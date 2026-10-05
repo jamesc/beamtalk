@@ -409,11 +409,23 @@ with_snapshot_write_raises_test() ->
     end).
 
 with_snapshot_no_live_class_test() ->
+    %% Liveness is checked lazily at the first mirror read, not on region entry.
     with_clean(fun() ->
         E = raised_error(fun() ->
-            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> ok end)
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                beamtalk_class_vars:get(self_obj(), x)
+            end)
         end),
         ?assertMatch(#beamtalk_error{kind = class_state_unreachable}, E),
+        ?assertEqual(undefined, erlang:get(?KEY))
+    end).
+
+with_snapshot_never_reads_succeeds_without_live_class_test() ->
+    with_clean(fun() ->
+        ?assertEqual(
+            done,
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> done end)
+        ),
         ?assertEqual(undefined, erlang:get(?KEY))
     end).
 

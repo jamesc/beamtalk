@@ -41,7 +41,7 @@ timeout. The builder is single-use: create, configure, register, done.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([register/1]).
+-export([register/1, validate_class_method_arities/2]).
 
 %% Selector-shape helpers, shared with the workspace app via
 %% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.
@@ -616,17 +616,23 @@ block or a computed fun.
 class_method_arity_error(ClassName, Selector, Expected, Actual) ->
     BlockParams = Expected,
     Error1 = beamtalk_error:new(arity_mismatch, ClassName, Selector),
-    beamtalk_error:with_hint(
-        Error1,
-        iolist_to_binary(
-            io_lib:format(
-                "classMethods: ~p must take ~b argument(s) (ClassSelf plus one per "
-                "selector slot), got ~b. A class-method block takes `self` plus one parameter "
-                "per selector argument, so it needs ~b parameter(s).",
-                [Selector, Expected, Actual, BlockParams]
-            )
-        )
-    ).
+    Base = io_lib:format(
+        "classMethods: ~p must take ~b argument(s) (ClassSelf plus one per "
+        "selector slot), got ~b. A class-method block takes `self` plus one parameter "
+        "per selector argument, so it needs ~b parameter(s).",
+        [Selector, Expected, Actual, BlockParams]
+    ),
+    %% One more than expected is the pre-ADR-0130 `fun(ClassSelf, ClassVars, Args...)`.
+    Extra =
+        case Actual =:= Expected + 1 of
+            true ->
+                " This looks like the pre-ADR-0130 shape fun(ClassSelf, ClassVars, Args...); "
+                "class methods no longer take or return class variables, so drop the "
+                "ClassVars parameter and return the bare result.";
+            false ->
+                ""
+        end,
+    beamtalk_error:with_hint(Error1, iolist_to_binary([Base, Extra])).
 
 -doc """
 Count the selector arity of a class-method selector atom.

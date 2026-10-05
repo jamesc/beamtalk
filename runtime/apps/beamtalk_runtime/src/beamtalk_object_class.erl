@@ -658,43 +658,19 @@ put_class_method(ClassPid, Selector, Fun, Source) ->
 
 -doc """
 ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
-`selector_arity + 1`. The pre-0130 `fun(ClassSelf, ClassVars, Args...)` shape
-(`selector_arity + 2`) would otherwise fail at call time with a raw `badarity`,
-so any other arity is refused here with a structured error naming the selector.
+`selector_arity + 1`. Any other arity is refused here with the structured error
+`beamtalk_class_builder:validate_class_method_arities/2` produces (the same rule
+`ClassBuilder register` applies), instead of a raw `badarity` at call time.
 """.
 -spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
 validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
-    {arity, Arity} = erlang:fun_info(Fun, arity),
-    Expected = beamtalk_class_builder:selector_arity(Selector) + 1,
-    case Arity =:= Expected of
-        true ->
-            ok;
-        false ->
-            ClassName = class_name(ClassPid),
-            Hint =
-                case Arity =:= Expected + 1 of
-                    true ->
-                        <<
-                            "This looks like the pre-ADR-0130 shape fun(ClassSelf, ClassVars, Args...). "
-                            "Class methods no longer take or return class variables: use "
-                            "fun(ClassSelf, Args...) and return the bare result."
-                        >>;
-                    false ->
-                        <<"A class-method fun takes ClassSelf plus one argument per selector slot.">>
-                end,
-            Error0 = beamtalk_error:new(
-                arity_mismatch,
-                ClassName,
-                Selector,
-                iolist_to_binary(
-                    io_lib:format(
-                        "Class method ~p must be a fun of arity ~b, got ~b",
-                        [Selector, Expected, Arity]
-                    )
-                )
-            ),
-            Error1 = beamtalk_error:with_details(Error0, #{expected => Expected, actual => Arity}),
-            beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint))
+    case
+        beamtalk_class_builder:validate_class_method_arities(
+            class_name(ClassPid), #{Selector => Fun}
+        )
+    of
+        ok -> ok;
+        {error, Error} -> beamtalk_error:raise(Error)
     end.
 
 -doc "Get instance variable names.".

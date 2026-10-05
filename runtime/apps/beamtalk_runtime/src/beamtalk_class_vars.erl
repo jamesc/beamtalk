@@ -269,7 +269,9 @@ Run `Fun` with the class's variables readable from the ETS mirror (resolved
 by class name) when its key is absent: installs the key plus
 `{'$bt_class_vars_ro', ClassName}`, erases exactly that in an `after`. When the
 key is already present (a live map or an outer snapshot) `Fun` just runs.
-Never touches the home entry. A name with no live class raises
+Never touches the home entry. Liveness is checked lazily, on the first mirror
+read (`mirror/2`): a region that never reads a class variable succeeds even
+while the class process is unregistered, and a read with no live class raises
 `class_state_unreachable`.
 """.
 -spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
@@ -278,7 +280,6 @@ with_snapshot(ClassSelf, Fun) ->
     Key = key(Class),
     case erlang:get(Key) of
         undefined ->
-            _ = live_class_pid(Class, undefined),
             erlang:put(Key, {?RO, Class}),
             try
                 Fun()
@@ -340,10 +341,13 @@ mirror(Class, Name) ->
         not_found -> raise_no_snapshot(Class, Name)
     end.
 
+%% No registered class process is a class-level condition, not a variable-level
+%% one, so it uses the name-less message and hint (the block-oriented hint of the
+%% named variant does not fit supervisor-init or `performLocally:` callers).
 -spec live_class_pid(atom(), atom() | undefined) -> pid().
-live_class_pid(Class, Name) ->
+live_class_pid(Class, _Name) ->
     case beamtalk_class_registry:whereis_class(Class) of
-        undefined -> raise_unreachable(Class, Name, read);
+        undefined -> raise_unreachable(Class, undefined, read);
         Pid -> Pid
     end.
 
@@ -398,7 +402,8 @@ nil_receiver() ->
 %% ADR 0130 §5: message, details and hint of `class_state_unreachable`.
 -spec raise_unreachable(atom(), atom() | undefined, read | write) -> no_return().
 raise_unreachable(Class, undefined, _Mode) ->
-    %% Name-less variant (`capture/2`, `with_snapshot/2`): no live class process.
+    %% Name-less variant (`capture/2`, mirror reads without a variable name): no
+    %% live class process is registered for the class.
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
@@ -410,7 +415,11 @@ raise_unreachable(Class, undefined, _Mode) ->
     ),
     beamtalk_error:raise(
         beamtalk_error:with_hint(
-            Error1, <<"The class is not loaded or has been removed; load it and retry.">>
+            Error1,
+            <<
+                "No class process is registered for this class right now (it is not loaded, "
+                "was removed, or is being restarted). Load the class or retry once it is running."
+            >>
         )
     );
 raise_unreachable(Class, Name, Mode) ->
