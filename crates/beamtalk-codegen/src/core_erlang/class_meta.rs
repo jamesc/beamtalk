@@ -380,6 +380,10 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
+            // ADR 0130 §3: the class-variable calling convention this module
+            // was compiled for (the runtime's load gate reads it).
+            ",\n      'class_var_abi' => ",
+            leaf::int_lit(super::class_var_keys::ABI_VERSION),
             // ADR 0103: sendability handle scope (omitted when undeclared).
             handle_scope_doc,
             // ADR 0123 §1/§2: declared shape version + migration table

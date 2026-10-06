@@ -8,8 +8,8 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, FrameId, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    AccParam, BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
+    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -81,10 +81,9 @@ impl<'g> RenderCtx<'g> {
                 self.generator.in_loop_body,
                 var.version,
             ),
-            VersionPrefix::ClassVars
-            | VersionPrefix::SelfVt
-            | VersionPrefix::Local(_)
-            | VersionPrefix::Gensym(_) => var.render_name(),
+            VersionPrefix::SelfVt | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => {
+                var.render_name()
+            }
         }
     }
 
@@ -179,13 +178,11 @@ pub(in crate::core_erlang) fn render(
                 target,
                 source,
                 op,
-                shadow_write,
                 span: _,
-            } => docs.push(render_bind(target, source, op, *shadow_write, ctx)),
+            } => docs.push(render_bind(target, source, op, ctx)),
             ThreadedStmt::Threaded {
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 body,
                 produces,
                 span: _,
@@ -208,7 +205,6 @@ pub(in crate::core_erlang) fn render(
                 fn_name,
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 counter,
                 condition,
                 condition_value,
@@ -236,9 +232,117 @@ pub(in crate::core_erlang) fn render(
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
             ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
+            ThreadedStmt::OnDoCatch { vars, clauses, .. } => {
+                docs.push(render_on_do_catch(vars, clauses));
+            }
         }
     }
     Document::Vec(docs)
+}
+
+/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`]: the open-ended
+/// `catch <Type, Error, Stack> -> case {Type, Error} of ...` fragment up to and
+/// including the `<'true'> when 'true' ->` arm of the exception-class filter.
+/// The caller appends the handler body, the `<'false'>` re-raise arm and the
+/// closing `end end`.
+///
+/// Clause order is the node's: both `$bt_nlr` pass-through arms re-raise
+/// untouched; the non-NLR arm runs its steps in order, the class-variable
+/// restore first (ADR 0130 §4), so every exception that is not a `^` discards
+/// the protected region's writes before the filter runs.
+fn render_on_do_catch(vars: &OnDoCatchVars, clauses: &[CatchClause]) -> Document<'static> {
+    let raise = || {
+        CoreErlangGenerator::emit_raw_raise(
+            vars.type_var.clone(),
+            vars.error_var.clone(),
+            vars.stack_var.clone(),
+        )
+    };
+    let mut docs: Vec<Document<'static>> = vec![docvec![
+        "catch <",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        ", ",
+        leaf::var(vars.stack_var.clone()),
+        "> -> case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of ",
+    ]];
+    for clause in clauses {
+        match clause {
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple4) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_state_var.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple3) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var2.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var2.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NonNlr { steps } => {
+                docs.push(docvec![
+                    "<",
+                    leaf::var(vars.other_pair_var.clone()),
+                    "> when 'true' -> "
+                ]);
+                for step in steps {
+                    docs.push(render_catch_step(vars, step));
+                }
+            }
+        }
+    }
+    Document::Vec(docs)
+}
+
+fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
+    match step {
+        CatchStep::ClassVarRestore { snapshot } => {
+            CoreErlangGenerator::class_var_restore_doc(snapshot)
+        }
+        CatchStep::WrapException => docvec![
+            "let ",
+            leaf::var(vars.built_stack_var.clone()),
+            " = primop 'build_stacktrace'(",
+            leaf::var(vars.stack_var.clone()),
+            ") in ",
+            "let ",
+            leaf::var(vars.ex_obj_var.clone()),
+            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
+            leaf::var(vars.type_var.clone()),
+            ", ",
+            leaf::var(vars.error_var.clone()),
+            ", ",
+            leaf::var(vars.built_stack_var.clone()),
+            ") in ",
+        ],
+        CatchStep::ClassFilter => docvec![
+            "let ",
+            leaf::var(vars.match_var.clone()),
+            " = call 'beamtalk_exception_handler':'matches_class'(",
+            leaf::var(vars.ex_class_var.clone()),
+            ", ",
+            leaf::var(vars.ex_obj_var.clone()),
+            ") in ",
+            "case ",
+            leaf::var(vars.match_var.clone()),
+            " of ",
+            "<'true'> when 'true' -> ",
+        ],
+    }
 }
 
 /// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real
@@ -687,68 +791,22 @@ fn render_bind(
     target: &VersionedVar,
     source: &VersionedVar,
     op: &BindOp,
-    shadow_write: bool,
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put {
-            field,
-            value,
-            class_tag,
-        } => {
-            let put_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'put'(",
-                leaf::atom(field.clone()),
-                ", ",
-                render_value(value, ctx),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    put_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                put_doc
-            }
-        }
-        BindOp::Remove { field, class_tag } => {
-            let remove_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'remove'(",
-                leaf::atom(field.clone()),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    remove_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                remove_doc
-            }
-        }
+        BindOp::Put { field, value } => docvec![
+            "let ",
+            leaf::var(target_name),
+            " = call 'maps':'put'(",
+            leaf::atom(field.clone()),
+            ", ",
+            render_value(value, ctx),
+            ", ",
+            leaf::var(source_name),
+            ") in ",
+        ],
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),

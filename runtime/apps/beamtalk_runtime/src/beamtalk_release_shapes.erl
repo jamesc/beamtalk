@@ -99,7 +99,14 @@ entry per class found under `EmitLibDirs` only.
 
 Returns `{error, {stdlib_start_failed, Reason}}` if `beamtalk_stdlib` (and
 so, transitively, `beamtalk_runtime`) cannot be started — nothing can be
-extracted without the class-registration machinery it provides. A module
+extracted without the class-registration machinery it provides.
+
+Returns `{error, {abi_mismatch, Messages}}` if any module under `EmitLibDirs`
+was compiled for a different `class_var_abi` than this runtime accepts
+(ADR 0130, `beamtalk_class_vars:check_class_info_abi/2`): the release must be
+rebuilt from a recompiled package, so this is a hard failure of the
+preflight, not a skipped shape. Messages are `beamtalk_error:format/1` text
+naming each module. Any other module
 that fails to *load or register* (a partial/stale build, a genuinely broken
 class) is not fatal to the whole extraction: it is logged and skipped,
 mirroring `beamtalk_module_activation:activate_modules/2`'s own
@@ -120,19 +127,37 @@ extract_shapes(RuntimeLibDirs, EmitLibDirs) ->
                     fun beamtalk_module_activation:find_bt_modules_in_dir/1, EmitLibDirs
                 )
             ),
-            {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
-                EmitModules, #{}
-            ),
-            lists:foreach(
-                fun({Module, Reason}) ->
-                    ?LOG_WARNING(
-                        "beamtalk_release_shapes: module failed to activate, skipping its shape",
-                        #{module => Module, reason => Reason, domain => [beamtalk, runtime]}
-                    )
-                end,
-                ActivationErrors
-            ),
-            {ok, build_shapes_map(EmitModules)};
+            %% ADR 0130 `class_var_abi` gate, the release-preflight half
+            %% (ADR 0125 §2.3): registration refuses a module compiled for a
+            %% different class-variable calling convention inside its `-on_load`
+            %% hook, and the code server does not return why. Collect the
+            %% refusals the gate records while the modules activate and fail the
+            %% extraction (so `beamtalk release` fails) instead of skipping the
+            %% module's shape like any other activation failure.
+            Refusals = beamtalk_class_vars:abi_refusals_table(),
+            _ = ets:new(Refusals, [named_table, public, set]),
+            try
+                {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
+                    EmitModules, #{}
+                ),
+                lists:foreach(
+                    fun({Module, Reason}) ->
+                        ?LOG_WARNING(
+                            "beamtalk_release_shapes: module failed to activate, skipping its shape",
+                            #{module => Module, reason => Reason, domain => [beamtalk, runtime]}
+                        )
+                    end,
+                    ActivationErrors
+                ),
+                case lists:sort(ets:tab2list(Refusals)) of
+                    [] ->
+                        {ok, build_shapes_map(EmitModules)};
+                    Refused ->
+                        {error, {abi_mismatch, [beamtalk_error:format(E) || {_M, E} <- Refused]}}
+                end
+            after
+                ets:delete(Refusals)
+            end;
         {error, Reason} ->
             {error, {stdlib_start_failed, Reason}}
     end.

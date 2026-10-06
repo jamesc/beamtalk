@@ -13,7 +13,7 @@ Coverage target: ≥ 85% of beamtalk_class_dispatch.erl.
 Test groups:
 
    1. Pure unit tests — class_method_fun_name/1, is_test_execution_selector/1
-   2. handle_class_method_call/6 — found, not_found, class_var_result, test_spawn
+   2. handle_class_method_call/6 — found, not_found, class-var write, test_spawn
    3. handle_async_dispatch/5 — all branches (methods, superclass, class_name, …)
    4. unwrap_class_call/1 — ok and error paths
    5. undef classification — module_not_loaded vs method_not_found
@@ -29,7 +29,7 @@ Test groups:
   15. metaclass_send extended — not_found, dead pid
   16. try_class_chain_fallthrough — Class chain dispatch
   17. handle_class_method_call/6 — class-side extension dispatch
-  18. class_self_dispatch/4 & class_self_dispatch_local/4 — self-send
+  18. class_self_dispatch/3 & class_self_dispatch_local/3 — self-send
       class-side extension dispatch
 """.
 
@@ -227,8 +227,8 @@ handle_class_method_call_test_() ->
             {"selector not in local methods and not in chain returns not_found",
                 fun test_hcmc_not_found/0},
             {"selector in local methods, successful return", fun test_hcmc_success/0},
-            {"selector in local methods, class_var_result return",
-                fun test_hcmc_class_var_result/0},
+            {"selector in local methods, class-variable write is read back",
+                fun test_hcmc_class_var_write/0},
             {"runAll selector with TestCase class returns test_spawn", fun test_hcmc_test_spawn/0},
             {"run: selector with TestCase class returns test_spawn",
                 fun test_hcmc_test_spawn_run/0},
@@ -262,8 +262,9 @@ test_hcmc_success() ->
     ),
     ?assertMatch({reply, {ok, test_success_result}, _}, Result).
 
-%% Class method returns {class_var_result, Value, NewVars} → state updated.
-test_hcmc_class_var_result() ->
+%% Class method writes a class variable through beamtalk_class_vars (ADR 0130)
+%% and returns a bare value → the reply carries the updated map.
+test_hcmc_class_var_write() ->
     LocalMethods = #{testClassVar => <<>>},
     InitVars = #{},
     Result = beamtalk_class_dispatch:handle_class_method_call(
@@ -906,7 +907,7 @@ test_chain_finds_parent_method() ->
     {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
     try
         %% handle_class_method_call on child for testSuccess — not in child,
-        %% walks to parent and invokes beamtalk_class_dispatch_test_helper:class_testSuccess/2.
+        %% walks to parent and invokes beamtalk_class_dispatch_test_helper:class_testSuccess/1.
         Result = gen_server:call(ChildPid, {class_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
@@ -1067,7 +1068,7 @@ test_undef_local_module_not_loaded() ->
 %% Local class method, module loaded but function absent → does_not_understand.
 test_undef_local_method_not_found() ->
     ClassName = 'BT1963LocalDNUClass',
-    %% `erlang` is always loaded but has no class_absentLocalMethod/2.
+    %% `erlang` is always loaded but has no class_absentLocalMethod/1.
     LocalMethods = #{absentLocalMethod => <<>>},
     Result = beamtalk_class_dispatch:handle_class_method_call(
         absentLocalMethod, [], ClassName, erlang, LocalMethods, #{}
@@ -1148,22 +1149,26 @@ invoke_class_method_errors_test_() ->
             {"connected Program exit: passes through the apply catch",
                 fun test_invoke_script_exit_passthrough/0},
             {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0},
-            {"NLR relay without shadow falls back to pre-call class vars",
-                fun test_invoke_nlr_relay_no_shadow/0},
-            {"NLR relay with shadow set replies with shadow class vars and erases it",
-                fun test_invoke_nlr_relay_reads_shadow/0},
-            {"genuine error ignores the shadow, reverts to pre-call class vars",
-                fun test_invoke_error_ignores_shadow/0},
-            {"BT-3039: a foreign class's shadow entry in the same process is never read back",
-                fun test_invoke_nlr_relay_ignores_foreign_class_shadow/0},
-            {"BT-3135: ?BT_CLASS_VARS_SHADOW_KEY_ATOM matches the Rust codegen literal",
-                fun test_shadow_key_atom_matches_codegen_contract/0},
-            {"BT-3675: the per-scope commit map never outlives a dispatch",
-                fun test_invoke_erases_scope_commits/0},
-            {"BT-3675: invoke_class_extension/7 erases the shadow and commits after a raise",
-                fun test_invoke_extension_erases_shadow_after_raise/0},
-            {"BT-3675: invoke_class_extension/7 erases the shadow and commits after a normal return",
-                fun test_invoke_extension_erases_shadow_after_return/0}
+            {"NLR relay without writes replies with the pre-call class vars",
+                fun test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes/0},
+            {"NLR relay keeps the writes made before the unwind",
+                fun test_invoke_nlr_relay_keeps_writes/0},
+            {"a genuine error discards the invocation's writes",
+                fun test_invoke_error_discards_writes/0},
+            {"a normal return replies with the live map and uninstalls the home",
+                fun test_invoke_ok_keeps_writes_and_uninstalls/0},
+            {"the home is installed under the class key while the method runs",
+                fun test_invoke_installs_home_during_method/0},
+            {"assert_absent fires on a nested invocation with the outer map intact",
+                fun test_invoke_nested_invocation_fails_loudly_outer_map_intact/0},
+            {"assert_absent fires for another class's live home (extension entry)",
+                fun test_invoke_extension_nested_other_class_home_fails_loudly/0},
+            {"invoke_class_extension/7 keeps writes after a normal return",
+                fun test_invoke_extension_writes_kept_after_return/0},
+            {"invoke_class_extension/7 discards writes after a raise",
+                fun test_invoke_extension_error_discards_writes/0},
+            {"invoke_class_extension/7 keeps writes made before a foreign ^",
+                fun test_invoke_extension_nlr_keeps_writes/0}
         ]
     end}.
 
@@ -1222,200 +1227,155 @@ test_invoke_two_arg_keyword() ->
     ),
     ?assertMatch({reply, {ok, {two_args, alpha, beta}}, _}, Result).
 
-%% ADR 0110: a foreign `^` (NLR throw) relaying out of a class method
-%% replies {error, Nlr} with the *pre-call* ClassVars when nothing has written
-%% the class's shadow key — exactly today's revert behavior.
-test_invoke_nlr_relay_no_shadow() ->
+%% ADR 0130 §1: a foreign `^` (NLR throw) relaying out of a class method
+%% that wrote nothing replies {error, Nlr} with the unchanged installed map
+%% (the pre-call vars), and the home never outlives the dispatch.
+test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes() ->
     LocalMethods = #{testNlrThrow => <<>>},
-    ClassVars = #{count => 1},
+    ClassName = 'BT3707NlrNoWriteClass',
     Result = beamtalk_class_dispatch:handle_class_method_call(
         testNlrThrow,
         [],
-        'BT3036NlrNoShadowClass',
+        ClassName,
         beamtalk_class_dispatch_test_helper,
         LocalMethods,
-        ClassVars
+        #{count => 1}
     ),
     ?assertMatch(
         {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 1}}, Result
     ),
-    %% The shadow key never outlives a dispatch.
-    ?assertEqual(
-        undefined,
-        erlang:get(
-            {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
-                beamtalk_class_registry:class_object_tag('BT3036NlrNoShadowClass')}
-        )
-    ).
+    assert_home_absent(ClassName).
 
-%% ADR 0110, class-keyed: when this class's shadow key IS
-%% set (as the codegen write-through will do at top-level class-var
-%% mutations), the NLR relay path replies with the shadow class vars —
-%% preserving writes made before the unwind — and the after clause erases the
-%% key.
-test_invoke_nlr_relay_reads_shadow() ->
-    LocalMethods = #{testNlrThrow => <<>>},
-    ShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
-            beamtalk_class_registry:class_object_tag('BT3036NlrShadowClass')},
-    erlang:put(ShadowKey, #{count => 99}),
-    try
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            testNlrThrow,
-            [],
-            'BT3036NlrShadowClass',
-            beamtalk_class_dispatch_test_helper,
-            LocalMethods,
-            #{count => 1}
-        ),
-        ?assertMatch(
-            {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 99}},
-            Result
-        ),
-        ?assertEqual(undefined, erlang:get(ShadowKey))
-    after
-        erlang:erase(ShadowKey)
-    end.
+%% ADR 0130 §1: writes made before a foreign `^` are kept (the reply carries
+%% the live map read back from the installed key).
+test_invoke_nlr_relay_keeps_writes() ->
+    LocalMethods = #{testWriteThenNlr => <<>>},
+    ClassName = 'BT3707NlrWriteClass',
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testWriteThenNlr,
+        [],
+        ClassName,
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{count => 1}
+    ),
+    ?assertMatch(
+        {reply, {error, {'$bt_nlr', bt3707_token, nlr_value, nlr_state}}, #{count := 99}},
+        Result
+    ),
+    assert_home_absent(ClassName).
 
-%% ADR 0110: a genuine error still reverts to the pre-call ClassVars
-%% even when the shadow key is set — only the NLR relay path reads it. The
-%% after clause still erases the key.
-test_invoke_error_ignores_shadow() ->
-    LocalMethods = #{testRaise => <<>>},
-    ShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
-            beamtalk_class_registry:class_object_tag('BT3036ErrorShadowClass')},
-    erlang:put(ShadowKey, #{count => 99}),
-    try
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            testRaise,
-            [],
-            'BT3036ErrorShadowClass',
-            beamtalk_class_dispatch_test_helper,
-            LocalMethods,
-            #{count => 1}
-        ),
-        ?assertMatch({reply, {error, test_deliberate_error}, #{count := 1}}, Result),
-        ?assertEqual(undefined, erlang:get(ShadowKey))
-    after
-        erlang:erase(ShadowKey)
-    end.
+%% ADR 0130 §1/§4: a genuine error discards what the invocation wrote and
+%% replies with the pre-call map.
+test_invoke_error_discards_writes() ->
+    LocalMethods = #{testWriteThenRaise => <<>>},
+    ClassName = 'BT3707ErrorWriteClass',
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testWriteThenRaise,
+        [],
+        ClassName,
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{count => 1}
+    ),
+    ?assertMatch({reply, {error, test_deliberate_error}, #{count := 1}}, Result),
+    assert_home_absent(ClassName).
 
-%% ADR 0110 amendment: reproduces the class-var shadow's original
-%% cross-class contamination hole directly — a mutating self-send inside a
-%% block invoked from a foreign class's process writes the shadow physically
-%% in *this* process, under *its own* class's key. Simulate that here by
-%% seeding a shadow entry for an unrelated class before dispatching, and
-%% assert `invoke_class_method/7` neither reads it back as this call's
-%% result nor erases it (it isn't this call's key to touch).
-test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
-    LocalMethods = #{testNlrThrow => <<>>},
-    OwnShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
-            beamtalk_class_registry:class_object_tag('BT3039OwnClass')},
-    ForeignShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
-            beamtalk_class_registry:class_object_tag('BT3039ForeignClass')},
-    ForeignClassVars = #{count => 12345},
-    erlang:put(ForeignShadowKey, ForeignClassVars),
-    try
-        %% No entry under OwnShadowKey — this call never mutated a class var
-        %% of its own before the block's foreign self-send ran.
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            testNlrThrow,
-            [],
-            'BT3039OwnClass',
-            beamtalk_class_dispatch_test_helper,
-            LocalMethods,
-            #{count => 1}
-        ),
-        %% Falls back to the pre-call ClassVars — the foreign entry must never
-        %% be mistaken for this call's own shadow.
-        ?assertMatch(
-            {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 1}},
-            Result
-        ),
-        ?assertEqual(undefined, erlang:get(OwnShadowKey)),
-        %% The foreign entry is untouched — invoke_class_method/7 only erases
-        %% its own class's key, not a different class's.
-        ?assertEqual(ForeignClassVars, erlang:get(ForeignShadowKey))
-    after
-        erlang:erase(OwnShadowKey),
-        erlang:erase(ForeignShadowKey)
-    end.
+%% ADR 0130 §1: a normal return replies with the live map (the write is kept)
+%% and uninstalls the home.
+test_invoke_ok_keeps_writes_and_uninstalls() ->
+    LocalMethods = #{testClassVar => <<>>},
+    ClassName = 'BT3707OkWriteClass',
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testClassVar,
+        [],
+        ClassName,
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{count => 1}
+    ),
+    ?assertMatch({reply, {ok, class_var_updated_value}, #{count := 1, updated := true}}, Result),
+    assert_home_absent(ClassName).
 
-%% ADR 0111 Phase D: the Erlang half of the cross-boundary
-%% conformance fixture — CLAUDE.md's cross-Rust/Erlang-boundary rule ("needs
-%% a shared conformance fixture or code generation, not a comment"). The
-%% Rust side (`crates/beamtalk-core/src/codegen/core_erlang/tests/
-%% class_var_shadow_contract.rs`) reads this same ?BT_CLASS_VARS_SHADOW_KEY_ATOM
-%% macro's definition out of beamtalk.hrl and cross-checks it against actual
-%% compiled codegen output. This test pins the macro's *value* on the
-%% Erlang side, so a change to the atom here that isn't mirrored in the
-%% codegen emission site fails on both sides, not just one.
-test_shadow_key_atom_matches_codegen_contract() ->
-    ?assertEqual('$bt_class_vars_shadow', ?BT_CLASS_VARS_SHADOW_KEY_ATOM).
-
-%% BT-3675: the per-scope commit map is erased by the outermost dispatch, so
-%% an entry left by a scope that raised (a dead token) never outlives it.
-test_invoke_erases_scope_commits() ->
-    LocalMethods = #{testNlrThrow => <<>>},
-    erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
-    try
-        _ = beamtalk_class_dispatch:handle_class_method_call(
-            testNlrThrow,
-            [],
-            'BT3675CommitErasedClass',
-            beamtalk_class_dispatch_test_helper,
-            LocalMethods,
-            #{count => 1}
-        ),
-        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
-    after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
-    end.
-
-%% BT-3675: an extension body that self-sends a compiled class method leaves
-%% that method's shadow write (and commits) under the class's key; neither may
-%% outlive the extension dispatch, and the reply still carries the pre-call
-%% ClassVars when the body raised.
-test_invoke_extension_erases_shadow_after_raise() ->
-    ClassName = 'BT3675ExtRaiseClass',
-    ShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
-    Fun = fun(_Args, _Self) ->
-        erlang:put(ShadowKey, #{count => 99}),
-        erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
-        error(bt3675_deliberate_crash)
+%% ADR 0130 §1: the home is installed while the method runs, under the
+%% class's key, and recorded as the live home entry.
+test_invoke_installs_home_during_method() ->
+    ClassName = 'BT3707HomeDuringClass',
+    Key = beamtalk_class_vars:key(ClassName),
+    Fun = fun(_Args, _ClassSelf) ->
+        {erlang:get(Key), erlang:get('$bt_class_vars_home')}
     end,
     try
         beamtalk_extensions:init(),
         ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, raisingExt, Fun, test),
+        ok = beamtalk_extensions:register(ClassTag, observeHome, Fun, test),
         Result = beamtalk_class_dispatch:handle_class_method_call(
-            raisingExt,
-            [],
-            ClassName,
-            beamtalk_class_dispatch_test_helper,
-            #{},
-            #{count => 1}
+            observeHome, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 7}
         ),
-        ?assertMatch({reply, {error, _}, #{count := 1}}, Result),
-        ?assertEqual(undefined, erlang:get(ShadowKey)),
-        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
+        ?assertEqual({reply, {ok, {#{count => 7}, Key}}, #{count => 7}}, Result),
+        assert_home_absent(ClassName)
     after
-        beamtalk_extensions:unregister(ClassName, raisingExt, true),
-        erlang:erase(ShadowKey),
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+        beamtalk_extensions:unregister(ClassName, observeHome, true)
     end.
 
-test_invoke_extension_erases_shadow_after_return() ->
-    ClassName = 'BT3675ExtReturnClass',
-    ShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
-    Fun = fun(_Args, _Self) ->
-        erlang:put(ShadowKey, #{count => 99}),
-        erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
+%% ADR 0130 §1: `assert_absent/1` fires on a simulated nested invocation (the
+%% key is already installed in this process) before anything is overwritten:
+%% the outer map and home entry stay intact and the method never runs.
+test_invoke_nested_invocation_fails_loudly_outer_map_intact() ->
+    ClassName = 'BT3707NestedClass',
+    Key = beamtalk_class_vars:key(ClassName),
+    OuterMap = #{count => 41},
+    ok = beamtalk_class_vars:install(Key, OuterMap),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = internal_error}},
+            beamtalk_class_dispatch:handle_class_method_call(
+                testClassVar,
+                [],
+                ClassName,
+                beamtalk_class_dispatch_test_helper,
+                #{testClassVar => <<>>},
+                #{count => 1}
+            )
+        ),
+        ?assertEqual(OuterMap, erlang:get(Key)),
+        ?assertEqual(Key, erlang:get('$bt_class_vars_home'))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+%% Same, for the extension entry point and a *different* class's live home:
+%% any home entry in this process counts as a nested invocation.
+test_invoke_extension_nested_other_class_home_fails_loudly() ->
+    OuterKey = beamtalk_class_vars:key('BT3707OuterClass'),
+    OuterMap = #{count => 5},
+    ok = beamtalk_class_vars:install(OuterKey, OuterMap),
+    ClassName = 'BT3707NestedExtClass',
+    Fun = fun(_Args, _Self) -> ext_should_not_run end,
+    try
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, nestedExt, Fun, test),
+        ?assertError(
+            #{error := #beamtalk_error{kind = internal_error}},
+            beamtalk_class_dispatch:handle_class_method_call(
+                nestedExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{}
+            )
+        ),
+        ?assertEqual(OuterMap, erlang:get(OuterKey)),
+        ?assertEqual(OuterKey, erlang:get('$bt_class_vars_home')),
+        ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName)))
+    after
+        beamtalk_extensions:unregister(ClassName, nestedExt, true),
+        beamtalk_class_vars:uninstall(OuterKey)
+    end.
+
+%% ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)`, writes
+%% through beamtalk_class_vars, and the entry replies with the live map.
+test_invoke_extension_writes_kept_after_return() ->
+    ClassName = 'BT3707ExtReturnClass',
+    Fun = fun(_Args, ClassSelf) ->
+        beamtalk_class_vars:put(ClassSelf, count, 99),
         ok
     end,
     try
@@ -1423,157 +1383,61 @@ test_invoke_extension_erases_shadow_after_return() ->
         ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
         ok = beamtalk_extensions:register(ClassTag, returningExt, Fun, test),
         Result = beamtalk_class_dispatch:handle_class_method_call(
-            returningExt,
-            [],
-            ClassName,
-            beamtalk_class_dispatch_test_helper,
-            #{},
-            #{count => 1}
+            returningExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
         ),
-        ?assertMatch({reply, {ok, ok}, _}, Result),
-        ?assertEqual(undefined, erlang:get(ShadowKey)),
-        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
+        ?assertMatch({reply, {ok, ok}, #{count := 99}}, Result),
+        assert_home_absent(ClassName)
     after
-        beamtalk_extensions:unregister(ClassName, returningExt, true),
-        erlang:erase(ShadowKey),
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+        beamtalk_extensions:unregister(ClassName, returningExt, true)
     end.
 
-%%% ============================================================================
-%%% BT-3675: per-scope class-variable commits
-%%% ============================================================================
-
-class_var_scope_commit_test_() ->
-    [
-        {"a commit is read back and taken only under its own token",
-            fun test_scope_commit_own_token/0},
-        {"an entry under a dead token is never read by another scope",
-            fun test_scope_commit_dead_token/0},
-        {"nothing is committed or read from a foreign class's process",
-            fun test_scope_commit_foreign_process/0},
-        {"a nil ClassSelf (stateless class-sealed direct call) answers the fallback",
-            fun test_scope_commit_nil_class_self/0},
-        {"read takes the innermost token's entry first", fun test_scope_read_chain/0},
-        {"export moves a closure invocation's entry to the enclosing token, only if present",
-            fun test_scope_export/0}
-    ].
-
-scope_class_self() ->
-    #beamtalk_object{class = 'BT3675Scope class', class_mod = bt3675_scope, pid = self()}.
-
-test_scope_commit_own_token() ->
-    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+%% An extension body that raises after writing replies with the pre-call map.
+test_invoke_extension_error_discards_writes() ->
+    ClassName = 'BT3707ExtRaiseClass',
+    Fun = fun(_Args, ClassSelf) ->
+        beamtalk_class_vars:put(ClassSelf, count, 99),
+        error(bt3707_deliberate_crash)
+    end,
     try
-        Self = scope_class_self(),
-        Tok = make_ref(),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_read(Self, [Tok], #{n => 0})
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, raisingExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            raisingExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
         ),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 1}),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 2}),
-        %% read does not consume; take does, exactly once.
-        ?assertEqual(
-            #{n => 2}, beamtalk_class_dispatch:class_var_scope_read(Self, [Tok], #{n => 0})
-        ),
-        ?assertEqual(
-            #{n => 2}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
-        ),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
-        )
+        ?assertMatch({reply, {error, _}, #{count := 1}}, Result),
+        assert_home_absent(ClassName)
     after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+        beamtalk_extensions:unregister(ClassName, raisingExt, true)
     end.
 
-test_scope_commit_dead_token() ->
-    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+%% A `^` unwinding through an extension body keeps the writes made before it.
+test_invoke_extension_nlr_keeps_writes() ->
+    ClassName = 'BT3707ExtNlrClass',
+    Fun = fun(_Args, ClassSelf) ->
+        beamtalk_class_vars:put(ClassSelf, count, 99),
+        throw({'$bt_nlr', bt3707_token, nlr_value, nlr_state})
+    end,
     try
-        Self = scope_class_self(),
-        Dead = make_ref(),
-        Live = make_ref(),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Dead, #{n => 7}),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Live, #{n => 0})
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, nlrExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            nlrExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
         ),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_read(Self, [Live], #{n => 0})
-        )
+        ?assertMatch(
+            {reply, {error, {'$bt_nlr', bt3707_token, nlr_value, nlr_state}}, #{count := 99}},
+            Result
+        ),
+        assert_home_absent(ClassName)
     after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+        beamtalk_extensions:unregister(ClassName, nlrExt, true)
     end.
 
-test_scope_commit_foreign_process() ->
-    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
-    try
-        Foreign = spawn(fun() ->
-            receive
-                stop -> ok
-            end
-        end),
-        Self = (scope_class_self())#beamtalk_object{pid = Foreign},
-        Tok = make_ref(),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 1}),
-        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM)),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
-        ),
-        Foreign ! stop
-    after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
-    end.
-
-test_scope_read_chain() ->
-    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
-    try
-        Self = scope_class_self(),
-        Inner = make_ref(),
-        Outer = make_ref(),
-        ?assertEqual(
-            #{n => 0},
-            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
-        ),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Outer, #{n => 1}),
-        ?assertEqual(
-            #{n => 1},
-            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
-        ),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Inner, #{n => 2}),
-        ?assertEqual(
-            #{n => 2},
-            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
-        )
-    after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
-    end.
-
-test_scope_export() ->
-    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
-    try
-        Self = scope_class_self(),
-        From = make_ref(),
-        To = make_ref(),
-        %% Nothing committed: exporting leaves the enclosing scope untouched.
-        ok = beamtalk_class_dispatch:class_var_scope_export(Self, From, To),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, To, #{n => 0})
-        ),
-        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, From, #{n => 5}),
-        ok = beamtalk_class_dispatch:class_var_scope_export(Self, From, To),
-        ?assertEqual(
-            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, From, #{n => 0})
-        ),
-        ?assertEqual(
-            #{n => 5}, beamtalk_class_dispatch:class_var_scope_take(Self, To, #{n => 0})
-        )
-    after
-        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
-    end.
-
-test_scope_commit_nil_class_self() ->
-    Tok = make_ref(),
-    ?assertEqual(ok, beamtalk_class_dispatch:class_var_scope_commit(nil, Tok, #{n => 1})),
-    ?assertEqual(#{n => 0}, beamtalk_class_dispatch:class_var_scope_read(nil, [Tok], #{n => 0})),
-    ?assertEqual(#{n => 0}, beamtalk_class_dispatch:class_var_scope_take(nil, Tok, #{n => 0})).
+%% The class's key and the home entry are both gone after a dispatch.
+assert_home_absent(ClassName) ->
+    ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName))),
+    ?assertEqual(undefined, erlang:get('$bt_class_vars_home')).
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants
@@ -1928,8 +1792,8 @@ class_send_dispatch_returns_real_error_test_() ->
     end}.
 
 test_class_send_dispatch_real_error() ->
-    %% beamtalk_class_dispatch_test_helper:class_testRaise/2 does error(test_deliberate_error),
-    %% which invoke_class_method catches and returns as {reply, {error, Err}, ClassVars}.
+    %% beamtalk_class_dispatch_test_helper:class_testRaise/1 does error(test_deliberate_error),
+    %% which invoke_class_method catches and returns as {reply, {error, Err}, PreCallVars}.
     %% class_send_dispatch then hits the Other-branch → unwrap_class_call → raises.
     ClassName = 'BT1981RealErrorTestClass',
     ClassInfo = #{
@@ -2200,7 +2064,7 @@ test_class_send_supervisor_new_rewrap() ->
     try
         %% The class method returns a Result tagged map wrapping the
         %% _new tuple (option-2 shape). With the helper module providing
-        %% class_initialize:/3, run_initialize resolves the method directly
+        %% class_initialize:/2, run_initialize resolves the method directly
         %% (no hierarchy walk needed) and the hook completes the rewrite.
         Outcome = beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, []),
         ?assertMatch(
@@ -2253,14 +2117,14 @@ runtime_class_method_fun_test_() ->
 %% across calls — the "dropped state" regression must not return.
 test_runtime_fun_threads_class_vars() ->
     ClassName = 'BT2266ThreadVars',
-    BumpFun = fun(_ClassSelf, ClassVars) ->
-        N = maps:get(total, ClassVars, 0) + 1,
-        {class_var_result, N, ClassVars#{total => N}}
+    BumpFun = fun(ClassSelf) ->
+        N = beamtalk_class_vars:get(ClassSelf, total) + 1,
+        beamtalk_class_vars:put(ClassSelf, total, N)
     end,
     ClassInfo = #{
         superclass => none,
         module => bt2266_no_module,
-        class_methods => #{bump => #{block => BumpFun, arity => 2}},
+        class_methods => #{bump => #{block => BumpFun, arity => 1}},
         class_state => #{total => 0}
     },
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
@@ -2286,7 +2150,7 @@ test_put_class_method_live() ->
     try
         %% Before install: the gate is closed.
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
-        GetCount = fun(_ClassSelf, ClassVars) -> maps:get(count, ClassVars, 0) end,
+        GetCount = fun(ClassSelf) -> beamtalk_class_vars:get(ClassSelf, count) end,
         ok = beamtalk_object_class:put_class_method(Pid, getCount, GetCount),
         ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
         ?assertEqual(10, beamtalk_class_dispatch:class_send(Pid, getCount, []))
@@ -2300,11 +2164,11 @@ test_put_class_method_live() ->
 test_inherited_runtime_class_method() ->
     ParentName = 'BT2266InhParent',
     ChildName = 'BT2266InhChild',
-    GreetFun = fun(_ClassSelf, _ClassVars, Name) -> {greeting, Name} end,
+    GreetFun = fun(_ClassSelf, Name) -> {greeting, Name} end,
     ParentInfo = #{
         superclass => none,
         module => bt2266_parent_no_module,
-        class_methods => #{'greet:' => #{block => GreetFun, arity => 3}},
+        class_methods => #{'greet:' => #{block => GreetFun, arity => 2}},
         class_state => #{}
     },
     ChildInfo = #{
@@ -2336,16 +2200,16 @@ test_inherited_runtime_class_method() ->
 %% shadows the compiled export (last writer wins, mirroring instance live-patch).
 test_runtime_fun_shadows_compiled() ->
     ClassName = 'BT2266Shadow',
-    OverrideFun = fun(_ClassSelf, _ClassVars) -> overridden_value end,
+    OverrideFun = fun(_ClassSelf) -> overridden_value end,
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSuccess => #{block => OverrideFun, arity => 2}},
+        class_methods => #{testSuccess => #{block => OverrideFun, arity => 1}},
         class_state => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
-        %% Compiled class_testSuccess/2 returns test_success_result; the runtime
+        %% Compiled class_testSuccess/1 returns test_success_result; the runtime
         %% fun shadows it.
         ?assertEqual(overridden_value, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
@@ -2357,13 +2221,13 @@ test_runtime_fun_shadows_compiled() ->
 %% flag is open (set by the runtime fun).
 test_mixed_class_compiled_selector() ->
     ClassName = 'BT2266Mixed',
-    RuntimeFun = fun(_ClassSelf, _ClassVars) -> from_runtime end,
+    RuntimeFun = fun(_ClassSelf) -> from_runtime end,
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
         class_methods => #{
-            runtimeOnly => #{block => RuntimeFun, arity => 2},
-            testSuccess => #{arity => 2}
+            runtimeOnly => #{block => RuntimeFun, arity => 1},
+            testSuccess => #{arity => 1}
         },
         class_state => #{}
     },
@@ -2387,7 +2251,7 @@ test_compile_only_class_gate_closed() ->
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSuccess => #{arity => 2}},
+        class_methods => #{testSuccess => #{arity => 1}},
         class_state => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
@@ -2405,11 +2269,11 @@ test_compile_only_class_gate_closed() ->
 %% (the {raised, ...} outcome → re-raised by class_send).
 test_runtime_fun_raises() ->
     ClassName = 'BT2266Raise',
-    BoomFun = fun(_ClassSelf, _ClassVars) -> error(boom) end,
+    BoomFun = fun(_ClassSelf) -> error(boom) end,
     ClassInfo = #{
         superclass => none,
         module => bt2266_no_module,
-        class_methods => #{boom => #{block => BoomFun, arity => 2}},
+        class_methods => #{boom => #{block => BoomFun, arity => 1}},
         class_state => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
@@ -2419,26 +2283,29 @@ test_runtime_fun_raises() ->
         catch gen_server:stop(Pid, normal, 5000)
     end.
 
-%% class_self_dispatch_local/4: the self-send primitive for builder class-method
+%% class_self_dispatch_local/3: the self-send primitive for builder class-method
 %% funs — local runtime fun first, else chain (super/inherited), else DNU.
 test_class_self_dispatch_local() ->
     ParentName = 'BT2267DispParent',
     ChildName = 'BT2267DispChild',
-    LocalFun = fun(_ClassSelf, _ClassVars) -> local_value end,
-    BumpFun = fun(_ClassSelf, ClassVars) -> {class_var_result, bumped, ClassVars#{n => 1}} end,
-    InheritedFun = fun(_ClassSelf, _ClassVars) -> inherited_value end,
+    LocalFun = fun(_ClassSelf) -> local_value end,
+    BumpFun = fun(ClassSelf) ->
+        beamtalk_class_vars:put(ClassSelf, n, 1),
+        bumped
+    end,
+    InheritedFun = fun(_ClassSelf) -> inherited_value end,
     ParentInfo = #{
         superclass => none,
         module => bt2267_disp_parent_no_module,
-        class_methods => #{inherited => #{block => InheritedFun, arity => 2}},
+        class_methods => #{inherited => #{block => InheritedFun, arity => 1}},
         class_state => #{}
     },
     ChildInfo = #{
         superclass => ParentName,
         module => bt2267_disp_child_no_module,
         class_methods => #{
-            local => #{block => LocalFun, arity => 2},
-            bump => #{block => BumpFun, arity => 2}
+            local => #{block => LocalFun, arity => 1},
+            bump => #{block => BumpFun, arity => 1}
         },
         class_state => #{}
     },
@@ -2448,23 +2315,30 @@ test_class_self_dispatch_local() ->
         %% Local runtime fun resolves.
         ?assertEqual(
             local_value,
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, local, #{}, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, local, [])
         ),
-        %% A local class-var mutation returns the raw {class_var_result, ...} the
-        %% calling fun threads.
-        ?assertEqual(
-            {class_var_result, bumped, #{n => 1}},
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, bump, #{}, [])
-        ),
+        %% A local class-var mutation is a `put` into the live home (installed
+        %% by the enclosing invocation in real use) and returns the bare value.
+        Key = beamtalk_class_vars:key(ChildName),
+        ok = beamtalk_class_vars:install(Key, #{}),
+        try
+            ?assertEqual(
+                bumped,
+                beamtalk_class_dispatch:class_self_dispatch_local(ChildName, bump, [])
+            ),
+            ?assertEqual(#{n => 1}, erlang:get(Key))
+        after
+            beamtalk_class_vars:uninstall(Key)
+        end,
         %% Not local → falls back to the chain and finds the inherited method.
         ?assertEqual(
             inherited_value,
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, inherited, #{}, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, inherited, [])
         ),
         %% Nothing anywhere → structured does_not_understand.
         ?assertError(
             #{error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, missing, #{}, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, missing, [])
         )
     after
         catch gen_server:stop(ChildPid, normal, 5000),
@@ -2492,8 +2366,8 @@ class_extension_dispatch_test_() ->
         [
             {"class-side extension (2-arity value fun) is found and invoked",
                 fun test_class_extension_value_fun/0},
-            {"class-side extension (3-arity actor fun) threads ClassVars",
-                fun test_class_extension_actor_fun_threads_state/0},
+            {"class-side extension writes class variables through beamtalk_class_vars and threads them across dispatches",
+                fun test_class_extension_threads_class_vars/0},
             {"class-side extension takes priority over a same-named local class method",
                 fun test_class_extension_priority_over_local/0},
             {"class-side extension receives a ClassSelf tagged with the metaclass atom",
@@ -2533,22 +2407,23 @@ test_class_extension_value_fun() ->
     Result = beamtalk_class_dispatch:handle_class_method_call(
         valueExt, [], ClassName, some_module, #{}, #{untouched => true}
     ),
-    %% 2-arity funs ignore ClassVars — it must pass through unchanged.
+    %% An extension that touches no class variable leaves the map unchanged.
     ?assertMatch({reply, {ok, value_ext_result}, #{untouched := true}}, Result).
 
-%% A 3-arity (actor-shaped) extension fun threads ClassVars back through
-%% successive dispatches, exactly like a compiled class method's
-%% {class_var_result, ...} path.
-test_class_extension_actor_fun_threads_state() ->
+%% ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)` whatever
+%% the target class's kind; it reads and writes class variables through
+%% beamtalk_class_vars, and the entry point threads the map across successive
+%% dispatches.
+test_class_extension_threads_class_vars() ->
     ClassName = 'Bt3192ExtActorClass',
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self, State) ->
-        Count = maps:get(count, State, 0) + 1,
-        {Count, State#{count => Count}}
+    Fun = fun(_Args, ClassSelf) ->
+        Count = beamtalk_class_vars:get(ClassSelf, count) + 1,
+        beamtalk_class_vars:put(ClassSelf, count, Count)
     end,
     ok = beamtalk_extensions:register(ClassTag, actorExt, Fun, test),
     Result1 = beamtalk_class_dispatch:handle_class_method_call(
-        actorExt, [], ClassName, some_module, #{}, #{}
+        actorExt, [], ClassName, some_module, #{}, #{count => 0}
     ),
     ?assertMatch({reply, {ok, 1}, #{count := 1}}, Result1),
     {reply, {ok, 1}, ClassVars1} = Result1,
@@ -2559,7 +2434,7 @@ test_class_extension_actor_fun_threads_state() ->
 
 %% Extension checked before LocalClassMethods (mirroring
 %% beamtalk_dispatch:lookup/5's own extension-before-local-table order): a
-%% real, invokable local class method (class_testSuccess/2, which would
+%% real, invokable local class method (class_testSuccess/1, which would
 %% return test_success_result) is shadowed by a same-named extension.
 test_class_extension_priority_over_local() ->
     ClassName = 'Bt3192ExtPriorityClass',
@@ -2572,7 +2447,7 @@ test_class_extension_priority_over_local() ->
     ),
     ?assertMatch({reply, {ok, from_extension}, _}, Result).
 
-%% The receiver handed to the extension fun mirrors apply_class_method_in_context/6's
+%% The receiver handed to the extension fun mirrors apply_class_method_in_context/5's
 %% ClassSelf: class = metaclass tag, class_mod = this call's module, pid = self()
 %% (the class gen_server this handler already runs inside — here, the calling
 %% test process, since this drives handle_class_method_call/6 directly).
@@ -2602,11 +2477,11 @@ test_class_extension_receives_class_self() ->
 test_class_extension_priority_over_inherited() ->
     ParentName = 'Bt3201ExtPriorityParent',
     ChildName = 'Bt3201ExtPriorityChild',
-    InheritedFun = fun(_ClassSelf, _ClassVars) -> from_inherited end,
+    InheritedFun = fun(_ClassSelf) -> from_inherited end,
     ParentInfo = #{
         superclass => none,
         module => bt3201_ext_priority_parent_no_module,
-        class_methods => #{shared => #{block => InheritedFun, arity => 2}},
+        class_methods => #{shared => #{block => InheritedFun, arity => 1}},
         class_state => #{}
     },
     ChildInfo = #{
@@ -2752,15 +2627,15 @@ class_send_and_metaclass_extension_e2e_test_() ->
     end}.
 
 %%% ============================================================================
-%%% 18. class_self_dispatch/4 & class_self_dispatch_local/4 — self-send
+%%% 18. class_self_dispatch/3 & class_self_dispatch_local/3 — self-send
 %%%     class-side extension dispatch
 %%%
 %%% External class-side sends (`Target sel` / `Target class sel`) consult
 %%% beamtalk_extensions (see section 17). A `self extensionSel` send from
 %%% inside another class method of the SAME class must reach the same
 %%% registry too, rather than falling straight to the superclass-chain walk
-%%% (`class_self_dispatch/4`) or the local runtime-method lookup
-%%% (`class_self_dispatch_local/4`) and raising does_not_understand. These
+%%% (`class_self_dispatch/3`) or the local runtime-method lookup
+%%% (`class_self_dispatch_local/3`) and raising does_not_understand. These
 %%% tests drive both functions directly against a real
 %%% beamtalk_extensions:register/4 registration, mirroring section 17's
 %%% style for the external-send case.
@@ -2769,9 +2644,9 @@ class_send_and_metaclass_extension_e2e_test_() ->
 class_self_dispatch_extension_test_() ->
     {setup, fun setup_class_self_extension/0, fun teardown_class_self_extension/1, fun(_) ->
         [
-            {"class_self_dispatch/4 finds an extension on the class's own tag",
+            {"class_self_dispatch/3 finds an extension on the class's own tag",
                 fun test_class_self_dispatch_extension_found/0},
-            {"class_self_dispatch/4 threads ClassVars through a 3-arity extension fun",
+            {"class_self_dispatch/3 extension writes go to the live home",
                 fun test_class_self_dispatch_extension_threads_class_vars/0},
             {"a crashing self-dispatched extension surfaces the raised error, not a raw exit",
                 fun test_class_self_dispatch_extension_crash_surfaces_error/0}
@@ -2795,7 +2670,7 @@ teardown_class_self_extension(_) ->
     ),
     ok.
 
-%% class_self_dispatch/4 needs no running class gen_server — the extension
+%% class_self_dispatch/3 needs no running class gen_server — the extension
 %% probe only reads the beamtalk_extensions ETS table and (for the module,
 %% falling back to ClassName) beamtalk_class_metadata, both safe on an
 %% unregistered class name.
@@ -2804,32 +2679,33 @@ test_class_self_dispatch_extension_found() ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     Fun = fun(_Args, _Self) -> from_self_ext end,
     ok = beamtalk_extensions:register(ClassTag, selfExt, Fun, test),
-    Result = beamtalk_class_dispatch:class_self_dispatch(ClassName, selfExt, #{}, []),
-    %% Always threaded through the class_var_result tuple codegen's
-    %% emit_class_var_result_unwrap already handles — see
-    %% unwrap_self_dispatch_extension_outcome/3's doc.
-    ?assertEqual({class_var_result, from_self_ext, #{}}, Result).
+    Result = beamtalk_class_dispatch:class_self_dispatch(ClassName, selfExt, []),
+    %% ADR 0130 §3: the bare result, no class_var_result wrapper.
+    ?assertEqual(from_self_ext, Result).
 
-%% A 3-arity (actor-shaped) extension fun threads ClassVars back through
-%% successive self-dispatches, exactly like the gen_server path's
-%% invoke_class_extension/6 does for an external send.
+%% ADR 0130 §3: a self-dispatched extension writes through beamtalk_class_vars
+%% into the home the enclosing invocation installed; nothing is threaded back.
 test_class_self_dispatch_extension_threads_class_vars() ->
     ClassName = 'Bt3198SelfExtVars',
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self, State) ->
-        Count = maps:get(count, State, 0) + 1,
-        {Count, State#{count => Count}}
+    Fun = fun(_Args, ClassSelf) ->
+        Count = beamtalk_class_vars:get(ClassSelf, count) + 1,
+        beamtalk_class_vars:put(ClassSelf, count, Count)
     end,
     ok = beamtalk_extensions:register(ClassTag, selfBump, Fun, test),
-    R1 = beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, #{}, []),
-    ?assertMatch({class_var_result, 1, #{count := 1}}, R1),
-    {class_var_result, 1, ClassVars1} = R1,
-    R2 = beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, ClassVars1, []),
-    ?assertMatch({class_var_result, 2, #{count := 2}}, R2).
+    Key = beamtalk_class_vars:key(ClassName),
+    ok = beamtalk_class_vars:install(Key, #{count => 0}),
+    try
+        ?assertEqual(1, beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, [])),
+        ?assertEqual(2, beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, [])),
+        ?assertEqual(#{count => 2}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
 
 %% Mirrors test_class_extension_crash_does_not_kill_class_process (section 17)
 %% for the self-dispatch path: apply_class_extension_fun/5's catch-all still
-%% classifies the crash, but unwrap_self_dispatch_extension_outcome/3
+%% classifies the crash, but unwrap_self_dispatch_outcome/3
 %% re-raises it directly (erlang:raise/3, no beamtalk_exception_handler:reraise
 %% wrapping — same contract unwrap_self_dispatch_outcome/3 already has for
 %% compiled/runtime class methods) since self-dispatch runs in the caller's
@@ -2841,15 +2717,15 @@ test_class_self_dispatch_extension_crash_surfaces_error() ->
     ok = beamtalk_extensions:register(ClassTag, crashSelfExt, Fun, test),
     ?assertError(
         bt3198_deliberate_crash,
-        beamtalk_class_dispatch:class_self_dispatch(ClassName, crashSelfExt, #{}, [])
+        beamtalk_class_dispatch:class_self_dispatch(ClassName, crashSelfExt, [])
     ).
 
 class_self_dispatch_extension_priority_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"class_self_dispatch/4 checks the extension before walking the superclass chain",
+            {"class_self_dispatch/3 checks the extension before walking the superclass chain",
                 fun test_class_self_dispatch_extension_priority_over_inherited/0},
-            {"class_self_dispatch_local/4 checks the extension before its own runtime class method",
+            {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
                 fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
         ]
     end}.
@@ -2862,11 +2738,11 @@ class_self_dispatch_extension_priority_test_() ->
 test_class_self_dispatch_extension_priority_over_inherited() ->
     ParentName = 'Bt3198SelfExtParent',
     ChildName = 'Bt3198SelfExtChild',
-    InheritedFun = fun(_ClassSelf, _ClassVars) -> from_inherited end,
+    InheritedFun = fun(_ClassSelf) -> from_inherited end,
     ParentInfo = #{
         superclass => none,
         module => bt3198_self_ext_parent_no_module,
-        class_methods => #{shared => #{block => InheritedFun, arity => 2}},
+        class_methods => #{shared => #{block => InheritedFun, arity => 1}},
         class_state => #{}
     },
     ChildInfo = #{
@@ -2881,15 +2757,15 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
         %% Sanity: without an extension, the inherited method wins via the chain.
         ?assertEqual(
             from_inherited,
-            beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, #{}, [])
+            beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, [])
         ),
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
         ExtFun = fun(_Args, _Self) -> from_extension end,
         ok = beamtalk_extensions:register(ChildTag, shared, ExtFun, test),
         try
             ?assertEqual(
-                {class_var_result, from_extension, #{}},
-                beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, #{}, [])
+                from_extension,
+                beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, [])
             )
         after
             beamtalk_extensions:unregister(ChildName, shared, true)
@@ -2904,11 +2780,11 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
 %% real, invokable runtime class-method fun of the same selector.
 test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
     ClassName = 'Bt3198SelfExtLocal',
-    LocalFun = fun(_ClassSelf, _ClassVars) -> from_local_runtime_method end,
+    LocalFun = fun(_ClassSelf) -> from_local_runtime_method end,
     ClassInfo = #{
         superclass => none,
         module => bt3198_self_ext_local_no_module,
-        class_methods => #{shared => #{block => LocalFun, arity => 2}},
+        class_methods => #{shared => #{block => LocalFun, arity => 1}},
         class_state => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
@@ -2916,15 +2792,15 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
         %% Sanity: without an extension, the local runtime method wins.
         ?assertEqual(
             from_local_runtime_method,
-            beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, #{}, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, [])
         ),
         ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
         ExtFun = fun(_Args, _Self) -> from_extension end,
         ok = beamtalk_extensions:register(ClassTag, shared, ExtFun, test),
         try
             ?assertEqual(
-                {class_var_result, from_extension, #{}},
-                beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, #{}, [])
+                from_extension,
+                beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, [])
             )
         after
             beamtalk_extensions:unregister(ClassName, shared, true)

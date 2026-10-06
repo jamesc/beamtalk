@@ -141,7 +141,6 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         target: sum_v1,
         source: sum_v0.clone(),
         op: BindOp::Direct(ValueRef::Doc(value_doc)),
-        shadow_write: false,
         span: span(),
     }];
     let ir_exit_sa = render_gen.fresh_temp_var("ExitSA");
@@ -160,7 +159,6 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
-        shadow_write_eligible: true,
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Doc(ir_cond_doc),
@@ -218,7 +216,6 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
                 leaf::var(sd_var.clone()),
                 ")",
             ])),
-            shadow_write: false,
             span: span(),
         },
     ];
@@ -236,7 +233,6 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
             leaf::var("Sum"),
             ", 1)",
         ])),
-        shadow_write: false,
         span: span(),
     }];
     let exit_arm = Document::Str("<'false'> when 'true' -> {'nil', Sum} end ");
@@ -244,7 +240,6 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
-        shadow_write_eligible: true,
         counter: None,
         condition,
         condition_value,
@@ -380,7 +375,6 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
             target: sum_v1,
             source: sum_v0.clone(),
             op: BindOp::Direct(ValueRef::Doc(value_doc)),
-            shadow_write: false,
             span: span(),
         },
         ThreadedStmt::Bind {
@@ -391,7 +385,6 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
                 0,
                 frame,
             ))),
-            shadow_write: false,
             span: span(),
         },
     ];
@@ -411,7 +404,6 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::Hybrid,
         frame,
-        shadow_write_eligible: true,
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Doc(ir_cond_doc),
@@ -459,7 +451,6 @@ fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nes
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::Hybrid,
         frame,
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::Bind {
             target: VersionedVar::new(VersionPrefix::State, 1, frame),
             source: VersionedVar::new(VersionPrefix::State, 0, frame),
@@ -468,7 +459,6 @@ fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nes
                 0,
                 frame,
             ))),
-            shadow_write: false,
             span: span(),
         }],
         produces: vec![VersionedVar::new(VersionPrefix::State, 1, frame)],
@@ -534,7 +524,6 @@ fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
             target: local("sum", 1, frame),
             source: local("sum", 0, frame),
             op: BindOp::Direct(ValueRef::Version(local("sum", 0, frame))),
-            shadow_write: false,
             span: span(),
         },
     ];

@@ -2,52 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-3510 (ADR 0122 Phase 1): differential test comparing the OLD,
-//! top-level-only `ClassVars`/`SelfVt` loop-body detectors
-//! (`CoreErlangGenerator::loop_body_threads_class_vars`/
-//! `loop_body_threads_value_self`, still the live formula behind
-//! `ThreadingPlan::threads_class_vars`/`threads_value_self` — this issue
-//! changes no site's emission) against the NEW, recursive
-//! `CoreErlangGenerator::body_threaded_families` detector, over every loop
-//! and `Foldl*` body `ThreadingPlan::new_impl` builds while compiling the
-//! whole `stdlib/src` + `stdlib/test` + `stdlib/bootstrap-test` corpus.
+//! top-level-only `SelfVt` loop-body detector
+//! (`CoreErlangGenerator::loop_body_threads_value_self`, still the live
+//! formula behind `ThreadingPlan::threads_value_self`) against the NEW,
+//! recursive `CoreErlangGenerator::body_threaded_families` detector, over
+//! every loop and `Foldl*` body `ThreadingPlan::new_impl` builds while
+//! compiling the whole `stdlib/src` + `stdlib/test` + `stdlib/bootstrap-test`
+//! corpus.
 //!
 //! Scope: `on:do:`/`ensure:` and `match:` are the other two detector families
 //! ADR 0122 names, and both have since finished their own migrations —
 //! `exception_construct_families` now CALLS `body_threaded_families` directly
-//! (BT-3522, the "later migration" this note used to defer to), and
-//! `match_needs_state_threading` moved to its own `MATCH_ARM_FAMILIES`
-//! capability declaration (BT-3517). Neither needs differential coverage here
-//! any more: one has no second detector left to differ from, the other has no
-//! body walk at all. This test covers the loop/`Foldl*` sites
-//! `ThreadingPlan::new_impl` already builds, which is where
-//! `find_class_var_mutating_stmt`/`find_value_self_mutating_stmt` (the
-//! detector pair `body_threaded_families` is slated to replace) still live.
+//! (BT-3522), and `match_needs_state_threading` moved to its own
+//! `MATCH_ARM_FAMILIES` capability declaration (BT-3517). Neither needs
+//! differential coverage here any more: one has no second detector left to
+//! differ from, the other has no body walk at all. This test covers the
+//! loop/`Foldl*` sites `ThreadingPlan::new_impl` already builds.
 //!
-//! Per ADR 0122 §Implementation step 1: "the only expected differences are
-//! nested mutations the old walks did not report, which the rejection
-//! function turns into the same errors as today" — for `ClassVars`
-//! specifically, `class_var_sub_expr.bt`'s `tickInLoopConditional` is the
-//! one corpus construct on record (`analysis.rs`'s own
-//! `find_class_var_mutating_stmt` doc comment) as deliberately, silently
-//! non-threading: a same-class self-send buried in a loop's own `ifTrue:`
-//! CONDITION, one level too deep for the old top-level walk, previously
-//! accepted as out-of-scope.
+//! Class variables are not a threaded family any more (ADR 0130 §3): they
+//! are written in place in the class process, so a class method's loop and
+//! fold bodies thread no family, and the `ClassVars` half of this harness —
+//! with the reviewed exception list it used to carry (a class-variable
+//! mutation nested in a construct the loop could not carry out) — was
+//! deleted with the family.
 //!
-//! `bt3055actor.bt`'s `runWithSelfSend` is a second, structurally different
-//! exception: `^self foo` — a same-class self-send one level inside a `^`
-//! (non-local return) statement, also invisible to the old top-level-only
-//! shape match. Unlike the class-var-mutation gap this ADR exists to close,
-//! this one is genuinely benign rather than merely accepted: a `^` throws
-//! immediately (CLAUDE.md — a non-local return never falls through to the
-//! loop's own tail-recursive continuation), so whether the loop's `ClassVars`
-//! carry-out is `true` or `false` for THIS statement can never be observed —
-//! there is no next iteration to carry it into. `bt3055class_method_counted_loop_test.bt`
-//! pins `runWithSelfSend` as compiling and returning `#FromAncestor`, so this
-//! is confirmed passing, correct behavior today, not a latent bug the
-//! recursive detector merely failed to also miss.
-//!
-//! `expected_mismatches` below is that reviewed exception list — anything
-//! else the corpus produces fails the test.
+//! `expected_mismatches` below is the reviewed exception list for the
+//! remaining (`SelfVt`) family — anything the corpus produces that is not on
+//! it fails the test.
 
 use super::*;
 
@@ -67,93 +48,14 @@ impl std::fmt::Display for Mismatch {
 }
 
 /// The reviewed, expected set of old/new mismatches over the whole corpus —
-/// see this file's own doc comment. A corpus change that removes one of
-/// these (e.g. the fixture is rewritten to avoid the nested self-send) is
-/// welcome; the test just needs its entry deleted here too. A corpus change
-/// that ADDS a new, unreviewed mismatch fails the test until it is looked at
-/// and either fixed (the nested mutation should really be rejected — see
-/// `reject_class_var_field_assignment`/`reject_unthreadable_value_self_field_write`)
-/// or added here as a reviewed, out-of-scope shape.
+/// see this file's own doc comment.
+///
+/// Empty. A corpus change that adds a mismatch for the `SelfVt` family fails
+/// the test until it is looked at (ADR 0130 §3 deleted the `ClassVars` half,
+/// whose entries only existed because a class variable was a threaded
+/// family).
 fn expected_mismatches() -> Vec<Mismatch> {
-    vec![
-        Mismatch {
-            file: "stdlib/test/fixtures/class_var_sub_expr.bt".to_string(),
-            line: 117,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/bt3055actor.bt".to_string(),
-            line: 38,
-            shape: "letrec",
-        },
-        // BT-3667: a late-bound `self foo:` (a subclass override may write a
-        // class variable) nested in a conditional in a `whileTrue:` body. The
-        // loop cannot thread it; the write is recovered from the ADR 0110
-        // shadow after the statement and pinned by
-        // `SelfSendOverrideBlocksTest>>testWhileNested`.
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_blocks_base.bt".to_string(),
-            line: 72,
-            shape: "letrec",
-        },
-        // BT-3690: the same shape in the plain-reply fixture and its sealed twin
-        // (`armsToDo` at line 52, `armsTimesRepeat` at line 64): a class's own
-        // `self bump` nested in a conditional arm of a `to:do:` /
-        // `timesRepeat:` body, next to arms that send a provably pure `self
-        // plain`. Both still compile, and the write is recovered from the
-        // per-scope commit tokens exactly as for the BT-3683 entries after it;
-        // pinned by `SelfSendPlainReplyTest>>test{Base,Sub,Sealed}ArmsToDo` /
-        // `...ArmsTimesRepeat`.
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
-            line: 52,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
-            line: 64,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
-            line: 52,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
-            line: 64,
-            shape: "letrec",
-        },
-        // BT-3683: a class's own late-bound `self increment` nested in a
-        // conditional arm of a `to:do:` / `timesRepeat:` body (`armsInToDo`,
-        // `armsInTimesRepeat`, open and sealed). Same shape as the `whileTrue:`
-        // entry above: the loop's own carry-out cannot thread a mutation
-        // nested in an arm, so the write is recovered from the per-scope
-        // commit tokens (BT-3675) and pinned by
-        // `SelfSendOverrideBlocksTest>>test{Open,Sealed}ArmsInToDo` /
-        // `...ArmsInTimesRepeat`. The `do:`-over-a-literal shapes added by the
-        // same issue do not appear here (their old detector already agrees).
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
-            line: 106,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
-            line: 118,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
-            line: 86,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
-            line: 98,
-            shape: "letrec",
-        },
-    ]
+    Vec::new()
 }
 
 /// Recursively collects every `.bt`/`.btscript` file under `dir`.
@@ -246,14 +148,10 @@ fn family_detector_agrees_with_old_loop_detectors_over_the_corpus() {
             .with(std::cell::RefCell::take);
         for record in records {
             total_records += 1;
-            let new_class_vars = record
-                .new_families
-                .contains(&crate::core_erlang::threaded_ir::VersionPrefix::ClassVars);
             let new_self_vt = record
                 .new_families
                 .contains(&crate::core_erlang::threaded_ir::VersionPrefix::SelfVt);
-            let agrees = record.old_threads_class_vars == new_class_vars
-                && record.old_threads_value_self == new_self_vt;
+            let agrees = record.old_threads_value_self == new_self_vt;
             if !agrees {
                 mismatches.push(Mismatch {
                     file: rel.clone(),
@@ -292,8 +190,7 @@ fn family_detector_agrees_with_old_loop_detectors_over_the_corpus() {
          reviewed `expected_mismatches()` list (or a previously-reviewed \
          mismatch is now missing). Every disagreement must be a nested \
          mutation the loop genuinely cannot carry — confirm the rejection \
-         path (`reject_class_var_field_assignment`/\
-         `reject_unthreadable_value_self_field_write`) still rejects it, \
+         path (`reject_unthreadable_value_self_field_write`) still rejects it, \
          then update the exception list to match."
     );
 }

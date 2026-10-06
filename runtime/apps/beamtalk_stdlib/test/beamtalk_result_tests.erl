@@ -157,6 +157,48 @@ try_do_non_fun_raises_type_error_test() ->
     end.
 
 %%% ============================================================================
+%%% tryDo: — class-variable catch boundary (ADR 0130 §4, BT-3708)
+%%% ============================================================================
+
+try_do_discards_class_var_writes_made_inside_the_block_test() ->
+    %% A write inside the protected block is discarded when the error is caught;
+    %% a write made before entering the block is kept.
+    Key = beamtalk_class_vars:key('BT3708TryDo'),
+    ok = beamtalk_class_vars:install(Key, #{n => 0}),
+    try
+        erlang:put(Key, #{n => 1}),
+        Result = beamtalk_result:'tryDo:'(fun() ->
+            erlang:put(Key, #{n => 2}),
+            error(boom)
+        end),
+        ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := false}, Result),
+        ?assertEqual(#{n => 1}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+try_do_keeps_class_var_writes_on_success_and_nlr_test() ->
+    Key = beamtalk_class_vars:key('BT3708TryDoOk'),
+    ok = beamtalk_class_vars:install(Key, #{n => 0}),
+    try
+        Ok = beamtalk_result:'tryDo:'(fun() -> erlang:put(Key, #{n => 3}) end),
+        ?assertMatch(#{'isOk' := true}, Ok),
+        ?assertEqual(#{n => 3}, erlang:get(Key)),
+        %% A `^` is control flow, not an error: writes before it are kept.
+        Nlr = {'$bt_nlr', make_ref(), done},
+        ?assertThrow(
+            Nlr,
+            beamtalk_result:'tryDo:'(fun() ->
+                erlang:put(Key, #{n => 4}),
+                throw(Nlr)
+            end)
+        ),
+        ?assertEqual(#{n => 4}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+%%% ============================================================================
 %%% class_tryDo:/3 — success path
 %%% ============================================================================
 

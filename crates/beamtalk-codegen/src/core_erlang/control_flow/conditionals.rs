@@ -73,7 +73,7 @@ use beamtalk_core::source_analysis::Span;
 // "open" `Document`, caller supplies the continuation), and this module's own
 // `lower_field_assignment_bind` (pushes a real, un-rendered `ThreadedStmt::Bind`
 // into a `Vec<ThreadedStmt>` body under construction) — one axis (which
-// storage family: `State`/`Self`/`ClassVars`) encoded ad hoc, differently, in
+// storage family: `State`/`Self`) encoded ad hoc, differently, in
 // each; the other (whether the caller wants a self-contained expression or an
 // open one) not named at all. `FieldWriteSite`/`Closure` name both axes once;
 // [`CoreErlangGenerator::lower_field_write`] is the single lowering core all
@@ -90,14 +90,6 @@ pub(in crate::core_erlang) enum FieldWriteSite {
     Actor,
     /// Value-type field: threads through `Self`.
     ValueType,
-    /// Class variable: threads through `ClassVars`, with ADR 0110's shadow
-    /// write and its own `frame`/`block_depth` eligibility rules —
-    /// [`CoreErlangGenerator::lower_field_write`] delegates this variant
-    /// wholesale to
-    /// [`CoreErlangGenerator::lower_class_var_field_assignment_bind`], the
-    /// single pre-existing implementation of that considerably more involved
-    /// contract, rather than re-deriving it here.
-    ClassVar,
 }
 
 impl FieldWriteSite {
@@ -105,12 +97,12 @@ impl FieldWriteSite {
     /// `self.field := value` write site shares — `ValueType` in
     /// `CodeGenContext::ValueType`, `Actor` otherwise (also covers
     /// `CodeGenContext::Repl`, matching every pre-existing call site's
-    /// implicit default). Never returns `ClassVar` — a
-    /// caller that may be in a class method decides that axis itself
-    /// (`in_class_method()`) before falling back to this for the plain
-    /// case, since `context` alone can't distinguish a class method's
-    /// `ClassVars` write from an ordinary instance write (a class
-    /// method's own `context` is `Actor`, not a fourth variant).
+    /// implicit default). A class-variable write (ADR 0130 §2) is not a
+    /// storage family at all: a caller that may be in a class method decides
+    /// that axis itself (`in_class_method()`) and lowers it as a plain
+    /// expression before falling back to this, since `context` alone can't
+    /// distinguish a class method's write from an ordinary instance write (a
+    /// class method's own `context` is `Actor`, not a third variant).
     ///
     /// The single implementation behind what were three independent
     /// `if matches!(context, CodeGenContext::ValueType) { .. } else { .. }`
@@ -168,17 +160,13 @@ impl FieldWriteSite {
             (Self::ValueType, Closure::Open) => {
                 "value-type Self open field-assignment version bind"
             }
-            (Self::ClassVar, _) => {
-                unreachable!("ClassVar sites verify through lower_class_var_field_assignment_bind")
-            }
         }
     }
 }
 
 impl CoreErlangGenerator {
     /// builds the real, un-rendered `Bind` (plus its `"let Val =
-    /// <value> in "` preamble) for an `Actor`/`ValueType` field write — never
-    /// `ClassVar`, which keeps its own [`Self::lower_class_var_field_assignment_bind`].
+    /// <value> in "` preamble) for an `Actor`/`ValueType` field write.
     /// `span` is the constructed `Bind`'s own span (only ever observed by a
     /// `verify()` diagnostic on the node, never by rendering); callers that
     /// already have a `ThreadedStmt`-level span (this module's
@@ -197,16 +185,9 @@ impl CoreErlangGenerator {
         frame: FrameId,
         span: Span,
     ) -> Result<(Document<'static>, ThreadedStmt, String)> {
-        debug_assert!(
-            !matches!(site, FieldWriteSite::ClassVar),
-            "ClassVar sites must go through lower_class_var_field_assignment_bind"
-        );
         let prefix = match site {
             FieldWriteSite::ValueType => VersionPrefix::SelfVt,
-            // `ClassVar` is unreachable here (see the `debug_assert!` above)
-            // — folded into the same arm as `Actor` rather than duplicated,
-            // since it's never actually read for that variant.
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => VersionPrefix::State,
+            FieldWriteSite::Actor => VersionPrefix::State,
         };
         let val_var = self.fresh_temp_var("Val");
         // Capture the source version BEFORE generating the value expression —
@@ -214,7 +195,7 @@ impl CoreErlangGenerator {
         // + 1`) and must see the pre-assignment snapshot.
         let source_version = match site {
             FieldWriteSite::ValueType => self.self_version(),
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => self.state_version(),
+            FieldWriteSite::Actor => self.state_version(),
         };
         let value_doc = match closure {
             Closure::Open => self.generate_field_assignment_value_doc(value)?,
@@ -225,7 +206,7 @@ impl CoreErlangGenerator {
                 self.next_self_var();
                 self.self_version()
             }
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => {
+            FieldWriteSite::Actor => {
                 self.next_state_var();
                 self.state_version()
             }
@@ -246,9 +227,7 @@ impl CoreErlangGenerator {
             op: BindOp::Put {
                 field: field_name.to_string(),
                 value: ValueRef::Var(val_var.clone()),
-                class_tag: ValueRef::Literal("'nil'"),
             },
-            shadow_write: false,
             span,
         };
         Ok((preamble, bind, val_var))
@@ -271,8 +250,7 @@ impl CoreErlangGenerator {
     /// [`FrameId::ROOT`] otherwise; `Actor`/`ValueType` writes reached
     /// through this function are always rendered immediately (never spliced
     /// into a larger, independently-verified `ThreadedIr` tree), so `frame`
-    /// is inert for them — passed through only so `FieldWriteSite::ClassVar`
-    /// can share this one signature.
+    /// is inert for them.
     pub(in crate::core_erlang) fn lower_field_write(
         &mut self,
         site: FieldWriteSite,
@@ -282,25 +260,13 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<(Document<'static>, String)> {
         let span = value.span();
-        let (preamble, bind, val_var) = match site {
-            FieldWriteSite::ClassVar => {
-                self.lower_class_var_field_assignment_bind(field_name, value, frame)?
-            }
-            FieldWriteSite::Actor | FieldWriteSite::ValueType => {
-                self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?
-            }
-        };
+        let (preamble, bind, val_var) =
+            self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?;
         let bind_doc = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
             threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
         };
-        // BT-3675: a direct class-var write commits like a send's rebind.
-        let commit = if matches!(site, FieldWriteSite::ClassVar) {
-            self.class_var_write_commit_doc().unwrap_or(Document::Nil)
-        } else {
-            Document::Nil
-        };
-        let doc = docvec![preamble, bind_doc, commit];
+        let doc = docvec![preamble, bind_doc];
         Ok(match closure {
             Closure::Open => (doc, val_var),
             Closure::Closed => (docvec![doc, leaf::var(val_var.clone())], val_var),
@@ -367,9 +333,8 @@ impl CoreErlangGenerator {
     /// ADR 0118 phase 2a: compiles a
     /// conditional/`ifNotNil:` receiver, returning a [`ThreadedValue`] —
     /// `prelude` is any real `Bind`/`Statement` sequence that must run
-    /// BEFORE the `case`'s condition binding (so a mutated binding like
-    /// `ClassVarsN` or an actor self-send's new `State`/`StateAcc` stays in
-    /// scope inside the `case`), and `value` is the receiver's own
+    /// BEFORE the `case`'s condition binding (so an actor self-send's new
+    /// `State`/`StateAcc` stays in scope inside the `case`), and `value` is the receiver's own
     /// boolean/nil value to test. Shared by all six `generate_*_with_mutations`
     /// generators below (previously each hand-duplicated this exact match —
     /// CLAUDE.md's no-duplicate-implementations rule). `frame` is the
@@ -399,11 +364,11 @@ impl CoreErlangGenerator {
     /// into instead of the six callers' own opaque `Document` return.
     ///
     /// Two receiver shapes thread state through this position:
-    /// - ADR 0118 phase 5b: a class-method self-send (or
-    ///   sub-expression containing one) is recognized by
-    ///   `threaded_expression` itself (`compile_conditional_receiver`
-    ///   delegates to it directly), so its `ClassVars` mutation is a real
-    ///   `Bind`, not an opaque `Statement`.
+    /// - ADR 0130: a class-method self-send (or sub-expression containing
+    ///   one) is recognized by `threaded_expression` itself
+    ///   (`compile_conditional_receiver` delegates to it directly) and bound
+    ///   in an ordered `let` of its own — it threads nothing, but its
+    ///   evaluation order against the condition is pinned.
     /// - ADR 0118 phase 4: an ACTOR-INSTANCE
     ///   self-send anywhere in the receiver's sequenceable sub-tree — the
     ///   receiver itself (`(self recordOnce: which) ifTrue:ifFalse:`),
@@ -1272,12 +1237,6 @@ impl CoreErlangGenerator {
         let Expression::FieldAccess { field, .. } = target.as_ref() else {
             unreachable!("field-assignment lowering requires a FieldAccess target");
         };
-        // §Scope: class-var mutations never legitimately reach these arms —
-        // shares `generate_field_assignment_open`'s rejection via
-        // `reject_class_var_field_assignment` (util.rs) so the two call
-        // sites can't drift out of sync.
-        self.reject_class_var_field_assignment(expr, field)?;
-
         if self.loop_mode.in_hybrid_loop
             && self
                 .loop_mode
@@ -1388,7 +1347,7 @@ impl CoreErlangGenerator {
         // `r` via `maps:get` — silently wrong, not a crash, since the local's
         // in-branch lexical binding (`bind_var`) is real but never escapes
         // this arm's own `StateAcc`.
-        if let Some(field_write) = Self::local_assign_field_write(value) {
+        if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
             let source_version = self.state_version();
@@ -1400,9 +1359,7 @@ impl CoreErlangGenerator {
                 op: BindOp::Put {
                     field: state_key,
                     value: ValueRef::Var(field_val_var.clone()),
-                    class_tag: ValueRef::Literal("'nil'"),
                 },
-                shadow_write: false,
                 span,
             });
             self.bind_var(&id.name, &field_val_var);
@@ -1440,7 +1397,6 @@ impl CoreErlangGenerator {
                     leaf::var(t2_tuple),
                     ")",
                 ])),
-                shadow_write: false,
                 span,
             });
             let _ = self.next_state_var();
@@ -1451,13 +1407,7 @@ impl CoreErlangGenerator {
                 op: BindOp::Put {
                     field: state_key,
                     value: ValueRef::Var(val_var.clone()),
-                    // Unused placeholder: only rendered when shadow_write is
-                    // true, which only class-var Puts ever set (ADR 0110) —
-                    // never reachable here (§Scope: class-var mutations
-                    // never route through these arms).
-                    class_tag: ValueRef::Literal("'nil'"),
                 },
-                shadow_write: false,
                 span,
             });
             self.bind_var(&id.name, &val_var);
@@ -1508,7 +1458,6 @@ impl CoreErlangGenerator {
                     leaf::var(cf_tuple),
                     ")",
                 ])),
-                shadow_write: false,
                 span,
             });
             let _ = self.next_state_var();
@@ -1519,9 +1468,7 @@ impl CoreErlangGenerator {
                 op: BindOp::Put {
                     field: state_key,
                     value: ValueRef::Var(val_var.clone()),
-                    class_tag: ValueRef::Literal("'nil'"),
                 },
-                shadow_write: false,
                 span,
             });
             self.bind_var(&id.name, &val_var);
@@ -1565,9 +1512,7 @@ impl CoreErlangGenerator {
             op: BindOp::Put {
                 field: state_key,
                 value: ValueRef::Var(val_var.clone()),
-                class_tag: ValueRef::Literal("'nil'"),
             },
-            shadow_write: false,
             span,
         });
         self.bind_var(&id.name, &val_var);
@@ -1666,11 +1611,10 @@ impl CoreErlangGenerator {
             // excludes class methods (`in_class_method()`) for the
             // same reason `mod.rs`'s `Expression::Return` handler does —
             // `generate_self_dispatch_call_doc` unconditionally threads
-            // `current_state_var()` (Actor instance state), never
-            // `current_class_var()` (ADR 0110's ClassVars mechanism a class
-            // method actually needs) — so a class-method self-send here
-            // falls to the C12 catch-all below instead, unchanged from
-            // before this fix.
+            // `current_state_var()` (Actor instance state), which a class
+            // method does not have — so a class-method self-send here falls
+            // to the C12 catch-all below instead, unchanged from before this
+            // fix.
             if let BodyExprKind::EarlyReturn = kind {
                 if let Expression::Return { value, .. } = expr {
                     if !self.in_class_method()
@@ -1732,7 +1676,7 @@ impl CoreErlangGenerator {
                     // `DispatchingSelfSend` throw immediately above, just
                     // with the field write's own value in place of the
                     // self-send's result.
-                    if let Some(field_write) = Self::local_assign_field_write(value) {
+                    if let Some(field_write) = self.local_assign_field_write(value) {
                         let field_val_var =
                             self.lower_field_assignment_bind(field_write, frame, span, &mut stmts)?;
                         let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
@@ -1803,7 +1747,7 @@ impl CoreErlangGenerator {
                         // established "RHS already evaluated" entry point
                         // (`DestructureAssignmentControlFlow`'s own sibling
                         // shape uses the same idiom in `gen_server/methods.rs`).
-                        if let Some(field_write) = Self::local_assign_field_write(value) {
+                        if let Some(field_write) = self.local_assign_field_write(value) {
                             let field_val_var = self.lower_field_assignment_bind(
                                 field_write,
                                 frame,
@@ -1862,7 +1806,6 @@ impl CoreErlangGenerator {
                                     leaf::var(tuple_var),
                                     ")",
                                 ])),
-                                shadow_write: false,
                                 span,
                             });
                             let _ = self.next_state_var();
@@ -1877,9 +1820,7 @@ impl CoreErlangGenerator {
                                 op: BindOp::Put {
                                     field: field.name.to_string(),
                                     value: ValueRef::Var(val_var.clone()),
-                                    class_tag: ValueRef::Literal("'nil'"),
                                 },
-                                shadow_write: false,
                                 span,
                             });
                             self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
@@ -1927,7 +1868,6 @@ impl CoreErlangGenerator {
                                 leaf::var(current_state_name),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         if is_last {
@@ -1969,7 +1909,6 @@ impl CoreErlangGenerator {
                                 leaf::var(current_state_name),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         if is_last {
@@ -2015,7 +1954,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         let _ = self.next_state_var();
@@ -2032,7 +1970,6 @@ impl CoreErlangGenerator {
                                 leaf::var(rhs_state),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         self.push_control_flow_threaded_var_rereads(
@@ -2077,7 +2014,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
@@ -2119,7 +2055,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         last_result = Some(ValueRef::Var(result_var));
@@ -2147,7 +2082,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
@@ -2186,7 +2120,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         last_result = Some(ValueRef::Var(result_var));
@@ -2219,7 +2152,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         // rebind captured local-var mutations from
@@ -2405,15 +2337,6 @@ impl CoreErlangGenerator {
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
-            // ADR 0111 Addendum 9, Question 1's scope check: a conditional
-            // branch arm never carries a class-var mutation by construction
-            // (`reject_class_var_field_assignment` fires before mode
-            // selection for any threaded body, conditionals included), so
-            // this value is inert here — set per the general lowering rule
-            // (`self.block_depth == 0`, independently re-derived) for
-            // consistency/forward-compatibility, not because this call site
-            // needs it today.
-            shadow_write_eligible: self.block_depth == 0,
             body: stmts,
             produces,
             span,
@@ -2465,16 +2388,13 @@ mod tests {
                     op: BindOp::Put {
                         field: field.to_string(),
                         value: ValueRef::Var(val.to_string()),
-                        class_tag: ValueRef::Literal("'nil'"),
                     },
-                    shadow_write: false,
                     span: Span::default(),
                 }
             };
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
-                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![
                     make_put("n", "_Val1", target.clone(), source.clone()),
                     make_put("n", "_Val2", target.clone(), source),
@@ -2512,15 +2432,12 @@ mod tests {
                 op: BindOp::Put {
                     field: "n".to_string(),
                     value: ValueRef::Var("_Val1".to_string()),
-                    class_tag: ValueRef::Literal("'nil'"),
                 },
-                shadow_write: false,
                 span: Span::default(),
             };
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
-                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),

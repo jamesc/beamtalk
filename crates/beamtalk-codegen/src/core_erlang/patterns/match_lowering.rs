@@ -43,7 +43,7 @@ use beamtalk_core::source_analysis::Span;
 /// decide whether a bare field-write arm threads). Adding `SelfVt` support
 /// later is the one-line change ADR 0122's Implementation 9 "Out of Scope"
 /// note describes — extend this list, nothing else.
-const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State, VersionPrefix::ClassVars];
+const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State];
 
 impl CoreErlangGenerator {
     /// Generates code for a match expression.
@@ -89,15 +89,14 @@ impl CoreErlangGenerator {
         // path at all — see that function's own context-gating note.
         //
         // Scoped to a value-type INSTANCE method: inside a value-type CLASS
-        // method `self.x :=` is a class-var write on the `ClassVars` chain
-        // (which IS in `MATCH_ARM_FAMILIES`), so it threads (and is rejected
-        // on its own terms by `reject_class_var_field_assignment`) rather
-        // than needing this.
+        // method `self.x :=` is a class-var write, an in-place `put` into the
+        // class process (ADR 0130) that threads nothing, so it needs no
+        // rejection here.
         if self.eligible_families().contains(&VersionPrefix::SelfVt)
             && !MATCH_ARM_FAMILIES.contains(&VersionPrefix::SelfVt)
         {
             for arm in arms {
-                if let Some((field, span)) = Self::vt_match_arm_field_write(arm) {
+                if let Some((field, span)) = self.vt_match_arm_field_write(arm) {
                     return Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm {
                         field: field.to_string(),
                         location: self.location_label(span),
@@ -237,9 +236,9 @@ impl CoreErlangGenerator {
     /// declared capability. The two formulas are equivalent by construction:
     /// `eligible_families` reports at most one family per context (its own
     /// doc comment proves this), and that family is exactly the one the old
-    /// formula named — `State` for an Actor instance method, `ClassVars` for
-    /// any class method (Actor's or a value type's), `SelfVt` — excluded from
-    /// `MATCH_ARM_FAMILIES` — for a value-type instance method. A
+    /// formula named — `State` for an Actor instance method, `SelfVt` —
+    /// excluded from `MATCH_ARM_FAMILIES` — for a value-type instance
+    /// method; a class method has none (ADR 0130). A
     /// value-type instance method DOES still reach this function (a
     /// `match:` with no field-writing arm has nothing for `generate_match`'s
     /// up-front rejection to catch), but `carries_family_write` is `false`
@@ -269,10 +268,10 @@ impl CoreErlangGenerator {
             // BT-3489: a `self.field := ...` arm body. Before this, nothing
             // here matched it, so `generate_match` left `base_state` as
             // `None` and the arm compiled through plain `expression_doc`,
-            // whose field-write binding (`State1`/`ClassVars1`) is scoped to
+            // whose field-write binding (`State1`) is scoped to
             // that one `case` arm — yet the code after the `match:` referenced
             // it unconditionally, so `erlc` rejected the module outright.
-            (carries_family_write && Self::is_field_assignment(arm.body.unwrap_parens()))
+            (carries_family_write && self.is_field_assignment(arm.body.unwrap_parens()))
                 || (is_actor
                     && (self.is_tier2_value_call(&arm.body)
                         || self.control_flow_has_mutations(&arm.body)
@@ -300,7 +299,7 @@ impl CoreErlangGenerator {
     /// gates on (a value-type INSTANCE method): a `[...] value`-wrapped
     /// field write is a separate, pre-existing gap this detector does not
     /// (yet) cover — see BT-3493's own follow-up notes.
-    fn vt_match_arm_field_write(arm: &MatchArm) -> Option<(&str, Span)> {
+    fn vt_match_arm_field_write<'a>(&self, arm: &'a MatchArm) -> Option<(&'a str, Span)> {
         let bare = arm.body.unwrap_parens();
         // BT-3495: a field write nested inside a `[...] value` block's own
         // statements (bare, or local-assign-wrapped) — `arm.body` alone is
@@ -324,10 +323,11 @@ impl CoreErlangGenerator {
             return block
                 .body
                 .iter()
-                .find_map(|stmt| Self::field_write_shape(&stmt.expression))
+                .find_map(|stmt| self.field_write_shape(&stmt.expression))
                 .map(Self::field_write_name_and_span);
         }
-        Self::field_write_shape(bare).map(Self::field_write_name_and_span)
+        self.field_write_shape(bare)
+            .map(Self::field_write_name_and_span)
     }
 
     /// The field write nested in `expr` for exactly the two shapes
@@ -337,15 +337,15 @@ impl CoreErlangGenerator {
     /// crashes `erlc` identically), or `expr` is a local assignment (`var :=
     /// ...`) whose own RHS is one (BT-3493's `local_assign_field_write`
     /// shape). `None` for every other shape.
-    fn field_write_shape(expr: &Expression) -> Option<&Expression> {
+    fn field_write_shape<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
         let bare = expr.unwrap_parens();
-        if Self::is_field_assignment(bare) {
+        if self.is_field_assignment(bare) {
             return Some(bare);
         }
         if let Expression::Assignment { target, value, .. } = bare
             && matches!(target.as_ref(), Expression::Identifier(_))
         {
-            return Self::local_assign_field_write(value);
+            return self.local_assign_field_write(value);
         }
         None
     }
@@ -474,7 +474,7 @@ impl CoreErlangGenerator {
         // BT-3493, which fixes it in the classifier (covering all three
         // constructs at once) and can then widen this condition.
         let bare_body = body.unwrap_parens();
-        if self.conditional_receiver_needs_threading(body) || Self::is_field_assignment(bare_body) {
+        if self.conditional_receiver_needs_threading(body) || self.is_field_assignment(bare_body) {
             let synthetic_block = Block::new(
                 Vec::new(),
                 vec![ExpressionStatement::bare(bare_body.clone())],

@@ -15,9 +15,11 @@
 TestCase subclass: ClassBuilderClassMethodTest
   field: cls = nil
   field: parentCls = nil
+  field: midCls = nil
 
   tearDown =>
     self.cls isNil ifFalse: [self.cls removeFromSystem]
+    self.midCls isNil ifFalse: [self.midCls removeFromSystem]
     self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
 
   // Class-variable mutation persists across calls (the BT-873 "dropped state"
@@ -72,14 +74,70 @@ TestCase subclass: ClassBuilderClassMethodTest
     self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSuperChild
     self assert: self.cls greeting equals: "base"
 
+  // ADR 0130 §3: a builder `super` send runs the superclass method with the
+  // LIVE receiver (`ClassSelf` of the subclass), so a class-variable access in
+  // that method uses the receiver's key rather than the static builder
+  // class's. Called on a subclass of the builder class, it must not raise
+  // class_state_unreachable.
+  testSuperFromSubclassReceiverUsesReceiverClassVars =>
+    Object classBuilder name: #BT3709SuperVarBase;
+      superclass: Object;
+      classVars: #{#n => 10};
+      classMethods: #{#bump => [:self |
+          self.n := self.n + 1
+          self.n
+        ]};
+      register
+    self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
+    Object classBuilder name: #BT3709SuperVarMid;
+      superclass: #BT3709SuperVarBase;
+      classMethods: #{#bump => [:self | super bump]};
+      register
+    self.midCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarMid
+    Object classBuilder name: #BT3709SuperVarLeaf;
+      superclass: #BT3709SuperVarMid;
+      classVars: #{#n => 100};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarLeaf
+    self assert: self.cls bump equals: 101
+    self assert: self.cls bump equals: 102
+
+  // The same, for a class-side extension reached from a builder method: the
+  // extension is looked up on the builder class but receives the live
+  // receiver's `ClassSelf`, so it reads the subclass's class variable.
+  testExtensionReadThroughSubclassReceiverUsesReceiverClassVars =>
+    Object classBuilder name: #BT3709ExtMid;
+      superclass: Object;
+      classVars: #{#n => 10};
+      classMethods: #{#viaSelf => [:self | self foo]};
+      register
+    self.midCls := (Erlang beamtalk_interface) findClass: #BT3709ExtMid
+    Object classBuilder name: #BT3709ExtLeaf;
+      superclass: #BT3709ExtMid;
+      classVars: #{#n => 100};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3709ExtLeaf
+    Erlang beamtalk_extensions
+      register: #'BT3709ExtMid class'
+      selector: #foo
+      fun: [:_args :s | Erlang beamtalk_class_vars get: s with: #n]
+      owner: #test
+    [self assert: self.cls viaSelf equals: 100]
+      ensure: [
+        Erlang beamtalk_extensions
+          unregister: #BT3709ExtMid
+          selector: #foo
+          classSide: true
+      ]
+
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
-  // not match the class-method calling convention `fun(ClassSelf, ClassVars, ...)`
+  // not match the class-method calling convention `fun(ClassSelf, ...)`
   // is rejected at register time with a structured #arity_mismatch error, instead
   // of installing successfully and crashing with an opaque error:undef when the
-  // class method is first called. Here `blk` is arity 1 but unary `#size` needs
-  // arity 2 (ClassSelf, ClassVars).
+  // class method is first called. Here `blk` is arity 2 but unary `#size` needs
+  // arity 1 (ClassSelf; class variables are not passed, ADR 0130).
   testWrongArityComputedFunRejected =>
-    blk := [:_self | "x" size]
+    blk := [:_self :_extra | "x" size]
     self
       should: [
         Object classBuilder name: #BT2276Computed;
@@ -90,10 +148,10 @@ TestCase subclass: ClassBuilderClassMethodTest
       raise: #arity_mismatch
 
   // A correctly-shaped computed (non-block-literal) class-method fun follows the
-  // `fun(ClassSelf, ClassVars, ...)` convention (arity 2 for a unary selector)
+  // `fun(ClassSelf, ...)` convention (arity 1 for a unary selector)
   // and registers and dispatches unaffected (BT-2276).
   testCorrectArityComputedFunUnaffected =>
-    blk := [:_self :_classVars | 99]
+    blk := [:_self | 99]
     Object classBuilder name: #BT2276ComputedOk;
       superclass: Object;
       classMethods: #{#answer => blk};

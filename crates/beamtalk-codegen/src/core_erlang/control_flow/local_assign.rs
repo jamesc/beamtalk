@@ -79,7 +79,7 @@ impl CoreErlangGenerator {
         // `lower_local_var_assignment_bind` (via the caller,
         // `lower_letrec_local_var_assignment`), which has its own BT-3493
         // fix for exactly this shape.
-        if Self::local_assign_field_write(value).is_some() {
+        if self.local_assign_field_write(value).is_some() {
             return Ok(None);
         }
         let core_var = self
@@ -162,7 +162,7 @@ impl CoreErlangGenerator {
         // to the field write's own returned value, exactly as `:=`'s "the
         // whole assignment evaluates to the assigned value" semantics
         // require.
-        if let Some(field_write) = Self::local_assign_field_write(value) {
+        if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_letrec_field_assignment(field_write, frame, span, stmts)?;
             let new_var = self.fresh_temp_var(&canonical);
@@ -171,7 +171,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(field_val_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -189,7 +188,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(result_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -201,7 +199,6 @@ impl CoreErlangGenerator {
             target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
             source,
             op: BindOp::Direct(ValueRef::Doc(value_code)),
-            shadow_write: false,
             span,
         });
         Ok(())

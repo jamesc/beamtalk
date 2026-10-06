@@ -1547,9 +1547,8 @@ fn check_expr_for_unsafe_field_mutation(
 ///   warning (gaps are fine; only an at-or-past-current step is dead).
 /// - `migrateFromVN:` may not read or write a class variable: it runs
 ///   outside the class process via `local_call/3`, which passes `nil` for
-///   `self` and discards any `{class_var_result, …}` mutation the method
-///   returns — a read would silently see `nil` and a write would be
-///   silently dropped (ADR 0123 §2).
+///   `self` and has no class process to write to — a read would silently
+///   see `nil` and a write would be silently dropped (ADR 0123 §2).
 /// - `migrateFromVN:`'s return type, when annotated, must be `Dictionary`.
 pub(crate) fn check_shape_version_and_migrations(
     module: &Module,

@@ -59,12 +59,12 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
   // crash.
   //
   // BT-2276: a computed class-method fun must follow the class-method calling
-  // convention `fun(ClassSelf, ClassVars, ...)` — a unary class method is arity
-  // 2 (ClassSelf, ClassVars). A wrong-arity computed fun is now rejected at
-  // register time, so this conforming arity-2 block is what a real computed
-  // class method looks like.
+  // convention `fun(ClassSelf, ...)` — a unary class method is arity 1
+  // (ClassSelf; class variables are not passed, ADR 0130). A wrong-arity
+  // computed fun is now rejected at register time, so this conforming arity-1
+  // block is what a real computed class method looks like.
   testComputedClassMethodIsKnownButUnindexable =>
-    blk := [:_self :_classVars | "x" size]
+    blk := [:_self | "x" size]
     self.cls := Object classBuilder name: #BTBuilderClassComputedProbe;
       superclass: Object;
       classMethods: #{#computedClassSize => blk};

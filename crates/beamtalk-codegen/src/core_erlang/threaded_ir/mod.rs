@@ -36,7 +36,7 @@
 //! - [`verify`] — the checker: `VerifyError`, `verify`.
 //! - [`emit`] — the emitter: `render`, `RenderCtx`.
 //! - [`build`] — builders that construct-and-verify or construct-and-render
-//!   fixtures: `build_tuple_acc_unpack`, `construct_and_verify_class_var_bind`,
+//!   fixtures: `build_tuple_acc_unpack`,
 //!   `verify_body_with_opaque_version_gaps`, `verify_simple_bind`.
 //!
 //! Every item re-exported below keeps the path it had before this split
@@ -50,16 +50,13 @@
 //! - Versions are linear within one [`ir::FrameId`]; sibling branch/handler
 //!   arms get distinct frames so independently-minted versions never
 //!   collide.
-//! - A class-var `Bind` at a shadow-write-eligible point, in a method whose
-//!   body can relay a foreign NLR, must set `shadow_write` (the ADR 0110
-//!   contract).
 //! - A body with version steps hidden inside a shared multi-module helper is
 //!   verified after `build::backfill_opaque_version_gap` closes those gaps.
 //!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
-//! selection, shadow-write emission, and NLR relay boundaries. Everything
+//! selection, and NLR relay boundaries. Everything
 //! else in codegen stays AST-directed and unaffected — see ADR 0111
 //! §Decision / §Constraints for the full narrow-scope rationale.
 
@@ -69,13 +66,14 @@ mod ir;
 mod verify;
 
 pub(super) use build::{
-    backfill_opaque_version_gaps, build_tuple_acc_unpack, construct_and_verify_class_var_bind,
-    verify_body_with_opaque_version_gaps, verify_simple_bind,
+    backfill_opaque_version_gaps, build_tuple_acc_unpack, verify_body_with_opaque_version_gaps,
+    verify_simple_bind,
 };
 pub(super) use emit::{RenderCtx, render, render_value};
 pub(super) use ir::{
-    BindOp, FrameId, LoopCounter, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, ValueRef,
+    VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use verify::verify;
 
@@ -91,7 +89,7 @@ pub(super) use verify::verify;
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
-pub(super) use verify::VerifyError;
+pub(super) use verify::{CatchRestoreDefect, VerifyError};
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

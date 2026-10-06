@@ -88,7 +88,7 @@ impl CoreErlangGenerator {
         // Synthesize class_supervisionSpec for Actor subclasses that don't define it
         let needs_spec_synthesis = self.needs_supervision_spec_synthesis(module);
         let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
-            Document::Str(", 'class_supervisionSpec'/2")
+            Document::Str(", 'class_supervisionSpec'/1")
         } else {
             Document::Nil
         };
@@ -473,12 +473,12 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
-            // Class method takes ClassSelf + ClassVars + user params
+            // Class method takes ClassSelf + user params (ADR 0130 §3)
             parts.push(docvec![
                 ", ",
                 fname(
                     safe_class_method_fn_name(m.selector.name().as_ref()),
-                    m.selector.arity() + 2
+                    m.selector.arity() + 1
                 ),
             ]);
         }
@@ -640,7 +640,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// Returns true if this actor module needs a synthesized `class_supervisionSpec/2`.
+    /// Returns true if this actor module needs a synthesized `class_supervisionSpec/1`.
     ///
     /// Synthesis is skipped when the class already defines `class supervisionSpec`
     /// explicitly (e.g. the `Actor` base class itself), either as an inline class
@@ -664,7 +664,7 @@ impl CoreErlangGenerator {
         !has_inline && !has_standalone
     }
 
-    /// Generates the synthesized `class_supervisionSpec/2` function.
+    /// Generates the synthesized `class_supervisionSpec/1` function.
     ///
     /// Calls `class_supervisionPolicy` **directly** to avoid a `gen_server` re-entrant
     /// deadlock: class methods execute inside a `gen_server:call` handler, so routing
@@ -685,13 +685,13 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// %% With local override (has_local_policy_override = true):
-    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
-    ///     let CMR = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    /// 'class_supervisionSpec'/1 = fun (ClassSelf) ->
+    ///     let Policy = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf) in
     ///     ...
     ///
     /// %% Without local override (has_local_policy_override = false):
-    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
-    ///     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    /// 'class_supervisionSpec'/1 = fun (ClassSelf) ->
+    ///     let Policy = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf) in
     ///     ...
     /// ```
     fn generate_supervision_spec_synthesis(
@@ -704,34 +704,21 @@ impl CoreErlangGenerator {
         } else {
             atom(self.compiled_module_name("Actor"))
         };
+        // ADR 0130 §3: `class_supervisionPolicy` returns its bare result.
         docvec![
-            "'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->\n",
-            "    let CMR = call ",
+            "'class_supervisionSpec'/1 = fun (ClassSelf) ->\n",
+            "    let Policy = call ",
             policy_mod,
-            ":'class_supervisionPolicy'(ClassSelf, ClassVars) in\n",
-            "    case CMR of\n",
-            "      <{'class_var_result', Policy, NewClassVars}> when 'true' ->\n",
-            "        let Spec0 = call ",
+            ":'class_supervisionPolicy'(ClassSelf) in\n",
+            "    let Spec0 = call ",
             atom(spec_mod.clone()),
             ":'new'() in\n",
-            "        let Spec1 = call ",
+            "    let Spec1 = call ",
             atom(spec_mod.clone()),
             ":'withActorClass:'(Spec0, ClassSelf) in\n",
-            "        let Spec2 = call ",
-            atom(spec_mod.clone()),
-            ":'withRestart:'(Spec1, Policy) in\n",
-            "        {'class_var_result', Spec2, NewClassVars}\n",
-            "      <Policy> when 'true' ->\n",
-            "        let Spec0 = call ",
-            atom(spec_mod.clone()),
-            ":'new'() in\n",
-            "        let Spec1 = call ",
-            atom(spec_mod.clone()),
-            ":'withActorClass:'(Spec0, ClassSelf) in\n",
-            "        call ",
+            "    call ",
             atom(spec_mod),
             ":'withRestart:'(Spec1, Policy)\n",
-            "    end\n",
         ]
     }
 }

@@ -1,11 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3704 (ADR 0130 Phase 1): rows of the open spelling that do not compile
-// today. They are written in the shape ADR 0130 makes legal and kept out of the
-// build with the `.pending` suffix (the BUnit runner only discovers `.bt`
-// files). BT-3713 (the Phase 3 flip) enables them by dropping the suffix from this
-// file, its sibling fixtures and its test file.
+// BT-3704 (ADR 0130 Phase 1): rows of the open spelling that did not compile
+// before ADR 0130; enabled by BT-3713.
 
 Object subclass: CvsOpenPending
   classState: n = 0
@@ -14,48 +11,43 @@ Object subclass: CvsOpenPending
 
   class n => self.n
 
-
   class reset => self.n := 0
-
 
   class boom =>
     self bump
     1 / 0
-
 
   class rowTimes =>
     self reset
     3 timesRepeat: [self bump]
     self.n
 
-
   class rowLoopCondition =>
     self reset
     [self n < 3] whileTrue: [self bump]
     self.n
-
 
   class rowDo =>
     self reset
     #(1, 2, 3) do: [:x | self bump]
     self.n
 
-
   class rowCollect =>
     self reset
     #(1, 2, 3) collect: [:x | self bump]
     self.n
 
-
   class rowInject =>
     self reset
-    #(1, 2, 3) inject: 0 into: [:a :x |
-      self bump
-      a + x
-    ]
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :x |
+        self bump
+        a + x
+      ]
     self.n
 
-
+  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.
   class rowNonMatchingInnerEnsure =>
     self reset
     [
@@ -63,11 +55,10 @@ Object subclass: CvsOpenPending
         [
           self bump
           1 / 0
-        ] on: TypeError do: [:e | nil]
+        ] on: RuntimeError do: [:e | nil]
       ] ensure: [self bump]
     ] on: Error do: [:e | nil]
     self.n
-
 
   class rowEnsureRaise =>
     self reset
@@ -79,7 +70,6 @@ Object subclass: CvsOpenPending
     ] on: Error do: [:e | nil]
     self.n
 
-
   class rowOwnNlrEnsure =>
     self reset
     [
@@ -89,4 +79,3 @@ Object subclass: CvsOpenPending
       ] ensure: [self bump]
     ] on: Error do: [:e | nil]
     99
-

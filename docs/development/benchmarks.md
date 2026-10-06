@@ -1147,3 +1147,106 @@ new cases print, kept as a reference for the Phase 3 re-run, not as gate evidenc
 |---|---|---|
 | `class_var_10r_3w_loop` | 203 | 282, 294 |
 | `instance_on_do_loop` | 2500 | 2434, 2468, 2618 |
+
+### Phase 3 re-measure of gate 4 with the real lowering (BT-3711)
+
+Only gate 4 was re-measured here (the other gates belong to BT-3709's lowering). The compiler now emits
+`let Snap = beamtalk_class_vars:snapshot() in` before every `on:do:`'s `try` and `do
+beamtalk_class_vars:restore(Snap)` as the first statement of the non-NLR catch arm, as helper calls (gate 4 chose
+helpers). Case: `SsbOnDoObject run:` (`runtime/perf/self_send_bench`, `[i + 1] on: Error do: [:e | 0]` in a
+`1 to: n do:` loop, outside any class invocation, so `snapshot/0` answers `none`).
+
+Method: the bench package was built with the BT-3711 compiler; its `ssb_on_do_object.core` is the "instrumented"
+side, and the "today" side is the same `.core` with exactly the two inserted expressions removed. That is what
+`origin/adr-0130` emits for this module: the corpus `.core` diff of the whole stdlib + test corpus against
+`origin/adr-0130` is, after removing the snapshot, restore and capture insertions and renumbering temporaries,
+empty. Both sides were compiled with `erlc +from_core` under different module names and timed in one `erl`
+process (runtime and stdlib applications started), 200,000 iterations after 1,000 warmup, 15 interleaved rounds
+(plain, instrumented, plain, ...) per run, three runs. 4-core VM, load average under 1 at the start of each run.
+
+| run | today (plain) | BT-3711 (snapshot + restore arm) | delta |
+|---|---|---|---|
+| 1 | 2300 [2208-2544] | 2330 [2155-2632] | +1.3% |
+| 2 | 2400 [2140-2982] | 2338 [2181-3221] | -2.6% |
+| 3 | 2327 [2120-2853] | 2329 [2200-2661] | +0.1% |
+
+Medians in ns/op with min-max. **Gate 4 passes**: within 10% (and within the noise of the run-to-run spread).
+Not measured here: the restore arm taken (an error crossing a catch), and the end-to-end `SsbMain` run through
+`beamtalk run`.
+
+### Phase 3 re-measure of gates 1 to 4 on the integration branch (BT-3713)
+
+All four gates, with the real lowering, through `runtime/perf/self_send_bench` as in "Harness" above
+(`beamtalk run SsbMain run`, 200,000 iterations per case after 1,000 warmup). Three sides, each built from its
+own checkout with its own compiler, stdlib and bench package and run in turn (baseline, main, branch, baseline,
+...), 9 interleaved rounds, medians with min-max, after one discarded warm-up run per side:
+
+- **baseline**: `f12484e06` (the parent of BT-3666; the bench package copied in from the branch).
+- **main**: `3fe282c76`, `origin/main`, the "today" of gates 3 and 4 (threaded class variables, BT-3690).
+- **branch**: this PR, `adr-0130` plus BT-3713 (single-home class variables, the real lowering).
+
+Machine: 4 cores, nothing else running (checked with `ps` before and after; no builds, no other agent). The
+1-minute load average at the start of each round was 1.31 to 1.57, which is the benchmark's own BEAM
+schedulers: the `beamtalk run` of the previous round. The Rust CLI of the baseline and main sides was built with
+`CARGO_PROFILE_DEV_DEBUG=0` to save disk, the branch with the default dev profile; the generated code and the
+runtime beams do not depend on either. Harness: a throwaway script that alternates the three binaries (not
+checked in; the method above is the recipe).
+
+| case (ns/op, median [min-max], n = 9) | baseline `f12484e06` | main `3fe282c76` | branch |
+|---|---|---|---|
+| class self-send, open class (top level) | 120 [114-157] | 223 [213-318] | 199 [193-230] |
+| class self-send, open class in an `ifTrue:` arm | 168 [160-247] | 330 [293-361] | 260 [240-279] |
+| class self-send, sealed class | 121 [113-152] | 124 [115-133] | 119 [116-135] |
+| class-variable loop, 10 reads + 3 writes | 171 [164-208] | 285 [275-394] | 582 [566-1819] |
+| instance-side `on:do:` loop (no invocation) | 2399 [2266-2723] | 2267 [2179-3078] | 2313 [2191-2553] |
+| class self-send, inherited override (walk) | 128 [126-170] | 1627 [1539-1925] | 1908 [1745-2434] |
+| actor self-send, open | 104 [93-222] | 132 [122-193] | 127 [119-197] |
+| actor self-send, sealed | 77 [74-126] | 87 [80-97] | 86 [80-162] |
+| actor self-send, inherited override | 87 [83-123] | 118 [112-150] | 117 [112-161] |
+
+#### Gate 1: open self-send, `median_after <= 1.15 * baseline + guard`
+
+`guard`, re-measured on this branch (loop-subtracted `beamtalk_class_dispatch:class_self_direct_ok/4` on a
+registered open class, 2,000,000 iterations, 9 rounds): **75 ns** [71-83].
+
+| case | bound | branch | verdict |
+|---|---|---|---|
+| top level | 1.15 x 120 + 75 = 213 | 199 [193-230] | **passes** (main: 223, which would have failed) |
+| in an `ifTrue:` arm | 1.15 x 168 + 75 = 268 | 260 [240-279] | **passes**, by 8 ns (the arm's max, 279, is above the bound) |
+
+The token, scope read, export and commit that main paid per send are gone: the branch is 24 ns (top level) and
+70 ns (arm) below main. What is left over the baseline is the guard (75 ns) plus noise; BT-3700 owns it.
+
+#### Gate 2: sealed self-send
+
+119 [116-135] against 121 [113-152] on the baseline and 124 [115-133] on main: **no regression**.
+
+#### Gate 3: ten reads and three writes per iteration, `median_after <= 2 * median_today`
+
+Branch 582 [566-1819] against main 285 [275-394]: **2.04x, the gate fails by 12 ns (2%)**. Seven of the nine
+rounds are in 566-644; two rounds hit scheduler or GC outliers (1819, 1042), which the median ignores. The
+paired per-round ratio branch/main has median 2.11. The access is already the inlined form the ADR's fallback
+asks for (`erlang:get/1` plus `maps:find/2` for a read, `erlang:get/1`, `maps:put/3` and `erlang:put/2` for a
+write, helper call only on a miss; ADR 0130 §2, BT-3709), so the fallback is used up. **Handled as the ADR
+prescribes: the number is recorded and accepted, not used to reopen the decision.** Why it is above the spike's
+183 ns: the spike hardcoded the key as a literal tuple, which the compiler stores once. The real lowering
+builds `{'$bt_class_vars', element(2, ClassSelf)}` on every access (13 times per iteration), because the key
+depends on the receiver's class tag. A cheap follow-up that is not done here: bind the key once per method (a
+`let`) and reuse it for every access in the method, which removes 13 tuple builds and `element/2` calls per
+iteration. Until then a class method that touches class variables in a hot loop is about twice as expensive as it
+was on main, and about 3.4x the baseline (which had no class-variable threading to pay for at all: its 171 ns is
+a lexical `maps:get`).
+
+#### Gate 4: `snapshot/0` + restore arm around an instance-side `on:do:`, within 10%
+
+Branch 2313 [2191-2553] against main 2267 [2179-3078]: **+2.0%, passes**. (The real lowering, end to end
+through `beamtalk run`; the BT-3711 measurement, which timed the instrumented and plain `.core` of the same
+module in one process, gave +1.3%, -2.6%, +0.1%.)
+
+#### Other observations (not gates)
+
+- `class_self_send_inherited_override`, the late-bound hierarchy walk (`class_self_send/4`), is 1908 ns on the
+  branch, 1627 on main and 128 on the baseline: roughly 13x the baseline already on main, and 17% above main
+  now. No gate covers it (ADR 0130 leaves the late-binding guard and the walk to BT-3700); recorded here so the
+  17% is not lost.
+- Actor self-sends are unchanged by this ADR and within noise of main.

@@ -61,7 +61,9 @@ Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
 """.
 -spec should_raise(fun(() -> term()), atom()) -> 'nil'.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
-    try Block() of
+    %% ADR 0130 §4: this catch swallows the block's error, so it is a catch
+    %% boundary; `protect/1` restores the class-variable map before we classify.
+    try beamtalk_class_vars:protect(Block) of
         _ ->
             % Block completed without error
             NoRaiseErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),

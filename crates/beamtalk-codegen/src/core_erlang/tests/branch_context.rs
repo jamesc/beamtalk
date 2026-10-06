@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Discipline-pinning tests for `with_branch_context`'s per-prefix
-//! save/reset/restore policy. Unifying `StateThreading`/`class_var_version`/
-//! `self_version` behind the shared `VersionCounter` must unify their
+//! save/reset/restore policy. Unifying `StateThreading`/`self_version`
+//! behind the shared `VersionCounter` must unify their
 //! naming/identity *shape* only — each prefix's branch-entry/exit
 //! *discipline* stays exactly as documented on `BranchContextGuard`
 //! (ADR 0111 §Phase A2).
@@ -28,46 +28,8 @@ fn with_branch_context_state_resets_on_entry_and_restores_on_exit() {
     );
 }
 
-/// `class_vars`: NOT reset on entry — the branch inherits the outer scope's
-/// current version — but restored to it on exit.
-#[test]
-fn with_branch_context_class_vars_inherits_on_entry_and_restores_on_exit() {
-    let mut generator = CoreErlangGenerator::new("test");
-    generator.set_class_var_version(2);
-    let entry_version = generator.with_branch_context(|g| {
-        let entry = g.class_var_version();
-        g.next_class_var();
-        entry
-    });
-    assert_eq!(
-        entry_version, 2,
-        "class_vars inherits the outer version on branch entry (no reset)"
-    );
-    assert_eq!(
-        generator.class_var_version(),
-        2,
-        "class_vars restores to the outer version on exit"
-    );
-}
-
-/// `class_var_mutated`: sticky — set inside a branch, deliberately NOT
-/// restored when the branch exits.
-#[test]
-fn with_branch_context_class_var_mutated_is_sticky_across_exit() {
-    let mut generator = CoreErlangGenerator::new("test");
-    assert!(!generator.class_var_mutated());
-    generator.with_branch_context(|g| {
-        g.next_class_var(); // sets class_var_mutated = true
-    });
-    assert!(
-        generator.class_var_mutated(),
-        "class_var_mutated must stay sticky after with_branch_context exits"
-    );
-}
-
 /// self: NOT reset on entry (the
-/// branch inherits the outer scope's current version, same as
-/// `class_vars`), restored to it on exit. Fixes the prior "live landmine"
+/// branch inherits the outer scope's current version), restored to it on exit. Fixes the prior "live landmine"
 /// of neither save nor restore without introducing a stale-read regression:
 /// unlike `state`, `Self{N}` has no loop-body rename, so a reset-on-entry
 /// policy would silently read the pre-mutation value on a `self.field`
@@ -147,18 +109,15 @@ fn with_branch_context_nests_independently() {
 fn with_branch_context_restores_even_when_f_returns_err() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_state_version(5);
-    generator.set_class_var_version(2);
     generator.set_self_version(7);
 
     let result: std::result::Result<(), &'static str> = generator.with_branch_context(|g| {
         g.next_state_var();
-        g.next_class_var();
         g.next_self_var();
         Err("boom")
     });
 
     assert_eq!(result, Err("boom"));
     assert_eq!(generator.state_version(), 5);
-    assert_eq!(generator.class_var_version(), 2);
     assert_eq!(generator.self_version(), 7);
 }

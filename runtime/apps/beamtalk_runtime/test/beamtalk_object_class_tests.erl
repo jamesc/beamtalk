@@ -12,6 +12,8 @@ Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+-export([class_lcRead/1, class_lcWrite/1, class_lcSelf/1]).
+
 %%====================================================================
 %% Setup/Teardown
 %%====================================================================
@@ -1610,7 +1612,6 @@ local_call_test_() ->
             {"local_call with keyword argument", fun test_local_call_keyword_arg/0},
             {"local_call method not found raises does_not_understand",
                 fun test_local_call_method_not_found/0},
-            {"local_call unwraps class_var_result tuple", fun test_local_call_class_var_result/0},
             {"local_call on non-class receiver raises type_error",
                 fun test_local_call_non_class_receiver/0},
             {"local_call on non-object raises type_error", fun test_local_call_non_object/0}
@@ -1670,25 +1671,6 @@ test_local_call_method_not_found() ->
         beamtalk_object_class:local_call(ClassObj, nonExistentMethod, [])
     ).
 
-test_local_call_class_var_result() ->
-    ClassInfo = #{
-        name => 'LocalCallCvarTestClass',
-        module => beamtalk_class_dispatch_test_helper,
-        superclass => none,
-        class_methods => #{testClassVar => <<>>},
-        class_state => #{}
-    },
-    {ok, Pid} = beamtalk_object_class:start_link('LocalCallCvarTestClass', ClassInfo),
-    ClassObj = #beamtalk_object{
-        class = 'LocalCallCvarTestClass class',
-        class_mod = beamtalk_class_dispatch_test_helper,
-        pid = Pid
-    },
-    %% testClassVar returns {class_var_result, Value, NewVars} — local_call
-    %% should unwrap and return just the value
-    Result = beamtalk_object_class:local_call(ClassObj, testClassVar, []),
-    ?assertEqual(class_var_updated_value, Result).
-
 test_local_call_non_class_receiver() ->
     %% An actor instance (class name does NOT end with " class") should fail
     FakeActor = #beamtalk_object{
@@ -1706,6 +1688,151 @@ test_local_call_non_object() ->
         #{error := #beamtalk_error{kind = type_error}},
         beamtalk_object_class:local_call(not_an_object, testSuccess, [])
     ).
+
+%%====================================================================
+%% local_call/3 class-variable snapshot region (ADR 0130 §5, BT-3708)
+%%====================================================================
+
+%% Class methods the local_call/3 snapshot tests reach (`class_mod = ?MODULE`).
+class_lcRead(ClassSelf) -> beamtalk_class_vars:get(ClassSelf, n).
+class_lcWrite(ClassSelf) -> beamtalk_class_vars:put(ClassSelf, n, 99).
+class_lcSelf(ClassSelf) -> ClassSelf.
+
+local_call_snapshot_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
+            {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
+            {"write raises class_state_read_only and erases the snapshot",
+                fun test_local_call_write_raises/0},
+            {"mid-invocation on the same class reads and writes the live map",
+                fun test_local_call_live_same_class/0},
+            {"mid-invocation of X calling performLocally: on Y keeps X's home",
+                fun test_local_call_other_class_keeps_home/0}
+        ]
+    end}.
+
+lc_class(Name, N) ->
+    ClassInfo = #{
+        name => Name,
+        module => ?MODULE,
+        superclass => none,
+        class_methods => #{},
+        class_state => #{n => N}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
+    #beamtalk_object{
+        class = beamtalk_class_registry:class_object_tag(Name),
+        class_mod = ?MODULE,
+        pid = Pid
+    }.
+
+test_local_call_passes_receiver() ->
+    Obj = lc_class('BT3708LcSelf', 1),
+    ?assertEqual(Obj, beamtalk_object_class:local_call(Obj, lcSelf, [])).
+
+test_local_call_reads_snapshot() ->
+    Obj = lc_class('BT3708LcRead', 5),
+    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
+
+test_local_call_write_raises() ->
+    Obj = lc_class('BT3708LcWrite', 5),
+    ?assertError(
+        #{error := #beamtalk_error{kind = class_state_read_only}},
+        beamtalk_object_class:local_call(Obj, lcWrite, [])
+    ),
+    ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcWrite'))),
+    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
+
+test_local_call_live_same_class() ->
+    Obj = lc_class('BT3708LcLive', 5),
+    Key = beamtalk_class_vars:key('BT3708LcLive'),
+    ok = beamtalk_class_vars:install(Key, #{n => 123}),
+    try
+        ?assertEqual(123, beamtalk_object_class:local_call(Obj, lcRead, [])),
+        ?assertEqual(99, beamtalk_object_class:local_call(Obj, lcWrite, [])),
+        ?assertEqual(#{n => 99}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+test_local_call_other_class_keeps_home() ->
+    _X = lc_class('BT3708LcX', 1),
+    Y = lc_class('BT3708LcY', 2),
+    KeyX = beamtalk_class_vars:key('BT3708LcX'),
+    ok = beamtalk_class_vars:install(KeyX, #{n => 10}),
+    try
+        %% Y is read through its mirror; X's home entry is untouched.
+        Snap = beamtalk_class_vars:snapshot(),
+        ?assertEqual(2, beamtalk_object_class:local_call(Y, lcRead, [])),
+        ?assertEqual(KeyX, erlang:get('$bt_class_vars_home')),
+        ?assertEqual(#{n => 10}, erlang:get(KeyX)),
+        ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcY'))),
+        %% X's restore still works afterwards.
+        erlang:put(KeyX, #{n => 11}),
+        ok = beamtalk_class_vars:restore(Snap),
+        ?assertEqual(#{n => 10}, erlang:get(KeyX))
+    after
+        beamtalk_class_vars:uninstall(KeyX)
+    end.
+
+%%====================================================================
+%% put_class_method/4 arity gate (ADR 0130 §3, BT-3708)
+%%====================================================================
+
+put_class_method_arity_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"accepts an n+1 fun", fun test_put_class_method_accepts_n_plus_1/0},
+            {"rejects an old n+2 fun naming the selector",
+                fun test_put_class_method_rejects_n_plus_2/0}
+        ]
+    end}.
+
+pcm_class(Name) ->
+    ClassInfo = #{
+        name => Name,
+        module => bt3708_no_module,
+        superclass => none,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
+    Pid.
+
+test_put_class_method_accepts_n_plus_1() ->
+    Pid = pcm_class('BT3708PcmOk'),
+    ?assertEqual(
+        ok, beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _) -> ok end)
+    ),
+    ?assertEqual(ok, beamtalk_object_class:put_class_method(Pid, make, fun(_) -> ok end)).
+
+test_put_class_method_rejects_n_plus_2() ->
+    Pid = pcm_class('BT3708PcmOld'),
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = arity_mismatch,
+                class = 'BT3708PcmOld',
+                selector = 'at:put:',
+                details = #{expected := 3, actual := 4}
+            }
+        },
+        beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
+    ),
+    ?assertError(
+        #{error := #beamtalk_error{kind = arity_mismatch, selector = make}},
+        beamtalk_object_class:put_class_method(Pid, make, fun(_, _) -> ok end)
+    ),
+    %% The message is built after the class is known, never naming `undefined`.
+    #{error := #beamtalk_error{message = Msg}} =
+        try
+            beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
+        catch
+            error:E -> E
+        end,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"BT3708PcmOld">>)),
+    ?assertEqual(nomatch, binary:match(Msg, <<"undefined">>)).
 
 %%====================================================================
 %% Class Process Crash Detection and Recovery
@@ -2343,18 +2470,18 @@ bt1982_code_change_delegates_test_() ->
     end}.
 
 %% has_class_new_in_chain/3 returns true when the class's own module exports
-%% class_new:/3. Uses a dynamically-compiled module exporting class_new:/3.
+%% class_new:/2. Uses a dynamically-compiled module exporting class_new:/2.
 bt1982_has_class_new_in_chain_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                %% Compile a tiny module that exports class_new:/3.
+                %% Compile a tiny module that exports class_new:/2 (ADR 0130: ClassSelf, Arg).
                 Forms = [
                     {attribute, 1, module, bt1982_new_colon_mod},
-                    {attribute, 2, export, [{'class_new:', 3}]},
-                    {function, 3, 'class_new:', 3, [
-                        {clause, 3, [{var, 3, '_'}, {var, 3, 'CVars'}, {var, 3, '_'}], [], [
-                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {var, 3, 'CVars'}]}
+                    {attribute, 2, export, [{'class_new:', 2}]},
+                    {function, 3, 'class_new:', 2, [
+                        {clause, 3, [{var, 3, '_'}, {var, 3, '_'}], [], [
+                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {atom, 3, none}]}
                         ]}
                     ]}
                 ],
@@ -2374,9 +2501,9 @@ bt1982_has_class_new_in_chain_test_() ->
                 {ok, Pid} = beamtalk_object_class:start_link('BT1982HasClassNew', ClassInfo),
                 %% Calling new/2 with non-empty args triggers the
                 %% has_class_new_in_chain/3 branch and dispatches through the
-                %% compiled class_new:/3.
+                %% compiled class_new:/2.
                 Result = beamtalk_object_class:new(Pid, [anything]),
-                %% The compiled class_new:/3 returns its raw {reply, ...}
+                %% The compiled class_new:/2 returns its raw {reply, ...}
                 %% tuple which handle_class_method_call passes back — we just
                 %% need to confirm the has_class_new_in_chain branch executed
                 %% (not the generic field-init path, which would try to treat

@@ -9,7 +9,7 @@
 
 -define(HOME, '$bt_class_vars_home').
 -define(C, 'ClassVarsTestClass').
--define(KEY, {'$bt_class_vars', 'ClassVarsTestClass'}).
+-define(KEY, {'$bt_class_vars', 'ClassVarsTestClass class'}).
 
 %%% Helpers
 
@@ -18,7 +18,7 @@ self_obj() ->
 
 clean() ->
     erlang:erase(?KEY),
-    erlang:erase({'$bt_class_vars', 'OtherClass'}),
+    erlang:erase({'$bt_class_vars', 'OtherClass class'}),
     erlang:erase(?HOME),
     ok.
 
@@ -110,7 +110,7 @@ assert_absent_rejects_key_test() ->
 
 assert_absent_rejects_home_test() ->
     with_clean(fun() ->
-        erlang:put(?HOME, {'$bt_class_vars', 'OtherClass'}),
+        erlang:put(?HOME, {'$bt_class_vars', 'OtherClass class'}),
         ?assertEqual(
             internal_error, raised_kind(fun() -> beamtalk_class_vars:assert_absent(?KEY) end)
         )
@@ -409,12 +409,43 @@ with_snapshot_write_raises_test() ->
     end).
 
 with_snapshot_no_live_class_test() ->
+    %% Liveness is checked lazily at the first mirror read, not on region entry.
     with_clean(fun() ->
         E = raised_error(fun() ->
-            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> ok end)
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                beamtalk_class_vars:get(self_obj(), x)
+            end)
         end),
         ?assertMatch(#beamtalk_error{kind = class_state_unreachable}, E),
         ?assertEqual(undefined, erlang:get(?KEY))
+    end).
+
+with_snapshot_never_reads_succeeds_without_live_class_test() ->
+    with_clean(fun() ->
+        ?assertEqual(
+            done,
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> done end)
+        ),
+        ?assertEqual(undefined, erlang:get(?KEY))
+    end).
+
+mirror_read_without_snapshot_row_unreachable_test() ->
+    %% A registered class process with no snapshot row (a restart that has not
+    %% yet recorded) is "unreachable", while an empty-map row reads normally.
+    with_clean(fun() ->
+        Pid = start_fake_class(#{}),
+        try
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                ?assertEqual(false, beamtalk_class_vars:has(self_obj(), n)),
+                beamtalk_class_registry:forget_class_state_snapshot(Pid),
+                ?assertEqual(
+                    class_state_unreachable,
+                    raised_kind(fun() -> beamtalk_class_vars:has(self_obj(), n) end)
+                )
+            end)
+        after
+            catch stop_fake_class(Pid)
+        end
     end).
 
 mirror_read_with_dead_class_unreachable_test() ->
@@ -485,7 +516,7 @@ with_snapshot_never_touches_home_test() ->
     with_clean(fun() ->
         Pid = start_fake_class(#{n => 1}),
         try
-            OtherKey = {'$bt_class_vars', 'OtherClass'},
+            OtherKey = {'$bt_class_vars', 'OtherClass class'},
             erlang:put(?HOME, OtherKey),
             erlang:put(OtherKey, #{z => 1}),
             beamtalk_class_vars:with_snapshot(self_obj(), fun() ->

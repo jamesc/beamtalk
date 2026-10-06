@@ -3,16 +3,16 @@
 
 //! Builders that construct-and-verify (or construct-and-render) `ThreadedIr`
 //! fixtures for call sites that aren't themselves full `ThreadedIr`-emitting
-//! generators: [`build_tuple_acc_unpack`], [`construct_and_verify_class_var_bind`],
+//! generators: [`build_tuple_acc_unpack`],
 //! [`verify_body_with_opaque_version_gaps`], [`verify_simple_bind`], and
 //! [`super::ThreadedValue::close`]. Depends on [`super::ir`], [`super::verify`],
 //! and [`super::emit`] — the top of the `threaded_ir` module split.
 
-use super::super::{CoreErlangGenerator, NlrBoundary};
+use super::super::CoreErlangGenerator;
 use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
-    AccParam, BindOp, CloseContext, FrameId, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CloseContext, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use super::verify::{VerifyError, verify};
 use beamtalk_cerl_doc::Document;
@@ -81,13 +81,6 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
     let stmt = ThreadedStmt::Threaded {
         mode: ThreadingMode::TupleAcc(mode_gate_slots),
         frame,
-        // `TupleAcc` unpacks only local threaded vars — never a class var
-        // (per ADR 0111 Addendum 9, Question 4/6: `TupleAcc(>0)` is
-        // unconditionally excluded whenever a body threads `ClassVars`), so
-        // this node can never itself contain a class-var `Bind` needing the
-        // eligibility check. `true` is the neutral default, matching
-        // `verify()`'s own `[true]` seed.
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: node_gate_slots,
@@ -99,174 +92,6 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
         span,
     };
     (stmt, targets)
-}
-
-// ─── Class-var Bind construction (ADR 0110 contract) ─────
-
-/// Constructs the single class-var version `Bind` a production emission site
-/// is about to render, and verifies it against a synthetic ADR 0110
-/// NLR-relay marker — the two producer sites named in ADR 0111 §Phase D:
-/// `expressions.rs::generate_field_assignment`'s class-var branch (a
-/// [`BindOp::Put`] field mutation, `shadow_write` set from the real
-/// `block_depth == 0` gate) and `dispatch_codegen.rs::emit_class_var_result_unwrap`
-/// (a [`BindOp::Direct`] rebind from an inherited self-dispatched call's
-/// returned `class_var_result` tuple — never itself a shadow-write producer,
-/// since self-dispatch runs in the same class `gen_server` process and any
-/// mutation it reflects was already shadow-written by the *callee's own*
-/// `generate_field_assignment` call under the same `ClassSelf`-tagged key;
-/// see ADR 0110 §Runtime change's "no per-nesting-level save/restore is
-/// needed" reasoning).
-///
-/// Unlike the deleted `verify_class_var_bind` (which verified a
-/// hardcoded `0 -> 1` step, disconnected from the version actually in play —
-/// both call sites rendered their real `current_class_var()`/`next_class_var()`
-/// names by hand, and separately passed an always-`0->1` fixture here purely
-/// to run the shadow-write check), the [`ThreadedStmt::Bind`] returned here
-/// carries the REAL `source_version`/`target_version` already read off the
-/// live generator counter and IS what [`render`] renders — there is no
-/// second, independently-reconstructed shape. `1..=source_version` backfills
-/// a dummy `Bind` chain so [`VerifyWalk::check_use`]'s frame-flow rule
-/// doesn't spuriously fail `UnboundVersion` for a mutation past a method's
-/// first (the same technique [`verify_simple_bind`] uses).
-///
-/// The synthetic `NlrCatch { has_class_vars: true }` marker is still
-/// unconditionally included in the *verified* fixture (not in the returned
-/// `Bind`, which callers render alone) — an isolated per-call-site
-/// verification cannot observe whether THIS method's body really contains a
-/// foreign-NLR-relay-capable boundary, so it assumes one, same as the
-/// deleted fixture did (ADR 0111 §Verifier honesty).
-///
-/// `frame` (ADR 0111 Addendum 9, Question 2) is the `Bind`'s (and the
-/// marker's) real `FrameId` — the caller's own `current_branch_frame()` for
-/// a loop/fold-body class-var mutation, or [`FrameId::ROOT`] for a
-/// top-frame one. Unlike the deleted `at_method_top_frame: bool` this
-/// replaces, `frame` no longer doubles as the shadow-write-eligibility
-/// signal — that is `shadow_write_eligible`'s own, independent job
-/// (Addendum 9, Question 1): whether a foreign NLR relayed out of this
-/// class method is still guaranteed to observe this mutation via the ADR
-/// 0110 process-dictionary shadow write. `FrameId` scopes version linearity
-/// (sibling branch arms/loop iterations getting fresh, disjoint identities);
-/// `shadow_write_eligible` scopes shadow-write eligibility
-/// (`self.block_depth == 0` — "is this still the method's own top level, not
-/// nested inside a first-class block-literal closure boundary"). The two
-/// axes coincided at `FrameId::ROOT` only because no non-`ROOT` frame ever
-/// carried a legitimate class-var mutation before loop/fold bodies did.
-///
-/// **This is deliberately NOT `self.current_nlr_token().is_some()`** (whether
-/// *this* method's own body happens to contain a literal `^` inside one of
-/// its own block literals, gating whether `lower_class_method_body`'s
-/// caller prepends a real `NlrCatch` — formerly `wrap_class_method_body_with_nlr_catch`)
-/// — that would silently exempt the *exact* ADR 0110 repro shape from this
-/// check: `CollectionDriver countedRun:over:` mutates a class var and then
-/// invokes a **caller-supplied** block (`aBlock value: x`, inside its own
-/// `[:x | aBlock value: x]` block, which contains no literal `^` of its
-/// own) — `has_block_nlr_or_walk` is `false` for that method, so it gets no
-/// local NLR try/catch at all, and the whole relay is caught one layer
-/// out, unconditionally, by `apply_class_method_fun/6`'s
-/// `throw:Nlr:NlrST when ?IS_NLR(Nlr)` clause. The shadow write in
-/// production code is correspondingly unconditional too — gated only on
-/// `block_depth == 0` (`generate_field_assignment`), never on local
-/// NLR-catch presence. Callers must therefore pass an *independently
-/// re-derived* `shadow_write_eligible` (`self.block_depth == 0`, read fresh
-/// from live generator state — not reused from whatever `shadow_write` value
-/// a future regression might compute wrong), matching production's actual
-/// gate 1:1 (ADR 0111 §Verifier honesty: comparing the generator against
-/// itself is silent when both are consistently wrong).
-///
-/// The `dispatch_codegen.rs` rebind site passes `FrameId::ROOT`/`false`
-/// unconditionally — the frame is now honestly `ROOT` (that call site never
-/// claims a real nested identity), and `shadow_write_eligible: false` is a
-/// deliberate exemption: that `Bind` structurally never carries its own
-/// shadow-write obligation regardless of nesting (see its own call-site
-/// comment), so it is modeled as never eligible for this check.
-pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
-    op: BindOp,
-    shadow_write: bool,
-    frame: FrameId,
-    shadow_write_eligible: bool,
-    source_version: usize,
-    target_version: usize,
-    span: Span,
-) -> (ThreadedStmt, Vec<VerifyError>) {
-    // `shadow_write: true` here is a backfill-scaffolding assumption, not a
-    // claim about the earlier mutation's real shape (this fixture never
-    // inspects it): only the LAST Bind below — the one this call site is
-    // actually about to render — is what `ShadowWriteMissing` is checking.
-    // Backfilling `false` would spuriously flag every earlier synthetic step
-    // at `FrameId::ROOT`, since `has_class_vars_nlr` is unconditionally true
-    // here (the synthetic marker below).
-    let mut body = backfill_version_chain(
-        &VersionPrefix::ClassVars,
-        frame,
-        0,
-        source_version,
-        true,
-        span,
-    );
-    let bind = ThreadedStmt::Bind {
-        target: VersionedVar::new(VersionPrefix::ClassVars, target_version, frame),
-        source: VersionedVar::new(VersionPrefix::ClassVars, source_version, frame),
-        op,
-        shadow_write,
-        span,
-    };
-    body.push(bind.clone());
-    // Fixture-only synthetic marker (never rendered — not in the returned
-    // `Bind`, which callers render alone), so its token name is a literal
-    // placeholder, never a real lowering-minted `NlrToken` temp.
-    let marker = ThreadedStmt::NlrCatch {
-        boundary: NlrBoundary::ClassMethod {
-            has_class_vars: true,
-        },
-        token: TokenId::new("NlrTokenFixtureOnly"),
-        frame,
-        span,
-    };
-    // `verify()` seeds its frame stack with just `[FrameId::ROOT]` (module
-    // docs on `FrameId`) and its shadow-write-eligibility stack with just
-    // `[true]` — `body`'s Binds are only reachable at the top level with no
-    // wrapper when BOTH `frame == FrameId::ROOT` AND `shadow_write_eligible`
-    // (ADR 0111 Addendum 9, Question 2's correction to this branch: an OR of
-    // two independent triggers, not a replacement of one by the other).
-    //
-    // Trigger 1 (unchanged from before Addendum 9): `frame != FrameId::ROOT`
-    // must PUSH `frame` via a `Threaded` node, or `VerifyWalk::check_use`'s
-    // frame-flow rule can never find a backfilled version `>0` at that frame
-    // (a bare top-level `Bind`/`NlrCatch` never pushes anything) — without
-    // real backfill history here this would be a spurious `UnboundVersion`
-    // gap (the `dispatch_codegen.rs` rebind site's frame is honestly
-    // `FrameId::ROOT` too, so it never triggers this one — see its own
-    // call-site comment).
-    //
-    // Trigger 2 (new in Addendum 9): `!shadow_write_eligible` must ALSO wrap,
-    // independently of `frame` — the `dispatch_codegen.rs` rebind site's
-    // `shadow_write_eligible: false` at its now-`FrameId::ROOT` frame would
-    // otherwise fall onto the bare path and be silently exempt from
-    // `ShadowWriteMissing`'s eligibility check for the wrong reason (a bare
-    // top-level `Bind` is unconditionally eligible per `verify()`'s `[true]`
-    // seed) — wrapping still resolves that false exemption, because the
-    // wrapper's own `shadow_write_eligible: false` correctly AND-combines
-    // down to `false` on the stack, matching production's real "never
-    // eligible" semantics for this call site.
-    let needs_wrap = frame != FrameId::ROOT || !shadow_write_eligible;
-    let fixture: Vec<ThreadedStmt> = if needs_wrap {
-        vec![
-            ThreadedStmt::Threaded {
-                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
-                frame,
-                shadow_write_eligible,
-                body,
-                produces: Vec::new(),
-                span,
-            },
-            marker,
-        ]
-    } else {
-        let mut f = body;
-        f.push(marker);
-        f
-    };
-    (bind, verify(&fixture))
 }
 
 // ─── Method-body verification with opaque version gaps ──────────
@@ -285,7 +110,7 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
 /// Without accounting for those gaps, the first real `Bind` after such a
 /// helper would spuriously fail [`VerifyError::UnboundVersion`] (its source
 /// version has no producing `Bind` in the fixture). The fix reuses
-/// [`verify_simple_bind`]/[`construct_and_verify_class_var_bind`]'s
+/// [`verify_simple_bind`]'s
 /// established backfill technique, generalized from "backfill everything
 /// before the one Bind under test" to "backfill exactly the gaps between
 /// this body's real Binds": walk the IR in order, tracking the last
@@ -301,10 +126,8 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
 /// backfill history — the shape
 /// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`'s
 /// previously-hypothetical capability made live), `UnboundVersion` for any
-/// source the chain never reached, and [`VerifyError::ShadowWriteMissing`]
-/// over any class-var `Bind` sharing the body with a real `NlrCatch`.
-/// What it cannot check (ADR 0111 §Verifier honesty, same class as
-/// `ValueRef::Doc`/`exit_arm`): mutations hidden inside the opaque
+/// source the chain never reached. What it cannot check (ADR 0111 §Verifier
+/// honesty, same class as `ValueRef::Doc`/`exit_arm`): mutations hidden inside the opaque
 /// statements themselves — those are exactly the backfilled gaps.
 pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     ir: &[ThreadedStmt],
@@ -330,7 +153,6 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
 ) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     let mut last_state_version = 0usize;
-    let mut last_class_var_version = 0usize;
     for stmt in ir {
         if let ThreadedStmt::Bind { target, source, .. } = stmt {
             backfill_opaque_version_gap(
@@ -341,31 +163,14 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
                 frame,
                 &mut last_state_version,
             );
-            backfill_opaque_version_gap(
-                &mut fixture,
-                &VersionPrefix::ClassVars,
-                target,
-                source,
-                frame,
-                &mut last_class_var_version,
-            );
         }
         fixture.push(stmt.clone());
     }
     fixture
 }
 
-/// Shared backfill step for one `VersionPrefix` inside
-/// [`backfill_opaque_version_gaps`]'s per-`Bind` scan — extracted so
-/// the identical technique isn't hand-duplicated once per prefix (CLAUDE.md's
-/// no-duplicate-implementations rule). The synthetic `Bind`s this inserts
-/// always carry `shadow_write: true` — an earlier `false` here spuriously tripped
-/// [`VerifyError::ShadowWriteMissing`] on a `ClassVars` gap step whenever a
-/// real `NlrCatch` was present — see the `shadow_write: true` assignment
-/// below for the full reasoning, the same [`construct_and_verify_class_var_bind`]
-/// already established for its own backfill loop. Moot for `State`
-/// (`ShadowWriteMissing` never inspects `State`-prefix `Bind`s); load-bearing
-/// for `ClassVars`.
+/// Backfill step for one `VersionPrefix` inside
+/// [`backfill_opaque_version_gaps`]'s per-`Bind` scan.
 fn backfill_opaque_version_gap(
     fixture: &mut Vec<ThreadedStmt>,
     prefix: &VersionPrefix,
@@ -375,30 +180,11 @@ fn backfill_opaque_version_gap(
     last_version: &mut usize,
 ) {
     if source.prefix == *prefix && source.frame == frame && source.version > *last_version {
-        // `shadow_write: true`, not `false` — same reasoning
-        // `construct_and_verify_class_var_bind`'s own backfill chain (above)
-        // already documents for its synthetic steps: this stands in for a
-        // REAL mutation this verifier cannot see (it lives inside an opaque
-        // `Statement`, e.g. `emit_class_var_result_unwrap`'s own internal
-        // `next_class_var()` bump for a class-method self-send). For `State`
-        // this is moot (`ShadowWriteMissing` never inspects `State`-prefix
-        // `Bind`s), but for `ClassVars` a `false` here would claim "this
-        // top-frame mutation is definitely missing its ADR 0110 shadow
-        // write" about a step whose real emission site this verifier never
-        // inspected — exactly the false-positive `ShadowWriteMissing` a
-        // class method with a class-var-mutating self-send followed by its
-        // own real last-statement class-var `Bind` would otherwise spuriously
-        // trip (guarded against by
-        // `verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing`
-        // below). ADR 0111 §Verifier honesty: a check that cannot see the
-        // real site must not assert a verdict about it — `true` is silence,
-        // not a claim of compliance either way.
         fixture.extend(backfill_version_chain(
             prefix,
             frame,
             *last_version,
             source.version,
-            true,
             Span::default(),
         ));
         *last_version = source.version;
@@ -410,17 +196,15 @@ fn backfill_opaque_version_gap(
 
 /// Builds a synthetic `Direct('_')` `Bind` chain backfilling version history
 /// `(from+1)..=to` at `frame` for `prefix` — the technique
-/// [`construct_and_verify_class_var_bind`], [`backfill_opaque_version_gap`],
-/// and [`verify_simple_bind`] all need to give [`VerifyWalk::check_use`]'s
-/// frame-flow rule a producing `Bind` for version history a fixture can't
-/// otherwise see (extracted from three hand-duplicated copies of
-/// this loop, CLAUDE.md's no-duplicate-implementations rule).
+/// [`backfill_opaque_version_gap`] and [`verify_simple_bind`] both need to
+/// give [`VerifyWalk::check_use`]'s frame-flow rule a producing `Bind` for
+/// version history a fixture can't otherwise see (one shared loop, per
+/// CLAUDE.md's no-duplicate-implementations rule).
 fn backfill_version_chain(
     prefix: &VersionPrefix,
     frame: FrameId,
     from: usize,
     to: usize,
-    shadow_write: bool,
     span: Span,
 ) -> Vec<ThreadedStmt> {
     let mut chain = Vec::with_capacity(to.saturating_sub(from));
@@ -429,7 +213,6 @@ fn backfill_version_chain(
             target: VersionedVar::new(prefix.clone(), v, frame),
             source: VersionedVar::new(prefix.clone(), v - 1, frame),
             op: BindOp::Direct(ValueRef::Literal("'_'")),
-            shadow_write,
             span,
         });
     }
@@ -442,19 +225,8 @@ fn backfill_version_chain(
 /// or `State{N}` version `Bind`, given the real source/target version
 /// numbers already read off the live generator counter at the call site
 /// (`generate_field_assignment`'s value-type and instance-actor
-/// branches, `expressions.rs` around lines 634/664 — the two sibling
-/// branches of the class-var branch [`construct_and_verify_class_var_bind`]
-/// already covers). Reused for both prefixes instead of
-/// copy-pasting [`construct_and_verify_class_var_bind`]'s body three times
-/// (CLAUDE.md's no-duplicate-implementations rule).
-///
-/// Like [`construct_and_verify_class_var_bind`] (both are
-/// handed the real version numbers already read off the live generator
-/// counter and share its `1..=source_version` backfill technique), but
-/// without that function's class-var-specific `ShadowWriteMissing`
-/// machinery (the synthetic `NlrCatch` marker, the `frame`/
-/// `shadow_write_eligible` pair) — `Self{N}`/`State{N}` mutations never
-/// carry that ADR 0110 obligation. This helper is handed the *actual* version numbers,
+/// branches, `expressions.rs`). Reused for both prefixes. This helper is
+/// handed the *actual* version numbers,
 /// which may already be arbitrarily large after earlier mutations in the
 /// same method. [`VerifyWalk::check_use`]'s
 /// frame-flow rule requires every version `>0` referenced as a `Bind`'s
@@ -496,12 +268,11 @@ pub(in crate::core_erlang) fn verify_simple_bind(
     span: Span,
 ) -> Vec<VerifyError> {
     let frame = FrameId::ROOT;
-    let mut ir = backfill_version_chain(&prefix, frame, 0, source_version, false, span);
+    let mut ir = backfill_version_chain(&prefix, frame, 0, source_version, span);
     ir.push(ThreadedStmt::Bind {
         target: VersionedVar::new(prefix.clone(), target_version, frame),
         source: VersionedVar::new(prefix, source_version, frame),
         op: BindOp::Direct(ValueRef::Literal("'_'")),
-        shadow_write: false,
         span,
     });
     verify(&ir)

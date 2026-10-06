@@ -89,3 +89,26 @@ fn probe_on_reports_clear_field_as_write() {
 fn probe_on_output_compiles_through_erlc() {
     super::assert_compiles_through_erlc("probe_foo", &generate(true));
 }
+
+#[test]
+fn probe_on_reports_has_field_as_read() {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(
+        "Object subclass: ProbeBar
+  classState: n = 0
+
+  class check => self hasField: #n
+",
+    );
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("probe_bar").with_class_var_probe(true),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains(&format!(
+            "{PROBE}ClassSelf, 'ProbeBar', 'check', 'read', 'n', 'false')"
+        )),
+        "hasField: is a class-variable read. Got:\n{code}"
+    );
+}

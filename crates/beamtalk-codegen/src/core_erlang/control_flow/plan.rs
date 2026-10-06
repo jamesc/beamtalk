@@ -9,16 +9,12 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::{
-    FrameId, RenderCtx, StateAccFallbackReason, VersionPrefix, VersionedVar, render,
-};
+use super::super::threaded_ir::{FrameId, StateAccFallbackReason, VersionPrefix, VersionedVar};
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
-use super::family_slots::{self, FamilyVersionStep};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
-use beamtalk_core::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -144,72 +140,28 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub mutated_fields: Vec<String>,
     /// ADR 0122 Decision 2/3: the storage families
-    /// ([`VersionPrefix::ClassVars`]/[`VersionPrefix::SelfVt`]) this
-    /// loop/fold body threads through its own extra, explicit trailing
-    /// slot — never folded into `StateAcc`'s own map. [`Self::threads_class_vars`]/
-    /// [`Self::threads_value_self`] are thin accessor methods over this ONE
-    /// list rather than two independently-computed flags that could drift
-    /// apart (see [`Self::derived_threaded_families`] for how the OLD
-    /// per-shape formulas below feed it — this field changes no site's
-    /// emission, only the storage shape).
+    /// ([`VersionPrefix::SelfVt`]) this loop body threads through its own
+    /// extra, explicit trailing slot — never folded into `StateAcc`'s own
+    /// map. [`Self::threads_value_self`] is a thin accessor method over this
+    /// ONE list.
     ///
-    /// ADR 0111 Addendum 9, Questions 3/4/6: two mutually exclusive shapes,
-    /// distinguished by `allow_direct_params` at construction time (never
-    /// both populated for the same plan):
-    ///
-    /// * **Letrec** (`new_for_letrec`, `allow_direct_params: true`):
-    ///   contains `ClassVars` when the body has a direct class-var field
-    ///   write or a same-class self-send
-    ///   (`generator.loop_body_threads_class_vars`), threaded through the
-    ///   loop's own recursive tail call as an extra, explicit trailing fun
-    ///   parameter (Question 3); contains `SelfVt` when the body threads a
-    ///   value-type `Self` mutation (`self.field := ...` in
-    ///   [`CodeGenContext::ValueType`], outside a class method,
-    ///   `generator.loop_body_threads_value_self`) through the same
-    ///   mechanism — one extra trailing `letrec` fun parameter plus a
-    ///   matching trailing slot on the loop's `{'nil', StateAcc, …}` result
-    ///   tuple (`Self` is the value-type instance map itself; folding the
-    ///   loop's `__local__` keys into it would pollute the returned value
-    ///   object). The two are mutually exclusive (see
-    ///   [`CoreErlangGenerator::loop_body_threads_value_self`]'s doc comment),
-    ///   so at most one entry. Per Question 4 Part A, any body shape that
-    ///   populates this also always has `use_direct_params`/`use_tuple_acc`/
-    ///   `use_hybrid_params` all `false`, so only the `StateAcc` base-path
-    ///   loop generators (`while_loops.rs`, `counted_loops.rs`) ever consult
-    ///   it in this shape.
-    /// * **`Foldl*`** (`new`/`new_for_foldl_list_op`, `allow_direct_params:
-    ///   false`): can only ever contain `ClassVars` (never `SelfVt` — a
-    ///   fold's accumulator has no matching slot), present when this is a
-    ///   class-method loop/fold body (`generator.in_class_method()`,
-    ///   `context != Actor` — see this field's own construction site for why
-    ///   the `Actor`-context exclusion matters) that contains a self-send
-    ///   (`body_analysis.has_self_sends`) — the only shape Question 4 Part A
-    ///   found reachable for `ClassVars` mutation via a class-method
-    ///   self-send, since `has_self_sends` already unconditionally forces
-    ///   `StateAcc`/plain-map-fold mode whenever it's true. When present, the
-    ///   fold's own accumulator must carry an extra `ClassVars` slot (a
-    ///   leading tuple position, Question 6) so a class-var mutation made by
-    ///   the self-send survives the fold instead of being silently
-    ///   discarded.
-    ///
-    /// A bare class-var field write (not a self-send) inside a threaded
-    /// `Foldl*` body is unaffected by the `Foldl*` shape above —
-    /// `reject_class_var_field_assignment` already rejects that at compile
-    /// time, unchanged by this field.
+    /// Only ever populated for a **Letrec** plan (`new_for_letrec`,
+    /// `allow_direct_params: true`): it contains `SelfVt` when the body
+    /// threads a value-type `Self` mutation (`self.field := ...` in
+    /// [`CodeGenContext::ValueType`], outside a class method,
+    /// `generator.loop_body_threads_value_self`) through the loop's own
+    /// recursive tail call — one extra trailing `letrec` fun parameter plus a
+    /// matching trailing slot on the loop's `{'nil', StateAcc, …}` result
+    /// tuple (`Self` is the value-type instance map itself; folding the
+    /// loop's `__local__` keys into it would pollute the returned value
+    /// object). Any body shape that populates this also always has
+    /// `use_direct_params`/`use_tuple_acc`/`use_hybrid_params` all `false`,
+    /// so only the `StateAcc` base-path loop generators (`while_loops.rs`,
+    /// `counted_loops.rs`) ever consult it. A `Foldl*` plan never populates
+    /// it: a fold's accumulator has no matching `Self` slot. Class methods
+    /// never populate it either: class variables live in the class process
+    /// (ADR 0130), so there is nothing to thread.
     threaded_families: ThreadedFamilies,
-    /// ADR 0122 Decision 3 (BT-3516): the `ClassVars` version NUMBER
-    /// (`generator.class_var_version()`) in effect immediately before this
-    /// fold begins — mirrors `initial_state_var`'s own
-    /// capture-at-construction-time discipline, but stores the raw version
-    /// rather than a pre-rendered name so [`Self::class_var_fun_param`]/
-    /// [`Self::foldl_call_doc`] can build [`VersionedVar`]s for
-    /// [`family_slots::append_family_slots`]/[`family_slots::extract_family_slots`]
-    /// instead of re-splicing a captured string (the former `initial_class_var:
-    /// String` field this replaces). Only meaningful for the `Foldl*` shape
-    /// of `threads_class_vars` (`allow_direct_params: false`) — the Letrec
-    /// shape threads `ClassVars` via its own recursive-call fun parameter
-    /// instead (`LoopFamilyParam`), never consulting this field.
-    pub initial_class_var_version: usize,
 }
 
 /// ADR 0122 Decision 3 (BT-3515): one storage family's pre-loop identity for
@@ -220,8 +172,8 @@ pub(in crate::core_erlang) struct ThreadingPlan {
 /// [`ThreadingPlan::threaded_families`]'s canonical order.
 #[derive(Debug, Clone)]
 pub(in crate::core_erlang) struct LoopFamilyParam {
-    /// Which storage family this is (`ClassVars` or `SelfVt` for a Letrec
-    /// plan — see [`ThreadingPlan::threaded_families`]'s doc comment).
+    /// Which storage family this is (`SelfVt` for a Letrec plan — see
+    /// [`ThreadingPlan::threaded_families`]'s doc comment).
     pub(in crate::core_erlang) prefix: VersionPrefix,
     /// The letrec fun's own extra formal parameter name for this family —
     /// both the fun signature's identifier and the exit arm's `Gensym`'d
@@ -236,8 +188,8 @@ pub(in crate::core_erlang) struct LoopFamilyParam {
 }
 
 impl LoopFamilyParam {
-    /// This family's REAL pre-loop identity (`generator.current_class_var()`/
-    /// `current_self_var()`'s version at loop entry) — the `from` side of
+    /// This family's REAL pre-loop identity (`generator.current_self_var()`'s
+    /// version at loop entry) — the `from` side of
     /// the `rebase_loop_seed` call that re-anchors the loop body's own first
     /// `Bind` for this family onto [`Self::gensym_seed`].
     pub(in crate::core_erlang) fn real_seed(&self, frame: FrameId) -> VersionedVar {
@@ -289,7 +241,20 @@ struct BodyEffects {
 /// mutation-threading path too — see `generate_while_true`/
 /// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
 /// own gate, per CLAUDE.md's no-duplicate-implementations rule.
-pub(in crate::core_erlang) fn condition_has_state_effects(condition: &Expression) -> bool {
+///
+/// A class method threads no family at all (ADR 0130 §3: a class-variable
+/// write is an in-place `put` and a self-send rebinds nothing), so nothing
+/// in a class-method condition has a state effect to thread. Answering
+/// `true` there (BT-3694) made the loop take the `StateAcc` shape, whose
+/// initial state variable does not exist in a class method (an unbound
+/// `State`).
+pub(in crate::core_erlang) fn condition_has_state_effects(
+    generator: &CoreErlangGenerator,
+    condition: &Expression,
+) -> bool {
+    if generator.in_class_method() {
+        return false;
+    }
     if let Expression::Block(cond_block) = condition {
         block_analysis::analyze_block(cond_block).has_state_effects()
     } else {
@@ -305,7 +270,8 @@ impl BodyEffects {
         condition: Option<&Expression>,
         threaded_locals: &[String],
     ) -> Self {
-        let cond_has_state_effects = condition.is_some_and(condition_has_state_effects);
+        let cond_has_state_effects =
+            condition.is_some_and(|c| condition_has_state_effects(generator, c));
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
@@ -563,82 +529,21 @@ impl ThreadingPlan {
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 
-        // ADR 0111 Addendum 9, Question 3/4: whether this Letrec
-        // loop body threads a `ClassVars` mutation through its own recursive
-        // tail call. Only ever true for `new_for_letrec`-constructed plans
-        // (`allow_direct_params`).
-        //
-        // ADR 0111 Addendum 9, Questions 3/4/6: a class-method
-        // `Foldl*` body containing a self-send needs to thread `ClassVars`
-        // through the fold's own accumulator — for BOTH an `Object`/
-        // `ValueType` class method AND an `Actor` subclass's own class
-        // method: `context` alone never distinguishes them here.
-        // `is_class_method_self_send`/`in_class_method()` (used by
-        // `body_analysis.has_self_sends`'s own detection and by every
-        // downstream `class_bump`/`emit_class_var_result_unwrap` call this
-        // field's threading feeds) are already context-independent — the
-        // ONLY reason this used to also require `context != Actor` was
-        // `is_actor_self_send` (`expr_shape.rs`) unconditionally winning for
-        // any `self <msg>` send whenever `context == Actor`, regardless of
-        // `in_class_method()`, misrouting an Actor class-method self-send
-        // through the actor INSTANCE self-dispatch path instead — BT-3581
-        // (already landed) fixed `is_actor_self_send` to exclude
-        // `in_class_method()` too, so that premise no longer holds and this
-        // plan's own `context != Actor` exclusion became stale, silently
-        // dropping the class-var mutation for an Actor class method's own
-        // `do:`/`collect:`/etc. body instead of threading it (BT-3584).
-        // `!allow_direct_params` restricts this to Foldl-shaped constructors
-        // (`new_for_foldl_list_op` and the plain `new` compat-shim variant) —
-        // `new_for_letrec` passes `allow_direct_params: true` unconditionally,
-        // so a `whileTrue:`/`timesRepeat:`/`to:do:` (`BodyKind::Letrec`) plan
-        // never sets this field, regardless of self-sends. This is a hard
-        // safety boundary, not merely an optimization: the
-        // `lower_foldl_body` wrap (below, guarded on this
-        // same field) is Foldl-only by design (Question 6's `{ClassVars,
-        // StateAcc}` accumulator shape has no Letrec analogue — Letrec's own
-        // `ClassVars` threading is a parallel, independent migration,
-        // via an extra `letrec` fun parameter, never this accumulator wrap).
-        // A direct top-level self-send statement inside a real Letrec body is
-        // already unconditionally rejected before reaching this wrap
-        // (`ClassMethodSelfSendInThreadedLoopBody`, this file's `else if
-        // matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send`
-        // arm) — but a self-send nested inside a DEEPER block within a
-        // Letrec body (e.g. `whileTrue: [ i := i + 1. aList do: [:x | self
-        // bump] ]`) would not trip that direct-statement check, since
-        // `body_analysis.has_self_sends` recurses into nested blocks while
-        // `is_class_method_self_send` only inspects the top-level statement
-        // expression — this gate is what keeps that shape from reaching the
-        // Foldl-only wrap on the OUTER Letrec plan (the nested `do:`'s own,
-        // separately-constructed Foldl plan still threads correctly on its
-        // own terms).
-        let threads_class_vars_answer = if allow_direct_params {
-            // Letrec shape: `new_for_letrec`-constructed plans only.
-            generator.loop_body_threads_class_vars(body)
-        } else {
-            // Foldl* shape: `new`/`new_for_foldl_list_op`-constructed
-            // plans only. BT-3584: no `context != Actor` exclusion — see
-            // the comment above.
-            generator.in_class_method() && body_analysis.has_self_sends
-        };
-        let initial_class_var_version = generator.class_var_version();
-
-        // the `SelfVt` mirror of `threads_class_vars`' Letrec
-        // branch above — Letrec-shaped plans only (`allow_direct_params`),
-        // for the same reason: a `Foldl*` accumulator has no trailing `Self`
-        // slot to carry the mutation out through.
+        // Whether this Letrec loop body threads a value-type `Self` mutation
+        // through its own recursive tail call. Letrec-shaped plans only
+        // (`allow_direct_params`): a `Foldl*` accumulator has no trailing
+        // `Self` slot to carry the mutation out through.
         let threads_value_self_answer =
             allow_direct_params && generator.loop_body_threads_value_self(body);
 
         // ADR 0122 Decision 2/3: see `Self::derived_threaded_families`.
-        let threaded_families =
-            Self::derived_threaded_families(threads_class_vars_answer, threads_value_self_answer);
+        let threaded_families = Self::derived_threaded_families(threads_value_self_answer);
 
         #[cfg(test)]
         Self::record_family_detector_diff(
             generator,
             body,
             allow_direct_params,
-            threads_class_vars_answer,
             threads_value_self_answer,
         );
 
@@ -655,7 +560,6 @@ impl ThreadingPlan {
             fallback_reason,
             mutated_fields,
             threaded_families,
-            initial_class_var_version,
         }
     }
 
@@ -672,13 +576,6 @@ impl ThreadingPlan {
         &self.threaded_families
     }
 
-    /// Whether this plan threads a `ClassVars` mutation through its own
-    /// extra trailing slot — see [`Self::threaded_families`]'s (the field's)
-    /// doc comment for the Letrec/`Foldl*` shape split.
-    pub(in crate::core_erlang) fn threads_class_vars(&self) -> bool {
-        self.threaded_families.contains(&VersionPrefix::ClassVars)
-    }
-
     /// Whether this (always Letrec-shaped) plan threads a value-type `Self`
     /// mutation through its own extra trailing slot — see
     /// [`Self::threaded_families`]'s (the field's) doc comment.
@@ -689,23 +586,19 @@ impl ThreadingPlan {
     /// ADR 0122 Decision 3 (BT-3515): captures each family in
     /// [`Self::threaded_families`]'s pre-loop identity, BEFORE the loop
     /// body's own lowering runs — one entry per family, in canonical order,
-    /// generic over however many are present (Letrec: at most one of
-    /// `ClassVars`/`SelfVt`, mutually exclusive — see
-    /// [`CoreErlangGenerator::loop_body_threads_value_self`]'s doc comment).
+    /// generic over however many are present (Letrec: at most `SelfVt`).
     /// Replaces `while_loops.rs`'s/`counted_loops.rs`'s former
-    /// `plan.threads_class_vars.then(|| self.current_class_var())` /
-    /// `plan.threads_value_self.then(|| self.current_self_var())` pair of
-    /// near-identical `Option<String>` captures with one call, so a future
-    /// third family needs no new call-site plumbing.
+    /// `plan.threads_value_self.then(|| self.current_self_var())`
+    /// `Option<String>` capture with one call, so a future further family
+    /// needs no new call-site plumbing.
     ///
-    /// `generator.current_class_var()`/`current_self_var()` name the
-    /// method's own LIVE identity for that family at loop entry — both are
-    /// inherited (never reset) across `with_branch_context`, so this is
-    /// stable to call at whatever point in the loop's own setup the caller
-    /// already captured it at before this method existed.
-    /// `generator.class_var_version()`/`self_version()` name the identity
-    /// the loop body's own first `Bind` for that family sources from —
-    /// needed to rebase it onto the `produces` seed (`CoreErlangGenerator::rebase_loop_seed`'s
+    /// `generator.current_self_var()` names the method's own LIVE identity
+    /// for that family at loop entry — inherited (never reset) across
+    /// `with_branch_context`, so this is stable to call at whatever point in
+    /// the loop's own setup the caller already captured it at before this
+    /// method existed. `generator.self_version()` names the identity the loop
+    /// body's own first `Bind` for that family sources from — needed to
+    /// rebase it onto the `produces` seed (`CoreErlangGenerator::rebase_loop_seed`'s
     /// own doc comment has the full "why").
     pub(in crate::core_erlang) fn capture_loop_family_params(
         &self,
@@ -715,11 +608,6 @@ impl ThreadingPlan {
             .as_slice()
             .iter()
             .map(|prefix| match prefix {
-                VersionPrefix::ClassVars => LoopFamilyParam {
-                    prefix: prefix.clone(),
-                    param_name: generator.current_class_var(),
-                    seed_version: generator.class_var_version(),
-                },
                 VersionPrefix::SelfVt => LoopFamilyParam {
                     prefix: prefix.clone(),
                     param_name: generator.current_self_var(),
@@ -727,28 +615,16 @@ impl ThreadingPlan {
                 },
                 other => unreachable!(
                     "a Letrec ThreadingPlan's threaded_families only ever contains \
-                     ClassVars/SelfVt, got {other:?}"
+                     SelfVt, got {other:?}"
                 ),
             })
             .collect()
     }
 
-    /// ADR 0122 Decision 2/3: `threads_class_vars`/`threads_value_self` as
-    /// membership in ONE `ThreadedFamilies` list rather than two
-    /// independently-computed flags that could drift apart — the OLD
-    /// per-shape formulas in [`Self::new_impl`] are unchanged (this issue
-    /// changes no site's emission), only their STORAGE shape does. A later
-    /// issue in ADR 0122's epic (BT-3508) replaces these two derived bools
-    /// with `ThreadedFamilies` itself; this is the storage half of that
-    /// migration landing first.
-    fn derived_threaded_families(
-        threads_class_vars: bool,
-        threads_value_self: bool,
-    ) -> ThreadedFamilies {
-        let mut raw_matches = Vec::with_capacity(2);
-        if threads_class_vars {
-            raw_matches.push(VersionPrefix::ClassVars);
-        }
+    /// ADR 0122 Decision 2/3: `threads_value_self` as membership in ONE
+    /// `ThreadedFamilies` list — the storage shape every consumer reads.
+    fn derived_threaded_families(threads_value_self: bool) -> ThreadedFamilies {
+        let mut raw_matches = Vec::with_capacity(1);
         if threads_value_self {
             raw_matches.push(VersionPrefix::SelfVt);
         }
@@ -758,7 +634,7 @@ impl ThreadingPlan {
     /// BT-3510 differential test only (see
     /// `analysis::FamilyDetectorDiffRecord`'s doc comment) — records the
     /// NEW recursive detector's answer for `body` alongside the OLD
-    /// (unchanged) `threads_class_vars`/`threads_value_self` answers, so
+    /// (unchanged) `threads_value_self` answer, so
     /// `family_detector_differential` can compare them over a real compile
     /// of the whole corpus. No effect on production builds — `#[cfg(test)]`
     /// at every call site, never invoked outside a test build.
@@ -767,7 +643,6 @@ impl ThreadingPlan {
         generator: &CoreErlangGenerator,
         body: &beamtalk_core::ast::Block,
         allow_direct_params: bool,
-        old_threads_class_vars: bool,
         old_threads_value_self: bool,
     ) {
         let eligible = generator.eligible_families();
@@ -781,7 +656,6 @@ impl ThreadingPlan {
                         "foldl"
                     },
                     span: body.span,
-                    old_threads_class_vars,
                     old_threads_value_self,
                     new_families,
                 });
@@ -850,11 +724,10 @@ impl ThreadingPlan {
     /// subclass's class-method loop body mutating only a class var could
     /// latently select Hybrid mode (its own `CodeGenContext::Actor` check
     /// alone doesn't distinguish "instance method on an Actor class" from
-    /// "class method on an Actor class") — never manifesting as a visible bug
-    /// only because `reject_class_var_field_assignment` fired downstream
-    /// regardless of the selected mode; now that class-var writes thread
-    /// through `StateAcc` mode instead of being rejected, mode selection must
-    /// route them there correctly rather than latently into Hybrid.
+    /// "class method on an Actor class"). A class-variable write inside a
+    /// class method is a plain in-place `put` into the class process
+    /// (ADR 0130), so mode selection must never route such a body into
+    /// Hybrid.
     ///
     /// ADR 0124 §4e/B3 (`control_flow/loop_mode.rs` hoisting note): also
     /// excluded when any mutated field is a `late` slot. Hybrid mode
@@ -998,7 +871,7 @@ impl ThreadingPlan {
     /// of the actor State (which does not exist in value-type context).
     ///
     /// For class methods, also starts from a fresh `maps:new()`: a class
-    /// method's signature is `(ClassSelf, ClassVars, Args...)` — there is no `State`
+    /// method's signature is `(ClassSelf, Args...)` — there is no `State`
     /// parameter to pack from, even when `self.context` is `Actor` (an actor class's
     /// class methods still run with `context == Actor`, since the enclosing class is
     /// an actor even though the *method* itself has no per-instance state).
@@ -1093,207 +966,27 @@ impl ThreadingPlan {
         docs
     }
 
-    /// ADR 0122 Decision 3 (BT-3516): returns the fold fun's own
-    /// second (accumulator) parameter name to print at the `fun (Item, <here>) ->`
-    /// position, plus a prelude `Document` binding `real_param_name` (and,
-    /// when threading, each threaded family's loop-entry seed name) from it.
-    ///
-    /// When `threads_class_vars` is `false`, returns `(real_param_name,
-    /// Document::Nil)` unchanged — the caller's existing `fun (Item,
-    /// <real_param_name>) -> ...` continues to bind the accumulator directly,
-    /// byte-identical to before this field existed.
-    ///
-    /// When `true`, the fold's own accumulator is wrapped one level deeper as
-    /// `{<original accumulator>, ClassVars}` — **trailing**, per ADR 0122
-    /// Decision 2 ("Foldl's leading slot is normalized to trailing as part of
-    /// its migration") — the only reachable shape per Question 4 Part A. This
-    /// method mints a fresh raw parameter name to receive that 2-tuple and
-    /// returns a prelude that unwraps it: `let <real_param_name> = element(1,
-    /// Raw) in let <seed name> = element(2, Raw) in`. Every existing line of
-    /// code downstream of the fun header that references `real_param_name`
-    /// (however it further destructures that value — a bare `StateAcc`, or a
-    /// `{AccList, StateAcc}` pair for `collect:`/`inject:into:`-shaped
-    /// bodies) needs no change: after this prelude, `real_param_name` is
-    /// bound to exactly the same value it always was.
-    ///
-    /// This is a re-materialization of an ALREADY-existing identity (the
-    /// version captured in [`Self::initial_class_var_version`] at plan
-    /// construction, before this lambda even exists), never a fresh mint —
-    /// unlike [`family_slots::extract_family_slots`]'s "mint the target
-    /// first" contract, so it stays a plain generic loop over
-    /// [`Self::threaded_families`] rather than a call into that helper
-    /// (mirroring `value_type_codegen.rs`'s own `extract_vt_loop_family_slot`,
-    /// which dispatches to its own function for the identical reason — see
-    /// `family_slots.rs`'s module doc comment). The one genuine
-    /// mint-and-extract half of this migration is [`Self::foldl_call_doc`]'s
-    /// post-fold unwrap, below.
-    pub fn class_var_fun_param(
-        &self,
-        generator: &mut CoreErlangGenerator,
-        real_param_name: &str,
-    ) -> (String, Document<'static>) {
-        if self.threaded_families.as_slice().is_empty() {
-            return (real_param_name.to_string(), Document::Nil);
-        }
-        let raw = generator.fresh_temp_var("AccCV");
-        let base_arity = 1;
-        let mut docs = vec![docvec![
-            "let ",
-            leaf::var(real_param_name.to_string()),
-            " = call 'erlang':'element'(",
-            leaf::int_lit(i64::try_from(base_arity).unwrap_or(1)),
-            ", ",
-            leaf::var(raw.clone()),
-            ") in ",
-        ]];
-        for (i, prefix) in self.threaded_families.as_slice().iter().enumerate() {
-            let seed_name = match prefix {
-                VersionPrefix::ClassVars => VersionedVar::new(
-                    VersionPrefix::ClassVars,
-                    self.initial_class_var_version,
-                    FrameId::ROOT,
-                )
-                .render_name(),
-                other => unreachable!(
-                    "a Foldl ThreadingPlan's threaded_families only ever contains \
-                     ClassVars (never SelfVt — a fold accumulator has no matching \
-                     slot), got {other:?}"
-                ),
-            };
-            let slot = base_arity + i + 1;
-            docs.push(docvec![
-                "let ",
-                leaf::var(seed_name),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(slot).unwrap_or(i64::MAX)),
-                ", ",
-                leaf::var(raw.clone()),
-                ") in ",
-            ]);
-        }
-        (raw, Document::Vec(docs))
-    }
-
-    /// ADR 0122 Decision 3 (BT-3516): builds
-    /// `" in let <fold_result> = call 'lists':'foldl'(<lambda>, <init_acc>,
-    /// <list>) in "` — transparently wrapping `init_acc` with a **trailing**
-    /// `ClassVars` slot (ADR 0122 Decision 2: "Foldl's leading slot is
-    /// normalized to trailing"), and unwrapping the fold's own result back
-    /// out immediately after the call, whenever `threads_class_vars`. Every
-    /// call site's existing post-fold code keeps referencing `fold_result` by
-    /// the same name, bound to exactly the same (unwrapped) shape it always
-    /// was — only the freshly-minted post-fold `ClassVars` version name
-    /// differs, silently making the mutated value visible to subsequent
-    /// statements in the calling method via the generator's own class-var
-    /// version counter (`next_class_var`).
-    ///
-    /// When `threads_class_vars` is `false`, this is exactly the `" in let
-    /// <fold_result> = call 'lists':'foldl'(...) in "` text every call site
-    /// built by hand before this method existed — byte-identical.
-    ///
-    /// The two trailing-slot operations here are the genuine append/extract
-    /// pair [`family_slots`] exists for: the initial accumulator wrap is
-    /// `family_slots::append_family_slots`'s own "current, already-live
-    /// version" shape; the post-fold unwrap mints each family's fresh
-    /// successor version FIRST (`next_class_var`, mirroring
-    /// `rebind_vt_conditional_mutations`'s identical mint-then-extract
-    /// order), verifies the resulting version step via
-    /// `check_simple_field_bind_invariant` — the BT-3513 lesson this site
-    /// also needs, since `family_slots::extract_family_slots` never verifies
-    /// its own output — then builds the extraction `Bind`s through
-    /// [`family_slots::extract_family_slots`] and renders them via
-    /// [`render`].
+    /// Builds `" in let <fold_result> = call 'lists':'foldl'(<lambda>,
+    /// <init_acc>, <list>) in "` — the fold call every `Foldl*` call site
+    /// emits, built in one place. Class methods thread nothing through a
+    /// fold accumulator (ADR 0130 §3), so `init_acc` is always the caller's
+    /// own accumulator.
     pub fn foldl_call_doc(
-        &self,
-        generator: &mut CoreErlangGenerator,
         lambda_var: &str,
         init_acc: Document<'static>,
         safe_list_var: &str,
         fold_result: &str,
-        span: Span,
     ) -> Document<'static> {
-        if self.threaded_families.as_slice().is_empty() {
-            return docvec![
-                " in let ",
-                leaf::var(fold_result.to_string()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var.to_string()),
-                ", ",
-                init_acc,
-                ", ",
-                leaf::var(safe_list_var.to_string()),
-                ") in ",
-            ];
-        }
-        let raw = generator.fresh_temp_var("RawFoldCV");
-        let current_version = self.initial_class_var_version;
-        let init_tuple = {
-            let ctx = RenderCtx::new(generator);
-            family_slots::append_family_slots(
-                docvec!["{", init_acc],
-                &self.threaded_families,
-                |prefix| VersionedVar::new(prefix.clone(), current_version, FrameId::ROOT),
-                &ctx,
-            )
-        };
-        // fast-forward past whatever peak the fold body's own
-        // closure reached internally (already restored by now) before
-        // minting — otherwise this mint can collide with an
-        // already-used-inside-the-closure name (Core Erlang requires
-        // globally unique variable names across nested `fun` scopes within
-        // one compiled function) — see `LoopMode::foldl_peak_versions`'s
-        // doc comment.
-        generator.catch_up_class_var_version_to_foldl_peak(&self.threaded_families);
-        generator.next_class_var();
-        let target_version = generator.class_var_version();
-        // BT-3513's lesson (see CLAUDE.md's state-threading rule):
-        // `extract_family_slots` mints no version itself and verifies
-        // nothing — the caller checks each minted step. Safe to reuse the
-        // generic per-mutation invariant for `ClassVars` here too:
-        // `extraction_bind_op` always returns `BindOp::Direct`, so
-        // `ShadowWriteMissing` (the one check `verify_simple_bind`'s
-        // hardcoded `shadow_write: false` wouldn't model) never fires.
-        generator.check_simple_field_bind_invariant(
-            VersionPrefix::ClassVars,
-            current_version,
-            target_version,
-            "foldl accumulator's family-slot extraction",
-            span,
-        );
-        let extraction = family_slots::extract_family_slots(
-            &raw,
-            1,
-            &self.threaded_families,
-            |prefix| {
-                FamilyVersionStep::new(
-                    VersionedVar::new(prefix.clone(), current_version, FrameId::ROOT),
-                    VersionedVar::new(prefix.clone(), target_version, FrameId::ROOT),
-                )
-            },
-            span,
-        );
-        let mut ctx = RenderCtx::new(generator);
-        let extraction_doc = docvec![
-            render(&extraction, &mut ctx),
-            // BT-3675: the rebind is a mint like a send's; commit it to the
-            // enclosing scope so later sends sync from it.
-            generator.commit_live_class_var_doc(),
-        ];
         docvec![
             " in let ",
-            leaf::var(raw.clone()),
+            leaf::var(fold_result.to_string()),
             " = call 'lists':'foldl'(",
             leaf::var(lambda_var.to_string()),
             ", ",
-            init_tuple,
+            init_acc,
             ", ",
             leaf::var(safe_list_var.to_string()),
-            ") in let ",
-            leaf::var(fold_result.to_string()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(raw),
             ") in ",
-            extraction_doc,
         ]
     }
 

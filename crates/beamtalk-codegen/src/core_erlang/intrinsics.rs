@@ -25,7 +25,7 @@
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
-use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
+use beamtalk_core::ast::{Block, Expression, Literal, MessageSelector, WellKnownSelector};
 
 /// Hint shown when a structural intrinsic reached via generic dispatch
 /// (`perform:`/`perform:withArguments:`) can't tell — from an
@@ -528,11 +528,6 @@ impl CoreErlangGenerator {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
-            // falling through to the stdlib's own tail-recursive
-            // `Integer>>timesRepeat:` — a same-process, in-process call, same
-            // as `select:`/`do:`. See
-            // `check_no_unsafe_class_method_self_sends`'s doc comment.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -568,8 +563,6 @@ impl CoreErlangGenerator {
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
             }
-            // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -609,8 +602,6 @@ impl CoreErlangGenerator {
                 )?;
                 return Ok(Some(doc));
             }
-            // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -868,7 +859,7 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// ADR 0118 phase 5b: hoists a receiver operand (which may
-    /// need a `ClassVars`/state prelude) binding it to a fresh
+    /// need a state prelude) binding it to a fresh
     /// `prefix`-named temp var. Appends the necessary `let`-binding(s) to
     /// `parts` in order — `parts` is always a self-contained sequence
     /// (each entry a `let ... in` prefix), so its caller needs no separate
@@ -906,7 +897,7 @@ impl CoreErlangGenerator {
         parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
         let var = self.fresh_temp_var(prefix);
-        if Self::is_field_assignment(arg) {
+        if self.is_field_assignment(arg) {
             let (doc, val_var) = self.generate_field_assignment_open(arg)?;
             parts.push(doc);
             parts.push(docvec![
@@ -951,7 +942,7 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() * 2 + 3);
 
         // Hoist the receiver (e.g. class method self-send) inline so
-        // its ClassVarsN binding remains visible to subsequent arg bindings.
+        // its binding remains visible to subsequent arg bindings.
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let recv_var = self.thread_value_call_receiver(receiver, "ValRecv", &mut parts)?;
@@ -2216,14 +2207,23 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
-                    // Identity: just return the receiver
-                    // Preserve the receiver's own prelude (e.g. class
-                    // method self-send) so the mutated ClassVarsN binding
-                    // propagates upward — `close_prelude` splices it ahead of
-                    // the identity return.
+                    // Identity: just return the receiver. It is bound rather
+                    // than returned bare: the receiver's own document is
+                    // already line-annotated (`( X -| [Line, File] )`), and
+                    // the enclosing send annotates this result again, which
+                    // Core Erlang rejects as a directly nested annotation.
                     let mut seq = self.sequence_call(&[receiver], "Yourself")?;
                     let recv_doc = seq.next();
-                    Ok(Some(seq.close(self, recv_doc, "YourselfRes")))
+                    let recv_var = self.fresh_temp_var("Yourself");
+                    let identity_doc = docvec![
+                        "let ",
+                        leaf::var(recv_var.clone()),
+                        " = ",
+                        recv_doc,
+                        " in ",
+                        leaf::var(recv_var),
+                    ];
+                    Ok(Some(seq.close(self, identity_doc, "YourselfRes")))
                 }
                 // printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
@@ -2562,31 +2562,44 @@ impl CoreErlangGenerator {
                     // validates arity.
                     Some(WellKnownSelector::HasField) => {
                         debug_assert_eq!(arguments.len(), 1);
-                        // Class-method `self hasField: #x` reads `ClassVars`
-                        // directly (§4i) — a pure `maps:is_key`, never
-                        // raises, so it needs no state threading and works
-                        // at any nesting depth (unlike `clearField:` below,
-                        // which is a write).
-                        if self.in_class_method() {
-                            if let Expression::Identifier(id) = receiver {
-                                if id.name == "self" {
-                                    let name_var = self.fresh_var("Name");
-                                    let name_code = self.expression_doc(&arguments[0])?;
-                                    let cv = self.current_class_var();
-                                    let doc = docvec![
-                                        "let ",
-                                        leaf::var(name_var.clone()),
-                                        " = ",
-                                        name_code,
-                                        " in call 'maps':'is_key'(",
-                                        leaf::var(name_var),
-                                        ", ",
-                                        leaf::var(cv),
-                                        ")",
-                                    ];
-                                    return Ok(Some(doc));
-                                }
-                            }
+                        // Class-method `self hasField: #x` is a presence test
+                        // on the class variables, in place (ADR 0130 §2):
+                        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
+                        // never raises on the name.
+                        if self.is_class_var_has_field(receiver) {
+                            let probe_field = probe_field_name(&arguments[0]);
+                            let probe = self.class_var_probe_doc("read", &probe_field);
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                probe,
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in ",
+                                self.class_var_read_helper_call_doc(
+                                    "has",
+                                    vec![leaf::var(name_var)],
+                                ),
+                            ];
+                            return Ok(Some(doc));
+                        }
+                        // A direct-called method (sealed class, no class
+                        // variables, `class sealed`) has no `ClassSelf` to
+                        // ask and nothing to find: the answer is `false`. The
+                        // argument is still evaluated for its effects.
+                        if self.is_class_method_has_field_direct_called(receiver) {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            return Ok(Some(docvec![
+                                "let ",
+                                leaf::var(name_var),
+                                " = ",
+                                name_code,
+                                " in ",
+                                leaf::atom("false"),
+                            ]));
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.
@@ -2654,30 +2667,34 @@ impl CoreErlangGenerator {
                     // `fieldAt:put:` does.
                     Some(WellKnownSelector::ClearField) => {
                         debug_assert_eq!(arguments.len(), 1);
-                        // Class-side: every top-level (and producer-
-                        // recognized nested) `self clearField:` position in
-                        // a class method body is intercepted before
-                        // `expression_doc` is ever reached for this exact
-                        // node — `class_method_prelude_producer`
-                        // (`util.rs`) and `lower_class_method_body`
-                        // (`gen_server/methods.rs`), per
-                        // `is_self_clear_field_class_var`'s own doc comment
-                        // (ADR 0124 §4i). There is no general `ClassVars`
-                        // state-threading for this shape at any OTHER
-                        // nesting depth (e.g. inside `ifTrue:` or a loop —
-                        // out of scope for this issue), and reaching this
-                        // class gen_server from inside its own process
-                        // would deadlock (`beamtalk_class_dispatch:handle_class_self_call/1`),
-                        // so reject clearly instead of silently losing the
-                        // mutation or hanging.
+                        // Class-side `self clearField: #x` removes the class
+                        // variable in place at any nesting depth (ADR 0130
+                        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
+                        // which answers `self`. Routing it through
+                        // `class_send` instead would deadlock on the class's
+                        // own process.
                         if self.in_class_method() {
-                            return Err(CodeGenError::UnsupportedFeature {
-                                feature: "'self clearField:' on a class variable is only \
-                                    supported as a class method's own body statement (ADR \
-                                    0124 §4i) — not nested inside a conditional or loop"
-                                    .to_string(),
-                                span: Some(receiver.span()),
-                            });
+                            if let Expression::Identifier(id) = receiver {
+                                if id.name == "self" {
+                                    let probe_field = probe_field_name(&arguments[0]);
+                                    let probe = self.class_var_probe_doc("write", &probe_field);
+                                    let name_var = self.fresh_var("Name");
+                                    let name_code = self.expression_doc(&arguments[0])?;
+                                    let doc = docvec![
+                                        probe,
+                                        "let ",
+                                        leaf::var(name_var.clone()),
+                                        " = ",
+                                        name_code,
+                                        " in ",
+                                        Self::class_var_helper_call_doc(
+                                            "clear",
+                                            vec![leaf::var(name_var)],
+                                        ),
+                                    ];
+                                    return Ok(Some(doc));
+                                }
+                            }
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.
@@ -3108,6 +3125,15 @@ impl CoreErlangGenerator {
         ];
 
         Ok(Some(seq.close(self, call_doc, "LogRes")))
+    }
+}
+
+/// Field name the class-variable probe reports for a `hasField:` /
+/// `clearField:` argument: the literal Symbol's name, `_dynamic` otherwise.
+fn probe_field_name(arg: &Expression) -> String {
+    match arg.unwrap_parens() {
+        Expression::Literal(Literal::Symbol(name), _) => name.to_string(),
+        _ => "_dynamic".to_string(),
     }
 }
 

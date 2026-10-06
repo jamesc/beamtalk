@@ -1092,7 +1092,10 @@ pub fn stage_compiler_port_binary(release_dir: &Utf8Path) -> Result<Utf8PathBuf>
 ///
 /// Returns an error if `erl` cannot be spawned or the extractor reports a
 /// failure (`beamtalk_stdlib` — and so `beamtalk_runtime` — could not be
-/// started; nothing can be extracted without it).
+/// started; nothing can be extracted without it), or a project module was
+/// compiled for a different `class_var_abi` than the runtime being staged
+/// (ADR 0130: the extractor prints each refused module, naming it and saying
+/// to recompile, and the release build fails).
 pub fn write_shapes_json(
     runtime_lib_dirs: &[Utf8PathBuf],
     emit_lib_dirs: &[Utf8PathBuf],
@@ -1105,6 +1108,9 @@ pub fn write_shapes_json(
         "case beamtalk_release_shapes:write_shapes_json([{runtime_dirs}], [{emit_dirs}], \
              \"{out_path}\", <<\"{vsn}\">>) of \
              ok -> ok; \
+             {{error, {{abi_mismatch, AbiMsgs}}}} -> \
+                 [io:format(standard_error, \"~ts~n\", [AbiMsg]) || AbiMsg <- AbiMsgs], \
+                 halt(1); \
              ShapesErr -> \
                  io:format(standard_error, \"shapes.json extraction failed: ~p~n\", [ShapesErr]), \
                  halt(1) \

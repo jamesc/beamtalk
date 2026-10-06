@@ -7,6 +7,8 @@
 //!
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
+//! - `class_state_abroad` — blocks that touch their home class's variables
+//!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
 //! - `class_validators` — class-hierarchy-dependent checks
 //! - `late_slot_validators` — `late` slot declaration checks (ADR 0124 §1, §5)
 //! - `lint_validators` — code quality lints
@@ -15,11 +17,10 @@
 //! - `native_validators` — native actor validation
 //! - `operator_validators` — non-dispatchable operator declaration checks
 //! - `reserved_name_validators` — reserved internal-namespace name checks
-//! - `stored_closure_validators` — stored closures / user-HOM block arguments
-//!   whose class-side self-send class-variable write is not kept (BT-3681)
 //! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
 //!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
 
+mod class_state_abroad;
 mod class_validators;
 mod late_slot_validators;
 mod lint_validators;
@@ -29,13 +30,13 @@ mod operator_validators;
 pub(crate) mod package_validators;
 mod reserved_name_validators;
 mod sendability_validators;
-mod stored_closure_validators;
 mod structural_validators;
 mod supervision_validators;
 mod unguarded_late_read_validators;
 mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
+pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,
@@ -67,7 +68,6 @@ pub(crate) use reserved_name_validators::check_reserved_internal_names;
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,
 };
-pub(crate) use stored_closure_validators::check_stored_closure_class_var_writes;
 pub(crate) use structural_validators::{
     check_ffi_arity, check_native_declaration_location, check_unresolved_classes,
     check_unresolved_ffi_modules, check_unresolved_type_aliases,

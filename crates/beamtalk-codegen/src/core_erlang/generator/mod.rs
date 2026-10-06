@@ -13,7 +13,7 @@
 //! - [`branch_guard`] — [`BranchContextGuard`](branch_guard::BranchContextGuard)
 //!   and the `with_branch_context`/`enter_branch_context` pair
 //! - [`accessors`] — small field getters/setters and context-default wrappers
-//! - [`version`] — `State{N}`/`ClassVars{N}`/`Self{N}` version-counter helpers
+//! - [`version`] — `State{N}`/`Self{N}` version-counter helpers
 
 pub(in crate::core_erlang) mod accessors;
 pub(in crate::core_erlang) mod branch_guard;
@@ -136,7 +136,7 @@ pub struct CoreErlangGenerator {
     /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
     pub(in crate::core_erlang) active_branch_frame: u32,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
-    /// mode flags, `ClassVars`-threading side channels, pre-extracted field
+    /// mode flags, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
     /// grouped into one `control_flow`-owned value. See [`LoopMode`].
     pub(in crate::core_erlang) loop_mode: LoopMode,
@@ -151,6 +151,13 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// ADR 0130 §5: the Core Erlang variable holding the class-variable
+    /// capture of the innermost enclosing block literal that reads a class
+    /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
+    /// `None` at method level and inside blocks that read none. While `Some`,
+    /// every class-variable read's miss path lowers to the 3-arity
+    /// captured-fallback helper with this variable.
+    pub(in crate::core_erlang) class_var_capture: Option<String>,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Source identity of each provision-bearing protocol (ADR 0127 §3);
@@ -371,6 +378,7 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            class_var_capture: None,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
             primitive_bindings: PrimitiveBindingTable::new(),

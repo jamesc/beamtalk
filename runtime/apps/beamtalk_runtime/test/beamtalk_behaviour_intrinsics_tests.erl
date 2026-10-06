@@ -220,7 +220,7 @@ class_local_methods_metaclass_with_class_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {_ClassObj, Pid} = register_class_with_class_methods(
                     'BT1635MetaHasMethods',
                     #{},
@@ -287,7 +287,7 @@ class_includes_selector_metaclass_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {_ClassObj, Pid} = register_class_with_class_methods(
                     'BT1635MetaIncludes',
                     #{},
@@ -989,7 +989,7 @@ metaclass_all_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {ClassObj, Pid} = register_class_with_class_methods(
                     'BT1792BiMetaAllMethods',
                     #{},
@@ -1021,7 +1021,7 @@ metaclass_class_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {ClassObj, Pid} = register_class_with_class_methods(
                     'BT1792BiMetaClassMethods',
                     #{},
@@ -1053,7 +1053,7 @@ metaclass_local_class_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {ClassObj, Pid} = register_class_with_class_methods(
                     'BT1792BiMetaLocalClassM',
                     #{},
@@ -1105,7 +1105,7 @@ metaclass_includes_selector_true_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {ClassObj, Pid} = register_class_with_class_methods(
                     'BT1792BiMetaInclSel',
                     #{},
@@ -1341,7 +1341,7 @@ class_methods_metaclass_receiver_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {_ClassObj, Pid} = register_class_with_class_methods(
                     'BT1959MethodsMeta',
                     #{},
@@ -1749,7 +1749,7 @@ metaclass_class_methods_inherited_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                ClassMethodFun = fun(_Self) -> ok end,
                 {_ParentObj, ParentPid} = register_class_with_class_methods(
                     'BT1959MetaCMParent',
                     #{},
@@ -2654,7 +2654,10 @@ walk_hierarchy_cycle_guard_test_() ->
 
 %% Compile and load a module exporting __beamtalk_meta/0 returning MetaMap.
 %% Returns the module atom.
-load_meta_module(ModAtom, MetaMap) ->
+load_meta_module(ModAtom, MetaMap0) ->
+    %% A module exporting `__beamtalk_meta/0` is inside the ADR 0130 class_var_abi
+    %% load gate, so the fixture declares the current value like a compiled class.
+    MetaMap = MetaMap0#{class_var_abi => beamtalk_class_vars:abi()},
     MetaAbstract = erl_parse:abstract(MetaMap, [{line, 3}]),
     Forms = [
         {attribute, 1, module, ModAtom},

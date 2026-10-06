@@ -19,7 +19,9 @@ Object subclass: CvsOpen
 
   class makeBumper => [self bump]
 
-  class makeReader => [self.n]
+  class makeReader =>
+    @expect class_state_abroad "BT-3712: the returned block reads the captured value outside the class"
+    [self.n]
 
   class run: aBlock => aBlock value
 
@@ -147,7 +149,6 @@ Object subclass: CvsOpen
     [self bump] value
     self.n
 
-  @expect stored_closure "BT-3704: ADR 0130 removes the ADR 0110 stored-closure limit this row pins"
   class rowStoredWithin =>
     self reset
     b := [self bump]
@@ -157,6 +158,7 @@ Object subclass: CvsOpen
 
   class rowStoredReadWithin =>
     self reset
+    @expect class_state_abroad "BT-3712: a stored block is flagged even when run within the invocation"
     b := [self.n]
     self bump
     b value
@@ -168,6 +170,7 @@ Object subclass: CvsOpen
 
   class rowSyncWriteOpenDriver =>
     self reset
+    @expect class_state_abroad "BT-3712: the block writes in CvsDriver's process"
     CvsDriver each: [self bump]
     self.n
 
@@ -184,6 +187,7 @@ Object subclass: CvsOpen
   class rowAsyncRead =>
     self reset
     a := CvsActor spawn
+    @expect class_state_abroad "BT-3712: the actor runs the block later with the captured value"
     a keep: [self.n]
     self bump
     a run

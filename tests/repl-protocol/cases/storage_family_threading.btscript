@@ -19,8 +19,8 @@
 // fixture from loading):
 //   storage_family_actor.bt                    — Actor `state:`, all ACCEPT
 //   storage_family_class_method.bt              — class `classState:`, all ACCEPT
-//   storage_family_class_method_ensure_reject.bt   — classState REJECT (ensure:)
-//   storage_family_class_method_foldl_reject.bt    — classState REJECT (do:)
+//   storage_family_class_method_ensure_direct_write.bt — classState direct write in ensure:
+//   storage_family_class_method_foldl_direct_write.bt  — classState direct write in do:
 //   storage_family_value_type.bt                — TestCase field, ACCEPT cells
 //   storage_family_value_type_foldl_reject.bt      — TestCase field REJECT (do:)
 //   storage_family_value_type_match_reject.bt      — TestCase field REJECT (match:)
@@ -68,9 +68,9 @@
 
 // ===========================================================================
 // FAMILY 2: class-method `classState:` — `to:do:`/`whileTrue:`/
-// `ifTrue:ifFalse:` accept a bare direct class-var write; `do:`/`collect:`
-// and `on:do:`/`ensure:` accept it only via a same-class self-send (ADR
-// 0122 / BT-3506).
+// `ifTrue:ifFalse:`, `do:`/`collect:` and `on:do:`/`ensure:` accept a bare
+// direct class-var write (ADR 0122 / BT-3506; ADR 0130 removed the
+// compile-time rejections that used to stop the last two).
 // ===========================================================================
 
 :load tests/repl-protocol/fixtures/storage_family_class_method.bt
@@ -107,23 +107,23 @@ StorageFamilyClassMethod matchArm: 1
 StorageFamilyClassMethod matchArm: 2
 // => 0
 
-// ── REJECT: a bare direct class-var write nested inside `ensure:` stays a
-// compile-time rejection (ClassVarAssignmentInThreadedBody) — the self-send
-// form above is the only shape `on:do:`/`ensure:` can carry.
-:load tests/repl-protocol/fixtures/storage_family_class_method_ensure_reject.bt
-// => ERROR: Cannot assign to class variable 'runs' inside this loop/conditional body
+// ── A bare direct class-var write nested inside `ensure:` compiles (ADR 0130:
+// the write is an in-place `put`; before it was the compile-time rejection
+// ClassVarAssignmentInThreadedBody) and is kept.
+:load tests/repl-protocol/fixtures/storage_family_class_method_ensure_direct_write.bt
+// => Loaded: StorageFamilyClassMethodEnsureDirectWrite
 
-_error kind
-// => compile_error
+StorageFamilyClassMethodEnsureDirectWrite ensureDirectWrite
+// => 1
 
-// ── REJECT: a bare direct class-var write inside a Foldl-shaped `do:` body,
-// with no co-occurring self-send, never reaches the class-var-aware
-// dispatch at all (Foldl's only `ClassVars` trigger is a self-send) and
-// falls through to the generic stored-closure-body rejection instead — a
-// different diagnostic than the loop/conditional-body one above, but still
-// a clean compile-time rejection.
-:load tests/repl-protocol/fixtures/storage_family_class_method_foldl_reject.bt
-// => ERROR: Cannot assign to field 'runs' inside this block
+// ── A bare direct class-var write inside a `do:` body compiles too (it used
+// to fall through to the generic stored-closure-body rejection) and every
+// iteration's write is kept.
+:load tests/repl-protocol/fixtures/storage_family_class_method_foldl_direct_write.bt
+// => Loaded: StorageFamilyClassMethodFoldlDirectWrite
+
+StorageFamilyClassMethodFoldlDirectWrite doDirectWrite
+// => 6
 
 // ===========================================================================
 // FAMILY 3: value-type `TestCase` field — `to:do:`/`whileTrue:`/

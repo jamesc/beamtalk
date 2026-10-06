@@ -65,8 +65,7 @@ super(Selector, Args, Self, State, CurrentClass)
     super_value/4,
     responds_to/2,
     invoke_extension/6,
-    check_extension/2,
-    apply_extension_by_arity/4
+    check_extension/2
 ]).
 
 -include("beamtalk.hrl").
@@ -583,11 +582,11 @@ inline in the caller's own process, so the throw is a control-flow signal
 aimed at a catch further up that *same* call stack, not a crash to report —
 catching and wrapping it here would turn a non-local return into a spurious
 `#beamtalk_error{}` instead of letting it unwind. Mirrors the passthrough
-`beamtalk_class_dispatch:apply_class_extension_fun/6` already has for the
+`beamtalk_class_dispatch:apply_class_extension_fun/5` already has for the
 class-side extension path (that sibling also relays the NLR outward via a
 tagged `{nlr_relay, ...}` return, since a class method crosses its
-gen_server's `handle_call` boundary and the shadow-relay machinery
-needs the tag; plain instance dispatch has no such boundary to relay across
+gen_server's `handle_call` boundary and the entry point
+needs the tag to keep the class-variable writes made before the unwind; plain instance dispatch has no such boundary to relay across
 here, so re-raising is enough).
 """.
 -spec invoke_extension(fun(), selector(), class_name(), args(), bt_self(), state()) ->
@@ -622,17 +621,12 @@ Apply an extension fun given its registered arity, unifying both signatures
 to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
 core behind `invoke_extension/6`.
 
-Exported so `beamtalk_class_dispatch:invoke_class_extension/7` can
-reuse this exact arity convention for class-side extensions instead of
-duplicating it. Deliberately does NOT decide how to handle an error — that is
-context-dependent: `invoke_extension/6` (instance-side dispatch, below) uses
-the module's shared `ensure_wrapped/4` classification, matching
-every other crash-safe dispatch path in this file; class-side dispatch
-instead needs its own finer-grained classification (`undef_in_body` vs.
-generic, plus NLR-relay / script-exit passthrough for self-sends inside class
-methods — see `beamtalk_class_dispatch:apply_class_extension_fun/6`), since
-the class's own long-lived gen_server must survive a bad extension body the
-same way it survives a bad compiled/runtime-installed class method.
+Internal to this module: only `invoke_extension/6` (instance-side dispatch)
+calls it. Class-side extensions no longer share this arity convention (ADR 0130
+§3: they are `fun(Args, ClassSelf)` and `beamtalk_class_dispatch:
+apply_class_extension_fun/5` calls them directly). Deliberately does NOT decide
+how to handle an error; `invoke_extension/6` classifies via the shared
+`ensure_wrapped/4`.
 """.
 -spec apply_extension_by_arity(fun(), args(), bt_self(), state()) -> {term(), state()}.
 apply_extension_by_arity(Fun, Args, Self, State) ->

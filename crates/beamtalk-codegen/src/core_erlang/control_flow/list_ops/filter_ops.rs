@@ -56,8 +56,6 @@ impl CoreErlangGenerator {
 
         // list reject: is opposite of filter - we need to negate the predicate
         // Add runtime is_list guard for non-list receivers
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -238,20 +236,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
@@ -286,13 +278,11 @@ impl CoreErlangGenerator {
             self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
         let pre_doc = docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{[], ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(rev_list.clone()),

@@ -156,6 +156,16 @@ before any class registers.
 """.
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
+    %% ADR 0130 Phase 3: refuse a compiled module with a different
+    %% `class_var_abi` before any process is started (see
+    %% `beamtalk_class_vars:check_class_info_abi/2`).
+    case beamtalk_class_vars:check_class_info_abi(ClassName, ClassInfo) of
+        ok -> do_start(ClassName, ClassInfo);
+        {error, _} = Refused -> Refused
+    end.
+
+-spec do_start(class_name(), map()) -> {ok, pid()} | {error, term()}.
+do_start(ClassName, ClassInfo) ->
     Result =
         case whereis(beamtalk_class_sup) of
             undefined ->
@@ -259,14 +269,25 @@ rename(OldName, NewName) ->
             end
     end.
 
--doc "Update an existing class process with new metadata after redefinition.".
+-doc """
+Update an existing class process with new metadata after redefinition.
+
+The hot-reload path of the ADR 0130 `class_var_abi` gate: a module whose
+`class_var_abi` differs from the running runtime's is refused with a structured
+`abi_mismatch` and the class keeps its current definition.
+""".
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            {error, {class_not_found, ClassName}};
-        Pid ->
-            gen_server:call(Pid, {update_class, ClassInfo})
+    case beamtalk_class_vars:check_class_info_abi(ClassName, ClassInfo) of
+        ok ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    {error, {class_not_found, ClassName}};
+                Pid ->
+                    gen_server:call(Pid, {update_class, ClassInfo})
+            end;
+        {error, _} = Refused ->
+            Refused
     end.
 
 -doc "Set a class variable on a class by name.".
@@ -466,9 +487,12 @@ class_send(ClassPid, Selector, Args) ->
 Execute a class method in the caller's process.
 
 Resolves the target module from the class object, then calls
-Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
-object's gen_server. The caller takes responsibility for knowing the
-method does not mutate class state (nil is passed for ClassSelf).
+Module:class_<Selector>(Receiver, Args...) directly — bypassing the class
+object's gen_server. The receiver class object is passed as `ClassSelf` and the
+call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
+class-variable reads see the snapshot (the ETS mirror as of the last completed
+invocation), writes raise `class_state_read_only`, and when called from inside
+the class's own method mid-invocation the live map is read and written.
 
 Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
@@ -481,16 +505,11 @@ local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
         true ->
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
             code:ensure_loaded(Module),
-            case erlang:function_exported(Module, FunName, length(Args) + 2) of
+            case erlang:function_exported(Module, FunName, length(Args) + 1) of
                 true ->
-                    case erlang:apply(Module, FunName, [nil, #{} | Args]) of
-                        {class_var_result, Value, _NewClassVars} ->
-                            %% Discard class var mutations — local_call does not
-                            %% update the class object's state.
-                            Value;
-                        Result ->
-                            Result
-                    end;
+                    beamtalk_class_vars:with_snapshot(Receiver, fun() ->
+                        erlang:apply(Module, FunName, [Receiver | Args])
+                    end);
                 false ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -642,8 +661,8 @@ put_method(ClassPid, Selector, Fun, Source) ->
 Install or replace a class-side method with a runtime fun (ADR 0084).
 
 Class-side mirror of `put_method/4`. The fun follows the compiled class-method
-calling convention exactly: `fun(ClassSelf, ClassVars, A1..An) -> Result |
-{class_var_result, Result, NewClassVars}`, arity `n + 2`. The fun is stored in
+calling convention exactly (ADR 0130 §3): `fun(ClassSelf, A1..An) -> Result`,
+arity `n + 1`; class variables are accessed through `beamtalk_class_vars`. The fun is stored in
 the class gen_server `class_methods` map (the source of truth) and mirrored into
 the metadata retrieval store so subclasses can dispatch it without a gen_server
 hop. A runtime fun shadows any compiled method of the same selector.
@@ -655,7 +674,27 @@ put_class_method(ClassPid, Selector, Fun) ->
 -doc "Install or replace a class-side method with a runtime fun and source.".
 -spec put_class_method(pid(), selector(), fun(), binary()) -> ok.
 put_class_method(ClassPid, Selector, Fun, Source) ->
+    ok = validate_class_method_fun_arity(ClassPid, Selector, Fun),
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
+
+-doc """
+ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
+`selector_arity + 1`. Any other arity is refused here with the structured error
+`beamtalk_class_builder:validate_class_method_arities/2` produces (the same rule
+`ClassBuilder register` applies), instead of a raw `badarity` at call time.
+""".
+-spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
+validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
+    %% The class name is only needed for the error, so it is resolved on mismatch.
+    case beamtalk_class_builder:validate_class_method_arities(undefined, #{Selector => Fun}) of
+        ok ->
+            ok;
+        {error, Error} ->
+            %% Rebuild the message now that the class is known (`with_selector/2`
+            %% regenerates it; hint and details are untouched).
+            Named = Error#beamtalk_error{class = class_name(ClassPid)},
+            beamtalk_error:raise(beamtalk_error:with_selector(Named, Selector))
+    end.
 
 -doc "Get instance variable names.".
 -spec instance_variables(pid()) -> [atom()].
@@ -2007,10 +2046,10 @@ find_inherited_class_method(Selector, SuperName) ->
     end.
 
 -doc """
-Check whether `class_new:/3` is exported anywhere in the superclass chain.
+Check whether `class_new:/2` is exported anywhere in the superclass chain.
 
 Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
-a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
+a module exporting `class_new:'/2` is found, `false` if none is found in the chain.
 This correctly supports inherited `class new:` constructors: a subclass that does
 not override `class new:` will still route through the parent's implementation.
 
@@ -2027,7 +2066,7 @@ has_class_new_in_chain(ClassName, Module) ->
 has_class_new_in_chain(_ClassName, _Module, Depth) when Depth > 50 ->
     false;
 has_class_new_in_chain(ClassName, Module, Depth) ->
-    case erlang:function_exported(Module, 'class_new:', 3) of
+    case erlang:function_exported(Module, 'class_new:', 2) of
         true ->
             true;
         false ->
