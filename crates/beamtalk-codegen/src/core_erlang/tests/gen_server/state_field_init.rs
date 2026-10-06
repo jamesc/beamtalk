@@ -5,11 +5,24 @@
 //!
 //! 1. `generate_own_state_fields` — the `omit_late_defaultless_slot` skip
 //!    when a subclass (`has_parent_init`) has a late defaultless field.
-//! 2. `generate_initial_state_fields` — the fallback loop (lines 121-135)
-//!    that runs when no class identity is set but the module has classes with
-//!    state fields.
+//! 2. `generate_initial_state_fields` — the `else` fallback branch that runs
+//!    when no class identity is set but the module has classes with state
+//!    fields.
 
 use super::*;
+
+/// Extract the body of `ChildFields` from generated Core Erlang.
+///
+/// Returns the text between `let ChildFields = ~{` and the first `}~`.
+/// Panics if the expected delimiters are absent.
+fn extract_child_fields(code: &str) -> &str {
+    code.split("let ChildFields = ~{")
+        .nth(1)
+        .expect("init/1 must emit ChildFields for a subclass")
+        .split("}~")
+        .next()
+        .expect("ChildFields must close with }~")
+}
 
 // ── Gap 1: generate_own_state_fields late-defaultless skip ───────────────────
 
@@ -17,9 +30,9 @@ use super::*;
 /// and carries a `late state:` field without a default must have that field
 /// absent from `ChildFields`. The sibling eager field must still appear.
 ///
-/// This exercises line 38 of `gen_server/state.rs`:
-///   `if omit_late_defaultless_slot(state) { continue; }`
-/// which is only reachable when a class's superclass is not Actor/Object.
+/// This exercises the `omit_late_defaultless_slot` `continue` inside
+/// `generate_own_state_fields`, which is only reachable when a class's
+/// superclass is not Actor/Object.
 #[test]
 fn late_defaultless_slot_skipped_in_own_state_fields() {
     // LoggingCounter extends Counter (a user-defined Actor subclass), so
@@ -37,14 +50,7 @@ fn late_defaultless_slot_skipped_in_own_state_fields() {
     let code = generate_module(&module, CodegenOptions::new("logging_counter"))
         .expect("codegen should succeed");
 
-    // ChildFields is the map holding this subclass's own state contributions.
-    let child_fields = code
-        .split("let ChildFields = ~{")
-        .nth(1)
-        .expect("init/1 must emit ChildFields for a subclass")
-        .split("}~")
-        .next()
-        .expect("ChildFields must close with }~");
+    let child_fields = extract_child_fields(&code);
 
     assert!(
         !child_fields.contains("'audit'"),
@@ -56,8 +62,9 @@ fn late_defaultless_slot_skipped_in_own_state_fields() {
     );
 }
 
-/// A subclass with ONLY a late defaultless field produces an empty `ChildFields`
-/// (only the mandatory internal keys — no user-defined state keys).
+/// A subclass with ONLY a late defaultless field produces a `ChildFields`
+/// containing no user-defined state keys — only the mandatory internal
+/// `$bt*` keys (`__class_mod__`, `__shape_version__`).
 #[test]
 fn own_state_fields_empty_when_only_late_defaultless() {
     let src = concat!(
@@ -69,26 +76,25 @@ fn own_state_fields_empty_when_only_late_defaultless() {
     let code = generate_module(&module, CodegenOptions::new("logging_counter"))
         .expect("codegen should succeed");
 
-    let child_fields = code
-        .split("let ChildFields = ~{")
-        .nth(1)
-        .expect("init/1 must emit ChildFields for a subclass")
-        .split("}~")
-        .next()
-        .expect("ChildFields must close with }~");
+    let child_fields = extract_child_fields(&code);
 
+    // No user-defined key may appear — only internal `__*__` entries.
+    let user_entries: Vec<&str> = child_fields
+        .lines()
+        .filter(|l| l.contains("=>") && !l.contains("'__"))
+        .collect();
     assert!(
-        !child_fields.contains("'audit'"),
-        "Late defaultless slot must not appear in ChildFields. Got:\n{child_fields}"
+        user_entries.is_empty(),
+        "ChildFields must contain only internal keys when the sole field is late defaultless. \
+         Unexpected user entries: {user_entries:?}. Full body:\n{child_fields}"
     );
 }
 
-// ── Gap 2: generate_initial_state_fields fallback loop ───────────────────────
+// ── Gap 2: generate_initial_state_fields fallback branch ─────────────────────
 
 /// When `generate_initial_state_fields` is called on a generator whose
-/// derived class name does not match any class in the module, the fallback
-/// loop (state.rs lines 121-135) runs and emits state fields from all
-/// module classes.
+/// derived class name does not match any class in the module, the `else`
+/// fallback branch runs and emits state fields from all module classes.
 ///
 /// This path is documented in state.rs as "Load-bearing for those tests,
 /// not dead code" — for hand-constructed test fixtures that call the method
@@ -101,7 +107,7 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
 
     // A fresh generator for "some_other": class_name() derives to "SomeOther",
-    // which does not match "Counter" → current_class() returns None → fallback loop.
+    // which does not match "Counter" → current_class() returns None → fallback.
     let mut generator = CoreErlangGenerator::new("some_other");
 
     let fields = generator
@@ -110,7 +116,7 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
 
     assert!(
         !fields.is_empty(),
-        "fallback loop should emit at least one field document"
+        "fallback branch should emit at least one field document"
     );
 
     let text = fields
@@ -124,8 +130,8 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
     );
 }
 
-/// A late defaultless field is also omitted by the fallback loop — same
-/// `omit_late_defaultless_slot` guard applies.
+/// A late defaultless field is also omitted by the fallback branch — the same
+/// `omit_late_defaultless_slot` guard applies there too.
 #[test]
 fn fallback_skips_late_defaultless_slot_too() {
     let src = concat!(
