@@ -122,7 +122,7 @@ Object subclass: SsoStaleBase
     self noop
     0
 
-  // BT-3675 known limit: a closure stored in a local and invoked by a LATER
+  // PIN-BUG BT-3713 (ADR 0110 limit, not intended behaviour): a closure stored in a local and invoked by a LATER
   // statement exports into the scope of the statement that built it, which
   // was already refreshed, so its writes are not kept (ADR 0110).
   class deferred -> Integer =>
@@ -131,7 +131,7 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
-  // BT-3688: the same limit when the stored closure is handed to a collection
+  // PIN-BUG BT-3713 (BT-3688): the same when the stored closure is handed to a collection
   // higher-order method by name instead of invoked directly.
   class deferredViaDo -> Integer =>
     b := [:x | self foo]
@@ -155,7 +155,7 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
-  // The closure's write is lost, but a writing send in the same body is kept.
+  // PIN-BUG BT-3713: the closure write is lost today, but a writing send in the same body is kept.
   class deferredThenSend -> Integer =>
     b := [self foo]
     b value
@@ -173,9 +173,9 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
-  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // PIN-BUG BT-3713 (ADR 0110 limit, BT-3681; not intended behaviour, ADR 0130 keeps these writes): a block literal passed to a user-defined
   // class-side higher-order method. The closure runs inside the callee, which
-  // returns the ClassVars it was given, so the closure's write is not kept;
+  // does not keep the closure write today (ADR 0110);
   // the callee's own write is.
   class section: aBlock :: Block -> Integer => aBlock value
 
@@ -207,7 +207,7 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
-  // Known limit (ADR 0110, BT-3681): a stored closure can also READ a stale or
+  // PIN-BUG BT-3713 (ADR 0110 limit, BT-3681; not intended behaviour, ADR 0130 keeps these writes): a stored closure can also READ a stale or
   // reverted value, because the building statement's token stays in its sync
   // chain after that statement's refresh consumed it.
   class nextId -> Integer => self bump

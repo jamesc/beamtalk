@@ -301,7 +301,7 @@ Object subclass: SsoPlainBase
 
   // --- closures ----------------------------------------------------------
 
-  // A closure stored in a local and invoked by a later statement (ADR 0110
+  // PIN-BUG BT-3713: a closure stored in a local and invoked by a later statement (ADR 0110
   // known limit, BT-3681): a plain send inside it changes nothing.
   class storedPlain -> Integer =>
     self.n := 0
@@ -311,7 +311,7 @@ Object subclass: SsoPlainBase
     self plain
     self.n
 
-  // The same limit with a writing send: the closure's write is not kept.
+  // PIN-BUG BT-3713: the same with a writing send: the closure write is not kept today.
   class storedBump -> Integer =>
     self.n := 0
     b := [self bump]
