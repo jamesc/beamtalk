@@ -620,7 +620,10 @@ impl<'p> Machine<'p> {
             Expr::Lit(v) => Ok(*v),
             Expr::Local(name) => Ok(Self::lookup_int(env, name)),
             Expr::Cv(var) => Ok(self.cv[var.index()]),
-            Expr::Add(a, k) => Ok(self.expr(a, env)? + k),
+            // Beamtalk integers are unbounded, `i64` is not: a sum that
+            // would wrap has no `i64` oracle answer, so the program is
+            // skipped exactly like one that exhausts the step budget.
+            Expr::Add(a, k) => self.expr(a, env)?.checked_add(*k).ok_or(Ctl::Budget),
             Expr::Send { helper, arg } => {
                 let a = self.expr(arg, env)?;
                 let prog = self.prog;
@@ -680,12 +683,12 @@ impl<'p> Machine<'p> {
                 Ok(a)
             }
             Expr::CollectSum { items, elem, body } => {
-                let mut sum = 0;
+                let mut sum: i64 = 0;
                 for item in items {
                     env.push((elem.clone(), Val::Int(*item)));
                     let r = self.block(body, env);
                     env.pop();
-                    sum += r?;
+                    sum = sum.checked_add(r?).ok_or(Ctl::Budget)?;
                 }
                 Ok(sum)
             }
