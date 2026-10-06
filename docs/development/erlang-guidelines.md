@@ -141,25 +141,25 @@ init([]) ->
 
 ---
 
-## FFI Class Methods That Mutate Class Variables (ADR 0110)
+## FFI Class Methods and Class Variables (ADR 0130)
 
-A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) that mutates class variables — i.e. returns `{class_var_result, NewValue, NewClassVars}` — and can have a foreign non-local return (`^`) pass through it (for example, because it invokes a caller-supplied `fun()`/`Block`) **must** also write the process-dictionary shadow at each mutation point, keyed by this call's own dynamic class identity (`ClassSelf#beamtalk_object.class`) — **not** a bare atom:
+Class variables live in the class process's dictionary for the duration of a class-method invocation, and **every** access goes through `beamtalk_class_vars`. A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) takes `(ClassSelf, Args...)` and returns the **bare result**: it never takes, builds or returns a class-variable map.
 
 ```erlang
-NewClassVars = maps:put(runs, Val, ClassVars),
-_ = erlang:put({'$bt_class_vars_shadow', ClassSelf#beamtalk_object.class}, NewClassVars),
-{class_var_result, Val, NewClassVars}
+%% Hand-written class method `bump`: counts calls in the class variable `runs`.
+class_bump(ClassSelf) ->
+    Runs = beamtalk_class_vars:get(ClassSelf, runs),
+    beamtalk_class_vars:put(ClassSelf, runs, Runs + 1).
 ```
 
-**Why:** compiled class methods get this write-through for free — `generate_field_assignment` emits it at every top-frame class-var assignment (`crates/beamtalk-codegen/src/core_erlang/expressions.rs`). Without it, `beamtalk_class_dispatch:invoke_class_method/7` has no way to recover the mutation when a block passed into the method escapes with a foreign `^`: it falls back to the pre-call `ClassVars`, silently reverting the mutation (BT-3032).
-
-**Why class-keyed (ADR 0110 amendment, BT-3039):** a block literal executes in whichever process *invokes* it, which can be a different class's gen_server than the one the block was lexically written in (ADR 0109). A mutating self-send inside such a block runs its target method's shadow write physically in that foreign process — a single shared key would let it clobber the entry the process's *own* class method just wrote, corrupting an unrelated class's persisted state. Tagging the key with `ClassSelf#beamtalk_object.class` (the *dynamic* calling identity — correct for inherited self-dispatch too, unlike a statically compiled-in class name) makes that collision impossible: each class's write and read use their own key, no matter which process the code physically runs in.
-
 **Rules:**
-- Write the shadow only at the method's own top frame — never from a callback/continuation running after control has already returned to different Beamtalk code, and never on behalf of a different class's `ClassVars`.
-- Always key the write with `ClassSelf#beamtalk_object.class` (or, equivalently, `beamtalk_class_registry:class_object_tag(ClassName)` if only the plain `ClassName` is in scope) — never the bare `'$bt_class_vars_shadow'` atom.
-- Do not `erlang:erase/1` the shadow yourself — `invoke_class_method/7` erases its own class-tagged key in a `try ... after ... end` once per external call, regardless of which path (`ok`, `nlr_relay`, or error) was taken.
-- No module under `beamtalk_stdlib/src` or `beamtalk_runtime/src` mutates class vars today, so this is a forward-looking authoring rule, not a live gap. See ADR 0110 for the full mechanism.
+- **Use `beamtalk_class_vars` and nothing else.** Read with `get/2` (`get_late/2` for a `late` slot, `has/2` for `hasField:`) and write with `put/3`; never touch `{'$bt_class_vars', Tag}` or `'$bt_class_vars_home'` with `erlang:get/put/erase` yourself. `beamtalk_class_vars` owns the key shape; `install/2` and `uninstall/1` are called only by `invoke_class_method/7` and `invoke_class_extension/7`.
+- **Never return `{class_var_result, Result, NewClassVars}`** and never write the old `{'$bt_class_vars_shadow', _}` key. Both were deleted (ADR 0110 is superseded); a class-method result is the result, and a write is the `put`.
+- **Never pass `nil` as the receiver.** The access helpers need the real `ClassSelf` class object; `nil` is an internal error, not a reachable-state question.
+- **An Erlang `catch`/`try` that runs a Beamtalk block (a `fun()` the user supplied) must wrap the call in `beamtalk_class_vars:protect/1`.** A write made inside the protected block must be discarded when the error is caught (ADR 0130 §4, the same rule `on:do:` follows). `protect/1` snapshots the home entry, restores it before re-raising any exception other than a `$bt_nlr` throw, passes both `$bt_nlr` tuple shapes through untouched (a `^` is not an error), and is a pass-through when no invocation is live. `beamtalk_result:'tryDo:'/1` and `TestCase should:raise:` are converted; the audit of the remaining runtime catchers is tracked by [BT-3728](https://linear.app/beamtalk/issue/BT-3728).
+- **Out-of-process code reads a snapshot.** Runtime code that deliberately runs a class method away from the class process (supervisor definition, the `initialize:` hook, `performLocally:withArguments:`) wraps the call in `beamtalk_class_vars:with_snapshot(ClassSelf, Fun)`: reads see the class variables as of the last completed invocation, and a write raises `class_state_read_only`.
+- **Callers of `beamtalk_class_dispatch:class_self_dispatch/4` and `class_self_dispatch_local/4`** pass `(Name, Selector, Args, ReceiverTag)`. The arity is unchanged but the old third argument (`ClassVars`) is gone; a stale caller fails with `badarg` or `function_clause`.
+- A hand-written Erlang class module with no `__beamtalk_meta/0` is outside the loader's `class_var_abi` check, so this rule is its only guard: a module built for the old convention is not refused, it just misbehaves.
 
 ---
 

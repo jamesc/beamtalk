@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-05-24) — epic BT-2259 complete, all issues Done (see [ADR 0038 Implementation Tracking](0038-subclass-classbuilder-protocol.md))
 
+> **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06), class-method fun arity.** The calling convention in §1 and every `apply(Fun, [ClassSelf, ClassVars | Args])` below now read `fun(ClassSelf, A1, ..., An) -> Result`, arity `n + 1`, returning the bare result. `ClassVars` is no longer a parameter and `{class_var_result, Result, NewClassVars}` no longer exists: a fun reads and writes class variables through `beamtalk_class_vars`, and the dispatch wrapper installs and writes back the map. `put_class_method/4` refuses an old `n + 2` fun with a structured error naming the selector. The storage, dispatch order, BT-873 guard and scope boundary decisions are unchanged.
+
 ## Context
 
 ### Problem

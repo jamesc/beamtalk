@@ -559,6 +559,18 @@ is surface-specific.
   reported as a stale expectation.
 - The `class-state-abroad` rule is lexical and per-class-method: it does not
   follow a block through a variable or an instance method.
+- Known gaps (false negatives; the lint is a hint, not a guarantee): cascade
+  messages after the first are not inspected
+  ([BT-3716](https://linear.app/beamtalk/issue/BT-3716)), and a late-bound
+  `self` send inside a `class sealed` method of an open class is judged by
+  its defining class alone
+  ([BT-3717](https://linear.app/beamtalk/issue/BT-3717)).
+- The runtime errors the lint predicts, `class_state_unreachable`,
+  `class_state_read_only` and `abi_mismatch` (ADR 0130), are ordinary
+  `#beamtalk_error{}` values and reach every surface through its existing
+  error path; none is surface-specific. A
+  class-variable write from a supervisor factory, a `class initialize:` hook
+  or `performLocally:` raises `class_state_read_only` on every surface.
 
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 

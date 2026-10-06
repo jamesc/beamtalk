@@ -136,7 +136,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Implemented | 2026-07-12 |
 | [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Implemented | 2026-07-15 |
 | [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Implemented | 2026-07-28 |
-| [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Implemented | 2026-08-02 |
+| [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Superseded by 0130 | 2026-10-06 |
 | [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Implemented | 2026-08-11 |
 | [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Implemented | 2026-08-15 |
 | [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Implemented | 2026-08-18 |
@@ -156,7 +156,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Accepted | 2026-09-23 |
 | [0128](0128-opaque-callable-fold-threading-for-collection-homs.md) | Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs | Proposed | 2026-09-23 |
 | [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted | 2026-09-25 |
-| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Accepted | 2026-10-02 |
+| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented | 2026-10-06 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
