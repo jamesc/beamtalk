@@ -18270,6 +18270,8 @@
         "testBlockRunsInCallerProcess",
         "testClassPassedAsArgument",
         "testDynamicSelfMessagingMethodNoLongerRaisesDispatchError",
+        "testHasFieldInBlockOnStatelessClassIsFalse",
+        "testHasFieldOnStatelessClassIsFalse",
         "testPerformRunsInCallersProcess",
         "testPerformWithArgumentsRunsDirectly",
         "testStatefulClassPerformStillRunsInClassProcess",
@@ -18277,9 +18279,10 @@
         "testStatefulClassStillRunsInClassProcess",
         "testStaticAndDynamicResultsMatch",
         "testStaticSendRunsInCallersProcess",
+        "testUnusedBlockWithHasFieldDoesNotRaise",
         "testVariableReceiverRunsInCallersProcess"
       ],
-      "source": "// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless\n// classes call the module function directly in the caller, so they behave\n// identically to the static form. Eligibility is generated metadata\n// (`direct_class_methods`), computed by `compute_direct_call_eligible`.\n//\n// Fixtures: fixtures/direct_dispatch_stateless.bt,\n// fixtures/direct_dispatch_stateful.bt.\n\nTestCase subclass: DirectDispatchTest\n\n  // --- static and dynamic forms agree, and run in the caller ---------------\n  testStaticSendRunsInCallersProcess =>\n    self assert: DirectDispatchStateless callerPid equals: Erlang erlang self\n\n  testVariableReceiverRunsInCallersProcess =>\n    cls := DirectDispatchStateless\n    self assert: cls callerPid equals: Erlang erlang self\n\n  testPerformRunsInCallersProcess =>\n    self assert: (DirectDispatchStateless perform: #callerPid) equals: Erlang erlang self\n\n  testPerformWithArgumentsRunsDirectly =>\n    self assert: (DirectDispatchStateless perform: #double: withArguments: #(4)) equals: 8\n\n  testStaticAndDynamicResultsMatch =>\n    cls := DirectDispatchStateless\n    self assert: (cls double: 5) equals: (DirectDispatchStateless double: 5)\n\n  testClassPassedAsArgument =>\n    self assert: (DirectDispatchStateless relay: DirectDispatchStateless) equals: 42\n\n  // --- hazards ---------------------------------------------------------------\n\n  // The method messages its own class. Dynamically dispatched through the\n  // class gen_server this used to raise `dispatch_error`.\n  testDynamicSelfMessagingMethodNoLongerRaisesDispatchError =>\n    cls := DirectDispatchStateless\n    self assert: (cls relay: cls) equals: 42\n\n  // A block passed into an eligible method now runs in the caller.\n  testBlockRunsInCallerProcess =>\n    cls := DirectDispatchStateless\n    pid := cls callBlock: [Erlang erlang self]\n    self assert: pid equals: Erlang erlang self\n\n  // A class with `classState:` keeps the gen_server hop.\n  testStatefulClassStillRunsInClassProcess =>\n    cls := DirectDispatchStateful\n    self deny: (cls callerPid =:= Erlang erlang self)\n\n  testStatefulClassPerformStillRunsInClassProcess =>\n    self deny: ((DirectDispatchStateful perform: #callerPid) =:= Erlang erlang self)\n\n  testStatefulClassStateStillWorksDynamically =>\n    cls := DirectDispatchStateful\n    first := cls bump\n    self assert: cls bump equals: first + 1",
+      "source": "// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless\n// classes call the module function directly in the caller, so they behave\n// identically to the static form. Eligibility is generated metadata\n// (`direct_class_methods`), computed by `compute_direct_call_eligible`.\n//\n// Fixtures: fixtures/direct_dispatch_stateless.bt,\n// fixtures/direct_dispatch_stateful.bt.\n\nTestCase subclass: DirectDispatchTest\n\n  // --- static and dynamic forms agree, and run in the caller ---------------\n  testStaticSendRunsInCallersProcess =>\n    self assert: DirectDispatchStateless callerPid equals: Erlang erlang self\n\n  testVariableReceiverRunsInCallersProcess =>\n    cls := DirectDispatchStateless\n    self assert: cls callerPid equals: Erlang erlang self\n\n  testPerformRunsInCallersProcess =>\n    self assert: (DirectDispatchStateless perform: #callerPid) equals: Erlang erlang self\n\n  testPerformWithArgumentsRunsDirectly =>\n    self assert: (DirectDispatchStateless perform: #double: withArguments: #(4)) equals: 8\n\n  testStaticAndDynamicResultsMatch =>\n    cls := DirectDispatchStateless\n    self assert: (cls double: 5) equals: (DirectDispatchStateless double: 5)\n\n  testClassPassedAsArgument =>\n    self assert: (DirectDispatchStateless relay: DirectDispatchStateless) equals: 42\n\n  // --- hazards ---------------------------------------------------------------\n\n  // The method messages its own class. Dynamically dispatched through the\n  // class gen_server this used to raise `dispatch_error`.\n  testDynamicSelfMessagingMethodNoLongerRaisesDispatchError =>\n    cls := DirectDispatchStateless\n    self assert: (cls relay: cls) equals: 42\n\n  // A block passed into an eligible method now runs in the caller.\n  testBlockRunsInCallerProcess =>\n    cls := DirectDispatchStateless\n    pid := cls callBlock: [Erlang erlang self]\n    self assert: pid equals: Erlang erlang self\n\n  // A class with `classState:` keeps the gen_server hop.\n  testStatefulClassStillRunsInClassProcess =>\n    cls := DirectDispatchStateful\n    self deny: (cls callerPid =:= Erlang erlang self)\n\n  testStatefulClassPerformStillRunsInClassProcess =>\n    self deny: ((DirectDispatchStateful perform: #callerPid) =:= Erlang erlang self)\n\n  testStatefulClassStateStillWorksDynamically =>\n    cls := DirectDispatchStateful\n    first := cls bump\n    self assert: cls bump equals: first + 1\n\n  // --- hasField: on a class with no class variables (ADR 0130 §2) -------------\n  testHasFieldOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingField equals: false\n\n  testHasFieldInBlockOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingFieldInBlock equals: false\n\n  testUnusedBlockWithHasFieldDoesNotRaise =>\n    self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7",
       "explanation": "BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless classes call the module function directly in the caller, so they behave identically to the static form. Eligibility is generated metadata (`direct_class_methods`), computed by `compute_direct_call_eligible`.  Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/direct_dispatch_stateful.bt."
     },
     {
@@ -24229,22 +24232,30 @@
       "tags": [
         "DirectDispatchStateless",
         "Object",
+        "assign",
+        "assignment",
         "callBlock:",
         "callerPid",
         "direct_dispatch_stateless",
         "double:",
         "extends",
         "field",
+        "hasMissingField",
+        "hasMissingFieldInBlock",
         "inherit",
         "inheritance",
         "instance variable",
         "member",
+        "mutate",
+        "mutation",
         "object",
         "property",
         "relay:",
-        "subclassing"
+        "set",
+        "subclassing",
+        "unusedBlockWithHasField"
       ],
-      "source": "// BT-3639 / ADR 0129 Phase 0b: a sealed class with no `classState:` whose\n// `class sealed` methods are direct-call eligible — dynamic sends must run\n// them in the caller's process, exactly like the static direct call.\n\nsealed Object subclass: DirectDispatchStateless\n\n  class sealed callerPid => Erlang erlang self\n\n  class sealed double: n :: Integer -> Integer => n * 2\n\n  // Messages its own class (through a class object passed in) — before the\n  // direct path a dynamic send of this method ran in the class process and the\n  // inner send raised `dispatch_error`.\n  class sealed relay: aClass => aClass double: 21\n\n  // Calls the block in whichever process runs the method.\n  class sealed callBlock: aBlock :: Block => aBlock value",
+      "source": "// BT-3639 / ADR 0129 Phase 0b: a sealed class with no `classState:` whose\n// `class sealed` methods are direct-call eligible — dynamic sends must run\n// them in the caller's process, exactly like the static direct call.\n\nsealed Object subclass: DirectDispatchStateless\n\n  class sealed callerPid => Erlang erlang self\n\n  class sealed double: n :: Integer -> Integer => n * 2\n\n  // Messages its own class (through a class object passed in) — before the\n  // direct path a dynamic send of this method ran in the class process and the\n  // inner send raised `dispatch_error`.\n  class sealed relay: aClass => aClass double: 21\n\n  // Calls the block in whichever process runs the method.\n  class sealed callBlock: aBlock :: Block => aBlock value\n\n  // BT-3701 / ADR 0130 §2: a direct-called method has `ClassSelf = nil` and no\n  // class variables, so a `hasField:` presence test is `false`, never an error\n  // — directly, and inside a block that is created but never run.\n  class sealed hasMissingField => self hasField: #x\n\n  class sealed hasMissingFieldInBlock => [self hasField: #x] value\n\n  class sealed unusedBlockWithHasField =>\n    _unused := [self hasField: #x]\n    7",
       "explanation": "BT-3639 / ADR 0129 Phase 0b: a sealed class with no `classState:` whose `class sealed` methods are direct-call eligible — dynamic sends must run them in the caller's process, exactly like the static direct call."
     },
     {
