@@ -230,6 +230,36 @@ fn self_send_in_a_sealed_class_is_proven_pure() {
     assert!(d.is_empty(), "{d:?}");
 }
 
+#[test]
+fn write_of_an_inherited_class_variable_is_a_write() {
+    let d = abroad(
+        "Object subclass: Driver
+  class each: aBlock => aBlock value
+
+Object subclass: Base
+  classState: n = 0
+
+Base subclass: Sub
+
+  class sealed bumpN => self.n := self.n + 1
+
+  class a => Driver each: [Sub bumpN]
+",
+    );
+    assert_eq!(d.len(), 1, "{d:?}");
+}
+
+#[test]
+fn read_message_is_conditional_on_running_abroad() {
+    let d = only("  class reader => [self.n]\n");
+    assert!(
+        d[0].message
+            .contains("if run outside an invocation of Counter, it reads the values captured"),
+        "{}",
+        d[0].message
+    );
+}
+
 // ---- never fires for blocks that stay at home ------------------------------
 
 #[test]
