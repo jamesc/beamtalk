@@ -1,9 +1,9 @@
 # ADR 0130: Class Variables Live in the Class Process During an Invocation
 
 ## Status
-Accepted (2026-10-02)
+Implemented (2026-10-06); accepted 2026-10-02.
 
-Supersedes ADR 0110 (Class-Variable Shadow Write-Through for Foreign NLR Relay) when implemented. Amends ADR 0013 §1 (class-variable storage), ADR 0084 (ClassBuilder class-method fun arity), ADR 0111 and ADR 0122 (removes the `ClassVars` threading family and slot family).
+Supersedes ADR 0110 (Class-Variable Shadow Write-Through for Foreign NLR Relay). Amends ADR 0013 §1 (class-variable storage), ADR 0066 (class-side extension fun shape), ADR 0084 (ClassBuilder class-method fun arity), ADR 0109 (what a block running elsewhere may do with class variables), ADR 0111 and ADR 0122 (removes the `ClassVars` threading family and slot family).
 
 ## Context
 
@@ -481,6 +481,7 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 - **Supervisor definitions, `class initialize:` and `performLocally:` keep reading** what they read today (the snapshot as of the last completed invocation). A class-variable write there now raises `class_state_read_only`: for `class children` and the other `static_init`/`dynamic_init` selectors that replaces a supervisor-startup crash, for the `withClassMethod:` factory and `initialize:` it replaces a silent discard, and for `performLocally:` it replaces a raw `badkey`.
 - **Escaping closures** (a block returned or stored by a class method and run after that invocation ended) that read a class variable keep seeing the value captured at creation when they run outside any invocation of their class, as today, and now get a `class-state-abroad` warning saying so; one that writes there raises `class_state_unreachable` where today it is a compile error or a lost write. Run from a later invocation of the same class, such a block is at home: it reads live and its writes take effect, which today's compiler does not allow.
 - **Programs that worked around the old limits** (an unused local added to thread a loop body, `@expect stored_closure`) keep working; the workaround becomes unnecessary and `@expect stored_closure` becomes an unused-expectation warning to remove.
+- **Hand-written Erlang callers of `beamtalk_class_dispatch:class_self_dispatch/4` and `class_self_dispatch_local/4`** keep the arity but not the meaning: the arguments were `(Name, Sel, ClassVars, Args)` and are now `(Name, Sel, Args, ReceiverTag)`. A stale caller fails with `badarg` or `function_clause` rather than `undef`, so the arity gives no warning. Update the call (drop the class-variable map, pass the receiver's metaclass tag, or use the 3-arity forms, which derive it) and read class variables through `beamtalk_class_vars`.
 - **Hot upgrades** across the release that changes the calling convention are not supported: the node restarts, and every package is recompiled. A module from an older compiler is refused at load with an `abi_mismatch` error that names it.
 
 ## Open Questions
@@ -492,7 +493,9 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 
 **Epic:** BT-3701
 **Issues:** BT-3702, BT-3703 (Phase 0); BT-3704, BT-3705 (Phase 1); BT-3706, BT-3707, BT-3708 (Phase 2); BT-3709, BT-3710, BT-3711, BT-3712, BT-3713 (Phase 3); BT-3714, BT-3715 (Phase 4)
-**Status:** Planned
+**Status:** Done (Phases 0 to 3: PR #4169; Phase 4 docs sweep: BT-3714)
+
+Follow-ups: BT-3716 and BT-3717 (`class-state-abroad` lint false negatives), BT-3719 (class-variable key bound once per method; gate 3 and hierarchy-walk perf), BT-3728 (Phase 2 `protect/1` catch audit).
 
 ## References
 

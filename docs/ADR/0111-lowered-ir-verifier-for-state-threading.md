@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-08-11)
 
+> **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06).** The `ClassVars` storage family is removed from `ThreadedIr`: class variables are written in place in the class process, so there is nothing to thread, and `VersionPrefix::ClassVars`, the `ClassVars` loop and fold slots, `ShadowWriteMissing` and the shadow-write flag on `Bind` are deleted. The `State` and `SelfVt` families, non-local return and the verifier are unchanged. `ThreadedStmt::OnDoCatch` is the one node that carries class-variable semantics now, and `verify()` reports `VerifyError::CatchWithoutClassVarRestore` for a catch whose non-NLR arm does not begin with `restore/1` (both `$bt_nlr` arms first). The addenda below describe `ClassVars` threading and the ADR 0110 shadow write as history.
+
 ## Implementation Tracking
 
 **Epic:** [BT-3128](https://linear.app/beamtalk/issue/BT-3128) — Lowered IR + Verifier for State Threading (ADR 0111)

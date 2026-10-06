@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-09-16)
 
+> **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06).** The `ClassVars` family and its slot (the `[State, ClassVars]` canonical order, the `ClassVars` loop parameter, the `{Acc, ClassVars}` fold accumulator and the three `ClassVars`-only `LoopMode` side channels) were removed. The slot family generalization keeps `State` and `SelfVt`; the shape this ADR describes for a `ClassVars` slot, and the sixth gap's `ClassVars` repro, no longer exist in the code.
+
 ## Context
 
 Three storage families get threaded through control-flow constructs: Actor
