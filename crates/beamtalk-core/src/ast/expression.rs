@@ -52,6 +52,10 @@ pub enum ExpectCategory {
     /// Suppress sendability advisories — scoped handle crossing a process
     /// boundary or undeclared handle-wrapping class (ADR 0103).
     Sendability,
+    /// Suppress class-state-abroad warnings — a block literal that touches
+    /// its home class's variables used where it runs outside an invocation of
+    /// that class (ADR 0130 §5).
+    ClassStateAbroad,
     /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
     /// advisory it suppressed no longer exists, so nothing produces a matching
     /// diagnostic. The name is still accepted so existing
@@ -83,6 +87,7 @@ impl ExpectCategory {
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
+            "class_state_abroad" => Some(Self::ClassStateAbroad),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
@@ -108,6 +113,7 @@ impl ExpectCategory {
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
+            Self::ClassStateAbroad => "class_state_abroad",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
@@ -133,6 +139,7 @@ impl ExpectCategory {
             "type_annotation",
             "inheritance",
             "sendability",
+            "class_state_abroad",
             "all",
         ]
     }

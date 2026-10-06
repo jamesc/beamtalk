@@ -21,7 +21,9 @@ Object subclass: CvsOverrideBase
 
   class makeBumper => [self bump]
 
-  class makeReader => [self.n]
+  class makeReader =>
+    @expect class_state_abroad "BT-3712: the returned block reads the captured value outside the class"
+    [self.n]
 
   class run: aBlock => aBlock value
 
@@ -193,6 +195,7 @@ Object subclass: CvsOverrideBase
 
   class rowStoredReadWithin =>
     self reset
+    @expect class_state_abroad "BT-3712: a stored block is flagged even when run within the invocation"
     b := [self.n]
     self bump
     b value
@@ -204,6 +207,7 @@ Object subclass: CvsOverrideBase
 
   class rowSyncWriteOpenDriver =>
     self reset
+    @expect class_state_abroad "BT-3712: the block writes in CvsDriver's process"
     CvsDriver each: [self bump]
     self.n
 
@@ -220,6 +224,7 @@ Object subclass: CvsOverrideBase
   class rowAsyncRead =>
     self reset
     a := CvsActor spawn
+    @expect class_state_abroad "BT-3712: the actor runs the block later with the captured value"
     a keep: [self.n]
     self bump
     a run

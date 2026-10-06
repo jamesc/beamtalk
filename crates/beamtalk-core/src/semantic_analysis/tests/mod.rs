@@ -8,6 +8,7 @@
 //!
 //! - [`analyser_core_and_block_context`] — core `Analyser` fundamentals
 //!   and block-context classification
+//! - [`class_state_abroad`] — ADR 0130 §5 `class-state-abroad` lint (BT-3712)
 //! - [`match_arm_analysis`] — `match:` arm pattern binding and scoping
 //! - [`class_hierarchy_and_method_validators`] — `ClassHierarchy` and
 //!   reflection-method validator integration
@@ -48,6 +49,7 @@ mod adr0103_handle_scope_and_sendability;
 mod adr0123_shape_version_and_migrations;
 mod analyser_core_and_block_context;
 mod class_hierarchy_and_method_validators;
+mod class_state_abroad;
 mod dead_code_super_and_shadowing;
 mod extension_method_integration;
 mod flattened_provision_diagnostics;
