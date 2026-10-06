@@ -15,7 +15,8 @@ use std::collections::HashMap;
 
 use super::super::CoreErlangGenerator;
 use super::ir::{
-    BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, ThreadedStmt,
+    ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -128,6 +129,34 @@ pub(in crate::core_erlang) enum VerifyError {
     /// No production caller yet — see [`CloseContext`].
     #[allow(dead_code)]
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
+
+    /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch
+    /// boundary, and its [`ThreadedStmt::OnDoCatch`] node does not honour the
+    /// obligation — the non-NLR clause does not begin with
+    /// `beamtalk_class_vars:restore(Snap)`, or it is missing, or the two
+    /// `$bt_nlr` pass-through clauses (3-tuple and actor 4-tuple) are not both
+    /// ordered before it. This is wrong-value Core Erlang, not an unbound
+    /// variable: an error keeps the writes made inside the protected region,
+    /// or a `^` throw discards writes it must keep. See [`CatchRestoreDefect`].
+    CatchWithoutClassVarRestore {
+        defect: CatchRestoreDefect,
+        at: Span,
+    },
+}
+
+/// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
+/// ([`VerifyError::CatchWithoutClassVarRestore`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchRestoreDefect {
+    /// There is no non-NLR clause at all.
+    NoNonNlrClause,
+    /// The non-NLR clause does not begin with the class-variable restore.
+    RestoreNotFirst,
+    /// The restore reads a variable other than the node's snapshot variable.
+    RestoreReadsWrongSnapshot,
+    /// An NLR pass-through shape is missing before the non-NLR clause (it is
+    /// absent, or ordered after it): a `^` of that shape would be restored.
+    NlrArmNotBeforeRestore(NlrThrowShape),
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -223,7 +252,8 @@ fn collect_producer_consumer_counts(
             }
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Return(..)
-            | ThreadedStmt::Statement(..) => {}
+            | ThreadedStmt::Statement(..)
+            | ThreadedStmt::OnDoCatch { .. } => {}
         }
     }
 }
@@ -343,6 +373,16 @@ impl VerifyWalk<'_> {
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
             ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
+            ThreadedStmt::OnDoCatch {
+                vars,
+                clauses,
+                span,
+            } => {
+                if let Some(defect) = check_catch_restore(vars, clauses) {
+                    self.errors
+                        .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
+                }
+            }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
                 if let ValueRef::Version(v) = value {
@@ -381,6 +421,40 @@ impl VerifyWalk<'_> {
                 // consumer of a prior version.
             }
         }
+    }
+}
+
+/// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:
+/// the first defect found, or `None` when the non-NLR clause begins with the
+/// restore of the node's own snapshot and both NLR pass-through shapes are
+/// ordered before it.
+fn check_catch_restore(
+    vars: &OnDoCatchVars,
+    clauses: &[CatchClause],
+) -> Option<CatchRestoreDefect> {
+    let Some(non_nlr_at) = clauses
+        .iter()
+        .position(|c| matches!(c, CatchClause::NonNlr { .. }))
+    else {
+        return Some(CatchRestoreDefect::NoNonNlrClause);
+    };
+    for shape in [NlrThrowShape::Tuple3, NlrThrowShape::Tuple4] {
+        let before = clauses[..non_nlr_at]
+            .iter()
+            .any(|c| matches!(c, CatchClause::NlrPassThrough(s) if *s == shape));
+        if !before {
+            return Some(CatchRestoreDefect::NlrArmNotBeforeRestore(shape));
+        }
+    }
+    let CatchClause::NonNlr { steps } = &clauses[non_nlr_at] else {
+        return Some(CatchRestoreDefect::NoNonNlrClause);
+    };
+    match steps.first() {
+        Some(CatchStep::ClassVarRestore { snapshot }) if *snapshot == vars.snapshot_var => None,
+        Some(CatchStep::ClassVarRestore { .. }) => {
+            Some(CatchRestoreDefect::RestoreReadsWrongSnapshot)
+        }
+        _ => Some(CatchRestoreDefect::RestoreNotFirst),
     }
 }
 

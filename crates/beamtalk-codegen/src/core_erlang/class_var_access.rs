@@ -26,6 +26,8 @@ use super::class_var_keys;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
+use beamtalk_core::ast::well_known::WellKnownSelector;
+use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector};
 
 impl CoreErlangGenerator {
     /// `call 'beamtalk_class_vars':'<function>'(ClassSelf, <args>..)`.
@@ -45,6 +47,173 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str(")"));
         Document::Vec(parts)
+    }
+
+    /// The miss-path helper call of a *read* (`get`, `get_late`, `has`): the
+    /// 2-arity form at method level, the 3-arity captured-fallback form
+    /// (ADR 0130 §5) inside a block literal that bound a capture, so a block
+    /// carried to another process answers the values its class variables had
+    /// when it was created. Writes never take a capture (`put`/`clear`).
+    pub(super) fn class_var_read_helper_call_doc(
+        &self,
+        function: &str,
+        mut args: Vec<Document<'static>>,
+    ) -> Document<'static> {
+        if let Some(capture) = &self.class_var_capture {
+            args.push(leaf::var(capture.clone()));
+        }
+        Self::class_var_helper_call_doc(function, args)
+    }
+
+    /// `let Snap = call 'beamtalk_class_vars':'snapshot'() in ` — the catch
+    /// boundary's entry half (ADR 0130 §4), emitted before every compiled
+    /// `on:do:`'s `try`.
+    pub(super) fn class_var_snapshot_let_doc(snapshot_var: &str) -> Document<'static> {
+        docvec![
+            "let ",
+            leaf::var(snapshot_var.to_string()),
+            " = call 'beamtalk_class_vars':'snapshot'() in "
+        ]
+    }
+
+    /// `do call 'beamtalk_class_vars':'restore'(Snap) ` — the catch boundary's
+    /// exit half (ADR 0130 §4), the first statement of a catch's non-NLR arm.
+    pub(super) fn class_var_restore_doc(snapshot_var: &str) -> Document<'static> {
+        docvec![
+            "do call 'beamtalk_class_vars':'restore'(",
+            leaf::var(snapshot_var.to_string()),
+            ") "
+        ]
+    }
+
+    /// `let CVCapture = call 'beamtalk_class_vars':'capture'(ClassSelf, Outer) in `
+    /// — the block-creation capture (ADR 0130 §5); `outer` is the enclosing
+    /// block's capture variable, or `'none'` at method level.
+    pub(super) fn class_var_capture_let_doc(
+        capture_var: &str,
+        outer: Option<&str>,
+    ) -> Document<'static> {
+        docvec![
+            "let ",
+            leaf::var(capture_var.to_string()),
+            " = call 'beamtalk_class_vars':'capture'(ClassSelf, ",
+            match outer {
+                Some(var) => leaf::var(var.to_string()),
+                None => leaf::atom("none"),
+            },
+            ") in "
+        ]
+    }
+
+    /// `self` as the receiver of a class-side access.
+    fn is_self_receiver(expr: &Expression) -> bool {
+        matches!(expr, Expression::Identifier(id) if id.name == "self")
+    }
+
+    /// THE predicate for "`receiver.field` lowers to a class-variable read":
+    /// in a class method, `self.<declared class variable>`. Both the lowering
+    /// (`generate_field_access`) and the capture walker
+    /// ([`Self::block_reads_class_var`]) call it, so a block binds a capture
+    /// exactly when something inside it lowers to a read.
+    pub(super) fn is_class_var_field_read(
+        &self,
+        receiver: &Expression,
+        field: &Identifier,
+    ) -> bool {
+        self.in_class_method()
+            && Self::is_self_receiver(receiver)
+            && self.class_var_names().contains(field.name.as_str())
+    }
+
+    /// THE predicate for "`receiver hasField: ...` lowers to
+    /// `beamtalk_class_vars:has`": in a class method, a `self` receiver. The
+    /// `HasField` intrinsic and the capture walker both call it.
+    pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
+        self.in_class_method() && Self::is_self_receiver(receiver)
+    }
+
+    /// Whether `block` (including every nested block literal) reads a class
+    /// variable of the class being compiled: a node for which
+    /// [`Self::is_class_var_field_read`] holds (outside an assignment target),
+    /// or a `hasField:` send for which [`Self::is_class_var_has_field`] holds,
+    /// as a plain send or as a cascade message. A write-only block reads
+    /// nothing and binds no capture ("blocks that read no class variable bind
+    /// nothing").
+    pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
+        let is_has_field =
+            |selector: &MessageSelector| selector.well_known() == Some(WellKnownSelector::HasField);
+        let mut assigned_targets: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
+        let mut found = false;
+        for stmt in &block.body {
+            beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Assignment { target, .. } => {
+                    if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
+                        if Self::is_self_receiver(receiver) {
+                            assigned_targets.push(target.span());
+                        }
+                    }
+                }
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } => {
+                    if self.is_class_var_field_read(receiver, field)
+                        && !assigned_targets.contains(&e.span())
+                    {
+                        found = true;
+                    }
+                }
+                Expression::MessageSend {
+                    receiver, selector, ..
+                } => {
+                    if is_has_field(selector) && self.is_class_var_has_field(receiver) {
+                        found = true;
+                    }
+                }
+                // The walker visits a cascade's receiver and the messages'
+                // arguments, never the messages themselves.
+                Expression::Cascade {
+                    receiver, messages, ..
+                } => {
+                    if self.is_class_var_has_field(receiver)
+                        && messages.iter().any(|m| is_has_field(&m.selector))
+                    {
+                        found = true;
+                    }
+                }
+                _ => {}
+            });
+        }
+        found
+    }
+
+    /// Runs `build_fun` (which generates the `fun` of block literal `block`) inside
+    /// the block's class-variable capture scope and binds the capture around the
+    /// result: `let CVCapture = capture(ClassSelf, Outer) in fun (...) -> ... end`.
+    ///
+    /// The capture is generator state for the whole lexical extent of the
+    /// closure, so every access lowered inside it, in a straight-line statement,
+    /// a conditional arm, a loop or fold body, an `on:do:` arm or a nested
+    /// inlined block alike, takes the same miss-path fallback; a nested closure
+    /// that reads binds its own capture with this one as `Outer`, so a block
+    /// created abroad inherits its parent's. Not in a class method, or for a
+    /// block that reads no class variable, nothing is bound.
+    pub(super) fn with_class_var_capture(
+        &mut self,
+        block: &Block,
+        build_fun: impl FnOnce(&mut Self) -> super::Result<Document<'static>>,
+    ) -> super::Result<Document<'static>> {
+        if !self.in_class_method() || !self.block_reads_class_var(block) {
+            return build_fun(self);
+        }
+        let capture_var = self.fresh_temp_var("CVCapture");
+        let outer = self.class_var_capture.replace(capture_var.clone());
+        let built = build_fun(self);
+        self.class_var_capture.clone_from(&outer);
+        let fun = built?;
+        Ok(docvec![
+            Self::class_var_capture_let_doc(&capture_var, outer.as_deref()),
+            fun
+        ])
     }
 
     /// Read of class variable `name`: the inlined hit path, the helper otherwise.
@@ -78,7 +247,7 @@ impl CoreErlangGenerator {
         } else {
             ("get", Document::Str("'true'"))
         };
-        let fallback = || Self::class_var_helper_call_doc(function, vec![leaf::atom(name)]);
+        let fallback = || self.class_var_read_helper_call_doc(function, vec![leaf::atom(name)]);
         docvec![
             "case call 'erlang':'get'(",
             class_var_keys::key_doc("ClassSelf"),

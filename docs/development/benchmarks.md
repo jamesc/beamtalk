@@ -1147,3 +1147,29 @@ new cases print, kept as a reference for the Phase 3 re-run, not as gate evidenc
 |---|---|---|
 | `class_var_10r_3w_loop` | 203 | 282, 294 |
 | `instance_on_do_loop` | 2500 | 2434, 2468, 2618 |
+
+### Phase 3 re-measure of gate 4 with the real lowering (BT-3711)
+
+Only gate 4 was re-measured here (the other gates belong to BT-3709's lowering). The compiler now emits
+`let Snap = beamtalk_class_vars:snapshot() in` before every `on:do:`'s `try` and `do
+beamtalk_class_vars:restore(Snap)` as the first statement of the non-NLR catch arm, as helper calls (gate 4 chose
+helpers). Case: `SsbOnDoObject run:` (`runtime/perf/self_send_bench`, `[i + 1] on: Error do: [:e | 0]` in a
+`1 to: n do:` loop, outside any class invocation, so `snapshot/0` answers `none`).
+
+Method: the bench package was built with the BT-3711 compiler; its `ssb_on_do_object.core` is the "instrumented"
+side, and the "today" side is the same `.core` with exactly the two inserted expressions removed. That is what
+`origin/adr-0130` emits for this module: the corpus `.core` diff of the whole stdlib + test corpus against
+`origin/adr-0130` is, after removing the snapshot, restore and capture insertions and renumbering temporaries,
+empty. Both sides were compiled with `erlc +from_core` under different module names and timed in one `erl`
+process (runtime and stdlib applications started), 200,000 iterations after 1,000 warmup, 15 interleaved rounds
+(plain, instrumented, plain, ...) per run, three runs. 4-core VM, load average under 1 at the start of each run.
+
+| run | today (plain) | BT-3711 (snapshot + restore arm) | delta |
+|---|---|---|---|
+| 1 | 2300 [2208-2544] | 2330 [2155-2632] | +1.3% |
+| 2 | 2400 [2140-2982] | 2338 [2181-3221] | -2.6% |
+| 3 | 2327 [2120-2853] | 2329 [2200-2661] | +0.1% |
+
+Medians in ns/op with min-max. **Gate 4 passes**: within 10% (and within the noise of the run-to-run spread).
+Not measured here: the restore arm taken (an error crossing a catch), and the end-to-end `SsbMain` run through
+`beamtalk run`.

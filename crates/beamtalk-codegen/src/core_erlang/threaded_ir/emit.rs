@@ -8,8 +8,8 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, FrameId, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    AccParam, BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
+    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -232,9 +232,117 @@ pub(in crate::core_erlang) fn render(
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
             ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
+            ThreadedStmt::OnDoCatch { vars, clauses, .. } => {
+                docs.push(render_on_do_catch(vars, clauses));
+            }
         }
     }
     Document::Vec(docs)
+}
+
+/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`]: the open-ended
+/// `catch <Type, Error, Stack> -> case {Type, Error} of ...` fragment up to and
+/// including the `<'true'> when 'true' ->` arm of the exception-class filter.
+/// The caller appends the handler body, the `<'false'>` re-raise arm and the
+/// closing `end end`.
+///
+/// Clause order is the node's: both `$bt_nlr` pass-through arms re-raise
+/// untouched; the non-NLR arm runs its steps in order, the class-variable
+/// restore first (ADR 0130 §4), so every exception that is not a `^` discards
+/// the protected region's writes before the filter runs.
+fn render_on_do_catch(vars: &OnDoCatchVars, clauses: &[CatchClause]) -> Document<'static> {
+    let raise = || {
+        CoreErlangGenerator::emit_raw_raise(
+            vars.type_var.clone(),
+            vars.error_var.clone(),
+            vars.stack_var.clone(),
+        )
+    };
+    let mut docs: Vec<Document<'static>> = vec![docvec![
+        "catch <",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        ", ",
+        leaf::var(vars.stack_var.clone()),
+        "> -> case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of ",
+    ]];
+    for clause in clauses {
+        match clause {
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple4) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_state_var.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple3) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var2.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var2.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NonNlr { steps } => {
+                docs.push(docvec![
+                    "<",
+                    leaf::var(vars.other_pair_var.clone()),
+                    "> when 'true' -> "
+                ]);
+                for step in steps {
+                    docs.push(render_catch_step(vars, step));
+                }
+            }
+        }
+    }
+    Document::Vec(docs)
+}
+
+fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
+    match step {
+        CatchStep::ClassVarRestore { snapshot } => {
+            CoreErlangGenerator::class_var_restore_doc(snapshot)
+        }
+        CatchStep::WrapException => docvec![
+            "let ",
+            leaf::var(vars.built_stack_var.clone()),
+            " = primop 'build_stacktrace'(",
+            leaf::var(vars.stack_var.clone()),
+            ") in ",
+            "let ",
+            leaf::var(vars.ex_obj_var.clone()),
+            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
+            leaf::var(vars.type_var.clone()),
+            ", ",
+            leaf::var(vars.error_var.clone()),
+            ", ",
+            leaf::var(vars.built_stack_var.clone()),
+            ") in ",
+        ],
+        CatchStep::ClassFilter => docvec![
+            "let ",
+            leaf::var(vars.match_var.clone()),
+            " = call 'beamtalk_exception_handler':'matches_class'(",
+            leaf::var(vars.ex_class_var.clone()),
+            ", ",
+            leaf::var(vars.ex_obj_var.clone()),
+            ") in ",
+            "case ",
+            leaf::var(vars.match_var.clone()),
+            " of ",
+            "<'true'> when 'true' -> ",
+        ],
+    }
 }
 
 /// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real

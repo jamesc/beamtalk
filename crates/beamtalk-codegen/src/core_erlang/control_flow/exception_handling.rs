@@ -52,7 +52,8 @@ use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
 use super::super::threaded_ir::{
-    BindOp, FrameId, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RenderCtx,
+    ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -361,96 +362,91 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the NLR-passthrough catch clause preamble shared by both
-    /// `generate_on_do` and `generate_on_do_with_mutations`.
+    /// The snapshot variable of the `on:do:` whose exception-class variable is
+    /// `ex_class_var`: that (already unique) name with a `Snap` suffix, derived
+    /// without minting from the module counter (see `fresh_on_do_catch_vars`).
+    fn derived_snapshot_var(ex_class_var: &str) -> String {
+        [ex_class_var, "Snap"].concat()
+    }
+
+    /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause,
+    /// plus the class-variable snapshot variable bound before its `try`.
+    /// `ex_class_var` is the variable holding the exception class.
+    fn fresh_on_do_catch_vars(&mut self, ex_class_var: String) -> OnDoCatchVars {
+        OnDoCatchVars {
+            type_var: self.fresh_temp_var("Type"),
+            error_var: self.fresh_temp_var("Error"),
+            stack_var: self.fresh_temp_var("Stack"),
+            built_stack_var: self.fresh_temp_var("BuiltStack"),
+            ex_obj_var: self.fresh_temp_var("ExObj"),
+            match_var: self.fresh_temp_var("Match"),
+            // Unique names for the NLR pattern variables (no anonymous `_` in
+            // Core Erlang). Actor NLR throws include state as a 4th element.
+            nlr_tok_var: self.fresh_temp_var("NlrCheckTok"),
+            nlr_val_var: self.fresh_temp_var("NlrCheckVal"),
+            nlr_state_var: self.fresh_temp_var("NlrCheckState"),
+            nlr_tok_var2: self.fresh_temp_var("NlrCheckTok"),
+            nlr_val_var2: self.fresh_temp_var("NlrCheckVal"),
+            // Fallback pattern: ONE variable binding the whole 2-tuple (not
+            // two separate elements).
+            other_pair_var: self.fresh_temp_var("OtherPair"),
+            // Derived from the (already unique) exception-class variable, not
+            // minted from the module counter: the snapshot binding then
+            // renumbers none of the module's other temporaries.
+            snapshot_var: Self::derived_snapshot_var(&ex_class_var),
+            ex_class_var,
+        }
+    }
+
+    /// Generates the catch clause shared by every compiled `on:do:`
+    /// (`generate_on_do`, `generate_on_do_with_mutations`,
+    /// `generate_on_do_tier1_try`): the single owner of the catch boundary
+    /// (ADR 0130 §4), built as a [`ThreadedStmt::OnDoCatch`] node,
+    /// [`threaded_ir::verify`]d (a violated obligation is a
+    /// `VerifyError::CatchWithoutClassVarRestore`) and rendered.
     ///
-    /// Produces an open-ended fragment; caller appends the `<'true'>` branch
-    /// body, the `<'false'>` re-raise arm, and the closing `end end`.
+    /// Produces an open-ended fragment; caller appends the handler body, the
+    /// `<'false'>` re-raise arm, and the closing `end end`. The node orders the
+    /// clauses: NLR throws (`{'$bt_nlr', ...}`, both the actor-shaped 4-tuple
+    /// and the 3-tuple) bypass the catch untouched so the enclosing method's NLR
+    /// handler can intercept them and a `^` keeps the writes made before it;
+    /// every other exception then restores the class variables to the
+    /// `snapshot_var` the caller bound before the `try`
+    /// ([`Self::class_var_snapshot_let_doc`]) and only then wraps the exception
+    /// and runs the class filter.
     ///
-    /// NLR throws (`{'$bt_nlr', ...}`) must bypass
-    /// on:do: so the enclosing method's NLR handler can intercept them.
-    #[allow(clippy::too_many_arguments)]
-    fn on_do_catch_preamble(
-        type_var: &str,
-        error_var: &str,
-        stack_var: String,
-        nlr_tok_var: String,
-        nlr_val_var: String,
-        nlr_state_var: String,
-        nlr_tok_var2: String,
-        nlr_val_var2: String,
-        other_pair_var: String,
-        built_stack_var: String,
-        ex_obj_var: String,
-        match_var: String,
-        ex_class_var: String,
+    /// Every context gets the same obligation: with no live class invocation in
+    /// the process `snapshot/0` answers `none` and `restore/1` is a no-op, so
+    /// nothing here depends on the method context.
+    fn on_do_catch_clause(
+        &mut self,
+        vars: OnDoCatchVars,
+        span: beamtalk_core::source_analysis::Span,
     ) -> Document<'static> {
-        docvec![
-            "catch <",
-            leaf::var(type_var.to_string()),
-            ", ",
-            leaf::var(error_var.to_string()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> ",
-            "case {",
-            leaf::var(type_var.to_string()),
-            ", ",
-            leaf::var(error_var.to_string()),
-            "} of ",
-            "<{'throw', {'$bt_nlr', ",
-            leaf::var(nlr_tok_var),
-            ", ",
-            leaf::var(nlr_val_var),
-            ", ",
-            leaf::var(nlr_state_var),
-            "}}> when 'true' -> ",
-            Self::emit_raw_raise(
-                type_var.to_string(),
-                error_var.to_string(),
-                stack_var.clone(),
-            ),
-            " ",
-            "<{'throw', {'$bt_nlr', ",
-            leaf::var(nlr_tok_var2),
-            ", ",
-            leaf::var(nlr_val_var2),
-            "}}> when 'true' -> ",
-            Self::emit_raw_raise(
-                type_var.to_string(),
-                error_var.to_string(),
-                stack_var.clone(),
-            ),
-            " ",
-            "<",
-            leaf::var(other_pair_var),
-            "> when 'true' -> ",
-            "let ",
-            leaf::var(built_stack_var.clone()),
-            " = primop 'build_stacktrace'(",
-            leaf::var(stack_var),
-            ") in ",
-            "let ",
-            leaf::var(ex_obj_var.clone()),
-            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
-            leaf::var(type_var.to_string()),
-            ", ",
-            leaf::var(error_var.to_string()),
-            ", ",
-            leaf::var(built_stack_var),
-            ") in ",
-            "let ",
-            leaf::var(match_var.clone()),
-            " = call 'beamtalk_exception_handler':'matches_class'(",
-            leaf::var(ex_class_var),
-            ", ",
-            leaf::var(ex_obj_var),
-            ") in ",
-            "case ",
-            leaf::var(match_var),
-            " of ",
-            "<'true'> when 'true' -> ",
-        ]
+        let snapshot = vars.snapshot_var.clone();
+        let node = ThreadedStmt::OnDoCatch {
+            vars: Box::new(vars),
+            clauses: vec![
+                CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
+                CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
+                CatchClause::NonNlr {
+                    steps: vec![
+                        CatchStep::ClassVarRestore { snapshot },
+                        CatchStep::WrapException,
+                        CatchStep::ClassFilter,
+                    ],
+                },
+            ],
+            span,
+        };
+        let ir = [node];
+        let errors = threaded_ir::verify(&ir);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "on:do: class-variable catch boundary",
+            span,
+        );
+        threaded_ir::render(&ir, &mut RenderCtx::new(self))
     }
 
     /// Builds the `apply HandlerFun (ExObj)` or `apply HandlerFun ()` fragment
@@ -541,12 +537,12 @@ impl CoreErlangGenerator {
         let ex_class_var = self.fresh_temp_var("ExClass");
         let handler_var = self.fresh_temp_var("HandlerFun");
         let result_var = self.fresh_temp_var("Result");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-        let built_stack_var = self.fresh_temp_var("BuiltStack");
-        let ex_obj_var = self.fresh_temp_var("ExObj");
-        let match_var = self.fresh_temp_var("Match");
+        let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        let type_var = catch_vars.type_var.clone();
+        let error_var = catch_vars.error_var.clone();
+        let stack_var = catch_vars.stack_var.clone();
+        let ex_obj_var = catch_vars.ex_obj_var.clone();
+        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // Capture expression outputs (ADR 0018 bridge pattern)
         let receiver_code = self.expression_doc(receiver)?;
@@ -554,18 +550,8 @@ impl CoreErlangGenerator {
         let handler_code = self.expression_doc(handler)?;
 
         let handler_apply =
-            Self::make_handler_apply(handler_var.clone(), ex_obj_var.clone(), handler_takes_arg);
-
-        // Fresh variable names for the NLR pattern guard (Core Erlang
-        // does not support anonymous `_` wildcards — each must be unique).
-        let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
-        // Actor NLR throws include state as a 4th element.
-        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
-        let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
-        // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
-        let other_pair_var = self.fresh_temp_var("OtherPair");
+            Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
+        let catch_clause = self.on_do_catch_clause(catch_vars, receiver.span());
 
         Ok(docvec![
             "let ",
@@ -580,7 +566,9 @@ impl CoreErlangGenerator {
             leaf::var(handler_var),
             " = ",
             handler_code,
-            " in try apply ",
+            " in ",
+            Self::class_var_snapshot_let_doc(&snapshot_var),
+            "try apply ",
             leaf::var(block_var),
             " () ",
             "of ",
@@ -588,21 +576,7 @@ impl CoreErlangGenerator {
             " -> ",
             leaf::var(result_var),
             " ",
-            Self::on_do_catch_preamble(
-                &type_var,
-                &error_var,
-                stack_var.clone(),
-                nlr_tok_var,
-                nlr_val_var,
-                nlr_state_var,
-                nlr_tok_var2,
-                nlr_val_var2,
-                other_pair_var,
-                built_stack_var,
-                ex_obj_var,
-                match_var,
-                ex_class_var,
-            ),
+            catch_clause,
             handler_apply,
             " ",
             "<'false'> when 'true' -> ",
@@ -680,22 +654,13 @@ impl CoreErlangGenerator {
         }
 
         let ex_class_var = self.fresh_temp_var("ExClass");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-        let built_stack_var = self.fresh_temp_var("BuiltStack");
-        let ex_obj_var = self.fresh_temp_var("ExObj");
-        let match_var = self.fresh_temp_var("Match");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
-        // Unique names for NLR pattern variables (no anonymous _ in Core Erlang).
-        let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
-        // Actor NLR throws include state as a 4th element.
-        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
-        let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
-        // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
-        let other_pair_var = self.fresh_temp_var("OtherPair");
+        let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        let type_var = catch_vars.type_var.clone();
+        let error_var = catch_vars.error_var.clone();
+        let stack_var = catch_vars.stack_var.clone();
+        let ex_obj_var = catch_vars.ex_obj_var.clone();
+        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
@@ -738,7 +703,9 @@ impl CoreErlangGenerator {
             seed_doc,
             "let StateAcc = ",
             leaf::var(base_state),
-            " in try ",
+            " in ",
+            Self::class_var_snapshot_let_doc(&snapshot_var),
+            "try ",
         ]];
 
         // Generate try body (receiver block) with state threading
@@ -746,7 +713,7 @@ impl CoreErlangGenerator {
             self.push_exception_arm(&mut docs, receiver_block, &families, outer_version)?;
         // Return {Result, State[, Family]} from try body
         // Success: pass the tuple through + catch clause with NLR passthrough.
-        // NLR re-raise via on_do_catch_preamble (see generate_on_do).
+        // NLR re-raise via on_do_catch_clause (see generate_on_do).
         docs.push(self.close_exception_result_tuple(
             try_result_var,
             try_final,
@@ -759,21 +726,7 @@ impl CoreErlangGenerator {
             " -> ",
             leaf::var(state_after_try),
             " ",
-            Self::on_do_catch_preamble(
-                &type_var,
-                &error_var,
-                stack_var.clone(),
-                nlr_tok_var,
-                nlr_val_var,
-                nlr_state_var,
-                nlr_tok_var2,
-                nlr_val_var2,
-                other_pair_var,
-                built_stack_var,
-                ex_obj_var.clone(),
-                match_var,
-                ex_class_var,
-            ),
+            self.on_do_catch_clause(catch_vars, receiver_block.span),
         ]);
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
         self.push_scope();
@@ -1097,7 +1050,7 @@ impl CoreErlangGenerator {
     /// Builds the Tier 1 (pure protected block) `try`/`catch` body for
     /// `generate_on_do_structural_fallback` — factored out to keep that
     /// function under clippy's line-count limit. Reuses
-    /// `on_do_catch_preamble`'s NLR-passthrough + `matches_class` structure;
+    /// `on_do_catch_clause`'s NLR-passthrough + `matches_class` structure;
     /// only the handler's tier (arity 0 = pure 0-arg, arity 1 = pure 1-arg,
     /// anything else = stateful) is discriminated dynamically here, since it
     /// isn't known statically the way `generate_on_do` knows it from the
@@ -1110,22 +1063,12 @@ impl CoreErlangGenerator {
         class_name: &str,
     ) -> Document<'static> {
         let result_var = self.fresh_temp_var("Result");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-        let built_stack_var = self.fresh_temp_var("BuiltStack");
-        let ex_obj_var = self.fresh_temp_var("ExObj");
-        let match_var = self.fresh_temp_var("Match");
-        // Two NLR throw shapes `on_do_catch_preamble` matches against: the
-        // 4-tuple actor-NLR-with-state variant and the plain 3-tuple
-        // variant — not nesting levels, hence the `_with_state`/
-        // `_no_state` naming rather than a generic numeric suffix.
-        let nlr_tok_with_state_var = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_with_state_var = self.fresh_temp_var("NlrCheckVal");
-        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
-        let nlr_tok_no_state_var = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_no_state_var = self.fresh_temp_var("NlrCheckVal");
-        let other_pair_var = self.fresh_temp_var("OtherPair");
+        let catch_vars = self.fresh_on_do_catch_vars(ex_class_param);
+        let type_var = catch_vars.type_var.clone();
+        let error_var = catch_vars.error_var.clone();
+        let stack_var = catch_vars.stack_var.clone();
+        let ex_obj_var = catch_vars.ex_obj_var.clone();
+        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // arity 1 is ambiguous between a pure 1-arg handler and a stateful
         // 0-arg handler — same documented ambiguity as Block's blockValue*
@@ -1151,23 +1094,12 @@ impl CoreErlangGenerator {
             " end end",
         ];
 
-        let catch_preamble = Self::on_do_catch_preamble(
-            &type_var,
-            &error_var,
-            stack_var.clone(),
-            nlr_tok_with_state_var,
-            nlr_val_with_state_var,
-            nlr_state_var,
-            nlr_tok_no_state_var,
-            nlr_val_no_state_var,
-            other_pair_var,
-            built_stack_var,
-            ex_obj_var,
-            match_var,
-            ex_class_param,
-        );
+        // No source span: this is the generically-dispatched `onDo` body.
+        let catch_preamble =
+            self.on_do_catch_clause(catch_vars, beamtalk_core::source_analysis::Span::default());
 
         docvec![
+            Self::class_var_snapshot_let_doc(&snapshot_var),
             "try apply ",
             Document::Str(self_var),
             " () of ",
@@ -1189,7 +1121,7 @@ impl CoreErlangGenerator {
     /// `generate_block_value_structural_fallback` for the general
     /// Tier 1/Tier 2 discrimination rationale.
     ///
-    /// Reuses `on_do_catch_preamble`'s NLR-passthrough + `matches_class`
+    /// Reuses `on_do_catch_clause`'s NLR-passthrough + `matches_class`
     /// structure so the Tier 1 (pure) case stays behaviourally identical to
     /// the AST-driven `generate_on_do` — only the receiver/handler *tier*
     /// discrimination differs, since a generically dispatched handler's
@@ -1835,7 +1767,7 @@ Actor subclass: Foo
     fn test_on_do_with_state_mutation_in_handler_uses_threading() {
         // Handler block mutates actor field — triggers generate_on_do_with_mutations,
         // which inlines block bodies with StateAcc threading instead of wrapping as
-        // closures. Also exercises on_do_catch_preamble and
+        // closures. Also exercises on_do_catch_clause and
         // generate_exception_body_with_threading.
         let src = "\
 Actor subclass: Srv

@@ -2419,6 +2419,10 @@ impl CoreErlangGenerator {
         // on every exit path below.
         let saved_block_depth = self.block_depth;
         self.block_depth = 0;
+        // Likewise the fun is a method's own top frame (home by construction),
+        // not a block literal: it takes no enclosing block's class-variable
+        // capture (ADR 0130 §5).
+        let saved_class_var_capture = self.class_var_capture.take();
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -2463,6 +2467,7 @@ impl CoreErlangGenerator {
                 Ok(doc) => doc,
                 Err(e) => {
                     self.block_depth = saved_block_depth;
+                    self.class_var_capture = saved_class_var_capture;
                     self.pop_scope();
                     return Err(e);
                 }
@@ -2476,6 +2481,7 @@ impl CoreErlangGenerator {
         ];
 
         self.block_depth = saved_block_depth;
+        self.class_var_capture = saved_class_var_capture;
         self.pop_scope();
         Ok(doc)
     }

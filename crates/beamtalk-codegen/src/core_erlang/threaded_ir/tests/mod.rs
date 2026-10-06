@@ -14,6 +14,7 @@
 //! - [`simple_bind`] — `verify_simple_bind` and
 //!   `verify_body_with_opaque_version_gaps`
 //! - [`dual_run`] — the dual-run byte-parity harness
+//! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
 
 use super::*;
@@ -44,6 +45,7 @@ fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
     render(ir, &mut ctx)
 }
 
+mod catch_boundary;
 mod close_and_value;
 mod dual_run;
 mod lower_and_render_shim;
