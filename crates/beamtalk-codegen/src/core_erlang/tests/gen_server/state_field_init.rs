@@ -64,7 +64,7 @@ fn late_defaultless_slot_skipped_in_own_state_fields() {
 
 /// A subclass with ONLY a late defaultless field produces a `ChildFields`
 /// containing no user-defined state keys — only the mandatory internal
-/// `$bt*` keys (`__class_mod__`, `__shape_version__`).
+/// `__*__` keys (`__class_mod__`, `__shape_version__`).
 #[test]
 fn own_state_fields_empty_when_only_late_defaultless() {
     let src = concat!(
@@ -99,25 +99,28 @@ fn own_state_fields_empty_when_only_late_defaultless() {
 /// This path is documented in state.rs as "Load-bearing for those tests,
 /// not dead code" — for hand-constructed test fixtures that call the method
 /// directly without going through `setup_class_identity`.
+///
+/// Two classes are present so that only the all-classes fallback loop can
+/// produce both fields — a single-class match on either branch would miss one.
 #[test]
 fn fallback_state_fields_emitted_when_class_identity_absent() {
-    // Parse a module whose sole class ("Counter") has a state field.
-    let src = concat!("Actor subclass: Counter\n", "  state: count = 0\n",);
+    // Two classes: "Counter" (count) and "Gauge" (total).
+    // class_name() for "some_other" → "SomeOther", matching neither
+    // → current_class() returns None → fallback loop over all classes.
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: count = 0\n",
+        "Actor subclass: Gauge\n",
+        "  state: total = 0\n",
+    );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
 
-    // A fresh generator for "some_other": class_name() derives to "SomeOther",
-    // which does not match "Counter" → current_class() returns None → fallback.
     let mut generator = CoreErlangGenerator::new("some_other");
 
     let fields = generator
         .generate_initial_state_fields(&module)
         .expect("fallback path should succeed");
-
-    assert!(
-        !fields.is_empty(),
-        "fallback branch should emit at least one field document"
-    );
 
     let text = fields
         .iter()
@@ -126,18 +129,29 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
 
     assert!(
         text.contains("count"),
-        "fallback should emit 'count' from Counter's state. Got: {text:?}"
+        "fallback should emit 'count' from Counter. Got: {text:?}"
+    );
+    assert!(
+        text.contains("total"),
+        "fallback should emit 'total' from Gauge. Got: {text:?}"
     );
 }
 
 /// A late defaultless field is also omitted by the fallback branch — the same
 /// `omit_late_defaultless_slot` guard applies there too.
+///
+/// Two classes ensure the fallback loop (not a single-class branch) ran.
 #[test]
 fn fallback_skips_late_defaultless_slot_too() {
+    // Counter: eager `count` + late defaultless `handle`.
+    // Gauge: eager `total`.
+    // Both classes' eager fields must appear; `handle` must not.
     let src = concat!(
         "Actor subclass: Counter\n",
         "  late state: handle :: Handle\n",
         "  state: count = 0\n",
+        "Actor subclass: Gauge\n",
+        "  state: total = 0\n",
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -156,6 +170,10 @@ fn fallback_skips_late_defaultless_slot_too() {
     assert!(
         text.contains("count"),
         "fallback should emit eager 'count'. Got: {text:?}"
+    );
+    assert!(
+        text.contains("total"),
+        "fallback should emit eager 'total' from Gauge. Got: {text:?}"
     );
     assert!(
         !text.contains("handle"),
