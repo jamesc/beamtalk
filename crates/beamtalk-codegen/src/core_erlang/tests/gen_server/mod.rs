@@ -31,6 +31,8 @@
 //! - [`actor_trap_exit_on_terminate`] — BT-3596: `init/1` `trap_exit` gating
 //!   on an overridden `terminate:` (own + inherited), and `handle_info/2`'s
 //!   linked-`'EXIT'` interception
+//! - [`state_field_init`] — `generate_own_state_fields` late-defaultless skip
+//!   and `generate_initial_state_fields` fallback loop (`gen_server/state.rs`)
 
 use super::*;
 
@@ -96,6 +98,7 @@ mod extensions;
 mod late_field_read;
 mod native_facade;
 mod protocol_and_xref_metadata;
+mod state_field_init;
 mod state_threading_loops;
 mod state_threading_self_dispatch;
 mod tier2_nested_blocks;
