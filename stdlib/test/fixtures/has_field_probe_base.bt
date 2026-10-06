@@ -8,6 +8,7 @@
 // `ClassSelf`; see direct_dispatch_stateless.bt.
 
 Object subclass: HasFieldProbeBase
+
   class probe => self hasField: #n
 
   class probeInBlock => [self hasField: #n] value

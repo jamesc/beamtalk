@@ -25268,7 +25268,7 @@
         "property",
         "subclassing"
       ],
-      "source": "// BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs\n// with the *receiver* class as `ClassSelf`, so a parent without class\n// variables still answers for a subclass that declares one. Only a\n// direct-called method (sealed class, `class sealed` method) has no\n// `ClassSelf`; see direct_dispatch_stateless.bt.\n\nObject subclass: HasFieldProbeBase\n  class probe => self hasField: #n\n\n  class probeInBlock => [self hasField: #n] value",
+      "source": "// BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs\n// with the *receiver* class as `ClassSelf`, so a parent without class\n// variables still answers for a subclass that declares one. Only a\n// direct-called method (sealed class, `class sealed` method) has no\n// `ClassSelf`; see direct_dispatch_stateless.bt.\n\nObject subclass: HasFieldProbeBase\n\n  class probe => self hasField: #n\n\n  class probeInBlock => [self hasField: #n] value",
       "explanation": "BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs with the *receiver* class as `ClassSelf`, so a parent without class variables still answers for a subclass that declares one. Only a direct-called method (sealed class, `class sealed` method) has no `ClassSelf`; see direct_dispatch_stateless.bt."
     },
     {
