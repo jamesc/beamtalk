@@ -106,7 +106,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
 
 /// Compiles `src` and returns the Core Erlang text of the function whose
 /// header starts with `header`, up to the next top-level definition.
-fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
+pub(super) fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
     let start = code
         .find(header)
         .unwrap_or_else(|| panic!("{header} not found in:\n{code}"));

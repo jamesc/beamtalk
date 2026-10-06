@@ -17,7 +17,14 @@
 //!    release build's degraded form of the same failure -- ADR 0130 Open
 //!    Question 2, "verifier visibility in release builds": the property
 //!    treats either as a failure);
-//! 3. the Core Erlang is structurally valid.
+//! 3. the Core Erlang is structurally valid;
+//! 4. every compiled `on:do:` is a class-variable catch boundary (ADR 0130
+//!    §4, BT-3711): a `snapshot/0` immediately before its `try`, and in its
+//!    catch the two `$bt_nlr` pass-through arms, then
+//!    `restore/1` as the first statement of the non-NLR arm. The in-process
+//!    `ThreadedIr` verifier (`CatchWithoutClassVarRestore`) already checks the
+//!    node; this re-checks the emitted text of every generated program, so a
+//!    renderer that dropped the order would fail here too.
 //!
 //! The execution half (compile with `erlc`, run on a BEAM, compare the three
 //! spellings with the reference interpretation) is
@@ -77,13 +84,50 @@ fn check_source(name: &str, source: &str) -> Result<(), String> {
                 return Err(format!("verifier diagnostic surfaced: {}", w.message));
             }
             let issues = core_erlang_structural_issues(&out.code);
-            if issues.is_empty() {
-                Ok(())
-            } else {
-                Err(format!("invalid Core Erlang: {}", issues.join("; ")))
+            if !issues.is_empty() {
+                return Err(format!("invalid Core Erlang: {}", issues.join("; ")));
+            }
+            catch_boundary_issues(&out.code)
+                .map_or(Ok(()), |issue| Err(format!("catch boundary: {issue}")))
+        }
+    }
+}
+
+/// ADR 0130 §4: the first violation of the `on:do:` catch-boundary order in
+/// `code`, or `None`. Each compiled `on:do:` catch is anchored by its
+/// `build_stacktrace` wrap (only `on:do:` emits it).
+fn catch_boundary_issues(code: &str) -> Option<String> {
+    let anchors: Vec<usize> = code
+        .match_indices("primop 'build_stacktrace'(")
+        .map(|(i, _)| i)
+        .collect();
+    let snapshots = code
+        .matches("call 'beamtalk_class_vars':'snapshot'() in try")
+        .count();
+    if snapshots != anchors.len() {
+        return Some(format!(
+            "{} on:do: catches but {snapshots} snapshots before a try",
+            anchors.len()
+        ));
+    }
+    for anchor in anchors {
+        let catch_at = code[..anchor].rfind("catch <")?;
+        let region = &code[catch_at..anchor];
+        let nlr_arms: Vec<usize> = region
+            .match_indices("{'$bt_nlr', ")
+            .map(|(i, _)| i)
+            .collect();
+        let restore = region.find("do call 'beamtalk_class_vars':'restore'(");
+        match (nlr_arms.as_slice(), restore) {
+            ([_, second], Some(restore)) if *second < restore => {}
+            _ => {
+                return Some(format!(
+                    "the restore is not first after both NLR arms: {region}"
+                ));
             }
         }
     }
+    None
 }
 
 fn check_program(index: usize, program: &Program) -> Result<(), String> {

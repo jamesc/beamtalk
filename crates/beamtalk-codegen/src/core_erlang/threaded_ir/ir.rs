@@ -761,6 +761,77 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// opacity) and `exit_arm` (a named, deliberate limitation); a
     /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
+
+    /// ADR 0130 §4: the catch clause of a compiled `on:do:` — the catch
+    /// boundary at which an error discards the class-variable writes made
+    /// inside the protected region. `clauses` is the outer `case {Type,
+    /// Error}` of the catch in emission order: the two `$bt_nlr` pass-through
+    /// arms and the non-NLR arm whose first step is the class-variable
+    /// restore. [`verify`](super::verify::verify) reports
+    /// [`VerifyError::CatchWithoutClassVarRestore`] unless the non-NLR arm
+    /// begins with the restore and both NLR arms precede it, so a `^` crosses
+    /// the catch without touching the map and every other exception restores
+    /// before anything else runs. Built by `exception_handling.rs`'s
+    /// `on_do_catch_clause`, the single owner of every compiled `on:do:`
+    /// catch (class-side, instance-side, direct-called or not).
+    OnDoCatch {
+        vars: Box<OnDoCatchVars>,
+        clauses: Vec<CatchClause>,
+        span: Span,
+    },
+}
+
+/// The Core Erlang variable names an [`ThreadedStmt::OnDoCatch`] clause binds
+/// (no anonymous `_` exists in Core Erlang, so each pattern variable is
+/// unique), plus the `snapshot` variable bound before the `try`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct OnDoCatchVars {
+    pub type_var: String,
+    pub error_var: String,
+    pub stack_var: String,
+    pub nlr_tok_var: String,
+    pub nlr_val_var: String,
+    pub nlr_state_var: String,
+    pub nlr_tok_var2: String,
+    pub nlr_val_var2: String,
+    pub other_pair_var: String,
+    pub built_stack_var: String,
+    pub ex_obj_var: String,
+    pub match_var: String,
+    pub ex_class_var: String,
+    /// The `let Snap = beamtalk_class_vars:snapshot() in` variable the
+    /// restore step reads.
+    pub snapshot_var: String,
+}
+
+/// The two `$bt_nlr` throw shapes a compiled catch passes through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrThrowShape {
+    /// The actor-shaped `{'$bt_nlr', Tok, Val, State}`.
+    Tuple4,
+    /// The plain `{'$bt_nlr', Tok, Val}`.
+    Tuple3,
+}
+
+/// One clause of an [`ThreadedStmt::OnDoCatch`]'s outer `case`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchClause {
+    /// A `^` in flight: re-raised untouched, never restored.
+    NlrPassThrough(NlrThrowShape),
+    /// Every other exception, in step order.
+    NonNlr { steps: Vec<CatchStep> },
+}
+
+/// One step of the non-NLR catch clause, in emission order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchStep {
+    /// `do beamtalk_class_vars:restore(Snap)` — must come first.
+    ClassVarRestore { snapshot: String },
+    /// Wrap the raw `{Type, Error, Stack}` as an exception object.
+    WrapException,
+    /// `matches_class` and the opening of its `'true'` arm; the handler
+    /// body and the `'false'` re-raise follow in the caller's text.
+    ClassFilter,
 }
 
 // ─── ThreadedValue (ADR 0118, Decision 1) ────────────────────────

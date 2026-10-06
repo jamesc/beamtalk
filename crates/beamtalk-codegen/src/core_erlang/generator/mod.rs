@@ -151,6 +151,13 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// ADR 0130 §5: the Core Erlang variable holding the class-variable
+    /// capture of the innermost enclosing block literal that reads a class
+    /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
+    /// `None` at method level and inside blocks that read none. While `Some`,
+    /// every class-variable read's miss path lowers to the 3-arity
+    /// captured-fallback helper with this variable.
+    pub(in crate::core_erlang) class_var_capture: Option<String>,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Source identity of each provision-bearing protocol (ADR 0127 §3);
@@ -371,6 +378,7 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            class_var_capture: None,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
             primitive_bindings: PrimitiveBindingTable::new(),

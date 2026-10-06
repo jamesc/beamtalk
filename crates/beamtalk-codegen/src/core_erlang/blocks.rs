@@ -125,7 +125,16 @@ impl CoreErlangGenerator {
     /// Field writes (`self.x := ...`) and self-sends are handled separately:
     /// - Field writes are threaded via `gen_server` State at the method level (for Tier 2).
     /// - Self-sends are pre-scanned via `generate_tier2_self_send_open`.
+    ///
+    /// ADR 0130 §5: a block literal that reads a class variable binds its
+    /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
+        self.with_class_var_capture(block, |this| this.generate_block_fun(block))
+    }
+
+    /// [`Self::generate_block`] without the class-variable capture binding: the
+    /// `fun` itself, selecting Tier 1 or Tier 2.
+    fn generate_block_fun(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);
 
@@ -161,7 +170,7 @@ impl CoreErlangGenerator {
 
         // Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
-            return self.generate_block_stateful(block, &captured_mutations);
+            return self.generate_block_stateful_fun(block, &captured_mutations);
         }
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
@@ -238,7 +247,21 @@ impl CoreErlangGenerator {
     /// is a live check against this arm's real IR (see the scalar-synthesis
     /// `check_branch_frame_linearity` scaffolding's own doc comment for why
     /// it could not check this before).
+    ///
+    /// ADR 0130 §5: binds the block's class-variable capture around the `fun`
+    /// when it reads a class variable, exactly as [`Self::generate_block`].
     pub(super) fn generate_block_stateful(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        self.with_class_var_capture(block, |this| {
+            this.generate_block_stateful_fun(block, captured_vars)
+        })
+    }
+
+    /// [`Self::generate_block_stateful`] without the capture binding.
+    fn generate_block_stateful_fun(
         &mut self,
         block: &Block,
         captured_vars: &[String],

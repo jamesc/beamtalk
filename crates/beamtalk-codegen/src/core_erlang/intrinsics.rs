@@ -2580,7 +2580,7 @@ impl CoreErlangGenerator {
                                         " = ",
                                         name_code,
                                         " in ",
-                                        Self::class_var_helper_call_doc(
+                                        self.class_var_read_helper_call_doc(
                                             "has",
                                             vec![leaf::var(name_var)],
                                         ),
