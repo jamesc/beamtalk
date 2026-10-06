@@ -111,7 +111,9 @@ fn catch_boundary_issues(code: &str) -> Option<String> {
         ));
     }
     for anchor in anchors {
-        let catch_at = code[..anchor].rfind("catch <")?;
+        let Some(catch_at) = code[..anchor].rfind("catch <") else {
+            return Some("an on:do: wrap with no preceding catch".to_string());
+        };
         let region = &code[catch_at..anchor];
         let nlr_arms: Vec<usize> = region
             .match_indices("{'$bt_nlr', ")
@@ -128,6 +130,26 @@ fn catch_boundary_issues(code: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[test]
+fn catch_boundary_check_reports_malformed_text() {
+    let ok = "let S = call 'beamtalk_class_vars':'snapshot'() in try X catch <T, E, K> -> \
+        case {T, E} of <{'throw', {'$bt_nlr', A, B, C}}> when 'true' -> r \
+        <{'throw', {'$bt_nlr', A, B}}> when 'true' -> r \
+        <O> when 'true' -> do call 'beamtalk_class_vars':'restore'(S) \
+        let U = primop 'build_stacktrace'(K) in U";
+    assert_eq!(catch_boundary_issues(ok), None);
+    // A wrap with no catch before it must be reported, not read as clean.
+    let no_catch = "let S = call 'beamtalk_class_vars':'snapshot'() in try X \
+        let U = primop 'build_stacktrace'(K) in U";
+    assert!(catch_boundary_issues(no_catch).is_some_and(|m| m.contains("no preceding catch")));
+    // Restore ordered before the second NLR arm.
+    let restore_first = ok.replace("<{'throw', {'$bt_nlr', A, B}}> when 'true' -> r <O>", "<O>");
+    assert!(catch_boundary_issues(&restore_first).is_some());
+    // No snapshot before the try.
+    let no_snapshot = ok.replace("let S = call 'beamtalk_class_vars':'snapshot'() in ", "");
+    assert!(catch_boundary_issues(&no_snapshot).is_some());
 }
 
 fn check_program(index: usize, program: &Program) -> Result<(), String> {

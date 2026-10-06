@@ -683,14 +683,12 @@ impl CoreErlangGenerator {
         // ADR 0130 §2: a class method reads a class variable in place from the
         // class process's dictionary (inlined, the runtime helper on a miss).
         if self.in_class_method() {
-            if let Expression::Identifier(recv_id) = receiver {
-                if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
-                    let class_name = self.class_name();
-                    let probe = self.class_var_probe_doc("read", field.name.as_str());
-                    let late = self.is_late_class_var(&class_name, field.name.as_str());
-                    let read = self.class_var_read_doc(field.name.as_str(), late);
-                    return Ok(docvec![probe, read]);
-                }
+            if self.is_class_var_field_read(receiver, field) {
+                let class_name = self.class_name();
+                let probe = self.class_var_probe_doc("read", field.name.as_str());
+                let late = self.is_late_class_var(&class_name, field.name.as_str());
+                let read = self.class_var_read_doc(field.name.as_str(), late);
+                return Ok(docvec![probe, read]);
             }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(

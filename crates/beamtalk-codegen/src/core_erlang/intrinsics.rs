@@ -2566,28 +2566,24 @@ impl CoreErlangGenerator {
                         // on the class variables, in place (ADR 0130 §2):
                         // `beamtalk_class_vars:has(ClassSelf, Name)`, which
                         // never raises on the name.
-                        if self.in_class_method() {
-                            if let Expression::Identifier(id) = receiver {
-                                if id.name == "self" {
-                                    let probe_field = probe_field_name(&arguments[0]);
-                                    let probe = self.class_var_probe_doc("read", &probe_field);
-                                    let name_var = self.fresh_var("Name");
-                                    let name_code = self.expression_doc(&arguments[0])?;
-                                    let doc = docvec![
-                                        probe,
-                                        "let ",
-                                        leaf::var(name_var.clone()),
-                                        " = ",
-                                        name_code,
-                                        " in ",
-                                        self.class_var_read_helper_call_doc(
-                                            "has",
-                                            vec![leaf::var(name_var)],
-                                        ),
-                                    ];
-                                    return Ok(Some(doc));
-                                }
-                            }
+                        if self.is_class_var_has_field(receiver) {
+                            let probe_field = probe_field_name(&arguments[0]);
+                            let probe = self.class_var_probe_doc("read", &probe_field);
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                probe,
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in ",
+                                self.class_var_read_helper_call_doc(
+                                    "has",
+                                    vec![leaf::var(name_var)],
+                                ),
+                            ];
+                            return Ok(Some(doc));
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.

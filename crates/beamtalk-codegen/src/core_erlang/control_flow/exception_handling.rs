@@ -362,6 +362,13 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// The snapshot variable of the `on:do:` whose exception-class variable is
+    /// `ex_class_var`: that (already unique) name with a `Snap` suffix, derived
+    /// without minting from the module counter (see `fresh_on_do_catch_vars`).
+    fn derived_snapshot_var(ex_class_var: &str) -> String {
+        [ex_class_var, "Snap"].concat()
+    }
+
     /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause,
     /// plus the class-variable snapshot variable bound before its `try`.
     /// `ex_class_var` is the variable holding the exception class.
@@ -386,7 +393,7 @@ impl CoreErlangGenerator {
             // Derived from the (already unique) exception-class variable, not
             // minted from the module counter: the snapshot binding then
             // renumbers none of the module's other temporaries.
-            snapshot_var: format!("{ex_class_var}Snap"),
+            snapshot_var: Self::derived_snapshot_var(&ex_class_var),
             ex_class_var,
         }
     }

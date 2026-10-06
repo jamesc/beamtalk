@@ -26,7 +26,8 @@ use super::class_var_keys;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::Block;
+use beamtalk_core::ast::well_known::WellKnownSelector;
+use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector};
 
 impl CoreErlangGenerator {
     /// `call 'beamtalk_class_vars':'<function>'(ClassSelf, <args>..)`.
@@ -104,21 +105,50 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// `self` as the receiver of a class-side access.
+    fn is_self_receiver(expr: &Expression) -> bool {
+        matches!(expr, Expression::Identifier(id) if id.name == "self")
+    }
+
+    /// THE predicate for "`receiver.field` lowers to a class-variable read":
+    /// in a class method, `self.<declared class variable>`. Both the lowering
+    /// (`generate_field_access`) and the capture walker
+    /// ([`Self::block_reads_class_var`]) call it, so a block binds a capture
+    /// exactly when something inside it lowers to a read.
+    pub(super) fn is_class_var_field_read(
+        &self,
+        receiver: &Expression,
+        field: &Identifier,
+    ) -> bool {
+        self.in_class_method()
+            && Self::is_self_receiver(receiver)
+            && self.class_var_names().contains(field.name.as_str())
+    }
+
+    /// THE predicate for "`receiver hasField: ...` lowers to
+    /// `beamtalk_class_vars:has`": in a class method, a `self` receiver. The
+    /// `HasField` intrinsic and the capture walker both call it.
+    pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
+        self.in_class_method() && Self::is_self_receiver(receiver)
+    }
+
     /// Whether `block` (including every nested block literal) reads a class
-    /// variable of the class being compiled: `self.n` outside an assignment
-    /// target, or `self hasField: ...`. A write-only block reads nothing and
-    /// binds no capture ("blocks that read no class variable bind nothing").
+    /// variable of the class being compiled: a node for which
+    /// [`Self::is_class_var_field_read`] holds (outside an assignment target),
+    /// or a `hasField:` send for which [`Self::is_class_var_has_field`] holds,
+    /// as a plain send or as a cascade message. A write-only block reads
+    /// nothing and binds no capture ("blocks that read no class variable bind
+    /// nothing").
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
-        use beamtalk_core::ast::Expression;
-        use beamtalk_core::ast::well_known::WellKnownSelector;
-        let is_self = |e: &Expression| matches!(e, Expression::Identifier(id) if id.name == "self");
+        let is_has_field =
+            |selector: &MessageSelector| selector.well_known() == Some(WellKnownSelector::HasField);
         let mut assigned_targets: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
         let mut found = false;
         for stmt in &block.body {
             beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
                 Expression::Assignment { target, .. } => {
                     if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
-                        if is_self(receiver) {
+                        if Self::is_self_receiver(receiver) {
                             assigned_targets.push(target.span());
                         }
                     }
@@ -126,8 +156,7 @@ impl CoreErlangGenerator {
                 Expression::FieldAccess {
                     receiver, field, ..
                 } => {
-                    if is_self(receiver)
-                        && self.class_var_names().contains(field.name.as_str())
+                    if self.is_class_var_field_read(receiver, field)
                         && !assigned_targets.contains(&e.span())
                     {
                         found = true;
@@ -136,8 +165,17 @@ impl CoreErlangGenerator {
                 Expression::MessageSend {
                     receiver, selector, ..
                 } => {
-                    if is_self(receiver)
-                        && selector.well_known() == Some(WellKnownSelector::HasField)
+                    if is_has_field(selector) && self.is_class_var_has_field(receiver) {
+                        found = true;
+                    }
+                }
+                // The walker visits a cascade's receiver and the messages'
+                // arguments, never the messages themselves.
+                Expression::Cascade {
+                    receiver, messages, ..
+                } => {
+                    if self.is_class_var_has_field(receiver)
+                        && messages.iter().any(|m| is_has_field(&m.selector))
                     {
                         found = true;
                     }

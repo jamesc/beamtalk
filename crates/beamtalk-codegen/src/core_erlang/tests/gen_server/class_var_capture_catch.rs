@@ -356,3 +356,20 @@ fn nested_on_do_each_snapshot_and_restore() {
     assert_eq!(nested.matches("'restore'(").count(), 2, "{nested}");
     assert_compiles_through_erlc("test", &code);
 }
+
+/// The capture walker and the lowering share `is_class_var_field_read` /
+/// `is_class_var_has_field`; a `hasField:` that is a cascade message (which the
+/// generic AST walk does not visit as a send) still binds a capture, and
+/// whichever helper the lowering emits for it compiles.
+#[test]
+fn has_field_as_a_cascade_message_in_a_block_binds_a_capture() {
+    let src = concat!(
+        "Object subclass: Counter\n",
+        "  classState: n = 0\n\n",
+        "  class cascaded => [:x | self hasField: #n; hasField: #m]\n",
+    );
+    let code = codegen(src);
+    let cascaded = function_text(&code, "'class_cascaded'/1 = fun");
+    assert!(cascaded.contains(CAPTURE_CALL), "{cascaded}");
+    assert_compiles_through_erlc("test", &code);
+}
