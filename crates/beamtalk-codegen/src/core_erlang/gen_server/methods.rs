@@ -3168,7 +3168,7 @@ impl CoreErlangGenerator {
         // "does this loop's own condition need threading" there — cannot
         // disagree.
         if matches!(sel_str.as_str(), "whileTrue:" | "whileFalse:")
-            && super::super::control_flow::condition_has_state_effects(receiver)
+            && super::super::control_flow::condition_has_state_effects(self, receiver)
         {
             return true;
         }

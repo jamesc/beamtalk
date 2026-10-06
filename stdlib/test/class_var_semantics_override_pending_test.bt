@@ -3,11 +3,12 @@
 
 // BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
 // subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test
-// whose current answer differs pins today's answer and carries a PIN-BUG marker
-// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker
+// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.
 //
-// PENDING: the rows these tests call do not compile today (see the matching
-// fixture); the assertions are the ADR 0130 answers and nothing is pinned.
+// These rows did not compile before ADR 0130 (class-variable writes in loop and
+// fold bodies, a class-variable-writing send in a loop condition); BT-3713
+// enabled them. The assertions are the ADR 0130 answers.
 
 TestCase subclass: ClassVarSemanticsOverridePendingTest
 

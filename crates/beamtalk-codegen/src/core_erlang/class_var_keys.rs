@@ -37,8 +37,11 @@ pub(super) const RO_TAG: &str = "$bt_class_vars_ro";
 /// The class-variable calling-convention version a compiled module declares in
 /// `__beamtalk_meta/0` as `class_var_abi` (ADR 0130 §3): `1` is "class methods
 /// are `class_<sel>(ClassSelf, Args...)` and class variables live in the
-/// class process's dictionary". The runtime's load gate (enabled in the flip
-/// issue) reads it through `?BT_CLASS_VAR_ABI` in the generated header.
+/// class process's dictionary". The runtime's load gate
+/// (`beamtalk_class_vars:check_class_info_abi/2`, enforced at class registration,
+/// hot reload and the release preflight) compares a module's `class_var_abi`
+/// with `?BT_CLASS_VAR_ABI` in the generated header: this constant is the one
+/// place the value is written.
 pub(super) const ABI_VERSION: i64 = 1;
 
 /// The class key for the class object `class_self_var` names:

@@ -28,7 +28,7 @@ Each call emits one OTP logger event at `notice` level with
 | `kind`       | `read` or `write`                                                |
 | `in_block`   | access sits lexically inside a non-inlined block                 |
 | `field`      | class-variable name                                              |
-| `at_home`    | `self()` is the home class process                               |
+| `at_home`    | this process holds the class's variables (key presence, ADR 0130 §2) |
 | `home_live`  | the home class process is inside a class-method invocation       |
 | `process`    | `self()` rendered as text                                        |
 | `home`       | the home pid rendered as text, or `none`                         |
@@ -69,9 +69,8 @@ The function never raises: a failing probe must not change program behaviour.
 -spec report(term(), atom(), atom(), read | write, atom(), boolean()) -> ok.
 report(ClassSelf, Class, Selector, Kind, Field, InBlock) ->
     try
-        Self0 = self(),
-        case home_pid(ClassSelf) of
-            Self0 when not InBlock -> ok;
+        case at_home(ClassSelf) of
+            true when not InBlock -> ok;
             _ -> do_report(ClassSelf, Class, Selector, Kind, Field, InBlock)
         end
     catch
@@ -84,7 +83,7 @@ do_report(ClassSelf, Class, Selector, Kind, Field, InBlock) ->
         ok = ensure_sink(),
         HomePid = home_pid(ClassSelf),
         Self = self(),
-        AtHome = HomePid =:= Self,
+        AtHome = at_home(ClassSelf),
         HomeLive = AtHome orelse home_invocation_live(HomePid),
         Shape =
             case {AtHome, HomeLive} of
@@ -185,6 +184,17 @@ quiet_other_handlers() ->
         end,
         logger:get_handler_config()
     ).
+
+%% ADR 0130 §2: "at home" is key presence, not pid equality: this process holds
+%% the class's variables under `{'$bt_class_vars', ClassTag}` (the live
+%% invocation's, or a `with_snapshot/2` region's), the same test the access
+%% helpers make. A class-process restart or a closure holding a stale pid does
+%% not change the answer.
+-spec at_home(term()) -> boolean().
+at_home(#beamtalk_object{class = ClassTag}) when is_atom(ClassTag) ->
+    erlang:get(beamtalk_class_vars:key_for_tag(ClassTag)) =/= undefined;
+at_home(_) ->
+    false.
 
 -spec home_pid(term()) -> pid() | none.
 home_pid(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> Pid;

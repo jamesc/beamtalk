@@ -518,7 +518,8 @@ read or write in class methods. The runtime logs one OTP logger event with
 `domain => [beamtalk, probe]` per access that is inside a non-inlined block
 (the runtime cannot see those otherwise) or made away from the home class
 process. Each event carries `class`, `selector`, `kind` (`read`/`write`),
-`field`, `in_block`, `at_home` (`self()` is the home pid), `home_live` (the
+`field`, `in_block`, `at_home` (this process holds the class's variables:
+key presence, ADR 0130 §2, not pid equality), `home_live` (the
 home process is inside a class-method invocation) and `shape` (`home`,
 `carried_sync`: home is blocked in the call that carried the block away, or
 `abroad`). With the flag unset nothing references the probe and the generated
@@ -535,6 +536,11 @@ Run only the suites that execute code (`test-bunit`, `test-stdlib`,
 `test-repl-protocol`) with the flag on, not `cargo test`: the flag changes
 generated code, so codegen snapshot tests would fail. Recompile the Erlang
 runtime (`just build-erlang`) first so `beamtalk_class_var_probe` is loadable.
+A census run needs a clean `_build/` (and `runtime/_build/`) **before and
+after**: the flag changes the generated code, the stdlib and test beams are
+cached in `_build/`, so beams compiled without the flag would be reused (and
+miss accesses) and beams compiled with it would be reused by the next normal
+build.
 Side effects of a census run: the probe sets the VM-wide
 `erlang:system_flag(backtrace_depth, 128)` once (not restored) and, when
 `BEAMTALK_CLASS_VAR_PROBE_LOG` is set, lowers the primary logger level to

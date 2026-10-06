@@ -358,18 +358,37 @@ fn nested_on_do_each_snapshot_and_restore() {
 }
 
 /// The capture walker and the lowering share `is_class_var_field_read` /
-/// `is_class_var_has_field`; a `hasField:` that is a cascade message (which the
-/// generic AST walk does not visit as a send) still binds a capture, and
-/// whichever helper the lowering emits for it compiles.
+/// `is_class_var_has_field`. A `hasField:` that is a cascade message lowers
+/// through `beamtalk_message_dispatch:send`, never through the `HasField`
+/// intrinsic, so it emits no `beamtalk_class_vars:has` read and the block binds
+/// no capture ("a block binds a capture exactly when something inside it lowers
+/// to a read"); the plain-send spelling, which does lower to `has`, binds one.
 #[test]
-fn has_field_as_a_cascade_message_in_a_block_binds_a_capture() {
+fn has_field_as_a_cascade_message_lowers_through_dispatch_and_binds_no_capture() {
     let src = concat!(
         "Object subclass: Counter\n",
         "  classState: n = 0\n\n",
         "  class cascaded => [:x | self hasField: #n; hasField: #m]\n",
+        "  class plain => [:x | self hasField: #n]\n",
     );
     let code = codegen(src);
     let cascaded = function_text(&code, "'class_cascaded'/1 = fun");
-    assert!(cascaded.contains(CAPTURE_CALL), "{cascaded}");
+    assert!(
+        !cascaded.contains("'beamtalk_class_vars':'has'("),
+        "a cascade `hasField:` is a dispatched send, not a `has` read: {cascaded}"
+    );
+    assert!(
+        !cascaded.contains(CAPTURE_CALL),
+        "nothing in the cascade reads through a capture: {cascaded}"
+    );
+    assert!(
+        cascaded.contains("'beamtalk_message_dispatch':'send'("),
+        "the cascade messages go through dispatch: {cascaded}"
+    );
+    let plain = function_text(&code, "'class_plain'/1 = fun");
+    assert!(
+        plain.contains("'beamtalk_class_vars':'has'(") && plain.contains(CAPTURE_CALL),
+        "the plain `hasField:` lowers to `has` and binds a capture: {plain}"
+    );
     assert_compiles_through_erlc("test", &code);
 }

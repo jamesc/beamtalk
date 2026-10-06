@@ -44,15 +44,15 @@
 //! passed to an actor (`a each: [self bump]`), which runs in the actor's
 //! process and raises, but rule (b) only covers class-side receivers.
 //!
-//! Deliberately deferred (known false negatives, worth their own issues):
+//! Deliberately deferred (known false negatives, each tracked by its own issue):
 //!
-//! - Cascade messages after the first are never visited:
+//! - **BT-3716.** Cascade messages after the first are never visited:
 //!   `ast_walker::walk_expression` folds a cascade to its first send and only
 //!   visits the later messages' arguments. `Driver reset; each: [self bump]`
 //!   and `[self log; bump]` are therefore missed in `check_method_body`,
 //!   `ClassCtx::first_class_var_write` and
 //!   `block_facts::same_class_reference_send_selectors`.
-//! - A `class sealed` method of an *open* class whose body makes a late-bound
+//! - **BT-3717.** A `class sealed` method of an *open* class whose body makes a late-bound
 //!   `self` send to a non-sealed selector is judged by its defining class's
 //!   body alone, so a subclass override of that selector that writes a class
 //!   variable is missed (the rule the removed BT-3688 advisory documented).

@@ -84,7 +84,10 @@ receiver is an internal error.
     snapshot/0,
     restore/1,
     protect/1,
-    with_snapshot/2
+    with_snapshot/2,
+    abi/0,
+    check_class_info_abi/2,
+    abi_refusals_table/0
 ]).
 
 -export_type([key/0, snapshot/0, class_self/0]).
@@ -423,6 +426,137 @@ assert_declared(Class, Name) ->
             case maps:is_key(Name, Kinds) of
                 true -> ok;
                 false -> raise_undeclared(Class, Name)
+            end
+    end.
+
+%%====================================================================
+%% The class_var_abi load gate (ADR 0130 Phase 3, last item)
+%%====================================================================
+
+-doc """
+The `class_var_abi` value this runtime accepts: the calling convention of
+compiled class methods (`class_<sel>(ClassSelf, Args...)`, class variables in
+the class process's dictionary). Generated from the Rust `ABI_VERSION`
+(`class_var_keys` in `beamtalk-codegen`), the same constant codegen emits
+into every module's `__beamtalk_meta/0`, so the two cannot disagree.
+""".
+-spec abi() -> pos_integer().
+abi() -> ?BT_CLASS_VAR_ABI.
+
+-doc """
+The name of the ETS table a caller may create to *collect* ABI refusals
+(`check_class_info_abi/2` inserts `{Module, #beamtalk_error{}}` rows into it
+when it exists). `beamtalk_release_shapes:extract_shapes/2` uses it to turn a
+refused module into a failed release preflight: a refusal happens inside a
+module's `-on_load` hook, whose failure reason the code server does not
+return.
+""".
+-spec abi_refusals_table() -> atom().
+abi_refusals_table() -> beamtalk_abi_refusals.
+
+-doc """
+Refuse a compiled Beamtalk class module whose `class_var_abi` is not exactly
+`abi/0` (ADR 0130 §3, Implementation Phase 3): `{error, #beamtalk_error{kind =
+abi_mismatch}}` naming the module and saying to recompile.
+
+Called by `beamtalk_object_class:start/2` (registration) and
+`beamtalk_object_class:update_class/2` (hot reload) before anything is
+installed, with the `ClassInfo` the registration carries. The gate covers
+*compiled Beamtalk class modules*, identified the way the loader identifies
+them, by `__beamtalk_meta/0`:
+
+- the compiler-emitted meta map in `ClassInfo` (`meta`, which always has the
+  `class` key; the only form available while the module's `-on_load` hook is
+  still running, when `erlang:function_exported/3` is `false`), or
+- an exported `__beamtalk_meta/0` on `ClassInfo`'s `module`.
+
+Among those, a missing `class_var_abi` key (every module compiled before the
+flip) or any value other than `abi/0` is refused: the check is "equal to the
+current value", never "present and unequal". A module without
+`__beamtalk_meta/0` (a hand-written Erlang class module, an EUnit fixture, a
+ClassBuilder class) is outside the gate; its obligation is the FFI rule (use
+`beamtalk_class_vars`, never return `class_var_result`).
+""".
+-spec check_class_info_abi(atom(), map()) -> ok | {error, #beamtalk_error{}}.
+check_class_info_abi(ClassName, ClassInfo) ->
+    Module = maps:get(module, ClassInfo, undefined),
+    case compiled_meta(Module, maps:get(meta, ClassInfo, undefined)) of
+        none ->
+            ok;
+        {ok, Meta} ->
+            case maps:find(class_var_abi, Meta) of
+                {ok, ?BT_CLASS_VAR_ABI} ->
+                    ok;
+                Found ->
+                    Error = abi_mismatch_error(ClassName, Module, Found),
+                    ?LOG_ERROR(
+                        "Refused ~p: ~ts",
+                        [Module, Error#beamtalk_error.message],
+                        #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
+                    ),
+                    record_abi_refusal(Module, Error),
+                    {error, Error}
+            end
+    end.
+
+-spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | none.
+compiled_meta(_Module, #{class := _} = Meta) ->
+    {ok, Meta};
+compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> {ok, Meta};
+                _ -> {ok, #{}}
+            catch
+                _:_ -> {ok, #{}}
+            end;
+        false ->
+            none
+    end;
+compiled_meta(_, _) ->
+    none.
+
+-spec abi_mismatch_error(atom(), atom() | undefined, {ok, term()} | error) -> #beamtalk_error{}.
+abi_mismatch_error(ClassName, Module, Found) ->
+    {Reported, Declared} =
+        case Found of
+            {ok, Value} -> {Value, io_lib:format("class_var_abi ~p", [Value])};
+            error -> {missing, "no class_var_abi entry (compiled before ADR 0130)"}
+        end,
+    Message = iolist_to_binary(
+        io_lib:format(
+            "Module ~s (class ~s) was compiled with ~s, but this runtime requires "
+            "class_var_abi ~p",
+            [Module, ClassName, Declared, ?BT_CLASS_VAR_ABI]
+        )
+    ),
+    Error0 = beamtalk_error:new(abi_mismatch, ClassName),
+    Error1 = beamtalk_error:with_message(Error0, Message),
+    Error2 = beamtalk_error:with_details(Error1, #{
+        module => Module, expected => ?BT_CLASS_VAR_ABI, found => Reported
+    }),
+    beamtalk_error:with_hint(
+        Error2,
+        <<
+            "Recompile the package with the current beamtalk compiler. The class-variable "
+            "calling convention changed (ADR 0130), so a module compiled by an older compiler "
+            "cannot be loaded."
+        >>
+    ).
+
+-spec record_abi_refusal(atom() | undefined, #beamtalk_error{}) -> ok.
+record_abi_refusal(Module, Error) ->
+    Table = abi_refusals_table(),
+    case ets:whereis(Table) of
+        undefined ->
+            ok;
+        _ ->
+            try
+                ets:insert(Table, {Module, Error}),
+                ok
+            catch
+                error:badarg -> ok
             end
     end.
 

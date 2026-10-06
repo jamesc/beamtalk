@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3704: see cvs_override_pending_base.bt.
+// BT-3704: see cvs_override_base_pending.bt.
 
 CvsOverrideBasePending subclass: CvsOverrideSubPending
 

@@ -31,9 +31,9 @@
 //! `beamtalk-cli/tests/cli/cli_class_var_agreement.rs`; it needs the runtime,
 //! this one does not.
 //!
-//! Two properties share one body: the shapes that pass today are a normal
-//! test; the full shape set is `#[ignore]`d until ADR 0130 Phase 3 (BT-3713)
-//! makes every shape compile and flips it.
+//! The properties draw [`Shapes::ENABLED`] (every shape except `local_touch`,
+//! whose failures are BT-3718 and show only when the program is executed).
+//! `local_touch` has its own property; see `local_touch_shapes_pass_verified_codegen`.
 //!
 //! Only the open and sealed spellings are checked here: the override
 //! spelling is two classes in two files, and a class method's lowering
@@ -181,11 +181,12 @@ proptest! {
         }
     }
 
-    /// The shapes whose programs compile today through debug codegen with the
-    /// verifier on: no panic, no `internal:` diagnostic, valid Core Erlang.
+    /// Every enabled shape (ADR 0130 Phase 3, BT-3713) compiles through debug
+    /// codegen with the verifier on: no panic, no `internal:` diagnostic,
+    /// valid Core Erlang.
     #[test]
-    fn supported_shapes_pass_verified_codegen(
-        (seed, size, program) in arb_class_program(Shapes::SUPPORTED_TODAY)
+    fn enabled_shapes_pass_verified_codegen(
+        (seed, size, program) in arb_class_program(Shapes::ENABLED)
     ) {
         if let Err(e) = check_program(0, &program) {
             return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
@@ -236,11 +237,16 @@ fn measure_failure_rate() {
 proptest! {
     #![proptest_config(proptest_config_default())]
 
-    /// Every shape. Red on `main` (the failure rate and the shapes are in the
-    /// BT-3705 PR): ADR 0130 Phase 3 (BT-3713) removes the `#[ignore]`.
+    /// The `local_touch` shape (an outer local mutated inside a protected
+    /// block) together with every other shape. BT-3718 tracks the
+    /// `local_touch` failures. They show only when the program is executed
+    /// (`cli_class_var_agreement.rs`): in-process codegen passes (0 of 2000
+    /// programs measured with `measure_failure_rate` when BT-3713 landed), so
+    /// this property is `#[ignore]`d for symmetry with the execution one and
+    /// to keep the enabled set the same in both.
     #[test]
-    #[ignore = "red on main until ADR 0130 Phase 3 (BT-3713) flips it"]
-    fn all_shapes_pass_verified_codegen(
+    #[ignore = "local_touch is excluded from the enabled shapes until BT-3718 is fixed"]
+    fn local_touch_shapes_pass_verified_codegen(
         (seed, size, program) in arb_class_program(Shapes::all())
     ) {
         if let Err(e) = check_program(0, &program) {

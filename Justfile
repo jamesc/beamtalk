@@ -1358,20 +1358,30 @@ test-metamorphic *ARGS: build-stdlib
     @cargo run --bin beamtalk --quiet -- test-metamorphic --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ Metamorphic tests complete"
 
-# ADR 0130 Phase 1 (BT-3705): the class-variable agreement corpus. Measures the
-# FULL generated-shape set (loops, on:do:/ensure:/tryDo:, stored closures,
-# writing and late-bound self-sends, in open / sealed / override spellings)
-# against the ADR 0130 §4 reference interpretation, on a BEAM, and prints the
-# failure rate and the failures grouped by cause. Red on `main` until ADR 0130
-# Phase 3 (BT-3713) flips it; the shapes that pass today run as a normal test in
-# `just test-rust` (`class_var_agreement_supported_shapes`), so this recipe is
-# not part of `just test`. Knobs: CV_CORPUS_CASES (programs, default 48),
+# ADR 0130 (BT-3705, enabled by BT-3713): the class-variable agreement corpus.
+# Draws every generated shape except `local_touch` (loops, on:do:/ensure:/tryDo:,
+# stored closures, writing and late-bound self-sends, in open / sealed /
+# override spellings), runs each program on a BEAM and asserts all three
+# spellings answer the ADR 0130 §4 reference interpretation, then runs the
+# in-process codegen properties (verifier on, valid Core Erlang, catch-boundary
+# text check). Both are normal tests (`just test-rust` runs them with the default
+# draw); this recipe prints the failure report and takes the knobs:
+# CV_CORPUS_CASES (programs, default 48 on a BEAM, proptest default in-process),
 # CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
-# The `beamtalk-codegen` half (in-process, no BEAM) prints its own table with:
+# `local_touch` (an outer local mutated inside a protected block) is excluded
+# until BT-3718 is fixed; `just test-class-var-corpus-local-touch` measures it.
+# Measure the in-process failure rate with:
 #   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
 test-class-var-corpus: build-stdlib
-    @echo "🧬 Running the class-variable agreement corpus (all shapes; red on main until BT-3713)..."
-    cargo test -p beamtalk-cli --test cli class_var_agreement_all_shapes -- --ignored --nocapture
+    @echo "🧬 Running the class-variable agreement corpus (all shapes except local_touch)..."
+    cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
+    cargo test -p beamtalk-codegen --test class_var_agreement
+
+# BT-3718: the `local_touch` shape (an outer local mutated inside a protected
+# block) fails today, so its property is `#[ignore]`d; this recipe measures it.
+test-class-var-corpus-local-touch: build-stdlib
+    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until BT-3718)..."
+    cargo test -p beamtalk-cli --test cli class_var_agreement_local_touch -- --ignored --nocapture
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests

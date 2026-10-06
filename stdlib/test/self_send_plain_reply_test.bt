@@ -40,11 +40,10 @@ TestCase subclass: SelfSendPlainReplyTest
   testBaseRaisedIterationInLoop =>
     self assert: SsoPlainBase raisedIterationInLoop equals: 0
 
-  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
-  // iterations are kept); it flips when an error crossing a boundary discards the writes made
-  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
-  testBaseRaisedIterationBetweenKept =>
-    self assert: SsoPlainBase raisedIterationBetweenKept equals: 3
+  // ADR 0130 §4: an error crossing a catch discards the writes made inside the protected
+  // region, so only the iteration that completed (i = 2) keeps its write: 1.
+  testBaseRaisedIterationBetweenDiscarded =>
+    self assert: SsoPlainBase raisedIterationBetweenKept equals: 1
 
   testBaseHandlerArm => self assert: SsoPlainBase handlerArm equals: 1
 
@@ -54,7 +53,7 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testBaseStoredPlain => self assert: SsoPlainBase storedPlain equals: 1
 
-  testBaseStoredBump => self assert: SsoPlainBase storedBump equals: 0
+  testBaseStoredBump => self assert: SsoPlainBase storedBump equals: 1
 
   testBaseStoredPlainThenWrite =>
     self assert: SsoPlainBase storedPlainThenWrite equals: 1
@@ -70,17 +69,14 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testBaseFooHandler => self assert: SsoPlainBase fooHandler equals: 0
 
-  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
-  // class-side HOM keeps the send's commit, which overwrites the block's export,
-  // so its write is dropped (0 everywhere).
+  // BT-3682 (ADR 0130 §5): a block LITERAL passed to a user-defined class-side HOM of the
+  // same class runs at home, so its write is kept (1 for the overriding subclass and the
+  // sealed class; 0 for the base class, whose `foo` does not write).
   testBaseViaSectionLiteralInLoop =>
     self assert: SsoPlainBase viaSectionLiteralInLoop equals: 0
 
-  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
-  // the plain reply skips the commit and the export survives: the write is KEPT
-  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
-  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
-  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  // The same block reaching the HOM BY NAME (a block parameter) answers like the literal
+  // spelling: there is one class variable, so the spelling cannot matter (ADR 0130 §1).
   testBaseViaSectionParamInLoop =>
     self assert: SsoPlainBase viaSectionParamInLoop equals: 0
 
@@ -119,11 +115,10 @@ TestCase subclass: SelfSendPlainReplyTest
   testSubRaisedIterationInLoop =>
     self assert: SsoPlainSub raisedIterationInLoop equals: 0
 
-  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
-  // iterations are kept); it flips when an error crossing a boundary discards the writes made
-  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
-  testSubRaisedIterationBetweenKept =>
-    self assert: SsoPlainSub raisedIterationBetweenKept equals: 3
+  // ADR 0130 §4: an error crossing a catch discards the writes made inside the protected
+  // region, so only the iteration that completed (i = 2) keeps its write: 1.
+  testSubRaisedIterationBetweenDiscarded =>
+    self assert: SsoPlainSub raisedIterationBetweenKept equals: 1
 
   testSubHandlerArm => self assert: SsoPlainSub handlerArm equals: 1
 
@@ -133,7 +128,7 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSubStoredPlain => self assert: SsoPlainSub storedPlain equals: 1
 
-  testSubStoredBump => self assert: SsoPlainSub storedBump equals: 0
+  testSubStoredBump => self assert: SsoPlainSub storedBump equals: 1
 
   testSubStoredPlainThenWrite =>
     self assert: SsoPlainSub storedPlainThenWrite equals: 1
@@ -149,17 +144,14 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSubFooHandler => self assert: SsoPlainSub fooHandler equals: 1
 
-  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
-  // class-side HOM keeps the send's commit, which overwrites the block's export,
-  // so its write is dropped (0 everywhere).
+  // BT-3682 (ADR 0130 §5): a block LITERAL passed to a user-defined class-side HOM of the
+  // same class runs at home, so its write is kept (1 for the overriding subclass and the
+  // sealed class; 0 for the base class, whose `foo` does not write).
   testSubViaSectionLiteralInLoop =>
-    self assert: SsoPlainSub viaSectionLiteralInLoop equals: 0
+    self assert: SsoPlainSub viaSectionLiteralInLoop equals: 1
 
-  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
-  // the plain reply skips the commit and the export survives: the write is KEPT
-  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
-  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
-  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  // The same block reaching the HOM BY NAME (a block parameter) answers like the literal
+  // spelling: there is one class variable, so the spelling cannot matter (ADR 0130 §1).
   testSubViaSectionParamInLoop =>
     self assert: SsoPlainSub viaSectionParamInLoop equals: 1
 
@@ -202,7 +194,7 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedStoredPlain => self assert: SsoPlainSealed storedPlain equals: 1
 
-  testSealedStoredBump => self assert: SsoPlainSealed storedBump equals: 0
+  testSealedStoredBump => self assert: SsoPlainSealed storedBump equals: 1
 
   testSealedStoredPlainThenWrite =>
     self assert: SsoPlainSealed storedPlainThenWrite equals: 1
@@ -217,17 +209,14 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedFooHandler => self assert: SsoPlainSealed fooHandler equals: 1
 
-  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
-  // class-side HOM keeps the send's commit, which overwrites the block's export,
-  // so its write is dropped (0 everywhere).
+  // BT-3682 (ADR 0130 §5): a block LITERAL passed to a user-defined class-side HOM of the
+  // same class runs at home, so its write is kept (1 for the overriding subclass and the
+  // sealed class; 0 for the base class, whose `foo` does not write).
   testSealedViaSectionLiteralInLoop =>
-    self assert: SsoPlainSealed viaSectionLiteralInLoop equals: 0
+    self assert: SsoPlainSealed viaSectionLiteralInLoop equals: 1
 
-  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
-  // the plain reply skips the commit and the export survives: the write is KEPT
-  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
-  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
-  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  // The same block reaching the HOM BY NAME (a block parameter) answers like the literal
+  // spelling: there is one class variable, so the spelling cannot matter (ADR 0130 §1).
   testSealedViaSectionParamInLoop =>
     self assert: SsoPlainSealed viaSectionParamInLoop equals: 1
 
@@ -241,8 +230,7 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedFooArms => self assert: SsoPlainSealed fooArms equals: 1
 
-  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
-  // iterations are kept); it flips when an error crossing a boundary discards the writes made
-  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
-  testSealedPinBugRaisedIterationBetweenKept =>
-    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 3
+  // ADR 0130 §4: an error crossing a catch discards the writes made inside the protected
+  // region, so only the iteration that completed (i = 2) keeps its write: 1.
+  testSealedRaisedIterationBetweenDiscarded =>
+    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 1

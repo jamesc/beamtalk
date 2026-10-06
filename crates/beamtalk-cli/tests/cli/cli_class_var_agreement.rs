@@ -15,13 +15,13 @@
 //!
 //! Two properties share one harness:
 //!
-//! - `class_var_agreement_supported_shapes` draws only the shapes whose
-//!   programs all pass on the current compiler. It is a normal test: it guards
-//!   the shapes ADR 0130 Phase 3 must not regress.
-//! - `class_var_agreement_all_shapes` draws every shape. It is `#[ignore]`d
-//!   (red on `main` today) and prints the failure rate and the failing
-//!   shapes; the Phase 3 flip removes the `#[ignore]` (see `just
-//!   test-class-var-corpus`).
+//! - `class_var_agreement_enabled_shapes` draws [`Shapes::ENABLED`], every shape
+//!   except `local_touch`. It is a normal test (ADR 0130 Phase 3, BT-3713,
+//!   enabled it); `just test-class-var-corpus` runs it with a larger draw.
+//! - `class_var_agreement_local_touch` draws every shape including
+//!   `local_touch` (an outer local mutated inside a protected block). It is
+//!   `#[ignore]`d: those programs fail today for a local-variable threading
+//!   reason, BT-3718, not fixed by ADR 0130.
 //!
 //! A batch is one package compiled and run once; if the package fails to
 //! compile (a rejected program, or a `ThreadedIr` verifier `internal:` error
@@ -334,14 +334,20 @@ fn property(shapes: Shapes) {
 }
 
 #[test]
-fn class_var_agreement_supported_shapes() {
-    property(Shapes::SUPPORTED_TODAY);
+fn class_var_agreement_enabled_shapes() {
+    // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
+    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED`.
+    property(corpus_shapes_from_env(Shapes::ENABLED));
 }
 
+/// BT-3718: with `local_touch` (an outer local mutated inside a `on:do:`,
+/// `ensure:` or `Result tryDo:` block) 27 of 48 programs fail, identically on
+/// the `adr-0130` branch before BT-3713: 13 do not compile
+/// (`ambiguous_catch_try_state`, an unbound `State`) and 14 answer wrong. Remove
+/// the `#[ignore]` (and add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3718 is
+/// fixed.
 #[test]
-#[ignore = "red on main until ADR 0130 Phase 3 (BT-3713) flips it; run via `just test-class-var-corpus`"]
-fn class_var_agreement_all_shapes() {
-    // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
-    // failure belongs to (names: `Shapes::names`); default is every shape.
-    property(corpus_shapes_from_env(Shapes::all()));
+#[ignore = "local_touch fails today (BT-3718); run via `just test-class-var-corpus-local-touch`"]
+fn class_var_agreement_local_touch() {
+    property(Shapes::all());
 }

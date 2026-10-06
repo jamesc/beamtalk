@@ -175,3 +175,4 @@ mod protocol_registration_conformance;
 mod recv_type;
 mod supervisor;
 mod trait_flattening;
+mod while_condition_class_method;

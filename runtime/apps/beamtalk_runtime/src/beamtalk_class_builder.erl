@@ -157,6 +157,8 @@ do_register(ClassName, ClassInfo) ->
                 {ok, _IVars} ->
                     notify_class_loaded(ClassName),
                     {ok, beamtalk_class_registry:whereis_class(ClassName)};
+                {error, #beamtalk_error{kind = abi_mismatch} = Refused} ->
+                    {error, Refused};
                 {error, Reason} ->
                     ?LOG_WARNING("ClassBuilder update_class failed", #{
                         class => ClassName,
@@ -171,6 +173,10 @@ do_register(ClassName, ClassInfo) ->
                     ),
                     {error, Error}
             end;
+        {error, #beamtalk_error{kind = abi_mismatch} = Refused} ->
+            %% ADR 0130 `class_var_abi` gate: already structured (it names the
+            %% module and says to recompile); do not bury it in an internal_error.
+            {error, Refused};
         {error, Reason} ->
             Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
             Error = beamtalk_error:with_hint(

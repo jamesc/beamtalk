@@ -3,8 +3,8 @@
 
 // BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
 // sealed class. Each test asserts the ADR 0130 section 4/5 answer; a test
-// whose current answer differs pins today's answer and carries a PIN-BUG marker
-// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker
+// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.
 
 TestCase subclass: ClassVarSemanticsSealedTest
 
@@ -64,33 +64,25 @@ TestCase subclass: ClassVarSemanticsSealedTest
   testBareBlock => self assert: CvsSealed rowBare equals: 1
 
   // ADR 0130 §5 at home
-  // PIN-BUG BT-3713: pins today's answer (0: the stored closure's write is lost, ADR 0110 / BT-3681); ADR 0130 §5
-  // keeps it (the correct answer is 2).
   testStoredClosureWithinInvocationWrites =>
-    self assert: CvsSealed rowStoredWithin equals: 0
+    self assert: CvsSealed rowStoredWithin equals: 2
 
   // ADR 0130 §5 at home
-  // PIN-BUG BT-3713: pins today's answer (0: the closure reads the value it captured); ADR 0130 §5: a block at
-  // home reads live (the correct answer is 1).
   testStoredClosureWithinInvocationReadsLive =>
-    self assert: CvsSealed rowStoredReadWithin equals: 0
+    self assert: CvsSealed rowStoredReadWithin equals: 1
 
   // ADR 0130 §5 later invocation of the same class is at home
-  // PIN-BUG BT-3713: pins today's answer (the write is lost, n stays 0); ADR 0130 §5: a stored closure run from a
-  // later invocation of its class is at home and the write succeeds (the correct answer is 1).
   testStoredClosureLaterInvocationWrites =>
     CvsSealed reset
     CvsSealed run: CvsSealed makeBumper
-    self assert: CvsSealed n equals: 0
+    self assert: CvsSealed n equals: 1
 
   // ADR 0130 §5 later invocation of the same class is at home
-  // PIN-BUG BT-3713: pins today's answer (0: the creation-time value); ADR 0130 §5: at home the read is live
-  // (the correct answer is 1).
   testStoredClosureLaterInvocationReadsLive =>
     CvsSealed reset
     b := CvsSealed makeReader
     CvsSealed bump
-    self assert: (CvsSealed run: b) equals: 0
+    self assert: (CvsSealed run: b) equals: 1
 
   // ADR 0130 §5 abroad: captured read
   testClosureFromForeignProcessReadsCaptured =>
@@ -100,12 +92,13 @@ TestCase subclass: ClassVarSemanticsSealedTest
     self assert: b value equals: 0
 
   // ADR 0130 §5 abroad: write raises
-  // PIN-BUG BT-3713: pins today's answer (the write is silently lost: the block answers 1, the class variable stays 0);
-  // ADR 0130 §5: the write raises class_state_unreachable.
+  // The error comes from the block's method-level read inside `bump`, which has no capture
+  // (a block abroad reads only what its own literal captured); either way the kind is the
+  // structured class_state_unreachable and nothing is written.
   testClosureFromForeignProcessWriteRaises =>
     CvsSealed reset
     b := CvsSealed makeBumper
-    self assert: b value equals: 1
+    self should: [b value] raise: #class_state_unreachable
     self assert: CvsSealed n equals: 0
 
   // ADR 0130 §5 carried synchronously: captured equals live
@@ -113,10 +106,11 @@ TestCase subclass: ClassVarSemanticsSealedTest
     self assert: CvsSealed rowSyncReadOpenDriver equals: 1
 
   // ADR 0130 §5 abroad: write raises
-  // PIN-BUG BT-3713: pins today's answer (the write is silently lost, no error); ADR 0130 §5: the write raises
-  // class_state_unreachable.
   testSyncBlockToOpenDriverWriteRaises =>
-    self assert: CvsSealed rowSyncWriteOpenDriver equals: 0
+    CvsSealed reset
+    self should: [
+      CvsSealed rowSyncWriteOpenDriver
+    ] raise: #class_state_unreachable
     self assert: CvsSealed n equals: 0
 
   // ADR 0130 §5 direct-called class method is at home
@@ -132,32 +126,24 @@ TestCase subclass: ClassVarSemanticsSealedTest
     self assert: CvsSealed rowAsyncRead equals: 0
 
   // ADR 0130 §5 abroad: write raises
-  // PIN-BUG BT-3713: pins today's answer (the write is silently dropped, #ok); ADR 0130 §5: the write
-  // raises class_state_unreachable (the correct answer is #class_state_unreachable).
   testAsyncBlockToActorWriteRaises =>
-    self assert: CvsSealed rowAsyncWrite equals: #ok
+    self assert: CvsSealed rowAsyncWrite equals: #class_state_unreachable
     self assert: CvsSealed n equals: 0
 
   // ADR 0130 §5 runtime-owned snapshot
-  // PIN-BUG BT-3713: pins today's answer (key_error: ClassSelf is nil, so the class variable is not found);
-  // ADR 0130 §5: reads see the snapshot (the correct answer is 1).
   testPerformLocallyReadsSnapshot =>
     CvsSealed reset
     CvsSealed bump
-    self assert: ([
-      CvsSealed performLocally: #n withArguments: #()
-    ] on: Error do: [:e | e kind]) equals: #key_error
+    self assert: (CvsSealed performLocally: #n withArguments: #()) equals: 1
 
   // ADR 0130 §5 runtime-owned snapshot
-  // PIN-BUG BT-3713: pins today's answer (key_error, not the ADR's structured error); ADR 0130 §5: the write
-  // raises class_state_read_only.
   testPerformLocallyWriteRaises =>
     CvsSealed reset
     self
       assert: ([
         CvsSealed performLocally: #bump withArguments: #()
       ] on: Error do: [:e | e kind])
-      equals: #key_error
+      equals: #class_state_read_only
     self assert: CvsSealed n equals: 0
 
   // ADR 0130 §4 non-local return
@@ -176,11 +162,7 @@ TestCase subclass: ClassVarSemanticsSealedTest
     self assert: CvsSealed n equals: 1
 
   // ADR 0130 §5 runtime-owned snapshot
-  // PIN-BUG BT-3713: pins today's answer (supervise succeeds and the hook's write is silently discarded); ADR 0130 §5:
-  // the write raises class_state_read_only (the exact surfacing through supervise is the ADR's reading).
   testInitializeHookWriteRaises =>
     CvsInitSealed reset
-    r := CvsInitSealed supervise
-    self assert: r isOk equals: true
+    self should: [CvsInitSealed supervise] raise: #class_state_read_only
     self assert: CvsInitSealed n equals: 0
-    r unwrap stop
