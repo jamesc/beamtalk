@@ -241,7 +241,20 @@ struct BodyEffects {
 /// mutation-threading path too — see `generate_while_true`/
 /// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
 /// own gate, per CLAUDE.md's no-duplicate-implementations rule.
-pub(in crate::core_erlang) fn condition_has_state_effects(condition: &Expression) -> bool {
+///
+/// A class method threads no family at all (ADR 0130 §3: a class-variable
+/// write is an in-place `put` and a self-send rebinds nothing), so nothing
+/// in a class-method condition has a state effect to thread. Answering
+/// `true` there (BT-3694) made the loop take the `StateAcc` shape, whose
+/// initial state variable does not exist in a class method (an unbound
+/// `State`).
+pub(in crate::core_erlang) fn condition_has_state_effects(
+    generator: &CoreErlangGenerator,
+    condition: &Expression,
+) -> bool {
+    if generator.in_class_method() {
+        return false;
+    }
     if let Expression::Block(cond_block) = condition {
         block_analysis::analyze_block(cond_block).has_state_effects()
     } else {
@@ -257,7 +270,7 @@ impl BodyEffects {
         condition: Option<&Expression>,
         threaded_locals: &[String],
     ) -> Self {
-        let cond_has_state_effects = condition.is_some_and(condition_has_state_effects);
+        let cond_has_state_effects = condition.is_some_and(|c| condition_has_state_effects(generator, c));
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`

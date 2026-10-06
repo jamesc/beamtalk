@@ -87,7 +87,7 @@ impl CoreErlangGenerator {
             // tests, `tests/gen_server.rs`).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(condition)
+                || super::condition_has_state_effects(self, condition)
             {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
@@ -137,7 +137,7 @@ impl CoreErlangGenerator {
             // `generate_while_true`.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(condition)
+                || super::condition_has_state_effects(self, condition)
             {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
@@ -253,7 +253,7 @@ impl CoreErlangGenerator {
         // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
         // carries one) — decides whether `CondFun` must return a
         // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
-        let cond_effects = super::condition_has_state_effects(condition);
+        let cond_effects = super::condition_has_state_effects(self, condition);
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 

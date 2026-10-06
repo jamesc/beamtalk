@@ -166,6 +166,7 @@ mod class_var_probe;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;
+mod while_condition_class_method;
 mod expressions;
 mod gen_server;
 mod late_reconcile_conformance;

@@ -301,8 +301,8 @@ Object subclass: SsoPlainBase
 
   // --- closures ----------------------------------------------------------
 
-  // PIN-BUG BT-3713: a closure stored in a local and invoked by a later statement (ADR 0110
-  // known limit, BT-3681): a plain send inside it changes nothing.
+  // A closure stored in a local and invoked by a later statement: a plain send inside it
+  // changes nothing.
   class storedPlain -> Integer =>
     self.n := 0
     b := [self plain]
@@ -311,7 +311,7 @@ Object subclass: SsoPlainBase
     self plain
     self.n
 
-  // PIN-BUG BT-3713: the same with a writing send: the closure write is not kept today.
+  // The same with a writing send: the closure's write is kept (ADR 0130 §1).
   class storedBump -> Integer =>
     self.n := 0
     b := [self bump]
@@ -342,9 +342,7 @@ Object subclass: SsoPlainBase
   // --- a block handed to a user-defined class-side higher-order method -------
   class section: aBlock :: Block -> Integer => aBlock value
 
-  // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
-  // the send's own commit, which overwrites the block's export, so the write is
-  // dropped.
+  // BT-3682: a block LITERAL passed to the HOM runs at home, so its write is kept.
   class viaSectionLiteralInLoop -> Integer =>
     self.n := 0
     seen := 0
@@ -355,14 +353,8 @@ Object subclass: SsoPlainBase
       ]
     self.n
 
-  // BT-3690 behaviour: the same block reaching the HOM BY NAME (here a block
-  // parameter, which the BT-3681 check does not track) is not a literal of the
-  // send, so the plain reply from `section:` skips the commit and the block's
-  // export into the scope survives: the write is KEPT (answers 1 for a
-  // subclass override or a sealed class; before BT-3690 it was dropped like the
-  // literal spelling above). An improvement, not a guarantee: the two
-  // spellings of the same call answer differently until BT-3682 merges the
-  // passed, returned and exported class variables.
+  // The same block reaching the HOM BY NAME (here a block parameter) answers like the
+  // literal spelling above: there is one class variable (ADR 0130 §1).
   class viaSectionParamInLoop -> Integer =>
     self.n := 0
     seen := 0
