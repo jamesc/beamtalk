@@ -77,22 +77,63 @@ block_access_away_from_home_is_logged_test() ->
         end
     end).
 
+%% ADR 0130 §2: at home means this process holds the class's key, not that its
+%% pid is the one in ClassSelf.
+with_home_key(Fun) ->
+    Key = beamtalk_class_vars:key_for_tag('ProbeClass class'),
+    erlang:put(Key, #{}),
+    try
+        Fun()
+    after
+        erlang:erase(Key)
+    end.
+
 block_access_at_home_is_logged_as_home_test() ->
     with_handler(fun() ->
+        with_home_key(fun() ->
+            ok = beamtalk_class_var_probe:report(
+                class_self(self()), 'ProbeClass', viaCollect, read, n, true
+            ),
+            {ok, Report} = next_probe_event(500),
+            ?assertEqual(true, maps:get(at_home, Report)),
+            ?assertEqual(home, maps:get(shape, Report))
+        end)
+    end).
+
+at_home_is_key_presence_not_pid_equality_test() ->
+    with_handler(fun() ->
+        with_home_key(fun() ->
+            %% A ClassSelf carrying a stale pid (a class-process restart): the
+            %% key is present in this process, so the access is still at home.
+            Stale = spawn(fun() -> ok end),
+            ok = beamtalk_class_var_probe:report(
+                class_self(Stale), 'ProbeClass', viaCollect, read, n, true
+            ),
+            {ok, Report} = next_probe_event(500),
+            ?assertEqual(true, maps:get(at_home, Report)),
+            ?assertEqual(home, maps:get(shape, Report))
+        end)
+    end).
+
+at_home_pid_without_the_key_is_not_at_home_test() ->
+    with_handler(fun() ->
+        %% This process is the pid in ClassSelf but holds no key (a foreign or
+        %% idle process): not at home.
         ok = beamtalk_class_var_probe:report(
             class_self(self()), 'ProbeClass', viaCollect, read, n, true
         ),
         {ok, Report} = next_probe_event(500),
-        ?assertEqual(true, maps:get(at_home, Report)),
-        ?assertEqual(home, maps:get(shape, Report))
+        ?assertEqual(false, maps:get(at_home, Report))
     end).
 
 method_level_access_at_home_is_not_logged_test() ->
     with_handler(fun() ->
-        ok = beamtalk_class_var_probe:report(
-            class_self(self()), 'ProbeClass', bump, write, n, false
-        ),
-        ?assertEqual(none, next_probe_event(100))
+        with_home_key(fun() ->
+            ok = beamtalk_class_var_probe:report(
+                class_self(self()), 'ProbeClass', bump, write, n, false
+            ),
+            ?assertEqual(none, next_probe_event(100))
+        end)
     end).
 
 method_level_access_away_from_home_is_logged_test() ->

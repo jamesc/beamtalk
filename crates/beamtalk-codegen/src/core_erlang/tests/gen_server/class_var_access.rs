@@ -319,9 +319,15 @@ fn class_method_nlr_yields_the_bare_value() {
 #[test]
 fn meta_declares_class_var_abi() {
     let code = codegen("Object subclass: Counter\n  classState: n = 0\n");
+    // The expected value is the one constant the runtime's load gate also reads
+    // (`ABI_VERSION` -> `beamtalk_class_vars_keys.hrl`), never a literal here.
+    let expected = format!(
+        "'class_var_abi' => {}",
+        super::super::class_var_keys::ABI_VERSION
+    );
     assert!(
-        code.contains("'class_var_abi' => 1"),
-        "__beamtalk_meta/0 must carry class_var_abi => 1. Got:\n{code}"
+        code.contains(&expected),
+        "__beamtalk_meta/0 must carry `{expected}`. Got:\n{code}"
     );
 }
 

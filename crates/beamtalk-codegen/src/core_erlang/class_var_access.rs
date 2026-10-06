@@ -135,14 +135,23 @@ impl CoreErlangGenerator {
     /// Whether `block` (including every nested block literal) reads a class
     /// variable of the class being compiled: a node for which
     /// [`Self::is_class_var_field_read`] holds (outside an assignment target),
-    /// or a `hasField:` send for which [`Self::is_class_var_has_field`] holds,
-    /// as a plain send or as a cascade message. A write-only block reads
-    /// nothing and binds no capture ("blocks that read no class variable bind
-    /// nothing").
+    /// or a `hasField:` send for which [`Self::is_class_var_has_field`] holds.
+    /// A write-only block reads nothing and binds no capture ("blocks that read
+    /// no class variable bind nothing").
+    ///
+    /// A `hasField:` that is a *cascade message* is deliberately not counted:
+    /// the cascade lowers every message, the first one included, through
+    /// `beamtalk_message_dispatch:send` and never through the `HasField`
+    /// intrinsic (`beamtalk_class_vars:has`), so nothing in it reads through a
+    /// capture. The AST represents the first message as the cascade's receiver
+    /// send, which the walk visits as an ordinary send, so it is skipped by span;
+    /// the later messages are never visited as sends. That keeps the walker and
+    /// the lowering in agreement.
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
         let is_has_field =
             |selector: &MessageSelector| selector.well_known() == Some(WellKnownSelector::HasField);
         let mut assigned_targets: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
+        let mut cascade_firsts: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
         let mut found = false;
         for stmt in &block.body {
             beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
@@ -162,20 +171,17 @@ impl CoreErlangGenerator {
                         found = true;
                     }
                 }
+                Expression::Cascade { receiver, .. } => {
+                    if matches!(receiver.as_ref(), Expression::MessageSend { .. }) {
+                        cascade_firsts.push(receiver.span());
+                    }
+                }
                 Expression::MessageSend {
                     receiver, selector, ..
                 } => {
-                    if is_has_field(selector) && self.is_class_var_has_field(receiver) {
-                        found = true;
-                    }
-                }
-                // The walker visits a cascade's receiver and the messages'
-                // arguments, never the messages themselves.
-                Expression::Cascade {
-                    receiver, messages, ..
-                } => {
-                    if self.is_class_var_has_field(receiver)
-                        && messages.iter().any(|m| is_has_field(&m.selector))
+                    if is_has_field(selector)
+                        && self.is_class_var_has_field(receiver)
+                        && !cascade_firsts.contains(&e.span())
                     {
                         found = true;
                     }
