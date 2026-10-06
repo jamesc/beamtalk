@@ -32,8 +32,8 @@
 //! results — any sub-trees that parsed successfully still contribute results.
 
 use crate::ast::{
-    CascadeMessage, Expression, MessageSelector, MethodDefinition, Pattern, StringSegment,
-    TypeAnnotation,
+    CascadeMessage, Expression, Identifier, MessageSelector, MethodDefinition, Pattern,
+    StringSegment, TypeAnnotation,
 };
 use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, parse};
 
@@ -1321,45 +1321,66 @@ fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(Str
     }
 }
 
-fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut Vec<(String, u32)>) {
+/// Visits every class-reference [`Identifier`] in a [`TypeAnnotation`] tree,
+/// calling `f` on each one in depth-first order.
+///
+/// Both [`collect_type_annotation_class_names`] and `collect_all_type_refs`
+/// delegate here. `Singleton` / `Self` / `Self class` annotations carry no
+/// class reference and are skipped.
+pub(crate) fn for_each_type_annotation_class_ref<'a>(
+    annotation: &'a TypeAnnotation,
+    f: &mut impl FnMut(&'a Identifier),
+) {
     match annotation {
-        TypeAnnotation::Simple(id) => {
-            hits.push((id.name.to_string(), id.span.line_number(source)));
-        }
+        TypeAnnotation::Simple(id) => f(id),
         TypeAnnotation::Generic {
             base, parameters, ..
         } => {
-            hits.push((base.name.to_string(), base.span.line_number(source)));
+            f(base);
             for param in parameters {
-                collect_all_type_refs(param, source, hits);
+                for_each_type_annotation_class_ref(param, f);
             }
         }
         TypeAnnotation::Union { types, .. } => {
             for ty in types {
-                collect_all_type_refs(ty, source, hits);
+                for_each_type_annotation_class_ref(ty, f);
             }
         }
         TypeAnnotation::FalseOr { inner, .. } => {
-            collect_all_type_refs(inner, source, hits);
+            for_each_type_annotation_class_ref(inner, f);
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
-            collect_all_type_refs(base, source, hits);
-            collect_all_type_refs(excluded, source, hits);
+            for_each_type_annotation_class_ref(base, f);
+            for_each_type_annotation_class_ref(excluded, f);
         }
         TypeAnnotation::Intersection { left, right, .. } => {
-            collect_all_type_refs(left, source, hits);
-            collect_all_type_refs(right, source, hits);
+            for_each_type_annotation_class_ref(left, f);
+            for_each_type_annotation_class_ref(right, f);
         }
-        TypeAnnotation::ClassOf {
-            class_name: class_id,
-            ..
-        } => {
-            hits.push((class_id.name.to_string(), class_id.span.line_number(source)));
-        }
+        TypeAnnotation::ClassOf { class_name, .. } => f(class_name),
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}
     }
+}
+
+/// Collects the class names referenced by a type annotation into `out`.
+///
+/// Used by `beamtalk-codegen`'s synthetic accessor emission (ADR 0087 Phase 6)
+/// so it can report the same referenced class names a hand-written accessor
+/// with the same type signature would, without needing the raw source text.
+/// `Singleton` / `Self` / `Self class` annotations carry no class reference
+/// and are skipped.
+///
+/// This is `pub`, not `pub(crate)`: `beamtalk-codegen` lives in its own crate.
+pub fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Vec<String>) {
+    for_each_type_annotation_class_ref(annotation, &mut |id| out.push(id.name.to_string()));
+}
+
+fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut Vec<(String, u32)>) {
+    for_each_type_annotation_class_ref(annotation, &mut |id| {
+        hits.push((id.name.to_string(), id.span.line_number(source)));
+    });
 }
 
 // ---------------------------------------------------------------------------
