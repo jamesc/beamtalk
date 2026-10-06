@@ -126,10 +126,32 @@ impl CoreErlangGenerator {
     }
 
     /// THE predicate for "`receiver hasField: ...` lowers to
-    /// `beamtalk_class_vars:has`": in a class method, a `self` receiver. The
-    /// `HasField` intrinsic and the capture walker both call it.
+    /// `beamtalk_class_vars:has`": in a class method of a class that has class
+    /// variables, a `self` receiver. The `HasField` intrinsic and the capture
+    /// walker both call it.
+    ///
+    /// A class with no class variables is excluded: its `class sealed` methods
+    /// are direct-called with `ClassSelf = nil` (ADR 0130 §2), which
+    /// `beamtalk_class_vars:has` rejects. Its `hasField:` is a constant, see
+    /// [`Self::is_class_method_has_field_without_class_vars`].
     pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
-        self.in_class_method() && Self::is_self_receiver(receiver)
+        self.in_class_method()
+            && Self::is_self_receiver(receiver)
+            && !self.class_var_names().is_empty()
+    }
+
+    /// `self hasField: ...` in a class method of a class with no class
+    /// variables: nothing can be present, so it lowers to `false` without
+    /// touching the class-variable home. Complements
+    /// [`Self::is_class_var_has_field`]; exactly one of the two holds for a
+    /// class-method `self hasField:`.
+    pub(super) fn is_class_method_has_field_without_class_vars(
+        &self,
+        receiver: &Expression,
+    ) -> bool {
+        self.in_class_method()
+            && Self::is_self_receiver(receiver)
+            && self.class_var_names().is_empty()
     }
 
     /// Whether `block` (including every nested block literal) reads a class

@@ -58,3 +58,13 @@ TestCase subclass: DirectDispatchTest
     cls := DirectDispatchStateful
     first := cls bump
     self assert: cls bump equals: first + 1
+
+  // --- hasField: on a class with no class variables (ADR 0130 §2) -------------
+  testHasFieldOnStatelessClassIsFalse =>
+    self assert: DirectDispatchStateless hasMissingField equals: false
+
+  testHasFieldInBlockOnStatelessClassIsFalse =>
+    self assert: DirectDispatchStateless hasMissingFieldInBlock equals: false
+
+  testUnusedBlockWithHasFieldDoesNotRaise =>
+    self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7
