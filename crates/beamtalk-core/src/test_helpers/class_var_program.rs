@@ -600,7 +600,7 @@ impl<'p> Machine<'p> {
                 None => 0,
             };
             let c = Self::lookup_int(env, counter);
-            if c + extra_v >= bound {
+            if c.checked_add(extra_v).ok_or(Ctl::Budget)? >= bound {
                 return Ok(());
             }
             self.stmts(body, env)?;
@@ -706,7 +706,8 @@ impl<'p> Machine<'p> {
 
 impl Program {
     /// Interprets the program per ADR 0130 §4. `None` when the step budget is
-    /// exhausted (the generator never produces such a program).
+    /// exhausted or an `i64` sum would overflow (the generator never produces
+    /// such a program).
     #[must_use]
     pub fn interpret(&self) -> Option<Outcome> {
         let mut m = Machine {
