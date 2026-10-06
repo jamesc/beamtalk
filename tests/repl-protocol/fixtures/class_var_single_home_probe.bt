@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 §2 / BT-3715: hasField: in an inheritable (unsealed) parent's class
+// method follows the receiver: the stateful subclass sees its own class
+// variable, the parent (no class variables) does not.
+
+Object subclass: CvshProbeBase
+  class probe => self hasField: #n
+  class probeInBlock => [self hasField: #n] value

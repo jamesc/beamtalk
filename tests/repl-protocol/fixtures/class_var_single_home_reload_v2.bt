@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 / BT-3715: v2 of CvshReload: bump now adds 10; same classState:
+// declaration, so the live map must survive the reload.
+
+Object subclass: CvshReload
+  classState: n = 0
+  class bump -> Integer => self.n := self.n + 10
+  class n -> Integer => self.n

@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 / BT-3715: the ADR's REPL-session example. The loop body and the
+// stored closure both write the class variable in the home class process.
+// Class variables are per class (ADR 0013), so the subclass redeclares n.
+
+Object subclass: CvshCounter
+  classState: n = 0
+  class bump -> Integer => self.n := self.n + 1
+  class hook => nil
+  class run =>
+    b := [self hook]
+    #(1, 2, 3) do: [:i | i > 1 ifTrue: [self bump]]
+    b value
+    self.n

@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 §4 / BT-3715: a write made inside an on:do: protected body is
+// discarded when the error is caught; a write before the body is kept.
+
+Object subclass: CvshIds
+  classState: next = 0
+  classState: kept = 0
+  class take =>
+    self.next := self.next + 1
+    self error: "boom"
+  class tryTake =>
+    [self take] on: Error do: [:e | nil]
+    self.next
+  class tryTakeKeepingEarlierWrite =>
+    self.kept := self.kept + 1
+    [self take] on: Error do: [:e | nil]
+    self.kept
+  class next -> Integer => self.next

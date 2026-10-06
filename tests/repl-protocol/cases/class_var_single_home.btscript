@@ -1,0 +1,170 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E for ADR 0130 / BT-3715: class variables live in the class process.
+// A block reads and writes its home class's variables only at home; abroad
+// it reads the value captured at creation and a write raises
+// `class_state_unreachable`. Boundaries (on:do:) discard what happened
+// inside them. Driven through the REPL protocol because the feature crosses
+// compile, load, the class gen_server and error display (ADR 0069 lesson,
+// docs/development/testing-strategy.md section 8). BUnit coverage:
+// stdlib/test/class_var_semantics_*_test.bt.
+//
+// Error assertions are substrings of what the REPL actually prints (the
+// structured kind is not in the display; the message text is). Abroad write:
+// runtime `class_state_unreachable`; performLocally: write: `class_state_read_only`.
+// No display behaviour is changed or specified here.
+//
+// Class names are prefixed Cvsh* to stay unique in the shared workspace.
+
+// @load tests/repl-protocol/fixtures/class_var_single_home_counter.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_loud.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_ids.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_tally.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_tally_main.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_probe.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_probechild.bt
+
+// ---------------------------------------------------------------------------
+// The ADR's Counter / LoudCounter example: loop-body writes and a stored
+// closure invoked within the same invocation both take effect at home.
+// ---------------------------------------------------------------------------
+
+CvshCounter run
+// => 2
+
+CvshLoudCounter run
+// => 3
+
+// ---------------------------------------------------------------------------
+// on:do: is a catch boundary: the write inside the protected body is
+// discarded when the error is caught; a write made before it is kept.
+// ---------------------------------------------------------------------------
+
+CvshIds tryTake
+// => 0
+
+CvshIds next
+// => 0
+
+CvshIds tryTakeKeepingEarlierWrite
+// => 1
+
+CvshIds tryTakeKeepingEarlierWrite
+// => 2
+
+CvshIds next
+// => 0
+
+// Uncaught, the same error surfaces to the REPL.
+CvshIds take
+// => ERROR: boom
+
+CvshIds next
+// => 0
+
+// ---------------------------------------------------------------------------
+// A block carried synchronously into another class's class method (the
+// callee has class state, so it runs in its own process). A read sees the
+// live value (the home is blocked, so captured == live); a write raises.
+// ---------------------------------------------------------------------------
+
+CvshTally readViaBatch
+// => 5
+
+CvshTally writeViaBatch
+// => ERROR: class variable total cannot be read from this process
+
+// The uncaught error discards the whole invocation's writes, including the
+// reset made before the failed write, so the earlier 5 is unchanged.
+CvshTally total
+// => 5
+
+// ---------------------------------------------------------------------------
+// Stored closures. Run from a later invocation of the same class they are at
+// home: live read, write succeeds.
+// ---------------------------------------------------------------------------
+
+CvshTally reset
+// => 0
+
+bumper := CvshTally makeBumper
+// => _
+
+CvshTally run: bumper
+// => 1
+
+CvshTally total
+// => 1
+
+reader := CvshTally makeReader
+// => _
+
+CvshTally add: 4
+// => 5
+
+CvshTally run: reader
+// => 5
+
+// Run from the REPL process, after the invocation ended: the read answers the
+// value captured when the block was made (1), and the write raises.
+reader value
+// => 1
+
+bumper value
+// => ERROR: class variable total cannot be read from this process
+
+CvshTally total
+// => 5
+
+// ---------------------------------------------------------------------------
+// performLocally: runs the method in the caller against a read-only snapshot
+// of the last completed state: reads work, writes raise class_state_read_only.
+// ---------------------------------------------------------------------------
+
+CvshTally performLocally: #total withArguments: #()
+// => 5
+
+CvshTally performLocally: #add: withArguments: #(1)
+// => ERROR: class variable total is read-only here
+
+CvshTally total
+// => 5
+
+// ---------------------------------------------------------------------------
+// Unsealed parent / stateful subclass: hasField: follows the receiver.
+// ---------------------------------------------------------------------------
+
+CvshProbeBase probe
+// => false
+
+CvshProbeChild probe
+// => true
+
+CvshProbeBase probeInBlock
+// => false
+
+CvshProbeChild probeInBlock
+// => true
+
+// ---------------------------------------------------------------------------
+// Hot reload of a class with classState: mid-session keeps its map.
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/class_var_single_home_reload_v1.bt
+// => Loaded: CvshReload
+
+CvshReload bump
+// => 1
+
+CvshReload bump
+// => 2
+
+:load tests/repl-protocol/fixtures/class_var_single_home_reload_v2.bt
+// => Loaded: CvshReload
+
+CvshReload n
+// => 2
+
+CvshReload bump
+// => 12

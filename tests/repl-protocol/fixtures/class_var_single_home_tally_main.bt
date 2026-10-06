@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 / BT-3715: CvshTally, driven with CvshBatch (separate file).
+
+Object subclass: CvshTally
+  classState: total = 0
+  class add: x => self.total := self.total + x
+  class total -> Integer => self.total
+  class reset => self.total := 0
+  class readViaBatch =>
+    self reset
+    self add: 5
+    CvshBatch each: [self.total]
+  class writeViaBatch =>
+    self reset
+    CvshBatch each: [self add: 1]
+    self.total
+  class makeBumper => [self add: 1]
+  class makeReader =>
+    @expect class_state_abroad "BT-3715: run from the REPL it reads the creation-time value"
+    [self.total]
+  class run: aBlock => aBlock value
+  class performRead => self performLocally: #total withArguments: #()
+  class snapshotTotal => self total
