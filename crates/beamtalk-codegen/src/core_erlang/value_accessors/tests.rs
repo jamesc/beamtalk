@@ -7,7 +7,7 @@
 use super::*;
 use crate::core_erlang::tests::bare;
 use beamtalk_core::ast::{
-    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, Identifier, KeywordPart,
+    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, Identifier, KeywordPart, TypeAnnotation,
     Literal, MessageSelector, MethodDefinition, ParameterDefinition,
     StateDeclaration as AstStateDeclaration,
 };

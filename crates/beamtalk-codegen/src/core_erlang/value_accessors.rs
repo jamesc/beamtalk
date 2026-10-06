@@ -18,7 +18,8 @@
 use super::{CoreErlangGenerator, xref::MAX_ATOM_BYTES};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
-use beamtalk_core::ast::{ClassDefinition, ClassKind, StateDeclaration, TypeAnnotation};
+use beamtalk_core::ast::{ClassDefinition, ClassKind, StateDeclaration};
+use beamtalk_core::method_source_walker::collect_type_annotation_class_names;
 use beamtalk_core::unparse::unparse_type_annotation_display;
 use std::fmt::Write as FmtWrite;
 
@@ -171,48 +172,6 @@ struct SyntheticAccessorEntries {
     class: Vec<SyntheticAccessorEntry>,
 }
 
-/// Collects the class names referenced by a type annotation into `out`
-/// (ADR 0087 Phase 6).
-///
-/// Mirrors `collect_all_type_refs` in
-/// [`beamtalk_core::method_source_walker`] — the walker hand-written-method
-/// `references` rows use — so a synthetic accessor on a typed slot reports the
-/// same referenced class names a hand-written accessor with the same type
-/// signature would. `Singleton` / `Self` / `Self class` annotations carry no
-/// class reference and are skipped.
-fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Vec<String>) {
-    match annotation {
-        TypeAnnotation::Simple(id) => out.push(id.name.to_string()),
-        TypeAnnotation::Generic {
-            base, parameters, ..
-        } => {
-            out.push(base.name.to_string());
-            for param in parameters {
-                collect_type_annotation_class_names(param, out);
-            }
-        }
-        TypeAnnotation::Union { types, .. } => {
-            for ty in types {
-                collect_type_annotation_class_names(ty, out);
-            }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_type_annotation_class_names(inner, out);
-        }
-        TypeAnnotation::Difference { base, excluded, .. } => {
-            collect_type_annotation_class_names(base, out);
-            collect_type_annotation_class_names(excluded, out);
-        }
-        TypeAnnotation::Intersection { left, right, .. } => {
-            collect_type_annotation_class_names(left, out);
-            collect_type_annotation_class_names(right, out);
-        }
-        TypeAnnotation::ClassOf { class_name, .. } => out.push(class_name.name.to_string()),
-        TypeAnnotation::Singleton { .. }
-        | TypeAnnotation::SelfType { .. }
-        | TypeAnnotation::SelfClass { .. } => {}
-    }
-}
 
 impl CoreErlangGenerator {
     /// Generates an auto-getter function for a single slot.

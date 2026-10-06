@@ -1321,6 +1321,53 @@ fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(Str
     }
 }
 
+/// Collects the class names referenced by a type annotation into `out`.
+///
+/// This is the names-only variant of [`collect_all_type_refs`]: it walks the
+/// same `TypeAnnotation` tree but records only the class name strings, without
+/// source line numbers. Used by `beamtalk-codegen`'s synthetic accessor
+/// emission (ADR 0087 Phase 6) so it can report the same referenced class
+/// names a hand-written accessor with the same type signature would, without
+/// needing the raw source text.
+///
+/// `Singleton` / `Self` / `Self class` annotations carry no class reference
+/// and are skipped.
+///
+/// This is `pub`, not `pub(crate)`: `beamtalk-codegen` lives in its own crate.
+pub fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Vec<String>) {
+    match annotation {
+        TypeAnnotation::Simple(id) => out.push(id.name.to_string()),
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            out.push(base.name.to_string());
+            for param in parameters {
+                collect_type_annotation_class_names(param, out);
+            }
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for ty in types {
+                collect_type_annotation_class_names(ty, out);
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            collect_type_annotation_class_names(inner, out);
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            collect_type_annotation_class_names(base, out);
+            collect_type_annotation_class_names(excluded, out);
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_type_annotation_class_names(left, out);
+            collect_type_annotation_class_names(right, out);
+        }
+        TypeAnnotation::ClassOf { class_name, .. } => out.push(class_name.name.to_string()),
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
+    }
+}
+
 fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut Vec<(String, u32)>) {
     match annotation {
         TypeAnnotation::Simple(id) => {
