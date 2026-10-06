@@ -1324,11 +1324,11 @@ fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(Str
 /// Visits every class-reference [`Identifier`] in a [`TypeAnnotation`] tree,
 /// calling `f` on each one in depth-first order.
 ///
-/// Both [`collect_type_annotation_class_names`] and [`collect_all_type_refs`]
+/// Both [`collect_type_annotation_class_names`] and `collect_all_type_refs`
 /// delegate here. `beamtalk-language-service` has two filtered walkers over the
 /// same shape (`collect_type_lines` in `references_to_query` and
-/// `collect_type_annotation_refs` in `references_provider`) — those are tracked
-/// for migration to this visitor as a follow-up.
+/// `collect_type_annotation_refs` in `references_provider`) — those are not yet
+/// migrated to this visitor.
 /// `Singleton` / `Self` / `Self class` annotations carry no class reference
 /// and are skipped.
 ///
