@@ -4,7 +4,7 @@
 //! Coverage for the two untested paths in `gen_server/state.rs`:
 //!
 //! 1. `generate_own_state_fields` — the `omit_late_defaultless_slot` skip
-//!    when a subclass (has_parent_init) has a late defaultless field.
+//!    when a subclass (`has_parent_init`) has a late defaultless field.
 //! 2. `generate_initial_state_fields` — the fallback loop (lines 121-135)
 //!    that runs when no class identity is set but the module has classes with
 //!    state fields.
@@ -56,7 +56,7 @@ fn late_defaultless_slot_skipped_in_own_state_fields() {
     );
 }
 
-/// A subclass with ONLY a late defaultless field produces an empty ChildFields
+/// A subclass with ONLY a late defaultless field produces an empty `ChildFields`
 /// (only the mandatory internal keys — no user-defined state keys).
 #[test]
 fn own_state_fields_empty_when_only_late_defaultless() {
@@ -115,7 +115,7 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
 
     let text = fields
         .iter()
-        .map(|d| d.to_pretty_string())
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
         .collect::<String>();
 
     assert!(
@@ -144,7 +144,7 @@ fn fallback_skips_late_defaultless_slot_too() {
 
     let text = fields
         .iter()
-        .map(|d| d.to_pretty_string())
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
         .collect::<String>();
 
     assert!(
