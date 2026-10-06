@@ -542,6 +542,24 @@ file, so it is only meaningful there.
   dependencies) in both `ProtocolRegistry::add_pre_loaded` and
   `analyse_full`'s carried protocol map, and in the source map (BT-3665).
 
+### `class-state-abroad` diagnostic (ADR 0130 §5, BT-3712)
+
+A block literal that touches its home class's variables where it runs outside
+an invocation of that class gets a `class-state-abroad` warning at the block.
+It is computed in `beamtalk-core` semantic analysis (`analyse_full`), so every
+surface that reports semantic diagnostics (CLI `build`/`check`/`lint`/`test`,
+REPL load, LSP `textDocument/publishDiagnostics`, MCP `lint`/
+`diagnostic_summary`) reports the same message at the same span. No operation
+is surface-specific.
+
+- Category `ClassStateAbroad`; `[diagnostics]` key `class-state-abroad`
+  (`"off"` drops it); site-level `@expect class_state_abroad`.
+- Replaces the BT-3681 `stored-closure` advisory (removed with the ClassVars
+  threading family, BT-3710). `@expect stored_closure` still parses and is
+  reported as a stale expectation.
+- The `class-state-abroad` rule is lexical and per-class-method: it does not
+  follow a block through a variable or an instance method.
+
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 
 A class that `uses:` a trait declared in *another* file only has the trait's

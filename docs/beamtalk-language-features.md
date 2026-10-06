@@ -7034,6 +7034,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `unused` | Unused variable warnings |
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
+| `class_state_abroad` | A block that reads or writes its class's variables where it runs outside an invocation of that class (ADR 0130 §5) |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
 | `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |

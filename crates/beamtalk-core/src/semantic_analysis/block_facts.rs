@@ -8,7 +8,10 @@
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops.
 
-use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector};
+use crate::ast::{
+    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
+    ParameterDefinition,
+};
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -26,6 +29,11 @@ pub struct BlockMutationAnalysis {
     pub field_writes: HashSet<String>,
     /// Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
+    /// Selectors sent to `self` anywhere in the block, including inside
+    /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
+    /// tracked by name so a caller can distinguish a self-send to a provably
+    /// non-mutating class method from one that is (or might be) mutating.
+    pub self_send_selectors: HashSet<String>,
     /// Whether the block contains a `self.field value(:...)` send — invoking
     /// a block stored in a field. The stored block's body isn't visible here (it may
     /// be assigned anywhere), so this is conservative: any such call is treated as a
@@ -86,7 +94,277 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
-/// Statement-list walker behind [`analyze_block`].
+/// Analyzes a method body (top-level statements, not wrapped in a
+/// `Block`) the same way [`analyze_block`] analyzes a block body — used by
+/// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)
+/// to inspect each class method's own body directly, since `MethodDefinition`
+/// isn't a `Block`.
+pub fn analyze_method_body(
+    parameters: &[ParameterDefinition],
+    body: &[ExpressionStatement],
+) -> BlockMutationAnalysis {
+    let mut ctx = AnalysisContext::new();
+    for param in parameters {
+        ctx.local_bindings.insert(param.name.name.to_string());
+    }
+    analyze_statements(body, &mut ctx)
+}
+
+/// Computes the set of this class's own class-method selectors that
+/// are *known or suspected* to mutate a class variable — directly (`self.cv
+/// := ...` for `cv` in `class_var_names`) or transitively (a same-class send
+/// — `self foo` OR `ClassName foo`, anywhere in the method body including
+/// inside nested blocks — to another selector already in this set).
+///
+/// BT-3522 adversarial review: the transitive closure originally walked only
+/// [`BlockMutationAnalysis::self_send_selectors`], which — like
+/// [`BlockMutationAnalysis::has_self_sends`] — only ever records a `self`-receiver
+/// send ([`is_self_reference`]). `ClassName foo` reaches the exact same
+/// same-class call as `self foo` (`beamtalk-codegen`'s
+/// `is_class_method_self_send` treats both identically), so excluding it here
+/// made a mutation reached only through the `ClassName`-spelled call invisible
+/// to this fixed point — silently treated as pure. [`same_class_reference_send_selectors`]
+/// closes that gap by unioning in same-class `ClassReference` sends
+/// separately, without widening `self_send_selectors`/`has_self_sends`
+/// themselves (both have other, unrelated consumers across the codebase that
+/// depend on their current `self`-only meaning).
+///
+/// A self-send to a selector NOT defined in this class's own `class_methods`
+/// (inherited from a superclass, or otherwise unresolvable at this class's
+/// compile time) is conservatively treated as mutating too — the same "can't
+/// know statically, so assume the worst" call codegen makes for self-sends in
+/// threaded loop bodies. This keeps the analysis sound without needing
+/// cross-class information codegen doesn't have at this point: a self-send is
+/// only ever excluded from the mutating set when its target is a *locally
+/// defined* method that this same pass has proven pure.
+///
+/// Used to let a self-send to a provably pure class method (the common case —
+/// see `stdlib/test/fixtures/class_method_block.bt`'s `self double:`-style
+/// helpers) keep compiling in a bare, unthreaded block passed to
+/// `select:`/`collect:`/`do:`/etc., while rejecting one whose target may
+/// mutate class state, where codegen's `Letrec`-only guard doesn't reach.
+///
+/// ADR 0118 §Decision 5 follow-up — design decision: investigated
+/// replacing this whole-class, syntax-only pre-flight fixed point with
+/// `beamtalk-codegen`'s `ThreadedValue::close(ctx, CloseContext::Opaque)` /
+/// `VerifyError::StateEffectEscapesExpression` — a post-hoc check of one
+/// already-compiled expression's real prelude. Structurally impossible to
+/// do here regardless of that mechanism's own maturity: this function lives
+/// in `beamtalk-core` (Compilation), which never depends on
+/// `beamtalk-codegen` (Code Generation) —
+/// `docs/development/architecture-principles.md` §1 — so it cannot name
+/// `ThreadedValue`/`close()`/`VerifyError` at all, the same constraint
+/// the `StateEffects` fact hits for its own, differently-shaped
+/// "genuinely different questions" split. This function must also run
+/// BEFORE any codegen of any of the class's methods (it needs the whole
+/// class's own call graph to compute a fixed point), where `close()`'s input
+/// — a real, already-compiled expression's prelude — does not exist yet
+/// either. The consuming predicate
+/// (`check_no_unsafe_class_method_self_sends`, `beamtalk-codegen/src/core_erlang/expressions.rs`)
+/// carries the complementary half of this finding (why its `beamtalk-codegen`-side
+/// call sites can't route through `close()` either) and the disposition:
+/// kept separate, cross-referenced, not unified.
+#[allow(clippy::implicit_hasher)] // concrete HashSet (matches ClassContext::class_var_names) is simpler for callers
+pub fn compute_class_var_mutating_selectors(
+    class: &ClassDefinition,
+    class_var_names: &HashSet<String>,
+) -> HashSet<String> {
+    let class_name = class.name.name.as_str();
+    let methods: Vec<(String, BlockMutationAnalysis, HashSet<String>)> = class
+        .class_methods
+        .iter()
+        .filter(|m| m.kind == MethodKind::Primary)
+        .map(|m| {
+            let analysis = analyze_method_body(&m.parameters, &m.body);
+            let mut same_class_call_targets = analysis.self_send_selectors.clone();
+            same_class_call_targets
+                .extend(same_class_reference_send_selectors(&m.body, class_name));
+            (
+                m.selector.name().to_string(),
+                analysis,
+                same_class_call_targets,
+            )
+        })
+        .collect();
+    let local_selectors: HashSet<&str> = methods.iter().map(|(sel, _, _)| sel.as_str()).collect();
+
+    let mut mutating: HashSet<String> = methods
+        .iter()
+        .filter(|(_, analysis, _)| {
+            analysis
+                .field_writes
+                .iter()
+                .any(|f| class_var_names.contains(f))
+        })
+        .map(|(sel, _, _)| sel.clone())
+        .collect();
+
+    // Fixed-point closure over same-class sends: a method becomes "mutating"
+    // if it same-class-sends (`self foo` or `ClassName foo`) a selector
+    // already known to mutate, or one this class doesn't itself define
+    // (unresolvable — assume the worst).
+    loop {
+        let mut changed = false;
+        for (sel, _, same_class_call_targets) in &methods {
+            if mutating.contains(sel) {
+                continue;
+            }
+            let calls_unsafe = same_class_call_targets.iter().any(|called| {
+                mutating.contains(called) || !local_selectors.contains(called.as_str())
+            });
+            if calls_unsafe {
+                mutating.insert(sel.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    mutating
+}
+
+/// Selectors sent via a same-class `ClassName selector` receiver (as opposed
+/// to `self selector`) anywhere in `body`, including nested blocks — the
+/// [`Expression::ClassReference`] counterpart to [`is_self_reference`]-based
+/// `self_send_selectors` tracking. See
+/// [`compute_class_var_mutating_selectors`]'s own doc comment for why its
+/// fixed point needs this unioned in separately rather than folded into
+/// [`BlockMutationAnalysis::self_send_selectors`] itself.
+///
+/// `pub` (BT-3529): also called directly on a bare block's own body by
+/// `beamtalk-codegen`'s `check_no_unsafe_class_method_self_sends`
+/// (`core_erlang/blocks.rs`) — that predicate filters
+/// [`BlockMutationAnalysis::self_send_selectors`] the same way this
+/// function's own fixed point originally did, and inherited the identical
+/// `ClassName`-spelled blind spot for the same reason. Re-exported via
+/// `beamtalk-codegen`'s `block_analysis` module (CLAUDE.md's
+/// no-duplicate-implementations rule) rather than reimplemented there.
+pub fn same_class_reference_send_selectors(
+    body: &[ExpressionStatement],
+    class_name: &str,
+) -> HashSet<String> {
+    let mut selectors = HashSet::new();
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            let Expression::MessageSend {
+                receiver, selector, ..
+            } = e
+            else {
+                return;
+            };
+            let is_own_class_reference = matches!(
+                receiver.as_ref(),
+                Expression::ClassReference { name, package, .. }
+                    if package.is_none() && name.name == class_name
+            );
+            if is_own_class_reference {
+                selectors.insert(selector.name().to_string());
+            }
+        });
+    }
+    selectors
+}
+
+/// How a block literal leaves the class-method invocation that created it
+/// (ADR 0130 §5): the shapes the Phase 0 census (BT-3703) counts and the
+/// `class-state-abroad` lint (BT-3712) warns on. One definition, shared by
+/// both, so they cannot disagree about what "escaping" means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EscapeShape {
+    /// Returned: the method's last statement, or the operand of `^`.
+    Returned,
+    /// Assigned to a local variable (`b := [...]`).
+    StoredLocal,
+    /// Assigned to a class variable (`self.cb := [...]`).
+    StoredClassVar,
+    /// An element of a list, array or map literal.
+    StoredInLiteral,
+}
+
+/// The block literal an expression is, looking through parentheses.
+fn as_block(expr: &Expression) -> Option<&Block> {
+    match expr.unwrap_parens() {
+        Expression::Block(block) => Some(block),
+        _ => None,
+    }
+}
+
+/// Every block literal in a method body (nested blocks included) that is
+/// returned or stored, with how it escapes (cloned: the walker's borrows do
+/// not outlive its callback). Purely syntactic: a block passed
+/// as a message argument is not an escape here (whether it escapes depends on
+/// the callee). A block returned from inside a nested inlined conditional
+/// branch is not seen (only the method's own last statement and explicit `^`).
+pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)> {
+    let mut found = Vec::new();
+    if let Some(block) = body.last().and_then(|last| as_block(&last.expression)) {
+        found.push((block.clone(), EscapeShape::Returned));
+    }
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |expr| match expr {
+            Expression::Return { value, .. } => {
+                if let Some(block) = as_block(value) {
+                    found.push((block.clone(), EscapeShape::Returned));
+                }
+            }
+            Expression::Assignment { target, value, .. } => {
+                if let Some(block) = as_block(value) {
+                    let shape = if matches!(**target, Expression::FieldAccess { .. }) {
+                        EscapeShape::StoredClassVar
+                    } else {
+                        EscapeShape::StoredLocal
+                    };
+                    found.push((block.clone(), shape));
+                }
+            }
+            Expression::ListLiteral { elements, .. }
+            | Expression::ArrayLiteral { elements, .. } => {
+                for block in elements.iter().filter_map(as_block) {
+                    found.push((block.clone(), EscapeShape::StoredInLiteral));
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for block in pairs.iter().filter_map(|p| as_block(&p.value)) {
+                    found.push((block.clone(), EscapeShape::StoredInLiteral));
+                }
+            }
+            _ => {}
+        });
+    }
+    found
+}
+
+/// Class variables read (as `self.name`) anywhere inside `block`, including
+/// nested blocks, sorted. A `self.name := v` write target is not a read.
+#[allow(clippy::implicit_hasher)] // concrete HashSet, matching ClassContext-style callers
+pub fn class_var_reads(block: &Block, vars: &HashSet<String>) -> Vec<String> {
+    let mut written_targets = Vec::new();
+    let mut reads = std::collections::BTreeSet::new();
+    let root = Expression::Block(block.clone());
+    crate::ast_walker::walk_expression(&root, &mut |expr| {
+        if let Expression::Assignment { target, .. } = expr {
+            if let Expression::FieldAccess { span, .. } = &**target {
+                written_targets.push(*span);
+            }
+        }
+        if let Expression::FieldAccess {
+            receiver,
+            field,
+            span,
+        } = expr
+        {
+            let is_self = matches!(&**receiver, Expression::Identifier(id) if id.name == "self");
+            if is_self && vars.contains(field.name.as_str()) && !written_targets.contains(span) {
+                reads.insert(field.name.to_string());
+            }
+        }
+    });
+    reads.into_iter().collect()
+}
+
+/// Shared statement-list walker behind [`analyze_block`] and [`analyze_method_body`].
 fn analyze_statements(
     body: &[ExpressionStatement],
     ctx: &mut AnalysisContext,
@@ -198,6 +476,10 @@ fn analyze_expression(
             // Detect self-sends (may mutate actor state)
             if is_self_reference(receiver) {
                 analysis.has_self_sends = true;
+                // Record the selector too (see `self_send_selectors` doc).
+                analysis
+                    .self_send_selectors
+                    .insert(selector.name().to_string());
             }
             // Detect `self.field value(:...)` — invoking a block stored in a
             // field. The field may hold a Tier 2 (state-mutating) block, so this is
@@ -277,12 +559,15 @@ fn analyze_expression(
             // Propagate self-sends the same way — a self-send inside a
             // block passed to select:/collect:/do:/etc. (this is exactly that
             // shape: a `Block` argument that isn't an inline-conditional
-            // selector, handled above) is itself a potential mutation source
-            // and must be seen at any nesting depth, not just at this block's
-            // own top level.
+            // selector, handled above) is itself a potential mutation source,
+            // and callers like `analyze_method_body`'s purity check need to see
+            // it at any nesting depth, not just at this block's own top level.
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }
+            analysis
+                .self_send_selectors
+                .extend(nested_analysis.self_send_selectors.iter().cloned());
         }
 
         Expression::Return { value, .. } => {
@@ -321,10 +606,17 @@ fn analyze_expression(
                 }
                 // A cascade's 2nd+ message is sent to
                 // the same shared receiver as the first (see the comment above),
-                // so a self-send there is recorded the same way the
-                // `MessageSend` arm does for the first message.
+                // so a self-send there needs the same `self_send_selectors`
+                // recording the `MessageSend` arm does for the first message —
+                // otherwise a mutating self-send hidden behind an earlier pure
+                // cascade message (`self pureLog: x; check: x`) is invisible to
+                // `check_no_unsafe_class_method_self_sends` and to
+                // `compute_class_var_mutating_selectors`'s purity closure.
                 if is_self_reference(cascade_receiver) {
                     analysis.has_self_sends = true;
+                    analysis
+                        .self_send_selectors
+                        .insert(msg.selector.name().to_string());
                 }
                 for arg in &msg.arguments {
                     analyze_expression(arg, analysis, ctx);
@@ -560,6 +852,9 @@ fn propagate_inline_block_writes(
     if nested.has_self_sends {
         analysis.has_self_sends = true;
     }
+    analysis
+        .self_send_selectors
+        .extend(nested.self_send_selectors.iter().cloned());
     if nested.has_field_value_call {
         analysis.has_field_value_call = true;
     }

@@ -193,6 +193,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::FileClassNameMismatch => "FileClassNameMismatch",
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
+        DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
     }
 }
 
@@ -412,6 +413,7 @@ mod tests {
             ),
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
             (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
+            (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);
