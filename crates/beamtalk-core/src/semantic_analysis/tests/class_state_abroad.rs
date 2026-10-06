@@ -44,6 +44,10 @@ Object subclass: OpenStateless
 
   class each: aBlock => aBlock value
 
+Object subclass: Lib
+
+  class sealed each: aBlock => aBlock value
+
 sealed Object subclass: SealedDriver
 
   class sealed each: aBlock => aBlock value
@@ -120,7 +124,8 @@ fn reading_block_passed_to_an_actor_warns() {
         only("  class rowAsyncRead =>\n    a := Worker spawn\n    a keep: [self.n]\n    a run\n");
     assert_eq!(d.len(), 1, "{d:?}");
     assert!(
-        d[0].message.contains("asynchronous send 'keep:'"),
+        d[0].message
+            .contains("handed to an actor by 'keep:', which may keep it"),
         "{}",
         d[0].message
     );
@@ -130,6 +135,11 @@ fn reading_block_passed_to_an_actor_warns() {
 fn reading_block_passed_to_a_cast_warns() {
     let d = only("  class a: w => w keep: [self.n]!\n");
     assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("asynchronous cast"),
+        "{}",
+        d[0].message
+    );
 }
 
 #[test]
@@ -162,6 +172,15 @@ fn writing_block_passed_to_a_stateful_class_warns() {
         d[0].message
     );
     assert!(d[0].message.contains("Driver each:"), "{}", d[0].message);
+}
+
+#[test]
+fn class_sealed_method_of_an_open_stateless_class_still_warns() {
+    // Not direct-called: the class is not sealed, so `each:` runs in `Lib`'s
+    // gen_server even though the method is `class sealed` and `Lib` has no
+    // class variables (codegen's direct-call gate 1).
+    let d = only("  class a => Lib each: [self bump]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
 }
 
 #[test]

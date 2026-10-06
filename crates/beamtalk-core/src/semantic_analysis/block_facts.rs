@@ -116,54 +116,23 @@ pub fn analyze_method_body(
 /// — `self foo` OR `ClassName foo`, anywhere in the method body including
 /// inside nested blocks — to another selector already in this set).
 ///
-/// BT-3522 adversarial review: the transitive closure originally walked only
-/// [`BlockMutationAnalysis::self_send_selectors`], which — like
-/// [`BlockMutationAnalysis::has_self_sends`] — only ever records a `self`-receiver
-/// send ([`is_self_reference`]). `ClassName foo` reaches the exact same
-/// same-class call as `self foo` (`beamtalk-codegen`'s
-/// `is_class_method_self_send` treats both identically), so excluding it here
-/// made a mutation reached only through the `ClassName`-spelled call invisible
-/// to this fixed point — silently treated as pure. [`same_class_reference_send_selectors`]
-/// closes that gap by unioning in same-class `ClassReference` sends
-/// separately, without widening `self_send_selectors`/`has_self_sends`
-/// themselves (both have other, unrelated consumers across the codebase that
-/// depend on their current `self`-only meaning).
+/// The transitive closure walks [`BlockMutationAnalysis::self_send_selectors`]
+/// (a `self foo` send) unioned with [`same_class_reference_send_selectors`]
+/// (a `ClassName foo` send to the class's own name, which binds the same
+/// method), so a mutation reached only through the `ClassName`-spelled call is
+/// not mistaken for pure.
 ///
-/// A self-send to a selector NOT defined in this class's own `class_methods`
-/// (inherited from a superclass, or otherwise unresolvable at this class's
-/// compile time) is conservatively treated as mutating too — the same "can't
-/// know statically, so assume the worst" call codegen makes for self-sends in
-/// threaded loop bodies. This keeps the analysis sound without needing
-/// cross-class information codegen doesn't have at this point: a self-send is
-/// only ever excluded from the mutating set when its target is a *locally
-/// defined* method that this same pass has proven pure.
+/// A same-class send to a selector NOT defined in this class's own
+/// `class_methods` (inherited, or otherwise unresolvable at this class's
+/// compile time) is conservatively treated as mutating: a selector is only
+/// excluded from the mutating set when its target is a *locally defined*
+/// method that this same pass has proven pure.
 ///
-/// Used to let a self-send to a provably pure class method (the common case —
-/// see `stdlib/test/fixtures/class_method_block.bt`'s `self double:`-style
-/// helpers) keep compiling in a bare, unthreaded block passed to
-/// `select:`/`collect:`/`do:`/etc., while rejecting one whose target may
-/// mutate class state, where codegen's `Letrec`-only guard doesn't reach.
-///
-/// ADR 0118 §Decision 5 follow-up — design decision: investigated
-/// replacing this whole-class, syntax-only pre-flight fixed point with
-/// `beamtalk-codegen`'s `ThreadedValue::close(ctx, CloseContext::Opaque)` /
-/// `VerifyError::StateEffectEscapesExpression` — a post-hoc check of one
-/// already-compiled expression's real prelude. Structurally impossible to
-/// do here regardless of that mechanism's own maturity: this function lives
-/// in `beamtalk-core` (Compilation), which never depends on
-/// `beamtalk-codegen` (Code Generation) —
-/// `docs/development/architecture-principles.md` §1 — so it cannot name
-/// `ThreadedValue`/`close()`/`VerifyError` at all, the same constraint
-/// the `StateEffects` fact hits for its own, differently-shaped
-/// "genuinely different questions" split. This function must also run
-/// BEFORE any codegen of any of the class's methods (it needs the whole
-/// class's own call graph to compute a fixed point), where `close()`'s input
-/// — a real, already-compiled expression's prelude — does not exist yet
-/// either. The consuming predicate
-/// (`check_no_unsafe_class_method_self_sends`, `beamtalk-codegen/src/core_erlang/expressions.rs`)
-/// carries the complementary half of this finding (why its `beamtalk-codegen`-side
-/// call sites can't route through `close()` either) and the disposition:
-/// kept separate, cross-referenced, not unified.
+/// Consumed by the `class-state-abroad` lint (`validators/class_state_abroad.rs`,
+/// `may_write_class_var`) to judge whether a `self`/own-class send inside a
+/// block may write a class variable. The analysis is syntactic and whole-class
+/// (it needs the class's own call graph for the fixed point) and lives in
+/// `beamtalk-core`, which cannot depend on `beamtalk-codegen`.
 #[allow(clippy::implicit_hasher)] // concrete HashSet (matches ClassContext::class_var_names) is simpler for callers
 pub fn compute_class_var_mutating_selectors(
     class: &ClassDefinition,
@@ -228,20 +197,9 @@ pub fn compute_class_var_mutating_selectors(
 /// Selectors sent via a same-class `ClassName selector` receiver (as opposed
 /// to `self selector`) anywhere in `body`, including nested blocks — the
 /// [`Expression::ClassReference`] counterpart to [`is_self_reference`]-based
-/// `self_send_selectors` tracking. See
-/// [`compute_class_var_mutating_selectors`]'s own doc comment for why its
-/// fixed point needs this unioned in separately rather than folded into
-/// [`BlockMutationAnalysis::self_send_selectors`] itself.
-///
-/// `pub` (BT-3529): also called directly on a bare block's own body by
-/// `beamtalk-codegen`'s `check_no_unsafe_class_method_self_sends`
-/// (`core_erlang/blocks.rs`) — that predicate filters
-/// [`BlockMutationAnalysis::self_send_selectors`] the same way this
-/// function's own fixed point originally did, and inherited the identical
-/// `ClassName`-spelled blind spot for the same reason. Re-exported via
-/// `beamtalk-codegen`'s `block_analysis` module (CLAUDE.md's
-/// no-duplicate-implementations rule) rather than reimplemented there.
-pub fn same_class_reference_send_selectors(
+/// `self_send_selectors` tracking, unioned in by
+/// [`compute_class_var_mutating_selectors`].
+fn same_class_reference_send_selectors(
     body: &[ExpressionStatement],
     class_name: &str,
 ) -> HashSet<String> {
@@ -606,11 +564,10 @@ fn analyze_expression(
                 }
                 // A cascade's 2nd+ message is sent to
                 // the same shared receiver as the first (see the comment above),
-                // so a self-send there needs the same `self_send_selectors`
-                // recording the `MessageSend` arm does for the first message —
+                // so a self-send there is recorded in `self_send_selectors` the
+                // same way the `MessageSend` arm records the first message —
                 // otherwise a mutating self-send hidden behind an earlier pure
                 // cascade message (`self pureLog: x; check: x`) is invisible to
-                // `check_no_unsafe_class_method_self_sends` and to
                 // `compute_class_var_mutating_selectors`'s purity closure.
                 if is_self_reference(cascade_receiver) {
                     analysis.has_self_sends = true;

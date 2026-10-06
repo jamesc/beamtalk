@@ -12,17 +12,22 @@
 //! can see the block leave home it says so, at the block:
 //!
 //! - **(a) reads.** A block literal that reads a class variable and is passed
-//!   to an asynchronous send (a cast, a send to a statically known actor, a
-//!   class-side send of a method that spawns its block such as `Timer
-//!   after:do:`), stored in a local, class variable or literal, or returned,
-//!   "reads the values captured at creation".
+//!   to an asynchronous send (a cast, or a class-side method that spawns its
+//!   block such as `Timer after:do:`), handed to a statically known actor
+//!   (which may keep it: a plain send to an actor is a synchronous call, so
+//!   this case is broader than the synchronous class-side exemption below),
+//!   stored in a local, class variable or literal, or returned, "reads the
+//!   values captured at creation".
 //! - **(b) writes.** A block literal that writes a class variable, directly or
 //!   through a `self`/own-class send that
 //!   [`compute_class_var_mutating_selectors`] cannot prove pure, and is passed
 //!   to a class-side send whose receiver is statically another (user-defined)
-//!   class that has class state, or whose method is not `class sealed`, "raises
-//!   `class_state_unreachable`". A `class sealed` method of a stateless class
-//!   is direct-called in the caller, so a block passed there stays home.
+//!   class and which is not direct-called, "raises `class_state_unreachable`".
+//!   A send is direct-called in the caller (so a block passed there stays home)
+//!   only for a `class sealed` method of a sealed class with no class
+//!   variables ([`ClassHierarchy::is_direct_call_eligible`], the rule codegen's
+//!   direct-call table uses): a `class sealed` method of an open or stateful
+//!   class still runs in that class's process.
 //!
 //! This is a lint, not a guarantee: a block passed through a variable or an
 //! instance method is only caught at run time, and only for writes. A block
@@ -35,7 +40,9 @@
 //! census): a reading block passed to an actor held in a field or a
 //! parameter, a reading block returned from inside a nested conditional
 //! branch, a block reaching class state only through a self-send (the access
-//! sits in the callee), and a block handed to a `Future`.
+//! sits in the callee), a block handed to a `Future`, and a *writing* block
+//! passed to an actor (`a each: [self bump]`), which runs in the actor's
+//! process and raises, but rule (b) only covers class-side receivers.
 
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
 use crate::ast_walker::walk_expression;
@@ -173,20 +180,12 @@ fn check_method_body(
                     _ => None,
                 })
             };
-            // (a) reads: passed to an asynchronous send.
-            if *is_cast || ctx.is_async_send(receiver, &sel, &actors) {
+            // (a) reads: passed to a send that runs or keeps it elsewhere.
+            if let Some(how) = ctx.abroad_send_clause(receiver, &sel, *is_cast, &actors) {
                 for block in blocks() {
                     let reads = class_var_reads(block, &ctx.class_vars);
                     if !reads.is_empty() {
-                        report(
-                            block,
-                            reads_diagnostic(
-                                ctx,
-                                block,
-                                &reads,
-                                &format!("passed to the asynchronous send '{sel}'"),
-                            ),
-                        );
+                        report(block, reads_diagnostic(ctx, block, &reads, &how));
                     }
                 }
             }
@@ -203,30 +202,48 @@ fn check_method_body(
 }
 
 impl ClassCtx<'_> {
-    /// Whether a send of `selector` to `receiver` runs its block argument
-    /// outside this invocation, without blocking it: a send to a statically
-    /// known actor instance, or a class-side send of a method that spawns its
-    /// block (`Timer after:do:`; `Parallel` blocks until its workers finish, so
-    /// the captured value is the live one and it is not asynchronous).
-    fn is_async_send(
+    /// How a send hands its block argument somewhere it can run outside this
+    /// invocation, as a clause for the diagnostic; `None` when it does not.
+    ///
+    /// - a cast (`!`) and a class-side method that spawns its block
+    ///   (`Timer after:do:`) run the block asynchronously; `Parallel` blocks
+    ///   until its workers finish, so the captured value is the live one;
+    /// - a send to a statically known actor is a synchronous `gen_server:call`,
+    ///   so an actor that merely evaluates the block runs it while this
+    ///   invocation is blocked (like `Driver each: [self.n]`, which is exempt).
+    ///   The hazard is an actor that *keeps* the block and runs it later, which
+    ///   the compiler cannot see, so this case is deliberately broader than the
+    ///   synchronous class-side exemption and worded "may keep it".
+    fn abroad_send_clause(
         &self,
         receiver: &Expression,
         selector: &str,
+        is_cast: bool,
         actors: &HashSet<String>,
-    ) -> bool {
+    ) -> Option<String> {
+        if is_cast {
+            return Some(format!("passed to the asynchronous cast '{selector}'"));
+        }
+        let to_actor = || format!("handed to an actor by '{selector}', which may keep it");
         match receiver.unwrap_parens() {
-            Expression::Identifier(id) => actors.contains(id.name.as_str()),
+            Expression::Identifier(id) => actors.contains(id.name.as_str()).then(to_actor),
             // `Worker spawn keep: [...]`.
             Expression::MessageSend {
                 receiver: inner,
                 selector: spawn,
                 ..
-            } => self.is_actor_spawn(inner, &spawn.name()),
+            } => self.is_actor_spawn(inner, &spawn.name()).then(to_actor),
             Expression::ClassReference { name, package, .. } if package.is_none() => self
                 .hierarchy
                 .find_class_method(name.name.as_str(), selector)
-                .is_some_and(|m| m.spawns_block && m.defined_in != "Parallel"),
-            _ => false,
+                .filter(|m| m.spawns_block && m.defined_in != "Parallel")
+                .map(|_| {
+                    format!(
+                        "passed to '{} {selector}', which runs it asynchronously",
+                        name.name
+                    )
+                }),
+            _ => None,
         }
     }
 
@@ -242,7 +259,7 @@ impl ClassCtx<'_> {
 
     /// The class a class-side send reaches when its receiver is statically
     /// *another* user-defined class whose method runs in that class's process
-    /// (the class has class state, or the method is not `class sealed`).
+    /// (it is not direct-called: see `ClassHierarchy::is_direct_call_eligible`).
     fn foreign_class_send_target(&self, receiver: &Expression, selector: &str) -> Option<String> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
@@ -260,8 +277,9 @@ impl ClassCtx<'_> {
         if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
             return None;
         }
-        let has_class_state = !self.hierarchy.class_variable_names(target).is_empty();
-        (has_class_state || !method.is_sealed).then(|| target.to_string())
+        // Direct-called in the caller (codegen's rule, shared): the block stays
+        // home. Anything else runs in `target`'s process.
+        (!self.hierarchy.is_direct_call_eligible(target, selector)).then(|| target.to_string())
     }
 
     /// The first class-variable write `block` makes: a direct `self.n := ...`,
