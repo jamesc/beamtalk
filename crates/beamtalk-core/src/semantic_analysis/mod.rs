@@ -1002,6 +1002,9 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
+    // ADR 0130 §5 (BT-3712): a block that touches its home class's variables
+    // where it runs outside an invocation of that class.
+    validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_value_slot_assignment(
         module,
         &result.class_hierarchy,

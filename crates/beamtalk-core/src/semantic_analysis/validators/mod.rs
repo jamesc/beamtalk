@@ -7,6 +7,8 @@
 //!
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
+//! - `class_state_abroad` — blocks that touch their home class's variables
+//!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
 //! - `class_validators` — class-hierarchy-dependent checks
 //! - `late_slot_validators` — `late` slot declaration checks (ADR 0124 §1, §5)
 //! - `lint_validators` — code quality lints
@@ -18,6 +20,7 @@
 //! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
 //!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
 
+mod class_state_abroad;
 mod class_validators;
 mod late_slot_validators;
 mod lint_validators;
@@ -33,6 +36,7 @@ mod unguarded_late_read_validators;
 mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
+pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,

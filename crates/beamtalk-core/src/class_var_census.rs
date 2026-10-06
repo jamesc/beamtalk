@@ -11,7 +11,8 @@
 //! block, so the Migration Path and the Phase 3 `class-state-abroad` lint
 //! (BT-3712) are tuned to shapes that occur.
 //!
-//! An *escaping closure* here is a block literal, inside a class method, that
+//! The shape detection lives in `semantic_analysis::block_facts` (shared with
+//! the lint). An *escaping closure* here is a block literal, inside a class method, that
 //! reads a class variable of its class (or of a superclass found in the same
 //! corpus) and is **returned** or **stored** by that method:
 //!
@@ -37,22 +38,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Block, Expression, MethodDefinition, Module};
-use crate::ast_walker::walk_expression;
+use crate::ast::{MethodDefinition, Module};
+use crate::semantic_analysis::block_facts::{class_var_reads, escaping_blocks};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 
-/// How an escaping closure leaves its creating class method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum EscapeShape {
-    /// Returned: the method's last statement, or the operand of `^`.
-    Returned,
-    /// Assigned to a local variable (`b := [...]`).
-    StoredLocal,
-    /// Assigned to a class variable (`self.cb := [...]`).
-    StoredClassVar,
-    /// An element of a list, array or map literal.
-    StoredInLiteral,
-}
+pub use crate::semantic_analysis::block_facts::EscapeShape;
 
 /// One escaping closure that reads a class variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,10 +226,10 @@ fn scan_method(
     vars: &HashSet<String>,
     sites: &mut Vec<EscapeSite>,
 ) {
-    let mut record = |block: &Block, shape: EscapeShape| {
-        let reads = class_var_reads(block, vars);
+    for (block, shape) in escaping_blocks(&method.body) {
+        let reads = class_var_reads(&block, vars);
         if reads.is_empty() {
-            return;
+            continue;
         }
         sites.push(EscapeSite {
             file: file.path.clone(),
@@ -249,80 +239,7 @@ fn scan_method(
             shape,
             reads,
         });
-    };
-
-    if let Some(last) = method.body.last() {
-        if let Some(block) = as_block(&last.expression) {
-            record(block, EscapeShape::Returned);
-        }
     }
-    for stmt in &method.body {
-        walk_expression(&stmt.expression, &mut |expr| match expr {
-            Expression::Return { value, .. } => {
-                if let Some(block) = as_block(value) {
-                    record(block, EscapeShape::Returned);
-                }
-            }
-            Expression::Assignment { target, value, .. } => {
-                if let Some(block) = as_block(value) {
-                    let shape = if matches!(**target, Expression::FieldAccess { .. }) {
-                        EscapeShape::StoredClassVar
-                    } else {
-                        EscapeShape::StoredLocal
-                    };
-                    record(block, shape);
-                }
-            }
-            Expression::ListLiteral { elements, .. }
-            | Expression::ArrayLiteral { elements, .. } => {
-                for block in elements.iter().filter_map(as_block) {
-                    record(block, EscapeShape::StoredInLiteral);
-                }
-            }
-            Expression::MapLiteral { pairs, .. } => {
-                for block in pairs.iter().filter_map(|p| as_block(&p.value)) {
-                    record(block, EscapeShape::StoredInLiteral);
-                }
-            }
-            _ => {}
-        });
-    }
-}
-
-/// The block literal an expression is, looking through parentheses.
-fn as_block(expr: &Expression) -> Option<&Block> {
-    match expr {
-        Expression::Block(block) => Some(block),
-        Expression::Parenthesized { expression, .. } => as_block(expression),
-        _ => None,
-    }
-}
-
-/// Class variables read (as `self.name`) anywhere inside `block`, including
-/// nested blocks. A `self.name := v` write target is not a read.
-fn class_var_reads(block: &Block, vars: &HashSet<String>) -> Vec<String> {
-    let mut written_targets = Vec::new();
-    let mut reads = std::collections::BTreeSet::new();
-    let root = Expression::Block(block.clone());
-    walk_expression(&root, &mut |expr| {
-        if let Expression::Assignment { target, .. } = expr {
-            if let Expression::FieldAccess { span, .. } = &**target {
-                written_targets.push(*span);
-            }
-        }
-        if let Expression::FieldAccess {
-            receiver,
-            field,
-            span,
-        } = expr
-        {
-            let is_self = matches!(&**receiver, Expression::Identifier(id) if id.name == "self");
-            if is_self && vars.contains(field.name.as_str()) && !written_targets.contains(span) {
-                reads.insert(field.name.to_string());
-            }
-        }
-    });
-    reads.into_iter().collect()
 }
 
 fn line_of(source: &str, offset: u32) -> usize {
