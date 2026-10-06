@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 §5 / BT-3715: blocks carried into another class's class method
+// (CvshBatch has class state, so it runs in its own process) and stored
+// closures run from the REPL after the invocation ended.
+
+Object subclass: CvshBatch
+  classState: runs = 0
+
+  class each: aBlock =>
+    self.runs := self.runs + 1
+    aBlock value
+
+  class guard: aBlock => [aBlock value] on: Error do: [:e | nil]

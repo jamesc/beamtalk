@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 / BT-3715: hot reload of a class with classState: mid-session.
+
+Object subclass: CvshReload
+  classState: n = 0
+
+  class bump -> Integer => self.n := self.n + 1
+
+  class n -> Integer => self.n
