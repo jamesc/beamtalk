@@ -844,6 +844,8 @@ guarantee boundary the issue asked for.
 
 ## Class-side self-send cost (BT-3666 / BT-3669 / BT-3675, measured in BT-3676)
 
+> **Historical.** The per-scope token, commit, export and `class_var_scope_*` helpers measured below were deleted by [ADR 0130](../ADR/0130-class-variables-live-in-the-class-process.md) (class variables now live in the class process). The harness section still describes the current method; for the current numbers see [ADR 0130 Phase 0](#adr-0130-phase-0-single-home-class-variables-perf-spike-and-gates-bt-3702), in particular its final gate summary.
+
 ### Harness
 
 `runtime/perf/self_send_bench` is a small Beamtalk package whose `SsbMain run`
@@ -1250,3 +1252,17 @@ module in one process, gave +1.3%, -2.6%, +0.1%.)
   now. No gate covers it (ADR 0130 leaves the late-binding guard and the walk to BT-3700); recorded here so the
   17% is not lost.
 - Actor self-sends are unchanged by this ADR and within noise of main.
+
+#### Final gate summary (ADR 0130 Phase 4, BT-3714)
+
+The numbers above are the final ones; nothing was re-run for the docs sweep.
+
+| gate | bound | result (median) | verdict |
+|---|---|---|---|
+| 1. open self-send, top level | 213 ns | 199 ns | passes |
+| 1. open self-send, in an `ifTrue:` arm | 268 ns | 260 ns | passes (by 8 ns) |
+| 2. sealed self-send | no regression | 119 ns vs 121 ns baseline | passes |
+| 3. 10 reads + 3 writes per iteration | `2 * 285 = 570` ns | **582 ns** | **fails by 12 ns (2%); accepted** |
+| 4. `snapshot/0` + restore around `on:do:` | within 10% of main | +2.0% | passes |
+
+Gate 3 was accepted rather than used to reopen the single-home decision, as the ADR prescribes. The follow-up is [BT-3719](https://linear.app/beamtalk/issue/BT-3719): bind the class-variable key once per method instead of at each inlined access, then re-run gate 3 (target at or under 570 ns) and re-measure the late-bound hierarchy walk (`class_self_send_inherited_override`, 1908 ns, +17% over main), recovering or explaining it. Until then a class method that touches class variables in a hot loop costs about twice what it did on `main` before ADR 0130.

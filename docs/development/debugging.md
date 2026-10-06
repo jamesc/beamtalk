@@ -220,8 +220,8 @@ conditional sites, `conditionals.rs`'s Actor conditional,
 accumulator — into three shared pieces, all in `control_flow/`:
 
 - **One type, `ThreadedFamilies`** (`analysis.rs`) — an ordered
-  `Vec<VersionPrefix>` in canonical slot order (`State`, then `ClassVars`,
-  then `SelfVt`; ADR 0122 Decision 2), constructed only via
+  `Vec<VersionPrefix>` in canonical slot order (`State`, then `SelfVt`;
+  ADR 0122 Decision 2; the `ClassVars` family was removed by ADR 0130), constructed only via
   `ThreadedFamilies::from_matches` so no call site can hand-assemble one out
   of order.
 - **One emission helper, `family_slots.rs`** — `append_family_slots`/
@@ -237,27 +237,26 @@ accumulator — into three shared pieces, all in `control_flow/`:
   call site — this is exactly the "ask about the ones in front of you"
   mistake ADR 0122's own "Why the gaps keep happening" section names as the
   root cause of BT-3489 and BT-3506); `match_lowering.rs`'s
-  `MATCH_ARM_FAMILIES` (`[State, ClassVars]`, `SelfVt` excluded) is the
+  `MATCH_ARM_FAMILIES` (`[State]`, `SelfVt` excluded) is the
   clearest example of a site declaring a narrower capability than
   `eligible_families` would allow, with the exclusion checked against the
   shared detector rather than hand-matched. A family a site does not declare
   is *meant* to be rejected through the construct's own existing diagnostic
-  (`ClassVarAssignmentInThreadedBody`, `FieldAssignmentInUnsupportedBlock`,
+  (`FieldAssignmentInUnsupportedBlock`,
   `ValueSelfFieldAssignmentInMatchArm`) — detection and carry-capability stay
   deliberately separate questions (ADR 0122 Decision 1). That pairing is
-  verified present for the loop sites; it is **not yet wired up for two
-  shapes found auditing this close-out** — a `ClassVars` mutation nested
-  inside a conditional inside `on:do:`/`ensure:`, and a `SelfVt` mutation
-  nested inside a value-type conditional's own `ifTrue:`/`ifFalse:` block —
-  both missed by the narrow detector with no rejection to catch the miss,
-  so the mutation is silently dropped instead. Tracked as
+  verified present for the loop sites; it is **not yet wired up for one
+  shape found auditing this close-out**, a `SelfVt` mutation nested inside
+  a value-type conditional's own `ifTrue:`/`ifFalse:` block, missed by the
+  narrow detector with no rejection to catch the miss, so the mutation is
+  silently dropped instead (the audit's `ClassVars` half no longer applies:
+  ADR 0130 removed the family). Tracked as
   [BT-3522](https://linear.app/beamtalk/issue/BT-3522).
 
 What ADR 0122 did **not** collapse into one recursive walk, on purpose: each
 site's own "does THIS body's TOP-LEVEL statements mutate family X" predicate
-(`CoreErlangGenerator::loop_body_threads_class_vars`/
-`loop_body_threads_value_self`, `ThreadingPlan::threads_class_vars`/
-`threads_value_self`, `exception_handling.rs`'s
+(`CoreErlangGenerator::loop_body_threads_value_self`,
+`ThreadingPlan::threads_value_self`, `exception_handling.rs`'s
 `block_top_level_mutates_family`) stays narrower than the fully recursive
 `body_threaded_families` (`analysis.rs`) the ADR's Decision 1 describes as
 the eventual end state. The narrow predicates are the *actual carrying
@@ -268,8 +267,7 @@ deliberately not wired into live emission: a construct can only thread a
 mutation its own tail-call/tuple shape has a slot for, and that slot only
 ever comes from a BARE top-level statement (a mutation nested inside the
 body's own conditional/loop keeps its own, more narrowly-scoped version
-chain — see `find_class_var_mutating_stmt`'s doc comment for the
-`class_var_sub_expr.bt` regression this scoping prevents). Widening a live
+chain). Widening a live
 site's own detector to the recursive walk would change which programs
 compile and how — exactly the kind of diff `just core-diff` (below) exists
 to catch — so it stayed out of scope; `body_threaded_families` carries
@@ -382,49 +380,25 @@ scaffolding these two call sites were the last production users of — are
 deleted; `NonLinearVersion`/`UnboundVersion` are live checks for `on:do:`/
 `ensure:` arms now, same as everywhere else in this table.
 
-**The class-method body pipeline (BT-3164, closing the gap BT-3148 left
-open).** `gen_server/methods.rs`'s class-method body generator
-(`generate_class_method_body`, pre-dating `BodyExprKind`/
-`classify_body_expr` entirely) is now `lower_class_method_body`, returning
-a real `Vec<ThreadedStmt>` instead of a hand-rolled `Document` — mirroring
-BT-3148's own `is_last`-only precedent for the Actor pipeline's
-`BodyExprKind::FieldAssignment`: only a class method's own direct
-`self.classVar := value` in the body's *last* position is promoted to a
-real `Bind` (`lower_class_method_last_class_var_bind`); every other
-position, and any class-var rebind hidden inside the shared
-`emit_class_var_result_unwrap` helper (the class-method analogue of the
-Actor pipeline's `generate_self_dispatch_open`), stays an opaque
-`Statement`. Both class-method NLR call sites
-(`generate_class_method_functions`, `generate_class_method_fun_from_block`
-— the latter migrated off the now-deleted `wrap_class_method_body_with_nlr_catch`
-Document-wrap by this issue) mint the token before lowering and prepend a
-real `NlrCatch`, then verify the whole body in one
-`verify_and_render_body_stmts` call — the same "method-level `verify()`"
-shape BT-3148 established for Actor bodies, now also covering class
-methods. This is what first lets `ShadowWriteMissing` see a real
-class-var `Bind` jointly with a real class-method `NlrCatch` (the ADR 0110
-joint-visibility gap ADR 0111 Addendum 6 left open); the pre-existing
-isolated, synthetic-marker check `construct_and_verify_class_var_bind`
-still runs too, since it is the only one of the two that fires for a
-method with no literal `^` at all (the ADR 0110 `CollectionDriver
-countedRun:over:` repro shape). The other 5 `wrap_body_with_nlr_catch`-family
-call sites this issue's task list named were audited: `generate_class_method_fun_from_block`
-(above) shares the same pipeline and was migrated; the 3 Actor-flavored
-call sites (`actor_codegen.rs`, `gen_server/dispatch.rs`,
-`gen_server/extensions.rs`) don't carry the `ClassVars`
-`ShadowWriteMissing` gap this issue closes and are tracked separately
-(BT-3171); `gen_server/extensions.rs`'s value-type NLR site
-(`wrap_value_type_body_with_nlr_catch`) is a structurally different,
-already-inline mechanism, not applicable.
+**The class-method body pipeline (BT-3164, simplified by ADR 0130).** A
+class method's body is still lowered to a real `Vec<ThreadedStmt>` and
+verified in one method-level `verify()` call together with its `NlrCatch`,
+but class variables no longer appear in it: ADR 0130 deleted the `ClassVars`
+family, the shadow-write flag on `Bind`, `ShadowWriteMissing`, the
+`class_var_result` unwrap helpers and the isolated shadow-write check, so a
+class-variable access is an ordinary call into `beamtalk_class_vars` (a
+`put`/`get` in the class process) and needs no `Bind`. The one class-variable
+node left is the catch boundary: `ThreadedStmt::OnDoCatch` (see
+`CatchWithoutClassVarRestore` above).
 
 **Corpus `.core` diff harness (BT-3509, ADR 0122 Phase 0).** The verifier
 above catches a *malformed* `ThreadedIr` graph — an unbound version, a
-missing shadow write, a slot-count mismatch — via `debug_assert!` under
+a slot-count mismatch — via `debug_assert!` under
 `just verify-threaded-ir`. It does **not** catch a *well-formed* graph that
 renders to different Core Erlang than before: a changed tuple shape or slot
 order still passes every `VerifyError` check while silently changing
 generated code. ADR 0122's `ThreadedFamilies` unification (unifying how
-`State`/`ClassVars`/`SelfVt` thread through loops, conditionals,
+`State`/`SelfVt` (and, before ADR 0130, `ClassVars`) thread through loops, conditionals,
 `on:do:`/`ensure:`, and Foldl bodies) is exactly the kind of refactor where
 that gap matters: every migration in that epic is meant to be
 byte-identical except its own documented, reviewed exception. `just

@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-18)
 
+> **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06), class-side extension fun shape.** A class-side extension fun is now `fun(Args, ClassSelf) -> Result`, compiled in class-method context whatever the target class's kind, and reads and writes class variables through `beamtalk_class_vars`. The previous Actor-subclass shape `fun(Args, Self, State) -> {Result, NewState}` (the class-variable map passed as `State`) and its `class_var_result` unwrapping are gone; `beamtalk_extensions:register` refuses a 3-arity class-side extension fun with a structured error, so an extension module built by an older compiler fails at install. Instance-side extensions are unchanged.
+
 ## Context
 
 Beamtalk supports adding methods to existing classes — including sealed primitives — using the `>>` standalone method definition syntax:
