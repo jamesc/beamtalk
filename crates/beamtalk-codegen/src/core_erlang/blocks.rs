@@ -35,8 +35,6 @@ pub(super) enum BlockExprKind {
     /// Carries `is_last` so the handler can append `'nil'` when the destructure
     /// is the final expression in the block.
     Destructure { is_last: bool },
-    /// Last expression that is a class method self-send.
-    LastClassMethodSelfSend,
     /// Last expression (general case) — its value is the block's result.
     LastExpr,
     /// `self.field := value` — direct field assignment (non-last).
@@ -45,8 +43,6 @@ pub(super) enum BlockExprKind {
     LocalAssignment,
     /// `whileTrue:` / `whileFalse:` / `timesRepeat:` with threaded vars (non-last).
     ControlFlowWithThreadedVars,
-    /// Class method self-send as non-last expression.
-    ClassMethodSelfSend,
     /// Expression evaluated for side effects only — result discarded.
     SideEffect,
 }
@@ -114,176 +110,6 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// Rejects a same-class send — spelled `self foo` OR `ClassName foo`,
-    /// both same-class, same-activation, and treated identically by
-    /// `is_class_method_self_send` in codegen — inside a block whose target
-    /// selector isn't provably free of class-variable mutation (see
-    /// `ClassMethodSelfSendInUnthreadedBlock`'s doc comment for the full
-    /// rationale) — such a block has no way to thread a classState mutation
-    /// back to the class method that owns it, silently losing it otherwise.
-    ///
-    /// BT-3529: `analysis.self_send_selectors` only ever records a bare
-    /// `self`-receiver send ([`beamtalk_core::semantic_analysis::block_facts::analyze_expression`]),
-    /// so a same-class send spelled `ClassName foo` inside `block` was
-    /// invisible to this predicate even though `compute_class_var_mutating_selectors`
-    /// (BT-3522) already treats it as an equally valid mutation-reaching
-    /// path. Unions in `block_analysis::same_class_reference_send_selectors`
-    /// — the same BT-3522 helper `compute_class_var_mutating_selectors`
-    /// uses for its own transitive closure — rather than widening
-    /// `BlockMutationAnalysis::self_send_selectors`/`has_self_sends`
-    /// themselves, which have other consumers (e.g. `plan.rs`'s
-    /// Actor-instance threading) that depend on their current self-only
-    /// meaning.
-    ///
-    /// Scoped to class-method context only (this is a classState concern,
-    /// not an actor-state one), and gated on the class actually declaring
-    /// class variables: with none, there is no classState a self-send could
-    /// possibly lose, so the conservative "not defined locally" fallback
-    /// below (which can't see inherited methods — e.g. `Actor`'s
-    /// `spawnWith:` called from a native Actor subclass with no
-    /// `classState:` of its own, like `Subprocess`) would otherwise reject
-    /// sends to safe inherited methods it has no way to prove safe. See
-    /// `class_var_names`.
-    ///
-    /// Deliberately NOT called from `generate_block` itself — that function
-    /// is the universal block-to-closure compiler, reached from contexts
-    /// that are safe (a block passed to a *different* class's class-side
-    /// method always runs in that class's own `gen_server` process, so a
-    /// same-class self-send inside it is genuine cross-process messaging,
-    /// not the lossy in-process direct-call optimization — see ADR 0110
-    /// / `shadow_cross_class_owner.bt`) or merely unproven (an
-    /// `ifTrue:`/`ifFalse:` block reached via generic dynamic dispatch is a
-    /// long-documented ADR 0110 "known limitation" (BT-1550), not something
-    /// this guard introduces). `generate_block` has no way to tell those apart
-    /// from its own call site. Instead, called individually from each
-    /// call site *confirmed* unsafe (same-process, in-process self-send,
-    /// mutation empirically lost). Most list-op call sites share this via
-    /// `check_bare_list_op_block_self_sends` (`control_flow/list_ops/mod.rs`)
-    /// — `do:`/`collect:`/`select:`/`reject:`/`detect:`/`detect:ifNone:`/
-    /// `anySatisfy:`/`allSatisfy:`/`count:`/`flatMap:`/`takeWhile:`/
-    /// `dropWhile:`/`partition:`/`groupBy:`/`sort:`, plus the
-    /// `eachWithIndex:`/`do:separatedBy:` desugar fallbacks
-    /// (`enumeration_ops.rs`) — every one a bare, no-mutation-threading
-    /// block that falls through to a plain/BIF dispatch. Called directly
-    /// (not through that shared helper) at three shapes it doesn't cover:
-    /// `generate_list_inject`'s pure-block fast path (bypasses
-    /// `generate_block` entirely — calls `generate_block_body` directly to
-    /// avoid wrapper overhead), a `whileTrue:`/`whileFalse:` condition
-    /// block, a bare `timesRepeat:`/`to:do:`/`to:by:do:` body that falls
-    /// through to the stdlib's own `Integer`/value-type loop implementation,
-    /// and a block argument crossing the Erlang interop boundary in a
-    /// direct `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s
-    /// keyword branch, `dispatch_codegen.rs`) — same
-    /// `generate_erlang_interop_wrapper` → `generate_block` mechanism as
-    /// the list-op call sites above.
-    pub(super) fn check_no_unsafe_class_method_self_sends(
-        &self,
-        analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
-        block: &Block,
-        span: beamtalk_core::source_analysis::Span,
-    ) -> Result<()> {
-        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING
-            || !self.in_class_method()
-            || self.class_var_names().is_empty()
-        {
-            return Ok(());
-        }
-        let same_class_reference_sends =
-            crate::core_erlang::block_analysis::same_class_reference_send_selectors(
-                &block.body,
-                &self.class_name(),
-            );
-        let mut unsafe_selectors: Vec<&str> = analysis
-            .self_send_selectors
-            .iter()
-            .map(String::as_str)
-            .chain(same_class_reference_sends.iter().map(String::as_str))
-            .filter(|sel| {
-                self.class_var_mutating_selectors().contains(*sel)
-                    || !self.class_method_selectors().contains(*sel)
-            })
-            .collect();
-        if let Some(selector) = {
-            unsafe_selectors.sort_unstable();
-            unsafe_selectors.into_iter().next()
-        } {
-            return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
-                selector: selector.to_string(),
-                location: self.location_label(span),
-            });
-        }
-        Ok(())
-    }
-
-    // ADR 0118 §Decision 5 follow-up — design decision, not yet
-    // implemented: investigated routing this predicate's
-    // ~10 call sites through `ThreadedValue::close(ctx, CloseContext::Opaque)`
-    // / `VerifyError::StateEffectEscapesExpression` instead of (or on top
-    // of) `class_var_mutating_selectors()` above. Kept separate — full
-    // finding below.
-    //
-    // **Where things actually stand:**
-    // `generate_class_method_self_send` (`dispatch_codegen.rs`) already
-    // returns a real `ThreadedValue` (ADR 0118 phases 5a/5b) — its
-    // `ClassVars` `Bind` is a genuine, un-rendered
-    // `ThreadedStmt::Bind` in the prelude, not baked eagerly into a
-    // `Document`. The *ambient* re-entry point every self-send reached via
-    // ordinary (non-`threaded_expression`) `generate_expression` funnels
-    // through — `try_handle_class_method_self_send` →
-    // `Self::close_threaded_value_doc` (`util.rs`) — already exists too.
-    // But `close_threaded_value_doc` deliberately does NOT call
-    // `ThreadedValue::close`: it renders prelude-then-value unconditionally,
-    // preserving "the pre-ADR-0118 open-let-chain's own contract" (its own
-    // doc comment) for EVERY ambient self-send site alike, trusting this
-    // predicate to have already rejected any block where that would be
-    // wrong.
-    //
-    // **Why `close_threaded_value_doc` can't just start calling `close()`
-    // with `CloseContext::Opaque`.** It is one shared choke point reached
-    // from self-sends in BOTH kinds of position this predicate's own doc
-    // comment distinguishes: the safe/unproven ones (a class method's own
-    // flat top level; a block passed to a *different* class's class-side
-    // method, genuine cross-process messaging — `shadow_cross_class_owner.bt`
-    // guards this one) and the confirmed-unsafe bare-block ones this
-    // predicate rejects pre-flight. Telling them apart at
-    // `close_threaded_value_doc`'s call time — after arbitrary-depth
-    // `generate_expression` recursion, with no record of which message send
-    // the innermost enclosing block literal is even an argument to — means
-    // re-deriving the SAME receiver-class-identity classification each of
-    // this predicate's ~10 call sites already computes once, per block
-    // literal, with the actual message send in hand. A generator-side
-    // context flag threaded through that recursion cannot easily stay
-    // correct across a *nested* block of the opposite safety (a same-class
-    // self-send inside a block-argument-to-a-different-class nested inside
-    // an outer unsafe bare block, or vice versa) without becoming a second,
-    // could-drift-independently copy of this predicate's own call-site
-    // reasoning (CLAUDE.md's no-duplicate-implementations rule) — and
-    // `report_threaded_ir_verify_errors` `debug_assert!`-aborts in debug/CI
-    // on ANY misclassification, so a false positive here is not a quiet
-    // regression, it is a build break across the corpus. That is real,
-    // non-trivial redesign risk against the very protection this predicate
-    // (and its 20 `test_class_method_self_send_*` pins) exists to keep sound
-    // — a similarly non-trivial scope boundary, not a small change scoped
-    // to this one predicate.
-    //
-    // **Why `compute_class_var_mutating_selectors` can't be replaced
-    // either.** It is a `beamtalk-core` (Compilation) whole-class,
-    // syntax-only fixed point computed once before any codegen of any block
-    // runs; `beamtalk-core` never depends on `beamtalk-codegen`
-    // (`docs/development/architecture-principles.md` §1), so it structurally
-    // cannot name `ThreadedValue`/`close()`/`VerifyError` at all — see its
-    // own doc comment (`beamtalk-core/src/semantic_analysis/block_facts.rs`)
-    // for this half of the finding.
-    //
-    // **Disposition:** kept separate, cross-referenced here and at
-    // `ThreadedValue::close`/`CloseContext`/`VerifyError::StateEffectEscapesExpression`
-    // (`threaded_ir.rs`) and `close_threaded_value_doc` (`util.rs`) — this
-    // predicate stays the sole gate for class-method self-sends; `close()`'s
-    // `CloseContext::Opaque` arm remains test-only (no production caller).
-    // Revisit only alongside a deliberate redesign of the ambient
-    // self-send re-entry path that carries real block-literal-to-message-send
-    // context through it, not as a follow-up scoped to this predicate alone.
-
     /// Generates code for a block (closure).
     ///
     /// Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
@@ -331,29 +157,6 @@ impl CoreErlangGenerator {
             Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
         }
 
-        // Deliberately NOT calling `check_no_unsafe_class_method_self_sends`
-        // here — `generate_block` is the universal block-to-closure compiler,
-        // reached both from genuinely unsafe bare-block call sites (a
-        // `select:`/`do:`/`inject:into:` argument, a `whileTrue:` condition —
-        // all same-process, in-process self-send contexts where the mutation
-        // is provably lost) AND from contexts that are safe or cannot be
-        // proven unsafe here: an `ifTrue:`/`ifFalse:` block reached via
-        // generic dynamic dispatch (a long-documented ADR 0110 "known
-        // limitation", not newly introduced by this guard), and a block
-        // passed to a message send whose receiver may be a *different*
-        // class's class-side method — which always executes in that class's
-        // own gen_server process (`docs/beamtalk-language-features.md` §
-        // Passing Blocks Through Class Methods), so a same-class self-send
-        // inside it is genuine cross-process messaging, not the in-process
-        // direct-call optimization, and correctly commits (confirmed by the
-        // passing `shadow_cross_class_owner.bt` fixture/
-        // `testCrossClassMutationDoesNotCorruptForeignProcessShadow`, ADR
-        // 0110). `generate_block` has no way to distinguish these
-        // from its own call site, so the check instead lives at each
-        // specific, individually-verified-unsafe call site: see
-        // `check_no_unsafe_class_method_self_sends`'s doc comment for the
-        // full list.
-
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
         // Blocks with captured local mutations use Tier 2 stateful calling convention.
@@ -365,11 +168,6 @@ impl CoreErlangGenerator {
         self.push_scope();
         // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
-        // Save class_var_version so that self-calls inside the closure
-        // don't leak ClassVars{N} bindings into the enclosing scope.  The closure
-        // is a separate Core Erlang `fun`, so any let-bindings inside it are not
-        // visible to the outer method body.
-        let saved_class_var_version = self.class_var_version();
         // Save state_version too. A pure block's body can still
         // contain a conditional/field-mutation whose own state threading
         // bumps `state_version` (deliberately visible to later statements
@@ -396,17 +194,8 @@ impl CoreErlangGenerator {
 
         // Generate block body as Document.
         // Ensure block_depth and scope are restored even on error.
-        //
-        // BT-3675: the closure body is a class-variable region: what its
-        // sends commit is exported to the enclosing scope only when the body
-        // returns, so a closure that raises after a send completed (caught
-        // by a runtime catcher such as `Result tryDo:`) exports nothing.
-        let closure_region = self.open_closure_region();
-        let body_result = self
-            .generate_block_body(block)
-            .map(|body| self.wrap_closure_region(closure_region, body));
+        let body_result = self.generate_block_body(block);
         self.block_depth -= 1;
-        self.set_class_var_version(saved_class_var_version);
         self.set_state_version(saved_state_version);
         self.pop_scope();
         // The block is a closed `fun () -> ... end` expression. Any
@@ -476,8 +265,6 @@ impl CoreErlangGenerator {
 
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
-        // BT-3675: see `generate_block`'s class-variable closure region.
-        let closure_region = self.open_closure_region();
         // Set up loop body context for StateAcc-based threading
         let result = self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
@@ -537,7 +324,6 @@ impl CoreErlangGenerator {
         self.loop_mode.direct_params_do_open_chain = false;
 
         let (body_doc, _branch_final) = result?;
-        let body_doc = self.wrap_closure_region(closure_region, body_doc);
 
         Ok(docvec![header, body_doc])
     }
@@ -926,10 +712,6 @@ impl CoreErlangGenerator {
             return BlockExprKind::Destructure { is_last };
         }
 
-        if is_last && self.is_class_method_self_send(expr) {
-            return BlockExprKind::LastClassMethodSelfSend;
-        }
-
         if is_last {
             return BlockExprKind::LastExpr;
         }
@@ -944,10 +726,6 @@ impl CoreErlangGenerator {
 
         if self.get_control_flow_threaded_vars(expr).is_some() {
             return BlockExprKind::ControlFlowWithThreadedVars;
-        }
-
-        if self.is_class_method_self_send(expr) {
-            return BlockExprKind::ClassMethodSelfSend;
         }
 
         BlockExprKind::SideEffect
@@ -966,16 +744,12 @@ impl CoreErlangGenerator {
             BlockExprKind::Destructure { is_last } => {
                 self.generate_block_destructure(expr, is_last)
             }
-            BlockExprKind::LastClassMethodSelfSend | BlockExprKind::LastExpr => {
+            BlockExprKind::LastExpr => {
                 // Last expression: its value is the block's result. ADR 0118
-                // phase 5b: `threaded_expression` closes any
-                // `ClassVars` prelude (a class-method self-send, or one
+                // phase 5b: `threaded_expression` closes any prelude (e.g. one
                 // nested in a message's receiver/args) into a self-contained
                 // `Document` so the block body is a complete closed
-                // expression. The ClassVarsN bindings inside stay scoped
-                // inside the block's `fun () -> ... end` and do not leak to
-                // the outer method body — that is handled in generate_block
-                // by saving/restoring class_var_version.
+                // expression.
                 let frame = self.current_frame();
                 self.threaded_expression_doc(expr, frame)
             }
@@ -989,11 +763,11 @@ impl CoreErlangGenerator {
             BlockExprKind::ControlFlowWithThreadedVars => {
                 self.generate_block_control_flow_threaded(expr)
             }
-            BlockExprKind::ClassMethodSelfSend | BlockExprKind::SideEffect => {
+            BlockExprKind::SideEffect => {
                 // Not an assignment or loop — generate and discard the
                 // result. ADR 0118 phase 5b: `threaded_expression`
-                // threads a class-method self-send (or one nested in a
-                // message's receiver/args) as a real prelude, closed here
+                // threads a producer (or one nested in a message's
+                // receiver/args) as a real prelude, closed here
                 // into a self-contained `Document` since a Tier 1 block body
                 // is a flat statement sequence with no `ThreadedIr` frame of
                 // its own to splice into.
@@ -1164,44 +938,12 @@ impl CoreErlangGenerator {
         // Important: capture BEFORE updating the mapping,
         // so that any uses of the variable in the RHS see the previous binding.
         //
-        // ADR 0118 phase 5b: a class method's own top-level body
-        // splices a class-var producer's prelude directly (`lower_class_method_body`),
-        // but a block nested inside a class method (this function) still
-        // reaches this assignment for `result := self foo`-shaped RHSes. When
-        // `value` is ITSELF a recognized producer (`is_class_var_assignment`/
-        // `is_class_method_self_send`), `threaded_expression` gives it a real
-        // prelude whose rebound `ClassVarsN` stays lexically visible here.
-        // Otherwise `value` may still dispatch one that the compile below
-        // reaches opaquely and closes (e.g. an inherited dispatch) —
-        // closing loses the mutated name's LEXICAL visibility, but not the
-        // mutation itself: the compiler's OWN `current_class_var()`
-        // bookkeeping advances to track it regardless, so a later statement
-        // in this same block body (e.g. `^result`, which reads
-        // `current_class_var()`) would otherwise reference a name never
-        // bound in its own scope. `refresh_class_var_after_opaque_scope`
-        // recovers the live value via the per-scope class-variable commit (BT-3675) and re-binds
-        // it to a name that IS in scope here.
-        if self.in_class_method()
-            && !(self.is_class_var_assignment(value)
-                || self.is_self_clear_field_class_var(value)
-                || self.is_class_method_self_send(value))
-        {
-            let cv_version_before = self.class_var_scope_mark();
+        // A class method threads nothing (ADR 0130 §3): `value` is compiled as
+        // an ordinary expression and bound, with no prelude of its own.
+        if self.in_class_method() {
             let val_doc = self.expression_doc(value)?;
             self.bind_var(var_name, &core_var);
-            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-            let refresh = self
-                .refresh_class_var_after_opaque_scope(cv_version_before)
-                .unwrap_or(Document::Nil);
-            return Ok(docvec![
-                scope_prefix,
-                "let ",
-                leaf::var(core_var),
-                " = ",
-                val_doc,
-                " in ",
-                refresh,
-            ]);
+            return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);
         }
         let frame = self.current_frame();
         let tv = self.threaded_expression(value, frame)?;

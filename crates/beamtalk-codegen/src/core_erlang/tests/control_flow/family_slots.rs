@@ -3,15 +3,12 @@
 
 //! BT-3511 (ADR 0122 Phase 2): the unified storage-family result-tuple
 //! append/extract emission helper (`control_flow::family_slots`) — pins the
-//! exact `Document` output for the three tuple shapes ADR 0122 names
-//! (`[State]`, `[State, ClassVars]`, `[State, SelfVt]`, matching
-//! `tests/gen_server/state_threading_loops.rs`'s
-//! `{'nil', StateAcc, ClassVars}` and
+//! exact `Document` output for the tuple shapes that remain once class
+//! variables stopped being a threaded family (ADR 0130: `[State]` and
+//! `[State, SelfVt]`, matching
 //! `tests/control_flow/list_and_loop_value_threading.rs`'s
-//! `{'nil', StateAcc, Self}` byte-for-byte), plus the two-family
-//! `[State, ClassVars]` combination inside a value-type class method — and
-//! proves the safety net: an extraction that forgets a family `verify()`
-//! catches as `UnboundVersion`.
+//! `{'nil', StateAcc, Self}` byte-for-byte) — and proves the safety net: an
+//! extraction that forgets a family `verify()` catches as `UnboundVersion`.
 //!
 //! Also pins the `Document::Nil` `base` convention BT-3513 added to
 //! [`append_family_slots`] for a construct whose own tuple has no element
@@ -44,10 +41,6 @@ fn span() -> Span {
 
 fn state(version: usize) -> VersionedVar {
     VersionedVar::new(VersionPrefix::State, version, FrameId::ROOT)
-}
-
-fn class_vars(version: usize) -> VersionedVar {
-    VersionedVar::new(VersionPrefix::ClassVars, version, FrameId::ROOT)
 }
 
 fn self_vt(version: usize) -> VersionedVar {
@@ -89,7 +82,7 @@ fn render_extracted(stmts: &[ThreadedStmt]) -> String {
 #[test]
 fn append_state_only_shape() {
     // ADR 0122's trivial case (`State` already fits — the predicate is
-    // always true): a loop with no ClassVars/SelfVt mutation carries only
+    // always true): a loop with no SelfVt mutation carries only
     // the mandatory scratch-map slot.
     let families = ThreadedFamilies::from_matches(&[VersionPrefix::State]);
     let doc = append_in_loop_body(docvec!["{'nil'"], &families, |prefix| match prefix {
@@ -97,21 +90,6 @@ fn append_state_only_shape() {
         other => panic!("unexpected family queried: {other:?}"),
     });
     assert_eq!(doc, "{'nil', StateAcc}");
-}
-
-#[test]
-fn append_state_and_class_vars_shape() {
-    // Matches `tests/gen_server/state_threading_loops.rs`'s
-    // `test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_vars`
-    // exit-arm shape byte-for-byte: `{'nil', StateAcc, ClassVars}`.
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
-    let doc = append_in_loop_body(docvec!["{'nil'"], &families, |prefix| match prefix {
-        VersionPrefix::State => state(0),
-        VersionPrefix::ClassVars => class_vars(0),
-        other => panic!("unexpected family queried: {other:?}"),
-    });
-    assert_eq!(doc, "{'nil', StateAcc, ClassVars}");
 }
 
 #[test]
@@ -129,45 +107,6 @@ fn append_state_and_self_vt_shape() {
 }
 
 #[test]
-fn append_state_and_class_vars_inside_a_value_type_class_method() {
-    // ADR 0122 Decision 2: "Slot 2 is always the scratch map ... regardless"
-    // — the two-family `[State, ClassVars]` combination this describes for a
-    // VALUE-TYPE class method's own loop/conditional (its `StateAcc` scratch
-    // map for LOCAL-variable threading, plus a `ClassVars` mutation).
-    //
-    // Not reachable via `eligible_families()` as written today —
-    // `VersionPrefix::State` is eligible only for an ACTOR instance method
-    // (`context == Actor && !in_class_method()`), which is mutually
-    // exclusive with `ClassVars`' own `in_class_method()` gate — widening
-    // that gate so a class method's own scratch-map slot is modeled as a
-    // genuine `ThreadedFamilies` member (rather than the construct's own
-    // pre-existing, family-detector-independent `StateAcc`/tuple-acc
-    // convention) is a LATER migration issue's job, not this helper's. This
-    // test exercises the general-purpose helper against the full matrix ADR
-    // 0122 promises, independent of what `eligible_families()` currently
-    // restricts — constructing the combination directly via
-    // `ThreadedFamilies::from_matches` rather than through a real compile.
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
-    // Not in a loop body (a class method's own `on:do:`/`ensure:`-style
-    // top-level construct, e.g.) — `State` renders plain, not `StateAcc`.
-    let mut generator = CoreErlangGenerator::new("bt@family_slots_class_method_test");
-    let ctx = RenderCtx::new(&mut generator);
-    let doc = append_family_slots(
-        docvec!["{Value"],
-        &families,
-        |prefix| match prefix {
-            VersionPrefix::State => state(2),
-            VersionPrefix::ClassVars => class_vars(3),
-            other => panic!("unexpected family queried: {other:?}"),
-        },
-        &ctx,
-    )
-    .to_pretty_string();
-    assert_eq!(doc, "{Value, State2, ClassVars3}");
-}
-
-#[test]
 fn append_empty_families_just_closes_the_base_tuple() {
     let families = ThreadedFamilies::from_matches(&[]);
     let doc = append_in_loop_body(docvec!["{'nil'"], &families, |prefix| {
@@ -179,11 +118,11 @@ fn append_empty_families_just_closes_the_base_tuple() {
 #[test]
 fn append_with_nil_base_omits_the_leading_separator_before_the_first_family() {
     // BT-3513: the value-type conditional's per-arm return value when the
-    // arm has NO threaded local to open the tuple with — only a `ClassVars`/
-    // `SelfVt` write (`ConditionalWithSelfFieldThreading`). There is no
+    // arm has NO threaded local to open the tuple with — only a `SelfVt`
+    // write (`ConditionalWithSelfFieldThreading`). There is no
     // prior tuple element (no `'nil'`, no `Result`, no joined locals list),
     // so `base` is `Document::Nil` and the FIRST family renders with no
-    // leading `", "` — a single-element tuple, not `"{, ClassVars1}"`.
+    // leading `", "` — a single-element tuple, not `"{, Self1}"`.
     let families = ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt]);
     let mut generator = CoreErlangGenerator::new("bt@family_slots_nil_base_test");
     let ctx = RenderCtx::new(&mut generator);
@@ -207,22 +146,21 @@ fn append_with_nil_base_and_two_families_still_separates_the_second() {
     // `ThreadedFamilies::from_matches`'s general contract, never in practice
     // at the one real `Document::Nil` call site, which carries at most one
     // family) still gets its own leading `", "`.
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::ClassVars, VersionPrefix::SelfVt]);
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let mut generator = CoreErlangGenerator::new("bt@family_slots_nil_base_multi_test");
     let ctx = RenderCtx::new(&mut generator);
     let doc = append_family_slots(
         Document::Nil,
         &families,
         |prefix| match prefix {
-            VersionPrefix::ClassVars => class_vars(1),
+            VersionPrefix::State => state(1),
             VersionPrefix::SelfVt => self_vt(2),
             other => panic!("unexpected family queried: {other:?}"),
         },
         &ctx,
     )
     .to_pretty_string();
-    assert_eq!(doc, "{ClassVars1, Self2}");
+    assert_eq!(doc, "{State1, Self2}");
 }
 
 #[test]
@@ -234,11 +172,10 @@ fn append_baseline_family_slots_is_append_family_slots_with_the_baseline_source(
     // drives the output, not a hardcoded baseline) version source must
     // produce the exact same shape `append_family_slots` would for that
     // same closure.
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let baseline = |prefix: &VersionPrefix| match prefix {
         VersionPrefix::State => state(0),
-        VersionPrefix::ClassVars => class_vars(1),
+        VersionPrefix::SelfVt => self_vt(1),
         other => panic!("unexpected family queried: {other:?}"),
     };
     let mut gen_a = CoreErlangGenerator::new("bt@family_slots_baseline_a");
@@ -253,32 +190,27 @@ fn append_baseline_family_slots_is_append_family_slots_with_the_baseline_source(
         append_family_slots(docvec!["{'nil'"], &families, baseline, &ctx_b).to_pretty_string();
 
     assert_eq!(via_baseline_op, via_append);
-    assert_eq!(via_baseline_op, "{'nil', State, ClassVars1}");
+    assert_eq!(via_baseline_op, "{'nil', State, Self1}");
 }
 
 #[test]
-fn append_and_extract_agree_on_slot_positions_for_all_three_families_together() {
+fn append_and_extract_agree_on_slot_positions_for_both_families_together() {
     // The core invariant the module doc comment advertises ("a construct's
     // append/extract pair can never independently drift on slot order or
     // count"), checked directly rather than only by two separately-pinned
-    // shapes that happen to agree: build ONE `ThreadedFamilies` covering all
-    // three families, append it, then extract from the same `base_arity`,
+    // shapes that happen to agree: build ONE `ThreadedFamilies` covering
+    // both families, append it, then extract from the same `base_arity`,
     // and confirm the `element/N` reads land on exactly the positions
-    // `append_family_slots` put each family's value at (2 = StateAcc, 3 =
-    // ClassVars, 4 = Self, matching `appended`'s own 1-based tuple layout).
-    let families = ThreadedFamilies::from_matches(&[
-        VersionPrefix::State,
-        VersionPrefix::ClassVars,
-        VersionPrefix::SelfVt,
-    ]);
+    // `append_family_slots` put each family's value at (2 = StateAcc,
+    // 3 = Self, matching `appended`'s own 1-based tuple layout).
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let current = |prefix: &VersionPrefix| match prefix {
         VersionPrefix::State => state(0),
-        VersionPrefix::ClassVars => class_vars(0),
         VersionPrefix::SelfVt => self_vt(0),
         other => panic!("unexpected family queried: {other:?}"),
     };
     let appended = append_in_loop_body(docvec!["{'nil'"], &families, current);
-    assert_eq!(appended, "{'nil', StateAcc, ClassVars, Self}");
+    assert_eq!(appended, "{'nil', StateAcc, Self}");
 
     let stmts = extract_family_slots(
         "Tuple",
@@ -286,7 +218,6 @@ fn append_and_extract_agree_on_slot_positions_for_all_three_families_together() 
         &families,
         |prefix| match prefix {
             VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
-            VersionPrefix::ClassVars => FamilyVersionStep::new(class_vars(0), class_vars(1)),
             VersionPrefix::SelfVt => FamilyVersionStep::new(self_vt(0), self_vt(1)),
             other => panic!("unexpected family queried: {other:?}"),
         },
@@ -295,8 +226,7 @@ fn append_and_extract_agree_on_slot_positions_for_all_three_families_together() 
     assert_eq!(
         render_extracted(&stmts),
         "let State1 = call 'erlang':'element'(2, Tuple) in \
-         let ClassVars1 = call 'erlang':'element'(3, Tuple) in \
-         let Self1 = call 'erlang':'element'(4, Tuple) in "
+         let Self1 = call 'erlang':'element'(3, Tuple) in "
     );
 }
 
@@ -318,28 +248,6 @@ fn extract_state_only_shape() {
     assert_eq!(
         render_extracted(&stmts),
         "let State1 = call 'erlang':'element'(2, Tuple) in "
-    );
-}
-
-#[test]
-fn extract_state_and_class_vars_shape() {
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
-    let stmts = extract_family_slots(
-        "Tuple",
-        1,
-        &families,
-        |prefix| match prefix {
-            VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
-            VersionPrefix::ClassVars => FamilyVersionStep::new(class_vars(0), class_vars(1)),
-            other => panic!("unexpected family queried: {other:?}"),
-        },
-        span(),
-    );
-    assert_eq!(
-        render_extracted(&stmts),
-        "let State1 = call 'erlang':'element'(2, Tuple) in \
-         let ClassVars1 = call 'erlang':'element'(3, Tuple) in "
     );
 }
 
@@ -372,15 +280,14 @@ fn extract_family_slots_honors_a_nonzero_base_arity() {
     // family slots to start one position later — `base_arity: 2` — so this
     // pins the general `base_arity + i + 1` formula, not just the `1` case
     // every other test in this file happens to share.
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let stmts = extract_family_slots(
         "Tuple",
         2,
         &families,
         |prefix| match prefix {
             VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
-            VersionPrefix::ClassVars => FamilyVersionStep::new(class_vars(0), class_vars(1)),
+            VersionPrefix::SelfVt => FamilyVersionStep::new(self_vt(0), self_vt(1)),
             other => panic!("unexpected family queried: {other:?}"),
         },
         span(),
@@ -388,21 +295,20 @@ fn extract_family_slots_honors_a_nonzero_base_arity() {
     assert_eq!(
         render_extracted(&stmts),
         "let State1 = call 'erlang':'element'(3, Tuple) in \
-         let ClassVars1 = call 'erlang':'element'(4, Tuple) in "
+         let Self1 = call 'erlang':'element'(4, Tuple) in "
     );
 }
 
 #[test]
 fn extract_family_slots_produces_binds_that_verify_cleanly_when_every_target_is_consumed() {
-    let families =
-        ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::ClassVars]);
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let mut ir = extract_family_slots(
         "Tuple",
         1,
         &families,
         |prefix| match prefix {
             VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
-            VersionPrefix::ClassVars => FamilyVersionStep::new(class_vars(0), class_vars(1)),
+            VersionPrefix::SelfVt => FamilyVersionStep::new(self_vt(0), self_vt(1)),
             other => panic!("unexpected family queried: {other:?}"),
         },
         span(),
@@ -418,13 +324,13 @@ fn extract_family_slots_produces_binds_that_verify_cleanly_when_every_target_is_
 #[test]
 fn extract_family_slots_omitting_a_family_fails_verify_with_unbound_version() {
     // The safety net BT-3511's acceptance criteria names: a caller that
-    // builds its `families` list wrong (here: forgets `ClassVars`, exactly
+    // builds its `families` list wrong (here: forgets `SelfVt`, exactly
     // BT-3506's "sixth gap" mistake — ADR 0122 §"Why the gaps keep
-    // happening") never produces a `ClassVars` `Bind` at all, so any later
+    // happening") never produces a `SelfVt` `Bind` at all, so any later
     // statement that reads the version the (correct) `append_family_slots`
     // side of the SAME construct claimed to produce is an `UnboundVersion`
     // `verify()` catches — never a silent dropped mutation.
-    let extraction_families = ThreadedFamilies::from_matches(&[VersionPrefix::State]); // BUG: omits ClassVars
+    let extraction_families = ThreadedFamilies::from_matches(&[VersionPrefix::State]); // BUG: omits SelfVt
     let mut ir = extract_family_slots(
         "Tuple",
         1,
@@ -436,18 +342,18 @@ fn extract_family_slots_omitting_a_family_fails_verify_with_unbound_version() {
         span(),
     );
     // The construct's OWN `append_family_slots` call (elsewhere) claimed a
-    // `[State, ClassVars]` result tuple, so the code that follows reads
-    // `ClassVars1` as if it were live — but nothing here ever bound it.
+    // `[State, SelfVt]` result tuple, so the code that follows reads
+    // `Self1` as if it were live — but nothing here ever bound it.
     ir.push(ThreadedStmt::Return(
         ValueRef::Var("Result".to_string()),
-        class_vars(1),
+        self_vt(1),
         span(),
     ));
     let errors = verify(&ir);
     assert_eq!(
         errors,
         vec![VerifyError::UnboundVersion {
-            var: class_vars(1),
+            var: self_vt(1),
             at: span(),
         }],
         "an extraction that omits a family the construct actually threads \

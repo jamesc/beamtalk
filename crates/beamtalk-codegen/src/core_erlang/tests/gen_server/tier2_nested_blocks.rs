@@ -15,17 +15,11 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // must NOT be rejected. `Letrec`'s own real `threads_class_vars` gate
     // (`loop_body_threads_class_vars`) is narrowly top-level-only by
     // design — recursing into a conditional buried inside a `Letrec` body
-    // is exactly the shape that predicate was narrowed to exclude (the
-    // `class_var_sub_expr.bt` `tickInLoopConditional` regression documented
-    // on `loop_body_threads_class_vars` itself), and it's also the shape
-    // `class_var_sub_expr_test.bt`'s
-    // `testTickInLoopConditionalCompilesAndRuns` already pins as
-    // accepted, silently-non-threading behavior at a single loop level
-    // (out of scope here). The inner loop was never going to
-    // attempt `ClassVars` threading for this self-send in the first place,
-    // so nothing is "lost" here for the outer loop to fail to recover —
-    // rejecting only the nested-loop variant of this exact same shape
-    // would be an inconsistent new restriction. Mirrors
+    // is the shape `class_var_sub_expr_test.bt`'s
+    // `testTickInLoopConditionalCompilesAndRuns` pins at a single loop
+    // level. A class-method self-send threads nothing (ADR 0130 §3), so
+    // there is nothing for the outer loop to fail to recover — this
+    // nested-loop variant of the same shape compiles too. Mirrors
     // `tickInLoopConditional` one loop level deeper.
     let src = "Object subclass: NestedCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);

@@ -116,7 +116,6 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_in_stateacc_fallback_context() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
         frame,
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: 0,
@@ -147,7 +146,6 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::DirectParams,
         frame,
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: 0,
@@ -225,7 +223,6 @@ fn verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::TupleAcc(1),
         frame,
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: 2,

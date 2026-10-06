@@ -127,50 +127,6 @@ impl CoreErlangGenerator {
         &mut self.class_context_mut().sealed_class_method_selectors
     }
 
-    /// Returns a reference to the class-var-mutating selectors set.
-    pub(in crate::core_erlang) fn class_var_mutating_selectors(
-        &self,
-    ) -> &std::collections::HashSet<String> {
-        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
-            std::sync::LazyLock::new(std::collections::HashSet::new);
-        self.class_context
-            .as_ref()
-            .map_or(&*EMPTY, |ctx| &ctx.class_var_mutating_selectors)
-    }
-
-    /// Returns a mutable reference to the class-var-mutating selectors set.
-    pub(in crate::core_erlang) fn class_var_mutating_selectors_mut(
-        &mut self,
-    ) -> &mut std::collections::HashSet<String> {
-        &mut self.class_context_mut().class_var_mutating_selectors
-    }
-
-    /// Returns the class variable version counter.
-    pub(in crate::core_erlang) fn class_var_version(&self) -> usize {
-        self.class_context
-            .as_ref()
-            .map_or(0, |ctx| ctx.class_var_version.version())
-    }
-
-    /// Sets the class variable version counter.
-    pub(in crate::core_erlang) fn set_class_var_version(&mut self, version: usize) {
-        self.class_context_mut()
-            .class_var_version
-            .set_version(version);
-    }
-
-    /// Returns whether class variables were mutated in the current method.
-    pub(in crate::core_erlang) fn class_var_mutated(&self) -> bool {
-        self.class_context
-            .as_ref()
-            .is_some_and(|ctx| ctx.class_var_mutated)
-    }
-
-    /// Sets the class variable mutated flag.
-    pub(in crate::core_erlang) fn set_class_var_mutated(&mut self, value: bool) {
-        self.class_context_mut().class_var_mutated = value;
-    }
-
     /// Derives this generation unit's own [`PackageId`] from `self.module_name`
     /// (ADR 0119): `bt@stdlib@...` is [`PackageId::Stdlib`],
     /// `bt@{pkg}@...` is [`PackageId::Package`], anything else (a bare

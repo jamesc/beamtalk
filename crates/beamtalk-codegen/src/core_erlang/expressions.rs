@@ -19,7 +19,7 @@
 //! [`super::dispatch_codegen`].
 
 use super::control_flow::{Closure, FieldWriteSite};
-use super::threaded_ir::{self, ThreadedStmt, ThreadedValue, ValueRef};
+use super::threaded_ir::{self, ThreadedStmt, ValueRef};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -576,7 +576,7 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     /// Shared by `generate_field_access`'s instance branch (State/Self map)
-    /// and class-method branch (`ClassVars` map) — both read the same slot the
+    /// and class-method branch (the class process's dictionary) — both read the same slot the
     /// same way, differing only in which map variable and declared-type
     /// lookup feed it. The `'nil'` arm is required, not optional: `nil` can
     /// reach an unassigned `late` slot's key unobserved (`spawnWith:` with a
@@ -775,7 +775,8 @@ impl CoreErlangGenerator {
     /// - **Actor context**: `State{n}` threading via `maps:put`
     /// - **`ValueType` context**: `Self{n}` threading — each assignment produces
     ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
-    /// - **Class method**: `ClassVars{n}` threading, with ADR 0110's shadow write
+    /// - **Class method**: an in-place `put` into the class process's
+    ///   dictionary (ADR 0130 §2), handled before any threading
     ///
     /// ```erlang
     /// let _Val = <value> in
@@ -820,252 +821,6 @@ impl CoreErlangGenerator {
         let (doc, _val_var) =
             self.lower_field_write(site, Closure::Closed, field_name, value, frame)?;
         Ok(doc)
-    }
-
-    /// The class-var branch of [`Self::generate_field_assignment`]
-    /// (`self.field := value` inside a class method) — extracted to its own
-    /// function so the caller stays under clippy's `too_many_lines` budget
-    /// alongside its two sibling branches (`ThreadedIr` instrumentation on
-    /// those two grows the combined function past the limit).
-    ///
-    /// ADR 0118 phase 5a: the prelude's trailing `Bind` leaves
-    /// `ClassVarsN` bound with no consuming body of its own — callers
-    /// splice the prelude into their own frame (§Decision 4) or close it
-    /// ([`Self::close_threaded_value_doc`]) so `ClassVarsN` stays visible to
-    /// the continuation.
-    ///
-    /// Delegates the actual `Bind` construction (mint/
-    /// version-capture/shadow-write/isolated-verify) to the shared
-    /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
-    /// comment for the full ADR 0110 shadow-write rationale — and returns
-    /// it as a real, un-rendered [`ThreadedStmt::Bind`] in the prelude;
-    /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`
-    /// promotes its own copy of this exact sequence to a real top-level
-    /// `Bind` instead.
-    pub(super) fn generate_class_var_field_assignment(
-        &mut self,
-        field_name: &str,
-        value: &Expression,
-        frame: super::threaded_ir::FrameId,
-    ) -> Result<ThreadedValue> {
-        let span = value.span();
-        let (preamble_doc, bind, val_var) =
-            self.lower_class_var_field_assignment_bind(field_name, value, frame)?;
-        let mut prelude = vec![ThreadedStmt::Statement(preamble_doc, span), bind];
-        if let Some(commit) = self.class_var_write_commit_doc() {
-            prelude.push(ThreadedStmt::Statement(commit, span));
-        }
-        Ok(ThreadedValue {
-            prelude,
-            value: ValueRef::Var(val_var),
-        })
-    }
-
-    /// Shared class-var assignment `Bind` construction —
-    /// the `self.classVar := value` shape's core sequence (mint `Val`,
-    /// capture `source_version`/`target_version` around
-    /// `expression_doc(value)`/`next_class_var()`, derive the ADR 0110
-    /// shadow-write gate, construct + isolated-verify the `Bind` via
-    /// [`super::threaded_ir::construct_and_verify_class_var_bind`]) —
-    /// extracted so [`Self::generate_class_var_field_assignment`] (every
-    /// non-last-position or nested class-var assignment, which still
-    /// renders its `Bind` immediately and keeps it inside an opaque
-    /// `Statement`) and `gen_server::methods`'s
-    /// `lower_class_method_last_class_var_bind` (the ONE case
-    /// promoted to a real top-level `Bind` node) don't each hand-roll the
-    /// same sequence (CLAUDE.md's no-duplicate-implementations rule).
-    ///
-    /// ADR 0110: shadow write-through so a foreign NLR
-    /// (`^` belonging to another method's frame) relayed out of this class
-    /// method does not lose the mutation — `invoke_class_method/7` reads
-    /// the shadow back on the `{nlr_relay, ...}` path and erases it in
-    /// `after` on every path. Gated on `block_depth == 0`: a block literal
-    /// written in this method can execute in a *different* class's
-    /// `gen_server` process (ADR 0109), where an unconditional write would
-    /// corrupt that class's vars with this class's map. Top-frame-only
-    /// also matches existing semantics — block-interior class-var
-    /// mutations are already discarded on normal return.
-    ///
-    /// ADR 0110 amendment: keyed by `element(2, ClassSelf)` —
-    /// this call's dynamic runtime class identity — not a single shared
-    /// key. A mutating self-send inside a block invoked from a foreign
-    /// class's process (`block_depth` resets to 0 on entering the
-    /// self-sent method's own body) would otherwise write the *same*
-    /// global key that process's own class method is using, clobbering it
-    /// before that class's `invoke_class_method/7` reads it back.
-    /// `element(2, ClassSelf)` (not the static `self.class_name()`) also
-    /// keeps an inherited self-dispatch chain (`self otherClassMethod:`)
-    /// tagged with the calling subclass's identity, not the defining
-    /// ancestor's.
-    ///
-    /// This is NOT the only class-var write site —
-    /// `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
-    /// constructs) never reach it; a class-var write there goes through
-    /// `generate_field_assignment_open` (`dispatch_codegen.rs`), which
-    /// threads via the generic State/StateAcc map and has no class-var
-    /// branch at all, so `block_depth == 0` never even gets consulted for
-    /// that shape. That gap is now a compile-time error
-    /// (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
-    /// silent runtime no-op — see ADR 0110's amendment above.
-    ///
-    /// ADR 0111 Phase D completion: this `Bind` is constructed
-    /// and isolated-verified through the SAME `threaded_ir::ThreadedStmt::Bind`
-    /// a `while_loops.rs`-style caller would — `threaded_ir::render`'s
-    /// `BindOp::Put` arm is the only place the ADR 0110 shadow write is
-    /// constructed (see [`super::threaded_ir::construct_and_verify_class_var_bind`]'s
-    /// doc comment); no second, hand-rolled `Document` reconstructs it.
-    ///
-    /// Returns `(preamble_doc, bind, val_var)`: `preamble_doc` is `"let
-    /// Val = <value> in "` — the caller supplies its own
-    /// continuation/glue after (rendering the `Bind` immediately and
-    /// appending, or pushing both as separate real `ThreadedStmt`s);
-    /// `bind` is the real, not-yet-rendered `ThreadedStmt::Bind`;
-    /// `val_var` is the minted temp variable name (both the `Bind`'s
-    /// `Put` value and the expression's own logical result).
-    ///
-    /// `frame` is the real [`threaded_ir::FrameId`] this write's
-    /// `Bind` is tagged with — `FrameId::ROOT` for the method's own
-    /// top-frame write (`generate_class_var_field_assignment`,
-    /// `lower_class_method_last_class_var_bind`), or the loop's real,
-    /// already-minted frame (`current_branch_frame()`) for a class-var write
-    /// directly inside a Letrec loop body that threads `ClassVars` through
-    /// the loop's own recursive tail call (`dispatch_codegen.rs`'s
-    /// `generate_field_assignment_open`) — per ADR 0111 Addendum 9, Question
-    /// 2's resolution. `shadow_write`/`shadow_write_eligible` stay driven by
-    /// `block_depth == 0` regardless of `frame`: a loop body never
-    /// increments `block_depth` (it is control flow, not a lexical closure
-    /// boundary), so this is `true` there exactly as it is at the method's
-    /// own top level.
-    pub(super) fn lower_class_var_field_assignment_bind(
-        &mut self,
-        field_name: &str,
-        value: &Expression,
-        frame: super::threaded_ir::FrameId,
-    ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
-        if !self.class_var_names().contains(field_name) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: format!(
-                    "cannot assign to instance field '{field_name}' in a class method"
-                ),
-                span: Some(value.span()),
-            });
-        }
-        let val_var = self.fresh_temp_var("Val");
-        // The version numbers driving both the verify() call and
-        // the real Bind rendered below — captured before/after minting,
-        // rather than reconstructed from `current_cv`/`new_cv`-style names
-        // by hand.
-        let source_version = self.class_var_version();
-        let val_doc = self.expression_doc(value)?;
-        self.next_class_var();
-        let target_version = self.class_var_version();
-        let shadow_write = self.block_depth == 0;
-        let (bind, verify_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
-            super::threaded_ir::BindOp::Put {
-                field: field_name.to_string(),
-                value: super::threaded_ir::ValueRef::Var(val_var.clone()),
-                class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
-            },
-            shadow_write,
-            frame,
-            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
-            source_version,
-            target_version,
-            value.span(),
-        );
-        self.report_threaded_ir_verify_errors(
-            &verify_errors,
-            "class-var mutation missing ADR 0110 shadow write",
-            value.span(),
-        );
-        let probe = self.class_var_probe_doc("write", field_name);
-        let preamble_doc = docvec![
-            probe,
-            "let ",
-            leaf::var(val_var.clone()),
-            " = ",
-            val_doc,
-            " in ",
-        ];
-        Ok((preamble_doc, bind, val_var))
-    }
-
-    /// `self clearField: #classVar` inside a class method (ADR 0124 §1/§4i,
-    /// B4): the `BindOp::Remove` counterpart to
-    /// [`Self::generate_class_var_field_assignment`] above, used at every
-    /// non-last-position or nested-producer call site
-    /// ([`Self::class_method_prelude_producer`], `util.rs`) the way that
-    /// function is.
-    pub(super) fn generate_class_var_field_clear(
-        &mut self,
-        field_name: &str,
-        span: beamtalk_core::source_analysis::Span,
-        frame: super::threaded_ir::FrameId,
-    ) -> Result<ThreadedValue> {
-        let (preamble_doc, bind, val_var) =
-            self.lower_class_var_field_clear_bind(field_name, span, frame)?;
-        let mut prelude = vec![ThreadedStmt::Statement(preamble_doc, span), bind];
-        if let Some(commit) = self.class_var_write_commit_doc() {
-            prelude.push(ThreadedStmt::Statement(commit, span));
-        }
-        Ok(ThreadedValue {
-            prelude,
-            value: ValueRef::Var(val_var),
-        })
-    }
-
-    /// Shared `self clearField: #classVar` `Bind` construction (ADR 0124
-    /// §1/§4i, B4) — the `BindOp::Remove` counterpart to
-    /// [`Self::lower_class_var_field_assignment_bind`], which this mirrors
-    /// exactly (same version-capture/shadow-write-gate/isolated-verify
-    /// sequence, ADR 0110's shadow write, same two call sites —
-    /// [`Self::generate_class_var_field_clear`] and
-    /// `gen_server::methods`'s `lower_class_method_last_class_var_clear`)
-    /// except there is no value expression to compile: `field_name` is
-    /// always a compile-time-known literal Symbol
-    /// ([`super::expr_shape::is_self_clear_field_class_var`] guarantees
-    /// this before either call site is reached), so there is no
-    /// `expression_doc(value)` step and no `preamble_doc` beyond an empty
-    /// `Document::Nil` — kept in the return shape only for symmetry with the
-    /// assignment sibling's `(preamble_doc, bind, val_var)` triple.
-    /// `val_var` is `"ClassSelf"` — `clearField: -> Self`'s return value,
-    /// mirroring `self clearField:`'s instance-side counterpart
-    /// (`generate_self_clear_field_open`) returning the literal `"Self"`.
-    pub(super) fn lower_class_var_field_clear_bind(
-        &mut self,
-        field_name: &str,
-        span: beamtalk_core::source_analysis::Span,
-        frame: super::threaded_ir::FrameId,
-    ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
-        if !self.class_var_names().contains(field_name) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: format!("cannot clear instance field '{field_name}' in a class method"),
-                span: Some(span),
-            });
-        }
-        let source_version = self.class_var_version();
-        self.next_class_var();
-        let target_version = self.class_var_version();
-        let shadow_write = self.block_depth == 0;
-        let (bind, verify_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
-            super::threaded_ir::BindOp::Remove {
-                field: field_name.to_string(),
-                class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
-            },
-            shadow_write,
-            frame,
-            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
-            source_version,
-            target_version,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &verify_errors,
-            "class-var mutation missing ADR 0110 shadow write",
-            span,
-        );
-        let probe = self.class_var_probe_doc("write", field_name);
-        Ok((probe, bind, "ClassSelf".to_string()))
     }
 
     /// ADR 0111 coverage extension: construct + verify the
@@ -1238,35 +993,11 @@ impl CoreErlangGenerator {
         let builder_ctx: Option<(String, Vec<String>)> =
             super::class_builder_source::builder_class_method_context(receiver, messages);
 
-        // Snapshot the class-var version *before* generating
-        // anything — the receiver included — so we can tell, once the last
-        // message's own arguments have been generated, whether *any* part of
-        // this cascade (the receiver or any message's arguments) hoisted a
-        // `ClassVarsN` rebind (`class_var_version` is never rolled back after
-        // a hoist — see `split_subexpr_for_preamble`). If so, the whole
-        // cascade must stay an *open* let-chain (like an ordinary
-        // class-method self-send) rather than a self-contained Document, so
-        // the rebind stays visible to the caller instead of being scoped
-        // only to this cascade's own value-defining subexpression.
-        let class_var_version_before_cascade = self.class_var_version();
-
         let receiver_var = self.fresh_temp_var("Receiver");
-        // Thread the receiver's open scope rather than close
-        // it — `underlying_receiver` can itself rebind `ClassVarsN` (e.g. a
-        // same-class self-send, or a nested cascade whose own last message
-        // hoists a rebind, now that this function can produce one).
-        // `closed_expression_doc` would splice `expr_doc, leaf::var(result_var)`
-        // in as `recv_doc`'s own value, trapping the `ClassVarsN` binding
-        // inside this `let Receiver = ... in` wrapper's closed subexpression —
-        // invisible to the rest of `docs` and to the enclosing class method's
-        // own closing `class_var_result` tuple, the exact failure class this
-        // whole fix addresses, just relocated to receiver position. Instead,
-        // splice any preamble into `docs` first (mirroring how
+        // Splice any receiver preamble into `docs` first (mirroring how
         // `capture_subexpr_sequence`/`bind_args_to_temps` already do this for
         // ordinary message-send receivers/arguments), so a rebind stays
-        // visible at the same nesting level as everything else in `docs` —
-        // and is caught by the `class_var_version_before_cascade` snapshot
-        // above, taken before this call runs.
+        // visible at the same nesting level as everything else in `docs`.
         let mut seq = self.sequence_call(std::slice::from_ref(&underlying_receiver), "Recv")?;
         let receiver_value_doc = seq.next();
         let receiver_prelude = seq.into_prelude();
@@ -1332,27 +1063,10 @@ impl CoreErlangGenerator {
                 _ => self.generate_cascade_args(arguments, &mut docs)?,
             };
 
-            // ADR 0118 phase 5b: once the last message's
-            // own (possibly hoisting) args are generated, `class_var_version`
-            // reflects every rebind the whole cascade produced. If it
-            // advanced, this last send is bound to a named result
-            // (`let _CascadeResult = ... in _CascadeResult`) rather than
-            // left as the cascade's bare tail value — `generate_cascade` is
-            // reached through ordinary `generate_expression`, with no open
-            // scope left to propagate, so the rebind is closed inline here
-            // instead of escaping via a side channel.
-            let last_rebind_result_var =
-                if is_last && self.class_var_version() != class_var_version_before_cascade {
-                    let result_var = self.fresh_temp_var("CascadeResult");
-                    docs.push(docvec!["let ", leaf::var(result_var.clone()), " = "]);
-                    Some(result_var)
-                } else {
-                    if !is_last {
-                        // For all but the last message, discard the result
-                        docs.push(Document::Str("let _ = "));
-                    }
-                    None
-                };
+            if !is_last {
+                // For all but the last message, discard the result
+                docs.push(Document::Str("let _ = "));
+            }
 
             docs.push(docvec![
                 "call 'beamtalk_message_dispatch':'send'(",
@@ -1370,12 +1084,8 @@ impl CoreErlangGenerator {
 
             docs.push(Document::Str("])"));
 
-            if !is_last || last_rebind_result_var.is_some() {
+            if !is_last {
                 docs.push(Document::Str(" in "));
-            }
-
-            if let Some(result_var) = last_rebind_result_var {
-                docs.push(leaf::var(result_var));
             }
         }
 
@@ -1386,16 +1096,6 @@ impl CoreErlangGenerator {
     ///
     /// This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
-    ///
-    /// A non-field-assignment argument that is itself a same-class
-    /// class-method call emits an *open* let-chain ending in `... in ` with
-    /// no trailing value expression (`ClassVarsN` must stay visible to
-    /// subsequent cascade messages — see `emit_class_var_result_unwrap`'s
-    /// doc comment), relying on the caller to append the result variable and
-    /// keep the chain's bindings in scope. An argument doc placed directly
-    /// into a `send(...)` argument list with no such append would leave an
-    /// open-scope arg dangling, producing malformed Core Erlang (a
-    /// `let ... in` immediately followed by the list's closing `]`).
     ///
     /// Hoisting only the argument(s) that need it
     /// while a *different*, side-effecting-but-plain argument in the same

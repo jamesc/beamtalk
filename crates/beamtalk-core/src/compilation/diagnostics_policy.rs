@@ -136,7 +136,6 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
         "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
         "unguarded-late-read" => DiagnosticCategory::UnguardedLateRead,
-        "stored-closure" => DiagnosticCategory::StoredClosure,
         _ => return None,
     })
 }
@@ -166,7 +165,6 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "file-class-name-mismatch",
     "definite-assignment",
     "unguarded-late-read",
-    "stored-closure",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -574,6 +572,8 @@ fn expect_category_unchecked(
         | ExpectCategory::TypeAnnotation
         | ExpectCategory::Inheritance
         | ExpectCategory::Sendability
+        // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
+        // never "unchecked" — it is reported stale like any unmatched directive.
         | ExpectCategory::StoredClosure => false,
     }
 }
@@ -865,10 +865,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::Sendability,
                     Some(DiagnosticCategory::Sendability)
                 )
-                | (
-                    ExpectCategory::StoredClosure,
-                    Some(DiagnosticCategory::StoredClosure)
-                )
         )
 }
 
@@ -1054,7 +1050,6 @@ native-declaration-location = "error"
 file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
-stored-closure = "warn"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1302,6 +1297,30 @@ dnu = "error"
             "plain apply_expect_directives should flag dead_assignment stale \
              when no diagnostic exists, got: {diagnostics:?}"
         );
+    }
+
+    /// ADR 0130 §Migration Path: `@expect stored_closure` still parses (the
+    /// category is deprecated and parse-only) and, since nothing produces a
+    /// matching diagnostic any more, becomes an ordinary stale-expectation
+    /// warning rather than a parse error.
+    #[test]
+    fn expect_stored_closure_parses_and_is_reported_stale_warning() {
+        let source = "@expect stored_closure\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "`@expect stored_closure` must still parse, got: {parse_diags:?}"
+        );
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        let stale: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("stale @expect stored_closure"))
+            .collect();
+        assert_eq!(stale.len(), 1, "got: {diagnostics:?}");
+        assert_eq!(stale[0].severity, Severity::Warning);
     }
 
     /// `beamtalk build`/`beamtalk test`/the LSP/the REPL never run

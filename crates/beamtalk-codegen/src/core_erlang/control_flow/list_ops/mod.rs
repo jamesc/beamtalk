@@ -179,26 +179,6 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// Checks a bare (no-mutation-threading) list-op
-    /// block body for a class-var-mutating self-send. Call this after
-    /// `block_needs_mutation_threading` returns `None`, before falling
-    /// through to a plain/BIF dispatch that compiles the block via
-    /// `generate_block` (or `expression_doc`/`generate_erlang_interop_wrapper`
-    /// on top of it) — that fallback has no way to thread a classState
-    /// mutation back to the class method that owns it. See
-    /// `check_no_unsafe_class_method_self_sends`'s doc comment for the full
-    /// rationale.
-    pub(in crate::core_erlang) fn check_bare_list_op_block_self_sends(
-        &self,
-        body: &Expression,
-    ) -> Result<()> {
-        if let Some(block) = Self::extract_block_literal(body) {
-            let analysis = block_analysis::analyze_block(block);
-            self.check_no_unsafe_class_method_self_sends(&analysis, block, block.span)?;
-        }
-        Ok(())
-    }
-
     /// Whether a non-literal (opaque) callable forwarded to a collection HOM
     /// (`beamtalk-core`'s `opaque_fold_callable_arg`) should route through the
     /// ADR 0128 `lists:foldl` state-fold rewrite
@@ -219,9 +199,8 @@ impl CoreErlangGenerator {
     /// `true` only in an Actor INSTANCE method
     /// (`in_actor_instance_context`). `false` for `CodeGenContext::ValueType`
     /// (no `State` map to thread) and for a class method
-    /// (`class_<selector>(ClassSelf, ClassVars, Args...)` has no
-    /// `State`/`StateAcc` parameter either — class-side threading goes
-    /// through `ClassVars`). BT-3615: also `false` for
+    /// (`class_<selector>(ClassSelf, Args...)` has no `State`/`StateAcc`
+    /// parameter either). BT-3615: also `false` for
     /// `CodeGenContext::Repl` — the REPL eval module unpacks a
     /// `{Result, State}` tuple only when a builder flags
     /// `repl_loop_mutated`, and does not splice ADR 0118 expression
@@ -239,13 +218,6 @@ impl CoreErlangGenerator {
         body: &Expression,
         operation: &str,
     ) -> Result<Document<'static>> {
-        // `do:`/`collect:`/`select:` all route through here — a
-        // same-class mutating self-send inside a bare block has no way to
-        // thread its class-var mutation back (this always runs in-process,
-        // never a genuine cross-class gen_server call). See
-        // `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
-
         // The Actor-instance non-literal (opaque) callable path (below) does not
         // use the shared footer at all — it has its own receiver/temp-var
         // allocation. Only compute `list_var`/`recv_code` here, ahead of

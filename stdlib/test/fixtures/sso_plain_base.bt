@@ -301,9 +301,8 @@ Object subclass: SsoPlainBase
 
   // --- closures ----------------------------------------------------------
 
-  // A closure stored in a local and invoked by a later statement (ADR 0110
+  // PIN-BUG BT-3713: a closure stored in a local and invoked by a later statement (ADR 0110
   // known limit, BT-3681): a plain send inside it changes nothing.
-  @expect stored_closure "BT-3690: pins that a plain send in a stored closure changes nothing"
   class storedPlain -> Integer =>
     self.n := 0
     b := [self plain]
@@ -312,8 +311,7 @@ Object subclass: SsoPlainBase
     self plain
     self.n
 
-  // The same limit with a writing send: the closure's write is not kept.
-  @expect stored_closure "BT-3690: pins the known limit of a stored closure"
+  // PIN-BUG BT-3713: the same with a writing send: the closure write is not kept today.
   class storedBump -> Integer =>
     self.n := 0
     b := [self bump]
@@ -322,7 +320,6 @@ Object subclass: SsoPlainBase
     self.n
 
   // A writing send after a stored closure's plain send is kept.
-  @expect stored_closure "BT-3690: pins that a plain send in a stored closure changes nothing"
   class storedPlainThenWrite -> Integer =>
     self.n := 0
     b := [self plain]
@@ -348,7 +345,6 @@ Object subclass: SsoPlainBase
   // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
   // the send's own commit, which overwrites the block's export, so the write is
   // dropped.
-  @expect stored_closure "BT-3682: pins the known limit of a block literal passed to a HOM"
   class viaSectionLiteralInLoop -> Integer =>
     self.n := 0
     seen := 0

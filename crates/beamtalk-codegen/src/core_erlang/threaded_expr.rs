@@ -30,7 +30,7 @@
 //! * **Boundary (per-context adapter, the only thing that varies).** A
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
 //!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
-//!   `{class_var_result, Result, ClassVarsN}` / bare-`Result` shape, or the Actor
+//!   bare-`Result` shape, or the Actor
 //!   `{'reply', Reply, NewState}` `gen_server` reply shape. This mirrors the
 //!   [`NlrBoundary`](super::NlrBoundary) precedent.
 //!
@@ -104,10 +104,9 @@ pub(super) enum ThreadingBoundary {
     /// Value-type methods: the tail yields `{Result, Self{N}}` when a non-local return
     /// is active (so the normal and NLR-catch paths share a shape), or bare `Result`.
     ValueType { has_nlr: bool },
-    /// Class methods: the tail yields `{'class_var_result', Result, ClassVarsN}` when an
-    /// earlier statement mutated a class var, or bare `Result` otherwise. Threading
-    /// constructs mutate *locals*, not class vars, so the wrapping is driven solely by
-    /// `class_var_mutated()`.
+    /// Class methods: the tail yields the bare `Result`. Class variables are written
+    /// in place in the class process (ADR 0130 §3), so nothing is returned beside the
+    /// result.
     ClassMethod,
     /// Actor (`gen_server`) methods. Structurally distinct from the value-type
     /// and class-method boundaries:
@@ -119,8 +118,8 @@ pub(super) enum ThreadingBoundary {
     ///   element 2 to the next state version and threads it onward, rather than discarding
     ///   it.
     /// * **How the body returns.** Actor method bodies return the `gen_server` reply tuple
-    ///   `{'reply', Reply, NewState}`, not a bare value (or a `{Value, Self}` /
-    ///   `{class_var_result, …}` value-type shape).
+    ///   `{'reply', Reply, NewState}`, not a bare value (or a `{Value, Self}`
+    ///   value-type shape).
     Actor,
 }
 
@@ -198,9 +197,9 @@ impl CoreErlangGenerator {
         } else if self.is_exception_construct_with_vt_local_threading(expr) {
             // `on:do:`/`ensure:` — the third construct family this
             // recognizes, alongside loops/foldl-list-ops and read+write
-            // conditionals. (ADR 0122: this predicate now also answers
-            // `true` for `ClassVars`/`SelfVt` family threading, folding what
-            // used to be a two-predicate OR here into one call.)
+            // conditionals. (ADR 0122: this predicate also answers `true`
+            // for `SelfVt` family threading, folding what used to be a
+            // two-predicate OR here into one call.)
             self.emit_vt_exception_tuple_unwrap_to_var(expr, &mut parts)?
         } else {
             return Ok(None);
@@ -312,7 +311,6 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var),
                 ")",
             ])),
-            shadow_write: false,
             span,
         });
         stmts.push(ThreadedStmt::Statement(
@@ -338,27 +336,10 @@ impl CoreErlangGenerator {
         boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<bool> {
-        // Captured before lowering — `lower_threaded_last`'s two
-        // internal builders (`emit_vt_threaded_tuple_unwrap_to_var`,
-        // `emit_vt_conditional_case_to_var`) both bind the construct's own
-        // Document opaquely (`let TupleVar = <construct> in ...`), which
-        // confines any `ClassVarsN` a class-method self-send inside a
-        // `Foldl*` body minted (ADR 0111 Addendum 9 Question 6) to that
-        // `let`'s own RHS. Refreshed below so `threading_result_tail`'s
-        // `ClassMethod` boundary references a name that's actually visible —
-        // see `refresh_class_var_after_opaque_scope`'s own doc comment. A
-        // no-op (`None`) for the `ValueType`/`Actor` boundaries, where
-        // `class_var_version` never advances.
-        let cv_version_before = self.class_var_scope_mark();
         let Some(threaded) = self.lower_threaded_last(expr, position)? else {
-            let _ = self.close_class_var_scope(cv_version_before);
             return Ok(false);
         };
-        body_parts.push(self.class_var_scope_prefix(cv_version_before));
         body_parts.push(threaded.value_doc);
-        if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
-            body_parts.push(refresh);
-        }
         body_parts.push(self.threading_result_tail(
             &threaded.result_var,
             threaded.state_var.as_deref(),
@@ -490,7 +471,6 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var),
                 ")",
             ])),
-            shadow_write: false,
             span,
         });
         self.bind_var(var_name, &core_var);
@@ -584,16 +564,6 @@ impl CoreErlangGenerator {
             }
             ThreadingBoundary::ValueType { has_nlr: false } => {
                 docvec!["    ", leaf::var(result_var.to_string()), "\n"]
-            }
-            ThreadingBoundary::ClassMethod if self.class_var_mutated() => {
-                let final_cv = self.current_class_var();
-                docvec![
-                    "{'class_var_result', ",
-                    leaf::var(result_var.to_string()),
-                    ", ",
-                    leaf::var(final_cv),
-                    "}",
-                ]
             }
             ThreadingBoundary::ClassMethod => leaf::var(result_var.to_string()),
         }

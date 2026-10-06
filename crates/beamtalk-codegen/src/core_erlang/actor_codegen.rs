@@ -685,8 +685,8 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// %% With local override (has_local_policy_override = true):
-    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
-    ///     let CMR = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    /// 'class_supervisionSpec'/1 = fun (ClassSelf) ->
+    ///     let Policy = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf) in
     ///     ...
     ///
     /// %% Without local override (has_local_policy_override = false):

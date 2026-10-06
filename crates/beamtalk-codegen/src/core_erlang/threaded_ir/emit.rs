@@ -81,10 +81,9 @@ impl<'g> RenderCtx<'g> {
                 self.generator.in_loop_body,
                 var.version,
             ),
-            VersionPrefix::ClassVars
-            | VersionPrefix::SelfVt
-            | VersionPrefix::Local(_)
-            | VersionPrefix::Gensym(_) => var.render_name(),
+            VersionPrefix::SelfVt | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => {
+                var.render_name()
+            }
         }
     }
 
@@ -179,13 +178,11 @@ pub(in crate::core_erlang) fn render(
                 target,
                 source,
                 op,
-                shadow_write,
                 span: _,
-            } => docs.push(render_bind(target, source, op, *shadow_write, ctx)),
+            } => docs.push(render_bind(target, source, op, ctx)),
             ThreadedStmt::Threaded {
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 body,
                 produces,
                 span: _,
@@ -208,7 +205,6 @@ pub(in crate::core_erlang) fn render(
                 fn_name,
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 counter,
                 condition,
                 condition_value,
@@ -687,68 +683,22 @@ fn render_bind(
     target: &VersionedVar,
     source: &VersionedVar,
     op: &BindOp,
-    shadow_write: bool,
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put {
-            field,
-            value,
-            class_tag,
-        } => {
-            let put_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'put'(",
-                leaf::atom(field.clone()),
-                ", ",
-                render_value(value, ctx),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    put_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                put_doc
-            }
-        }
-        BindOp::Remove { field, class_tag } => {
-            let remove_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'remove'(",
-                leaf::atom(field.clone()),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    remove_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                remove_doc
-            }
-        }
+        BindOp::Put { field, value } => docvec![
+            "let ",
+            leaf::var(target_name),
+            " = call 'maps':'put'(",
+            leaf::atom(field.clone()),
+            ", ",
+            render_value(value, ctx),
+            ", ",
+            leaf::var(source_name),
+            ") in ",
+        ],
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),

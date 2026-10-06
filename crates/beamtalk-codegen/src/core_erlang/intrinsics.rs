@@ -528,11 +528,6 @@ impl CoreErlangGenerator {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
-            // falling through to the stdlib's own tail-recursive
-            // `Integer>>timesRepeat:` — a same-process, in-process call, same
-            // as `select:`/`do:`. See
-            // `check_no_unsafe_class_method_self_sends`'s doc comment.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -568,8 +563,6 @@ impl CoreErlangGenerator {
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
             }
-            // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -609,8 +602,6 @@ impl CoreErlangGenerator {
                 )?;
                 return Ok(Some(doc));
             }
-            // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -868,7 +859,7 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// ADR 0118 phase 5b: hoists a receiver operand (which may
-    /// need a `ClassVars`/state prelude) binding it to a fresh
+    /// need a state prelude) binding it to a fresh
     /// `prefix`-named temp var. Appends the necessary `let`-binding(s) to
     /// `parts` in order — `parts` is always a self-contained sequence
     /// (each entry a `let ... in` prefix), so its caller needs no separate
@@ -951,7 +942,7 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() * 2 + 3);
 
         // Hoist the receiver (e.g. class method self-send) inline so
-        // its ClassVarsN binding remains visible to subsequent arg bindings.
+        // its binding remains visible to subsequent arg bindings.
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let recv_var = self.thread_value_call_receiver(receiver, "ValRecv", &mut parts)?;

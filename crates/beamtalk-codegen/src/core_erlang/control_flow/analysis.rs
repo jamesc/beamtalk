@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Diagnostics and class-var/list-op analysis predicates for state-threaded
-//! loop and fold bodies.
+//! Diagnostics and list-op analysis predicates for state-threaded loop and
+//! fold bodies.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -17,13 +17,9 @@ use beamtalk_core::source_analysis::Span;
 // ─── ADR 0122: unified storage-family detector ─────────────────────────────
 
 /// ADR 0122 Decision 2: canonical slot order for [`ThreadedFamilies`] — the
-/// scratch map (`State`) first, then `ClassVars`, then `SelfVt` — regardless
-/// of the order callers pass an `eligible`/match set in.
-const FAMILY_CANONICAL_ORDER: [VersionPrefix; 3] = [
-    VersionPrefix::State,
-    VersionPrefix::ClassVars,
-    VersionPrefix::SelfVt,
-];
+/// scratch map (`State`) first, then `SelfVt` — regardless of the order
+/// callers pass an `eligible`/match set in.
+const FAMILY_CANONICAL_ORDER: [VersionPrefix; 2] = [VersionPrefix::State, VersionPrefix::SelfVt];
 
 /// ADR 0122 Decision 2: the storage families a construct body mutates, in
 /// canonical slot order. Built by [`CoreErlangGenerator::body_threaded_families`]
@@ -75,26 +71,22 @@ impl ThreadedFamilies {
 }
 
 /// BT-3510 differential test: one [`super::plan::ThreadingPlan::new_impl`]
-/// call's OLD (still-live, unchanged) `threads_class_vars`/`threads_value_self`
-/// answers, alongside what the NEW recursive
+/// call's OLD (still-live, unchanged) `threads_value_self`
+/// answer, alongside what the NEW recursive
 /// [`CoreErlangGenerator::body_threaded_families`] answers for the exact same
 /// body — recorded by real compiles (`generate_module` over the stdlib +
 /// bootstrap-test corpus) rather than by hand-building a `CoreErlangGenerator`
-/// per corpus construct, so the recorded context (`class_var_names`,
-/// `class_method_selectors`, `context`, `in_class_method`) is always the real
-/// one the compiler itself built.
+/// per corpus construct, so the recorded context (`context`,
+/// `in_class_method`) is always the real one the compiler itself built.
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(in crate::core_erlang) struct FamilyDetectorDiffRecord {
     /// `"letrec"` (`allow_direct_params`) or `"foldl"` — which of
-    /// `ThreadingPlan::new_impl`'s two shapes this plan is, since the two
-    /// have genuinely different OLD formulas (see
-    /// `ThreadingPlan::threads_class_vars`'s doc comment).
+    /// `ThreadingPlan::new_impl`'s two shapes this plan is.
     pub(in crate::core_erlang) shape: &'static str,
     /// The loop/fold body's own span — printed by the differential test so
     /// a mismatch is reviewable against source.
     pub(in crate::core_erlang) span: beamtalk_core::source_analysis::Span,
-    pub(in crate::core_erlang) old_threads_class_vars: bool,
     pub(in crate::core_erlang) old_threads_value_self: bool,
     pub(in crate::core_erlang) new_families: ThreadedFamilies,
 }
@@ -109,83 +101,16 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// BT-3522: the two shapes [`CoreErlangGenerator::is_family_mutation`]
-/// recognises for [`VersionPrefix::ClassVars`], reduced to just what
-/// [`CoreErlangGenerator::reject_unthreadable_class_var_mutation`]'s
-/// diagnostic needs.
-///
-/// Exists because `ast_walker::walk_expression`'s visitor is a
-/// higher-ranked `FnMut(&Expression)` — the matched node cannot outlive the
-/// walk, so the facts are copied out at the point of match instead of the
-/// reference being carried back to the caller.
-#[derive(Debug)]
-enum ClassVarMutationSite {
-    /// A bare `self.classVar := ...` write.
-    FieldWrite { field: String, span: Span },
-    /// A same-class self-send whose target may mutate a class variable.
-    SelfSend { selector: String, span: Span },
-}
-
-impl ClassVarMutationSite {
-    /// Classifies an expression [`CoreErlangGenerator::is_family_mutation`]
-    /// has ALREADY matched for `ClassVars` — the caller's guard, not a
-    /// second copy of the shape rule (ADR 0122 Decision 4).
-    fn new(expr: &Expression) -> Self {
-        if let Some(field) = crate::core_erlang::expr_shape::field_assignment_name(expr) {
-            return Self::FieldWrite {
-                field: field.to_string(),
-                span: expr.span(),
-            };
-        }
-        let Expression::MessageSend { selector, .. } = expr.unwrap_parens() else {
-            // `is_family_mutation(&ClassVars, _)` matches exactly two
-            // shapes: the field write handled above, and a self-send —
-            // which `is_class_method_self_send` only ever reports for a
-            // `MessageSend`.
-            unreachable!("a non-field-write ClassVars mutation is always a MessageSend");
-        };
-        Self::SelfSend {
-            selector: selector.name().to_string(),
-            span: expr.span(),
-        }
-    }
-
-    fn span(&self) -> Span {
-        match self {
-            Self::FieldWrite { span, .. } | Self::SelfSend { span, .. } => *span,
-        }
-    }
-
-    /// Reuses the existing diagnostic that already describes each shape —
-    /// no third "nested class-var mutation" variant is needed (CLAUDE.md's
-    /// no-duplicate-implementations rule).
-    fn into_error(self, location: String) -> CodeGenError {
-        match self {
-            Self::FieldWrite { field, .. } => {
-                CodeGenError::ClassVarAssignmentInThreadedBody { field, location }
-            }
-            Self::SelfSend { selector, .. } => {
-                CodeGenError::ClassMethodSelfSendInUnthreadedBlock { selector, location }
-            }
-        }
-    }
-}
-
-/// which family a [`Self::nested_loop_or_fold_body`] match belongs
-/// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
-/// formula for each (see that field's doc comment), so
-/// [`Self::nested_loop_lost_class_var_mutation`] must apply the matching
-/// one rather than a single one-size-fits-all check.
+/// Which kind of loop/fold a [`CoreErlangGenerator::nested_loop_or_fold_body`]
+/// match is: only the `Letrec` shapes thread a value-type `Self` through
+/// their own recursive tail call (see
+/// [`CoreErlangGenerator::nested_loop_lost_value_self_mutation`]).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NestedLoopShape {
     /// `whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:` — the
-    /// `BodyKind::Letrec` shapes, gated by the narrow, top-level-only
-    /// `loop_body_threads_class_vars`.
+    /// `BodyKind::Letrec` shapes.
     Letrec,
-    /// `do:`/`collect:`/`select:`/... — the `BodyKind::Foldl*` shapes,
-    /// gated by the recursive `has_self_sends` formula (BT-3584: no
-    /// longer Actor-excluded — `context` alone never distinguishes an
-    /// Actor's own class method from an `Object`/`ValueType` one here).
+    /// `do:`/`collect:`/`select:`/... — the `BodyKind::Foldl*` shapes.
     Foldl,
 }
 
@@ -197,28 +122,20 @@ impl CoreErlangGenerator {
     /// BT-3506 were missed (ADR 0122 §"Why the gaps keep happening").
     ///
     /// * `State` (an Actor's own scratch map) — an ACTOR INSTANCE method
-    ///   only (`Actor` context, not [`Self::in_class_method`]); a class
-    ///   method's own `gen_server` state is `ClassVars`, never this family.
-    /// * `ClassVars` — whenever [`Self::in_class_method`], regardless of the
-    ///   class's own instance `context` (an Actor's and a `ValueType`'s
-    ///   class methods compile identically).
+    ///   only (`Actor` context, not [`Self::in_class_method`]).
     /// * `SelfVt` — a `ValueType` INSTANCE method only (`ValueType` context,
     ///   not [`Self::in_class_method`]).
     ///
-    /// Mutually exclusive by construction: [`Self::in_class_method`] alone
-    /// decides `State` vs. `ClassVars`, and `context` alone decides
-    /// `ClassVars` vs. `SelfVt` once [`Self::in_class_method`] is fixed — so
-    /// at most one family is ever eligible in `Repl` context too (none, in
-    /// fact, since `Repl` never sets `in_class_method` and is never
-    /// `ValueType`/`Actor`).
+    /// Class methods thread no family at all: class variables live in the
+    /// class process (ADR 0130 §3).
+    ///
+    /// Mutually exclusive by construction: `context` alone decides `State`
+    /// vs. `SelfVt`, so at most one family is ever eligible (none in `Repl`
+    /// context, which is never `ValueType`/`Actor`).
     pub(in crate::core_erlang) fn eligible_families(&self) -> Vec<VersionPrefix> {
         let mut eligible = Vec::with_capacity(1);
         if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
             eligible.push(VersionPrefix::State);
-        }
-        // ADR 0130 §3: class variables are not a threaded family.
-        if crate::core_erlang::expr_shape::CLASS_VAR_THREADING && self.in_class_method() {
-            eligible.push(VersionPrefix::ClassVars);
         }
         if matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method() {
             eligible.push(VersionPrefix::SelfVt);
@@ -229,12 +146,6 @@ impl CoreErlangGenerator {
     /// ADR 0122 Decision 4: the ONE place "what counts as a mutation" is
     /// answered, per family — never re-derived at a call site:
     ///
-    /// * `ClassVars` — a bare class-var field write (`self.classVar := ...`)
-    ///   or a same-class-method self-send, the same OR
-    ///   [`Self::find_class_var_mutating_stmt`] (Letrec shape) and the
-    ///   `Foldl*`-shape `threads_class_vars` branch
-    ///   ([`super::plan::ThreadingPlan::new_impl`]) each separately checked
-    ///   before this existed.
     /// * `SelfVt` — a bare value-type field write (`self.field := ...`
     ///   outside a class method); the shape
     ///   [`Self::find_value_self_mutating_stmt`] and
@@ -260,25 +171,6 @@ impl CoreErlangGenerator {
     ) -> bool {
         match prefix {
             VersionPrefix::State => true,
-            VersionPrefix::ClassVars => {
-                // `self clearField: #x` (ADR 0124 §1/B4) is deliberately
-                // NOT included here: unlike a field assignment or a
-                // class-method self-send, it has no per-statement Letrec/
-                // Foldl loop-body Bind construction of its own (out of
-                // scope for this issue — see `is_self_clear_field_class_var`'s
-                // own doc comment). Recognizing it as a "family mutation"
-                // here without that construction would make a loop believe
-                // it must thread `ClassVars` through a shape this crate
-                // cannot actually build a `Bind` for. `self clearField:` as
-                // a class method's own top-level statement (in or out of a
-                // loop) is instead compiled via
-                // `CoreErlangGenerator::class_method_prelude_producer` /
-                // `lower_class_method_body`, and any other position raises a
-                // clear compile-time diagnostic (`try_generate_object_reflection`'s
-                // `ClearField` arm) rather than silently losing the mutation.
-                (self.is_field_assignment(expr) && self.is_class_var_assignment(expr))
-                    || self.is_class_method_self_send(expr)
-            }
             VersionPrefix::SelfVt => {
                 !self.in_class_method()
                     && matches!(self.context, CodeGenContext::ValueType)
@@ -295,15 +187,12 @@ impl CoreErlangGenerator {
     /// ([`beamtalk_core::ast_walker::walk_expression`]'s descend-into-blocks
     /// behavior) — unlike the narrower, top-level-only walks this is
     /// differential-tested against
-    /// ([`Self::find_class_var_mutating_stmt`]/
-    /// [`Self::find_value_self_mutating_stmt`]/
+    /// ([`Self::find_value_self_mutating_stmt`]/
     /// `value_type_codegen::is_vt_self_field_assignment`'s own callers).
     ///
     /// A site that cannot carry a mutation found below its own top level
     /// rejects it via the existing shared rejection functions
-    /// ([`Self::reject_unthreadable_value_self_field_write`],
-    /// [`Self::reject_unthreadable_class_var_mutation`],
-    /// `reject_class_var_field_assignment`) — detection and carry-capability
+    /// ([`Self::reject_unthreadable_value_self_field_write`]) — detection and carry-capability
     /// are deliberately separate questions (ADR 0122 §Decision 1).
     ///
     /// BT-3522 wired the first live emission consumer:
@@ -395,53 +284,23 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0111 Addendum 9, Questions 3/4: whether a Letrec loop
-    /// body threads a `ClassVars` mutation through the loop's own recursive
-    /// tail call. True exactly when the body is compiled inside a class
-    /// method AND has a direct class-var field write or a same-class
-    /// self-send — per Question 4 Part A, either shape already
-    /// unconditionally forces `StateAcc` mode for the loop's own
-    /// local-variable threading (`has_state_effects()`/`has_self_sends`
-    /// exclude `DirectParams`/`TupleAcc`/`Hybrid`), so `ClassVars`
-    /// composition only needs to be designed against that one shape.
-    ///
-    /// Shared by [`ThreadingPlan::new_impl`] (Letrec-only, via
-    /// `allow_direct_params`) and the value-type/class-method loop-open
-    /// consumers (`value_type_codegen.rs`) so the routing decision and the
-    /// tuple-shape decision can never independently drift out of sync
-    /// (CLAUDE.md's no-duplicate-implementations rule).
-    pub(in crate::core_erlang) fn loop_body_threads_class_vars(
-        &self,
-        body: &beamtalk_core::ast::Block,
-    ) -> bool {
-        self.find_class_var_mutating_stmt(body).is_some()
-    }
-
     /// whether a Letrec loop body threads a value-type `Self`
     /// mutation (`self.field := ...` in [`CodeGenContext::ValueType`])
-    /// through the loop's own recursive tail call — the `SelfVt` mirror of
-    /// [`Self::loop_body_threads_class_vars`], deliberately built the same
-    /// (narrow, top-level-statement-only) way and for the same reason: an
-    /// extra `letrec` fun parameter can only carry a rebind that the loop
-    /// body's own STATEMENT sequence actually produces, never one scoped
-    /// inside some larger sub-expression's own nested `let` (see
-    /// [`Self::find_class_var_mutating_stmt`]'s doc comment for the
-    /// empirically-confirmed unbound-variable regression that narrowing
-    /// prevents).
+    /// through the loop's own recursive tail call. Deliberately narrow
+    /// (top-level-statement-only): an extra `letrec` fun parameter can only
+    /// carry a rebind that the loop body's own STATEMENT sequence actually
+    /// produces, never one scoped inside some larger sub-expression's own
+    /// nested `let`.
     ///
-    /// Mutually exclusive with [`Self::loop_body_threads_class_vars`] by
-    /// construction — that one requires `in_class_method()`, this one
-    /// excludes it (inside a class method `self.x :=` is a CLASS-var write,
-    /// [`FieldWriteSite::ClassVar`](super::FieldWriteSite::ClassVar), which
-    /// already has its own threading) — so the two never both claim the
-    /// loop's single extra trailing tuple slot.
+    /// Excludes class methods: inside a class method `self.x :=` is a
+    /// CLASS-var write, which lives in the class process (ADR 0130) and is
+    /// never threaded.
     ///
     /// Shared by [`ThreadingPlan::new_impl`] (which turns it into
     /// `ThreadingPlan::threads_value_self`) and the value-type loop-open
     /// consumers in `value_type_codegen.rs`, so the routing decision and the
     /// tuple-shape decision can never independently drift out of sync
-    /// (CLAUDE.md's no-duplicate-implementations rule) — exactly the
-    /// arrangement `loop_body_threads_class_vars` already has.
+    /// (CLAUDE.md's no-duplicate-implementations rule).
     ///
     /// **Accepted scope limit, inherited from that same narrowing:** a field
     /// write buried inside a NESTED construct in the loop body — most
@@ -449,16 +308,15 @@ impl CoreErlangGenerator {
     /// a top-level statement, so this returns `false` and the loop threads no
     /// `Self`; the conditional's own `Self{N}` rebind stays scoped to its own
     /// nested `let`. Widening the predicate instead produced real
-    /// unbound-variable regressions — see
-    /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment — so that
-    /// shape remains deliberately unsupported.
+    /// unbound-variable regressions, so that shape remains deliberately
+    /// unsupported.
     ///
     /// What changed is only what happens to it *after* this returns `false`:
     /// it used to compile to a silently-dropped mutation (or, with no sibling
     /// local mutation to thread, an `erlc` `unbound variable 'State'` crash),
     /// and is now rejected at compile time by
     /// [`Self::reject_unthreadable_value_self_field_write`] with the same
-    /// diagnostic the identical class-var shape already produced.
+    /// diagnostic.
     pub(in crate::core_erlang) fn loop_body_threads_value_self(
         &self,
         body: &beamtalk_core::ast::Block,
@@ -469,8 +327,7 @@ impl CoreErlangGenerator {
     /// Shared predicate behind [`Self::loop_body_threads_value_self`] and
     /// [`Self::nested_loop_lost_value_self_mutation`] — returns
     /// the first top-level statement of `body` that is a value-type
-    /// `self.field := ...` write, or `None` if there isn't one. The `SelfVt`
-    /// mirror of [`Self::find_class_var_mutating_stmt`]; see
+    /// `self.field := ...` write, or `None` if there isn't one; see
     /// [`Self::loop_body_threads_value_self`] for why it is deliberately
     /// top-level-only.
     fn find_value_self_mutating_stmt<'a>(
@@ -514,14 +371,8 @@ impl CoreErlangGenerator {
     /// crashed `erlc` outright (`unbound variable 'State'`, from the pack
     /// prefix short-circuiting to the ambient actor `State` a value-type
     /// method does not have — confirmed empirically for the headline repro
-    /// and for both `Foldl*` shapes on the parent commit). The identical
-    /// CLASS-VAR shape has always been rejected cleanly —
-    /// `needs_mutation_threading`'s `in_class_method()` arm does not count
-    /// field writes, so such a branch block never reaches the inline
-    /// mutation-threading path at all and falls through to `generate_block`'s
-    /// [`CoreErlangGenerator::validate_stored_closure`] diagnostic. This
-    /// check closes that value-type gap by producing the same error through
-    /// the shared
+    /// and for both `Foldl*` shapes on the parent commit). This check
+    /// rejects them with a clear error through the shared
     /// [`CodeGenError::field_assignment_in_unsupported_block`](super::super::CodeGenError::field_assignment_in_unsupported_block)
     /// constructor.
     ///
@@ -540,11 +391,10 @@ impl CoreErlangGenerator {
     /// `is_field_assignment`).
     ///
     /// Shaped as a `Result`-returning rejection helper (rather than a
-    /// predicate each call site turns into an error itself) for the same
-    /// reason as [`CoreErlangGenerator::reject_class_var_field_assignment`]:
-    /// it is the single place that turns a positive match into the
-    /// diagnostic, so the `Letrec` and `Foldl*` call sites cannot drift out of
-    /// sync (CLAUDE.md's no-duplicate-implementations rule).
+    /// predicate each call site turns into an error itself): it is the single
+    /// place that turns a positive match into the diagnostic, so the `Letrec`
+    /// and `Foldl*` call sites cannot drift out of sync (CLAUDE.md's
+    /// no-duplicate-implementations rule).
     pub(in crate::core_erlang) fn reject_unthreadable_value_self_field_write(
         &self,
         expr: &Expression,
@@ -586,176 +436,7 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-3522 (ADR 0122): the `ClassVars` counterpart of
-    /// [`Self::reject_unthreadable_value_self_field_write`] — rejects a
-    /// class-var mutation that `expr` (ONE top-level statement of an
-    /// `on:do:`/`ensure:` arm) hides inside a NESTED BLOCK, which the
-    /// enclosing construct's trailing `ClassVars` slot cannot carry.
-    ///
-    /// # Why a nested-block walk, not a whole-subtree walk
-    ///
-    /// The `SelfVt` sibling rejects any write below the statement's root,
-    /// its own right-hand side included. `ClassVars` is genuinely different,
-    /// and the difference was confirmed empirically rather than assumed:
-    ///
-    /// * A class-var mutation in this statement's own SUB-EXPRESSION
-    ///   (`t := 1 + (self bump)`) **is** carried. ADR 0118 phase 5b taught
-    ///   `subexpr_needs_prelude`/`thread_ahead` to recognize a class-var
-    ///   producer, so `generate_exception_body_with_threading_inner`'s E6/E7
-    ///   arms lower it into a real `ThreadedStmt::Bind` in the arm's OWN
-    ///   frame, advancing the ambient class-var version that
-    ///   `ExceptionArm::family_mutated_version` then reads back out into the
-    ///   construct's trailing slot. (Before BT-3522 widened
-    ///   `exception_construct_families` to the recursive
-    ///   [`Self::body_threaded_families`], that `Bind` had no slot to land
-    ///   in and the shape tripped `verify()`'s `UnboundVersion` — an `erlc`
-    ///   unbound-variable crash in a release build. Rejecting it now would
-    ///   swap one regression for another.)
-    /// * A class-var mutation inside a nested BLOCK (`flag ifTrue: [self
-    ///   bump]`, a nested `on:do:`/`ensure:` arm, a nested loop body) is
-    ///   **not** carried: that block compiles to its own closure or its own
-    ///   branch-merge tuple, whose `ClassVars` rebind is scoped strictly
-    ///   inside it, and nothing in this construct's E1..E7 dispatch unpacks
-    ///   it back out. Confirmed empirically: the mutation is simply
-    ///   discarded on normal return (the BT-3522 headline repro returned
-    ///   `0` instead of `1`), with the emitted arm tuple silently naming a
-    ///   same-spelled outer version instead.
-    ///
-    /// So the walk descends the statement looking for nested blocks OR
-    /// `match:` arms, then searches each one's own body (and a `match:`
-    /// arm's own guard, if it has one) — at any depth, since
-    /// [`beamtalk_core::ast_walker::walk_expression`] descends into blocks
-    /// and `match:` arms itself — for a match. "What counts as a mutation"
-    /// is [`Self::is_family_mutation`] (ADR 0122 Decision 4), so the bare
-    /// class-var field write and the same-class self-send shapes are covered
-    /// by the one shared rule rather than re-derived here.
-    ///
-    /// # Why `match:` arms need the same treatment as a nested block
-    ///
-    /// BT-3522 adversarial review: [`beamtalk_core::ast::MatchArm::body`] is
-    /// a bare `Expression`, not a [`beamtalk_core::ast::Block`], so it is
-    /// invisible to a walk that only special-cases
-    /// [`Expression::Block`](beamtalk_core::ast::Expression::Block). ADR
-    /// 0122 Phase 9 (BT-3517) made `match:` declare `[State, ClassVars]` as
-    /// data it may thread — but only for a `match:` that is ITSELF the
-    /// construct doing the threading (i.e. reached the same way a top-level
-    /// bare mutation is). Confirmed empirically that this does NOT extend to
-    /// a `match:` sitting inside `on:do:`/`ensure:`: a class-method self-send
-    /// inside a `1 -> self bump` arm, itself inside an `ensure:`'s try body,
-    /// compiled cleanly and silently returned the pre-mutation value — the
-    /// exact silent-drop shape this issue exists to close, just reached
-    /// through a `match:` arm instead of an `ifTrue:` block. So a `match:`
-    /// arm's body (and its guard, which could in principle hide the same
-    /// shape) gets the identical "can't carry, so reject" treatment as a
-    /// nested block, rather than being assumed safe because it isn't
-    /// syntactically one.
-    ///
-    /// # Why the self-send shape is narrowed once more before rejecting
-    ///
-    /// [`Self::is_family_mutation`] answers the DETECTION question, and for
-    /// `ClassVars` it counts every same-class self-send, mutating or not —
-    /// correct there, because `generate_class_method_self_send` rebinds
-    /// `ClassVars` from the callee's `{'class_var_result', …}` reply
-    /// unconditionally, so the construct needs a slot either way. It is the
-    /// wrong question for REJECTING: when the callee provably never writes a
-    /// class variable, the rebind it returns is the caller's own map
-    /// unchanged, so losing it inside a nested block loses nothing, and
-    /// erroring would break code that compiles and behaves correctly today
-    /// (confirmed empirically on a `class helper => 42` self-send inside an
-    /// arm's `ifTrue:`). `class_var_mutating_selectors()` — a whole-class
-    /// fixed point that already assumes the worst for anything it cannot
-    /// resolve (`compute_class_var_mutating_selectors`) — is the same
-    /// narrowing `check_no_unsafe_class_method_self_sends` (`blocks.rs`)
-    /// applies for the identical "a block cannot thread this back" reason,
-    /// reused here rather than re-derived.
-    ///
-    /// Reuses the two existing diagnostics rather than adding a third:
-    /// [`CodeGenError::ClassVarAssignmentInThreadedBody`](super::super::CodeGenError::ClassVarAssignmentInThreadedBody)
-    /// for a bare write and
-    /// [`CodeGenError::ClassMethodSelfSendInUnthreadedBlock`](super::super::CodeGenError::ClassMethodSelfSendInUnthreadedBlock)
-    /// for a self-send — whose wording ("this block has no way to thread
-    /// such a mutation back to the class method that owns it") already
-    /// describes exactly this shape.
-    pub(super) fn reject_unthreadable_class_var_mutation(&self, expr: &Expression) -> Result<()> {
-        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING || !self.in_class_method() {
-            return Ok(());
-        }
-        // The visitor is a `FnMut(&Expression)` with a higher-ranked
-        // lifetime, so the matched node itself cannot escape the walk —
-        // the diagnostic's own inputs are extracted in place instead.
-        let mut found: Option<ClassVarMutationSite> = None;
-        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
-            if found.is_some() {
-                return;
-            }
-            match e {
-                Expression::Block(block) => {
-                    for stmt in &block.body {
-                        if let Some(site) = self.find_class_var_mutation_in_scope(&stmt.expression)
-                        {
-                            found = Some(site);
-                            return;
-                        }
-                    }
-                }
-                Expression::Match { arms, .. } => {
-                    for arm in arms {
-                        if let Some(guard) = &arm.guard {
-                            if let Some(site) = self.find_class_var_mutation_in_scope(guard) {
-                                found = Some(site);
-                                return;
-                            }
-                        }
-                        if let Some(site) = self.find_class_var_mutation_in_scope(&arm.body) {
-                            found = Some(site);
-                            return;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        });
-        let Some(site) = found else {
-            return Ok(());
-        };
-        let location = self.location_label(site.span());
-        Err(site.into_error(location))
-    }
-
-    /// Searches one nested scope (a block's own statement, or a `match:`
-    /// arm's body/guard) for the first [`Self::is_family_mutation`] match
-    /// for `ClassVars`, applying the same self-send purity narrowing
-    /// [`Self::reject_unthreadable_class_var_mutation`]'s own doc comment
-    /// explains ("Why the self-send shape is narrowed once more"). Factored
-    /// out so [`Self::reject_unthreadable_class_var_mutation`]'s two scope
-    /// kinds (block statements, `match:` arms) share one search rather than
-    /// two copies of this narrowing.
-    fn find_class_var_mutation_in_scope(
-        &self,
-        scope_expr: &Expression,
-    ) -> Option<ClassVarMutationSite> {
-        let mut found: Option<ClassVarMutationSite> = None;
-        beamtalk_core::ast_walker::walk_expression(scope_expr, &mut |inner| {
-            if found.is_some() || !self.is_family_mutation(&VersionPrefix::ClassVars, inner) {
-                return;
-            }
-            let site = ClassVarMutationSite::new(inner);
-            if let ClassVarMutationSite::SelfSend { selector, .. } = &site {
-                if !self
-                    .class_var_mutating_selectors()
-                    .contains(selector.as_str())
-                {
-                    return;
-                }
-            }
-            found = Some(site);
-        });
-        found
-    }
-
-    /// the `SelfVt` mirror of
-    /// [`Self::nested_loop_lost_class_var_mutation`] — if `expr` is itself a
-    /// nested Letrec-shaped loop whose own body would thread a value-type
+    /// If `expr` is itself a nested Letrec-shaped loop whose own body would thread a value-type
     /// `Self` mutation through its own recursive tail call, returns a short
     /// description of that mutation for
     /// [`CodeGenError::ValueSelfMutationLostAcrossNestedLoop`](super::super::CodeGenError::ValueSelfMutationLostAcrossNestedLoop)'s
@@ -764,8 +445,8 @@ impl CoreErlangGenerator {
     /// Same deliberate scope limit, for the same reason: nothing unpacks a
     /// nested loop's own trailing `Self` tuple slot back into the enclosing
     /// loop body's statement sequence, so the inner loop's mutation would be
-    /// silently discarded. Rejecting it cleanly is consistent with the class-var
-    /// precedent; making arbitrary nesting work is explicitly out of scope.
+    /// silently discarded. Rejecting it cleanly is the chosen behaviour;
+    /// making arbitrary nesting work is explicitly out of scope.
     ///
     /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
     /// body's value-type field write has no `Self` threading of its own to
@@ -786,164 +467,6 @@ impl CoreErlangGenerator {
             return None;
         };
         Some(format!("field 'self.{}'", field.name))
-    }
-
-    /// Shared predicate behind [`Self::loop_body_threads_class_vars`] and
-    /// [`Self::nested_loop_lost_class_var_mutation`] — returns the
-    /// first top-level statement of `body` that is a bare class-var
-    /// assignment or class-method self-send, or `None` if there isn't one.
-    ///
-    /// Deliberately narrower than `block_analysis::analyze_block`'s own
-    /// (recursive) `field_writes`/`has_self_sends` — those also count a
-    /// class-var write or self-send NESTED inside a conditional, a binary
-    /// op, or any other sub-expression position, which is exactly right
-    /// for THEIR job (deciding whether the body needs `StateAcc` fallback
-    /// at all) but wrong for this one: `lower_letrec_body`/`lower_foldl_body`
-    /// only ever thread `ClassVars` through the loop's tail call for a
-    /// BARE, top-level class-var-assignment or class-method-self-send
-    /// STATEMENT (the two shapes it has real Bind-construction branches
-    /// for) — never for one buried inside a larger expression, whose own
-    /// `ClassVarsN` rebind is scoped to that expression's own nested
-    /// `let`, not threaded out to the loop body's own statement sequence.
-    /// Confirmed by a real regression while validating this issue: a
-    /// pre-existing, previously-compiling fixture
-    /// (`class_var_sub_expr.bt`'s `tickInLoopConditional`, a self-send
-    /// nested inside a `to:do:` body's `ifTrue:` *condition*) started
-    /// emitting `unbound variable 'ClassVars1'` once this predicate used
-    /// the recursive analysis — the self-send's own internally-minted
-    /// rebind was correctly scoped to its own conditional's nested `let`,
-    /// but this predicate's resulting extra loop-level `ClassVars` fun
-    /// parameter/tail-call argument then referenced that same
-    /// already-out-of-scope name.
-    fn find_class_var_mutating_stmt<'a>(
-        &self,
-        body: &'a beamtalk_core::ast::Block,
-    ) -> Option<&'a Expression> {
-        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING || !self.in_class_method() {
-            return None;
-        }
-        let filtered_body = super::super::util::collect_body_exprs(&body.body);
-        filtered_body
-            .into_iter()
-            .find(|expr| self.is_family_mutation(&VersionPrefix::ClassVars, expr))
-    }
-
-    /// if `expr` is itself a nested `Letrec`- or `Foldl*`-shaped
-    /// loop (per [`Self::nested_loop_or_fold_body`]) whose own body would
-    /// thread a `ClassVars` mutation through its own recursive tail call or
-    /// fold accumulator, returns a short description of that mutation for
-    /// use in [`CodeGenError::ClassVarMutationLostAcrossNestedLoop`]'s
-    /// message. Returns `None` for anything else, including a nested
-    /// loop/fold whose own body has no class-var mutation to lose in the
-    /// first place.
-    ///
-    /// Two independent triggers, matching each shape's own real threading
-    /// gate:
-    /// * [`Self::loop_body_threads_class_vars`] — a BARE, top-level
-    ///   class-var field write or class-method self-send (the `Letrec`
-    ///   gate, `ThreadingPlan::threads_class_vars`'s `allow_direct_params`
-    ///   branch).
-    /// * `block_analysis::analyze_block(body).has_self_sends` — ANY
-    ///   same-class self-send anywhere in the body, however deeply nested
-    ///   in a conditional or another block (the `Foldl*` gate, that same
-    ///   field's `else` branch) — deliberately recursive here, unlike the
-    ///   first trigger, because that IS how `Foldl*`'s own
-    ///   `ThreadingPlan::new_impl` decides `threads_class_vars`. Applies
-    ///   equally to an Actor's own class method (BT-3584: `context` alone
-    ///   never distinguishes it from an `Object`/`ValueType` one here). A bare
-    ///   class-var field write inside a `Foldl*` body needs no matching
-    ///   trigger here: `generate_field_assignment_open` never threads one
-    ///   regardless of nesting (`loop_mode.threading_families` stays scoped
-    ///   to `BodyKind::Letrec`), so it is already unconditionally rejected by
-    ///   `reject_class_var_field_assignment` at any depth.
-    ///
-    /// BT-3530: the `Foldl*` gate's own diagnostic-message fallback below
-    /// must mirror that same recursive reach for a same-class send spelled
-    /// `ClassName foo` (as opposed to `self foo`) — `self_send_selectors`
-    /// only ever records a bare `self`-receiver send, so a `ClassName`-spelled
-    /// mutation reached this predicate's `Some(body)` match but fell through
-    /// to `None` unrejected. Closed via `block_analysis::same_class_reference_send_selectors`,
-    /// the same BT-3529/BT-3522 helper, rather than a second copy of the
-    /// same-class-send detection.
-    ///
-    /// This is a detection-only predicate, deliberately separate from
-    /// `ThreadingPlan::threads_class_vars`, which stays scoped to the OUTER
-    /// body's own top-level statements (see that field's doc comment)
-    /// rather than being extended to also thread the inner construct's
-    /// `ClassVars` value through — no code path currently unpacks a nested
-    /// loop/fold's `ClassVars` tuple element back into an enclosing body
-    /// (confirmed empirically for the `Foldl*`-in-`Foldl*` shape: the
-    /// nested fold's own `next_class_var()` mint permanently advances the
-    /// generator's single, unscoped class-var-name counter even though the
-    /// resulting name is never surfaced to the enclosing body, producing an
-    /// `erlc` "unbound variable" compile crash rather than a clean
-    /// diagnostic) — so this predicate exists purely to reject the shape,
-    /// not to make it work.
-    pub(super) fn nested_loop_lost_class_var_mutation(&self, expr: &Expression) -> Option<String> {
-        let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
-        if let Some(mutating_stmt) = self.find_class_var_mutating_stmt(body) {
-            if self.is_field_assignment(mutating_stmt)
-                && self.is_class_var_assignment(mutating_stmt)
-            {
-                if let Expression::Assignment { target, .. } = mutating_stmt {
-                    if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                        return Some(format!("class variable '{}'", field.name));
-                    }
-                }
-            } else if let Expression::MessageSend { selector, .. } = mutating_stmt {
-                return Some(format!("'self {}'", selector.name()));
-            }
-        }
-        // The recursive self-send fallback must match
-        // `ThreadingPlan::new_impl`'s OWN per-shape gate exactly, not apply
-        // uniformly to both shapes. `Letrec`'s real gate
-        // (`loop_body_threads_class_vars`, already checked above) is
-        // deliberately top-level-only — recursing into a conditional
-        // buried inside a `Letrec` body is EXACTLY the shape that predicate
-        // was narrowed to exclude (the `class_var_sub_expr.bt`
-        // `tickInLoopConditional` regression), and it's also the shape
-        // `class_var_sub_expr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
-        // pins as already-accepted, out-of-scope, silently-non-threading
-        // behavior at a single loop level — rejecting only the
-        // nested-loop variant of that exact same shape would be an
-        // inconsistent, surprising new restriction this predicate has no
-        // business introducing. Only `Foldl*`'s own real gate
-        // (`in_class_method() && body_analysis.has_self_sends` — BT-3584:
-        // no `context != Actor` term, matching `ThreadingPlan::new_impl`'s
-        // own Foldl branch, which dropped the same stale exclusion) is
-        // genuinely recursive, so the fallback below applies only when
-        // `shape` is `Foldl`.
-        if crate::core_erlang::expr_shape::CLASS_VAR_THREADING
-            && matches!(shape, NestedLoopShape::Foldl)
-            && self.in_class_method()
-        {
-            let analysis = block_analysis::analyze_block(body);
-            // `self_send_selectors` is a `HashSet` (default `RandomState`) —
-            // pick the lexicographically-smallest selector so the
-            // diagnostic text is reproducible across runs for identical
-            // source, rather than depending on hash-iteration order. Which
-            // selector is named doesn't affect the accept/reject decision,
-            // only the message.
-            if let Some(selector) = analysis.self_send_selectors.iter().min() {
-                return Some(format!("'self {selector}'"));
-            }
-            // BT-3530: `self_send_selectors` only ever records a bare
-            // `self`-receiver send (`beamtalk_core::semantic_analysis::block_facts::analyze_expression`),
-            // so a same-class send spelled `ClassName foo` — the exact same
-            // same-class, same-activation call `is_class_method_self_send`
-            // treats identically to `self foo` — was invisible to the check
-            // above, silently skipping this rejection instead of catching
-            // the lost mutation at compile time. Same blind spot BT-3529
-            // already fixed at `check_no_unsafe_class_method_self_sends`'s
-            // call sites; reuse the same helper rather than a second copy.
-            let class_name = self.class_name();
-            let class_reference_sends =
-                block_analysis::same_class_reference_send_selectors(&body.body, &class_name);
-            if let Some(selector) = class_reference_sends.iter().min() {
-                return Some(format!("'{class_name} {selector}'"));
-            }
-        }
-        None
     }
 
     /// Canonical "selector → body-block-argument position" table.
@@ -1023,8 +546,9 @@ impl CoreErlangGenerator {
     /// Extracts the body block of `expr`, and which family it belongs to,
     /// if it is a nested loop/fold send. Selector coverage and argument
     /// position come from [`Self::block_arg_for_selector`]; the returned
-    /// [`NestedLoopShape`] tells [`Self::nested_loop_lost_class_var_mutation`]
-    /// which of `ThreadingPlan`'s two `threads_class_vars` gates applies.
+    /// [`NestedLoopShape`] tells
+    /// [`Self::nested_loop_lost_value_self_mutation`] whether the construct
+    /// is one that threads a value-type `Self` through its tail call.
     fn nested_loop_or_fold_body(
         expr: &Expression,
     ) -> Option<(&beamtalk_core::ast::Block, NestedLoopShape)> {

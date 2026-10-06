@@ -25,7 +25,6 @@ fn self_send_prelude(dispatch_var: &str) -> Vec<ThreadedStmt> {
                 leaf::var(dispatch_var.to_string()),
                 ")",
             ])),
-            shadow_write: false,
             span: span(),
         },
     ]
@@ -101,12 +100,10 @@ fn close_does_not_report_binds_nested_inside_a_threaded_node() {
         prelude: vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
-            shadow_write_eligible: true,
             body: vec![ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, 1, frame),
                 source: VersionedVar::new(VersionPrefix::State, 0, frame),
                 op: BindOp::Direct(ValueRef::Literal("'_'")),
-                shadow_write: false,
                 span: span(),
             }],
             produces: vec![],

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Value-type/`ClassVars` mutation threading through `on:do:`/
+//! Value-type mutation threading through `on:do:`/
 //! `ensure:` exception-handling constructs, including chained and
 //! nested ensure blocks.
 

@@ -1396,9 +1396,8 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     // ADR 0128 / BT-3583 (review-flagged on PR #4030): a CLASS method
     // forwarding a non-literal callable to `do:` must NOT route through the
     // fold rewrite (`generate_simple_list_op_threaded_fold`) — a class
-    // method compiles to `class_<selector>(ClassSelf, ClassVars, Args...)`,
-    // which has no `State`/`StateAcc` parameter at all (class-side
-    // threading goes through `ClassVars`), so the fold's `State`-seeded
+    // method compiles to `class_<selector>(ClassSelf, Args...)`, which has
+    // no `State`/`StateAcc` parameter at all, so the fold's `State`-seeded
     // accumulator would reference an unbound variable. Must keep emitting
     // the pre-existing plain-value wrapper, exactly like the ValueType
     // sibling case just below.

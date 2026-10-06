@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use super::super::{CoreErlangGenerator, NlrBoundary};
+use super::super::CoreErlangGenerator;
 use super::ir::{
     BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -48,14 +48,6 @@ pub(in crate::core_erlang) enum VerifyError {
     /// centralized, source-attributed diagnosis.)
     ThreadingModeUnpackMismatch { mode: ThreadingMode, at: Span },
 
-    /// The ADR 0110 CONTRACT check — regression-pinning, not counterfactual
-    /// detection (see ADR §Verifier honesty). A class-var `Bind` at frame
-    /// depth 0 (method top frame) inside a method whose body can relay a
-    /// foreign NLR (a `NlrCatch` with `boundary: ClassMethod` present) MUST have `shadow_write: true`. Fires if a future
-    /// emission path forgets the shadow write ADR 0110's fix depends on, or
-    /// if a new mutation site is added without it.
-    ShadowWriteMissing { mutated: VersionedVar, at: Span },
-
     /// Invariant class 1: a [`ThreadedStmt::TupleAccUnpack`] node
     /// (the flat positional-unpack accumulator discipline) appeared outside
     /// a [`ThreadingMode::TupleAcc`] body. Mirrors `ThreadingModeUnpackMismatch`
@@ -89,9 +81,9 @@ pub(in crate::core_erlang) enum VerifyError {
     /// variable to reference — `TupleAcc` mode is unconditionally
     /// unavailable there, and this fires if a future change to
     /// `select_tuple_acc`'s guard ordering ever lets `use_tuple_acc` become
-    /// `true` in a `ValueType` context. Regression-pinning, like
-    /// `ShadowWriteMissing` (see ADR §Verifier honesty) — `select_tuple_acc`'s
-    /// own early-return already makes this unreachable today.
+    /// `true` in a `ValueType` context. Regression-pinning (see ADR
+    /// §Verifier honesty) — `select_tuple_acc`'s own early-return already
+    /// makes this unreachable today.
     ///
     /// `#[cfg(test)]`: this variant's sole constructor
     /// ([`verify_tuple_acc_value_type_exclusion`]) is itself test-only —
@@ -131,18 +123,9 @@ pub(in crate::core_erlang) enum VerifyError {
     /// closure body — to surface a user-facing diagnostic built from this
     /// error rather than from a second predicate.
     ///
-    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`], which has
-    /// no production caller yet — see [`CloseContext`].
+    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`].
     ///
-    /// The "genuine boundary such as a Tier 1 closure body" case
-    /// above is exactly the class-method self-send-in-a-bare-block scenario
-    /// `check_no_unsafe_class_method_self_sends` (`expressions.rs`) already
-    /// diagnoses from a separate, pre-flight static predicate — replacing
-    /// that diagnostic with this variant (surfaced via `close()`
-    /// at `close_threaded_value_doc`, `util.rs`) is blocked on a
-    /// real signal-propagation gap, not a small wiring change. See that
-    /// predicate's own doc comment for the full finding; still no
-    /// production caller.
+    /// No production caller yet — see [`CloseContext`].
     #[allow(dead_code)]
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 }
@@ -156,8 +139,6 @@ pub(in crate::core_erlang) enum VerifyError {
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
 /// (No call site does either yet — see module docs §Status.)
 pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
-    let has_class_vars_nlr = contains_class_var_nlr_catch(ir);
-
     let mut producers: HashMap<VersionedVar, usize> = HashMap::new();
     let mut consumers: HashMap<VersionedVar, usize> = HashMap::new();
     collect_producer_consumer_counts(ir, &mut producers, &mut consumers);
@@ -194,38 +175,13 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
 
     let mut walk = VerifyWalk {
         producers: &producers,
-        has_class_vars_nlr,
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
-        shadow_write_eligible_stack: vec![true],
         errors: &mut errors,
     };
     walk.walk(ir);
 
     errors
-}
-
-/// Recursively scans `ir` for an `NlrCatch` whose boundary is
-/// `ClassMethod` — the precondition for
-/// [`VerifyError::ShadowWriteMissing`].
-fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
-    ir.iter().any(|stmt| match stmt {
-        ThreadedStmt::NlrCatch { boundary, .. } => {
-            matches!(boundary, NlrBoundary::ClassMethod)
-        }
-        ThreadedStmt::Threaded { body, .. } => contains_class_var_nlr_catch(body),
-        // ADR 0118 phase 3: `condition` scans too — a class-var
-        // NLR catch nested there is exactly as relevant to `ShadowWriteMissing`
-        // as one nested in `body`, even though no real lowering produces one
-        // (a while condition has no NLR boundary of its own).
-        ThreadedStmt::ConditionalLoop {
-            condition, body, ..
-        } => contains_class_var_nlr_catch(condition) || contains_class_var_nlr_catch(body),
-        ThreadedStmt::Bind { .. }
-        | ThreadedStmt::Return(..)
-        | ThreadedStmt::TupleAccUnpack { .. }
-        | ThreadedStmt::Statement(..) => false,
-    })
 }
 
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
@@ -273,23 +229,13 @@ fn collect_producer_consumer_counts(
 }
 
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
-/// [`VerifyError::UnboundVersion`], [`VerifyError::ThreadingModeUnpackMismatch`],
-/// and [`VerifyError::ShadowWriteMissing`] (`NonLinearVersion` is fully
-/// determined by the first pass's counts and checked before this walk runs).
+/// [`VerifyError::UnboundVersion`] and [`VerifyError::ThreadingModeUnpackMismatch`]
+/// (`NonLinearVersion` is fully determined by the first pass's counts and
+/// checked before this walk runs).
 struct VerifyWalk<'a> {
     producers: &'a HashMap<VersionedVar, usize>,
-    has_class_vars_nlr: bool,
     frame_stack: Vec<FrameId>,
     mode_stack: Vec<ThreadingMode>,
-    /// ADR 0111 Addendum 9, Question 1: parallel to `frame_stack`, seeded
-    /// `[true]` (a method's own top level is always shadow-write-eligible),
-    /// pushed/popped in lockstep in the `Threaded | ConditionalLoop` arm of
-    /// `walk_stmt`, AND-combined with the parent's current top for
-    /// defense-in-depth on hand-built fixtures (correct lowering never needs
-    /// the AND — a nested node's own `block_depth`-derived flag already
-    /// encodes total nesting depth). `ShadowWriteMissing`'s gate reads this
-    /// stack's top instead of `target.frame == FrameId::ROOT`.
-    shadow_write_eligible_stack: Vec<bool>,
     errors: &'a mut Vec<VerifyError>,
 }
 
@@ -322,11 +268,7 @@ impl VerifyWalk<'_> {
     fn walk_stmt(&mut self, stmt: &ThreadedStmt) {
         match stmt {
             ThreadedStmt::Bind {
-                target,
-                source,
-                op,
-                shadow_write,
-                span,
+                source, op, span, ..
             } => {
                 self.check_use(source, *span);
                 match op {
@@ -335,12 +277,6 @@ impl VerifyWalk<'_> {
                             self.check_use(v, *span);
                         }
                     }
-                    // `Remove` carries no `value` (a `maps:remove` has
-                    // nothing to write) — `class_tag` is never check_use'd
-                    // for `Put` either (it is always a bare `ClassSelf`/
-                    // `nil` literal, never a versioned value), so `Remove`
-                    // is symmetrically inert here.
-                    BindOp::Remove { .. } => {}
                     BindOp::Unpack { .. } => {
                         if let Some(mode) = self.mode_stack.last()
                             && !matches!(mode, ThreadingMode::StateAcc(_))
@@ -352,63 +288,26 @@ impl VerifyWalk<'_> {
                         }
                     }
                 }
-                // ADR 0118 phase 5a: `BindOp::Put` only — a
-                // `BindOp::Direct` rebind (`emit_class_var_result_unwrap`'s
-                // inherited-self-dispatch/loop-construct rebind,
-                // `rebind_class_vars_from_doc`) is never itself a
-                // shadow-write producer regardless of `shadow_write`'s
-                // value (its own doc comments: the underlying mutation was
-                // already shadow-written by the callee's own `Put` under
-                // the identical `ClassSelf`-tagged key) — `render_bind`'s
-                // `BindOp::Put` arm is the only place the ADR 0110 shadow
-                // write is even constructed, so `shadow_write` is inert for
-                // `Direct`. `construct_and_verify_class_var_bind`'s own
-                // isolated check exempts `Direct` via a fixture-only
-                // wrapping trick (never part of the returned `Bind` node —
-                // see its `needs_wrap`), which a same-class self-send's
-                // real `Bind`, spliced directly into a jointly-verified
-                // body, does not go through — so this joint check must
-                // exclude `Direct` explicitly, matching that exemption.
-                if matches!(target.prefix, VersionPrefix::ClassVars)
-                    && matches!(op, BindOp::Put { .. } | BindOp::Remove { .. })
-                    && *self.shadow_write_eligible_stack.last().unwrap()
-                    && !*shadow_write
-                    && self.has_class_vars_nlr
-                {
-                    self.errors.push(VerifyError::ShadowWriteMissing {
-                        mutated: target.clone(),
-                        at: *span,
-                    });
-                }
             }
             ThreadedStmt::Threaded {
                 mode,
                 frame,
-                shadow_write_eligible,
                 body,
                 produces,
                 span: _,
             } => {
-                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
-                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
-                // with the parent's current top.
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.shadow_write_eligible_stack.push(
-                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
-                );
                 self.walk(body);
                 for v in produces {
                     self.check_use(v, Span::default());
                 }
-                self.shadow_write_eligible_stack.pop();
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
             ThreadedStmt::ConditionalLoop {
                 mode,
                 frame,
-                shadow_write_eligible,
                 condition,
                 condition_value,
                 body,
@@ -426,15 +325,8 @@ impl VerifyWalk<'_> {
                 // (or caller-supplied, non-threading) fields `verify()` does
                 // not, and is not meant to, inspect — see the variant's doc
                 // comment.
-                //
-                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
-                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
-                // with the parent's current top.
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.shadow_write_eligible_stack.push(
-                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
-                );
                 self.walk(condition);
                 if let ValueRef::Version(v) = condition_value {
                     self.check_use(v, Span::default());
@@ -443,7 +335,6 @@ impl VerifyWalk<'_> {
                 for v in produces {
                     self.check_use(v, Span::default());
                 }
-                self.shadow_write_eligible_stack.pop();
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }

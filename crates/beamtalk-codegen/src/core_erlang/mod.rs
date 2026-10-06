@@ -89,7 +89,7 @@
 //! - [`sequencing`] - sub-expression sequencing primitives shared across
 //!   dispatch, operator, and expression codegen (ADR 0118)
 //! - [`expr_shape`] - expression-shape predicates (`is_field_assignment`,
-//!   `is_class_var_assignment`, …) shared across the whole crate
+//!   `is_actor_self_send`, …) shared across the whole crate
 //! - [`util`] - Utility functions (indentation, name conversions)
 //!
 //! ## Structural Split
@@ -285,15 +285,14 @@ impl CoreErlangGenerator {
                     );
                     // Generalized by ADR 0118 phase 1b
                     // and phase 5b: `value` may itself dispatch a
-                    // self-send that threads new state (Actor `State` or,
-                    // since phase 5b, class-method `ClassVars`) — nested
-                    // anywhere inside it (`^ self.items at: (self bump)`),
-                    // not just at its own top level. `state` below must be
-                    // computed AFTER `value` threads, so it reflects
-                    // whatever `Bind` that dispatch just produced —
-                    // `threaded_expression` is the one mechanism that
-                    // threads BOTH prefixes correctly for whichever context
-                    // this `^` runs in.
+                    // self-send that threads new state (Actor `State`) —
+                    // nested anywhere inside it
+                    // (`^ self.items at: (self bump)`), not just at its own
+                    // top level. `state` below must be computed AFTER
+                    // `value` threads, so it reflects whatever `Bind` that
+                    // dispatch just produced — `threaded_expression` is the
+                    // one mechanism that threads it correctly for whichever
+                    // context this `^` runs in.
                     //
                     // ADR 0118 phase 2a: when THIS `Return` node
                     // is itself the sole child `threaded_expression`'s own
@@ -321,52 +320,11 @@ impl CoreErlangGenerator {
                         .contains_key(&value.unwrap_parens().span());
                     let (val_preamble, value_doc) = if value_already_sequenced {
                         (Document::Nil, self.expression_doc(value)?)
-                    } else if self.in_class_method()
-                        && !(self.is_class_var_assignment(value.unwrap_parens())
-                            || self.is_self_clear_field_class_var(value.unwrap_parens())
-                            || self.is_class_method_self_send(value.unwrap_parens()))
-                    {
-                        // ADR 0118 phase 5b: `value` is not ITSELF
-                        // a recognized producer at its own top level (e.g.
-                        // `^self foo` where `foo` is inherited, so
-                        // `is_class_method_self_send`'s `class_method_selectors()`
-                        // check excludes it) — `threaded_expression` would
-                        // still dispatch it, but through the opaque
-                        // `sequenced_send_children` fallback, which closes
-                        // over any `ClassVarsN` it rebinds internally: the
-                        // compiler's OWN `current_class_var()` bookkeeping
-                        // advances to track that rebind regardless, so
-                        // reading it below (`state`) would reference a name
-                        // never bound in THIS scope.
-                        // `refresh_class_var_after_opaque_scope` recovers
-                        // the live value via the per-scope class-variable commit (BT-3675) and
-                        // re-binds it to a name that IS in scope here.
-                        //
-                        // BT-3675: the value is bound BEFORE the refresh, so
-                        // the refresh (which reads what the value's own
-                        // sends committed) runs after they did.
-                        let cv_version_before = self.class_var_scope_mark();
-                        let result_doc = self.expression_doc(value)?;
-                        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-                        let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
-                        match refresh {
-                            None => (Document::Nil, result_doc),
-                            Some(refresh) => {
-                                let value_var = self.fresh_temp_var("NlrVal");
-                                (
-                                    docvec![
-                                        scope_prefix,
-                                        "let ",
-                                        leaf::var(value_var.clone()),
-                                        " = ",
-                                        result_doc,
-                                        " in ",
-                                        refresh,
-                                    ],
-                                    leaf::var(value_var),
-                                )
-                            }
-                        }
+                    } else if self.in_class_method() {
+                        // A class method threads nothing (ADR 0130 §3): the
+                        // value is compiled as an ordinary expression, with
+                        // no prelude of its own.
+                        (Document::Nil, self.expression_doc(value)?)
                     } else {
                         // ADR 0118 phase 2a: `current_frame()` —
                         // this generic `Return` handler fires for a `^`

@@ -3,86 +3,45 @@
 
 //! ADR 0122 Decision 3: the ONE emission helper appending
 //! [`ThreadedFamilies`] slots to a construct's own result tuple and
-//! extracting them back out afterwards — the shared machinery every
-//! currently hand-rolled trailing-slot site will route through once each
-//! migrates (later issues in ADR 0122's epic, BT-3508). Sites migrated so
-//! far:
-//! - `exception_handling.rs`'s former `exception_self_slot`/`_doc`
-//!   (BT-3486) — `on:do:`/`ensure:`'s result tuple now closes through
-//!   [`append_family_slots`] via `close_exception_result_tuple` (BT-3506,
-//!   the epic's first real consumer).
-//! - `while_loops.rs`/`counted_loops.rs`'s own `{'nil', StateAcc[, ClassVars
-//!   | Self1]}` exit-arm tuple (BT-3512, Phase 3) appends its `SelfVt` slot
-//!   via [`append_family_slots`] too (the `ClassVars` half — the
-//!   Actor/class-method letrec parameter path — stayed hand-rolled until
-//!   BT-3515, below). `value_type_codegen.rs`'s own value-type/class-method Letrec
-//!   loop extraction (formerly `vt_construct_extra_slot`/
-//!   `emit_vt_threaded_tuple_unwrap_to_var`) now reads [`ThreadedFamilies`]
-//!   too, but dispatches through its own `extract_vt_loop_family_slot` onto
-//!   the existing, already-verified
-//!   `rebind_class_vars_from_doc`/`rebind_value_self_from_doc` rather than
-//!   [`extract_family_slots`] directly — that pair's own backfill/
-//!   shadow-write verify machinery (`construct_and_verify_class_var_bind`,
-//!   `verify_simple_bind`) is a correctness invariant this helper's plain
-//!   [`VersionPrefix::extraction_bind_op`] does not (yet) reproduce.
-//! - `value_type_codegen.rs`'s `finish_vt_conditional_branch`/
-//!   `rebind_vt_conditional_mutations` (BT-3513, Phase 3's second consumer,
-//!   and the first PRODUCTION caller of [`extract_family_slots`] — every
-//!   earlier migration only ever needed the append half). Each arm's own
-//!   trailing family value is resolved to "this arm's own mutated version,
-//!   else the pre-`case` baseline" BEFORE calling [`append_family_slots`]
-//!   (the same both-or-neither resolution `exception_handling.rs`'s
-//!   `exception_family_slot` already performs for `on:do:`/`ensure:`), so
-//!   [`append_baseline_family_slots`] itself still has no production
-//!   caller — every real branch-merge site so far folds the "taken or
-//!   baseline" choice into its own `current`/`step` closure instead of a
-//!   second call. `append_family_slots` also grew a `Document::Nil` `base`
-//!   convention here — this site's own arm return value can have NO other
-//!   tuple element before its one family slot (a branch that only writes a
-//!   value-type field, no outer local) — see that function's own doc
-//!   comment.
-//! - `conditionals.rs`'s `with_branch_context`/six `generate_*_with_mutations`
-//!   (BT-3514, the first PRODUCTION Actor-path consumer, and
-//!   [`append_baseline_family_slots`]'s first production caller — the
-//!   Actor conditional's own non-taken/absent-block-passthrough arm genuinely
-//!   is "whichever arm ran, the other's baseline must still be valid,"
-//!   unlike BT-3513's own closure-folded resolution). The family list is
-//!   always `[State]` — ADR 0122's "State already fits" — never data-driven
-//!   per call site.
+//! extracting them back out afterwards. The families are `State` (an Actor
+//! instance method's scratch map) and `SelfVt` (a value-type instance
+//! method's `Self`); class variables are not a family (ADR 0130 §3 — they
+//! live in the class process and are written in place). Sites that route
+//! through it:
+//! - `exception_handling.rs`'s `on:do:`/`ensure:` result tuple closes through
+//!   [`append_family_slots`] via `close_exception_result_tuple`.
 //! - `while_loops.rs`'s/`counted_loops.rs`'s own extra `letrec` fun
-//!   parameter(s), `produces` entries, and exit-arm tuple slot(s) (BT-3515,
-//!   Phase 7) now route `ClassVars` through [`append_family_slots`] too,
-//!   generically over `ThreadingPlan::threaded_families()` alongside
-//!   `SelfVt` — one path instead of BT-3512's SelfVt-only append plus a
-//!   hand-rolled `ClassVars` half. `ThreadingPlan::capture_loop_family_params`
-//!   replaces the former per-family `Option<String>`/`.then(...)` capture
-//!   pair with one call generic over however many families are present.
-//! - `plan.rs`'s `foldl_call_doc` (BT-3516, Phase 8, the last Foldl
-//!   consumer) normalizes the fold accumulator's `ClassVars` slot from
-//!   leading to **trailing** — the intended Phase-0 diff ADR 0122's
-//!   "Keep Foldl's leading slot" alternative rejected — and routes the
-//!   initial-accumulator wrap through [`append_family_slots`] and the
-//!   post-fold unwrap through [`extract_family_slots`] (mint-then-extract,
-//!   the same order `rebind_vt_conditional_mutations` uses, including its
-//!   `check_simple_field_bind_invariant` verification — BT-3513's lesson:
-//!   `extract_family_slots` never verifies its own output). `class_var_fun_param`'s
-//!   own per-iteration seed re-materialization (the fold LAMBDA's own
-//!   parameter unwrap) stays a plain generic loop over `ThreadedFamilies`,
-//!   not a call into `extract_family_slots` — it re-binds an
-//!   ALREADY-existing identity captured before the lambda exists, never
-//!   mints a fresh one, so `extract_family_slots`'s "mint the target first"
-//!   contract does not apply (mirrors `value_type_codegen.rs`'s own
-//!   `extract_vt_loop_family_slot`, which dispatches to its own function for
-//!   the identical reason — see this module's own note above).
+//!   parameter(s), `produces` entries, and exit-arm tuple slot(s) — generic
+//!   over `ThreadingPlan::threaded_families()`;
+//!   `ThreadingPlan::capture_loop_family_params` captures them with one
+//!   call. `value_type_codegen.rs`'s value-type Letrec loop extraction reads
+//!   [`ThreadedFamilies`] too, but dispatches through its own
+//!   `extract_vt_loop_family_slot` onto `rebind_value_self_from_doc`, whose
+//!   `verify_simple_bind` check is a correctness invariant this helper's
+//!   plain [`BindOp::Direct`] rebind does not reproduce.
+//! - `value_type_codegen.rs`'s `finish_vt_conditional_branch`/
+//!   `rebind_vt_conditional_mutations` (BT-3513), the PRODUCTION caller of
+//!   [`extract_family_slots`]. Each arm's own trailing family value is
+//!   resolved to "this arm's own mutated version, else the pre-`case`
+//!   baseline" BEFORE calling [`append_family_slots`] (the same
+//!   both-or-neither resolution `exception_handling.rs`'s
+//!   `exception_family_slot` performs for `on:do:`/`ensure:`).
+//!   `append_family_slots` has a `Document::Nil` `base` convention for this
+//!   site — an arm return value can have NO other tuple element before its
+//!   one family slot (a branch that only writes a value-type field, no
+//!   outer local) — see that function's own doc comment.
+//! - `conditionals.rs`'s `with_branch_context`/six `generate_*_with_mutations`
+//!   (BT-3514, the Actor-path consumer, and [`append_baseline_family_slots`]'s
+//!   production caller — the Actor conditional's own
+//!   non-taken/absent-block-passthrough arm genuinely is "whichever arm ran,
+//!   the other's baseline must still be valid"). The family list is always
+//!   `[State]` — ADR 0122's "State already fits" — never data-driven per
+//!   call site.
 //!
-//! Foldl was the last construct in ADR 0122 §"What is hand-written today"
-//! whose own accumulator tuple built/unpacked a family slot by hand; the
-//! epic's remaining issues (`match:`'s detector, the `ClassVars`-only side
-//! channels) are cleanup on top of this, not new append/extract call sites.
+//! A `Foldl*` accumulator carries no family slot at all, so the list ops'
+//! `ThreadingPlan::foldl_call_doc` builds the plain fold call.
 //!
-//! **Trailing position only** — no leading-slot mode; Foldl's leading slot
-//! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
-//! Considered, "Keep Foldl's leading slot").
+//! **Trailing position only** — no leading-slot mode.
 //!
 //! Three operations, all keyed off one [`ThreadedFamilies`] so a
 //! construct's append/extract/non-taken-arm calls can never independently
@@ -91,13 +50,12 @@
 //! - [`append_baseline_family_slots`] — the "non-taken arm" shape for branch
 //!   merges (ADR 0122's both-or-neither discipline); a thin entry point over
 //!   [`append_family_slots`] real call sites remain free to fold into their
-//!   own `current` closure instead (see BT-3513's note above) — both read
-//!   the same way to a reviewer.
+//!   own `current` closure instead — both read the same way to a reviewer.
 //! - [`extract_family_slots`] — unpacks the trailing slots back into fresh
 //!   per-family versions after the construct completes.
 
 use super::super::threaded_ir::{
-    RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar, render_value,
+    BindOp, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar, render_value,
 };
 use super::analysis::ThreadedFamilies;
 use beamtalk_cerl_doc::Document;
@@ -134,9 +92,9 @@ impl FamilyVersionStep {
 /// canonical order first — e.g. `base = "{'nil', StateAcc"` (an OPEN
 /// prefix — no closing brace of its own; the caller's own `base` value
 /// supplies whatever comes before the family slots — a joined locals list,
-/// a bare `'nil'`, …), `families = [State, ClassVars]`, `current`
-/// answering `ClassVars2` for `VersionPrefix::ClassVars` produces
-/// `"{'nil', StateAcc, ClassVars2}"`. With an empty `families` this is just
+/// a bare `'nil'`, …), `families = [State, SelfVt]`, `current`
+/// answering `Self2` for `VersionPrefix::SelfVt` produces
+/// `"{'nil', StateAcc, Self2}"`. With an empty `families` this is just
 /// `base` plus the closing brace — the common case for a construct that
 /// threads no extra family.
 ///
@@ -249,15 +207,13 @@ pub(in crate::core_erlang) fn append_baseline_family_slots(
 /// `step` supplies each family's `(source, target)` [`VersionedVar`] pair
 /// via [`FamilyVersionStep`] — mirrors [`append_family_slots`]'s own
 /// "version lookup is a caller concern" design: a caller mints `target`
-/// itself (its own `next_state_var`/`next_class_var`/`next_self_var`) BEFORE
+/// itself (its own `next_state_var`/`next_self_var`) BEFORE
 /// calling this, exactly as every existing hand-rolled extraction site does
-/// (`rebind_class_vars_from_doc`, `rebind_value_self_from_doc`,
-/// `rebind_vt_conditional_mutations`).
+/// (`rebind_value_self_from_doc`, `rebind_vt_conditional_mutations`).
 ///
-/// Every produced `Bind`'s `op`/`shadow_write` come from
-/// [`VersionPrefix::extraction_bind_op`] — a method on the type, never a
-/// match in this function (ADR 0122 Decision 4) — see that method's own doc
-/// comment for why it is always a plain rebind, never a `maps:put`.
+/// Every produced `Bind`'s `op` is a plain whole-value rebind
+/// ([`BindOp::Direct`]), never a `maps:put` — see the comment at the
+/// construction site.
 pub(in crate::core_erlang) fn extract_family_slots(
     tuple_var: &str,
     base_arity: usize,
@@ -279,12 +235,16 @@ pub(in crate::core_erlang) fn extract_family_slots(
                 leaf::var(tuple_var.to_string()),
                 ")",
             ]);
-            let (op, shadow_write) = prefix.extraction_bind_op(value);
             ThreadedStmt::Bind {
                 target,
                 source,
-                op,
-                shadow_write,
+                // ALWAYS `BindOp::Direct` — never `BindOp::Put`: `value` (the
+                // tuple-element read built above) holds this family's ENTIRE
+                // post-construct value — the whole `StateAcc`/`Self` map — not
+                // one field of it. `maps:put(field, value, source)` would nest
+                // the whole new map under one field of the OLD map instead of
+                // replacing it.
+                op: BindOp::Direct(value),
                 span,
             }
         })

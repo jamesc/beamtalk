@@ -373,8 +373,8 @@ pub fn generate_method_spec(
 
 /// Generates the spec attribute for a class-side method.
 ///
-/// Class methods have two implicit parameters (`ClassSelf`, `ClassVars`)
-/// and use the `class_{selector}` naming convention.
+/// Class methods have one implicit parameter (`ClassSelf`) and use the
+/// `class_{selector}` naming convention.
 ///
 /// `aliases`, when present, resolves alias-named annotations to `user_type`
 /// references (ADR 0108) — see [`type_annotation_to_spec`].

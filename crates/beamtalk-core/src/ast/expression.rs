@@ -52,9 +52,12 @@ pub enum ExpectCategory {
     /// Suppress sendability advisories — scoped handle crossing a process
     /// boundary or undeclared handle-wrapping class (ADR 0103).
     Sendability,
-    /// Suppress stored-closure class-variable advisories — a stored or
-    /// user-HOM-passed block whose class-side self-send write is not kept
-    /// (ADR 0110, BT-3681).
+    /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
+    /// advisory it suppressed no longer exists, so nothing produces a matching
+    /// diagnostic. The name is still accepted so existing
+    /// `@expect stored_closure` annotations keep compiling; the directive
+    /// then falls through the ordinary unused-`@expect` path and is reported
+    /// as a stale-expectation warning. New code must not use it.
     StoredClosure,
     /// Suppress any diagnostic on the following expression.
     All,
@@ -110,7 +113,8 @@ impl ExpectCategory {
         }
     }
 
-    /// Returns the list of all valid category name strings, for use in error messages.
+    /// Returns the list of valid category name strings, for use in error messages.
+    /// Omits the deprecated parse-only `stored_closure` so it is not advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[
@@ -129,7 +133,6 @@ impl ExpectCategory {
             "type_annotation",
             "inheritance",
             "sendability",
-            "stored_closure",
             "all",
         ]
     }
