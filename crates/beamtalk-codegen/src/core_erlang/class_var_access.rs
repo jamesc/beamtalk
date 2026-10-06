@@ -134,6 +134,12 @@ impl CoreErlangGenerator {
     /// of a class that has no class variables of its own, runs with its
     /// receiver class as `ClassSelf`.
     fn current_class_method_is_direct_called(&self) -> bool {
+        // A ClassBuilder class-method fun always runs with the built class as
+        // `ClassSelf`; `current_method_selector` and `class_name()` still
+        // describe the enclosing compiled method there.
+        if self.builder_class_method_class().is_some() {
+            return false;
+        }
         let Some(selector) = self.current_method_selector.as_deref() else {
             return false;
         };

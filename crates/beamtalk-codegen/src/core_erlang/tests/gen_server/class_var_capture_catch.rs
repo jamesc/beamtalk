@@ -392,3 +392,34 @@ fn has_field_as_a_cascade_message_lowers_through_dispatch_and_binds_no_capture()
     );
     assert_compiles_through_erlc("test", &code);
 }
+
+/// `self hasField:` is the constant `false` only where `ClassSelf` is `nil`: a
+/// direct-called method (sealed class, no class variables, `class sealed`). A
+/// `ClassBuilder` class-method fun declared *inside* such a method is never
+/// direct-called: it runs with the built class as a real `ClassSelf` that
+/// declares `classVars:`, so its `hasField:` asks `beamtalk_class_vars:has`
+/// even though `current_method_selector` and `class_name()` still describe the
+/// enclosing direct-called method.
+#[test]
+fn has_field_in_a_builder_fun_inside_a_direct_called_method_still_asks_the_runtime() {
+    let src = concat!(
+        "sealed Object subclass: Factory\n\n",
+        "  class sealed plain => self hasField: #n\n",
+        "  class sealed build =>\n",
+        "    Object classBuilder name: #FactoryBuilt; superclass: Object; ",
+        "classVars: #{ #n => 0 }; ",
+        "classMethods: #{ #probe => [:self | self hasField: #n] }; register\n",
+    );
+    let code = codegen(src);
+    let plain = function_text(&code, "'class_plain'/1 = fun");
+    assert!(
+        !plain.contains("'beamtalk_class_vars':'has'("),
+        "a direct-called `self hasField:` has no ClassSelf to ask: {plain}"
+    );
+    let build = function_text(&code, "'class_build'/1 = fun");
+    assert!(
+        build.contains("'beamtalk_class_vars':'has'("),
+        "the builder fun runs with a real ClassSelf declaring `n`, so it asks the runtime: {build}"
+    );
+    assert_compiles_through_erlc("test", &code);
+}
