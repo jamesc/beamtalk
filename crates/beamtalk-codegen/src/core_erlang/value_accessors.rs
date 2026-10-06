@@ -172,7 +172,6 @@ struct SyntheticAccessorEntries {
     class: Vec<SyntheticAccessorEntry>,
 }
 
-
 impl CoreErlangGenerator {
     /// Generates an auto-getter function for a single slot.
     ///

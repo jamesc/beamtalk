@@ -7,9 +7,9 @@
 use super::*;
 use crate::core_erlang::tests::bare;
 use beamtalk_core::ast::{
-    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, Identifier, KeywordPart, TypeAnnotation,
+    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, Identifier, KeywordPart,
     Literal, MessageSelector, MethodDefinition, ParameterDefinition,
-    StateDeclaration as AstStateDeclaration,
+    StateDeclaration as AstStateDeclaration, TypeAnnotation,
 };
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::test_helpers::test_support::make_actor_class;
