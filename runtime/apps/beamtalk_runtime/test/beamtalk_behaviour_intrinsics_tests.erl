@@ -2654,7 +2654,10 @@ walk_hierarchy_cycle_guard_test_() ->
 
 %% Compile and load a module exporting __beamtalk_meta/0 returning MetaMap.
 %% Returns the module atom.
-load_meta_module(ModAtom, MetaMap) ->
+load_meta_module(ModAtom, MetaMap0) ->
+    %% A module exporting `__beamtalk_meta/0` is inside the ADR 0130 class_var_abi
+    %% load gate, so the fixture declares the current value like a compiled class.
+    MetaMap = MetaMap0#{class_var_abi => beamtalk_class_vars:abi()},
     MetaAbstract = erl_parse:abstract(MetaMap, [{line, 3}]),
     Forms = [
         {attribute, 1, module, ModAtom},
