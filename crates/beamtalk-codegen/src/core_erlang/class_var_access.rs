@@ -125,33 +125,46 @@ impl CoreErlangGenerator {
             && self.class_var_names().contains(field.name.as_str())
     }
 
+    /// Whether the class method being compiled is direct-called (ADR 0129
+    /// Phase 0b): its class is `sealed` with no class variables and the method
+    /// is `class sealed`, the one `ClassInfo::is_direct_call_eligible` rule
+    /// that `compute_direct_call_eligible` applies to build
+    /// `direct_call_eligible`. Only those methods run with `ClassSelf = nil`
+    /// (ADR 0130 §2). Every other class method, including an inheritable one
+    /// of a class that has no class variables of its own, runs with its
+    /// receiver class as `ClassSelf`.
+    fn current_class_method_is_direct_called(&self) -> bool {
+        let Some(selector) = self.current_method_selector.as_deref() else {
+            return false;
+        };
+        self.direct_call_eligible
+            .get(&self.class_name())
+            .is_some_and(|info| info.selectors.contains(selector))
+    }
+
     /// THE predicate for "`receiver hasField: ...` lowers to
-    /// `beamtalk_class_vars:has`": in a class method of a class that has class
-    /// variables, a `self` receiver. The `HasField` intrinsic and the capture
-    /// walker both call it.
+    /// `beamtalk_class_vars:has`": in a class method that is not direct-called,
+    /// a `self` receiver. The `HasField` intrinsic and the capture walker both
+    /// call it.
     ///
-    /// A class with no class variables is excluded: its `class sealed` methods
-    /// are direct-called with `ClassSelf = nil` (ADR 0130 §2), which
-    /// `beamtalk_class_vars:has` rejects. Its `hasField:` is a constant, see
-    /// [`Self::is_class_method_has_field_without_class_vars`].
+    /// A direct-called method is excluded because its `ClassSelf` is `nil`,
+    /// which `beamtalk_class_vars:has` rejects; its `hasField:` is a constant,
+    /// see [`Self::is_class_method_has_field_direct_called`].
     pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
         self.in_class_method()
             && Self::is_self_receiver(receiver)
-            && !self.class_var_names().is_empty()
+            && !self.current_class_method_is_direct_called()
     }
 
-    /// `self hasField: ...` in a class method of a class with no class
-    /// variables: nothing can be present, so it lowers to `false` without
-    /// touching the class-variable home. Complements
+    /// `self hasField: ...` in a direct-called class method: the class has no
+    /// class variables and there is no `ClassSelf` to ask, so it lowers to
+    /// `false` without touching the class-variable home. Complements
     /// [`Self::is_class_var_has_field`]; exactly one of the two holds for a
     /// class-method `self hasField:`.
-    pub(super) fn is_class_method_has_field_without_class_vars(
-        &self,
-        receiver: &Expression,
-    ) -> bool {
+    pub(super) fn is_class_method_has_field_direct_called(&self, receiver: &Expression) -> bool {
         self.in_class_method()
             && Self::is_self_receiver(receiver)
-            && self.class_var_names().is_empty()
+            && self.current_class_method_is_direct_called()
     }
 
     /// Whether `block` (including every nested block literal) reads a class

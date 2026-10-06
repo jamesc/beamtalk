@@ -6,7 +6,8 @@
 // identically to the static form. Eligibility is generated metadata
 // (`direct_class_methods`), computed by `compute_direct_call_eligible`.
 //
-// Fixtures: fixtures/direct_dispatch_stateless.bt,
+// Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/has_field_probe_base.bt,
+// fixtures/has_field_probe_child.bt,
 // fixtures/direct_dispatch_stateful.bt.
 
 TestCase subclass: DirectDispatchTest
@@ -68,3 +69,13 @@ TestCase subclass: DirectDispatchTest
 
   testUnusedBlockWithHasFieldDoesNotRaise =>
     self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7
+
+  // --- hasField: in an inheritable method follows the receiver (ADR 0130 §2) ---
+  testInheritedHasFieldSeesSubclassClassVariable =>
+    self assert: HasFieldProbeChild probe equals: true
+
+  testInheritedHasFieldInBlockSeesSubclassClassVariable =>
+    self assert: HasFieldProbeChild probeInBlock equals: true
+
+  testInheritedHasFieldOnStatelessParentIsFalse =>
+    self assert: HasFieldProbeBase probe equals: false

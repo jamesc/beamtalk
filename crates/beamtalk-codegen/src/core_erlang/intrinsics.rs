@@ -2585,11 +2585,11 @@ impl CoreErlangGenerator {
                             ];
                             return Ok(Some(doc));
                         }
-                        // A class with no class variables has nothing to
-                        // find, and its direct-called methods have no
-                        // `ClassSelf` to ask: the answer is `false`. The
+                        // A direct-called method (sealed class, no class
+                        // variables, `class sealed`) has no `ClassSelf` to
+                        // ask and nothing to find: the answer is `false`. The
                         // argument is still evaluated for its effects.
-                        if self.is_class_method_has_field_without_class_vars(receiver) {
+                        if self.is_class_method_has_field_direct_called(receiver) {
                             let name_var = self.fresh_var("Name");
                             let name_code = self.expression_doc(&arguments[0])?;
                             return Ok(Some(docvec![

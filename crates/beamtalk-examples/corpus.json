@@ -18252,14 +18252,18 @@
       "tags": [
         "DirectDispatchTest",
         "TestCase",
+        "anonymous function",
         "assign",
         "assignment",
+        "callback",
+        "closure",
         "direct_dispatch_test",
         "extends",
         "field",
         "inherit",
         "inheritance",
         "instance variable",
+        "lambda",
         "member",
         "mutate",
         "mutation",
@@ -18272,6 +18276,9 @@
         "testDynamicSelfMessagingMethodNoLongerRaisesDispatchError",
         "testHasFieldInBlockOnStatelessClassIsFalse",
         "testHasFieldOnStatelessClassIsFalse",
+        "testInheritedHasFieldInBlockSeesSubclassClassVariable",
+        "testInheritedHasFieldOnStatelessParentIsFalse",
+        "testInheritedHasFieldSeesSubclassClassVariable",
         "testPerformRunsInCallersProcess",
         "testPerformWithArgumentsRunsDirectly",
         "testStatefulClassPerformStillRunsInClassProcess",
@@ -18282,8 +18289,8 @@
         "testUnusedBlockWithHasFieldDoesNotRaise",
         "testVariableReceiverRunsInCallersProcess"
       ],
-      "source": "// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless\n// classes call the module function directly in the caller, so they behave\n// identically to the static form. Eligibility is generated metadata\n// (`direct_class_methods`), computed by `compute_direct_call_eligible`.\n//\n// Fixtures: fixtures/direct_dispatch_stateless.bt,\n// fixtures/direct_dispatch_stateful.bt.\n\nTestCase subclass: DirectDispatchTest\n\n  // --- static and dynamic forms agree, and run in the caller ---------------\n  testStaticSendRunsInCallersProcess =>\n    self assert: DirectDispatchStateless callerPid equals: Erlang erlang self\n\n  testVariableReceiverRunsInCallersProcess =>\n    cls := DirectDispatchStateless\n    self assert: cls callerPid equals: Erlang erlang self\n\n  testPerformRunsInCallersProcess =>\n    self assert: (DirectDispatchStateless perform: #callerPid) equals: Erlang erlang self\n\n  testPerformWithArgumentsRunsDirectly =>\n    self assert: (DirectDispatchStateless perform: #double: withArguments: #(4)) equals: 8\n\n  testStaticAndDynamicResultsMatch =>\n    cls := DirectDispatchStateless\n    self assert: (cls double: 5) equals: (DirectDispatchStateless double: 5)\n\n  testClassPassedAsArgument =>\n    self assert: (DirectDispatchStateless relay: DirectDispatchStateless) equals: 42\n\n  // --- hazards ---------------------------------------------------------------\n\n  // The method messages its own class. Dynamically dispatched through the\n  // class gen_server this used to raise `dispatch_error`.\n  testDynamicSelfMessagingMethodNoLongerRaisesDispatchError =>\n    cls := DirectDispatchStateless\n    self assert: (cls relay: cls) equals: 42\n\n  // A block passed into an eligible method now runs in the caller.\n  testBlockRunsInCallerProcess =>\n    cls := DirectDispatchStateless\n    pid := cls callBlock: [Erlang erlang self]\n    self assert: pid equals: Erlang erlang self\n\n  // A class with `classState:` keeps the gen_server hop.\n  testStatefulClassStillRunsInClassProcess =>\n    cls := DirectDispatchStateful\n    self deny: (cls callerPid =:= Erlang erlang self)\n\n  testStatefulClassPerformStillRunsInClassProcess =>\n    self deny: ((DirectDispatchStateful perform: #callerPid) =:= Erlang erlang self)\n\n  testStatefulClassStateStillWorksDynamically =>\n    cls := DirectDispatchStateful\n    first := cls bump\n    self assert: cls bump equals: first + 1\n\n  // --- hasField: on a class with no class variables (ADR 0130 §2) -------------\n  testHasFieldOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingField equals: false\n\n  testHasFieldInBlockOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingFieldInBlock equals: false\n\n  testUnusedBlockWithHasFieldDoesNotRaise =>\n    self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7",
-      "explanation": "BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless classes call the module function directly in the caller, so they behave identically to the static form. Eligibility is generated metadata (`direct_class_methods`), computed by `compute_direct_call_eligible`.  Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/direct_dispatch_stateful.bt."
+      "source": "// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless\n// classes call the module function directly in the caller, so they behave\n// identically to the static form. Eligibility is generated metadata\n// (`direct_class_methods`), computed by `compute_direct_call_eligible`.\n//\n// Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/has_field_probe_base.bt,\n// fixtures/has_field_probe_child.bt,\n// fixtures/direct_dispatch_stateful.bt.\n\nTestCase subclass: DirectDispatchTest\n\n  // --- static and dynamic forms agree, and run in the caller ---------------\n  testStaticSendRunsInCallersProcess =>\n    self assert: DirectDispatchStateless callerPid equals: Erlang erlang self\n\n  testVariableReceiverRunsInCallersProcess =>\n    cls := DirectDispatchStateless\n    self assert: cls callerPid equals: Erlang erlang self\n\n  testPerformRunsInCallersProcess =>\n    self assert: (DirectDispatchStateless perform: #callerPid) equals: Erlang erlang self\n\n  testPerformWithArgumentsRunsDirectly =>\n    self assert: (DirectDispatchStateless perform: #double: withArguments: #(4)) equals: 8\n\n  testStaticAndDynamicResultsMatch =>\n    cls := DirectDispatchStateless\n    self assert: (cls double: 5) equals: (DirectDispatchStateless double: 5)\n\n  testClassPassedAsArgument =>\n    self assert: (DirectDispatchStateless relay: DirectDispatchStateless) equals: 42\n\n  // --- hazards ---------------------------------------------------------------\n\n  // The method messages its own class. Dynamically dispatched through the\n  // class gen_server this used to raise `dispatch_error`.\n  testDynamicSelfMessagingMethodNoLongerRaisesDispatchError =>\n    cls := DirectDispatchStateless\n    self assert: (cls relay: cls) equals: 42\n\n  // A block passed into an eligible method now runs in the caller.\n  testBlockRunsInCallerProcess =>\n    cls := DirectDispatchStateless\n    pid := cls callBlock: [Erlang erlang self]\n    self assert: pid equals: Erlang erlang self\n\n  // A class with `classState:` keeps the gen_server hop.\n  testStatefulClassStillRunsInClassProcess =>\n    cls := DirectDispatchStateful\n    self deny: (cls callerPid =:= Erlang erlang self)\n\n  testStatefulClassPerformStillRunsInClassProcess =>\n    self deny: ((DirectDispatchStateful perform: #callerPid) =:= Erlang erlang self)\n\n  testStatefulClassStateStillWorksDynamically =>\n    cls := DirectDispatchStateful\n    first := cls bump\n    self assert: cls bump equals: first + 1\n\n  // --- hasField: on a class with no class variables (ADR 0130 §2) -------------\n  testHasFieldOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingField equals: false\n\n  testHasFieldInBlockOnStatelessClassIsFalse =>\n    self assert: DirectDispatchStateless hasMissingFieldInBlock equals: false\n\n  testUnusedBlockWithHasFieldDoesNotRaise =>\n    self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7\n\n  // --- hasField: in an inheritable method follows the receiver (ADR 0130 §2) ---\n  testInheritedHasFieldSeesSubclassClassVariable =>\n    self assert: HasFieldProbeChild probe equals: true\n\n  testInheritedHasFieldInBlockSeesSubclassClassVariable =>\n    self assert: HasFieldProbeChild probeInBlock equals: true\n\n  testInheritedHasFieldOnStatelessParentIsFalse =>\n    self assert: HasFieldProbeBase probe equals: false",
+      "explanation": "BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless classes call the module function directly in the caller, so they behave identically to the static form. Eligibility is generated metadata (`direct_class_methods`), computed by `compute_direct_call_eligible`.  Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/has_field_probe_base.bt, fixtures/has_field_probe_child.bt, fixtures/direct_dispatch_stateful.bt."
     },
     {
       "id": "stdlib-test-display-string-test",
@@ -25240,6 +25247,50 @@
       ],
       "source": "// HasClearFieldActor — test fixture for BT-3551 (ADR 0124 §1/§4f/§9/B4)\n//\n// The Symphony `CodexClient`/`stopProcess` shape the ADR is evidenced on\n// (§Context (a)): a `late state:` resource slot, acquired by an explicit\n// `launch`, released by `stopProcess`'s `hasField:`-guarded `clearField:`,\n// relaunchable afterwards.\n\ntyped Actor subclass: HasClearFieldActor\n  late state: proc :: Integer\n  state: count :: Integer = 0\n\n  hasProc -> Boolean => self hasField: #proc\n\n  launch: value :: Integer -> Nil =>\n    self.proc := value\n    nil\n\n  // Mirrors Symphony's real `stopProcess` exactly (ADR 0124 §1):\n  //   stopProcess -> Nil =>\n  //     (self hasField: #proc) ifTrue: [... self clearField: #proc]\n  //     nil\n  stopProcess -> Nil =>\n    (self hasField: #proc) ifTrue: [self clearField: #proc]\n    nil\n\n  // A plain top-level `clearField:` (not guarded/nested), exercising the\n  // simpler shape and its `-> Self` return value.\n  clearProc -> Self => self clearField: #proc\n\n  getCount -> Integer => self.count",
       "explanation": "HasClearFieldActor — test fixture for BT-3551 (ADR 0124 §1/§4f/§9/B4)  The Symphony `CodexClient`/`stopProcess` shape the ADR is evidenced on (§Context (a)): a `late state:` resource slot, acquired by an explicit `launch`, released by `stopProcess`'s `hasField:`-guarded `clearField:`, relaunchable afterwards."
+    },
+    {
+      "id": "stdlib-test-fixtures-has-field-probe-base",
+      "title": "HasFieldProbeBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "HasFieldProbeBase",
+        "Object",
+        "extends",
+        "field",
+        "has_field_probe_base",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "probe",
+        "probeInBlock",
+        "property",
+        "subclassing"
+      ],
+      "source": "// BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs\n// with the *receiver* class as `ClassSelf`, so a parent without class\n// variables still answers for a subclass that declares one. Only a\n// direct-called method (sealed class, `class sealed` method) has no\n// `ClassSelf`; see direct_dispatch_stateless.bt.\n\nObject subclass: HasFieldProbeBase\n  class probe => self hasField: #n\n\n  class probeInBlock => [self hasField: #n] value",
+      "explanation": "BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs with the *receiver* class as `ClassSelf`, so a parent without class variables still answers for a subclass that declares one. Only a direct-called method (sealed class, `class sealed` method) has no `ClassSelf`; see direct_dispatch_stateless.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-has-field-probe-child",
+      "title": "HasFieldProbeChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "HasFieldProbeBase",
+        "HasFieldProbeChild",
+        "extends",
+        "field",
+        "has_field_probe_child",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "subclassing"
+      ],
+      "source": "// BT-3701 / ADR 0130 §2: subclass that declares the class variable the\n// inherited `HasFieldProbeBase` probes see. See has_field_probe_base.bt.\n\nHasFieldProbeBase subclass: HasFieldProbeChild\n  classState: n = 0",
+      "explanation": "BT-3701 / ADR 0130 §2: subclass that declares the class variable the inherited `HasFieldProbeBase` probes see. See has_field_probe_base.bt."
     },
     {
       "id": "stdlib-test-fixtures-hierarchy-child",
