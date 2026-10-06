@@ -77,7 +77,7 @@ supervisor_can_start_test() ->
     ?assertEqual([], Children),
 
     %% Cleanup
-    exit(Pid, normal).
+    gen_server:stop(Pid).
 
 supervisor_count_children_test() ->
     %% Start the supervisor
@@ -91,7 +91,7 @@ supervisor_count_children_test() ->
     ?assertEqual(0, proplists:get_value(workers, Counts)),
 
     %% Cleanup
-    exit(Pid, normal).
+    gen_server:stop(Pid).
 
 %%% Additional coverage tests
 
@@ -115,7 +115,7 @@ supervisor_registered_name_test() ->
     {ok, Pid} = beamtalk_actor_sup:start_link(),
     ?assertEqual(Pid, whereis(beamtalk_actor_sup)),
     %% Cleanup
-    exit(Pid, normal).
+    gen_server:stop(Pid).
 
 start_actor_function_exported_test() ->
     %% Verify start_actor/3 is exported with correct arity
@@ -145,8 +145,7 @@ start_actor_success_starts_child_test() ->
         %% The child should be functional — sync call should return the seed
         ?assertEqual(42, gen_server:call(ChildPid, {getValue, []}))
     after
-        exit(SupPid, normal),
-        timer:sleep(10)
+        gen_server:stop(SupPid)
     end.
 
 start_actor_error_path_logs_and_returns_test() ->
@@ -159,8 +158,7 @@ start_actor_error_path_logs_and_returns_test() ->
         Result = beamtalk_actor_sup:start_actor(nonexistent_module, start_link, [0]),
         ?assertMatch({error, _}, Result)
     after
-        exit(SupPid, normal),
-        timer:sleep(10)
+        gen_server:stop(SupPid)
     end.
 
 start_link_logs_success_test() ->
@@ -171,8 +169,7 @@ start_link_logs_success_test() ->
     ?assert(is_process_alive(Pid)),
     %% Registered under the module name
     ?assertEqual(Pid, whereis(beamtalk_actor_sup)),
-    exit(Pid, normal),
-    timer:sleep(10),
+    gen_server:stop(Pid),
     ?assertEqual(undefined, whereis(beamtalk_actor_sup)).
 
 start_actor_multiple_children_test() ->
@@ -193,8 +190,7 @@ start_actor_multiple_children_test() ->
         ?assertEqual(2, gen_server:call(C2, {getValue, []})),
         ?assertEqual(3, gen_server:call(C3, {getValue, []}))
     after
-        exit(SupPid, normal),
-        timer:sleep(10)
+        gen_server:stop(SupPid)
     end.
 
 start_link_already_started_returns_error_test() ->
@@ -206,8 +202,7 @@ start_link_already_started_returns_error_test() ->
         Result = beamtalk_actor_sup:start_link(),
         ?assertMatch({error, {already_started, _}}, Result)
     after
-        exit(FirstPid, normal),
-        timer:sleep(10)
+        gen_server:stop(FirstPid)
     end.
 
 temporary_child_not_restarted_on_crash_test() ->
@@ -228,6 +223,5 @@ temporary_child_not_restarted_on_crash_test() ->
         Counts = supervisor:count_children(SupPid),
         ?assertEqual(0, proplists:get_value(active, Counts))
     after
-        exit(SupPid, normal),
-        timer:sleep(10)
+        gen_server:stop(SupPid)
     end.
