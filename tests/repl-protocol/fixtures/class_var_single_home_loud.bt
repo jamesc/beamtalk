@@ -5,4 +5,5 @@
 
 CvshCounter subclass: CvshLoudCounter
   classState: n = 0
+
   class hook => self bump

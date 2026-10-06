@@ -7,7 +7,9 @@
 
 Object subclass: CvshBatch
   classState: runs = 0
+
   class each: aBlock =>
     self.runs := self.runs + 1
     aBlock value
+
   class guard: aBlock => [aBlock value] on: Error do: [:e | nil]

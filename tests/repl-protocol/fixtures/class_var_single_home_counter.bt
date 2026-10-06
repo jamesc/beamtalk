@@ -7,8 +7,11 @@
 
 Object subclass: CvshCounter
   classState: n = 0
+
   class bump -> Integer => self.n := self.n + 1
+
   class hook => nil
+
   class run =>
     b := [self hook]
     #(1, 2, 3) do: [:i | i > 1 ifTrue: [self bump]]

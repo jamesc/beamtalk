@@ -5,5 +5,7 @@
 
 Object subclass: CvshReload
   classState: n = 0
+
   class bump -> Integer => self.n := self.n + 1
+
   class n -> Integer => self.n

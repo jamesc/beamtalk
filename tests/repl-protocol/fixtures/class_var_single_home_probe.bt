@@ -6,5 +6,7 @@
 // variable, the parent (no class variables) does not.
 
 Object subclass: CvshProbeBase
+
   class probe => self hasField: #n
+
   class probeInBlock => [self hasField: #n] value
