@@ -108,7 +108,9 @@ TestCase subclass: ClassVarSemanticsSealedTest
   // ADR 0130 §5 abroad: write raises
   testSyncBlockToOpenDriverWriteRaises =>
     CvsSealed reset
-    self should: [CvsSealed rowSyncWriteOpenDriver] raise: #class_state_unreachable
+    self should: [
+      CvsSealed rowSyncWriteOpenDriver
+    ] raise: #class_state_unreachable
     self assert: CvsSealed n equals: 0
 
   // ADR 0130 §5 direct-called class method is at home

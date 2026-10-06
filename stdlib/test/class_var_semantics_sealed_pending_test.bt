@@ -13,24 +13,19 @@
 TestCase subclass: ClassVarSemanticsSealedPendingTest
 
   // ADR 0130 §4
-  testLetrecTimes =>
-    self assert: CvsSealedPending rowTimes equals: 3
+  testLetrecTimes => self assert: CvsSealedPending rowTimes equals: 3
 
   // ADR 0130 §4 (BT-3694 shape)
-  testLoopCondition =>
-    self assert: CvsSealedPending rowLoopCondition equals: 3
+  testLoopCondition => self assert: CvsSealedPending rowLoopCondition equals: 3
 
   // ADR 0130 §4
-  testFoldDo =>
-    self assert: CvsSealedPending rowDo equals: 3
+  testFoldDo => self assert: CvsSealedPending rowDo equals: 3
 
   // ADR 0130 §4
-  testFoldCollect =>
-    self assert: CvsSealedPending rowCollect equals: 3
+  testFoldCollect => self assert: CvsSealedPending rowCollect equals: 3
 
   // ADR 0130 §4
-  testFoldInject =>
-    self assert: CvsSealedPending rowInject equals: 3
+  testFoldInject => self assert: CvsSealedPending rowInject equals: 3
 
   // ADR 0130 §4 catch boundary
   testNonMatchingInnerOnDoWithEnsureBetween =>

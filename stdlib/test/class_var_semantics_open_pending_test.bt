@@ -13,24 +13,19 @@
 TestCase subclass: ClassVarSemanticsOpenPendingTest
 
   // ADR 0130 §4
-  testLetrecTimes =>
-    self assert: CvsOpenPending rowTimes equals: 3
+  testLetrecTimes => self assert: CvsOpenPending rowTimes equals: 3
 
   // ADR 0130 §4 (BT-3694 shape)
-  testLoopCondition =>
-    self assert: CvsOpenPending rowLoopCondition equals: 3
+  testLoopCondition => self assert: CvsOpenPending rowLoopCondition equals: 3
 
   // ADR 0130 §4
-  testFoldDo =>
-    self assert: CvsOpenPending rowDo equals: 3
+  testFoldDo => self assert: CvsOpenPending rowDo equals: 3
 
   // ADR 0130 §4
-  testFoldCollect =>
-    self assert: CvsOpenPending rowCollect equals: 3
+  testFoldCollect => self assert: CvsOpenPending rowCollect equals: 3
 
   // ADR 0130 §4
-  testFoldInject =>
-    self assert: CvsOpenPending rowInject equals: 3
+  testFoldInject => self assert: CvsOpenPending rowInject equals: 3
 
   // ADR 0130 §4 catch boundary
   testNonMatchingInnerOnDoWithEnsureBetween =>

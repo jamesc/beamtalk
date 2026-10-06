@@ -108,7 +108,9 @@ TestCase subclass: ClassVarSemanticsOpenTest
   // ADR 0130 §5 abroad: write raises
   testSyncBlockToOpenDriverWriteRaises =>
     CvsOpen reset
-    self should: [CvsOpen rowSyncWriteOpenDriver] raise: #class_state_unreachable
+    self should: [
+      CvsOpen rowSyncWriteOpenDriver
+    ] raise: #class_state_unreachable
     self assert: CvsOpen n equals: 0
 
   // ADR 0130 §5 direct-called class method is at home
@@ -137,11 +139,9 @@ TestCase subclass: ClassVarSemanticsOpenTest
   // ADR 0130 §5 runtime-owned snapshot
   testPerformLocallyWriteRaises =>
     CvsOpen reset
-    self
-      assert: ([
-        CvsOpen performLocally: #bump withArguments: #()
-      ] on: Error do: [:e | e kind])
-      equals: #class_state_read_only
+    self assert: ([
+      CvsOpen performLocally: #bump withArguments: #()
+    ] on: Error do: [:e | e kind]) equals: #class_state_read_only
     self assert: CvsOpen n equals: 0
 
   // ADR 0130 §4 non-local return

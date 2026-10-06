@@ -128,7 +128,9 @@ registration_test_() ->
                 Mod = 'bt@bt3713_abi_old_missing',
                 Bin = old_binary(Mod, 'BT3713AbiOldMissing', ""),
                 ?assertMatch({error, on_load_failure}, load(Mod, Bin)),
-                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldMissing'))
+                ?assertEqual(
+                    undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldMissing')
+                )
             end},
             {"a module with a different class_var_abi (0) is refused at load", fun() ->
                 Mod = 'bt@bt3713_abi_old_zero',
@@ -184,7 +186,9 @@ refusal_error_test_() ->
                     #{module => Mod, expected => beamtalk_class_vars:abi(), found => missing},
                     Error#beamtalk_error.details
                 ),
-                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldMissing'))
+                ?assertEqual(
+                    undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldMissing')
+                )
             end},
             {"the meta map in ClassInfo is checked while the module is still loading", fun() ->
                 %% During -on_load erlang:function_exported/3 is false, so the

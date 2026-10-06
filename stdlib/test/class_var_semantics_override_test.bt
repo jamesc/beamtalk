@@ -126,7 +126,9 @@ TestCase subclass: ClassVarSemanticsOverrideTest
   // ADR 0130 §5 abroad: write raises
   testSyncBlockToOpenDriverWriteRaises =>
     CvsOverrideSub reset
-    self should: [CvsOverrideSub rowSyncWriteOpenDriver] raise: #class_state_unreachable
+    self should: [
+      CvsOverrideSub rowSyncWriteOpenDriver
+    ] raise: #class_state_unreachable
     self assert: CvsOverrideSub n equals: 0
 
   // ADR 0130 §5 direct-called class method is at home

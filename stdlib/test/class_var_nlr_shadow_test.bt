@@ -147,11 +147,9 @@ TestCase subclass: ClassVarNlrShadowTest
   // (the invocation boundary), and ShadowCrossClassOwner's invocation is discarded too.
   // CollectionDriver's persisted class vars are never corrupted by the foreign write.
   testCrossClassMutationDoesNotCorruptForeignProcessShadow =>
-    self
-      should: [
-        ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)
-      ]
-      raise: #class_state_unreachable
+    self should: [
+      ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)
+    ] raise: #class_state_unreachable
     self assert: CollectionDriver runCount equals: 0
     self assert: ShadowCrossClassOwner bumpCount equals: 0
 

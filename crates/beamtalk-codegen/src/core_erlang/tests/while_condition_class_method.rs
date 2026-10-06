@@ -74,29 +74,6 @@ fn while_condition_reads_class_var_and_body_writes_it() {
 }
 
 #[test]
-fn zz_probe() {
-    let code = codegen(
-        "Object subclass: Zz
-  classState: n = 0
-
-  class bump -> Integer => self.n := self.n + 1
-
-  class row -> Integer =>
-    [
-      [
-        [
-          self bump
-          1 / 0
-        ] on: TypeError do: [:e | nil]
-      ] ensure: [self bump]
-    ] on: Error do: [:e | nil]
-    self.n
-",
-    );
-    std::fs::write("/tmp/claude-0/-home-user-beamtalk/153ecdb0-a002-556a-8d11-02c4013fbc84/scratchpad/zz.core", code).unwrap();
-}
-
-#[test]
 fn pure_condition_loops_thread_nothing() {
     let code = codegen(
         "Object subclass: WhilePure

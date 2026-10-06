@@ -13,20 +13,16 @@ Object subclass: CvsOverrideBasePending
 
   class n => self.n
 
-
   class reset => self.n := 0
-
 
   class boom =>
     self bump
     1 / 0
 
-
   class rowLoopCondition =>
     self reset
     [self n < 3] whileTrue: [self bump]
     self.n
-
 
   // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.
   class rowNonMatchingInnerEnsure =>
@@ -40,4 +36,3 @@ Object subclass: CvsOverrideBasePending
       ] ensure: [self bump]
     ] on: Error do: [:e | nil]
     self.n
-
