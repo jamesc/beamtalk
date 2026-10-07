@@ -2520,10 +2520,12 @@ eval_with_self_runtime_exception() ->
 %% must have its write discarded when the eval catches the error.
 eval_with_self_discards_class_var_writes() ->
     %% beamtalk_class_vars resolves a class tag to its name with an existing-atom
-    %% lookup, so intern the base atom explicitly (a literal the compiler can fold
-    %% away would not guarantee it exists).
-    _ = binary_to_atom(<<"EvalSelfCvClass">>, utf8),
-    Tag = binary_to_atom(<<"EvalSelfCvClass class">>, utf8),
+    %% lookup, so the base atom must really exist in the loaded module. The
+    %% compiler folds `atom_to_list`/`binary_to_atom` of a literal and drops the
+    %% base atom; a process-dictionary round trip cannot be folded, so the
+    %% literal stays in the module's atom table.
+    erlang:put(eval_self_cv_class, 'EvalSelfCvClass'),
+    Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
     Key = {'$bt_class_vars', Tag},
     ClassSelf = #beamtalk_object{class = Tag, class_mod = escc, pid = self()},
     Block = fun() ->
