@@ -15,50 +15,99 @@ Object subclass: ClassMethodProtectedLocals
   // may write an outer local.
   class tryDoWritesLocal =>
     t := 0
-    r := Result tryDo: [t := t + 1. 5]
+    r := Result
+      tryDo: [
+        t := t + 1
+        5
+      ]
     (r valueOr: 0) * 10 + t
 
   class tryDoAnswersTheErrorOnRaise =>
     t := 0
-    r := Result tryDo: [t := t + 1. 5 > 3 ifTrue: [Error signal: "boom"]. 1]
+    r := Result
+      tryDo: [
+        t := t + 1
+        5 > 3 ifTrue: [Error signal: "boom"]
+        1
+      ]
     r valueOr: 7
 
   // The cleanup runs after the body and reads what the body wrote.
   class ensureCleanupSeesTheBodysWrite =>
     t := 0
-    [t := t + 1. 5] ensure: [t := t + 10]
+    [
+      t := t + 1
+      5
+    ] ensure: [t := t + 10]
     t
 
   class nestedEnsureCleanupsSeeEachOther =>
     t := 0
-    [t := t + 1. [t := t + 5. 3] ensure: [t := t + 10. 4]] ensure: [t := t * 2]
+    [
+      t := t + 1
+      [
+        t := t + 5
+        3
+      ]
+        ensure: [
+          t := t + 10
+          4
+        ]
+    ] ensure: [t := t * 2]
     t
 
   // An `on:do:` in the try body of another: erlc rejected the module with
   // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.
   class onDoNestedInATryBody =>
     t := 0
-    [t := t + 1. [t := t + 1. 2] on: Error do: [3]] on: Error do: [4]
+    [
+      t := t + 1
+      [
+        t := t + 1
+        2
+      ] on: Error do: [3]
+    ] on: Error do: [4]
     t
 
   class pureOnDoNestedInAPureOnDo =>
-    [[Error signal: "inner". 1] on: Error do: [2]] on: Error do: [3]
+    [
+      [
+        Error signal: "inner"
+        1
+      ] on: Error do: [2]
+    ] on: Error do: [3]
 
   // An error crossing the catch discards the writes made inside it.
   class onDoHandlerSeesTheValueBeforeTheTry =>
     t := 0
-    [t := t + 1. Error signal: "boom"] on: Error do: [t := t + 10]
+    [
+      t := t + 1
+      Error signal: "boom"
+    ] on: Error do: [t := t + 10]
     t
 
   // A `do:` nested in a loop body writes the same local as the loop.
   class nestedDoWritesTheLoopsLocal =>
     t := 0
-    #(1, 2) do: [:i | t := t + i. #(1, 2, 3) do: [:j | t := t + j]]
+    #(1, 2)
+      do: [:i |
+        t := t + i
+        #(1, 2, 3) do: [:j | t := t + j]
+      ]
     t
 
   class nestedDoInACountedLoop =>
     t := 0
-    1 to: 2 do: [:i | t := t + i. #(1, 2, 3) do: [:j | t := t + j. self.n := j]]
+    1
+      to: 2
+      do: [:i |
+        t := t + i
+        #(1, 2, 3)
+          do: [:j |
+            t := t + j
+            self.n := j
+          ]
+      ]
     t * 10 + self.n
 
   class n => self.n
