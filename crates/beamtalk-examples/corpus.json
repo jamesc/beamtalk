@@ -16792,13 +16792,13 @@
       "explanation": "BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^` escapes a class method must survive the non-local-return relay.  Codegen writes the just-updated ClassVars map into the '$bt_class_vars_shadow' process-dictionary key at every *top-frame* class-var mutation in a class method; the runtime's `{nlr_relay, ...}` path (BT-3036) reads it back instead of reverting to the pre-call map.  Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt, fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt, fixtures/shadow_relay_probe.bt, fixtures/class_method_conditional_self_call.bt, fixtures/shadow_cross_class_owner.bt."
     },
     {
-      "id": "stdlib-test-class-var-semantics-open-pending-test",
-      "title": "ClassVarSemanticsOpenPendingTest",
+      "id": "stdlib-test-class-var-semantics-open-control-test",
+      "title": "ClassVarSemanticsOpenControlTest",
       "category": "stdlib-tests",
       "tags": [
-        "ClassVarSemanticsOpenPendingTest",
+        "ClassVarSemanticsOpenControlTest",
         "TestCase",
-        "class_var_semantics_open_pending_test",
+        "class_var_semantics_open_control_test",
         "extends",
         "inherit",
         "inheritance",
@@ -16813,7 +16813,7 @@
         "testNonMatchingInnerOnDoWithEnsureBetween",
         "testOwnNlrThroughEnsureKeepsBothWrites"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// open class. Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsOpenPendingTest\n\n  // ADR 0130 §4\n  testLetrecTimes => self assert: CvsOpenPending rowTimes equals: 3\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition => self assert: CvsOpenPending rowLoopCondition equals: 3\n\n  // ADR 0130 §4\n  testFoldDo => self assert: CvsOpenPending rowDo equals: 3\n\n  // ADR 0130 §4\n  testFoldCollect => self assert: CvsOpenPending rowCollect equals: 3\n\n  // ADR 0130 §4\n  testFoldInject => self assert: CvsOpenPending rowInject equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsOpenPending rowNonMatchingInnerEnsure equals: 0\n\n  // ADR 0130 §4 ensure is not a boundary\n  testEnsureCleanupWriteGoesWithTheError =>\n    self assert: CvsOpenPending rowEnsureRaise equals: 0\n\n  // ADR 0130 §4 non-local return\n  testOwnNlrThroughEnsureKeepsBothWrites =>\n    self assert: CvsOpenPending rowOwnNlrEnsure equals: 7\n    self assert: CvsOpenPending n equals: 2",
+      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// open class. Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsOpenControlTest\n\n  // ADR 0130 §4\n  testLetrecTimes => self assert: CvsOpenControl rowTimes equals: 3\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition => self assert: CvsOpenControl rowLoopCondition equals: 3\n\n  // ADR 0130 §4\n  testFoldDo => self assert: CvsOpenControl rowDo equals: 3\n\n  // ADR 0130 §4\n  testFoldCollect => self assert: CvsOpenControl rowCollect equals: 3\n\n  // ADR 0130 §4\n  testFoldInject => self assert: CvsOpenControl rowInject equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsOpenControl rowNonMatchingInnerEnsure equals: 0\n\n  // ADR 0130 §4 ensure is not a boundary\n  testEnsureCleanupWriteGoesWithTheError =>\n    self assert: CvsOpenControl rowEnsureRaise equals: 0\n\n  // ADR 0130 §4 non-local return\n  testOwnNlrThroughEnsureKeepsBothWrites =>\n    self assert: CvsOpenControl rowOwnNlrEnsure equals: 7\n    self assert: CvsOpenControl n equals: 2",
       "explanation": "BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the open class. Each test asserts the ADR 0130 section 4/5 answer; a test whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker citing BT-3713; BT-3713 flipped every such pin to the ADR answer.  These rows did not compile before ADR 0130 (class-variable writes in loop and fold bodies, a class-variable-writing send in a loop condition); BT-3713 enabled them. The assertions are the ADR 0130 answers."
     },
     {
@@ -16884,13 +16884,13 @@
       "explanation": "BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the open class. Each test asserts the ADR 0130 section 4/5 answer; a test whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker citing BT-3713; BT-3713 flipped every such pin to the ADR answer."
     },
     {
-      "id": "stdlib-test-class-var-semantics-override-pending-test",
-      "title": "ClassVarSemanticsOverridePendingTest",
+      "id": "stdlib-test-class-var-semantics-override-control-test",
+      "title": "ClassVarSemanticsOverrideControlTest",
       "category": "stdlib-tests",
       "tags": [
-        "ClassVarSemanticsOverridePendingTest",
+        "ClassVarSemanticsOverrideControlTest",
         "TestCase",
-        "class_var_semantics_override_pending_test",
+        "class_var_semantics_override_control_test",
         "extends",
         "inherit",
         "inheritance",
@@ -16899,7 +16899,7 @@
         "testLoopCondition",
         "testNonMatchingInnerOnDoWithEnsureBetween"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsOverridePendingTest\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition =>\n    self assert: CvsOverrideSubPending rowLoopCondition equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsOverrideSubPending rowNonMatchingInnerEnsure equals: 0",
+      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsOverrideControlTest\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition =>\n    self assert: CvsOverrideSubControl rowLoopCondition equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsOverrideSubControl rowNonMatchingInnerEnsure equals: 0",
       "explanation": "BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker citing BT-3713; BT-3713 flipped every such pin to the ADR answer.  These rows did not compile before ADR 0130 (class-variable writes in loop and fold bodies, a class-variable-writing send in a loop condition); BT-3713 enabled them. The assertions are the ADR 0130 answers."
     },
     {
@@ -16977,13 +16977,13 @@
       "explanation": "BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker citing BT-3713; BT-3713 flipped every such pin to the ADR answer."
     },
     {
-      "id": "stdlib-test-class-var-semantics-sealed-pending-test",
-      "title": "ClassVarSemanticsSealedPendingTest",
+      "id": "stdlib-test-class-var-semantics-sealed-control-test",
+      "title": "ClassVarSemanticsSealedControlTest",
       "category": "stdlib-tests",
       "tags": [
-        "ClassVarSemanticsSealedPendingTest",
+        "ClassVarSemanticsSealedControlTest",
         "TestCase",
-        "class_var_semantics_sealed_pending_test",
+        "class_var_semantics_sealed_control_test",
         "extends",
         "inherit",
         "inheritance",
@@ -16998,7 +16998,7 @@
         "testNonMatchingInnerOnDoWithEnsureBetween",
         "testOwnNlrThroughEnsureKeepsBothWrites"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// sealed class. Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsSealedPendingTest\n\n  // ADR 0130 §4\n  testLetrecTimes => self assert: CvsSealedPending rowTimes equals: 3\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition => self assert: CvsSealedPending rowLoopCondition equals: 3\n\n  // ADR 0130 §4\n  testFoldDo => self assert: CvsSealedPending rowDo equals: 3\n\n  // ADR 0130 §4\n  testFoldCollect => self assert: CvsSealedPending rowCollect equals: 3\n\n  // ADR 0130 §4\n  testFoldInject => self assert: CvsSealedPending rowInject equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsSealedPending rowNonMatchingInnerEnsure equals: 0\n\n  // ADR 0130 §4 ensure is not a boundary\n  testEnsureCleanupWriteGoesWithTheError =>\n    self assert: CvsSealedPending rowEnsureRaise equals: 0\n\n  // ADR 0130 §4 non-local return\n  testOwnNlrThroughEnsureKeepsBothWrites =>\n    self assert: CvsSealedPending rowOwnNlrEnsure equals: 7\n    self assert: CvsSealedPending n equals: 2",
+      "source": "// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the\n// sealed class. Each test asserts the ADR 0130 section 4/5 answer; a test\n// whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker\n// citing BT-3713; BT-3713 flipped every such pin to the ADR answer.\n//\n// These rows did not compile before ADR 0130 (class-variable writes in loop and\n// fold bodies, a class-variable-writing send in a loop condition); BT-3713\n// enabled them. The assertions are the ADR 0130 answers.\n\nTestCase subclass: ClassVarSemanticsSealedControlTest\n\n  // ADR 0130 §4\n  testLetrecTimes => self assert: CvsSealedControl rowTimes equals: 3\n\n  // ADR 0130 §4 (BT-3694 shape)\n  testLoopCondition => self assert: CvsSealedControl rowLoopCondition equals: 3\n\n  // ADR 0130 §4\n  testFoldDo => self assert: CvsSealedControl rowDo equals: 3\n\n  // ADR 0130 §4\n  testFoldCollect => self assert: CvsSealedControl rowCollect equals: 3\n\n  // ADR 0130 §4\n  testFoldInject => self assert: CvsSealedControl rowInject equals: 3\n\n  // ADR 0130 §4 catch boundary\n  testNonMatchingInnerOnDoWithEnsureBetween =>\n    self assert: CvsSealedControl rowNonMatchingInnerEnsure equals: 0\n\n  // ADR 0130 §4 ensure is not a boundary\n  testEnsureCleanupWriteGoesWithTheError =>\n    self assert: CvsSealedControl rowEnsureRaise equals: 0\n\n  // ADR 0130 §4 non-local return\n  testOwnNlrThroughEnsureKeepsBothWrites =>\n    self assert: CvsSealedControl rowOwnNlrEnsure equals: 7\n    self assert: CvsSealedControl n equals: 2",
       "explanation": "BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the sealed class. Each test asserts the ADR 0130 section 4/5 answer; a test whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker citing BT-3713; BT-3713 flipped every such pin to the ADR answer.  These rows did not compile before ADR 0130 (class-variable writes in loop and fold bodies, a class-variable-writing send in a loop condition); BT-3713 enabled them. The assertions are the ADR 0130 answers."
     },
     {
@@ -23565,17 +23565,17 @@
       "explanation": "BT-3704 (ADR 0130 Phase 1): open class spelling of the class-variable semantics matrix. See class_var_semantics_open_test.bt."
     },
     {
-      "id": "stdlib-test-fixtures-cvs-open-pending",
-      "title": "CvsOpenPending",
+      "id": "stdlib-test-fixtures-cvs-open-control",
+      "title": "CvsOpenControl",
       "category": "stdlib-fixtures",
       "tags": [
-        "CvsOpenPending",
+        "CvsOpenControl",
         "Object",
         "assign",
         "assignment",
         "boom",
         "bump",
-        "cvs_open_pending",
+        "cvs_open_control",
         "extends",
         "field",
         "for each",
@@ -23608,7 +23608,7 @@
         "subclassing",
         "transform"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the open spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nObject subclass: CvsOpenPending\n  classState: n = 0\n\n  class bump => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowTimes =>\n    self reset\n    3 timesRepeat: [self bump]\n    self.n\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  class rowDo =>\n    self reset\n    #(1, 2, 3) do: [:x | self bump]\n    self.n\n\n  class rowCollect =>\n    self reset\n    #(1, 2, 3) collect: [:x | self bump]\n    self.n\n\n  class rowInject =>\n    self reset\n    #(1, 2, 3)\n      inject: 0\n      into: [:a :x |\n        self bump\n        a + x\n      ]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowEnsureRaise =>\n    self reset\n    [\n      [\n        self bump\n        1 / 0\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowOwnNlrEnsure =>\n    self reset\n    [\n      [\n        self bump\n        ^7\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    99",
+      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the open spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nObject subclass: CvsOpenControl\n  classState: n = 0\n\n  class bump => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowTimes =>\n    self reset\n    3 timesRepeat: [self bump]\n    self.n\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  class rowDo =>\n    self reset\n    #(1, 2, 3) do: [:x | self bump]\n    self.n\n\n  class rowCollect =>\n    self reset\n    #(1, 2, 3) collect: [:x | self bump]\n    self.n\n\n  class rowInject =>\n    self reset\n    #(1, 2, 3)\n      inject: 0\n      into: [:a :x |\n        self bump\n        a + x\n      ]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowEnsureRaise =>\n    self reset\n    [\n      [\n        self bump\n        1 / 0\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowOwnNlrEnsure =>\n    self reset\n    [\n      [\n        self bump\n        ^7\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    99",
       "explanation": "BT-3704 (ADR 0130 Phase 1): rows of the open spelling that did not compile before ADR 0130; enabled by BT-3713."
     },
     {
@@ -23696,17 +23696,17 @@
       "explanation": "BT-3704 (ADR 0130 Phase 1): subclass-override spelling: the base's `bump` never writes and CvsOverrideSub overrides it to write, so every row's write is a late-bound self-send the base cannot see of the class-variable semantics matrix. See class_var_semantics_override_test.bt."
     },
     {
-      "id": "stdlib-test-fixtures-cvs-override-base-pending",
-      "title": "CvsOverrideBasePending",
+      "id": "stdlib-test-fixtures-cvs-override-base-control",
+      "title": "CvsOverrideBaseControl",
       "category": "stdlib-fixtures",
       "tags": [
-        "CvsOverrideBasePending",
+        "CvsOverrideBaseControl",
         "Object",
         "assign",
         "assignment",
         "boom",
         "bump",
-        "cvs_override_base_pending",
+        "cvs_override_base_control",
         "extends",
         "field",
         "for each",
@@ -23731,7 +23731,7 @@
         "subclassing",
         "writeN"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the override spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nObject subclass: CvsOverrideBasePending\n  classState: n = 0\n\n  class bump => self.n\n\n  class writeN => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n",
+      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the override spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nObject subclass: CvsOverrideBaseControl\n  classState: n = 0\n\n  class bump => self.n\n\n  class writeN => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n",
       "explanation": "BT-3704 (ADR 0130 Phase 1): rows of the override spelling that did not compile before ADR 0130; enabled by BT-3713."
     },
     {
@@ -23754,22 +23754,22 @@
       "explanation": "BT-3704: see cvs_override_base.bt."
     },
     {
-      "id": "stdlib-test-fixtures-cvs-override-sub-pending",
-      "title": "CvsOverrideSubPending",
+      "id": "stdlib-test-fixtures-cvs-override-sub-control",
+      "title": "CvsOverrideSubControl",
       "category": "stdlib-fixtures",
       "tags": [
-        "CvsOverrideBasePending",
-        "CvsOverrideSubPending",
+        "CvsOverrideBaseControl",
+        "CvsOverrideSubControl",
         "bump",
-        "cvs_override_sub_pending",
+        "cvs_override_sub_control",
         "extends",
         "inherit",
         "inheritance",
         "object",
         "subclassing"
       ],
-      "source": "// BT-3704: see cvs_override_base_pending.bt.\n\nCvsOverrideBasePending subclass: CvsOverrideSubPending\n\n  class bump => self writeN",
-      "explanation": "BT-3704: see cvs_override_base_pending.bt."
+      "source": "// BT-3704: see cvs_override_base_control.bt.\n\nCvsOverrideBaseControl subclass: CvsOverrideSubControl\n\n  class bump => self writeN",
+      "explanation": "BT-3704: see cvs_override_base_control.bt."
     },
     {
       "id": "stdlib-test-fixtures-cvs-sealed",
@@ -23849,42 +23849,17 @@
       "explanation": "BT-3704 (ADR 0130 Phase 1): sealed class spelling of the class-variable semantics matrix. See class_var_semantics_sealed_test.bt."
     },
     {
-      "id": "stdlib-test-fixtures-cvs-sealed-driver",
-      "title": "CvsSealedDriver",
+      "id": "stdlib-test-fixtures-cvs-sealed-control",
+      "title": "CvsSealedControl",
       "category": "stdlib-fixtures",
       "tags": [
-        "CvsSealedDriver",
-        "Object",
-        "cvs_sealed_driver",
-        "each:",
-        "extends",
-        "for each",
-        "for-each",
-        "forEach",
-        "guard:",
-        "inherit",
-        "inheritance",
-        "iterate",
-        "iteration",
-        "loop",
-        "object",
-        "subclassing"
-      ],
-      "source": "// BT-3704: a sealed class with no class state whose `class sealed` methods are\n// direct-called in the caller's process (ADR 0129 Phase 0b), so a block passed\n// in runs at home.\n\nsealed Object subclass: CvsSealedDriver\n\n  class sealed each: aBlock => aBlock value\n\n  class sealed guard: aBlock => [aBlock value] on: Error do: [:e | nil]",
-      "explanation": "BT-3704: a sealed class with no class state whose `class sealed` methods are direct-called in the caller's process (ADR 0129 Phase 0b), so a block passed in runs at home."
-    },
-    {
-      "id": "stdlib-test-fixtures-cvs-sealed-pending",
-      "title": "CvsSealedPending",
-      "category": "stdlib-fixtures",
-      "tags": [
-        "CvsSealedPending",
+        "CvsSealedControl",
         "Object",
         "assign",
         "assignment",
         "boom",
         "bump",
-        "cvs_sealed_pending",
+        "cvs_sealed_control",
         "extends",
         "field",
         "for each",
@@ -23917,8 +23892,33 @@
         "subclassing",
         "transform"
       ],
-      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the sealed spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nsealed Object subclass: CvsSealedPending\n  classState: n = 0\n\n  class bump => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowTimes =>\n    self reset\n    3 timesRepeat: [self bump]\n    self.n\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  class rowDo =>\n    self reset\n    #(1, 2, 3) do: [:x | self bump]\n    self.n\n\n  class rowCollect =>\n    self reset\n    #(1, 2, 3) collect: [:x | self bump]\n    self.n\n\n  class rowInject =>\n    self reset\n    #(1, 2, 3)\n      inject: 0\n      into: [:a :x |\n        self bump\n        a + x\n      ]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowEnsureRaise =>\n    self reset\n    [\n      [\n        self bump\n        1 / 0\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowOwnNlrEnsure =>\n    self reset\n    [\n      [\n        self bump\n        ^7\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    99",
+      "source": "// BT-3704 (ADR 0130 Phase 1): rows of the sealed spelling that did not compile\n// before ADR 0130; enabled by BT-3713.\n\nsealed Object subclass: CvsSealedControl\n  classState: n = 0\n\n  class bump => self.n := self.n + 1\n\n  class n => self.n\n\n  class reset => self.n := 0\n\n  class boom =>\n    self bump\n    1 / 0\n\n  class rowTimes =>\n    self reset\n    3 timesRepeat: [self bump]\n    self.n\n\n  class rowLoopCondition =>\n    self reset\n    [self n < 3] whileTrue: [self bump]\n    self.n\n\n  class rowDo =>\n    self reset\n    #(1, 2, 3) do: [:x | self bump]\n    self.n\n\n  class rowCollect =>\n    self reset\n    #(1, 2, 3) collect: [:x | self bump]\n    self.n\n\n  class rowInject =>\n    self reset\n    #(1, 2, 3)\n      inject: 0\n      into: [:a :x |\n        self bump\n        a + x\n      ]\n    self.n\n\n  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.\n  class rowNonMatchingInnerEnsure =>\n    self reset\n    [\n      [\n        [\n          self bump\n          1 / 0\n        ] on: RuntimeError do: [:e | nil]\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowEnsureRaise =>\n    self reset\n    [\n      [\n        self bump\n        1 / 0\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    self.n\n\n  class rowOwnNlrEnsure =>\n    self reset\n    [\n      [\n        self bump\n        ^7\n      ] ensure: [self bump]\n    ] on: Error do: [:e | nil]\n    99",
       "explanation": "BT-3704 (ADR 0130 Phase 1): rows of the sealed spelling that did not compile before ADR 0130; enabled by BT-3713."
+    },
+    {
+      "id": "stdlib-test-fixtures-cvs-sealed-driver",
+      "title": "CvsSealedDriver",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "CvsSealedDriver",
+        "Object",
+        "cvs_sealed_driver",
+        "each:",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "guard:",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-3704: a sealed class with no class state whose `class sealed` methods are\n// direct-called in the caller's process (ADR 0129 Phase 0b), so a block passed\n// in runs at home.\n\nsealed Object subclass: CvsSealedDriver\n\n  class sealed each: aBlock => aBlock value\n\n  class sealed guard: aBlock => [aBlock value] on: Error do: [:e | nil]",
+      "explanation": "BT-3704: a sealed class with no class state whose `class sealed` methods are direct-called in the caller's process (ADR 0129 Phase 0b), so a block passed in runs at home."
     },
     {
       "id": "stdlib-test-fixtures-cycle-actor-a",

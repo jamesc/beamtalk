@@ -340,12 +340,9 @@ fn class_var_agreement_enabled_shapes() {
     property(corpus_shapes_from_env(Shapes::ENABLED));
 }
 
-/// BT-3718: with `local_touch` (an outer local mutated inside a `on:do:`,
-/// `ensure:` or `Result tryDo:` block) 27 of 48 programs fail, identically on
-/// the `adr-0130` branch before BT-3713: 13 do not compile
-/// (`ambiguous_catch_try_state`, an unbound `State`) and 14 answer wrong. Remove
-/// the `#[ignore]` (and add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3718 is
-/// fixed.
+/// BT-3718: `local_touch` (an outer local mutated inside a `on:do:`,
+/// `ensure:` or `Result tryDo:` block) fails today. Remove the `#[ignore]` (and
+/// add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3718 is fixed.
 #[test]
 #[ignore = "local_touch fails today (BT-3718); run via `just test-class-var-corpus-local-touch`"]
 fn class_var_agreement_local_touch() {
