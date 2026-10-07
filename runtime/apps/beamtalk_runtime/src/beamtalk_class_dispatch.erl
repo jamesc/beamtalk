@@ -287,9 +287,9 @@ compiled method that the walk honours: a class-side extension on the class
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
-Costs three `persistent_term` reads for the defining-class receiver
-(BT-3669: the per-class `beamtalk_class_shadow_flags` replace the former two
-ETS reads; BT-3676: the readiness flag replaces an `ets:whereis/1`); a
+Costs one `persistent_term` read for the defining-class receiver (BT-3700: a
+derived per-class flag in `beamtalk_class_shadow_flags` folds the extension flag,
+the runtime-fun flag and readiness; BT-3669/BT-3676 had three reads); a
 subclass receiver short-circuits on the first clause.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
@@ -298,10 +298,9 @@ class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
         true ->
             false;
         false ->
-            %% Extension registry not initialised yet (early bootstrap) declines:
-            %% the walk is always a correct answer. The shadow flags (BT-3669)
-            %% and their readiness flag (BT-3676) are persistent_term reads,
-            %% no ETS; BT-3690 folds the three reads into one inlined function.
+            %% Extension registry not initialised yet (early bootstrap), or a
+            %% shadow present, declines: the walk is always a correct answer.
+            %% One persistent_term read of the derived flag (BT-3700).
             beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName)
     end;
 class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
