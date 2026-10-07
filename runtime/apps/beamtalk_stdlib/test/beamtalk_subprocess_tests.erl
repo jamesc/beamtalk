@@ -422,16 +422,16 @@ validate_config_non_binary_dir_test() ->
 dir_sets_working_directory_test() ->
     case os:type() of
         {unix, _} ->
+            TmpDir = beamtalk_file:'tempDirectory'(),
             {ShExe, ShArgs} = shell_cmd(<<"pwd">>),
             {ok, Pid} = beamtalk_subprocess:start(#{
                 executable => ShExe,
                 args => ShArgs,
-                dir => <<"/tmp">>
+                dir => TmpDir
             }),
             Line = gen_server:call(Pid, {readLine, []}, 5000),
-            %% On some systems /tmp may resolve to /private/tmp (macOS)
             ?assertNotEqual(nil, Line),
-            ?assert(binary:match(Line, <<"/tmp">>) =/= nomatch),
+            ?assert(binary:match(Line, TmpDir) =/= nomatch),
             gen_server:stop(Pid);
         {win32, _} ->
             ok
@@ -440,18 +440,19 @@ dir_sets_working_directory_test() ->
 dir_with_env_sets_both_test() ->
     case os:type() of
         {unix, _} ->
+            TmpDir = beamtalk_file:'tempDirectory'(),
             {ShExe, ShArgs} = shell_cmd(<<"echo $BT_TEST_DIR; pwd">>),
             {ok, Pid} = beamtalk_subprocess:start(#{
                 executable => ShExe,
                 args => ShArgs,
                 env => #{<<"BT_TEST_DIR">> => <<"hello_dir">>},
-                dir => <<"/tmp">>
+                dir => TmpDir
             }),
             EnvLine = gen_server:call(Pid, {readLine, []}, 5000),
             ?assertEqual(<<"hello_dir">>, EnvLine),
             DirLine = gen_server:call(Pid, {readLine, []}, 5000),
             ?assertNotEqual(nil, DirLine),
-            ?assert(binary:match(DirLine, <<"/tmp">>) =/= nomatch),
+            ?assert(binary:match(DirLine, TmpDir) =/= nomatch),
             gen_server:stop(Pid);
         {win32, _} ->
             ok
