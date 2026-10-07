@@ -275,6 +275,12 @@ Update an existing class process with new metadata after redefinition.
 The hot-reload path of the ADR 0130 `class_var_abi` gate: a module whose
 `class_var_abi` differs from the running runtime's is refused with a structured
 `abi_mismatch` and the class keeps its current definition.
+
+The gate is atomic only for a caller that has not loaded the new code yet
+(a module's `-on_load` hook). It does **not** roll back: a caller such as
+`beamtalk_class_builder` or `beamtalk_bootstrap_stub` that has already loaded
+the new module code before calling this keeps that code loaded when the gate
+refuses, though the class process keeps its previous metadata.
 """.
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->

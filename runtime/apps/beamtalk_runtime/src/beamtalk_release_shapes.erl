@@ -134,29 +134,33 @@ extract_shapes(RuntimeLibDirs, EmitLibDirs) ->
             %% refusals the gate records while the modules activate and fail the
             %% extraction (so `beamtalk release` fails) instead of skipping the
             %% module's shape like any other activation failure.
-            Refusals = beamtalk_class_vars:abi_refusals_table(),
-            _ = ets:new(Refusals, [named_table, public, set]),
             try
-                {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
-                    EmitModules, #{}
-                ),
-                lists:foreach(
-                    fun({Module, Reason}) ->
-                        ?LOG_WARNING(
-                            "beamtalk_release_shapes: module failed to activate, skipping its shape",
-                            #{module => Module, reason => Reason, domain => [beamtalk, runtime]}
-                        )
-                    end,
-                    ActivationErrors
-                ),
-                case lists:sort(ets:tab2list(Refusals)) of
-                    [] ->
-                        {ok, build_shapes_map(EmitModules)};
-                    Refused ->
-                        {error, {abi_mismatch, [beamtalk_error:format(E) || {_M, E} <- Refused]}}
-                end
-            after
-                ets:delete(Refusals)
+                beamtalk_class_vars:collect_abi_refusals(fun() ->
+                    {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
+                        EmitModules, #{}
+                    ),
+                    lists:foreach(
+                        fun({Module, Reason}) ->
+                            ?LOG_WARNING(
+                                "beamtalk_release_shapes: module failed to activate, skipping its shape",
+                                #{
+                                    module => Module,
+                                    reason => Reason,
+                                    domain => [beamtalk, runtime]
+                                }
+                            )
+                        end,
+                        ActivationErrors
+                    )
+                end)
+            of
+                {_, []} ->
+                    {ok, build_shapes_map(EmitModules)};
+                {_, Refused} ->
+                    {error, {abi_mismatch, [beamtalk_error:format(E) || {_M, E} <- Refused]}}
+            catch
+                Class:Err ->
+                    {error, {extraction_failed, {Class, Err}}}
             end;
         {error, Reason} ->
             {error, {stdlib_start_failed, Reason}}

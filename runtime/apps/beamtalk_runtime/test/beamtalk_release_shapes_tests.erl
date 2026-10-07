@@ -34,6 +34,21 @@ extract_shapes_finds_both_fixture_classes_test() ->
     ?assert(maps:is_key(<<"ReleaseShapesRoot">>, Shapes)),
     ?assert(maps:is_key(<<"ReleaseShapesLeaf">>, Shapes)).
 
+extract_shapes_returns_error_when_a_collection_is_in_progress_test() ->
+    %% A leftover collector must surface as {error, _}, not a badarg crash,
+    %% and must not be consumed or deleted by the failing call.
+    Table = ets:new(beamtalk_abi_refusals, [named_table, public, set]),
+    try
+        ?assertMatch(
+            {error, {extraction_failed, {error, abi_collection_in_progress}}},
+            beamtalk_release_shapes:extract_shapes([], [fixtures_dir()])
+        ),
+        ?assertNotEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
+        ?assertEqual([], ets:tab2list(Table))
+    after
+        ets:delete(Table)
+    end.
+
 extract_shapes_root_entry_has_default_version_and_own_field_test() ->
     Dir = fixtures_dir(),
     {ok, Shapes} = beamtalk_release_shapes:extract_shapes([], [Dir]),
