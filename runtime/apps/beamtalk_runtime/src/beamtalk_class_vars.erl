@@ -87,7 +87,7 @@ receiver is an internal error.
     with_snapshot/2,
     abi/0,
     check_class_info_abi/2,
-    abi_refusals_table/0
+    collect_abi_refusals/1
 ]).
 
 -export_type([key/0, snapshot/0, class_self/0]).
@@ -106,6 +106,10 @@ receiver is an internal error.
 The process-dictionary key holding `ClassName`'s variables: the key shape
 applied to the class's metaclass tag, the same key an access derives from
 `ClassSelf` (`self_key/1`).
+
+Not for hot paths: it derives the tag through
+`beamtalk_class_registry:class_object_tag/1` (`list_to_atom`). Callers that
+already hold the metaclass tag must use `key_for_tag/1`.
 """.
 -spec key(atom()) -> key().
 key(nil) ->
@@ -444,15 +448,38 @@ into every module's `__beamtalk_meta/0`, so the two cannot disagree.
 abi() -> ?BT_CLASS_VAR_ABI.
 
 -doc """
-The name of the ETS table a caller may create to *collect* ABI refusals
-(`check_class_info_abi/2` inserts `{Module, #beamtalk_error{}}` rows into it
-when it exists). `beamtalk_release_shapes:extract_shapes/2` uses it to turn a
-refused module into a failed release preflight: a refusal happens inside a
-module's `-on_load` hook, whose failure reason the code server does not
-return.
+Run `Fun` while collecting the ABI refusals `check_class_info_abi/2` records,
+returning `{Result, Refusals}` (`Refusals :: [{Module, #beamtalk_error{}}]`,
+sorted). `beamtalk_release_shapes:extract_shapes/2` uses it to turn a refused
+module into a failed release preflight: a refusal happens inside a module's
+`-on_load` hook, whose failure reason the code server does not return.
+
+The collector is a per-call unnamed ETS table published through
+`persistent_term` (the `-on_load` hook runs in the code server, not the
+caller, so it cannot be passed by argument). Creation happens inside the
+`try`, so a second concurrent collection raises `{abi_collection_in_progress}`
+(an `error` exit the caller maps to `{error, _}`) rather than blaming one
+collection's refusals on another; the table is always released afterwards.
 """.
--spec abi_refusals_table() -> atom().
-abi_refusals_table() -> beamtalk_abi_refusals.
+-spec collect_abi_refusals(fun(() -> Result)) ->
+    {Result, [{atom() | undefined, #beamtalk_error{}}]}
+when
+    Result :: term().
+collect_abi_refusals(Fun) ->
+    Key = {?MODULE, abi_refusals},
+    case persistent_term:get(Key, undefined) of
+        undefined -> ok;
+        _ -> erlang:error(abi_collection_in_progress)
+    end,
+    Table = ets:new(beamtalk_abi_refusals, [public, set]),
+    persistent_term:put(Key, Table),
+    try
+        Result = Fun(),
+        {Result, lists:sort(ets:tab2list(Table))}
+    after
+        persistent_term:erase(Key),
+        ets:delete(Table)
+    end.
 
 -doc """
 Refuse a compiled Beamtalk class module whose `class_var_abi` is not exactly
@@ -483,23 +510,30 @@ check_class_info_abi(ClassName, ClassInfo) ->
     case compiled_meta(Module, maps:get(meta, ClassInfo, undefined)) of
         none ->
             ok;
+        {invalid, Why} ->
+            %% A crashing or non-map `__beamtalk_meta/0` is a different failure
+            %% from "compiled before ADR 0130": report it as such.
+            refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, {invalid, Why}));
         {ok, Meta} ->
             case maps:find(class_var_abi, Meta) of
                 {ok, ?BT_CLASS_VAR_ABI} ->
                     ok;
                 Found ->
-                    Error = abi_mismatch_error(ClassName, Module, Found),
-                    ?LOG_ERROR(
-                        "Refused ~p: ~ts",
-                        [Module, Error#beamtalk_error.message],
-                        #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
-                    ),
-                    record_abi_refusal(Module, Error),
-                    {error, Error}
+                    refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, Found))
             end
     end.
 
--spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | none.
+-spec refuse_abi(atom(), atom() | undefined, #beamtalk_error{}) -> {error, #beamtalk_error{}}.
+refuse_abi(ClassName, Module, Error) ->
+    ?LOG_ERROR(
+        "Refused ~p: ~ts",
+        [Module, Error#beamtalk_error.message],
+        #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
+    ),
+    record_abi_refusal(Module, Error),
+    {error, Error}.
+
+-spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | {invalid, term()} | none.
 compiled_meta(_Module, #{class := _} = Meta) ->
     {ok, Meta};
 compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
@@ -507,9 +541,9 @@ compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
         true ->
             try Module:'__beamtalk_meta'() of
                 Meta when is_map(Meta) -> {ok, Meta};
-                _ -> {ok, #{}}
+                Other -> {invalid, {not_a_map, Other}}
             catch
-                _:_ -> {ok, #{}}
+                Class:Reason -> {invalid, {crashed, Class, Reason}}
             end;
         false ->
             none
@@ -517,12 +551,22 @@ compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
 compiled_meta(_, _) ->
     none.
 
--spec abi_mismatch_error(atom(), atom() | undefined, {ok, term()} | error) -> #beamtalk_error{}.
+-spec abi_mismatch_error(atom(), atom() | undefined, {ok, term()} | error | {invalid, term()}) ->
+    #beamtalk_error{}.
 abi_mismatch_error(ClassName, Module, Found) ->
     {Reported, Declared} =
         case Found of
-            {ok, Value} -> {Value, io_lib:format("class_var_abi ~p", [Value])};
-            error -> {missing, "no class_var_abi entry (compiled before ADR 0130)"}
+            {ok, Value} ->
+                {Value, io_lib:format("class_var_abi ~p", [Value])};
+            error ->
+                {missing, "no class_var_abi entry (compiled before ADR 0130)"};
+            {invalid, Why} ->
+                {invalid_meta,
+                    io_lib:format(
+                        "an invalid __beamtalk_meta/0 (~0p), so its class_var_abi is unknown", [
+                            Why
+                        ]
+                    )}
         end,
     Message = iolist_to_binary(
         io_lib:format(
@@ -547,11 +591,10 @@ abi_mismatch_error(ClassName, Module, Found) ->
 
 -spec record_abi_refusal(atom() | undefined, #beamtalk_error{}) -> ok.
 record_abi_refusal(Module, Error) ->
-    Table = abi_refusals_table(),
-    case ets:whereis(Table) of
+    case persistent_term:get({?MODULE, abi_refusals}, undefined) of
         undefined ->
             ok;
-        _ ->
+        Table ->
             try
                 ets:insert(Table, {Module, Error}),
                 ok

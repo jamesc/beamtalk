@@ -226,6 +226,94 @@ refusal_error_test_() ->
     end}.
 
 %%====================================================================
+%% Invalid __beamtalk_meta/0 and refusal collection (BT-3726)
+%%====================================================================
+
+invalid_meta_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"a crashing __beamtalk_meta/0 is refused as invalid_meta, not 'compiled before'",
+                fun() ->
+                    Mod = 'bt3726_crashing_meta',
+                    Bin = compile_source(
+                        "-module('bt3726_crashing_meta').\n"
+                        "-export(['__beamtalk_meta'/0]).\n"
+                        "'__beamtalk_meta'() -> erlang:error(boom).\n"
+                    ),
+                    {module, Mod} = load(Mod, Bin),
+                    {error, Error} = beamtalk_class_vars:check_class_info_abi(
+                        'BT3726Crash', #{module => Mod}
+                    ),
+                    ?assertEqual(abi_mismatch, Error#beamtalk_error.kind),
+                    ?assertMatch(
+                        #{found := invalid_meta}, Error#beamtalk_error.details
+                    ),
+                    ?assertNotEqual(
+                        nomatch,
+                        binary:match(Error#beamtalk_error.message, <<"invalid __beamtalk_meta/0">>)
+                    ),
+                    ?assertEqual(
+                        nomatch,
+                        binary:match(Error#beamtalk_error.message, <<"compiled before">>)
+                    )
+                end},
+            {"a non-map __beamtalk_meta/0 is refused as invalid_meta", fun() ->
+                Mod = 'bt3726_nonmap_meta',
+                Bin = compile_source(
+                    "-module('bt3726_nonmap_meta').\n"
+                    "-export(['__beamtalk_meta'/0]).\n"
+                    "'__beamtalk_meta'() -> not_a_map.\n"
+                ),
+                {module, Mod} = load(Mod, Bin),
+                ?assertMatch(
+                    {error, #beamtalk_error{details = #{found := invalid_meta}}},
+                    beamtalk_class_vars:check_class_info_abi('BT3726NonMap', #{module => Mod})
+                )
+            end}
+        ]
+    end}.
+
+collect_abi_refusals_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"collects refusals and releases the collector", fun() ->
+                Meta = #{class => 'BT3726Coll', superclass => 'Object'},
+                {Result, Refusals} = beamtalk_class_vars:collect_abi_refusals(fun() ->
+                    _ = beamtalk_class_vars:check_class_info_abi(
+                        'BT3726Coll', #{module => bt3726_coll, meta => Meta}
+                    ),
+                    done
+                end),
+                ?assertEqual(done, Result),
+                ?assertMatch([{bt3726_coll, #beamtalk_error{kind = abi_mismatch}}], Refusals),
+                ?assertEqual(
+                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
+                )
+            end},
+            {"a leftover/concurrent collection raises instead of blaming it", fun() ->
+                {ok, _} = beamtalk_class_vars:collect_abi_refusals(fun() ->
+                    ?assertError(
+                        abi_collection_in_progress,
+                        beamtalk_class_vars:collect_abi_refusals(fun() -> ok end)
+                    ),
+                    {ok, ok}
+                end),
+                ?assertEqual(
+                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
+                )
+            end},
+            {"the collector is released when Fun crashes", fun() ->
+                ?assertError(
+                    boom, beamtalk_class_vars:collect_abi_refusals(fun() -> erlang:error(boom) end)
+                ),
+                ?assertEqual(
+                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
+                )
+            end}
+        ]
+    end}.
+
+%%====================================================================
 %% Modules outside the gate: no __beamtalk_meta/0
 %%====================================================================
 
