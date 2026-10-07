@@ -216,6 +216,59 @@ fn late_bound_self_send_that_a_subclass_may_override_warns() {
     assert_eq!(d.len(), 1, "{d:?}");
 }
 
+const LATE_BOUND: &str = "Object subclass: Base
+  classState: n = 0
+
+  class helper => 7
+
+  class sealed helperSealed => 7
+
+  class sealed viaHelper => self helper
+
+  class sealed viaSealed => self helperSealed
+
+  class sealed viaNamed => Base helper
+
+  class sealed deep => self viaSealedChain
+
+  class sealed viaSealedChain => self viaHelper
+
+Base subclass: Leaf
+
+  class helper => self.n := self.n + 1
+
+  class a => Driver each: [CALL]
+
+";
+
+fn late_bound(call: &str) -> Vec<Diagnostic> {
+    abroad(&format!("{HEADER}{}", LATE_BOUND.replace("CALL", call)))
+}
+
+#[test]
+fn inherited_sealed_method_with_a_late_bound_self_send_warns() {
+    // `Leaf helper` writes; `viaHelper` is `class sealed` but its `self helper`
+    // late-binds to `Leaf` (BT-3717, ADR 0110 amendment point 4).
+    assert_eq!(late_bound("Leaf viaHelper").len(), 1);
+    assert_eq!(late_bound("self viaHelper").len(), 1);
+}
+
+#[test]
+fn inherited_sealed_method_reaching_an_unsealed_self_send_transitively_warns() {
+    assert_eq!(late_bound("Leaf deep").len(), 1);
+}
+
+#[test]
+fn sealed_method_with_only_sealed_self_sends_does_not_warn() {
+    assert!(late_bound("self viaSealed").is_empty());
+}
+
+#[test]
+fn sealed_method_sending_through_the_class_name_does_not_warn() {
+    // `Base helper` binds `Base`'s method directly: no late binding.
+    assert!(late_bound("Leaf viaNamed").is_empty());
+}
+
 #[test]
 fn self_send_in_a_sealed_class_is_proven_pure() {
     let d = abroad(&format!(

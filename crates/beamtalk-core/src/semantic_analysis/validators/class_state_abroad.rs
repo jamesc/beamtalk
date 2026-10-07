@@ -43,20 +43,13 @@
 //! sits in the callee), a block handed to a `Future`, and a *writing* block
 //! passed to an actor (`a each: [self bump]`), which runs in the actor's
 //! process and raises, but rule (b) only covers class-side receivers.
-//!
-//! Deliberately deferred (a known false negative, tracked by its own issue):
-//!
-//! - **BT-3717.** A `class sealed` method of an *open* class whose body makes a late-bound
-//!   `self` send to a non-sealed selector is judged by its defining class's
-//!   body alone, so a subclass override of that selector that writes a class
-//!   variable is missed (the rule the removed BT-3688 advisory documented).
 
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, cascade_shared_receiver, class_var_reads, compute_class_var_mutating_selectors,
-    escaping_blocks,
+    EscapeShape, analyze_method_body, cascade_shared_receiver, class_var_reads,
+    compute_class_var_mutating_selectors, escaping_blocks,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::{HashMap, HashSet};
@@ -423,6 +416,16 @@ impl ClassCtx<'_> {
         if !via_class_reference && !class_sealed && !method.is_sealed {
             return true;
         }
+        // A `class sealed` method of an open class still late-binds its `self`
+        // sends to the receiving class, which may override a non-sealed
+        // selector to write (BT-3717). Reached through `ClassName sel` it is
+        // exact only when the method is defined by that very class.
+        if method.is_sealed
+            && !(via_class_reference && method.defined_in == self.class_name)
+            && self.late_binds_unsealed_self_send(method.defined_in.as_str(), selector)
+        {
+            return true;
+        }
         match self.module_classes.get(method.defined_in.as_str()) {
             Some(defining)
                 if defining
@@ -435,6 +438,58 @@ impl ClassCtx<'_> {
             }
             _ => true,
         }
+    }
+
+    /// Whether the `class sealed` method `selector` defined by the *open* class
+    /// `defining` (directly, or through the sealed methods it self-sends)
+    /// makes a `self` send to a selector that is not sealed. Such a send binds
+    /// late, to a subclass override this body cannot see (BT-3717). A selector
+    /// that does not resolve, or resolves to a stdlib method, is not guessed at.
+    fn late_binds_unsealed_self_send(&self, defining: &str, selector: &str) -> bool {
+        let mut visited = HashSet::new();
+        self.late_binds_from(defining, selector, &mut visited)
+    }
+
+    fn late_binds_from(
+        &self,
+        defining: &str,
+        selector: &str,
+        visited: &mut HashSet<String>,
+    ) -> bool {
+        // A sealed class has no subclass to override anything.
+        if self
+            .hierarchy
+            .get_class(defining)
+            .is_none_or(|c| c.is_sealed)
+        {
+            return false;
+        }
+        if !visited.insert(selector.to_string()) {
+            return false;
+        }
+        let Some(class) = self.module_classes.get(defining).map(|m| m.class) else {
+            return false;
+        };
+        let Some(def) = class
+            .class_methods
+            .iter()
+            .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+        else {
+            return false;
+        };
+        let sends = analyze_method_body(&def.parameters, &def.body).self_send_selectors;
+        sends.iter().any(|sent| {
+            let Some(target) = self.hierarchy.find_class_method(defining, sent) else {
+                return false;
+            };
+            if ClassHierarchy::is_builtin_class(target.defined_in.as_str()) {
+                return false;
+            }
+            if !target.is_sealed {
+                return true;
+            }
+            self.late_binds_from(target.defined_in.as_str(), sent, visited)
+        })
     }
 }
 
