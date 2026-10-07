@@ -82,7 +82,7 @@ pub(super) fn beamtalk_error_doc(
 #[cfg(test)]
 mod tests {
     use super::beamtalk_error_doc;
-    use beamtalk_cerl_doc::{leaf, Document};
+    use beamtalk_cerl_doc::{Document, leaf};
 
     #[test]
     fn inline_chain_renders_three_let_bindings() {
@@ -152,7 +152,10 @@ mod tests {
             Document::Str(" "),
         );
         let rendered = doc.to_pretty_string();
-        assert!(rendered.contains("let _Error0 = call"), "binding: {rendered}");
+        assert!(
+            rendered.contains("let _Error0 = call"),
+            "binding: {rendered}"
+        );
         assert!(
             rendered.contains("with_selector'(Error0,"),
             "ref in with_selector: {rendered}"
