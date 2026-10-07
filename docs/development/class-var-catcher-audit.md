@@ -190,7 +190,7 @@ Read `beamtalk_class_vars:protect/1`, `snapshot/0`, `restore/1` and ADR 0130 §4
 | beamtalk_dispatch.erl:595 | invoke_extension/6 | extension fun in-process | not-applicable-reraises | -> {error,..}; NLR and script exit re-raised, callers re-raise |
 | beamtalk_dispatch.erl:667 | check_extension/2 | beamtalk_extensions:lookup (ETS) | not-applicable-no-block | ETS only |
 | beamtalk_erlang_proxy.erl:243 | apply_with_coercion/5 | erlang:apply(Module,Fun,Args): FFI call; Args may hold Beamtalk blocks run in-process | converted (BT-3728) | every class re-raises except badarg+coercible binaries; the pre-call snapshot is now restored before the charlist retry (maybe_retry_badarg/7) |
-| beamtalk_erlang_proxy.erl:278 | maybe_retry_badarg/6 | retry erlang:apply with coerced args | not-applicable-reraises | classify_ffi_exception always raises (badarg terminal) |
+| beamtalk_erlang_proxy.erl:290 | maybe_retry_badarg/7 | retry erlang:apply with coerced args (after restoring the pre-call snapshot) | not-applicable-reraises | classify_ffi_exception always raises (badarg terminal) |
 | beamtalk_erlang_proxy.erl:419 | selector_to_function/1 | list_to_existing_atom | not-applicable-no-block | BIF |
 | beamtalk_erlang_proxy.erl:437 | get_exports/1 | Module:module_info(exports) | not-applicable-no-block | BIF |
 | beamtalk_error.erl:181 | format_safe/1 | format/1 | not-applicable-no-block | pure formatting |
