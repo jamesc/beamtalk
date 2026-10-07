@@ -32,7 +32,7 @@
 //! this one does not.
 //!
 //! The properties draw [`Shapes::ENABLED`] (every shape except `local_touch`,
-//! whose failures are BT-3718 and show only when the program is executed).
+//! whose failures are BT-3738 and show only when the program is executed).
 //! `local_touch` has its own property; see `local_touch_shapes_pass_verified_codegen`.
 //!
 //! Only the open and sealed spellings are checked here: the override
@@ -238,14 +238,14 @@ proptest! {
     #![proptest_config(proptest_config_default())]
 
     /// The `local_touch` shape (an outer local mutated inside a protected
-    /// block) together with every other shape. BT-3718 tracks the
+    /// block) together with every other shape. BT-3738 tracks the
     /// `local_touch` failures. They show only when the program is executed
     /// (`cli_class_var_agreement.rs`): in-process codegen passes (0 of 2000
     /// programs measured with `measure_failure_rate` when BT-3713 landed), so
     /// this property is `#[ignore]`d for symmetry with the execution one and
     /// to keep the enabled set the same in both.
     #[test]
-    #[ignore = "local_touch is excluded from the enabled shapes until BT-3718 is fixed"]
+    #[ignore = "local_touch is excluded from the enabled shapes until BT-3738 is fixed"]
     fn local_touch_shapes_pass_verified_codegen(
         (seed, size, program) in arb_class_program(Shapes::all())
     ) {

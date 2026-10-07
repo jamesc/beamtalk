@@ -426,6 +426,54 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// BT-3718: lowers a `do:` nested in a loop body, in value-type / class-method
+    /// context, whose body writes outer locals, into a loop body that threads its
+    /// locals through a `StateAcc` map.
+    ///
+    /// The nested `do:` has no `{Result, StateAcc}` tuple to unpack: its
+    /// value-type form is an open let chain that rebinds the locals it writes
+    /// ([`Self::generate_value_type_do_open`]) and answers `nil`. So it is emitted
+    /// open, and each local it wrote is then written back into THIS body's
+    /// `StateAcc` through a real `Put` `Bind`, exactly as an assignment to that
+    /// local in this body would be. Whatever follows (the next statement, the
+    /// loop's own epilogue) reads the new `StateAcc` version. Returns `false`,
+    /// emitting nothing, when `expr` is not such a `do:`.
+    fn lower_nested_vt_do(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<bool> {
+        if !self.is_do_with_vt_local_threading(expr) {
+            return Ok(false);
+        }
+        let threaded = self
+            .get_control_flow_threaded_vars(expr)
+            .unwrap_or_default();
+        let open = self.generate_value_type_do_open(expr)?;
+        stmts.push(ThreadedStmt::Statement(open, span));
+        for var in &threaded {
+            let core_var = self
+                .lookup_var(var)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var));
+            let source_version = self.state_version();
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Put {
+                    field: Self::local_state_key(var),
+                    value: ValueRef::Var(core_var),
+                },
+                span,
+            });
+        }
+        Ok(true)
+    }
+
     /// `Bind`-producing lowering of the generic (non-assignment) fallback —
     /// the direct counterpart of `lower_non_assign_expr`'s `BodyKind::Letrec`
     /// arm (ADR 0111 Addendum 15). Every non-`is_last`/non-tuple-producing
@@ -473,6 +521,9 @@ impl CoreErlangGenerator {
                     span,
                 ));
             }
+        } else if !hoisted_anything && self.lower_nested_vt_do(expr, frame, span, stmts)? {
+            // A nested value-type `do:` (BT-3718): written back into this body's
+            // `StateAcc`; see `lower_nested_vt_do`.
         } else if is_last && !has_direct_field_assignments {
             let produces_tuple = !hoisted_anything
                 && (self.get_control_flow_threaded_vars(expr).is_some()
@@ -781,22 +832,40 @@ impl CoreErlangGenerator {
                 // `generate_expression` below (which may push/pop scopes) so
                 // the lookup reflects this statement's own captured set.
                 let inner_threaded_vars = self.get_control_flow_threaded_vars(expr);
-                let doc = self.generate_expression(expr)?;
-                let new_state = self.next_state_var();
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        doc,
-                        " in let ",
-                        leaf::var(new_state.clone()),
-                        " = call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var.clone()),
-                        ") in ",
-                    ],
-                    span,
-                ));
+                let new_state;
+                if self.lower_nested_vt_do(expr, frame, span, &mut stmts)? {
+                    // BT-3718: a nested value-type `do:` has no tuple to unpack
+                    // (see `lower_nested_vt_do`); give the tail below the
+                    // `{nil, StateAcc}` it reads.
+                    new_state = self.current_state_var();
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = {'nil', ",
+                            leaf::var(new_state.clone()),
+                            "} in ",
+                        ],
+                        span,
+                    ));
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    new_state = self.next_state_var();
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = ",
+                            doc,
+                            " in let ",
+                            leaf::var(new_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            leaf::var(tuple_var.clone()),
+                            ") in ",
+                        ],
+                        span,
+                    ));
+                }
                 // a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
                 // statement here only bumps the StateAcc *version pointer* above —
                 // it does NOT rebind the specific local vars it threads. Both

@@ -394,6 +394,8 @@ impl CoreErlangGenerator {
             // minted from the module counter: the snapshot binding then
             // renumbers none of the module's other temporaries.
             snapshot_var: Self::derived_snapshot_var(&ex_class_var),
+            // Derived the same way, for the same reason: no module-counter mint.
+            filter_fallback_var: [ex_class_var.as_str(), "NoMatch"].concat(),
             ex_class_var,
         }
     }
@@ -405,8 +407,13 @@ impl CoreErlangGenerator {
     /// [`threaded_ir::verify`]d (a violated obligation is a
     /// `VerifyError::CatchWithoutClassVarRestore`) and rendered.
     ///
-    /// Produces an open-ended fragment; caller appends the handler body, the
-    /// `<'false'>` re-raise arm, and the closing `end end`. The node orders the
+    /// Produces the complete clause, `handler` being the body of the class
+    /// filter's `'true'` arm (the handler application). The node owns the filter
+    /// `case` end to end, so its `'false'` re-raise arm and the exhaustive
+    /// wildcard clause that keeps `erlc` from rejecting an `on:do:` nested in
+    /// another protected region (`ambiguous_catch_try_state`) are present by
+    /// construction, and `verify()` rejects a node without them
+    /// (`VerifyError::CatchFilterNotClosed`). The node orders the
     /// clauses: NLR throws (`{'$bt_nlr', ...}`, both the actor-shaped 4-tuple
     /// and the 3-tuple) bypass the catch untouched so the enclosing method's NLR
     /// handler can intercept them and a `^` keeps the writes made before it;
@@ -422,6 +429,7 @@ impl CoreErlangGenerator {
         &mut self,
         vars: OnDoCatchVars,
         span: beamtalk_core::source_analysis::Span,
+        handler: Document<'static>,
     ) -> Document<'static> {
         let snapshot = vars.snapshot_var.clone();
         let node = ThreadedStmt::OnDoCatch {
@@ -434,6 +442,8 @@ impl CoreErlangGenerator {
                         CatchStep::ClassVarRestore { snapshot },
                         CatchStep::WrapException,
                         CatchStep::ClassFilter,
+                        CatchStep::FilterHandler(handler),
+                        CatchStep::FilterMiss,
                     ],
                 },
             ],
@@ -538,9 +548,6 @@ impl CoreErlangGenerator {
         let handler_var = self.fresh_temp_var("HandlerFun");
         let result_var = self.fresh_temp_var("Result");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
-        let type_var = catch_vars.type_var.clone();
-        let error_var = catch_vars.error_var.clone();
-        let stack_var = catch_vars.stack_var.clone();
         let ex_obj_var = catch_vars.ex_obj_var.clone();
         let snapshot_var = catch_vars.snapshot_var.clone();
 
@@ -551,7 +558,7 @@ impl CoreErlangGenerator {
 
         let handler_apply =
             Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
-        let catch_clause = self.on_do_catch_clause(catch_vars, receiver.span());
+        let catch_clause = self.on_do_catch_clause(catch_vars, receiver.span(), handler_apply);
 
         Ok(docvec![
             "let ",
@@ -577,12 +584,6 @@ impl CoreErlangGenerator {
             leaf::var(result_var),
             " ",
             catch_clause,
-            handler_apply,
-            " ",
-            "<'false'> when 'true' -> ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
-            " end ",
-            "end",
         ])
     }
 
@@ -656,9 +657,6 @@ impl CoreErlangGenerator {
         let ex_class_var = self.fresh_temp_var("ExClass");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
-        let type_var = catch_vars.type_var.clone();
-        let error_var = catch_vars.error_var.clone();
-        let stack_var = catch_vars.stack_var.clone();
         let ex_obj_var = catch_vars.ex_obj_var.clone();
         let snapshot_var = catch_vars.snapshot_var.clone();
 
@@ -726,14 +724,14 @@ impl CoreErlangGenerator {
             " -> ",
             leaf::var(state_after_try),
             " ",
-            self.on_do_catch_clause(catch_vars, receiver_block.span),
         ]);
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
+        let mut handler_docs: Vec<Document<'static>> = Vec::new();
         self.push_scope();
         if let Some(param) = handler_block.parameters.first() {
             let param_var = Self::to_core_erlang_var(&param.name);
             self.bind_var(&param.name, &param_var);
-            docs.push(docvec![
+            handler_docs.push(docvec![
                 "let ",
                 leaf::var(param_var),
                 " = ",
@@ -745,15 +743,23 @@ impl CoreErlangGenerator {
         // Generate handler body with state threading (from original StateAcc)
         self.set_self_version(outer_self);
         let (handler_result_var, handler_final, handler_slot) =
-            self.push_exception_arm(&mut docs, handler_block, &families, outer_version)?;
+            self.push_exception_arm(&mut handler_docs, handler_block, &families, outer_version)?;
         // Return {Result, State[, Family]} from handler
-        docs.push(self.close_exception_result_tuple(
+        handler_docs.push(self.close_exception_result_tuple(
             handler_result_var,
             handler_final,
             &families,
             &handler_slot,
         ));
         self.pop_scope();
+        // The catch clause is one node that owns the class filter end to end:
+        // NLR pass-through, restore, wrap, filter, this handler, the `'false'`
+        // re-raise and the exhaustive fallback.
+        docs.push(self.on_do_catch_clause(
+            catch_vars,
+            receiver_block.span,
+            Document::Vec(handler_docs),
+        ));
 
         // ADR 0111 Addendum 5: the try body and the handler body
         // are sibling with_branch_context frames (only one of them ever
@@ -767,12 +773,6 @@ impl CoreErlangGenerator {
         // verification now happens where the IR is actually built (inside
         // `generate_exception_body_with_threading_inner`).
 
-        // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
-        docs.push(docvec![
-            "<'false'> when 'true' -> ",
-            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var),
-            " end end",
-        ]);
         // ADR 0122 / BT-3506: an arm's `let <bare> = … in ` shadow and its
         // own version chain live entirely inside that arm's Core Erlang
         // scope; the construct's single legitimate advance of the method's
@@ -964,6 +964,12 @@ impl CoreErlangGenerator {
             leaf::var(state_after_try.clone()),
             ") in ",
         ]);
+        // The cleanup runs after the try body, so a local the body wrote must be
+        // read back from the `StateAcc` the body returned: the cleanup's own
+        // reads of it are otherwise the pre-`try` binding, because a binding made
+        // inside the `try` is not in scope here (BT-3718).
+        let threaded = self.conditional_threaded_locals(&[receiver_block, cleanup_block]);
+        docs.extend(self.rebind_threaded_vars_from_state(&threaded, "StateAcc"));
 
         // On the SUCCESS path the cleanup runs after the try body, so
         // it must see the try body's mutation — but an Erlang binding made
@@ -1064,9 +1070,6 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let result_var = self.fresh_temp_var("Result");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_param);
-        let type_var = catch_vars.type_var.clone();
-        let error_var = catch_vars.error_var.clone();
-        let stack_var = catch_vars.stack_var.clone();
         let ex_obj_var = catch_vars.ex_obj_var.clone();
         let snapshot_var = catch_vars.snapshot_var.clone();
 
@@ -1095,8 +1098,11 @@ impl CoreErlangGenerator {
         ];
 
         // No source span: this is the generically-dispatched `onDo` body.
-        let catch_preamble =
-            self.on_do_catch_clause(catch_vars, beamtalk_core::source_analysis::Span::default());
+        let catch_clause = self.on_do_catch_clause(
+            catch_vars,
+            beamtalk_core::source_analysis::Span::default(),
+            handler_dispatch,
+        );
 
         docvec![
             Self::class_var_snapshot_let_doc(&snapshot_var),
@@ -1107,11 +1113,7 @@ impl CoreErlangGenerator {
             " -> ",
             leaf::var(result_var),
             " ",
-            catch_preamble,
-            handler_dispatch,
-            " <'false'> when 'true' -> ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
-            " end end",
+            catch_clause,
         ]
     }
 

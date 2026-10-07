@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3718: outer locals mutated inside protected blocks of class methods, and a
+// `do:` nested in a loop body. See the fixture for what each method does; the
+// answers below follow from the final value of the local.
+
+TestCase subclass: ClassMethodProtectedLocalsTest
+
+  testTryDoWritesLocal =>
+    self assert: ClassMethodProtectedLocals tryDoWritesLocal equals: 51
+
+  testTryDoAnswersTheErrorOnRaise =>
+    self assert: ClassMethodProtectedLocals tryDoAnswersTheErrorOnRaise equals: 7
+
+  testEnsureCleanupSeesTheBodysWrite =>
+    self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11
+
+  testNestedEnsureCleanupsSeeEachOther =>
+    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 32
+
+  testOnDoNestedInATryBody =>
+    self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2
+
+  testPureOnDoNestedInAPureOnDo =>
+    self assert: ClassMethodProtectedLocals pureOnDoNestedInAPureOnDo equals: 2
+
+  testOnDoHandlerSeesTheValueBeforeTheTry =>
+    self assert: ClassMethodProtectedLocals onDoHandlerSeesTheValueBeforeTheTry equals: 10
+
+  testNestedDoWritesTheLoopsLocal =>
+    self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15
+
+  testNestedDoInACountedLoop =>
+    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153
