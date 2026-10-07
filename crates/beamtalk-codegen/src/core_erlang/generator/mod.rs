@@ -158,6 +158,13 @@ pub struct CoreErlangGenerator {
     /// every class-variable read's miss path lowers to the 3-arity
     /// captured-fallback helper with this variable.
     pub(in crate::core_erlang) class_var_capture: Option<String>,
+    /// BT-3719: the per-method class-variable key binding. While a
+    /// class-method body is being lowered (`class_method_body_doc`) the `CVKey`
+    /// variable is minted lazily at the first inlined class-variable access and
+    /// bound once around the body, so every access reuses it instead of
+    /// rebuilding `{'$bt_class_vars', element(2, ClassSelf)}`. Outside a
+    /// class-method body an access inlines the key.
+    pub(in crate::core_erlang) class_var_key_scope: super::class_var_keys::KeyScope,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Source identity of each provision-bearing protocol (ADR 0127 §3);
@@ -379,6 +386,7 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             class_var_capture: None,
+            class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
             primitive_bindings: PrimitiveBindingTable::new(),

@@ -149,10 +149,9 @@ fn class_var_read_is_inlined_with_a_helper_fallback() {
     let code = codegen(src);
     let peek = function_text(&code, "'class_peek'/1 = fun");
     assert!(
-        peek.contains(
-            "call 'erlang':'get'({'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)})"
-        ),
-        "the key shape comes from the class_var_keys leaf. Got:\n{peek}"
+        peek.contains("let _CVKey3 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in")
+            && peek.contains("call 'erlang':'get'(_CVKey3)"),
+        "the key shape comes from the class_var_keys leaf, bound once. Got:\n{peek}"
     );
     assert!(
         peek.contains("call 'maps':'find'('n', ")
@@ -162,6 +161,37 @@ fn class_var_read_is_inlined_with_a_helper_fallback() {
     assert!(
         !peek.contains("class_name_from_tag"),
         "the hot path never derives the class name. Got:\n{peek}"
+    );
+}
+
+/// BT-3719: the class key is built once per method body, however many reads and
+/// writes the method makes (including inside a loop body and a block).
+#[test]
+fn class_var_key_is_bound_once_per_method() {
+    let src = concat!(
+        "Object subclass: Counter\n",
+        "  classState: n = 0\n\n",
+        "  class churn: k =>\n",
+        "    1 to: k do: [:i | self.n := self.n + i]\n",
+        "    self.n := self.n * 2\n",
+        "    self.n\n\n",
+        "  class other => 1\n",
+    );
+    let code = codegen(src);
+    let churn = function_text(&code, "'class_churn:'/2 = fun");
+    assert_eq!(
+        churn.matches("{'$bt_class_vars', ").count(),
+        1,
+        "one key tuple for every access. Got:\n{churn}"
+    );
+    assert!(
+        churn.matches("call 'erlang':'get'(_CVKey").count() >= 3,
+        "{churn}"
+    );
+    let other = function_text(&code, "'class_other'/1 = fun");
+    assert!(
+        !other.contains("_CVKey"),
+        "a method with no class-variable access binds no key. Got:\n{other}"
     );
 }
 
@@ -215,7 +245,7 @@ fn class_var_writes_anywhere_thread_nothing() {
         let header = format!("'class_{method}'/{arity} = fun");
         let text = function_text(&code, &header);
         assert!(
-            text.contains("call 'erlang':'put'({'$bt_class_vars', "),
+            text.contains("call 'erlang':'put'(_CVKey"),
             "{method} writes in place. Got:\n{text}"
         );
     }

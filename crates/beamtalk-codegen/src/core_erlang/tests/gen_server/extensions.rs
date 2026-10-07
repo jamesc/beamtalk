@@ -282,7 +282,7 @@ fn test_class_side_extension_fun_is_args_then_class_self() {
         "a class-side extension fun is fun(Args, ClassSelf). Got:\n{code}"
     );
     assert!(
-        code.contains("call 'erlang':'put'({'$bt_class_vars', ")
+        code.contains("call 'erlang':'put'(_CVKey")
             && code.contains("call 'beamtalk_class_vars':'get'(ClassSelf, 'total')"),
         "the target's class variables are read and written in place. Got:\n{code}"
     );
@@ -317,7 +317,7 @@ fn test_class_side_extension_on_actor_subclass_is_args_then_class_self() {
         "no 3-arity state-threading shape and no reply-tuple conversion. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        code.contains("call 'erlang':'put'(_CVKey"),
         "the write is in place. Got:\n{code}"
     );
 }

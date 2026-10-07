@@ -255,7 +255,7 @@ fn test_class_var_write_in_conditional_nested_in_loop_compiles_and_writes_in_pla
         "    self.total\n",
     ));
     assert!(
-        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        code.contains("call 'erlang':'put'(_CVKey"),
         "the write is an in-place put. Got:\n{code}"
     );
     assert!(

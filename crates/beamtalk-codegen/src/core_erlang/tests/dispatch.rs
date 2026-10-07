@@ -3756,7 +3756,7 @@ fn test_builder_class_var_mutation_is_an_in_place_put() {
                classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
     let code = try_codegen(src).expect("mutating classMethods block must compile");
     assert!(
-        code.contains("call 'erlang':'put'({'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)}, call 'maps':'put'('runs', "),
+        code.contains("call 'erlang':'put'(_CVKey") && code.contains("call 'maps':'put'('runs', "),
         "builder class-method write should be an inlined in-place put. Got:\n{code}"
     );
     assert!(
@@ -3816,7 +3816,7 @@ fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
         .expect("mutating classMethods block must compile")
         .to_pretty_string();
     assert!(
-        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        code.contains("call 'erlang':'put'(_CVKey"),
         "builder fun lowered from inside a block should still write in place. Got:\n{code}"
     );
     assert_eq!(
