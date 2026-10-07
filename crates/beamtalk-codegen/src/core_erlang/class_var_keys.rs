@@ -56,6 +56,30 @@ pub(super) fn key_doc(class_self_var: &str) -> Document<'static> {
     ]
 }
 
+/// Where the generator is in binding the class key once per method (BT-3719).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum KeyScope {
+    /// Not lowering a class-method body: an access inlines the key tuple.
+    #[default]
+    Unscoped,
+    /// Inside a class-method body; no access has needed the key yet.
+    Open,
+    /// Inside a class-method body; the key is bound to this variable.
+    Bound(String),
+}
+
+/// `let <key_var> = <class key> in `: binds the class key once so every
+/// inlined access in a method body reuses it (BT-3719).
+pub(super) fn key_binding_doc(key_var: &str, class_self_var: &str) -> Document<'static> {
+    docvec![
+        "let ",
+        leaf::var(key_var),
+        " = ",
+        key_doc(class_self_var),
+        " in "
+    ]
+}
+
 /// Content of `beamtalk_class_vars_keys.hrl`, generated from the constants
 /// above so the Erlang runtime and codegen share one key shape.
 #[must_use]
@@ -100,6 +124,14 @@ mod tests {
         assert_eq!(
             key_doc("ClassSelf").to_pretty_string(),
             "{'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)}"
+        );
+    }
+
+    #[test]
+    fn key_binding_doc_binds_the_key_once() {
+        assert_eq!(
+            key_binding_doc("_CVKey1", "ClassSelf").to_pretty_string(),
+            "let _CVKey1 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in "
         );
     }
 

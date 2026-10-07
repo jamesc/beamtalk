@@ -2503,21 +2503,24 @@ impl CoreErlangGenerator {
             self.set_current_nlr_token(None);
             return Ok(docvec!["ClassSelf"]);
         }
-        let body_stmts_result = self.lower_class_method_body(method);
-        self.set_current_nlr_token(None);
-        let mut body_stmts = body_stmts_result?;
-        if let Some(token_var) = nlr_token_var {
-            body_stmts.insert(
-                0,
-                threaded_ir::ThreadedStmt::NlrCatch {
-                    boundary: super::super::NlrBoundary::ClassMethod,
-                    token: threaded_ir::TokenId::new(token_var.to_string()),
-                    frame: threaded_ir::FrameId::ROOT,
-                    span: method.span,
-                },
-            );
-        }
-        Ok(self.verify_and_render_body_stmts(&body_stmts, method.span))
+        // BT-3719: the class key is bound once around the whole body.
+        self.with_class_var_key_binding(|this| {
+            let body_stmts_result = this.lower_class_method_body(method);
+            this.set_current_nlr_token(None);
+            let mut body_stmts = body_stmts_result?;
+            if let Some(token_var) = nlr_token_var {
+                body_stmts.insert(
+                    0,
+                    threaded_ir::ThreadedStmt::NlrCatch {
+                        boundary: super::super::NlrBoundary::ClassMethod,
+                        token: threaded_ir::TokenId::new(token_var.to_string()),
+                        frame: threaded_ir::FrameId::ROOT,
+                        span: method.span,
+                    },
+                );
+            }
+            Ok(this.verify_and_render_body_stmts(&body_stmts, method.span))
+        })
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces

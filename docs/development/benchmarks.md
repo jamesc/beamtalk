@@ -1266,3 +1266,36 @@ The numbers above are the final ones; nothing was re-run for the docs sweep.
 | 4. `snapshot/0` + restore around `on:do:` | within 10% of main | +2.0% | passes |
 
 Gate 3 was accepted rather than used to reopen the single-home decision, as the ADR prescribes. The follow-up is [BT-3719](https://linear.app/beamtalk/issue/BT-3719): bind the class-variable key once per method instead of at each inlined access, then re-run gate 3 (target at or under 570 ns) and re-measure the late-bound hierarchy walk (`class_self_send_inherited_override`, 1908 ns, +17% over main), recovering or explaining it. Until then a class method that touches class variables in a hot loop costs about twice what it did on `main` before ADR 0130.
+
+#### Key bound once per method (BT-3719)
+
+The compiler now binds the class key once per class-method body, at the first inlined access, as
+`let _CVKeyN = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in <body>`, and every inlined read and
+write in the body (loop bodies and blocks included) reuses `_CVKeyN`. A method with no class-variable access binds
+nothing. It is one lowering point shared by compiled class methods, `ClassBuilder` funs and class-side extension
+funs (`class_method_body_doc`), emitted through `class_var_keys::key_binding_doc` (`Document` + `leaf::*`).
+No state-threading scope is involved (class variables are written in place), so there is no `ThreadedIr` node to
+change; `just verify-threaded-ir` and `just test-class-var-corpus` pass.
+
+Method: `SsbMain run` through `beamtalk run`, two compilers built from the same checkout (before = `origin/main`
+`fbeac1c39`, after = this change), the bench package rebuilt from scratch with each, 7 interleaved rounds
+(before, after, before, ...), medians with min-max, ns/op. This was a shared, loaded 4-core VM, so the absolute
+numbers are about 1.8x those of the BT-3713 table above (before: 1026 here against 582 there); only the
+paired before/after ratio is meaningful.
+
+| case (ns/op, median [min-max], n = 7) | before | after | ratio |
+|---|---|---|---|
+| class-variable loop, 10 reads + 3 writes | 1026 [917-1149] | 723 [710-819] | 0.70 |
+| class self-send, inherited override (walk) | 2497 [2142-2677] | 2448 [2197-2685] | 0.98 (noise) |
+
+**Gate 3.** The loop is 30% cheaper (every round of "after" is below every round of "before" but one). Applied to
+the BT-3713 figure, 582 ns x 0.70 is about 410 ns, under the 570 ns budget (2 x 285 ns on main); the ratio is
+the measured quantity, the 410 ns is a projection, not a re-run on the idle machine of the BT-3713 table.
+The remaining gap to the spike's 183 ns is the `element/2` plus tuple build per method entry and the
+`erlang:get/1` per access, which a per-access `ClassSelf`-derived key cannot avoid.
+
+**Late-bound hierarchy walk.** Not recovered by this change, and not expected to be: `class_self_send_inherited_override`
+touches no class variable, so the key binding does not appear in it (0.98, inside the run-to-run spread of
+2142-2677). The +17% over main recorded under BT-3713 comes from the runtime path around the walk
+(`class_self_send/4` plus the single-home invocation boundary), not from the inlined access lowering. It is
+accepted here, and its owner is BT-3700 (late-binding guard and walk), as ADR 0130 already assigns.
