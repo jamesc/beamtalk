@@ -145,6 +145,14 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) {
 ///
 /// Class variables are resolved per class name across the whole corpus, so a
 /// subclass in one file sees a superclass's `classState:` from another.
+///
+/// BT-3723, intentionally accepted: classes are keyed by their bare name.
+/// Beamtalk class names are global in the runtime (the probe's `class` field is
+/// the same bare atom), so there is no namespace to key by; two corpus files
+/// that define the same class name (test fixtures redefining a class) have
+/// their class variables unioned and may over-report a read. For a one-off
+/// census that over-count is the safe direction. Pinned by
+/// `same_named_classes_in_different_files_are_merged`.
 #[must_use]
 pub fn escaping_class_var_closures(files: &[CorpusFile]) -> Vec<EscapeSite> {
     let mut own_vars: HashMap<String, HashSet<String>> = HashMap::new();
@@ -325,6 +333,19 @@ mod tests {
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].class, "Sub");
         assert_eq!(sites[0].reads, vec!["n".to_string()]);
+    }
+
+    /// BT-3723: documents the accepted name-keyed merge (see
+    /// [`escaping_class_var_closures`]).
+    #[test]
+    fn same_named_classes_in_different_files_are_merged() {
+        let a = parse_corpus_source("a.bt", "Object subclass: Foo\n  classState: n = 0\n")
+            .expect("parses");
+        let b = parse_corpus_source("b.bt", "Object subclass: Foo\n  class reader => [self.n]\n")
+            .expect("parses");
+        let sites = escaping_class_var_closures(&[a, b]);
+        assert_eq!(sites.len(), 1, "same-named classes share class variables");
+        assert_eq!(sites[0].file, "b.bt");
     }
 
     /// The Phase 0 census: counts escaping closures over the three corpora

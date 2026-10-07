@@ -152,3 +152,42 @@ probe_never_raises_on_garbage_test() ->
     ?assertEqual(
         ok, beamtalk_class_var_probe:report(class_self(undefined), 'C', s, read, n, false)
     ).
+
+%% BT-3723: a home pid on another node must not make the probe drop the event
+%% (`process_info/2` raises badarg on a non-local pid).
+remote_home_pid_is_logged_as_abroad_test() ->
+    with_handler(fun() ->
+        %% A pid of a fictional remote node, built from the external term format.
+        Remote = binary_to_term(
+            <<131, 88, 100, 0, 12, "other@nohost", 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 1>>
+        ),
+        ?assertNotEqual(node(), node(Remote)),
+        ok = beamtalk_class_var_probe:report(
+            class_self(Remote), 'ProbeClass', stored, read, n, true
+        ),
+        {ok, Report} = next_probe_event(500),
+        ?assertEqual(false, maps:get(home_live, Report)),
+        ?assertEqual(abroad, maps:get(shape, Report))
+    end).
+
+%% BT-3723: concurrent first reports must not crash or lose the setup; every
+%% caller returns ok and the setup flag ends up set.
+concurrent_first_reports_all_return_ok_test() ->
+    Key = {beamtalk_class_var_probe, setup},
+    _ = persistent_term:erase(Key),
+    Parent = self(),
+    Pids = [
+        spawn_link(fun() ->
+            R = beamtalk_class_var_probe:report(nil, 'ProbeClass', bump, write, n, true),
+            Parent ! {done, self(), R}
+        end)
+     || _ <- lists:seq(1, 20)
+    ],
+    [
+        receive
+            {done, P, R} -> ?assertEqual(ok, R)
+        after 5000 -> ?assert(false)
+        end
+     || P <- Pids
+    ],
+    ?assertEqual(true, persistent_term:get(Key, false)).
