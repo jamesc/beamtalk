@@ -1006,9 +1006,42 @@ A runtime-only change to `make_self` (read `__class_mod__` once, a `class_and_mo
 61 vs 77 ns when called inline in the microbenchmark but gave no difference through the generated code
 (122 vs 121 ns debug, 9 rounds), because the helper call and its tuple cost what the second lookup saved. It was
 not kept. The real saving is for the call site to pass the `Self` it already has (a `safe_dispatch/4`, ~50 ns
-or ~40% of the open actor send, getting it to about the sealed actor's cost), which touches every actor
-module's generated exports and the gen_server entry points, so it is left as a follow-up rather than done
-here. The +25% over the baseline (99 vs 122-125) is the BT-3666 late binding and is intentional.
+or ~40% of the open actor send, getting it to about the sealed actor's cost); that was done in BT-3692
+(below). The +25% over the baseline (99 vs 122-125) was the BT-3666 late binding and is intentional.
+
+##### BT-3692: `safe_dispatch/4` (caller passes `Self`)
+
+Every actor module now exports `safe_dispatch/4 (Selector, Args, Self, State)`, which holds the try/catch.
+`safe_dispatch/3` (used by `handle_call`/`handle_cast`/`handle_info`/`init`, which only have `State`) builds
+`Self` with `make_self/1` and delegates to `/4`. The open self-send call site passes its in-scope `Self`:
+
+```erlang
+let _SDArgs = [Args] in
+let _ClassMod = call 'maps':'get'('__class_mod__', State, 'module') in
+  case call 'erlang':'function_exported'(_ClassMod, 'safe_dispatch', 4) of
+    <'true'>  -> call _ClassMod:'safe_dispatch'('sel', _SDArgs, Self, State)
+    <_>       -> call _ClassMod:'safe_dispatch'('sel', _SDArgs, State)
+  end
+```
+
+The `'false'` arm is for a receiver module compiled by an older compiler (no `/4`), for example a stale package
+beam subclassing a recompiled class during a hot reload or release upgrade: it falls back to `/3` instead of
+raising `undef`. The `/3` entry stays exported for exactly this reason.
+
+Method: `runtime/perf/self_send_bench`, `beamtalk run SsbMain run`, debug CLI, 7 interleaved rounds
+(before, after, before, after, ...), each side compiled once with its own compiler. "before" is `fcacac843`
+(origin/main), "after" is this change. ns/op, medians with min-max. **The machine was shared and noisy** (the
+"before" open case ranged 158-557 ns within one side), so only the paired ratios mean anything, not the
+absolute values (which are also higher than the idle-VM figures above).
+
+| case | before | after | after/before |
+|---|---|---|---|
+| actor self-send, open | 183 [158-557] | 75 [68-198] | 0.41 |
+| actor self-send, inherited override (open) | 166 [135-190] | 69 [65-119] | 0.42 |
+| actor self-send, sealed (unchanged code, control) | 132 [111-318] | 130 [123-235] | 0.98 |
+
+The sealed case is untouched by this change and is the control: it is equal on both sides, so the open-case drop
+is not a machine-state artifact. After the change the open send is at or below the sealed actor's cost.
 
 #### `NestedImprovementRatio >= 1.5`
 

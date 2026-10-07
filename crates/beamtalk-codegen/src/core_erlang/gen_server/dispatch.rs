@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
     ///
     /// BT-3692: an open actor's self-send already has `Self` in scope, so it calls
     /// `safe_dispatch/4` and skips the `beamtalk_actor:make_self/1` rebuild (about
-    /// 45% of the send). `safe_dispatch/3` stays for the gen_server entry points
+    /// 45% of the send). `safe_dispatch/3` stays for the `gen_server` entry points
     /// (`handle_call`/`handle_cast`/`handle_info`/`init`), which only have `State`;
     /// it builds `Self` and delegates, so the try/catch lives in one place.
     ///

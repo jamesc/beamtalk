@@ -106,7 +106,7 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
     let code = codegen(src);
     // Y (CoreErlang name for y) must appear inside the nested fun's argument list
     assert!(
-        code.contains("'use:', [Y]"),
+        code.contains("let _SDArgs") && code.contains("= [Y] in"),
         "Y should be captured by nested block. Got:\n{code}"
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
