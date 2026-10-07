@@ -392,3 +392,89 @@ fn each_block_is_reported_once() {
     let d = only("  class a =>\n    w := Worker spawn\n    w keep: [self.n]\n    [self.n]\n");
     assert_eq!(d.len(), 2, "{d:?}");
 }
+
+// ---- cascades (BT-3716) -----------------------------------------------------
+//
+// The AST walker folds a cascade to its first send, so the later messages are
+// judged against the shared receiver explicitly.
+
+#[test]
+fn cascaded_later_message_passing_a_writing_block_to_another_class_warns() {
+    let d = only("  class a => Driver each: [3]; each: [self bump]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].message.contains("Driver each:"), "{}", d[0].message);
+}
+
+#[test]
+fn cascaded_later_message_passing_a_reading_block_to_an_actor_warns() {
+    let d = only("  class a =>\n    w := Worker spawn\n    w keep: [1]; keep: [self.n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("handed to an actor by 'keep:', which may keep it"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn pure_first_cascade_message_does_not_hide_a_write_in_a_sealed_class() {
+    let d = abroad(&format!(
+        "{HEADER}sealed Object subclass: Sealed
+  classState: m = 0
+
+  class log => 7
+
+  class bump => self.m := self.m + 1
+
+  class a => Driver each: [self log; bump]
+"
+    ));
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].message.contains("'bump'"), "{}", d[0].message);
+}
+
+#[test]
+fn pure_first_cascade_message_does_not_hide_a_write_to_the_own_class_name() {
+    let d = only("  class a => Driver each: [Counter pure; bump]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+}
+
+#[test]
+fn own_class_cascade_inside_a_method_body_makes_the_method_mutating() {
+    // `viaCascade` writes only through the cascaded `bump`; a sealed class
+    // proves `self viaCascade` pure unless that later message is seen.
+    let d = abroad(&format!(
+        "{HEADER}sealed Object subclass: Sealed
+  classState: m = 0
+
+  class log => 7
+
+  class bump => self.m := self.m + 1
+
+  class viaCascade => Sealed log; bump
+
+  class a => Driver each: [self viaCascade]
+"
+    ));
+    assert_eq!(d.len(), 1, "{d:?}");
+}
+
+#[test]
+fn cascades_that_stay_at_home_never_warn() {
+    let d = abroad(&format!(
+        "{HEADER}sealed Object subclass: Sealed
+  classState: m = 0
+
+  class log => 7
+
+  class viaCascade => Sealed log; log
+
+  class a =>
+    Driver each: [self log; log]
+    Driver each: [self viaCascade; log]
+    Sealed log; run: [self.m]
+"
+    ));
+    assert!(d.is_empty(), "{d:?}");
+}

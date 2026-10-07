@@ -194,6 +194,32 @@ pub fn compute_class_var_mutating_selectors(
     mutating
 }
 
+/// The one receiver every message of a cascade is sent to.
+///
+/// The parser folds a cascade's first message into `Cascade::receiver` as a
+/// whole `MessageSend`, so the shared receiver is that send's inner receiver
+/// (or `receiver` itself when it is not a send). The later messages are stored
+/// as bare selector/arguments, so callers judging them must pair each with
+/// this receiver (BT-3716).
+#[must_use]
+pub fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
+    match receiver {
+        Expression::MessageSend {
+            receiver: inner, ..
+        } => inner,
+        other => other,
+    }
+}
+
+/// Whether `receiver` is the unqualified class reference `class_name`.
+fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
+    matches!(
+        receiver,
+        Expression::ClassReference { name, package, .. }
+            if package.is_none() && name.name == class_name
+    )
+}
+
 /// Selectors sent via a same-class `ClassName selector` receiver (as opposed
 /// to `self selector`) anywhere in `body`, including nested blocks — the
 /// [`Expression::ClassReference`] counterpart to [`is_self_reference`]-based
@@ -206,19 +232,23 @@ fn same_class_reference_send_selectors(
     let mut selectors = HashSet::new();
     for stmt in body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            let Expression::MessageSend {
-                receiver, selector, ..
-            } = e
-            else {
-                return;
-            };
-            let is_own_class_reference = matches!(
-                receiver.as_ref(),
-                Expression::ClassReference { name, package, .. }
-                    if package.is_none() && name.name == class_name
-            );
-            if is_own_class_reference {
-                selectors.insert(selector.name().to_string());
+            match e {
+                Expression::MessageSend {
+                    receiver, selector, ..
+                } if is_own_class_reference(receiver, class_name) => {
+                    selectors.insert(selector.name().to_string());
+                }
+                // `Counter log; bump`: the folded first send is visited as its
+                // own `MessageSend`; the later messages share its receiver but
+                // never appear as nodes (BT-3716).
+                Expression::Cascade {
+                    receiver, messages, ..
+                } if is_own_class_reference(cascade_shared_receiver(receiver), class_name) => {
+                    for msg in messages {
+                        selectors.insert(msg.selector.name().to_string());
+                    }
+                }
+                _ => {}
             }
         });
     }
@@ -552,12 +582,7 @@ fn analyze_expression(
             // `receiver` itself if there was no message to fold) and check each
             // later message's own selector against it directly.
             analyze_expression(receiver, analysis, ctx);
-            let cascade_receiver = match receiver.as_ref() {
-                Expression::MessageSend {
-                    receiver: inner, ..
-                } => inner.as_ref(),
-                other => other,
-            };
+            let cascade_receiver = cascade_shared_receiver(receiver);
             for msg in messages {
                 if is_self_field_value_send(cascade_receiver, &msg.selector) {
                     analysis.has_field_value_call = true;
