@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn build_env_sets_the_five_required_vars() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
         let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
@@ -903,7 +903,7 @@ mod tests {
     fn build_env_respects_an_operator_provided_erl_epmd_address() {
         // A trusted-private-network operator can
         // still override the loopback pin — see build_env's doc comment.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("ERL_EPMD_ADDRESS", "10.0.0.5") };
         let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn spawn_front_refuses_when_oidc_env_present() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let tmp = tempfile::TempDir::new().unwrap();
         // SAFETY: guarded by ENV_LOCK above — serialized against every other
         // test in this crate that touches BT_OIDC_* env vars.
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn spawn_front_refuses_unknown_workspace_when_oidc_absent() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let tmp = tempfile::TempDir::new().unwrap();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("BT_OIDC_ISSUER") };
@@ -1313,7 +1313,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn spawn_front_errors_with_launcher_not_found_when_file_is_missing() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
             "win_launcher_missing",
             Some("bt_attach_win_launcher_missing@localhost"),
@@ -1513,7 +1513,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_front_errors_with_launcher_not_found_when_file_is_missing() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let ws = TestWorkspaceDir::new("launcher_missing");
         let tmp = tempfile::TempDir::new().unwrap();
         let launcher = tmp.path().join("server"); // deliberately never written
@@ -1873,7 +1873,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn spawn_front_with_port_retry_returns_a_live_child_on_the_first_attempt_windows() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
             "port_retry_ok_win",
             Some("bt_attach_port_retry_ok_win@localhost"),
@@ -1904,7 +1904,7 @@ mod tests {
     #[test]
     fn spawn_front_with_port_retry_gives_up_after_max_attempts_when_launcher_always_exits_windows()
     {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
             "port_retry_fail_win",
             Some("bt_attach_port_retry_fail_win@localhost"),
@@ -2024,10 +2024,51 @@ mod tests {
         }
     }
 
+    /// An open `SYNCHRONIZE` handle to a process, used to test liveness
+    /// without trusting a bare PID (BT-3698). While this handle is open the
+    /// kernel keeps the process object alive, so the PID cannot be reused
+    /// by an unrelated process; `has_exited` therefore answers for the
+    /// process we opened, not whatever later inherits its PID.
+    #[cfg(windows)]
+    struct ProcessHandle(windows_sys::Win32::Foundation::HANDLE);
+
+    #[cfg(windows)]
+    impl ProcessHandle {
+        fn open(pid: u32) -> Option<Self> {
+            use windows_sys::Win32::Foundation::FALSE;
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+
+            // SAFETY: plain Win32 call; a null return (failure) is handled below.
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, FALSE, pid) };
+            if handle.is_null() {
+                None
+            } else {
+                Some(Self(handle))
+            }
+        }
+
+        /// True once the process has terminated (its handle is signalled).
+        fn has_exited(&self) -> bool {
+            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+            // SAFETY: `self.0` is a valid handle owned by `self`, closed only in `Drop`.
+            unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for ProcessHandle {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` is a valid handle owned by `self`, not used afterwards.
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn dropping_spawned_front_kills_the_whole_process_tree_not_just_cmd_exe() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
             "job_kill_win",
             Some("bt_attach_job_kill_win@localhost"),
@@ -2055,16 +2096,20 @@ mod tests {
                  no longer holds",
             )
         };
+        // Open a handle before the drop and judge liveness through it, never
+        // by bare PID: once ping.exe exits, its PID can be reused by an
+        // unrelated process (BT-3698), which `is_process_alive(pid)` would
+        // report as ping.exe "surviving".
+        let ping = ProcessHandle::open(ping_pid)
+            .expect("should be able to open a handle to the discovered ping.exe");
         assert!(
-            crate::reap::is_process_alive(ping_pid),
+            !ping.has_exited(),
             "the discovered grandchild should be alive before the kill"
         );
 
         drop(front);
 
-        let died = poll_until(Duration::from_secs(5), || {
-            !crate::reap::is_process_alive(ping_pid)
-        });
+        let died = poll_until(Duration::from_secs(5), || ping.has_exited());
         assert!(
             died,
             "dropping SpawnedFront should kill the whole process tree via \
