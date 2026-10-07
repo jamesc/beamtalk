@@ -17,13 +17,29 @@ error wrapping, and printString formatting.
 %% Exported so the proxy can `erlang:apply/3` them (external call). Fixtures for
 %% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
 %% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
--export([retry_then_exit/1, retry_then_throw/1]).
+-export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
 
 retry_then_exit(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_exit(Arg) when is_list(Arg) -> exit(retry_exit_reason).
 
 retry_then_throw(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_throw(Arg) when is_list(Arg) -> throw(retry_throw_value).
+
+%% BT-3728: a failed first attempt writes class variable `a` then raises `badarg`
+%% (what a block run inside the FFI call could do); the charlist retry reports the
+%% value of `a` it sees.
+write_then_badarg(Arg) when is_binary(Arg) ->
+    beamtalk_class_vars:put(retry_self_obj(), a, 99),
+    erlang:error(badarg);
+write_then_badarg(Arg) when is_list(Arg) ->
+    beamtalk_class_vars:get(retry_self_obj(), a).
+
+%% The base class atom must exist (beamtalk_class_vars resolves a class tag to its
+%% name with an existing-atom lookup); this function keeps it in the atom table.
+retry_class() -> 'ProxyRetryTestClass'.
+
+retry_self_obj() ->
+    #beamtalk_object{class = 'ProxyRetryTestClass class', class_mod = prtc, pid = self()}.
 
 %%% ===================================================================
 %%% Proxy construction
@@ -1118,6 +1134,26 @@ native_call_retry_throw_passes_through_test() ->
         ?assert(false)
     catch
         throw:retry_throw_value -> ok
+    end.
+
+native_call_badarg_retry_discards_first_attempt_class_var_writes_test() ->
+    %% BT-3728: the retry is a fresh attempt; writes the failed first attempt made
+    %% (here `a := 99`) must not be visible to it, nor survive the call.
+    Key = {'$bt_class_vars', 'ProxyRetryTestClass class'},
+    erlang:erase(Key),
+    erlang:erase('$bt_class_vars_home'),
+    try
+        beamtalk_class_vars:install(Key, #{a => 1}),
+        ?assertEqual(
+            1,
+            beamtalk_erlang_proxy:native_call(
+                ?MODULE, write_then_badarg, [<<"x">>], {'Stream', 'take:'}
+            )
+        ),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
+    after
+        erlang:erase(Key),
+        erlang:erase('$bt_class_vars_home')
     end.
 
 native_call_beamtalk_error_passthrough_test() ->

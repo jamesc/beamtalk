@@ -1995,6 +1995,8 @@ eval_success_test_() ->
         {"eval_with_self evaluates an expression with self bound", fun eval_with_self_success/0},
         {"eval_with_self wraps a compile error", fun eval_with_self_compile_error/0},
         {"eval_with_self wraps a runtime exception", fun eval_with_self_runtime_exception/0},
+        {"eval_with_self discards class-variable writes made before a caught error",
+            fun eval_with_self_discards_class_var_writes/0},
         %% precheck_method/4 (ADR 0105 Phase 3 precheck).
         {"precheck_method refuses a stdlib class", fun precheck_method_stdlib_refused/0},
         {"precheck_method delegates for a non-stdlib class", fun precheck_method_delegates/0},
@@ -2512,6 +2514,34 @@ eval_with_self_compile_error() ->
 eval_with_self_runtime_exception() ->
     Result = beamtalk_repl_eval:eval_with_self(42, "self zork"),
     ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% BT-3728: `evaluate:` runs in the caller's process, which may hold a live
+%% class-variable home entry. A block that writes a class variable and then raises
+%% must have its write discarded when the eval catches the error.
+eval_with_self_discards_class_var_writes() ->
+    %% beamtalk_class_vars resolves a class tag to its name with an existing-atom
+    %% lookup, so intern the base atom explicitly (a literal the compiler can fold
+    %% away would not guarantee it exists).
+    _ = binary_to_atom(<<"EvalSelfCvClass">>, utf8),
+    Tag = binary_to_atom(<<"EvalSelfCvClass class">>, utf8),
+    Key = {'$bt_class_vars', Tag},
+    ClassSelf = #beamtalk_object{class = Tag, class_mod = escc, pid = self()},
+    Block = fun() ->
+        beamtalk_class_vars:put(ClassSelf, a, 99),
+        erlang:error(boom)
+    end,
+    erlang:erase(Key),
+    erlang:erase('$bt_class_vars_home'),
+    try
+        beamtalk_class_vars:install(Key, #{a => 1}),
+        ?assertMatch(
+            {error, #beamtalk_error{}}, beamtalk_repl_eval:eval_with_self(Block, "self value")
+        ),
+        ?assertEqual(1, beamtalk_class_vars:get(ClassSelf, a))
+    after
+        erlang:erase(Key),
+        erlang:erase('$bt_class_vars_home')
+    end.
 
 %%====================================================================
 %% precheck_method/4 (ADR 0105 Phase 3): the stdlib
