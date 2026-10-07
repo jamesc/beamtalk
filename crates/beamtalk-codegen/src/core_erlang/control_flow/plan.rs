@@ -248,6 +248,12 @@ struct BodyEffects {
 /// `true` there (BT-3694) made the loop take the `StateAcc` shape, whose
 /// initial state variable does not exist in a class method (an unbound
 /// `State`).
+///
+/// Backed by the verifier (BT-3725): `ThreadedIr`'s
+/// `VerifyError::ActorStateInClassMethod` rejects a class-method scope that
+/// opens a locals-less `StateAcc` loop or threads the `State`/`SelfVt` family,
+/// so a predicate that disagrees with this guard fails `verify()` rather than
+/// only `erlc`.
 pub(in crate::core_erlang) fn condition_has_state_effects(
     generator: &CoreErlangGenerator,
     condition: &Expression,

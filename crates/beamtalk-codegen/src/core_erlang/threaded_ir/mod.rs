@@ -75,7 +75,6 @@ pub(super) use ir::{
     StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, ValueRef,
     VersionCounter, VersionPrefix, VersionedVar,
 };
-pub(super) use verify::verify;
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s
@@ -89,7 +88,9 @@ pub(super) use verify::verify;
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
-pub(super) use verify::{CatchRestoreDefect, VerifyError};
+pub(super) use verify::{
+    CatchRestoreDefect, ClassMethodDefect, ScopeKind, VerifyError, verify, verify_in_scope,
+};
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

@@ -135,7 +135,7 @@ impl CoreErlangGenerator {
                 produces: Vec::new(),
                 span,
             };
-            let errors = threaded_ir::verify(std::slice::from_ref(&fixture));
+            let errors = this.verify_threaded_ir(std::slice::from_ref(&fixture));
             this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
             let mut ctx = threaded_ir::RenderCtx::new(this);
             let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);

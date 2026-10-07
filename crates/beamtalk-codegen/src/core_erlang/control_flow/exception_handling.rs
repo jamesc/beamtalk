@@ -450,7 +450,7 @@ impl CoreErlangGenerator {
             span,
         };
         let ir = [node];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(
             &errors,
             "on:do: class-variable catch boundary",

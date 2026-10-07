@@ -2341,7 +2341,7 @@ impl CoreErlangGenerator {
             produces,
             span,
         }];
-        let errors = threaded_ir::verify(&wrapper);
+        let errors = self.verify_threaded_ir(&wrapper);
         self.report_threaded_ir_verify_errors(
             &errors,
             "conditional branch arm ThreadedIr must be well-formed",
