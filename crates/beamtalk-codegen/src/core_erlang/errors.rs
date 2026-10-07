@@ -78,3 +78,106 @@ pub(super) fn beamtalk_error_doc(
         sep,
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::beamtalk_error_doc;
+    use beamtalk_cerl_doc::{leaf, Document};
+
+    #[test]
+    fn inline_chain_renders_three_let_bindings() {
+        let doc = beamtalk_error_doc(
+            Document::Str("Error0"),
+            Document::Str("Error0"),
+            Document::Str("Error1"),
+            Document::Str("Error1"),
+            Document::Str("Error2"),
+            "dnu",
+            leaf::atom("Counter"),
+            leaf::atom("badMethod"),
+            leaf::binary_lit("no such method"),
+            Document::Str(" "),
+        );
+        let rendered = doc.to_pretty_string();
+        assert!(
+            rendered.starts_with("let Error0 = call 'beamtalk_error':'new'('dnu', 'Counter') in "),
+            "unexpected: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'badMethod') in "
+            ),
+            "unexpected: {rendered}"
+        );
+        assert!(
+            rendered.contains("let Error2 = call 'beamtalk_error':'with_hint'(Error1,"),
+            "unexpected: {rendered}"
+        );
+        assert!(rendered.ends_with("in "), "unexpected ending: {rendered}");
+    }
+
+    #[test]
+    fn kind_is_emitted_as_atom_in_new_call() {
+        let doc = beamtalk_error_doc(
+            Document::Str("E0"),
+            Document::Str("E0"),
+            Document::Str("E1"),
+            Document::Str("E1"),
+            Document::Str("E2"),
+            "arity_mismatch",
+            leaf::atom("MyClass"),
+            leaf::atom("sel"),
+            leaf::binary_lit("hint"),
+            Document::Str(" "),
+        );
+        let rendered = doc.to_pretty_string();
+        assert!(
+            rendered.contains("'arity_mismatch'"),
+            "kind must be atom-quoted, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn err0_ref_used_in_with_selector_not_err0_binding() {
+        let doc = beamtalk_error_doc(
+            Document::Str("_Error0"),
+            Document::Str("Error0"),
+            Document::Str("_Error1"),
+            Document::Str("Error1"),
+            Document::Str("_Error2"),
+            "dnu",
+            leaf::atom("C"),
+            leaf::atom("s"),
+            leaf::binary_lit("h"),
+            Document::Str(" "),
+        );
+        let rendered = doc.to_pretty_string();
+        assert!(rendered.contains("let _Error0 = call"), "binding: {rendered}");
+        assert!(
+            rendered.contains("with_selector'(Error0,"),
+            "ref in with_selector: {rendered}"
+        );
+        assert!(
+            rendered.contains("with_hint'(Error1,"),
+            "ref in with_hint: {rendered}"
+        );
+    }
+
+    #[test]
+    fn separator_appears_after_each_in_keyword() {
+        let doc = beamtalk_error_doc(
+            Document::Str("E0"),
+            Document::Str("E0"),
+            Document::Str("E1"),
+            Document::Str("E1"),
+            Document::Str("E2"),
+            "err",
+            leaf::atom("Cls"),
+            leaf::atom("sel"),
+            leaf::binary_lit("h"),
+            Document::Str("SEP"),
+        );
+        let rendered = doc.to_pretty_string();
+        assert_eq!(rendered.matches("SEP").count(), 3, "sep count: {rendered}");
+    }
+}
