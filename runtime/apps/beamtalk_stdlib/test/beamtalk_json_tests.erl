@@ -218,6 +218,18 @@ generate_as_json_self_return_test() ->
         beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
     ).
 
+generate_as_json_nlr_passes_through_test() ->
+    %% BT-3740: a `^` out of an asJson hook is a non-local return, not an
+    %% encode failure: both throw shapes reach the caller untouched.
+    ?assertThrow(
+        {'$bt_nlr', nlr_token, nlr_value},
+        beamtalk_json:'generate:'('bt@json_hook_fixture':new(nlr))
+    ),
+    ?assertThrow(
+        {'$bt_nlr', nlr_token, nlr_value, nlr_state},
+        beamtalk_json:'generate:'('bt@json_hook_fixture':new(nlr_actor))
+    ).
+
 generate_as_json_mutual_cycle_test() ->
     %% Not a literal self-return: A's hook embeds a distinct B, whose hook
     %% embeds A back. Must raise before the recursion overflows the stack.
@@ -249,6 +261,18 @@ pretty_print_as_json_hook_test() ->
     Result = beamtalk_json:'prettyPrint:'('bt@json_hook_fixture':new(plain)),
     Decoded = json:decode(Result),
     ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Decoded)).
+
+pretty_print_as_json_nlr_passes_through_test() ->
+    %% BT-3740: prettyPrint: shares the encode pipeline, so a `^` out of an
+    %% asJson hook passes through here too.
+    ?assertThrow(
+        {'$bt_nlr', nlr_token, nlr_value},
+        beamtalk_json:'prettyPrint:'('bt@json_hook_fixture':new(nlr))
+    ),
+    ?assertThrow(
+        {'$bt_nlr', nlr_token, nlr_value, nlr_state},
+        beamtalk_json:'prettyPrint:'('bt@json_hook_fixture':new(nlr_actor))
+    ).
 
 %%% ============================================================================
 %%% prettyPrint:/1

@@ -90,44 +90,44 @@ are converted via that hook.
 """.
 -spec 'generate:'(term()) -> binary().
 'generate:'(Value) ->
-    try
-        Prepared = prepare_for_encode(Value),
-        iolist_to_binary(json:encode(Prepared))
-    catch
-        error:#{error := #beamtalk_error{}} = E:_ ->
-            error(E);
-        error:{unsupported_type, _} ->
-            beamtalk_error:raise_type_error(
-                'Json', 'generate:', <<"Value cannot be converted to JSON">>
-            );
-        _:Reason ->
-            Error = beamtalk_error:with_details(
-                beamtalk_error:new(
-                    type_error, 'Json', 'generate:', <<"Value cannot be converted to JSON">>
-                ),
-                #{reason => Reason}
-            ),
-            beamtalk_error:raise(Error)
-    end.
+    encode_with_errors('generate:', fun() ->
+        iolist_to_binary(json:encode(prepare_for_encode(Value)))
+    end).
 
 -doc "Generate a pretty-printed JSON string with indentation.".
 -spec 'prettyPrint:'(term()) -> binary().
 'prettyPrint:'(Value) ->
-    try
+    encode_with_errors('prettyPrint:', fun() ->
         Prepared = prepare_for_encode(Value),
-        Compact = iolist_to_binary(json:encode(Prepared)),
-        prettify(Compact)
+        prettify(iolist_to_binary(json:encode(Prepared)))
+    end).
+
+-doc """
+Run an encode pipeline for `Selector`, mapping its failures to a `Json`
+`type_error`.
+
+A `$bt_nlr` throw (either tuple shape) is a `^` out of an `asJson` hook, not an
+error: it passes through so the `^` reaches its home method.
+""".
+-spec encode_with_errors(atom(), fun(() -> binary())) -> binary().
+encode_with_errors(Selector, Encode) ->
+    try
+        Encode()
     catch
+        throw:{'$bt_nlr', _, _} = Nlr:Stack ->
+            erlang:raise(throw, Nlr, Stack);
+        throw:{'$bt_nlr', _, _, _} = Nlr:Stack ->
+            erlang:raise(throw, Nlr, Stack);
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:{unsupported_type, _} ->
             beamtalk_error:raise_type_error(
-                'Json', 'prettyPrint:', <<"Value cannot be converted to JSON">>
+                'Json', Selector, <<"Value cannot be converted to JSON">>
             );
         _:Reason ->
             Error = beamtalk_error:with_details(
                 beamtalk_error:new(
-                    type_error, 'Json', 'prettyPrint:', <<"Value cannot be converted to JSON">>
+                    type_error, 'Json', Selector, <<"Value cannot be converted to JSON">>
                 ),
                 #{reason => Reason}
             ),
