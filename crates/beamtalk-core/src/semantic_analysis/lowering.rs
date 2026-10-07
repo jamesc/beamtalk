@@ -76,7 +76,6 @@ use crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback;
 use crate::semantic_analysis::return_type_writeback::apply_return_type_writeback_from_map;
 use crate::semantic_analysis::supervisor_kind_writeback::apply_supervisor_kind_writeback;
 use crate::semantic_analysis::trait_expansion;
-use crate::semantic_analysis::try_do_lowering::apply_try_do_lowering;
 use crate::semantic_analysis::type_checker::{InferredType, MethodReturnKey};
 use std::collections::HashMap;
 
@@ -136,9 +135,6 @@ pub fn lower_module_for_codegen(
     // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
     // so codegen generates auto-slot methods (withX: setters).
     apply_class_kind_writeback(module, hierarchy);
-    // `Result tryDo: [..]` becomes the `on:do:` it is, so one construct owns a
-    // protected block's outer-local threading (BT-3718).
-    apply_try_do_lowering(module);
 }
 
 #[cfg(test)]

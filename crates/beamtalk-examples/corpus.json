@@ -16399,11 +16399,9 @@
         "testNestedEnsureCleanupsSeeEachOther",
         "testOnDoHandlerSeesTheValueBeforeTheTry",
         "testOnDoNestedInATryBody",
-        "testPureOnDoNestedInAPureOnDo",
-        "testTryDoAnswersTheErrorOnRaise",
-        "testTryDoWritesLocal"
+        "testPureOnDoNestedInAPureOnDo"
       ],
-      "source": "// BT-3718: outer locals mutated inside protected blocks of class methods, and a\n// `do:` nested in a loop body. See the fixture for what each method does; the\n// answers below follow from the final value of the local.\n\nTestCase subclass: ClassMethodProtectedLocalsTest\n\n  testTryDoWritesLocal =>\n    self assert: ClassMethodProtectedLocals tryDoWritesLocal equals: 51\n\n  testTryDoAnswersTheErrorOnRaise =>\n    self assert: ClassMethodProtectedLocals tryDoAnswersTheErrorOnRaise equals: 7\n\n  testEnsureCleanupSeesTheBodysWrite =>\n    self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11\n\n  testNestedEnsureCleanupsSeeEachOther =>\n    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 32\n\n  testOnDoNestedInATryBody =>\n    self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2\n\n  testPureOnDoNestedInAPureOnDo =>\n    self assert: ClassMethodProtectedLocals pureOnDoNestedInAPureOnDo equals: 2\n\n  testOnDoHandlerSeesTheValueBeforeTheTry =>\n    self assert: ClassMethodProtectedLocals onDoHandlerSeesTheValueBeforeTheTry equals: 10\n\n  testNestedDoWritesTheLoopsLocal =>\n    self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15\n\n  testNestedDoInACountedLoop =>\n    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153",
+      "source": "// BT-3718: outer locals mutated inside protected blocks of class methods, and a\n// `do:` nested in a loop body. See the fixture for what each method does; the\n// answers below follow from the final value of the local.\n\nTestCase subclass: ClassMethodProtectedLocalsTest\n\n  testEnsureCleanupSeesTheBodysWrite =>\n    self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11\n\n  testNestedEnsureCleanupsSeeEachOther =>\n    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 32\n\n  testOnDoNestedInATryBody =>\n    self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2\n\n  testPureOnDoNestedInAPureOnDo =>\n    self assert: ClassMethodProtectedLocals pureOnDoNestedInAPureOnDo equals: 2\n\n  testOnDoHandlerSeesTheValueBeforeTheTry =>\n    self assert: ClassMethodProtectedLocals onDoHandlerSeesTheValueBeforeTheTry equals: 10\n\n  testNestedDoWritesTheLoopsLocal =>\n    self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15\n\n  testNestedDoInACountedLoop =>\n    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153",
       "explanation": "BT-3718: outer locals mutated inside protected blocks of class methods, and a `do:` nested in a loop body. See the fixture for what each method does; the answers below follow from the final value of the local."
     },
     {
@@ -22506,16 +22504,13 @@
         "Object",
         "assign",
         "assignment",
-        "branch",
         "class_method_protected_locals",
-        "conditional",
         "ensureCleanupSeesTheBodysWrite",
         "extends",
         "field",
         "for each",
         "for-each",
         "forEach",
-        "if",
         "inherit",
         "inheritance",
         "instance variable",
@@ -22535,12 +22530,10 @@
         "property",
         "pureOnDoNestedInAPureOnDo",
         "set",
-        "subclassing",
-        "tryDoAnswersTheErrorOnRaise",
-        "tryDoWritesLocal"
+        "subclassing"
       ],
-      "source": "// BT-3718: an outer method-level local mutated inside a protected block\n// (`on:do:`, `ensure:`, `Result tryDo:`) of a class method, and a `do:` nested\n// in a loop body. Every method answers a number that depends on the local's\n// final value, so a write that is lost or a cleanup that reads a stale local\n// changes the answer. (A threading construct in *operand* position is BT-3738\n// and is not covered here.)\n\nObject subclass: ClassMethodProtectedLocals\n  classState: n = 0\n\n  // `Result tryDo:` is `on:do:` with a Result around each outcome, so its block\n  // may write an outer local.\n  class tryDoWritesLocal =>\n    t := 0\n    r := Result\n      tryDo: [\n        t := t + 1\n        5\n      ]\n    (r valueOr: 0) * 10 + t\n\n  class tryDoAnswersTheErrorOnRaise =>\n    t := 0\n    r := Result\n      tryDo: [\n        t := t + 1\n        5 > 3 ifTrue: [Error signal: \"boom\"]\n        1\n      ]\n    r valueOr: 7\n\n  // The cleanup runs after the body and reads what the body wrote.\n  class ensureCleanupSeesTheBodysWrite =>\n    t := 0\n    [\n      t := t + 1\n      5\n    ] ensure: [t := t + 10]\n    t\n\n  class nestedEnsureCleanupsSeeEachOther =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 5\n        3\n      ]\n        ensure: [\n          t := t + 10\n          4\n        ]\n    ] ensure: [t := t * 2]\n    t\n\n  // An `on:do:` in the try body of another: erlc rejected the module with\n  // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.\n  class onDoNestedInATryBody =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 1\n        2\n      ] on: Error do: [3]\n    ] on: Error do: [4]\n    t\n\n  class pureOnDoNestedInAPureOnDo =>\n    [\n      [\n        Error signal: \"inner\"\n        1\n      ] on: Error do: [2]\n    ] on: Error do: [3]\n\n  // An error crossing the catch discards the writes made inside it.\n  class onDoHandlerSeesTheValueBeforeTheTry =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"boom\"\n    ] on: Error do: [t := t + 10]\n    t\n\n  // A `do:` nested in a loop body writes the same local as the loop.\n  class nestedDoWritesTheLoopsLocal =>\n    t := 0\n    #(1, 2)\n      do: [:i |\n        t := t + i\n        #(1, 2, 3) do: [:j | t := t + j]\n      ]\n    t\n\n  class nestedDoInACountedLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:i |\n        t := t + i\n        #(1, 2, 3)\n          do: [:j |\n            t := t + j\n            self.n := j\n          ]\n      ]\n    t * 10 + self.n\n\n  class n => self.n",
-      "explanation": "BT-3718: an outer method-level local mutated inside a protected block (`on:do:`, `ensure:`, `Result tryDo:`) of a class method, and a `do:` nested in a loop body. Every method answers a number that depends on the local's final value, so a write that is lost or a cleanup that reads a stale local changes the answer. (A threading construct in *operand* position is BT-3738 and is not covered here.)"
+      "source": "// BT-3718: an outer method-level local mutated inside a protected block\n// (`on:do:`, `ensure:`) of a class method, and a `do:` nested\n// in a loop body. Every method answers a number that depends on the local's\n// final value, so a write that is lost or a cleanup that reads a stale local\n// changes the answer. (A threading construct in *operand* position is BT-3738\n// and is not covered here.)\n\nObject subclass: ClassMethodProtectedLocals\n  classState: n = 0\n\n  // The cleanup runs after the body and reads what the body wrote.\n  class ensureCleanupSeesTheBodysWrite =>\n    t := 0\n    [\n      t := t + 1\n      5\n    ] ensure: [t := t + 10]\n    t\n\n  class nestedEnsureCleanupsSeeEachOther =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 5\n        3\n      ]\n        ensure: [\n          t := t + 10\n          4\n        ]\n    ] ensure: [t := t * 2]\n    t\n\n  // An `on:do:` in the try body of another: erlc rejected the module with\n  // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.\n  class onDoNestedInATryBody =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 1\n        2\n      ] on: Error do: [3]\n    ] on: Error do: [4]\n    t\n\n  class pureOnDoNestedInAPureOnDo =>\n    [\n      [\n        Error signal: \"inner\"\n        1\n      ] on: Error do: [2]\n    ] on: Error do: [3]\n\n  // An error crossing the catch discards the writes made inside it.\n  class onDoHandlerSeesTheValueBeforeTheTry =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"boom\"\n    ] on: Error do: [t := t + 10]\n    t\n\n  // A `do:` nested in a loop body writes the same local as the loop.\n  class nestedDoWritesTheLoopsLocal =>\n    t := 0\n    #(1, 2)\n      do: [:i |\n        t := t + i\n        #(1, 2, 3) do: [:j | t := t + j]\n      ]\n    t\n\n  class nestedDoInACountedLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:i |\n        t := t + i\n        #(1, 2, 3)\n          do: [:j |\n            t := t + j\n            self.n := j\n          ]\n      ]\n    t * 10 + self.n\n\n  class n => self.n",
+      "explanation": "BT-3718: an outer method-level local mutated inside a protected block (`on:do:`, `ensure:`) of a class method, and a `do:` nested in a loop body. Every method answers a number that depends on the local's final value, so a write that is lost or a cleanup that reads a stale local changes the answer. (A threading construct in *operand* position is BT-3738 and is not covered here.)"
     },
     {
       "id": "stdlib-test-fixtures-class-method-supervisor",

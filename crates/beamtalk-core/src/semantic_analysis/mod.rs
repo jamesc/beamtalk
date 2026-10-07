@@ -45,7 +45,6 @@ pub(crate) mod scope;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
 pub mod trait_expansion;
-pub mod try_do_lowering;
 pub mod type_checker;
 // `pub`, not `pub(crate)`: `check_effect_free_statements` is used by the
 // standalone `beamtalk-lint` crate; the rest of this module stays
