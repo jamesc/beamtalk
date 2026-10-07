@@ -17,12 +17,14 @@
 //! `beamtalk_class_vars`, which holds the declared-set check and every
 //! structured error. The key shape is owned by [`super::class_var_keys`]; the
 //! key is derived from `ClassSelf`'s metaclass tag with a single `element/2`,
-//! never by recovering the class name per access.
+//! never by recovering the class name per access, and is bound once per method
+//! body (`let CVKey = {'$bt_class_vars', element(2, ClassSelf)} in ...`, BT-3719)
+//! so an inlined access reuses it instead of rebuilding the tuple.
 //!
 //! `clearField:` and `hasField:` are rare and stay helper calls.
 
 use super::CoreErlangGenerator;
-use super::class_var_keys;
+use super::class_var_keys::{self, KeyScope};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -103,6 +105,41 @@ impl CoreErlangGenerator {
             },
             ") in "
         ]
+    }
+
+    /// The class key of an inlined access: the method's bound `CVKey` variable
+    /// inside a class-method body (minted at the first access and bound by
+    /// [`Self::with_class_var_key_binding`]), the inline key tuple elsewhere.
+    fn class_var_key_ref_doc(&mut self) -> Document<'static> {
+        match self.class_var_key_scope.clone() {
+            KeyScope::Unscoped => class_var_keys::key_doc("ClassSelf"),
+            KeyScope::Bound(var) => leaf::var(var),
+            KeyScope::Open => {
+                let var = self.fresh_temp_var("CVKey");
+                self.class_var_key_scope = KeyScope::Bound(var.clone());
+                leaf::var(var)
+            }
+        }
+    }
+
+    /// Opens the per-method key scope around `lower`, which lowers one
+    /// class-method body, and binds the key once around the result when an
+    /// access used it (BT-3719). The enclosing scope (a `ClassBuilder` fun
+    /// lowered inside another class method) is restored afterwards.
+    pub(super) fn with_class_var_key_binding(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> super::Result<Document<'static>>,
+    ) -> super::Result<Document<'static>> {
+        let outer = std::mem::replace(&mut self.class_var_key_scope, KeyScope::Open);
+        let lowered = lower(self);
+        let inner = std::mem::replace(&mut self.class_var_key_scope, outer);
+        let body = lowered?;
+        Ok(match inner {
+            KeyScope::Bound(var) => {
+                docvec![class_var_keys::key_binding_doc(&var, "ClassSelf"), body]
+            }
+            KeyScope::Open | KeyScope::Unscoped => body,
+        })
     }
 
     /// `self` as the receiver of a class-side access.
@@ -294,10 +331,11 @@ impl CoreErlangGenerator {
         } else {
             ("get", Document::Str("'true'"))
         };
+        let key = self.class_var_key_ref_doc();
         let fallback = || self.class_var_read_helper_call_doc(function, vec![leaf::atom(name)]);
         docvec![
             "case call 'erlang':'get'(",
-            class_var_keys::key_doc("ClassSelf"),
+            key,
             ") of <",
             leaf::var(map_var.clone()),
             "> when call 'erlang':'is_map'(",
@@ -342,13 +380,14 @@ impl CoreErlangGenerator {
         let val_var = self.fresh_temp_var("CVVal");
         let map_var = self.fresh_temp_var("CVMap");
         let old_var = self.fresh_temp_var("CVOld");
+        let key = self.class_var_key_ref_doc();
         docvec![
             "let ",
             leaf::var(val_var.clone()),
             " = ",
             value_doc,
             " in case call 'erlang':'get'(",
-            class_var_keys::key_doc("ClassSelf"),
+            key.clone(),
             ") of <",
             leaf::var(map_var.clone()),
             "> when call 'erlang':'is_map'(",
@@ -356,7 +395,7 @@ impl CoreErlangGenerator {
             ") -> let ",
             leaf::var(old_var),
             " = call 'erlang':'put'(",
-            class_var_keys::key_doc("ClassSelf"),
+            key,
             ", call 'maps':'put'(",
             leaf::atom(name),
             ", ",
