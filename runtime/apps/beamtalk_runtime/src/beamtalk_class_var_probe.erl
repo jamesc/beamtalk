@@ -118,13 +118,30 @@ ensure_sink() ->
     %% One-time probe setup. Deep class-method call chains need a deeper
     %% backtrace window to find the invoke frame on a blocked home process;
     %% the flag is VM-wide, so set it once, not on every event.
+    %%
+    %% BT-3723: the check-then-put must be atomic. Two processes reporting
+    %% concurrently could both see `false` and both install the handler (the
+    %% second `add_handler` fails) or race the quieting of other handlers, so
+    %% the slow path runs under a node-local global lock and re-checks inside
+    %% it. The flag is set only after setup finishes, so a concurrent reporter
+    %% waits for the lock rather than logging before the sink exists.
     case persistent_term:get(?SETUP_KEY, false) of
         true ->
             ok;
         false ->
-            ok = persistent_term:put(?SETUP_KEY, true),
+            _ = global:trans({?SETUP_KEY, self()}, fun setup_once/0, [node()], infinity),
+            ok
+    end.
+
+-spec setup_once() -> ok.
+setup_once() ->
+    case persistent_term:get(?SETUP_KEY, false) of
+        true ->
+            ok;
+        false ->
             _ = erlang:system_flag(backtrace_depth, 128),
-            ensure_sink_handler()
+            ok = ensure_sink_handler(),
+            ok = persistent_term:put(?SETUP_KEY, true)
     end.
 
 -spec ensure_sink_handler() -> ok.
@@ -202,6 +219,11 @@ home_pid(_) -> none.
 
 -spec home_invocation_live(pid() | none) -> boolean().
 home_invocation_live(none) ->
+    false;
+home_invocation_live(Pid) when node(Pid) =/= node() ->
+    %% BT-3723: `erlang:process_info/2` raises `badarg` on a pid of another
+    %% node, which would drop the whole event. The census runs single-node; a
+    %% remote home is reported as not live (`abroad`) rather than probed.
     false;
 home_invocation_live(Pid) ->
     case erlang:process_info(Pid, current_stacktrace) of
