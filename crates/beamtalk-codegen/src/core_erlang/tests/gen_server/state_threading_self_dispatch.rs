@@ -9,6 +9,21 @@
 
 use super::*;
 
+/// Counts the self-send call sites that dispatch `selector` through
+/// `safe_dispatch`. BT-3692: each open self-send site emits two textual calls
+/// (`/4` with `Self`, and the `/3` fallback for older-compiled receiver
+/// modules) under one `function_exported` test, so only the `/4` arm (the one
+/// that passes `Self`) is counted.
+fn count_self_dispatches(code: &str, selector: &str) -> usize {
+    let needle = format!("'safe_dispatch'('{selector}'");
+    code.match_indices(&needle)
+        .filter(|(i, _)| {
+            let rest = &code[*i..];
+            rest[..rest.find(')').unwrap_or(rest.len())].contains(", Self, ")
+        })
+        .count()
+}
+
 #[test]
 fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_through_erlc() {
     // `(self recordOnce: which) ifTrue:ifFalse:` — the self-send is
@@ -177,7 +192,7 @@ fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_com
         "the nested self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
     );
     assert_eq!(
-        code.matches("'safe_dispatch'('recordOnce:'").count(),
+        count_self_dispatches(&code, "recordOnce:"),
         1,
         "the hoisted self-send must be dispatched exactly once (hoist, then substitute). Got:\n{code}"
     );
@@ -208,7 +223,7 @@ fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_com
         "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
     );
     assert_eq!(
-        code.matches("'safe_dispatch'('bumpCount'").count(),
+        count_self_dispatches(&code, "bumpCount"),
         1,
         "the hoisted self-send must be dispatched exactly once. Got:\n{code}"
     );
@@ -258,7 +273,7 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
         "the Actor-body FieldAssignment arm no longer goes through the planner's snapshot. Got:\n{code}"
     );
     assert_eq!(
-        code.matches("'safe_dispatch'('bumpCount'").count(),
+        count_self_dispatches(&code, "bumpCount"),
         1,
         "the sequenced self-send must be dispatched exactly once. Got:\n{code}"
     );
@@ -355,7 +370,7 @@ fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_
         "order must be: temp for `at:`, then the dispatch, then its State Bind. Got:\n{code}"
     );
     assert_eq!(
-        code.matches("'safe_dispatch'('bump'").count(),
+        count_self_dispatches(code, "bump"),
         1,
         "the sequenced self-send is dispatched exactly once. Got:\n{code}"
     );
@@ -393,7 +408,7 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
     )
     .unwrap_or_else(|e| panic!("an FFI send with a self-send argument must compile. Got: {e:?}"));
     assert_eq!(
-        code.matches("'safe_dispatch'('bump'").count(),
+        count_self_dispatches(&code, "bump"),
         4,
         "each of the four methods dispatches `bump` exactly once. Got:\n{code}"
     );

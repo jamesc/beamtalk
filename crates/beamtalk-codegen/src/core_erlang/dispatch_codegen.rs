@@ -3246,7 +3246,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Builds the shared `safe_dispatch/3` self-send fragment used by every
+    /// Builds the shared `safe_dispatch/4` self-send fragment used by every
     /// non-sealed self-dispatch call site (self-cast, discarding
     /// self-dispatch, open self-dispatch, and the Tier 2 dispatch call above).
     ///
@@ -3261,9 +3261,17 @@ impl CoreErlangGenerator {
     /// compiling module, so a state without the key keeps the old binding.
     ///
     /// ```erlang
+    /// let _Args = [Args] in
     /// let _CM = call 'maps':'get'('__class_mod__', State, 'module') in
-    ///   call _CM:'safe_dispatch'('selector', [Args], State)
+    ///   case call 'erlang':'function_exported'(_CM, 'safe_dispatch', 4) of
+    ///     <'true'>  -> call _CM:'safe_dispatch'('selector', _Args, Self, State)
+    ///     <_>       -> call _CM:'safe_dispatch'('selector', _Args, State)
+    ///   end
     /// ```
+    ///
+    /// BT-3692: the `function_exported` arm keeps a receiver module compiled by an
+    /// older compiler (no `safe_dispatch/4`, e.g. a stale package beam subclassing a
+    /// recompiled class) working through `/3` instead of raising `undef`.
     ///
     /// Sealed classes never reach this helper: they cannot be subclassed, so
     /// their self-sends stay statically bound (see the sealed branches).
@@ -3274,22 +3282,44 @@ impl CoreErlangGenerator {
         state_var: String,
     ) -> Document<'static> {
         let class_mod_var = self.fresh_temp_var("ClassMod");
+        let args_var = self.fresh_temp_var("SDArgs");
+        let selector = selector_atom.into();
+        // The args are bound once so the two arms below do not duplicate (and
+        // re-evaluate) the argument expressions.
         docvec![
             "let ",
+            leaf::var(args_var.clone()),
+            " = [",
+            args_doc,
+            "] in let ",
             leaf::var(class_mod_var.clone()),
             " = call 'maps':'get'('__class_mod__', ",
             leaf::var(state_var.clone()),
             ", ",
             leaf::atom(self.module_name.clone()),
-            ") in call ",
+            ") in case call 'erlang':'function_exported'(",
+            leaf::var(class_mod_var.clone()),
+            ", 'safe_dispatch', 4) of <'true'> when 'true' -> call ",
+            leaf::var(class_mod_var.clone()),
+            ":'safe_dispatch'(",
+            leaf::atom(selector.clone()),
+            ", ",
+            leaf::var(args_var.clone()),
+            ", ",
+            // BT-3692: pass the in-scope `Self` instead of making the callee
+            // rebuild it with `beamtalk_actor:make_self/1`.
+            leaf::var("Self"),
+            ", ",
+            leaf::var(state_var.clone()),
+            ") <_> when 'true' -> call ",
             leaf::var(class_mod_var),
             ":'safe_dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
+            leaf::atom(selector),
+            ", ",
+            leaf::var(args_var),
+            ", ",
             leaf::var(state_var),
-            ")"
+            ") end"
         ]
     }
 }

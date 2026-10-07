@@ -146,7 +146,7 @@ impl CoreErlangGenerator {
              'handle_cast'/2, 'handle_call'/3, \
              'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
             dispatch_3_export,
-            ", 'safe_dispatch'/3, \
+            ", 'safe_dispatch'/3, 'safe_dispatch'/4, \
              'method_table'/0, 'has_method'/1, 'class_name'/0, \
              'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
              'superclass'/0",
@@ -517,6 +517,16 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    line(),
+                    "apply 'safe_dispatch'/4 (Selector, Args, Self, State)",
+                ]
+            ),
+            "\n\n",
+            // BT-3692: caller-supplied Self variant (open self-sends pass their own Self)
+            "'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->",
+            nest(
+                INDENT,
+                docvec![
                     line(),
                     docvec![
                         "call ",

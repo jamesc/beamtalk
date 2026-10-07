@@ -358,6 +358,15 @@ fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
         output.contains("safe_dispatch"),
         "actor self cast should use safe_dispatch. Got: {output}"
     );
+    // BT-3692: passes the caller's `Self` to `safe_dispatch/4`, and falls back to
+    // `/3` when the receiver module (compiled by an older compiler) lacks `/4`.
+    assert!(
+        output.contains("'function_exported'(")
+            && output.contains("'safe_dispatch', 4)")
+            && output.contains("'safe_dispatch'('doIt', _SDArgs")
+            && output.contains(", Self, State)"),
+        "actor self cast should pass Self to safe_dispatch/4 with a /3 fallback. Got: {output}"
+    );
     assert!(
         output.contains("'ok'"),
         "actor self cast should return 'ok'. Got: {output}"
