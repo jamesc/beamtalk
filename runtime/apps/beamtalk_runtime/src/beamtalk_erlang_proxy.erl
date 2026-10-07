@@ -236,10 +236,15 @@ and `native_call/4`:
 
 `Context` selects the class/selector reported on wrapped errors — see
 `error_context()`. The wrapping helpers (`ensure_wrapped`-style) run only on the
-error path; the happy path pays nothing beyond the `try` frame + coercion.
+error path; the happy path pays nothing beyond the `try` frame, coercion and one class-variable snapshot read.
 """.
 -spec apply_with_coercion(atom(), atom(), list(), atom(), error_context()) -> term().
 apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
+    %% The first attempt can run a Beamtalk block passed as an argument. If it
+    %% raises `badarg` and the charlist retry runs, the retry is a fresh attempt:
+    %% class-variable writes the failed first attempt made must not survive into
+    %% it (ADR 0130 §4, BT-3728), so remember the pre-call state.
+    Snap = beamtalk_class_vars:snapshot(),
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
@@ -258,7 +263,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
                 Args,
                 OrigSelector,
                 Context,
-                fun maybe_retry_badarg/6
+                fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, Snap) end
             )
     end.
 
@@ -269,12 +274,19 @@ Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
 retry; if the retry still fails (or no binary args were coercible) the error is
 wrapped per `apply_with_coercion/5`.
+
+`Snap` is the class-variable snapshot taken before the first attempt. A retry
+restores it first, so writes made by a block run inside the failed attempt are
+discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
 """.
--spec maybe_retry_badarg(atom(), atom(), list(), atom(), error_context(), list()) -> term().
-maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack) ->
+-spec maybe_retry_badarg(
+    atom(), atom(), list(), atom(), error_context(), list(), beamtalk_class_vars:snapshot()
+) -> term().
+maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
     CoercedArgs = coerce_binaries_to_charlists(Args),
     case CoercedArgs =/= Args of
         true ->
+            beamtalk_class_vars:restore(Snap),
             try
                 coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs))
             catch
@@ -310,7 +322,7 @@ raise_badarg_terminal(Module, FunName, _Args, OrigSelector, Context, Stack) ->
 -doc """
 The single FFI exception classifier shared by the apply and badarg-retry paths.
 
-Both `apply_with_coercion/5` and `maybe_retry_badarg/6` used to inline a copy of
+Both `apply_with_coercion/5` and `maybe_retry_badarg/7` used to inline a copy of
 this clause set; they only differed in what `badarg` does (retry vs. raise). That
 divergence is now the `OnBadarg` continuation — a `fun/6` invoked as
 `OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
@@ -330,7 +342,7 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
 """.
 %% Returns `term()`, not `no_return()`: every classified-exception clause raises,
 %% but the `badarg` clause defers to `OnBadarg`, and the first-pass continuation
-%% (`maybe_retry_badarg/6`) can *return* the charlist-coerced retry result on
+%% (`maybe_retry_badarg/7`) can *return* the charlist-coerced retry result on
 %% success. That value flows back through here to `apply_with_coercion/5`.
 -spec classify_ffi_exception(
     error | exit | throw,

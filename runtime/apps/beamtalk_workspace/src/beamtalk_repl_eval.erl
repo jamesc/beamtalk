@@ -922,7 +922,14 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
     case code:load_binary(ModuleName, "", Binary) of
         {module, ModuleName} ->
             try
-                {RawResult, _UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
+                %% The evaluated source runs in this process, which may be a class
+                %% invocation process (Inspector `evaluate:` called from a class
+                %% method), and a block it runs may write class variables. This
+                %% catch swallows the error, so the writes must be rolled back
+                %% like any other protected region (ADR 0130 §4, BT-3728).
+                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
+                    apply(ModuleName, eval, [Bindings])
+                end),
                 case maybe_await_future(RawResult) of
                     {future_rejected, FutureReason} ->
                         %% An awaited future that rejected/timed out is an error,
