@@ -3246,7 +3246,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Builds the shared `safe_dispatch/3` self-send fragment used by every
+    /// Builds the shared `safe_dispatch/4` self-send fragment used by every
     /// non-sealed self-dispatch call site (self-cast, discarding
     /// self-dispatch, open self-dispatch, and the Tier 2 dispatch call above).
     ///
@@ -3262,7 +3262,7 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let _CM = call 'maps':'get'('__class_mod__', State, 'module') in
-    ///   call _CM:'safe_dispatch'('selector', [Args], State)
+    ///   call _CM:'safe_dispatch'('selector', [Args], Self, State)
     /// ```
     ///
     /// Sealed classes never reach this helper: they cannot be subclassed, so
@@ -3288,6 +3288,10 @@ impl CoreErlangGenerator {
             ", [",
             args_doc,
             "], ",
+            // BT-3692: pass the in-scope `Self` instead of making the callee
+            // rebuild it with `beamtalk_actor:make_self/1`.
+            leaf::var("Self"),
+            ", ",
             leaf::var(state_var),
             ")"
         ]
