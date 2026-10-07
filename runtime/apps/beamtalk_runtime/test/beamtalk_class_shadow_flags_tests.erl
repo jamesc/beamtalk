@@ -51,7 +51,10 @@ shadow_flag_test_() ->
                 ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
                 ok = beamtalk_class_shadow_flags:clear(runtime_fun, Name),
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                %% Readiness is never cleared in production; the derived flag
+                %% (BT-3700) is, so drop both to exercise the not-ready branch.
                 _ = persistent_term:erase(beamtalk_class_shadow_ready),
+                _ = persistent_term:erase(Tag),
                 ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
             after
                 beamtalk_class_shadow_flags:clear(extension, Tag),
@@ -59,6 +62,93 @@ shadow_flag_test_() ->
                 beamtalk_class_shadow_flags:mark_ready()
             end,
             ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+        end},
+        {"derived flag is installed on first send and erased by a shadow raise (BT-3700)", fun() ->
+            Tag = 'Bt3700Derived class',
+            Name = 'Bt3700Derived',
+            _ = persistent_term:erase(Tag),
+            ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+            ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+            ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+            try
+                %% each raise must erase the flag itself, before the next send
+                ok = beamtalk_class_shadow_flags:set(extension, Tag),
+                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ok = beamtalk_class_shadow_flags:clear(extension, Tag),
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                ok = beamtalk_class_shadow_flags:set(runtime_fun, Name),
+                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag))
+            after
+                beamtalk_class_shadow_flags:clear(extension, Tag),
+                beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+                persistent_term:erase(Tag)
+            end
+        end},
+        {"extension register/unregister flips the derived flag before the next send (BT-3700)",
+            fun() ->
+                Tag = 'Object class',
+                ?assert(direct(Tag, 'Object', bt3700_probe)),
+                ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ok = beamtalk_extensions:register(Tag, bt3700_ext, noop_fun(), bt3700),
+                try
+                    ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                    ?assertNot(direct(Tag, 'Object', bt3700_probe))
+                after
+                    ok = beamtalk_extensions:unregister('Object', bt3700_ext, true)
+                end,
+                ?assert(direct(Tag, 'Object', bt3700_probe))
+            end},
+        {"runtime class-method install/reset flips the derived flag (BT-3700)", fun() ->
+            Name = 'Object',
+            Tag = 'Object class',
+            ?assert(direct(Tag, Name, bt3700_probe)),
+            ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+            ok = beamtalk_class_metadata:set_runtime_class_methods(Name, [bt3700_rt]),
+            try
+                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ?assertNot(direct(Tag, Name, bt3700_probe))
+            after
+                ok = beamtalk_class_metadata:reset_runtime_class_methods(Name)
+            end,
+            ?assert(direct(Tag, Name, bt3700_probe))
+        end},
+        {"an install racing a raise never leaves a stale safe flag (BT-3700)", fun() ->
+            Tag = 'Bt3700Race class',
+            Name = 'Bt3700Race',
+            _ = persistent_term:erase(Tag),
+            Parent = self(),
+            %% Hold the tag lock; a sender and a raiser both block behind it.
+            %% Whichever runs second must win: after both, the flag is absent.
+            beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+                Sender = spawn_link(fun() ->
+                    Parent ! {sender, beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)}
+                end),
+                timer:sleep(50),
+                Raiser = spawn_link(fun() ->
+                    ok = beamtalk_class_shadow_flags:set(extension, Tag),
+                    Parent ! raised
+                end),
+                timer:sleep(50),
+                _ = {Sender, Raiser}
+            end),
+            receive
+                {sender, _} -> ok
+            after 5000 -> ?assert(false)
+            end,
+            receive
+                raised -> ok
+            after 5000 -> ?assert(false)
+            end,
+            try
+                ?assert(beamtalk_class_shadow_flags:is_set(extension, Tag)),
+                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+            after
+                beamtalk_class_shadow_flags:clear(extension, Tag),
+                persistent_term:erase(Tag)
+            end
         end},
         {"unregistering the last class-side extension restores the fast path", fun() ->
             Sel = bt3669_ext_restore,

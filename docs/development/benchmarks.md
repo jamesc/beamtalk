@@ -1332,3 +1332,45 @@ touches no class variable, so the key binding does not appear in it (0.98, insid
 2142-2677). The +17% over main recorded under BT-3713 comes from the runtime path around the walk
 (`class_self_send/4` plus the single-home invocation boundary), not from the inlined access lowering. It is
 accepted here, and its owner is BT-3700 (late-binding guard and walk), as ADR 0130 already assigns.
+
+## BT-3700: one derived flag for the class-side self-send guard
+
+`class_self_direct_ok/4` for a defining-class receiver used to cost three `persistent_term` reads (the
+`extension` flag, the `runtime_fun` flag, readiness), two of them tuple keys. It now reads one key: a derived
+"direct call is safe" flag keyed by the bare class-object tag atom (`'Foo class'`), installed lazily by the
+first send that finds the class ready and unshadowed, and erased by `beamtalk_class_shadow_flags:set/2`
+(either kind) under a per-tag lock before the shadow becomes visible. Design and the single-writer argument:
+`beamtalk_class_shadow_flags` moduledoc.
+
+### Method
+
+`runtime/perf/self_send_bench`, `beamtalk run SsbMain run` (debug CLI), 7 rounds interleaved (old, new, old,
+new, ...), medians in ns/op with min-max. The Rust compiler and generated code are identical on both sides;
+the only difference is the two changed runtime beams (`beamtalk_class_shadow_flags`,
+`beamtalk_class_dispatch`), swapped in place between runs, so the pairs differ in nothing else. The machine is
+shared; only the paired ratios mean anything. Bench gained `class_self_send_inherited_plain` (a subclass that
+overrides nothing).
+
+| case | before (origin/main) | after BT-3700 |
+|---|---|---|
+| class self-send, open (defining class) | 227 [217-290] | 163 [150-182] |
+| class self-send, open, in an `ifTrue:` arm | 292 [274-374] | 233 [204-322] |
+| class self-send, sealed | 133 [128-186] | 139 [133-149] |
+| subclass receiver, override present (walk) | 2191 [2050-2422] | 2231 [2169-2424] |
+| subclass receiver, no override (walk) | 2798 [2543-2936] | 2723 [2629-3333] |
+
+The guard in isolation (`erl` loop over `class_self_direct_ok/4`, loop overhead of ~8 ns not subtracted, same
+shared machine): about 120-200 ns before, 42-53 ns after (a bare `persistent_term:get/2` of the same key is
+37-48 ns in that shell, so the floor of any `persistent_term` scheme is the read itself). A tuple key costs
+~47 ns against ~17 ns for an atom key in a quiet shell, which is why the derived key is the bare tag atom.
+
+### Not done: the subclass-receiver short-circuit
+
+The issue's second half (skip the hierarchy walk for a subclass receiver when nothing between it and the
+defining class overrides the selector) is not implemented. An experiment (resolution cached in the process
+dictionary, no invalidation, extension check and hierarchy walk skipped entirely) took the subclass-receiver
+send from ~2.2 us to ~1.1-1.3 us. The rest is `apply_class_method_in_context/6` (runtime-fun lookup,
+`try`/classification, `ClassSelf` build, `receiver_tag/1` atom concatenation) and the unwrap, so
+"within 2x of the direct call" (~270 ns) needs a new call shape for the inherited case, not a flag, and a
+resolution cache would need a hierarchy-wide epoch bumped by every class-metadata write. That is a separate
+design; the numbers above are its starting point.
