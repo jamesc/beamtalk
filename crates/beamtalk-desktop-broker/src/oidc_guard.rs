@@ -169,7 +169,7 @@ pub fn oidc_configured(ide_toml_path: &Path) -> Option<OidcSource> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::ENV_LOCK;
+    use crate::test_support::lock_env;
 
     fn clear_oidc_env() {
         for key in OIDC_ENV_VARS {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn no_oidc_source_when_nothing_configured() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         clear_oidc_env();
         assert_eq!(oidc_requested_by_env(), None);
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn env_var_present_is_detected() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         clear_oidc_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("BT_OIDC_ISSUER", "https://idp.example.com") };
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn empty_env_var_is_not_configured() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         clear_oidc_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("BT_OIDC_ISSUER", "") };
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn oidc_configured_prefers_env_over_file() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         clear_oidc_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("BT_OIDC_CLIENT_ID", "beamtalk-ide") };
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn default_ide_config_path_respects_bt_ide_config_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("BT_IDE_CONFIG", "/custom/path/ide.toml") };
         assert_eq!(

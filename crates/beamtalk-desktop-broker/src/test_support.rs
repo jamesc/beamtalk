@@ -16,3 +16,16 @@ use std::sync::Mutex;
 /// Hold this for the duration of any test that reads or writes `BT_OIDC_*`
 /// or `BT_IDE_CONFIG`.
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquire [`ENV_LOCK`], recovering from poisoning.
+///
+/// The lock guards no data (`Mutex<()>`), only mutual exclusion, so a
+/// panicking test leaves nothing inconsistent behind. A bare
+/// `.lock().unwrap()` would let one failing test poison the lock and turn
+/// every later test that takes it into a spurious `PoisonError` failure
+/// (BT-3698), hiding the real failure.
+pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
