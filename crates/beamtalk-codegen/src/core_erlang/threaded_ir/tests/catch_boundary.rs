@@ -23,7 +23,12 @@ fn vars() -> OnDoCatchVars {
         match_var: v("Match1"),
         ex_class_var: v("ExClass1"),
         snapshot_var: v("ExClass1Snap"),
+        filter_fallback_var: v("ExClass1NoMatch"),
     }
+}
+
+fn handler() -> beamtalk_cerl_doc::Document<'static> {
+    beamtalk_cerl_doc::Document::Str("apply Handler1 (ExObj1)")
 }
 
 fn restore_steps(snapshot: &str) -> Vec<CatchStep> {
@@ -33,6 +38,8 @@ fn restore_steps(snapshot: &str) -> Vec<CatchStep> {
         },
         CatchStep::WrapException,
         CatchStep::ClassFilter,
+        CatchStep::FilterHandler(handler()),
+        CatchStep::FilterMiss,
     ]
 }
 
@@ -139,6 +146,8 @@ fn a_non_nlr_arm_that_does_not_begin_with_the_restore_fails() {
                     snapshot: "ExClass1Snap".to_string(),
                 },
                 CatchStep::ClassFilter,
+                CatchStep::FilterHandler(handler()),
+                CatchStep::FilterMiss,
             ],
         },
     ])];
@@ -151,7 +160,12 @@ fn a_non_nlr_arm_without_any_restore_fails() {
         CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
         CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
         CatchClause::NonNlr {
-            steps: vec![CatchStep::WrapException, CatchStep::ClassFilter],
+            steps: vec![
+                CatchStep::WrapException,
+                CatchStep::ClassFilter,
+                CatchStep::FilterHandler(handler()),
+                CatchStep::FilterMiss,
+            ],
         },
     ])];
     assert_eq!(defect(&ir), Some(CatchRestoreDefect::RestoreNotFirst));
@@ -195,5 +209,73 @@ fn render_orders_both_nlr_arms_before_the_restore_before_the_filter() {
     let filter = at("'beamtalk_exception_handler':'matches_class'(ExClass1, ExObj1)");
     assert!(four < three && three < restore && restore < wrap && wrap < filter);
     assert!(text.starts_with("catch <Type1, Error1, Stack1> -> case {Type1, Error1} of "));
-    assert!(text.ends_with("<'true'> when 'true' -> "));
+    assert!(text.ends_with(" end end"));
+}
+
+/// BT-3718: the class filter's `case` must be closed by its `'false'` re-raise
+/// and an exhaustive wildcard clause, or `erlc` rejects an `on:do:` nested in
+/// another protected region with `ambiguous_catch_try_state`.
+#[test]
+fn render_closes_the_filter_with_a_reraise_and_an_exhaustive_fallback() {
+    let text = lower_and_render(&[node(well_formed())]).to_pretty_string();
+    let handler = text.find("apply Handler1 (ExObj1)").expect("handler arm");
+    let miss = text
+        .find("<'false'> when 'true' -> primop 'raw_raise'(Type1, Error1, Stack1)")
+        .expect("filter-miss re-raise");
+    let fallback = text
+        .find(
+            "<ExClass1NoMatch> when 'true' -> call 'erlang':'error'({'case_clause', ExClass1NoMatch})",
+        )
+        .expect("exhaustive fallback clause");
+    assert!(handler < miss && miss < fallback);
+}
+
+fn filter_defect(ir: &[ThreadedStmt]) -> bool {
+    verify(ir)
+        .iter()
+        .any(|e| matches!(e, VerifyError::CatchFilterNotClosed { at } if *at == span()))
+}
+
+#[test]
+fn a_filter_with_no_miss_arm_or_fallback_fails() {
+    // The shape every compiled `on:do:` had before BT-3718: the filter opened,
+    // its handler and `'false'` arm left to the caller's text, no wildcard.
+    let ir = [node(vec![
+        CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
+        CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
+        CatchClause::NonNlr {
+            steps: vec![
+                CatchStep::ClassVarRestore {
+                    snapshot: "ExClass1Snap".to_string(),
+                },
+                CatchStep::WrapException,
+                CatchStep::ClassFilter,
+            ],
+        },
+    ])];
+    assert!(filter_defect(&ir));
+}
+
+#[test]
+fn a_filter_closed_without_its_handler_fails() {
+    let ir = [node(vec![
+        CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
+        CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
+        CatchClause::NonNlr {
+            steps: vec![
+                CatchStep::ClassVarRestore {
+                    snapshot: "ExClass1Snap".to_string(),
+                },
+                CatchStep::WrapException,
+                CatchStep::ClassFilter,
+                CatchStep::FilterMiss,
+            ],
+        },
+    ])];
+    assert!(filter_defect(&ir));
+}
+
+#[test]
+fn a_well_formed_catch_boundary_closes_its_filter() {
+    assert!(!filter_defect(&[node(well_formed())]));
 }

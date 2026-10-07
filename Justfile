@@ -1369,7 +1369,7 @@ test-metamorphic *ARGS: build-stdlib
 # CV_CORPUS_CASES (programs, default 48 on a BEAM, proptest default in-process),
 # CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
 # `local_touch` (an outer local mutated inside a protected block) is excluded
-# until BT-3718 is fixed; `just test-class-var-corpus-local-touch` measures it.
+# until BT-3738 is fixed; `just test-class-var-corpus-local-touch` measures it.
 # Measure the in-process failure rate with:
 #   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
 test-class-var-corpus: build-stdlib
@@ -1377,10 +1377,10 @@ test-class-var-corpus: build-stdlib
     cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
     cargo test -p beamtalk-codegen --test class_var_agreement
 
-# BT-3718: the `local_touch` shape (an outer local mutated inside a protected
+# BT-3738: the `local_touch` shape (an outer local mutated inside a protected
 # block) fails today, so its property is `#[ignore]`d; this recipe measures it.
 test-class-var-corpus-local-touch: build-stdlib
-    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until BT-3718)..."
+    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until BT-3738)..."
     cargo test -p beamtalk-cli --test cli class_var_agreement_local_touch -- --ignored --nocapture
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.

@@ -21,7 +21,7 @@
 //! - `class_var_agreement_local_touch` draws every shape including
 //!   `local_touch` (an outer local mutated inside a protected block). It is
 //!   `#[ignore]`d: those programs fail today for a local-variable threading
-//!   reason, BT-3718, not fixed by ADR 0130.
+//!   reason, BT-3738, not fixed by ADR 0130.
 //!
 //! A batch is one package compiled and run once; if the package fails to
 //! compile (a rejected program, or a `ThreadedIr` verifier `internal:` error
@@ -340,11 +340,11 @@ fn class_var_agreement_enabled_shapes() {
     property(corpus_shapes_from_env(Shapes::ENABLED));
 }
 
-/// BT-3718: `local_touch` (an outer local mutated inside a `on:do:`,
+/// BT-3738: `local_touch` (an outer local mutated inside a `on:do:`,
 /// `ensure:` or `Result tryDo:` block) fails today. Remove the `#[ignore]` (and
-/// add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3718 is fixed.
+/// add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3738 is fixed.
 #[test]
-#[ignore = "local_touch fails today (BT-3718); run via `just test-class-var-corpus-local-touch`"]
+#[ignore = "local_touch fails today (BT-3738); run via `just test-class-var-corpus-local-touch`"]
 fn class_var_agreement_local_touch() {
     property(Shapes::all());
 }

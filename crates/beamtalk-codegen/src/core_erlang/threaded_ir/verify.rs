@@ -142,6 +142,16 @@ pub(in crate::core_erlang) enum VerifyError {
         defect: CatchRestoreDefect,
         at: Span,
     },
+
+    /// A compiled `on:do:`'s [`ThreadedStmt::OnDoCatch`] opens the exception
+    /// class filter ([`CatchStep::ClassFilter`]) but does not close it with
+    /// its handler arm followed by [`CatchStep::FilterMiss`], the `'false'`
+    /// re-raise and the exhaustive wildcard clause. A filter `case` with no
+    /// wildcard is not provably exhaustive to the Core Erlang compiler, and
+    /// when the `on:do:` sits inside another protected region `erlc` rejects
+    /// the module with `ambiguous_catch_try_state` (BT-3718). Every `on:do:`
+    /// in any nesting position closes its filter, so the check is per node.
+    CatchFilterNotClosed { at: Span },
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -382,6 +392,10 @@ impl VerifyWalk<'_> {
                     self.errors
                         .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
                 }
+                if !catch_filter_closed(clauses) {
+                    self.errors
+                        .push(VerifyError::CatchFilterNotClosed { at: *span });
+                }
             }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
@@ -456,6 +470,25 @@ fn check_catch_restore(
         }
         _ => Some(CatchRestoreDefect::RestoreNotFirst),
     }
+}
+
+/// Whether the non-NLR clause of a [`ThreadedStmt::OnDoCatch`] closes the class
+/// filter it opens: `ClassFilter`, then `FilterHandler`, then `FilterMiss`, the
+/// last three steps in that order. A node with no non-NLR clause has no filter
+/// to close (the restore check reports that).
+fn catch_filter_closed(clauses: &[CatchClause]) -> bool {
+    clauses.iter().all(|clause| match clause {
+        CatchClause::NlrPassThrough(_) => true,
+        CatchClause::NonNlr { steps } => matches!(
+            steps.as_slice(),
+            [
+                ..,
+                CatchStep::ClassFilter,
+                CatchStep::FilterHandler(_),
+                CatchStep::FilterMiss
+            ]
+        ),
+    })
 }
 
 impl CoreErlangGenerator {

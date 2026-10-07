@@ -241,10 +241,10 @@ pub(in crate::core_erlang) fn render(
 }
 
 /// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`]: the open-ended
-/// `catch <Type, Error, Stack> -> case {Type, Error} of ...` fragment up to and
-/// including the `<'true'> when 'true' ->` arm of the exception-class filter.
-/// The caller appends the handler body, the `<'false'>` re-raise arm and the
-/// closing `end end`.
+/// `catch <Type, Error, Stack> -> case {Type, Error} of ...` clause, complete
+/// down to the closing `end end`: the exception-class filter's handler arm, its
+/// `<'false'>` re-raise arm and its exhaustive fallback are steps of the node
+/// ([`CatchStep::FilterHandler`], [`CatchStep::FilterMiss`]).
 ///
 /// Clause order is the node's: both `$bt_nlr` pass-through arms re-raise
 /// untouched; the non-NLR arm runs its steps in order, the class-variable
@@ -341,6 +341,17 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
             leaf::var(vars.match_var.clone()),
             " of ",
             "<'true'> when 'true' -> ",
+        ],
+        CatchStep::FilterHandler(handler) => handler.clone(),
+        CatchStep::FilterMiss => docvec![
+            " <'false'> when 'true' -> ",
+            CoreErlangGenerator::emit_raw_raise(
+                vars.type_var.clone(),
+                vars.error_var.clone(),
+                vars.stack_var.clone(),
+            ),
+            CoreErlangGenerator::case_clause_fallback_doc(vars.filter_fallback_var.clone()),
+            " end end",
         ],
     }
 }

@@ -1150,6 +1150,13 @@ impl CoreErlangGenerator {
         var_prefix: &str,
     ) -> beamtalk_cerl_doc::Document<'static> {
         let var = self.fresh_temp_var(var_prefix);
+        Self::case_clause_fallback_doc(var)
+    }
+
+    /// The fallback clause [`Self::case_clause_fallback`] builds, over a variable
+    /// the caller already owns (a node that renders without a generator, such as
+    /// the `on:do:` catch boundary, carries its own).
+    pub(super) fn case_clause_fallback_doc(var: String) -> beamtalk_cerl_doc::Document<'static> {
         docvec![
             " <",
             beamtalk_cerl_doc::leaf::var(var.clone()),

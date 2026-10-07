@@ -802,6 +802,9 @@ pub(in crate::core_erlang) struct OnDoCatchVars {
     /// The `let Snap = beamtalk_class_vars:snapshot() in` variable the
     /// restore step reads.
     pub snapshot_var: String,
+    /// The pattern variable of the exhaustive fallback clause that closes the
+    /// class filter's `case` ([`CatchStep::FilterMiss`]).
+    pub filter_fallback_var: String,
 }
 
 /// The two `$bt_nlr` throw shapes a compiled catch passes through.
@@ -829,9 +832,23 @@ pub(in crate::core_erlang) enum CatchStep {
     ClassVarRestore { snapshot: String },
     /// Wrap the raw `{Type, Error, Stack}` as an exception object.
     WrapException,
-    /// `matches_class` and the opening of its `'true'` arm; the handler
-    /// body and the `'false'` re-raise follow in the caller's text.
+    /// `matches_class` and the opening of its `'true'` arm. Must be followed
+    /// by [`CatchStep::FilterHandler`] and closed by [`CatchStep::FilterMiss`].
     ClassFilter,
+    /// The body of the filter's `'true'` arm: the handler application.
+    FilterHandler(Document<'static>),
+    /// The rest of the filter's `case`: the `'false'` arm that re-raises a
+    /// class the filter declines, then a wildcard clause that raises
+    /// `case_clause`, then the closing `end end`.
+    ///
+    /// The wildcard is what makes the `case` exhaustive *to the Core Erlang
+    /// compiler*, which cannot prove a `matches_class/2` answer is a boolean.
+    /// Without it an `on:do:` nested in another protected region (a `try` body
+    /// the compiler already holds open) fails `erlc` with
+    /// `ambiguous_catch_try_state`; see `case_clause_fallback`. The node owns
+    /// the clause so every compiled `on:do:` has it by construction, and
+    /// [`VerifyError::CatchFilterNotClosed`] rejects a node that lacks it.
+    FilterMiss,
 }
 
 // ─── ThreadedValue (ADR 0118, Decision 1) ────────────────────────
