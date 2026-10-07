@@ -286,9 +286,7 @@ collect_abi_refusals_test_() ->
                 end),
                 ?assertEqual(done, Result),
                 ?assertMatch([{bt3726_coll, #beamtalk_error{kind = abi_mismatch}}], Refusals),
-                ?assertEqual(
-                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
-                )
+                ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
             end},
             {"a leftover/concurrent collection raises instead of blaming it", fun() ->
                 {ok, _} = beamtalk_class_vars:collect_abi_refusals(fun() ->
@@ -298,17 +296,37 @@ collect_abi_refusals_test_() ->
                     ),
                     {ok, ok}
                 end),
-                ?assertEqual(
-                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
-                )
+                ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
+            end},
+            {"the collector is released when its owner is killed", fun() ->
+                Self = self(),
+                Pid = spawn(fun() ->
+                    beamtalk_class_vars:collect_abi_refusals(fun() ->
+                        Self ! collecting,
+                        receive
+                            never -> ok
+                        end
+                    end)
+                end),
+                receive
+                    collecting -> ok
+                after 5000 -> ?assert(false)
+                end,
+                ?assertNotEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
+                Ref = monitor(process, Pid),
+                exit(Pid, kill),
+                receive
+                    {'DOWN', Ref, process, Pid, killed} -> ok
+                after 5000 -> ?assert(false)
+                end,
+                ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
+                ?assertMatch({ok, []}, beamtalk_class_vars:collect_abi_refusals(fun() -> ok end))
             end},
             {"the collector is released when Fun crashes", fun() ->
                 ?assertError(
                     boom, beamtalk_class_vars:collect_abi_refusals(fun() -> erlang:error(boom) end)
                 ),
-                ?assertEqual(
-                    undefined, persistent_term:get({beamtalk_class_vars, abi_refusals}, undefined)
-                )
+                ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
             end}
         ]
     end}.
@@ -437,7 +455,7 @@ preflight_test_() ->
                     ?assertNotEqual(nomatch, binary:match(Message, atom_to_binary(Mod, utf8))),
                     ?assertNotEqual(nomatch, binary:match(Message, <<"Recompile">>)),
                     %% The refusals table is gone again.
-                    ?assertEqual(undefined, ets:whereis(beamtalk_class_vars:abi_refusals_table()))
+                    ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
                 after
                     file:del_dir_r(Dir)
                 end

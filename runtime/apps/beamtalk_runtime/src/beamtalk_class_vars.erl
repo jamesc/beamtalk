@@ -93,6 +93,7 @@ receiver is an internal error.
 -export_type([key/0, snapshot/0, class_self/0]).
 
 -define(HOME, ?BT_CLASS_VARS_HOME).
+-define(ABI_REFUSALS_TABLE, beamtalk_abi_refusals).
 
 -type key() :: ?BT_CLASS_VARS_KEY(atom()).
 -type snapshot() :: none | {key(), map()}.
@@ -454,30 +455,29 @@ sorted). `beamtalk_release_shapes:extract_shapes/2` uses it to turn a refused
 module into a failed release preflight: a refusal happens inside a module's
 `-on_load` hook, whose failure reason the code server does not return.
 
-The collector is a per-call unnamed ETS table published through
-`persistent_term` (the `-on_load` hook runs in the code server, not the
-caller, so it cannot be passed by argument). Creation happens inside the
-`try`, so a second concurrent collection raises `{abi_collection_in_progress}`
-(an `error` exit the caller maps to `{error, _}`) rather than blaming one
-collection's refusals on another; the table is always released afterwards.
+The collector is a named public ETS table owned by the caller (the `-on_load`
+hook runs in the code server, not the caller, so it cannot be passed by
+argument). Creating a named table is atomic: a second concurrent collection, or
+a leftover table, raises `abi_collection_in_progress` (an `error` exit the
+caller maps to `{error, _}`) instead of blaming one collection's refusals on
+another. The table is deleted afterwards, and the VM deletes it if the caller is
+killed, so a dead caller never leaves the collector claimed.
 """.
 -spec collect_abi_refusals(fun(() -> Result)) ->
     {Result, [{atom() | undefined, #beamtalk_error{}}]}
 when
     Result :: term().
 collect_abi_refusals(Fun) ->
-    Key = {?MODULE, abi_refusals},
-    case persistent_term:get(Key, undefined) of
-        undefined -> ok;
-        _ -> erlang:error(abi_collection_in_progress)
-    end,
-    Table = ets:new(beamtalk_abi_refusals, [public, set]),
-    persistent_term:put(Key, Table),
+    Table =
+        try
+            ets:new(?ABI_REFUSALS_TABLE, [named_table, public, set])
+        catch
+            error:badarg -> erlang:error(abi_collection_in_progress)
+        end,
     try
         Result = Fun(),
         {Result, lists:sort(ets:tab2list(Table))}
     after
-        persistent_term:erase(Key),
         ets:delete(Table)
     end.
 
@@ -591,16 +591,11 @@ abi_mismatch_error(ClassName, Module, Found) ->
 
 -spec record_abi_refusal(atom() | undefined, #beamtalk_error{}) -> ok.
 record_abi_refusal(Module, Error) ->
-    case persistent_term:get({?MODULE, abi_refusals}, undefined) of
-        undefined ->
-            ok;
-        Table ->
-            try
-                ets:insert(Table, {Module, Error}),
-                ok
-            catch
-                error:badarg -> ok
-            end
+    try
+        ets:insert(?ABI_REFUSALS_TABLE, {Module, Error}),
+        ok
+    catch
+        error:badarg -> ok
     end.
 
 -spec nil_receiver() -> no_return().
