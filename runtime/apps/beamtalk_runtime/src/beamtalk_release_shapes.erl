@@ -38,7 +38,9 @@ they have no place in a project's shapes.json.
 publicly: given a *registered, loaded* class, it returns the shapes.json
 entry ADR 0125 §3.4 specifies — `shape_version` (default `1`), the
 **flattened** field-type map (ancestors merged in, closer wins), and the
-`shape_migrations` table. It is deliberately usable from either side of the
+`shape_migrations` table, plus the module's `class_var_abi` (ADR 0130; `null`
+when absent) so `beamtalk release --upgrade-from` can flag an ABI change at
+build time. It is deliberately usable from either side of the
 build/live divide:
 
 - Here, against a scratch node that just loaded a release's beams.
@@ -81,7 +83,10 @@ structured log lines) — no new JSON-encoding dependency.
 -type shape_entry() :: #{
     version := pos_integer(),
     fields := #{binary() => binary() | null},
-    migrations := #{binary() => binary()}
+    migrations := #{binary() => binary()},
+    %% ADR 0130: the module's `class_var_abi`; `null` when the meta has no
+    %% such key (a module compiled before ADR 0130).
+    class_var_abi := pos_integer() | null
 }.
 -export_type([shape_entry/0]).
 
@@ -187,7 +192,8 @@ class_shape_entry(ClassAtom) ->
             #{
                 version => maps:get(shape_version, Meta, 1),
                 fields => normalize_fields(FlattenedFieldTypes),
-                migrations => normalize_migrations(Migrations)
+                migrations => normalize_migrations(Migrations),
+                class_var_abi => maps:get(class_var_abi, Meta, null)
             };
         not_found ->
             undefined
