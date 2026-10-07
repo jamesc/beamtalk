@@ -4,7 +4,7 @@
 // BT-3704 (ADR 0130 Phase 1): rows of the override spelling that did not compile
 // before ADR 0130; enabled by BT-3713.
 
-Object subclass: CvsOverrideBasePending
+Object subclass: CvsOverrideBaseControl
   classState: n = 0
 
   class bump => self.n

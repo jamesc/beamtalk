@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
-// open class. Each test asserts the ADR 0130 section 4/5 answer; a test
+// sealed class. Each test asserts the ADR 0130 section 4/5 answer; a test
 // whose answer differed before ADR 0130 pinned the old answer under a PIN-BUG marker
 // citing BT-3713; BT-3713 flipped every such pin to the ADR answer.
 //
@@ -10,32 +10,32 @@
 // fold bodies, a class-variable-writing send in a loop condition); BT-3713
 // enabled them. The assertions are the ADR 0130 answers.
 
-TestCase subclass: ClassVarSemanticsOpenPendingTest
+TestCase subclass: ClassVarSemanticsSealedControlTest
 
   // ADR 0130 §4
-  testLetrecTimes => self assert: CvsOpenPending rowTimes equals: 3
+  testLetrecTimes => self assert: CvsSealedControl rowTimes equals: 3
 
   // ADR 0130 §4 (BT-3694 shape)
-  testLoopCondition => self assert: CvsOpenPending rowLoopCondition equals: 3
+  testLoopCondition => self assert: CvsSealedControl rowLoopCondition equals: 3
 
   // ADR 0130 §4
-  testFoldDo => self assert: CvsOpenPending rowDo equals: 3
+  testFoldDo => self assert: CvsSealedControl rowDo equals: 3
 
   // ADR 0130 §4
-  testFoldCollect => self assert: CvsOpenPending rowCollect equals: 3
+  testFoldCollect => self assert: CvsSealedControl rowCollect equals: 3
 
   // ADR 0130 §4
-  testFoldInject => self assert: CvsOpenPending rowInject equals: 3
+  testFoldInject => self assert: CvsSealedControl rowInject equals: 3
 
   // ADR 0130 §4 catch boundary
   testNonMatchingInnerOnDoWithEnsureBetween =>
-    self assert: CvsOpenPending rowNonMatchingInnerEnsure equals: 0
+    self assert: CvsSealedControl rowNonMatchingInnerEnsure equals: 0
 
   // ADR 0130 §4 ensure is not a boundary
   testEnsureCleanupWriteGoesWithTheError =>
-    self assert: CvsOpenPending rowEnsureRaise equals: 0
+    self assert: CvsSealedControl rowEnsureRaise equals: 0
 
   // ADR 0130 §4 non-local return
   testOwnNlrThroughEnsureKeepsBothWrites =>
-    self assert: CvsOpenPending rowOwnNlrEnsure equals: 7
-    self assert: CvsOpenPending n equals: 2
+    self assert: CvsSealedControl rowOwnNlrEnsure equals: 7
+    self assert: CvsSealedControl n equals: 2

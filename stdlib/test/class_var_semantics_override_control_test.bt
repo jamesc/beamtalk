@@ -10,12 +10,12 @@
 // fold bodies, a class-variable-writing send in a loop condition); BT-3713
 // enabled them. The assertions are the ADR 0130 answers.
 
-TestCase subclass: ClassVarSemanticsOverridePendingTest
+TestCase subclass: ClassVarSemanticsOverrideControlTest
 
   // ADR 0130 §4 (BT-3694 shape)
   testLoopCondition =>
-    self assert: CvsOverrideSubPending rowLoopCondition equals: 3
+    self assert: CvsOverrideSubControl rowLoopCondition equals: 3
 
   // ADR 0130 §4 catch boundary
   testNonMatchingInnerOnDoWithEnsureBetween =>
-    self assert: CvsOverrideSubPending rowNonMatchingInnerEnsure equals: 0
+    self assert: CvsOverrideSubControl rowNonMatchingInnerEnsure equals: 0
