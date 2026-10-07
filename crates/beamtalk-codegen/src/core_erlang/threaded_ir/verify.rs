@@ -15,8 +15,8 @@ use std::collections::HashMap;
 
 use super::super::CoreErlangGenerator;
 use super::ir::{
-    BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, ThreadedStmt,
-    ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, StateAccFallbackReason,
+    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -152,6 +152,58 @@ pub(in crate::core_erlang) enum VerifyError {
     /// the module with `ambiguous_catch_try_state` (BT-3718). Every `on:do:`
     /// in any nesting position closes its filter, so the check is per node.
     CatchFilterNotClosed { at: Span },
+
+    /// BT-3725 (the verifier backing for the BT-3694 fix): a
+    /// [`ScopeKind::ClassMethod`] scope opens a `StateAcc` loop that carries no
+    /// threaded local, or threads the actor `State` / value-type `Self` family.
+    /// A class method has no `State` parameter and threads no family at all
+    /// (ADR 0130 §3: a class-variable write is an in-place `put` into the class
+    /// process and a self-send rebinds nothing), so the only thing a
+    /// class-method `StateAcc` loop may carry is a map of threaded *locals*,
+    /// seeded from a fresh `maps:new()`. A `StateAcc` loop with no locals can
+    /// only be seeded from the ambient actor `State` — unbound in a class
+    /// method, which `erlc` rejects as `unbound variable 'State'` (BT-3694).
+    /// See [`ClassMethodDefect`].
+    ActorStateInClassMethod { defect: ClassMethodDefect, at: Span },
+}
+
+/// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
+/// scope may thread (the per-scope-kind invariant [`verify_in_scope`]
+/// enforces, BT-3725).
+///
+/// (`State` inside a threading frame is the `StateAcc` map's version,
+/// legitimate in a class method — see `VerifyWalk::check_class_method_family`.)
+///
+/// | scope         | method-level `State` | `SelfVt` family      | `StateAcc` loop with no locals |
+/// |---------------|----------------------|----------------------|--------------------------------|
+/// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
+/// | `Instance`    | not constrained here | not constrained here | not constrained here           |
+///
+/// `Instance` (actor instance, value-type instance, REPL and every non-method
+/// fixture) is deliberately unconstrained by this check: which of
+/// `State`/`SelfVt` is eligible there is decided by
+/// `CoreErlangGenerator::eligible_families` (ADR 0122), not re-derived here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ScopeKind {
+    /// A class-side method body (`CoreErlangGenerator::in_class_method`).
+    ClassMethod,
+    /// Any other scope.
+    Instance,
+}
+
+/// What is wrong with a class-method scope
+/// ([`VerifyError::ActorStateInClassMethod`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ClassMethodDefect {
+    /// A `StateAcc` loop whose fallback reason is
+    /// [`StateAccFallbackReason::NoThreadedLocals`]: it carries nothing, so its
+    /// seed is the ambient actor `State` — unbound in a class method.
+    StateAccLoopWithoutLocals,
+    /// A versioned `Bind` / `Return` of the actor `State` family produced at
+    /// method level (outside every threading frame, where `State` is not the
+    /// `StateAcc` map), or of `SelfVt` anywhere: a class method threads no
+    /// family.
+    FamilyVersion(VersionPrefix),
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -178,6 +230,18 @@ pub(in crate::core_erlang) enum CatchRestoreDefect {
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
 /// (No call site does either yet — see module docs §Status.)
 pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
+    verify_in_scope(ir, ScopeKind::Instance)
+}
+
+/// [`verify`] for IR lowered in `scope`: additionally enforces the
+/// per-[`ScopeKind`] family invariant ([`VerifyError::ActorStateInClassMethod`]).
+/// Every production caller goes through this (via
+/// `CoreErlangGenerator::verify_threaded_ir`) so the scope can never be
+/// forgotten at a call site.
+pub(in crate::core_erlang) fn verify_in_scope(
+    ir: &[ThreadedStmt],
+    scope: ScopeKind,
+) -> Vec<VerifyError> {
     let mut producers: HashMap<VersionedVar, usize> = HashMap::new();
     let mut consumers: HashMap<VersionedVar, usize> = HashMap::new();
     collect_producer_consumer_counts(ir, &mut producers, &mut consumers);
@@ -216,6 +280,7 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
         producers: &producers,
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
+        scope,
         errors: &mut errors,
     };
     walk.walk(ir);
@@ -276,6 +341,7 @@ struct VerifyWalk<'a> {
     producers: &'a HashMap<VersionedVar, usize>,
     frame_stack: Vec<FrameId>,
     mode_stack: Vec<ThreadingMode>,
+    scope: ScopeKind,
     errors: &'a mut Vec<VerifyError>,
 }
 
@@ -304,13 +370,61 @@ impl VerifyWalk<'_> {
         }
     }
 
+    /// [`VerifyError::ActorStateInClassMethod`]: a `State`/`SelfVt` versioned
+    /// var in a [`ScopeKind::ClassMethod`] scope that denotes a *family*.
+    ///
+    /// The `State` prefix is overloaded: inside a threading frame (a loop,
+    /// fold or branch/handler arm — any `Threaded`/`ConditionalLoop` node, so
+    /// `mode_stack` is non-empty) it is the `StateAcc` map's version, which
+    /// carries threaded locals in a class method and is legitimate there (the
+    /// class-method corpus lowers `State1`, … in such frames). Only a `State`
+    /// version produced at method level (empty `mode_stack`) is the actor
+    /// `State` family. `SelfVt` is never a `StateAcc` map, so it is flagged
+    /// everywhere. Version 0 is a frame's entry parameter, never produced.
+    fn check_class_method_family(&mut self, var: &VersionedVar, at: Span) {
+        if self.scope != ScopeKind::ClassMethod || var.version == 0 {
+            return;
+        }
+        let is_family = match var.prefix {
+            VersionPrefix::State => self.mode_stack.is_empty(),
+            VersionPrefix::SelfVt => true,
+            VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
+        };
+        if is_family {
+            self.errors.push(VerifyError::ActorStateInClassMethod {
+                defect: ClassMethodDefect::FamilyVersion(var.prefix.clone()),
+                at,
+            });
+        }
+    }
+
+    /// [`VerifyError::ActorStateInClassMethod`]: a loop/fold node whose mode is
+    /// a locals-less `StateAcc` in a [`ScopeKind::ClassMethod`] scope.
+    fn check_class_method_mode(&mut self, mode: &ThreadingMode, at: Span) {
+        if self.scope == ScopeKind::ClassMethod
+            && matches!(
+                mode,
+                ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals)
+            )
+        {
+            self.errors.push(VerifyError::ActorStateInClassMethod {
+                defect: ClassMethodDefect::StateAccLoopWithoutLocals,
+                at,
+            });
+        }
+    }
+
     #[allow(clippy::too_many_lines)] // ADR 0118 phase 3 (BT-3419) split the Threaded/ConditionalLoop arm in two
     fn walk_stmt(&mut self, stmt: &ThreadedStmt) {
         match stmt {
             ThreadedStmt::Bind {
-                source, op, span, ..
+                target,
+                source,
+                op,
+                span,
             } => {
                 self.check_use(source, *span);
+                self.check_class_method_family(target, *span);
                 match op {
                     BindOp::Put { value, .. } | BindOp::Direct(value) => {
                         if let ValueRef::Version(v) = value {
@@ -334,13 +448,15 @@ impl VerifyWalk<'_> {
                 frame,
                 body,
                 produces,
-                span: _,
+                span,
             } => {
+                self.check_class_method_mode(mode, *span);
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
                 self.walk(body);
                 for v in produces {
                     self.check_use(v, Span::default());
+                    self.check_class_method_family(v, *span);
                 }
                 self.mode_stack.pop();
                 self.frame_stack.pop();
@@ -352,9 +468,10 @@ impl VerifyWalk<'_> {
                 condition_value,
                 body,
                 produces,
-                span: _,
+                span,
                 ..
             } => {
+                self.check_class_method_mode(mode, *span);
                 // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
                 // `ConditionalLoop` verifies almost exactly like `Threaded`
                 // — push frame/mode once, walk `condition` THEN `body` (both
@@ -374,6 +491,7 @@ impl VerifyWalk<'_> {
                 self.walk(body);
                 for v in produces {
                     self.check_use(v, Span::default());
+                    self.check_class_method_family(v, *span);
                 }
                 self.mode_stack.pop();
                 self.frame_stack.pop();
@@ -399,6 +517,7 @@ impl VerifyWalk<'_> {
             }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
+                self.check_class_method_family(state, *span);
                 if let ValueRef::Version(v) = value {
                     self.check_use(v, *span);
                 }
@@ -492,6 +611,25 @@ fn catch_filter_closed(clauses: &[CatchClause]) -> bool {
 }
 
 impl CoreErlangGenerator {
+    /// The [`ScopeKind`] the generator is currently lowering — the one place
+    /// that maps generator state to the verifier's scope (BT-3725).
+    pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {
+        if self.in_class_method() {
+            ScopeKind::ClassMethod
+        } else {
+            ScopeKind::Instance
+        }
+    }
+
+    /// [`verify_in_scope`] with the current [`Self::threaded_scope`] — what
+    /// every production lowering site calls instead of bare [`verify`].
+    pub(in crate::core_erlang) fn verify_threaded_ir(
+        &self,
+        ir: &[ThreadedStmt],
+    ) -> Vec<VerifyError> {
+        verify_in_scope(ir, self.threaded_scope())
+    }
+
     /// Shared failure-reporting path for every `ThreadedIr` production
     /// invariant check (ADR 0111 §The verifier / CLAUDE.md's "never panic
     /// on user input" rule): hard-fails in debug/CI via `debug_assert!`,

@@ -754,7 +754,8 @@ impl CoreErlangGenerator {
         stmts: &[threaded_ir::ThreadedStmt],
         span: Span,
     ) -> Document<'static> {
-        let errors = threaded_ir::verify_body_with_opaque_version_gaps(stmts);
+        let errors =
+            threaded_ir::verify_body_with_opaque_version_gaps(stmts, self.threaded_scope());
         self.report_threaded_ir_verify_errors(
             &errors,
             "gen_server method-body ThreadedIr must be well-formed",

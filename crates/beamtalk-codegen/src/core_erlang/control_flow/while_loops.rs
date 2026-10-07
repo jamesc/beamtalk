@@ -431,7 +431,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(&errors, "while StateAcc ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
@@ -704,7 +704,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(
             &errors,
             "while direct-params ConditionalLoop",
@@ -859,7 +859,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(&errors, "while hybrid ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);

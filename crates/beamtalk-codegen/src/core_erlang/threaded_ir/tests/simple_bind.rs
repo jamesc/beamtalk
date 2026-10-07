@@ -148,7 +148,7 @@ fn verify_body_with_opaque_version_gaps_backfills_gap_from_opaque_statement() {
             span,
         },
     ];
-    let errors = verify_body_with_opaque_version_gaps(&ir);
+    let errors = verify_body_with_opaque_version_gaps(&ir, ScopeKind::Instance);
     assert_eq!(
         errors,
         Vec::new(),
@@ -176,7 +176,7 @@ fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version(
             span,
         },
     ];
-    let errors = verify_body_with_opaque_version_gaps(&ir);
+    let errors = verify_body_with_opaque_version_gaps(&ir, ScopeKind::Instance);
     assert!(
         errors.iter().any(|e| matches!(
             e,

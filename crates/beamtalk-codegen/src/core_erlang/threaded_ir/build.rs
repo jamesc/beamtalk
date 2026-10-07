@@ -14,7 +14,7 @@ use super::ir::{
     AccParam, BindOp, CloseContext, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
     VersionPrefix, VersionedVar,
 };
-use super::verify::{VerifyError, verify};
+use super::verify::{ScopeKind, VerifyError, verify, verify_in_scope};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_core::source_analysis::Span;
@@ -131,8 +131,9 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// statements themselves — those are exactly the backfilled gaps.
 pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     ir: &[ThreadedStmt],
+    scope: ScopeKind,
 ) -> Vec<VerifyError> {
-    verify(&backfill_opaque_version_gaps(ir, FrameId::ROOT))
+    verify_in_scope(&backfill_opaque_version_gaps(ir, FrameId::ROOT), scope)
 }
 
 /// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:

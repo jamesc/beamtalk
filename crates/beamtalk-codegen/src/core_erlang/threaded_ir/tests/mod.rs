@@ -15,6 +15,8 @@
 //!   `verify_body_with_opaque_version_gaps`
 //! - [`dual_run`] — the dual-run byte-parity harness
 //! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
+//! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
+//! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
 
 use super::*;
@@ -46,6 +48,7 @@ fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
 }
 
 mod catch_boundary;
+mod class_method_scope;
 mod close_and_value;
 mod dual_run;
 mod lower_and_render_shim;
