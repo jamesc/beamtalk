@@ -279,6 +279,37 @@ fn unsealed_method_with_only_sealed_self_sends_does_not_warn() {
     assert!(late_bound("Leaf viaPlainSealed").is_empty());
 }
 
+/// `LATE_BOUND` plus a `sealed` subclass of the open `Base`, whose body is
+/// `body` followed by a block-passing `a` that self-sends `viaPlain`.
+fn sealed_sub(body: &str) -> Vec<Diagnostic> {
+    abroad(&format!(
+        "{HEADER}{}sealed Base subclass: SealedLeaf
+{body}
+  class a => Driver each: [self viaPlain]
+",
+        LATE_BOUND.replace("CALL", "7")
+    ))
+}
+
+#[test]
+fn sealed_subclass_self_send_to_inherited_unsealed_method_warns() {
+    // BT-3736 follow-up: `self viaPlain` in a sealed subclass resolves to
+    // `Base viaPlain` (unsealed), whose `self helper` late-binds. A sealed
+    // receiver does not make the inherited method's self sends static.
+    //
+    // The two cases give the same answer on purpose. The lint resolves
+    // `Base viaPlain`'s `self helper` from the open `Base` (documented
+    // over-approximation, module docs), so `SealedLeaf`'s override is never
+    // consulted: the override case warns because the selector is late-bound,
+    // not because the override writes. If the lint ever becomes precise
+    // enough to look at the subclass, the no-override case must flip to
+    // clean while the override case keeps its warning.
+    let overrides = sealed_sub("  class helper => self.n := self.n + 1\n");
+    assert_eq!(overrides.len(), 1, "{overrides:?}");
+    let plain = sealed_sub("");
+    assert_eq!(plain.len(), 1, "{plain:?}");
+}
+
 #[test]
 fn sealed_method_sending_through_the_class_name_does_not_warn() {
     // `Base helper` binds `Base`'s method directly: no late binding.
