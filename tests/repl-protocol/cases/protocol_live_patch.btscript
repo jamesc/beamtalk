@@ -39,20 +39,20 @@ File writeAll: _bt3630ProtoPath contents: "Protocol define: Bt3630Greetable
 // => Result ok: nil
 
 Workspace load: _bt3630ProtoPath
-// => _
+// => ["Bt3630Greetable"]
 
 File writeAll: _bt3630ValuePath contents: "Value subclass: Bt3630GreeterValue uses: Bt3630Greetable field: greeting :: Integer = 10"
 // => Result ok: nil
 
 Workspace load: _bt3630ValuePath
-// => _
+// => ["Bt3630GreeterValue"]
 
 File writeAll: _bt3630ActorPath contents: "Actor subclass: Bt3630GreeterActor uses: Bt3630Greetable state: greeting :: Integer = 20
   greeting -> Integer => self.greeting"
 // => Result ok: nil
 
 Workspace load: _bt3630ActorPath
-// => _
+// => ["Bt3630GreeterActor"]
 
 _bt3630Gv := Bt3630GreeterValue new
 // => _
@@ -135,20 +135,20 @@ File writeAll: _bt3630NeedsPath contents: "Protocol define: Bt3630NeedsTag
 // => Result ok: nil
 
 Workspace load: _bt3630NeedsPath
-// => _
+// => ["Bt3630NeedsTag"]
 
 File writeAll: _bt3630ProvidesPath contents: "Protocol define: Bt3630ProvidesTag
   tag -> Integer => 7"
 // => Result ok: nil
 
 Workspace load: _bt3630ProvidesPath
-// => _
+// => ["Bt3630ProvidesTag"]
 
 File writeAll: _bt3630TagUserPath contents: "Value subclass: Bt3630TagUser uses: Bt3630NeedsTag uses: Bt3630ProvidesTag"
 // => Result ok: nil
 
 Workspace load: _bt3630TagUserPath
-// => _
+// => ["Bt3630TagUser"]
 
 Bt3630TagUser new tag
 // => 7
@@ -190,19 +190,19 @@ File writeAll: _bt3630RejAPath contents: "Protocol define: Bt3630RejA a -> Integ
 // => Result ok: nil
 
 Workspace load: _bt3630RejAPath
-// => _
+// => ["Bt3630RejA"]
 
 File writeAll: _bt3630RejBPath contents: "Protocol define: Bt3630RejB b -> Integer => 2"
 // => Result ok: nil
 
 Workspace load: _bt3630RejBPath
-// => _
+// => ["Bt3630RejB"]
 
 File writeAll: _bt3630RejUserPath contents: "Value subclass: Bt3630RejUser uses: Bt3630RejA uses: Bt3630RejB"
 // => Result ok: nil
 
 Workspace load: _bt3630RejUserPath
-// => _
+// => ["Bt3630RejUser"]
 
 Bt3630RejUser new b
 // => 2
