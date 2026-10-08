@@ -598,6 +598,10 @@ impl<'d> Walker<'d> {
                     // their blocks, so a block literal in any of them is a
                     // block value with no return channel (§6), whatever its
                     // selector.
+                    // The shared receiver is evaluated once: check it once.
+                    if let Expression::Block(block) = shared.unwrap_parens() {
+                        self.report_literal(block, &selector.name());
+                    }
                     self.check_send(shared, selector, arguments, false);
                     for msg in messages {
                         self.check_send(shared, &msg.selector, &msg.arguments, false);
@@ -782,29 +786,35 @@ impl<'d> Walker<'d> {
             // ADR 0041 §Erlang Interop Boundary: lossy by design (warned by codegen).
             return;
         }
-        let is_self_send = matches!(receiver, Expression::Super(_))
-            || crate::semantic_analysis::block_facts::is_self_reference(receiver);
-        let actor_self_send = self.context == Actor && is_self_send;
+        // Only an actor *self* send carries a `StateAcc` back (BT-912), and
+        // only when it is an ordinary send: a `super` send takes the
+        // `SuperSend` path and a cascade message plain dispatch, neither of
+        // which threads outer locals (probed, BT-3745).
+        let is_self_send = crate::semantic_analysis::block_facts::is_self_reference(receiver);
+        let actor_self_send = inlined && self.context == Actor && is_self_send;
         let construct_send = inlined && is_section1_selector(&sel);
 
         // A block literal receiver. Only a direct `[...]` receiver of an
-        // inlined send is inlined; a parenthesized one is a block value.
-        match receiver {
-            Expression::Block(block) if !(inlined && receiver_has_channel(&sel)) => {
-                self.report_literal(block, &sel);
-            }
-            Expression::Parenthesized { .. } => {
-                // In an actor instance method a block value may be sent
-                // `value` (as a stored one may).
-                if let Expression::Block(block) = receiver.unwrap_parens() {
-                    if !(self.context == Actor && is_block_value_selector(selector)) {
+        // inlined send is inlined; a parenthesized one is a block value,
+        // even when sent `value` in an actor method (codegen's Tier 2
+        // `value` paths match only a bare block). A cascade checks its
+        // shared receiver once itself, so `inlined: false` skips it here.
+        if inlined {
+            match receiver {
+                Expression::Block(block) if !receiver_has_channel(&sel) => {
+                    self.report_literal(block, &sel);
+                }
+                Expression::Parenthesized { .. } => {
+                    if let Expression::Block(block) = receiver.unwrap_parens() {
                         self.report_literal(block, &sel);
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
-        // Block literal arguments.
+        // Block literal arguments. A parenthesized block argument is a block
+        // value even to an actor self-send (only a bare `[...]` is promoted
+        // to the Tier 2 self-send protocol).
         for arg in arguments {
             match arg {
                 Expression::Block(block) if !construct_send && !actor_self_send => {
@@ -812,9 +822,7 @@ impl<'d> Walker<'d> {
                 }
                 Expression::Parenthesized { .. } => {
                     if let Expression::Block(block) = arg.unwrap_parens() {
-                        if !actor_self_send {
-                            self.report_literal(block, &sel);
-                        }
+                        self.report_literal(block, &sel);
                     }
                 }
                 _ => {}
@@ -823,6 +831,9 @@ impl<'d> Walker<'d> {
 
         // Tier 2 block-valued locals.
         if let Expression::Identifier(id) = receiver.unwrap_parens() {
+            // Codegen rebinds a stored block's captured locals at every
+            // `value` send to it, cascade or not
+            // (`tier2stored_block_matrix_actor.bt` `mixedLocalVarCascade:`).
             let ok = self.context == Actor && is_block_value_selector(selector);
             if !ok {
                 self.report_local(&id.name, &sel, receiver.span());
@@ -834,7 +845,8 @@ impl<'d> Walker<'d> {
             let Expression::Identifier(id) = arg.unwrap_parens() else {
                 continue;
             };
-            let ok = self.context == Actor
+            let ok = inlined
+                && self.context == Actor
                 && (is_self_send || fold_callable.is_some_and(|c| std::ptr::eq(c, arg)));
             if !ok {
                 self.report_local(&id.name, &sel, arg.span());

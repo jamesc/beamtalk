@@ -470,9 +470,44 @@ fn section6_cascade_messages_are_never_inlined() {
 }
 
 #[test]
-fn section6_actor_self_send_cascade_still_compiles() {
-    let diags = adr0131_diagnostics(&in_actor("self ap: [t := t + 1]; yourself\nt"));
-    assert!(diags.is_empty(), "{diags:?}");
+fn section6_actor_self_send_exemption_is_only_for_a_plain_self_send() {
+    // Probed in an actor instance method on the debug build (BT-3745): each
+    // of these drops the write (answers 0) or raises `stateful_block_dispatch`
+    // / `invalid argument`, while the plain `self ap: [t := t + 1]` threads it.
+    for body in [
+        // A cascade message goes through plain dispatch.
+        "self ap: [t := t + 1]; yourself\nt",
+        // A `super` send takes the SuperSend path.
+        "super ap: [t := t + 1]\nt",
+        // Only a bare `[...]` argument is promoted to the Tier 2 self-send.
+        "self ap: ([t := t + 1])\nt",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+            1,
+            "{body}: {diags:?}"
+        );
+    }
+    assert!(adr0131_diagnostics(&in_actor("self ap: [t := t + 1]\nt")).is_empty());
+    // A stored block sent `value` in a cascade does thread
+    // (`tier2stored_block_matrix_actor.bt` `mixedLocalVarCascade:`).
+    assert!(
+        adr0131_diagnostics(&in_actor("b := [:n | t := t + n]\nb value: 1; value: 2\nt"))
+            .is_empty()
+    );
+}
+
+#[test]
+fn section6_cascade_block_receiver_is_reported_once() {
+    let src = in_class("[t := t + 1] value; value; yourself\nt");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(
+        of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+        1,
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -482,13 +517,16 @@ fn section6_parenthesized_block_receiver_is_a_block_value() {
         "([t := t + 1. 1]) on: Error do: [:e | 0]\nt",
         "([t := t + 1. t < 3]) whileTrue: [nil]\nt",
     ] {
-        let src = in_class(body);
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
-            1,
-            "{body}: {diags:?}"
-        );
+        // Also in an actor method: codegen's Tier 2 `value` paths only match
+        // a bare block, and `([t := t + 1]) value` raises there (probed).
+        for src in [in_class(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
     }
 }
 
