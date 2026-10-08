@@ -296,7 +296,9 @@ impl ThreadedValue {
     /// self-contained `Document` — the ONLY way to discard a prelude (ADR
     /// 0118 §Decision 5). Reports one
     /// [`VerifyError::StateEffectEscapesExpression`] per versioned `Bind`
-    /// in the prelude when `context` is [`CloseContext::Opaque`]; reports
+    /// and per [`ThreadedStmt::LocalRebind`] (ADR 0131 §4, reported under
+    /// [`VersionPrefix::Local`]) in the prelude when `context` is
+    /// [`CloseContext::Opaque`]; reports
     /// nothing when the context threads the prelude's prefixes itself
     /// ([`CloseContext::ThreadsState`]). Callers route the errors through
     /// `report_threaded_ir_verify_errors` (debug/CI hard failure, release
@@ -327,6 +329,15 @@ impl ThreadedValue {
                     ThreadedStmt::Bind { target, span, .. } => {
                         Some(VerifyError::StateEffectEscapesExpression {
                             prefix: target.prefix.clone(),
+                            at: *span,
+                        })
+                    }
+                    // ADR 0131 §4: a `LocalRebind` closed in an opaque
+                    // context is a dropped local write — nothing outside
+                    // the closed document sees the new value.
+                    ThreadedStmt::LocalRebind { local, span, .. } => {
+                        Some(VerifyError::StateEffectEscapesExpression {
+                            prefix: VersionPrefix::Local(local.clone()),
                             at: *span,
                         })
                     }

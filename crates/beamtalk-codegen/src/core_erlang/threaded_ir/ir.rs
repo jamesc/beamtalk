@@ -967,9 +967,11 @@ pub(in crate::core_erlang) enum RebindLowering {
     Let,
     /// `let Target = <read> in`, where `target` is
     /// `Gensym(value_var)`: one step of the loop's per-local identity chain
-    /// from `source` (the local's identity before this rebind), which
-    /// `final_loop_arg_identities` follows into the recursive call / the
-    /// fold's closing tuple exactly as it follows a `Bind`.
+    /// from `source` (the local's identity before this rebind). A
+    /// `ConditionalLoop`'s `final_loop_arg_identities` follows it into the
+    /// recursive call exactly as it follows a `Bind`; a `TupleAcc` fold's
+    /// closing tuple picks it up through the producer's `bind_var(local,
+    /// value_var)`.
     LoopParam {
         source: VersionedVar,
         target: VersionedVar,

@@ -501,6 +501,42 @@ fn actor_state_family_bind_renders_first_and_rebinds_read_the_new_state() {
 // ── verify plumbing ──────────────────────────────────────────────────────
 
 #[test]
+fn closing_a_rebind_prelude_opaquely_reports_the_dropped_local() {
+    // ADR 0131 §4: a `LocalRebind` left in a prelude that is closed in an
+    // `Opaque` context (a Tier 1 closure body, an FFI argument) is a dropped
+    // local write — `StateEffectEscapesExpression`, never silence.
+    let enclosing = frame_of(
+        &build_method_body(FrameId::ROOT, Vec::new(), Vec::new()),
+        &[],
+    );
+    let prelude = build_local_threading_prelude(
+        &enclosing,
+        CARRIER,
+        tuple_doc(),
+        &[key_slot("t", "_T1")],
+        Vec::new(),
+        span(),
+        mint(FrameId::ROOT, "__local__t"),
+    );
+    let tv = ThreadedValue {
+        prelude,
+        value: ValueRef::Doc(docvec!["call 'erlang':'element'(1, _CF3)"]),
+    };
+    let mut generator = CoreErlangGenerator::new("local_rebind_close_opaque");
+    let mut ctx = RenderCtx::new(&mut generator);
+    let (_, errors) = tv.clone().close(&mut ctx, CloseContext::Opaque);
+    assert_eq!(
+        errors,
+        vec![VerifyError::StateEffectEscapesExpression {
+            prefix: VersionPrefix::Local("t".to_string()),
+            at: span(),
+        }]
+    );
+    let (_, errors) = tv.close(&mut ctx, CloseContext::ThreadsState);
+    assert_eq!(errors, Vec::new());
+}
+
+#[test]
 fn a_map_put_rebind_is_a_version_step_later_binds_can_source() {
     // Phase 1c adds the rebind-specific checks; until then a `MapPut`
     // rebind's `State` step is counted exactly like a `Bind`'s, so a later
