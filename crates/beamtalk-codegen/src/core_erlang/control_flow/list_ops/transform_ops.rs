@@ -567,16 +567,18 @@ impl CoreErlangGenerator {
             let acc_var = Self::to_core_erlang_var(acc_param);
             let elem_var = Self::to_core_erlang_var(elem_param);
 
-            self.push_scope();
-            // Bind in swapped order: foldl's first param is Elem, second is Acc
-            if let Some(param) = body_block.parameters.get(1) {
-                self.bind_var(&param.name, &elem_var);
-            }
-            if let Some(param) = body_block.parameters.first() {
-                self.bind_var(&param.name, &acc_var);
-            }
-            let body_doc = self.generate_block_body(body_block)?;
-            self.pop_scope();
+            // A closed `fun`: its body's state-version bumps (BT-3737: a
+            // conditional with a block-local write) must not leak out.
+            let body_doc = self.with_closed_fun_scope(|this| {
+                // Bind in swapped order: foldl's first param is Elem, second is Acc
+                if let Some(param) = body_block.parameters.get(1) {
+                    this.bind_var(&param.name, &elem_var);
+                }
+                if let Some(param) = body_block.parameters.first() {
+                    this.bind_var(&param.name, &acc_var);
+                }
+                this.generate_block_body(body_block)
+            })?;
 
             // fun (Elem, Acc) -> <body>
             docvec![

@@ -194,6 +194,25 @@ proptest! {
     }
 }
 
+/// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen` in
+/// CI (an inlined `inject:into:` fold fun leaked its state version into the
+/// enclosing `StateAcc` loop). Explicit seeds, so no `.proptest-regressions`
+/// file is needed.
+#[test]
+fn bt_3737_ci_seeds_pass_verified_codegen() {
+    use beamtalk_core::test_helpers::class_var_program::gen_program;
+    for seed in [
+        4_288_439_136_652_914_866_u64,
+        12_525_934_088_575_929_805,
+        15_420_763_691_539_516_991,
+    ] {
+        let program = gen_program(seed, 3, Shapes::ENABLED);
+        if let Err(e) = check_program(0, &program) {
+            panic!("seed {seed}: {e}");
+        }
+    }
+}
+
 /// The first line of a failure, with names and numbers dropped, so equal
 /// causes group together in [`measure_failure_rate`].
 fn cause(error: &str) -> String {
