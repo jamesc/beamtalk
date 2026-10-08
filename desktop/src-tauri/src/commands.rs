@@ -625,7 +625,7 @@ fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
         port,
         pid,
         node_name: initial_node_name(workspace_id, pid),
-        start_time: reap::read_start_time(pid),
+        start_time: reap::proc_start_time(pid),
     };
     let _ = reap::save_record(&dir, &record);
 }

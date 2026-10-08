@@ -89,7 +89,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use beamtalk_workspace::pid_liveness::{is_process_alive, proc_start_time};
+use beamtalk_workspace::pid_liveness::is_process_alive;
+pub use beamtalk_workspace::pid_liveness::proc_start_time;
 
 use crate::error::Result;
 
