@@ -36,7 +36,15 @@
 //! collection, `on:do:`/`ensure:` and `Result tryDo:` are none of the shapes
 //! above (their receivers are the block, a local, or a stdlib class).
 //!
-//! Shapes the lint does not see (follow-up, none occurred in the Phase 0
+//! Known imprecision (intentional over-approximation): a block that sends an
+//! inherited class method warns when that method, or a sealed method it
+//! self-sends, makes a `self` send to a non-sealed selector of an open class
+//! (BT-3717, BT-3736). The selector is resolved from the defining class, not
+//! the receiving class, so `Leaf viaHelper` warns even when `Leaf` does not
+//! override `helper`; a further subclass of `Leaf` still could, and the lint
+//! does not check whether any override exists.
+//!
+//! Shapes the lint does not see(follow-up, none occurred in the Phase 0
 //! census): a reading block passed to an actor held in a field or a
 //! parameter, a reading block returned from inside a nested conditional
 //! branch, a block reaching class state only through a self-send (the access
@@ -416,12 +424,11 @@ impl ClassCtx<'_> {
         if !via_class_reference && !class_sealed && !method.is_sealed {
             return true;
         }
-        // A `class sealed` method of an open class still late-binds its `self`
-        // sends to the receiving class, which may override a non-sealed
-        // selector to write (BT-3717). Reached through `ClassName sel` it is
-        // exact only when the method is defined by that very class.
-        if method.is_sealed
-            && !(via_class_reference && method.defined_in == self.class_name)
+        // An inherited method, sealed or not, still late-binds its `self` sends
+        // to the receiving class, which may override a non-sealed selector to
+        // write (BT-3717, BT-3736). Reached through `ClassName sel` it is exact
+        // only when the method is defined by that very class.
+        if !(via_class_reference && method.defined_in == self.class_name)
             && self.late_binds_unsealed_self_send(method.defined_in.as_str(), selector)
         {
             return true;
@@ -440,11 +447,14 @@ impl ClassCtx<'_> {
         }
     }
 
-    /// Whether the `class sealed` method `selector` defined by the *open* class
-    /// `defining` (directly, or through the sealed methods it self-sends)
+    /// Whether the method `selector` defined by the *open* class `defining`
+    /// (sealed or not; directly, or through the sealed methods it self-sends)
     /// makes a `self` send to a selector that is not sealed. Such a send binds
-    /// late, to a subclass override this body cannot see (BT-3717). A selector
-    /// that does not resolve, or resolves to a stdlib method, is not guessed at.
+    /// late, to a subclass override this body cannot see (BT-3717, BT-3736). A
+    /// selector that does not resolve, or resolves to a stdlib method, is not
+    /// guessed at. Sent selectors are resolved from `defining`, not from the
+    /// receiving class, so this over-approximates when the receiving class does
+    /// not actually override the sent selector (see the module docs).
     fn late_binds_unsealed_self_send(&self, defining: &str, selector: &str) -> bool {
         let mut visited = HashSet::new();
         self.late_binds_from(defining, selector, &mut visited)
