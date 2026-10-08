@@ -846,8 +846,13 @@ impl CoreErlangGenerator {
         invariant_label: &str,
         span: beamtalk_core::source_analysis::Span,
     ) {
-        let errors =
-            super::threaded_ir::verify_simple_bind(prefix, source_version, target_version, span);
+        let errors = super::threaded_ir::verify_simple_bind(
+            prefix,
+            source_version,
+            target_version,
+            span,
+            self.threaded_scope(),
+        );
         self.report_threaded_ir_verify_errors(&errors, invariant_label, span);
     }
 

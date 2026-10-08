@@ -14,7 +14,7 @@ use super::ir::{
     AccParam, BindOp, CloseContext, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
     VersionPrefix, VersionedVar,
 };
-use super::verify::{ScopeKind, VerifyError, verify, verify_in_scope};
+use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_core::source_analysis::Span;
@@ -262,11 +262,20 @@ fn backfill_version_chain(
 /// gap is tracked as a follow-up, not attempted here (this helper is
 /// scoped to coverage extension via the existing checks, not new generator
 /// state).
+///
+/// **Per-scope invariant (BT-3725 follow-up):** verified with `scope` via
+/// [`verify_in_scope`], so a `State{N}`/`Self{N}` mint reached from a
+/// [`ScopeKind::ClassMethod`] scope is a
+/// [`VerifyError::ActorStateInClassMethod`] (`FamilyVersion`), exactly as it
+/// is for a whole-body check. The fixture's `Bind` sits at method level
+/// (empty `mode_stack`), so a `State` version here is always the actor
+/// family, never a `StateAcc` map's version.
 pub(in crate::core_erlang) fn verify_simple_bind(
     prefix: VersionPrefix,
     source_version: usize,
     target_version: usize,
     span: Span,
+    scope: ScopeKind,
 ) -> Vec<VerifyError> {
     let frame = FrameId::ROOT;
     let mut ir = backfill_version_chain(&prefix, frame, 0, source_version, span);
@@ -276,7 +285,7 @@ pub(in crate::core_erlang) fn verify_simple_bind(
         op: BindOp::Direct(ValueRef::Literal("'_'")),
         span,
     });
-    verify(&ir)
+    verify_in_scope(&ir, scope)
 }
 
 // ─── ThreadedValue::close (ADR 0118, Decision 5) ───────────────────────────

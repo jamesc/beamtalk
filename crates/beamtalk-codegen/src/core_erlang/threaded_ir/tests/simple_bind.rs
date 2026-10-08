@@ -15,11 +15,11 @@ fn verify_simple_bind_silent_on_a_method_first_mutation() {
     // source_version == 0 (the bare `Self`/`State` parameter, always
     // bound), target_version == 1.
     assert_eq!(
-        verify_simple_bind(VersionPrefix::SelfVt, 0, 1, span()),
+        verify_simple_bind(VersionPrefix::SelfVt, 0, 1, span(), ScopeKind::Instance),
         Vec::new()
     );
     assert_eq!(
-        verify_simple_bind(VersionPrefix::State, 0, 1, span()),
+        verify_simple_bind(VersionPrefix::State, 0, 1, span(), ScopeKind::Instance),
         Vec::new()
     );
 }
@@ -30,11 +30,11 @@ fn verify_simple_bind_silent_after_several_prior_mutations() {
     // spuriously fire UnboundVersion — the whole point of this helper's
     // backfill chain.
     assert_eq!(
-        verify_simple_bind(VersionPrefix::SelfVt, 4, 5, span()),
+        verify_simple_bind(VersionPrefix::SelfVt, 4, 5, span(), ScopeKind::Instance),
         Vec::new()
     );
     assert_eq!(
-        verify_simple_bind(VersionPrefix::State, 7, 8, span()),
+        verify_simple_bind(VersionPrefix::State, 7, 8, span(), ScopeKind::Instance),
         Vec::new()
     );
 }
@@ -47,7 +47,7 @@ fn verify_simple_bind_fires_when_target_reuses_an_already_minted_version() {
     // is the within-call shape the backfill chain actually catches (see
     // `verify_simple_bind`'s doc comment's "Scope, honestly stated"
     // section for how this differs from the cross-call shape below).
-    let errors = verify_simple_bind(VersionPrefix::SelfVt, 2, 1, span());
+    let errors = verify_simple_bind(VersionPrefix::SelfVt, 2, 1, span(), ScopeKind::Instance);
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -185,4 +185,26 @@ fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version(
         )),
         "expected NonLinearVersion for the duplicate State1 producer, got: {errors:?}"
     );
+}
+
+// ── verify_simple_bind: per-scope invariant (BT-3725 follow-up) ─────────
+
+#[test]
+fn verify_simple_bind_rejects_family_mint_in_a_class_method_scope() {
+    // A class method has no `State`/`Self` parameter and threads no family:
+    // a simple-bind mint of either is the actor-state-in-class-method defect.
+    for prefix in [VersionPrefix::State, VersionPrefix::SelfVt] {
+        assert_eq!(
+            verify_simple_bind(prefix.clone(), 0, 1, span(), ScopeKind::ClassMethod),
+            vec![VerifyError::ActorStateInClassMethod {
+                defect: ClassMethodDefect::FamilyVersion(prefix.clone()),
+                at: span(),
+            }],
+        );
+        // The same bind in an instance scope stays clean.
+        assert_eq!(
+            verify_simple_bind(prefix, 0, 1, span(), ScopeKind::Instance),
+            Vec::new()
+        );
+    }
 }
