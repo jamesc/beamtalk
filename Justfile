@@ -1503,9 +1503,12 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #     ignored test, so without this skip the coverage job fails on every push
 #     to `main` (BT-3733). Remove the skip together with the `#[ignore]` when
 #     BT-3738 enables the `local_touch` shape.
+#   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
+#     set; it is run by hand to print a generated program (BT-3733).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip negative_test_invalid_spec_detected_by_dialyzer \
     --skip class_var_agreement_local_touch \
+    --skip dump_program \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \
     --skip bad_cookie_readiness_resolves_within_the_default_budget \
