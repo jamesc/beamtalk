@@ -449,9 +449,10 @@ implements it; this ADR keeps it.
 through a channel-less send (`d at: #k put: [t := t + 1]`, a block only
 asked `numArgs`) compiles and runs today and will be rejected. The
 alternative, proving the block is never invoked, needs escape analysis the
-compiler does not have. The rule is accepted as stated: the write in such
-a block could never have taken effect, so the program's author almost
-certainly meant something else, and the help text says what.
+compiler does not have. The rule is accepted as stated, as an error and
+not a warning: the write in such a block could never have taken effect
+wherever it is later invoked, so a warning would let the author ship a
+program that is already wrong, and the help text says what they meant.
 
 **One predicate, in `beamtalk-core`.** The "is a §1 construct" test and
 this diagnostic must agree, or the LSP accepts code that fails at runtime
@@ -501,9 +502,12 @@ The REPL threads locals through its bindings map, the outermost `StateAcc`
 The REPL is a fourth column of the probe matrix and gets
 `tests/repl-protocol/cases/` coverage for every shape, because REPL
 display is covered by e2e tests and any change to it needs sign-off
-(CLAUDE.md § REPL output). The values shown above are what the shapes
-*should* print; whether a shape's display changes at all is recorded per
-phase.
+(CLAUDE.md § REPL output). The transcript above is the **approved display**
+for the probe shapes: every one of them prints a wrong value, a leaked
+tuple or an error today, and each phase's `repl-protocol` cases assert the
+correct value without a further per-PR sign-off. Any other REPL display
+change (a prompt, a format, a shape outside the probe) still needs its
+own.
 
 ## Prior Art
 
@@ -646,7 +650,8 @@ moved. Rejected: the per-position approach has had its chance.
 
 ### Neutral
 - The REPL root frame is `MethodBody (REPL)` in §2's table; REPL cases are
-  added for each shape and display changes are recorded per phase.
+  added for each probe shape, with the ADR's transcript as the approved
+  display.
 - The NLR path is unchanged: a `^` from inside a producer's construct
   bypasses its rebinds by design (§2).
 
@@ -696,13 +701,14 @@ return the value rather than write the local.
 ## Open Questions
 
 1. **Callee-side Tier 2 protocol for class and value-type HOMs** (Alternative
-   D). This needs its own ADR. Until then §6 stands.
+   D). This needs its own ADR, tracked as BT-3742. Until then §6 stands,
+   and the set of sites §6 rejects is the inventory that ADR must cover.
 2. Should a `LocalRebind` whose local is dead after the construct be elided?
    The verifier exemption would need a liveness fact the IR does not carry
    today. The default is to emit it (correctness first) and measure.
 
 ## References
-- Related issues: BT-3738 (becomes phase 3), BT-3718, BT-3725, BT-3737, BT-2717,
+- Related issues: BT-3738 (becomes phase 3), BT-3742 (Alternative D), BT-3718, BT-3725, BT-3737, BT-2717,
   BT-3694, BT-912, BT-3493
 - Related ADRs: ADR 0041, ADR 0111, ADR 0118, ADR 0122, ADR 0128, ADR 0130
 - Documentation: `docs/beamtalk-language-features.md` § Control Flow and
