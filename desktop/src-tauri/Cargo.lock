@@ -320,9 +320,11 @@ name = "beamtalk-workspace"
 version = "0.4.0"
 dependencies = [
  "beamtalk-home",
+ "libc",
  "miette",
  "sha2 0.11.0",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
