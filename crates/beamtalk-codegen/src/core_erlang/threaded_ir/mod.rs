@@ -37,7 +37,9 @@
 //! - [`emit`] — the emitter: `render`, `RenderCtx`.
 //! - [`build`] — builders that construct-and-verify or construct-and-render
 //!   fixtures: `build_tuple_acc_unpack`,
-//!   `verify_body_with_opaque_version_gaps`, `verify_simple_bind`.
+//!   `verify_body_with_opaque_version_gaps`, `verify_simple_bind`, and ADR
+//!   0131's local-rebind prelude constructors (`build_local_threading_prelude`,
+//!   `build_local_rebind`, `build_method_body`, `build_branch_arm`, …).
 //!
 //! Every item re-exported below keeps the path it had before this split
 //! (`threaded_ir::X`) — see each submodule's own doc comment for what it
@@ -69,12 +71,23 @@ pub(super) use build::{
     backfill_opaque_version_gaps, build_tuple_acc_unpack, verify_body_with_opaque_version_gaps,
     verify_simple_bind,
 };
+// ADR 0131 Phase 1b: the local-rebind prelude nodes' builders and types.
+// Test-only until Phase 2's `local_threading_producer` (the first production
+// caller) imports them — `#[cfg(test)]` for the same reason as
+// `AccParam`/`CloseContext` below.
+#[cfg(test)]
+pub(super) use build::{
+    RebindFrame, ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
+    build_local_rebind, build_local_threading_prelude, build_method_body,
+};
 pub(super) use emit::{RenderCtx, render, render_value};
 pub(super) use ir::{
     BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
     StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, ValueRef,
     VersionCounter, VersionPrefix, VersionedVar,
 };
+#[cfg(test)]
+pub(super) use ir::{CarrierSlot, RebindFrameKind, RebindLowering, RebindShape};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s

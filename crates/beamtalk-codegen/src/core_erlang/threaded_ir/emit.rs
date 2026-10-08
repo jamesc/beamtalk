@@ -8,8 +8,9 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
-    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape,
+    OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -235,9 +236,135 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::OnDoCatch { vars, clauses, .. } => {
                 docs.push(render_on_do_catch(vars, clauses));
             }
+            ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
+                "let ",
+                leaf::var(carrier.clone()),
+                " = ",
+                doc.clone(),
+                " in ",
+            ]),
+            ThreadedStmt::LocalRebind {
+                carrier,
+                slot,
+                value_var,
+                state_first,
+                lowering,
+                ..
+            } => docs.push(render_local_rebind(
+                carrier,
+                slot,
+                value_var,
+                state_first.as_ref(),
+                lowering,
+                ctx,
+            )),
+            // ADR 0131 §2: the method root's one legitimate drop. The
+            // consumer reads `element(1, carrier)` itself; nothing to bind.
+            ThreadedStmt::DiscardLocals { .. } => {}
+            // ADR 0131 §2: frame nodes. Each `LocalRebind` in `body` already
+            // carries the lowering its enclosing frame chose, so a frame
+            // renders straight-line like any other sequence (an `NlrCatch`
+            // inside still consumes the rest of `body` as its try-body).
+            ThreadedStmt::MethodBody { body, .. } | ThreadedStmt::BranchArm { body, .. } => {
+                docs.push(render(body, ctx));
+            }
         }
     }
     Document::Vec(docs)
+}
+
+/// ADR 0131 §2's `<read>`: `maps:get(Key, element(2, CF))` for a
+/// [`CarrierSlot::Key`] — or `maps:get(Key, StateN)` when `state_first`
+/// names the `State` version the family `Bind` already extracted from the
+/// carrier (actor instance frames) — and `element(k, CF)` for a
+/// [`CarrierSlot::Pos`].
+fn render_carrier_read(
+    carrier: &str,
+    slot: &CarrierSlot,
+    state_first: Option<&VersionedVar>,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let element = |k: usize| {
+        docvec![
+            "call 'erlang':'element'(",
+            leaf::int_lit(i64::try_from(k).unwrap_or(i64::MAX)),
+            ", ",
+            leaf::var(carrier.to_string()),
+            ")",
+        ]
+    };
+    match slot {
+        CarrierSlot::Key(key) => {
+            let map = match state_first {
+                Some(state) => leaf::var(ctx.resolve_prefix(state)),
+                None => element(2),
+            };
+            docvec![
+                "call 'maps':'get'(",
+                leaf::atom(key.clone()),
+                ", ",
+                map,
+                ")"
+            ]
+        }
+        CarrierSlot::Pos(k) => element(*k),
+    }
+}
+
+/// Renders one [`ThreadedStmt::LocalRebind`] per its recorded
+/// [`RebindLowering`] — the ADR 0131 §2 table cell its enclosing frame chose
+/// ([`super::ir::RebindShape::for_frame`]):
+/// - [`RebindLowering::Let`] (every non-member; a non-REPL `MethodBody`):
+///   `let V = <read> in`;
+/// - [`RebindLowering::LoopParam`] (`DirectParams`/`Hybrid`/`TupleAcc`
+///   member): the `Gensym` `Bind` `let V = <read> in`, whose identity
+///   [`final_loop_arg_identities`] carries into the loop's recursive call;
+/// - [`RebindLowering::MapPut`] (`StateAcc` loop/handler, `BranchArm`, REPL
+///   `MethodBody` member): `let V = <read> in` then the `Put` `Bind`
+///   `let StateN+1 = maps:put(Key, V, StateN) in`.
+///
+/// Both `Bind`s go through [`render_bind`], so a rebind and an ordinary
+/// mutation of the same shape can never differ in bytes.
+fn render_local_rebind(
+    carrier: &str,
+    slot: &CarrierSlot,
+    value_var: &str,
+    state_first: Option<&VersionedVar>,
+    lowering: &RebindLowering,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let read = render_carrier_read(carrier, slot, state_first, ctx);
+    let plain_let = |read: Document<'static>| {
+        docvec![
+            "let ",
+            leaf::var(value_var.to_string()),
+            " = ",
+            read,
+            " in "
+        ]
+    };
+    match lowering {
+        RebindLowering::Let => plain_let(read),
+        RebindLowering::LoopParam { source, target } => {
+            render_bind(target, source, &BindOp::Direct(ValueRef::Doc(read)), ctx)
+        }
+        RebindLowering::MapPut {
+            key,
+            source,
+            target,
+        } => docvec![
+            plain_let(read),
+            render_bind(
+                target,
+                source,
+                &BindOp::Put {
+                    field: key.clone(),
+                    value: ValueRef::Var(value_var.to_string()),
+                },
+                ctx,
+            ),
+        ],
+    }
 }
 
 /// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`]: the open-ended
@@ -693,6 +820,12 @@ fn final_loop_arg_identities(
                 ThreadedStmt::Bind { source, target, .. } if *source == current => {
                     Some(target.clone())
                 }
+                // ADR 0131 §2: a member rebind of a `DirectParams`/`Hybrid`/
+                // `TupleAcc` frame joins the chain exactly like a `Bind`.
+                ThreadedStmt::LocalRebind {
+                    lowering: RebindLowering::LoopParam { source, target },
+                    ..
+                } if *source == current => Some(target.clone()),
                 _ => None,
             }) {
                 current = next;

@@ -779,6 +779,232 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         clauses: Vec<CatchClause>,
         span: Span,
     },
+
+    /// ADR 0131 §1: a local-threading producer's construct tuple, bound to
+    /// `carrier` (`let <carrier> = <doc> in`). Replaces the opaque
+    /// [`Statement`](Self::Statement) a construct's `{Value, StateAcc}` (or
+    /// flat `{Value, L1, …, Ln}`) tuple bind used to be: `threads` names the
+    /// outer locals the tuple carries, so the verifier (ADR 0131 §4,
+    /// `ThreadedLocalDropped`) can require one [`LocalRebind`](Self::LocalRebind)
+    /// per entry — or a [`DiscardLocals`](Self::DiscardLocals) at a
+    /// [`MethodBody`](Self::MethodBody) frame — before the frame ends. `doc`
+    /// is the construct's own AST-directed tuple expression, opaque like a
+    /// `Statement`'s.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2's `local_threading_producer`
+    /// is the first.
+    #[allow(dead_code)]
+    ConstructTuple {
+        carrier: String,
+        doc: Document<'static>,
+        threads: Vec<String>,
+        span: Span,
+    },
+
+    /// ADR 0131 §2: the outer local `local` takes the value its construct
+    /// threaded out, read from `carrier` at `slot`. How the new value is
+    /// bound is decided by the enclosing frame's recorded mode and the
+    /// local's membership in that frame's threaded set — never by the
+    /// producer — and recorded in `lowering` (see [`RebindLowering`] for the
+    /// §2 table, and `build::rebind_shape` for the one function that applies
+    /// it). `frame` is the enclosing frame's identity.
+    ///
+    /// `value_var` is the Core Erlang name the read value is bound to,
+    /// minted at lowering time (ADR 0111 Addendum 2 Gap 2: never at render
+    /// time); the producer `bind_var`s `local` to it so later AST-directed
+    /// code reads the new value.
+    ///
+    /// `state_first` is set in an actor instance frame, where the carrier's
+    /// `StateAcc` slot is also the `State` family's next version: ADR 0122's
+    /// `extract_family_slots` `Bind` comes first and this rebind's
+    /// [`CarrierSlot::Key`] read then goes through that new `State` version
+    /// rather than `element(2, carrier)`, so one carrier read feeds both.
+    ///
+    /// A `^` thrown inside the construct skips its rebinds (ADR 0131 §2,
+    /// "Non-local return"); the NLR 4-tuple carries the state the method's
+    /// catch needs.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 is the first.
+    #[allow(dead_code)]
+    LocalRebind {
+        local: String,
+        carrier: String,
+        slot: CarrierSlot,
+        frame: FrameId,
+        value_var: String,
+        state_first: Option<VersionedVar>,
+        lowering: RebindLowering,
+        span: Span,
+    },
+
+    /// ADR 0131 §2, "Last position does not discard, except at the method
+    /// root": the one legitimate drop of a construct's threaded locals — a
+    /// [`MethodBody`](Self::MethodBody) frame's last expression, whose
+    /// rebinds nothing can observe. Explicit so the verifier sees the
+    /// choice. Renders nothing; the consumer reads `element(1, carrier)`.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 (`lower_threaded_last`)
+    /// is the first.
+    #[allow(dead_code)]
+    DiscardLocals { carrier: String, span: Span },
+
+    /// ADR 0131 §2: a method's root frame, as a node rather than a side
+    /// table, so a [`LocalRebind`](Self::LocalRebind) in it reads its mode
+    /// and `threads` structurally. `threads` is empty except in the REPL,
+    /// where it is the bindings map's keys (the `MethodBody (REPL)` row of
+    /// the §2 table). Renders `body` straight-line.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 is the first.
+    #[allow(dead_code)]
+    MethodBody {
+        frame: FrameId,
+        threads: Vec<String>,
+        body: Vec<ThreadedStmt>,
+    },
+
+    /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
+    /// the set the arm's closer packs into its seeded `StateAcc`'s
+    /// `__local__` keys (`seed_conditional_locals`'s set). Renders `body`
+    /// straight-line.
+    ///
+    /// No production caller yet: ADR 0131 Phase 3 is the first.
+    #[allow(dead_code)]
+    BranchArm {
+        frame: FrameId,
+        threads: Vec<String>,
+        body: Vec<ThreadedStmt>,
+    },
+}
+
+// ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────
+//
+// No production caller yet: ADR 0131 Phase 2 (`local_threading_producer`) is
+// the first, as `CloseContext` landed ahead of its consumers in ADR 0118
+// phase 1a — hence the `#[allow(dead_code)]`s below.
+
+/// Where a [`ThreadedStmt::LocalRebind`] reads its local's new value from
+/// the construct tuple (ADR 0131 §2's `<read>`). The construct reports which,
+/// because the construct built the tuple.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum CarrierSlot {
+    /// A `StateAcc`-carrying construct (`{Value, StateAcc}`): the local is the
+    /// map key (`__local__t`, or the bare name in the REPL) —
+    /// `maps:get(Key, element(2, CF))`.
+    Key(String),
+    /// A flat-tuple construct (`{Value, L1, …, Ln}`): the local is the
+    /// 1-based tuple position — `element(k, CF)`.
+    Pos(usize),
+}
+
+/// The enclosing frame kind of a [`ThreadedStmt::LocalRebind`] — the
+/// "frame mode" half of ADR 0131 §2's lowering key. Read off the enclosing
+/// node: a [`ThreadedStmt::MethodBody`], a [`ThreadedStmt::BranchArm`], or a
+/// loop/fold ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`])'s
+/// recorded [`ThreadingMode`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindFrameKind {
+    MethodBody,
+    BranchArm,
+    Loop(ThreadingMode),
+}
+
+/// The shape ADR 0131 §2's table assigns a [`ThreadedStmt::LocalRebind`]
+/// for one (frame kind × membership) cell — [`RebindLowering`] without its
+/// lowering-time names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindShape {
+    /// `let V = <read> in` + `bind_var(t, V)`.
+    Let,
+    /// A `Gensym` `Bind` joining the loop's `final_loop_arg_identities` chain.
+    LoopParam,
+    /// A `Put` into the frame's `StateAcc`/bindings map.
+    MapPut,
+}
+
+#[allow(dead_code)]
+impl RebindShape {
+    /// ADR 0131 §2's table, the one place it is written down:
+    ///
+    /// | Enclosing frame | `local` ∈ `threads` | `local` ∉ `threads` |
+    /// |---|---|---|
+    /// | `MethodBody` (non-REPL: `threads` empty) | n/a | `Let` |
+    /// | `MethodBody` (REPL) | `MapPut` (bindings map) | n/a |
+    /// | `StateAcc(_)` loop / handler body | `MapPut` (`__local__t`) | `Let` |
+    /// | `DirectParams` / `Hybrid` / `TupleAcc(g)` | `LoopParam` | `Let` |
+    /// | `BranchArm` | `MapPut` (the arm's seeded `StateAcc`) | `Let` |
+    ///
+    /// A non-member is never forced into the frame's parameter list or map:
+    /// in an actor a stray `__local__` key would persist into the
+    /// `gen_server` `State` (the BT-2717 class of bug).
+    pub(in crate::core_erlang) fn for_frame(kind: &RebindFrameKind, member: bool) -> Self {
+        if !member {
+            return Self::Let;
+        }
+        match kind {
+            RebindFrameKind::MethodBody
+            | RebindFrameKind::BranchArm
+            | RebindFrameKind::Loop(ThreadingMode::StateAcc(_)) => Self::MapPut,
+            RebindFrameKind::Loop(
+                ThreadingMode::DirectParams | ThreadingMode::Hybrid | ThreadingMode::TupleAcc(_),
+            ) => Self::LoopParam,
+        }
+    }
+}
+
+/// How one [`ThreadedStmt::LocalRebind`] is bound: its [`RebindShape`] plus
+/// the lowering-time names that shape needs. Chosen at lowering time from
+/// the enclosing frame (`build::build_local_rebind`, which applies
+/// [`RebindShape::for_frame`]); ADR 0131 Phase 1c's
+/// `LocalRebindModeMismatch` re-derives the shape from the enclosing node and
+/// compares (this is its `lowered_as`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindLowering {
+    /// `let V = <read> in` — a plain, unthreaded binding.
+    Let,
+    /// `let Target = <read> in`, where `target` is
+    /// `Gensym(value_var)`: one step of the loop's per-local identity chain
+    /// from `source` (the local's identity before this rebind), which
+    /// `final_loop_arg_identities` follows into the recursive call / the
+    /// fold's closing tuple exactly as it follows a `Bind`.
+    LoopParam {
+        source: VersionedVar,
+        target: VersionedVar,
+    },
+    /// `let V = <read> in let Target = maps:put(Key, V, Source) in` — one
+    /// `State`-prefix version step of the frame's map (a `StateAcc` loop's,
+    /// a branch arm's seeded `StateAcc`, or the REPL bindings map).
+    MapPut {
+        key: String,
+        source: VersionedVar,
+        target: VersionedVar,
+    },
+}
+
+#[allow(dead_code)]
+impl RebindLowering {
+    /// The [`RebindShape`] this lowering realizes.
+    pub(in crate::core_erlang) fn shape(&self) -> RebindShape {
+        match self {
+            Self::Let => RebindShape::Let,
+            Self::LoopParam { .. } => RebindShape::LoopParam,
+            Self::MapPut { .. } => RebindShape::MapPut,
+        }
+    }
+
+    /// The version step this lowering performs, if any (`source`, `target`)
+    /// — counted by the verifier exactly like a `Bind`'s.
+    pub(in crate::core_erlang) fn version_step(&self) -> Option<(&VersionedVar, &VersionedVar)> {
+        match self {
+            Self::Let => None,
+            Self::LoopParam { source, target } | Self::MapPut { source, target, .. } => {
+                Some((source, target))
+            }
+        }
+    }
 }
 
 /// The Core Erlang variable names an [`ThreadedStmt::OnDoCatch`] clause binds
