@@ -323,8 +323,8 @@ fn render_carrier_read(
 ///   `MethodBody` member): `let V = <read> in` then the `Put` `Bind`
 ///   `let StateN+1 = maps:put(Key, V, StateN) in`.
 ///
-/// Both `Bind`s go through [`render_bind`], so a rebind and an ordinary
-/// mutation of the same shape can never differ in bytes.
+/// Every version step goes through [`render_bind`], so a rebind and an
+/// ordinary mutation of the same shape can never differ in bytes.
 fn render_local_rebind(
     carrier: &str,
     slot: &CarrierSlot,
