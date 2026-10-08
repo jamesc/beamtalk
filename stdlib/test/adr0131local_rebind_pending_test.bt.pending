@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the cells of the ADR 0131 probe matrix that do
+// not compile today, with the ADR's Expected answers. This file is inert (the
+// runner discovers only `.bt`); see adr0131local_rebind_test.bt. The phase
+// that makes a shape compile moves its test into adr0131local_rebind_test.bt
+// (or drops the `.pending` suffix here and from its fixture) in the same PR.
+//
+//   class o3, o12 / value o3, o12, o13: erlc `unbound variable 'State'`
+//     (ADR 0131 §3: conditional families are hard-coded to `[State]`)
+//   class s2: ThreadedIr verifier panic (verify.rs); value s2: erlc
+//     `unbound variable 'State'`
+
+TestCase subclass: Adr0131LocalRebindPendingTest
+
+  testO3Class =>
+    self assert: (Adr0131LocalRebindClassPending o3) equals: #[2, 1]
+
+  testO3Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o3) equals: #[2, 1]
+
+  testO12Class =>
+    self assert: (Adr0131LocalRebindClassPending o12: false) equals: #[2, 1]
+
+  testO12Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o12: false) equals: #[2, 1]
+
+  testO13Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o13: false) equals: #[1, 1]
+
+  testS2Class =>
+    self assert: (Adr0131LocalRebindClassPending s2) equals: #[0, 1]
+
+  testS2Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) s2) equals: #[0, 1]

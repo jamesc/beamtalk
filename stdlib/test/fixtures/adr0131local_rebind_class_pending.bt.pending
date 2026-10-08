@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the class-method probe shapes that do not
+// compile today (see adr0131local_rebind_class.bt for the rest). Inert: the
+// runner discovers only `.bt`. The phase that makes these compile drops the
+// `.pending` suffix (and from adr0131local_rebind_pending_test.bt.pending).
+//
+//   o3, o12: erlc `unbound variable 'State'` in `class_*` (ADR 0131 §3)
+//   s2: ThreadedIr verifier panic (verify.rs)
+
+Object subclass: Adr0131LocalRebindClassPending
+  classState: n = 0
+
+  class o3 =>
+    t := 0
+    r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
+    #[r, t]
+
+  class o12: c =>
+    t := 0
+    self.n := (c ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
+    #[self.n, t]
+
+  class s2 =>
+    t := 0
+    r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
+    #[r, t]
