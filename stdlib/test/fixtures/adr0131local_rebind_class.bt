@@ -1,0 +1,219 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the class-method column of the ADR 0131 probe
+// matrix. Each method is one probe shape, named after its row in the ADR's
+// tables (o1-o13: operand position; s1-s9: assign-RHS and statement
+// position; `seq`: the §1a sequencing shape; `tryDo*`: the `Result tryDo:`
+// failure the ADR's Context describes). Each starts from `t := 0` and uses the
+// ADR's body (laid out by `beamtalk fmt`); it answers `#[r, t]` (or `#[self.n, t]` for a field
+// write, or the one value the ADR expects). See
+// stdlib/test/adr0131local_rebind_test.bt for the expected answers.
+//
+// The shapes that do not compile in a class method today (o3, o12, s2) are in
+// adr0131local_rebind_class_pending.bt.pending, so this module compiles.
+
+Object subclass: Adr0131LocalRebindClass
+  classState: n = 0
+
+  class o1 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+    #[r, t]
+
+  class o2 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] ensure: [t := t + 1]) + 1
+    #[r, t]
+
+  class o4 =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  class o5 =>
+    t := 0
+    self.n := [
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]
+    #[self.n, t]
+
+  class o6: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^#[([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]), t]
+      ]
+    #[0, t]
+
+  class o7: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+      7
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  class o8: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  // o9: o1's operand as the method's last expression.
+  class o9 =>
+    t := 0
+    ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+
+  // o10: o1's operand as a `^` value inside an arm.
+  class o10: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    0
+
+  class o11 =>
+    t := 0
+    4 =:= 5 ifFalse: [t := t + 1]
+    a := t
+    [t := t + 1] ensure: [nil]
+    #[a, t]
+
+  class o13: c =>
+    t := 0
+    self.n := c
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]
+    #[self.n, t]
+
+  class s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  class s3 =>
+    t := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]
+    #[r, t]
+
+  class s4 =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    t
+
+  class s5 =>
+    t := 0
+    r := 4 =:= 5
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]
+    #[r, t]
+
+  class s6 =>
+    t := 0
+    r := (Erlang lists)
+      map: [:x |
+        t := t + 1
+        x
+      ]
+      with: #(1)
+    #[r, t]
+
+  class s7 =>
+    t := 0
+    r := nil
+      ifNil: [
+        t := t + 1
+        1
+      ]
+    #[r, t]
+
+  class s8 =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x]
+    t
+
+  class s9 =>
+    t := 0
+    r := (#(1, 2)
+      reject: [:x |
+        t := t + 1
+        false
+      ]) size
+    #[r, t]
+
+  class seq =>
+    t := 0
+    r := t + ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  class tryDoRaises =>
+    t := 0
+    r := (Result
+      tryDo: [
+        t := t + 1
+        1 / 0
+      ]) isError
+    #[r, t]
+
+  class tryDoStatement =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        1
+      ]
+    t
