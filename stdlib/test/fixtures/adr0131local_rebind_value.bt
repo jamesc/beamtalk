@@ -12,101 +12,14 @@
 // construct to the functional update `self withN:` and answer `#[v n, t]`. See
 // stdlib/test/adr0131local_rebind_test.bt for the expected answers.
 //
-// The shapes that do not compile in a value-type method today (o3, o12, o13, s2)
-// are in adr0131local_rebind_value_pending.bt.pending, so this module compiles.
+// The shapes that do not compile in a value-type method today are in
+// adr0131local_rebind_value_pending.bt.pending, so this module compiles: o3,
+// o12, o13 and s2 (codegen failures before BT-3745), and o1, o2, o4-o10, s1,
+// s7, s9 and seq (ADR 0131 Phase 0 compile errors since BT-3745). s4 is a
+// permanent ADR 0131 §6 error and is pinned only in the Rust tests.
 
 Value subclass: Adr0131LocalRebindValue
   field: n = 0
-
-  o1 =>
-    t := 0
-    r := ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0]) + 1
-    #[r, t]
-
-  o2 =>
-    t := 0
-    r := ([
-      t := t + 1
-      1
-    ] ensure: [t := t + 1]) + 1
-    #[r, t]
-
-  o4 =>
-    t := 0
-    r := (#(1, 2) collect: [:x | t := t + x]) size
-    #[r, t]
-
-  o5 =>
-    t := 0
-    v := self
-      withN: ([
-        t := t + 1
-        1
-      ] on: Error do: [:e | 0])
-    #[v n, t]
-
-  o6: cond =>
-    t := 0
-    cond
-      ifTrue: [
-        ^#[([
-          t := t + 1
-          1
-        ] on: Error do: [:e | 0]), t]
-      ]
-    #[0, t]
-
-  o7: c =>
-    t := 0
-    r := [
-      c
-        ifTrue: [2]
-        ifFalse: [
-          ([
-            t := t + 1
-            1
-          ] on: Error do: [:e | 0]) + 1
-        ]
-      7
-    ] on: Error do: [:x | 3]
-    #[r, t]
-
-  o8: c =>
-    t := 0
-    r := [
-      c
-        ifTrue: [2]
-        ifFalse: [
-          ([
-            t := t + 1
-            1
-          ] on: Error do: [:e | 0]) + 1
-        ]
-    ] on: Error do: [:x | 3]
-    #[r, t]
-
-  // o9: o1's operand as the method's last expression.
-  o9 =>
-    t := 0
-    ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0]) + 1
-
-  // o10: o1's operand as a `^` value inside an arm.
-  o10: cond =>
-    t := 0
-    cond
-      ifTrue: [
-        ^([
-          t := t + 1
-          1
-        ] on: Error do: [:e | 0]) + 1
-      ]
-    0
 
   o11 =>
     t := 0
@@ -114,17 +27,6 @@ Value subclass: Adr0131LocalRebindValue
     a := t
     [t := t + 1] ensure: [nil]
     #[a, t]
-
-  s1 =>
-    t := 0
-    d := #{#a => 1}
-    r := d
-      at: #k
-      ifAbsent: [
-        t := t + 1
-        0
-      ]
-    #[r, t]
 
   s3 =>
     t := 0
@@ -135,12 +37,6 @@ Value subclass: Adr0131LocalRebindValue
         a + x
       ]
     #[r, t]
-
-  s4 =>
-    t := 0
-    b := [t := t + 1]
-    b value
-    t
 
   s5 =>
     t := 0
@@ -162,36 +58,10 @@ Value subclass: Adr0131LocalRebindValue
       with: #(1)
     #[r, t]
 
-  s7 =>
-    t := 0
-    r := nil
-      ifNil: [
-        t := t + 1
-        1
-      ]
-    #[r, t]
-
   s8 =>
     t := 0
     #(1, 2) do: [:x | t := t + x]
     t
-
-  s9 =>
-    t := 0
-    r := (#(1, 2)
-      reject: [:x |
-        t := t + 1
-        false
-      ]) size
-    #[r, t]
-
-  seq =>
-    t := 0
-    r := t + ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0])
-    #[r, t]
 
   tryDoRaises =>
     t := 0

@@ -1,42 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3744 (ADR 0131 Phase 0a): the value-type probe shapes that do not
-// compile today (see adr0131local_rebind_value.bt for the rest). Inert: the
-// runner discovers only `.bt`. The phase that makes these compile drops the
-// `.pending` suffix (and from adr0131local_rebind_pending_test.bt.pending).
-// As in adr0131local_rebind_value.bt, o12/o13 pass the construct to the
-// functional update `self withN:`, since a value type cannot write `self.n :=`.
+// BT-3745 (ADR 0131 Phase 0b): the actor-instance-method probe shapes that
+// are compile errors today (see adr0131local_rebind_actor.bt for the rest).
+// Inert: the runner discovers only `.bt`. The phase that makes a shape
+// compile moves it back (and its test from
+// adr0131local_rebind_pending_test.bt.pending).
 //
-//   o3, o12, o13, s2: erlc `unbound variable 'State'` (ADR 0131 §3)
-//   o1, o2, o4-o10, s1, s7, s9, seq: ADR 0131 Phase 0 compile errors
-//     (BT-3745: the allow-set error, or §6 for s1's `at:ifAbsent:` block)
+//   o1-o4, o6-o10, o12, s2, s9, seq: the ADR 0131 Phase 0 allow-set error
+//   s1: ADR 0131 §6 (`at:ifAbsent:` cannot return the block's write)
 //
 // Every method here is rejected by an ADR 0131 diagnostic today;
 // `adr0131_probe_matrix_pins` in beamtalk-core checks that.
 
-Value subclass: Adr0131LocalRebindValuePending
-  field: n = 0
-
-  o3 =>
-    t := 0
-    r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
-    #[r, t]
-
-  o12: c =>
-    t := 0
-    v := self withN: ((c ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1)
-    #[v n, t]
-
-  o13: c =>
-    t := 0
-    v := self withN: (c ifTrue: [2] ifFalse: [t := t + 1. 1])
-    #[v n, t]
-
-  s2 =>
-    t := 0
-    r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
-    #[r, t]
+Actor subclass: Adr0131LocalRebindActorPending
+  state: n = 0
 
   o1 =>
     t := 0
@@ -54,19 +32,20 @@ Value subclass: Adr0131LocalRebindValuePending
     ] ensure: [t := t + 1]) + 1
     #[r, t]
 
+  o3 =>
+    t := 0
+    r := (4 =:= 5
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]) + 1
+    #[r, t]
+
   o4 =>
     t := 0
     r := (#(1, 2) collect: [:x | t := t + x]) size
     #[r, t]
-
-  o5 =>
-    t := 0
-    v := self
-      withN: ([
-        t := t + 1
-        1
-      ] on: Error do: [:e | 0])
-    #[v n, t]
 
   o6: cond =>
     t := 0
@@ -128,6 +107,16 @@ Value subclass: Adr0131LocalRebindValuePending
       ]
     0
 
+  o12: c =>
+    t := 0
+    self.n := (c
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]) + 1
+    #[self.n, t]
+
   s1 =>
     t := 0
     d := #{#a => 1}
@@ -139,12 +128,13 @@ Value subclass: Adr0131LocalRebindValuePending
       ]
     #[r, t]
 
-  s7 =>
+  s2 =>
     t := 0
-    r := nil
-      ifNil: [
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
         t := t + 1
-        1
+        0
       ]
     #[r, t]
 

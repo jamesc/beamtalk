@@ -18,6 +18,11 @@
 // rest. Each shape resets `t` first, so one shape's wrong answer does not
 // change the next shape's input (the ADR transcript is the exception: it is
 // one stateful sequence, as the ADR writes it).
+//
+// Since BT-3745 (ADR 0131 Phase 0b) every shape that crashed or answered
+// wrong is a compile error (the Phase 0 allow-set error, or §6), so its pin
+// asserts that error; a rejected input runs nothing, so the `t` that follows
+// it still reads the value before it.
 
 // ===========================================================================
 // ADR 0131 §"REPL and error examples" (approved display)
@@ -26,19 +31,20 @@
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the `on:do:` operand leaks its `{Value, StateAcc}` tuple
-// (o1). Correct answer: 2.
+// PIN-BUG BT-3743: the `on:do:` operand leaked its `{Value, StateAcc}` tuple
+// (o1); since BT-3745 it is an ADR 0131 Phase 0 compile error. Correct
+// answer: 2.
 r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1
-// => ERROR: Tuple does not understand '+'
+// => ERROR: `on:do:` writes outer local `t`, but as the receiver of a message
 
 // PIN-BUG BT-3743: correct answer 1 (the on:do: body's write is kept).
 t
 // => 0
 
-// PIN-BUG BT-3743: `collect:` in receiver position raises (o4). Correct
-// answer: 2.
+// PIN-BUG BT-3743: `collect:` in receiver position raised (o4); since
+// BT-3745 it is a compile error. Correct answer: 2.
 (#(1, 2) collect: [:x | t := t + x]) size
-// => ERROR: invalid argument
+// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
 
 // PIN-BUG BT-3743: correct answer 4.
 t
@@ -62,9 +68,10 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the cleanup block cannot see `t`. Correct answer: 2.
+// PIN-BUG BT-3743: the cleanup block could not see `t`; since BT-3745 it is
+// a compile error. Correct answer: 2.
 r := ([t := t + 1. 1] ensure: [t := t + 1]) + 1
-// => ERROR: Undefined variable: t
+// => ERROR: `ensure:` writes outer local `t`, but as the receiver of a message
 
 // PIN-BUG BT-3743: correct answer 2.
 t
@@ -74,10 +81,10 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: codegen references an unbound `State` (ADR 0131 §3).
-// Correct answer: 2.
+// PIN-BUG BT-3743: codegen referenced an unbound `State` (ADR 0131 §3);
+// since BT-3745 it is a compile error. Correct answer: 2.
 r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
-// => ERROR: unbound variable
+// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as the receiver of a message
 
 // PIN-BUG BT-3743: correct answer 1.
 t
@@ -87,27 +94,29 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the inner tuple leaks, raises, and the outer handler
-// answers 3. Correct answer: 7.
+// PIN-BUG BT-3743: the inner tuple leaked, raised, and the outer handler
+// answered 3 (a silent wrong answer); since BT-3745 it is a compile error.
+// Correct answer: 7.
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
-// => 3
+// => ERROR: `on:do:` writes outer local `t`
 
-// PIN-BUG BT-3743: the outer `on:do:` drops `t` from the bindings. Correct
-// answer: 1.
+// PIN-BUG BT-3743: correct answer 1 (before BT-3745 the outer `on:do:`
+// dropped `t` from the bindings).
 t
-// => ERROR: Undefined variable: t
+// => 0
 
 // o8: as o7 without the trailing `7`.
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: correct answer 2.
+// PIN-BUG BT-3743: a silent wrong answer (3) before BT-3745, a compile
+// error since. Correct answer: 2.
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
-// => 3
+// => ERROR: `on:do:` writes outer local `t`
 
 // PIN-BUG BT-3743: correct answer 1.
 t
-// => ERROR: Undefined variable: t
+// => 0
 
 // o11: the statement-position control. A conditional, then `ensure:`.
 t := 0
@@ -133,10 +142,11 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the right operand leaks its tuple. Correct answer: 1
-// (source order reads `t` as 0 before the right operand writes it).
+// PIN-BUG BT-3743: the right operand leaked its tuple; since BT-3745 it is
+// a compile error. Correct answer: 1 (source order reads `t` as 0 before the
+// right operand writes it).
 r := t + ([t := t + 1. 1] on: Error do: [:e | 0])
-// => ERROR: Tuple does not understand 'plusFromNumber:'
+// => ERROR: `on:do:` writes outer local `t`, but as an argument of a message
 
 // PIN-BUG BT-3743: correct answer 1.
 t
@@ -150,10 +160,11 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the Tier 2 block reaches the native `at:ifAbsent:`.
-// Correct answer: 0.
+// PIN-BUG BT-3743: the Tier 2 block reached the native `at:ifAbsent:`;
+// since BT-3745 it is an ADR 0131 §6 compile error until `at:ifAbsent:`
+// becomes a producer (phase 2). Correct answer: 0.
 r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
-// => ERROR: function_clause
+// => ERROR: block writes outer local `t`, but `at:ifAbsent:` cannot return the write
 
 // PIN-BUG BT-3743: correct answer 1.
 t
@@ -186,8 +197,10 @@ t := 0
 b := [t := t + 1]
 // => _
 
-// PIN-BUG BT-3743: the stored Tier 2 block is sent `value` via perform:
-// (ADR 0131 §6 makes this a compile error). Correct answer: 1.
+// PIN-BUG BT-3743: the stored Tier 2 block is sent `value` via perform:.
+// ADR 0131 §6 makes this a compile error when the binding and the send are
+// compiled together (BT-3745); across two REPL inputs the second sees `b`
+// only as a binding, so the runtime error remains. Correct answer: 1.
 b value
 // => ERROR: Cannot call 'value' on Block via perform:
 
@@ -220,10 +233,10 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the Tier 2 block is called with the wrong arity. Correct
-// answer: 1.
+// PIN-BUG BT-3743: the Tier 2 block was called with the wrong arity; since
+// BT-3745 it is a compile error. Correct answer: 1.
 r := nil ifNil: [t := t + 1. 1]
-// => ERROR: Wrong number of arguments: block expects 1 but was called with 0
+// => ERROR: `ifNil:` writes outer local `t`, but as the value of an assignment
 
 // PIN-BUG BT-3743: correct answer 1.
 t
@@ -243,9 +256,10 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: correct answer 2.
+// PIN-BUG BT-3743: raised `invalid argument` before BT-3745, a compile error
+// since. Correct answer: 2.
 r := (#(1, 2) reject: [:x | t := t + 1. false]) size
-// => ERROR: invalid argument
+// => ERROR: `reject:` writes outer local `t`, but as the receiver of a message
 
 // PIN-BUG BT-3743: correct answer 2.
 t

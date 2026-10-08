@@ -10,42 +10,13 @@
 // write, or the one value the ADR expects). See
 // stdlib/test/adr0131local_rebind_test.bt for the expected answers.
 //
-// Every shape compiles in an actor instance method today, so this column has
-// no pending fixture; o3, o12 and s2 are here (pending in the other two).
+// Every shape compiled in an actor instance method before BT-3745. Since
+// BT-3745 (ADR 0131 Phase 0b) the ones that crashed or answered wrong (o1-o4,
+// o6-o10, o12, s1, s2, s9, seq) are compile errors and live in
+// adr0131local_rebind_actor_pending.bt.pending, so this module compiles.
 
 Actor subclass: Adr0131LocalRebindActor
   state: n = 0
-
-  o1 =>
-    t := 0
-    r := ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0]) + 1
-    #[r, t]
-
-  o2 =>
-    t := 0
-    r := ([
-      t := t + 1
-      1
-    ] ensure: [t := t + 1]) + 1
-    #[r, t]
-
-  o3 =>
-    t := 0
-    r := (4 =:= 5
-      ifTrue: [2]
-      ifFalse: [
-        t := t + 1
-        1
-      ]) + 1
-    #[r, t]
-
-  o4 =>
-    t := 0
-    r := (#(1, 2) collect: [:x | t := t + x]) size
-    #[r, t]
 
   o5 =>
     t := 0
@@ -55,82 +26,12 @@ Actor subclass: Adr0131LocalRebindActor
     ] on: Error do: [:e | 0]
     #[self.n, t]
 
-  o6: cond =>
-    t := 0
-    cond
-      ifTrue: [
-        ^#[([
-          t := t + 1
-          1
-        ] on: Error do: [:e | 0]), t]
-      ]
-    #[0, t]
-
-  o7: c =>
-    t := 0
-    r := [
-      c
-        ifTrue: [2]
-        ifFalse: [
-          ([
-            t := t + 1
-            1
-          ] on: Error do: [:e | 0]) + 1
-        ]
-      7
-    ] on: Error do: [:x | 3]
-    #[r, t]
-
-  o8: c =>
-    t := 0
-    r := [
-      c
-        ifTrue: [2]
-        ifFalse: [
-          ([
-            t := t + 1
-            1
-          ] on: Error do: [:e | 0]) + 1
-        ]
-    ] on: Error do: [:x | 3]
-    #[r, t]
-
-  // o9: o1's operand as the method's last expression.
-  o9 =>
-    t := 0
-    ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0]) + 1
-
-  // o10: o1's operand as a `^` value inside an arm.
-  o10: cond =>
-    t := 0
-    cond
-      ifTrue: [
-        ^([
-          t := t + 1
-          1
-        ] on: Error do: [:e | 0]) + 1
-      ]
-    0
-
   o11 =>
     t := 0
     4 =:= 5 ifFalse: [t := t + 1]
     a := t
     [t := t + 1] ensure: [nil]
     #[a, t]
-
-  o12: c =>
-    t := 0
-    self.n := (c
-      ifTrue: [2]
-      ifFalse: [
-        t := t + 1
-        1
-      ]) + 1
-    #[self.n, t]
 
   o13: c =>
     t := 0
@@ -141,27 +42,6 @@ Actor subclass: Adr0131LocalRebindActor
         1
       ]
     #[self.n, t]
-
-  s1 =>
-    t := 0
-    d := #{#a => 1}
-    r := d
-      at: #k
-      ifAbsent: [
-        t := t + 1
-        0
-      ]
-    #[r, t]
-
-  s2 =>
-    t := 0
-    r := #(1, 2)
-      detect: [:x | x > 5]
-      ifNone: [
-        t := t + 1
-        0
-      ]
-    #[r, t]
 
   s3 =>
     t := 0
@@ -212,23 +92,6 @@ Actor subclass: Adr0131LocalRebindActor
     t := 0
     #(1, 2) do: [:x | t := t + x]
     t
-
-  s9 =>
-    t := 0
-    r := (#(1, 2)
-      reject: [:x |
-        t := t + 1
-        false
-      ]) size
-    #[r, t]
-
-  seq =>
-    t := 0
-    r := t + ([
-      t := t + 1
-      1
-    ] on: Error do: [:e | 0])
-    #[r, t]
 
   tryDoRaises =>
     t := 0

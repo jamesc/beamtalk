@@ -1005,6 +1005,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // ADR 0130 §5 (BT-3712): a block that touches its home class's variables
     // where it runs outside an invocation of that class.
     validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
+    // ADR 0131 §6 and Phase 0 (BT-3745): outer-local writes that no
+    // construct threads back are compile errors, not silent wrong answers.
+    validators::check_local_threading(
+        module,
+        &result.class_hierarchy,
+        known_vars,
+        &mut result.diagnostics,
+    );
     validators::check_value_slot_assignment(
         module,
         &result.class_hierarchy,

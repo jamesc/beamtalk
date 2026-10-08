@@ -99,8 +99,11 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulBlock := [:x | count := count + x]
+    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
+    // block is laundered through a list to reach the runtime guard.
+    laundered := #(statefulBlock) first
     self should: [
-      statefulBlock perform: #value: withArguments: #(3)
+      laundered perform: #value: withArguments: #(3)
     ] raise: #stateful_block_dispatch
 
   testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind =>
@@ -148,8 +151,11 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulZeroArgBlock := [count := count + 1]
+    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
+    // block is laundered through a list to reach the runtime guard.
+    laundered := #(statefulZeroArgBlock) first
     caught := [
-      statefulZeroArgBlock perform: #value: withArguments: #(42)
+      laundered perform: #value: withArguments: #(42)
     ] on: Exception do: [:e | e]
     self assert: (caught isKindOf: Exception)
 
@@ -232,8 +238,12 @@ TestCase subclass: BlocksTest
     // limitation" note.
     i := 0
     @expect dead_assignment
+    statefulIncrement := [i := i + 1]
+    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
+    // block is laundered through a list to reach the runtime guard.
+    launderedIncrement := #(statefulIncrement) first
     self should: [
-      [i < 3] perform: #whileTrue: withArguments: #([i := i + 1])
+      [i < 3] perform: #whileTrue: withArguments: #(launderedIncrement)
     ] raise: #stateful_block_dispatch
     count := 0
     @expect dead_assignment
@@ -241,8 +251,9 @@ TestCase subclass: BlocksTest
     self should: [
       [false] perform: #whileTrue: withArguments: #(statefulBody)
     ] raise: #stateful_block_dispatch
+    launderedBody := #(statefulBody) first
     self should: [
-      statefulBody perform: #repeat withArguments: #()
+      launderedBody perform: #repeat withArguments: #()
     ] raise: #stateful_block_dispatch
 
   testPerformOnStatefulExceptionBlockRaisesClearError =>
@@ -251,17 +262,20 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulReceiver := [count := count + 1]
+    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
+    // block is laundered through a list to reach the runtime guard.
+    laundered := #(statefulReceiver) first
     self should: [
-      statefulReceiver perform: #on:do: withArguments: #(Error, [:e | "unused"])
+      laundered perform: #on:do: withArguments: #(Error, [:e | "unused"])
     ] raise: #stateful_block_dispatch
     @expect dead_assignment
+    statefulHandler := [:e | count := count + 1]
+    launderedHandler := #(statefulHandler) first
     self should: [
-      [
-        1 / 0
-      ] perform: #on:do: withArguments: #(Error, [:e | count := count + 1])
+      [1 / 0] perform: #on:do: withArguments: #(Error, launderedHandler)
     ] raise: #stateful_block_dispatch
     self should: [
-      statefulReceiver perform: #ensure: withArguments: #([nil])
+      laundered perform: #ensure: withArguments: #([nil])
     ] raise: #stateful_block_dispatch
     self should: [
       [42] perform: #ensure: withArguments: #(statefulReceiver)

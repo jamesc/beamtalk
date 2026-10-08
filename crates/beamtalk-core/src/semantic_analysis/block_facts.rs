@@ -12,6 +12,7 @@ use crate::ast::{
     Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
     ParameterDefinition,
 };
+use crate::source_analysis::Span;
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -842,6 +843,264 @@ fn propagate_inline_block_writes(
     }
     if nested.has_opaque_callable_hom_send {
         analysis.has_opaque_callable_hom_send = true;
+    }
+}
+
+/// One outer-local write found by [`outer_local_writes`]: the local's name and
+/// the span of the assignment that writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OuterLocalWrite {
+    /// The outer local written.
+    pub name: ecow::EcoString,
+    /// The assignment (or destructuring pattern) that writes it.
+    pub span: Span,
+}
+
+/// ADR 0131 (BT-3745): the outer locals `block` writes, anywhere in its body
+/// including nested blocks, in source order (first write of each name only).
+///
+/// A name is an outer local when `bound_outside(name)` says it is bound in
+/// the scope enclosing `block` and nothing between that scope and the write
+/// (the block's own parameters, a parameter of a nested block, a match-arm or
+/// destructuring binding, or an earlier first assignment that introduced it
+/// as a block local) rebinds it. Write-only writes count: a block that
+/// assigns an outer local without reading it still writes the caller's local
+/// in Smalltalk, so it is a Tier 2 block value (ADR 0041) and its write must
+/// be threaded back or it is lost.
+///
+/// This is the single "does this block write an outer local" fact that both
+/// ADR 0131 diagnostics (§6 and the Phase 0 allow-set, in
+/// `validators/local_threading.rs`) are computed from.
+pub fn outer_local_writes(
+    block: &Block,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+    };
+    walker.block(block);
+    walker.writes
+}
+
+/// Scope-tracking walk behind [`outer_local_writes`].
+struct OuterWriteWalker<'a> {
+    bound_outside: &'a dyn Fn(&str) -> bool,
+    /// Names bound inside the block being analysed, innermost last.
+    frames: Vec<HashSet<ecow::EcoString>>,
+    writes: Vec<OuterLocalWrite>,
+}
+
+impl OuterWriteWalker<'_> {
+    fn bound_inside(&self, name: &str) -> bool {
+        self.frames.iter().any(|f| f.contains(name))
+    }
+
+    fn define(&mut self, name: &ecow::EcoString) {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.insert(name.clone());
+        }
+    }
+
+    /// An assignment to `name` at `span`: an outer write, or the first
+    /// assignment of a block local (which then shadows nothing outside).
+    fn assign(&mut self, name: &ecow::EcoString, span: Span) {
+        if self.bound_inside(name) {
+            return;
+        }
+        if (self.bound_outside)(name) {
+            if !self.writes.iter().any(|w| &w.name == name) {
+                self.writes.push(OuterLocalWrite {
+                    name: name.clone(),
+                    span,
+                });
+            }
+        } else {
+            self.define(name);
+        }
+    }
+
+    fn block(&mut self, block: &Block) {
+        self.frames
+            .push(block.parameters.iter().map(|p| p.name.clone()).collect());
+        for stmt in &block.body {
+            self.expr(&stmt.expression);
+        }
+        self.frames.pop();
+    }
+
+    fn expr(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Assignment {
+                target,
+                value,
+                span,
+                ..
+            } => {
+                self.expr(value);
+                match target.as_ref() {
+                    Expression::Identifier(id) => self.assign(&id.name, *span),
+                    other => self.expr(other),
+                }
+            }
+            Expression::DestructureAssignment {
+                pattern,
+                value,
+                span,
+            } => {
+                self.expr(value);
+                let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                for id in ids {
+                    self.assign(&id.name, *span);
+                }
+            }
+            Expression::Block(block) => self.block(block),
+            Expression::Match { value, arms, .. } => {
+                self.expr(value);
+                for arm in arms {
+                    let (ids, _) =
+                        crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+                    self.frames
+                        .push(ids.into_iter().map(|id| id.name).collect());
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.expr(&arm.body);
+                    self.frames.pop();
+                }
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                self.expr(receiver);
+                for arg in arguments {
+                    self.expr(arg);
+                }
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.expr(receiver);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.expr(arg);
+                    }
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
+            Expression::Return { value, .. } => self.expr(value),
+            Expression::Parenthesized { expression, .. } => self.expr(expression),
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.expr(&pair.key);
+                    self.expr(&pair.value);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+                if let Some(t) = tail {
+                    self.expr(t);
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(e) = segment {
+                        self.expr(e);
+                    }
+                }
+            }
+            Expression::Literal(..)
+            | Expression::Identifier(_)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::Spread { .. }
+            | Expression::Error { .. } => {}
+        }
+    }
+}
+
+/// ADR 0131 §1 / Phase 0 (BT-3745): the selector and the block literals of a
+/// local-threading construct — a send whose literal block(s) codegen inlines
+/// and whose outer-local writes it threads back through a `StateAcc` (or
+/// flat) tuple rather than compiling them as closures. `None` when `expr` is
+/// not such a send.
+///
+/// Derived only from [`crate::state_threading_selectors`] (no new selector
+/// table): a keyword send classified as a state-threading, conditional or
+/// exception selector contributes each of its literal block arguments, plus
+/// its literal block receiver for `whileTrue:`/`whileFalse:` (the condition)
+/// and `on:do:`/`ensure:` (the protected body); a unary loop selector
+/// (`whileTrue`, `whileFalse`, `timesRepeat`, `repeat`) or a block `value`
+/// send contributes its literal block receiver. Only direct `[...]` literals
+/// count, because only those are inlined (a parenthesized or stored block is
+/// a block value, ADR 0131 §6).
+#[must_use]
+pub fn local_threading_construct_blocks(expr: &Expression) -> Option<(String, Vec<&Block>)> {
+    use crate::state_threading_selectors::{
+        is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
+        is_state_threading_keyword_selector, is_state_threading_unary_selector,
+    };
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let sel = selector.name().to_string();
+    let receiver_block = match receiver.as_ref() {
+        Expression::Block(b) => Some(b),
+        _ => None,
+    };
+    let mut blocks: Vec<&Block> = Vec::new();
+    match selector {
+        MessageSelector::Keyword(_) => {
+            let is_construct = is_state_threading_keyword_selector(&sel)
+                || is_conditional_selector(&sel)
+                || is_exception_selector(&sel);
+            if is_construct {
+                if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+                    || is_exception_selector(&sel)
+                {
+                    blocks.extend(receiver_block);
+                }
+                blocks.extend(arguments.iter().filter_map(|a| match a {
+                    Expression::Block(b) => Some(b),
+                    _ => None,
+                }));
+            } else if is_state_threaded_block_receiver(&sel) {
+                blocks.extend(receiver_block);
+            }
+        }
+        MessageSelector::Unary(_) => {
+            if is_state_threading_unary_selector(&sel)
+                || sel == "repeat"
+                || is_state_threaded_block_receiver(&sel)
+            {
+                blocks.extend(receiver_block);
+            }
+        }
+        MessageSelector::Binary(_) => {}
+    }
+    if blocks.is_empty() {
+        None
+    } else {
+        Some((sel, blocks))
     }
 }
 

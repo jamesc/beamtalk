@@ -194,6 +194,8 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
+        DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
+        DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
     }
 }
 
@@ -414,6 +416,14 @@ mod tests {
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
             (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
+            (
+                DiagnosticCategory::Tier2BlockNoReturnChannel,
+                "Tier2BlockNoReturnChannel",
+            ),
+            (
+                DiagnosticCategory::UnmigratedLocalThreading,
+                "UnmigratedLocalThreading",
+            ),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);
