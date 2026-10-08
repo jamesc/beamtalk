@@ -229,6 +229,10 @@ const LATE_BOUND: &str = "Object subclass: Base
 
   class sealed viaNamed => Base helper
 
+  class viaPlain => self helper
+
+  class viaPlainSealed => self helperSealed
+
   class sealed deep => self viaSealedChain
 
   class sealed viaSealedChain => self viaHelper
@@ -261,6 +265,18 @@ fn inherited_sealed_method_reaching_an_unsealed_self_send_transitively_warns() {
 #[test]
 fn sealed_method_with_only_sealed_self_sends_does_not_warn() {
     assert!(late_bound("self viaSealed").is_empty());
+}
+
+#[test]
+fn inherited_unsealed_method_with_a_late_bound_self_send_warns() {
+    // BT-3736: the same shape as `viaHelper`, without `class sealed`.
+    assert_eq!(late_bound("Leaf viaPlain").len(), 1);
+    assert_eq!(late_bound("self viaPlain").len(), 1);
+}
+
+#[test]
+fn unsealed_method_with_only_sealed_self_sends_does_not_warn() {
+    assert!(late_bound("Leaf viaPlainSealed").is_empty());
 }
 
 #[test]
