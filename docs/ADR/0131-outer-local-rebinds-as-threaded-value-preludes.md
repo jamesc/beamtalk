@@ -1,7 +1,7 @@
 # ADR 0131: Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context
 
 ## Status
-Proposed (2026-10-08)
+Accepted (2026-10-08)
 
 ## Context
 
