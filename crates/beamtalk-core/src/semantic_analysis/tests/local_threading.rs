@@ -445,3 +445,85 @@ fn adr0131_probe_s4_is_a_permanent_section6_error() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// PR #4210 review: cascades, parenthesized receivers, scoping, destructuring
+// ---------------------------------------------------------------------------
+
+#[test]
+fn section6_cascade_messages_are_never_inlined() {
+    // `generate_cascade` sends every message through ordinary dispatch, so a
+    // `do:` block in a cascade drops its write, in either message order.
+    for body in [
+        "#(1, 2) yourself; do: [:x | t := t + x]\nt",
+        "#(1, 2) do: [:x | t := t + x]; yourself\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn section6_actor_self_send_cascade_still_compiles() {
+    let diags = adr0131_diagnostics(&in_actor("self ap: [t := t + 1]; yourself\nt"));
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn section6_parenthesized_block_receiver_is_a_block_value() {
+    for body in [
+        "([t := t + 1]) value\nt",
+        "([t := t + 1. 1]) on: Error do: [:e | 0]\nt",
+        "([t := t + 1. t < 3]) whileTrue: [nil]\nt",
+    ] {
+        let src = in_class(body);
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+            1,
+            "{body}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn section6_sibling_scope_parameter_is_not_an_earlier_tier2_local() {
+    let src = in_value(
+        "#(1) do: [:e | blk := [t := t + 1]. blk]\n#(1, 2) do: [:blk | blk printString]\nt",
+    );
+    let diags = adr0131_diagnostics(&src);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn section6_destructuring_rebind_is_a_reassignment() {
+    let src = in_class("b := [t := t + 1]\n#[b, _x] := #[[0], 1]\nb value\nt");
+    let diags = adr0131_diagnostics(&src);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn allow_set_value_type_return_of_list_op_differs_from_implicit_last() {
+    // Probed on the debug build (BT-3745): `^#(1, 2) inject: 0 into: [...]`
+    // in a value-type method answers the leaked `{3, StateAcc}` tuple, while
+    // the same construct as the implicit last statement answers 3. The BUnit
+    // pins are `vtLastInject` (adr0131local_rebind_value.bt) and
+    // `vtReturnInject` (adr0131local_rebind_value_pending.bt.pending).
+    let ret = in_value("^#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]");
+    assert_eq!(
+        of_category(
+            &adr0131_diagnostics(&ret),
+            DiagnosticCategory::UnmigratedLocalThreading
+        )
+        .len(),
+        1
+    );
+    let last = in_value("#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]");
+    assert!(adr0131_diagnostics(&last).is_empty());
+}

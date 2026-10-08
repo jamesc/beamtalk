@@ -164,3 +164,15 @@ Value subclass: Adr0131LocalRebindValuePending
       1
     ] on: Error do: [:e | 0])
     #[r, t]
+
+  // BT-3745 review: `^` of a list op answers the leaked `{3, StateAcc}`
+  // tuple today (the implicit-last `vtLastInject` answers 3), so it is a
+  // Phase 0 compile error.
+  vtReturnInject =>
+    t := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]

@@ -448,12 +448,19 @@ impl<'d> Walker<'d> {
     ) -> Self {
         let mut assign_counts = HashMap::new();
         for stmt in body {
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Assignment { target, .. } = e {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Assignment { target, .. } => {
                     if let Expression::Identifier(id) = target.as_ref() {
                         *assign_counts.entry(id.name.clone()).or_insert(0) += 1;
                     }
                 }
+                Expression::DestructureAssignment { pattern, .. } => {
+                    let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                    for id in ids {
+                        *assign_counts.entry(id.name).or_insert(0) += 1;
+                    }
+                }
+                _ => {}
             });
         }
         Self {
@@ -509,8 +516,17 @@ impl<'d> Walker<'d> {
         self.depth += 1;
         self.body(&block.body);
         self.depth -= 1;
-        self.scope.pop();
+        self.pop_frame();
         self.block_frames.pop();
+    }
+
+    /// Leaves the innermost scope frame, forgetting the Tier 2 block-valued
+    /// locals it bound (a later same-named binding in a sibling scope is a
+    /// different variable).
+    fn pop_frame(&mut self) {
+        self.scope.pop();
+        let depth = self.scope.len();
+        self.tier2_locals.retain(|_, local| local.frame < depth);
     }
 
     /// Walks `expr` as an operand: a block literal is walked as a block, any
@@ -559,7 +575,7 @@ impl<'d> Walker<'d> {
                 ..
             } => {
                 self.check_construct(expr, position);
-                self.check_send(receiver, selector, arguments);
+                self.check_send(receiver, selector, arguments, true);
                 self.operand(receiver, Position::Receiver);
                 for arg in arguments {
                     self.operand(arg, Position::Argument);
@@ -577,10 +593,14 @@ impl<'d> Walker<'d> {
                     ..
                 } = receiver.as_ref()
                 {
-                    self.check_construct(receiver, Position::Cascade);
-                    self.check_send(shared, selector, arguments);
+                    // Codegen sends every cascade message through ordinary
+                    // dispatch (`generate_cascade`) and inlines none of
+                    // their blocks, so a block literal in any of them is a
+                    // block value with no return channel (§6), whatever its
+                    // selector.
+                    self.check_send(shared, selector, arguments, false);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -607,7 +627,7 @@ impl<'d> Walker<'d> {
                         self.operand(guard, Position::MatchArm);
                     }
                     self.operand(&arm.body, Position::MatchArm);
-                    self.scope.pop();
+                    self.pop_frame();
                 }
             }
             Expression::MapLiteral { pairs, .. } => {
@@ -748,12 +768,14 @@ impl<'d> Walker<'d> {
     }
 
     /// The §6 check for one send: its literal block arguments and receiver,
-    /// and any Tier 2 block-valued local it is sent to or passed.
+    /// and any Tier 2 block-valued local it is sent to or passed. `inlined`
+    /// is false for a cascade message, which codegen never inlines.
     fn check_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
+        inlined: bool,
     ) {
         let sel = selector.name().to_string();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
@@ -763,13 +785,24 @@ impl<'d> Walker<'d> {
         let is_self_send = matches!(receiver, Expression::Super(_))
             || crate::semantic_analysis::block_facts::is_self_reference(receiver);
         let actor_self_send = self.context == Actor && is_self_send;
-        let construct_send = is_section1_selector(&sel);
+        let construct_send = inlined && is_section1_selector(&sel);
 
-        // A block literal receiver.
-        if let Expression::Block(block) = receiver {
-            if !receiver_has_channel(&sel) {
+        // A block literal receiver. Only a direct `[...]` receiver of an
+        // inlined send is inlined; a parenthesized one is a block value.
+        match receiver {
+            Expression::Block(block) if !(inlined && receiver_has_channel(&sel)) => {
                 self.report_literal(block, &sel);
             }
+            Expression::Parenthesized { .. } => {
+                // In an actor instance method a block value may be sent
+                // `value` (as a stored one may).
+                if let Expression::Block(block) = receiver.unwrap_parens() {
+                    if !(self.context == Actor && is_block_value_selector(selector)) {
+                        self.report_literal(block, &sel);
+                    }
+                }
+            }
+            _ => {}
         }
         // Block literal arguments.
         for arg in arguments {

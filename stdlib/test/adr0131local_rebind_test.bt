@@ -112,3 +112,6 @@ TestCase subclass: Adr0131LocalRebindTest
     self should: [
       (Adr0131LocalRebindActor spawn) tryDoStatement
     ] raise: #type_error
+
+  testVtLastInjectValue =>
+    self assert: ((Adr0131LocalRebindValue new) vtLastInject) equals: 3

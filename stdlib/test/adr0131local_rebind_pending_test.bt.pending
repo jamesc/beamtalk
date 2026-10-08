@@ -162,3 +162,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testSeqActor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) seq) equals: #[1, 1]
+
+  testVtReturnInjectValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) vtReturnInject) equals: 3

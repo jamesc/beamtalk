@@ -80,3 +80,14 @@ Value subclass: Adr0131LocalRebindValue
         1
       ]
     t
+
+  // BT-3745 review: the implicit-last form of value-type `^#(1, 2) inject:
+  // ...` (which leaks its tuple and is pending). Answers 3.
+  vtLastInject =>
+    t := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]
