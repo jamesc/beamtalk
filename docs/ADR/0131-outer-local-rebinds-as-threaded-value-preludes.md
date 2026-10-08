@@ -14,13 +14,15 @@ count := 0
 r := ([count := count + 1. 1] on: Error do: [:e | 0]) + 1
 ```
 
-ADR 0041 promised this works "in all blocks". It works when the threading
-construct (the loop, list-op, conditional or `on:do:`/`ensure:` whose block
-writes `count`) is a **statement** or the **right-hand side of a local
-assignment**. Anywhere else, in **operand position** (a receiver, an argument,
-a binary operand, a `^` value inside an arm, a field or class-variable write's
-value, an element of a literal), the outer-local write is broken, in every
-method context.
+ADR 0041 promised this works "in all blocks". It works reliably only when
+the threading construct (the loop, list-op, conditional or `on:do:`/`ensure:`
+whose block writes `count`) is a **statement**. As the **right-hand side of
+a local assignment** it works for the constructs someone has wired (loops,
+list-ops, `ifTrue:ifFalse:`, `on:do:`) and not for others (`ifNil:`,
+`detect:ifNone:`, `at:ifAbsent:`; second table below). Anywhere else, in
+**operand position** (a receiver, an argument, a binary operand, a `^` value
+inside an arm, a field or class-variable write's value, an element of a
+literal), the outer-local write is broken, in every method context.
 
 BT-3738 was filed as "threading constructs in operand position inside class
 methods leak their `{Value, StateAcc}` tuple". Reproducing it showed it is
@@ -46,6 +48,25 @@ build, 2026-10-08):
 Bold cells are **silent wrong answers**: the program runs and returns a
 value that is not what the source says. Only o11, the statement-position
 control, passes everywhere.
+
+A second probe (same method, same day) over other block-taking selectors,
+all in **assign-RHS or statement position**, shows the per-position wiring
+is incomplete even there:
+
+| # | Body (after `t := 0`) | Expected | Class | Value-type | Actor |
+|---|---|---|---|---|---|
+| s1 | `r := d at: #k ifAbsent: [t := t + 1. 0]` | `#[0, 1]` | `function_clause` crash | crash | crash |
+| s2 | `r := #(1, 2) detect: [:x \| x > 5] ifNone: [t := t + 1. 0]` | `#[0, 1]` | **verifier panic** (`verify.rs`) | unbound `State` | **`#[0, 0]`** |
+| s4 | `b := [t := t + 1]. b value. t` (stored closure) | `1` | `value` via `perform:` raises | raises | pass |
+| s6 | `(Erlang lists) map: [:x \| t := t + 1. x] with: #(1)` | lossy by design | pass (write dropped, ADR 0041 warning) | pass | pass |
+| s7 | `r := nil ifNil: [t := t + 1. 1]` | `#[1, 1]` | arity crash | arity crash | pass |
+| s9 | `r := (#(1, 2) reject: [:x \| t := t + 1. false]) size` | `#[2, 2]` | **`#[2, 0]`** | **`#[2, 0]`** | **`#[2, 0]`** |
+| s3/s5/s8 | `inject:into:` RHS, `ifTrue:ifFalse:` RHS, statement `do:` | | pass | pass | pass |
+
+s4 contradicts `beamtalk-language-features.md`'s "local mutation in stored
+closure works via Tier 2": it works only in an actor instance method. s2
+in a class method is the one shape today's `ThreadedIr` verifier *does* see,
+and it reports it as a panic, not a diagnostic.
 
 Two related failures share the cause:
 
@@ -149,7 +170,13 @@ of its existing cases. It recognizes every construct that returns a
 locals:
 
 - loops (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`/
-  `repeat`), foldl list-ops and `do:`, and the ADR 0128 opaque-callable folds;
+  `repeat`), foldl list-ops and `do:`, and the block-taking lookup selectors
+  (`detect:ifNone:`, `at:ifAbsent:`, `at:ifAbsentPut:`, …) that take a
+  block literal;
+- the ADR 0128 opaque-callable folds, **in actor instance context only**:
+  ADR 0128 records that a non-literal callable cannot thread captured
+  locals in class or value-type context at all (its §"Explicitly narrowed");
+  there the fold is a §6 case, not a producer;
 - read+write conditionals (`ifTrue:` … `match:`; this is
   `inline_control_flow_producer` with its family list taken from context,
   §3);
@@ -160,18 +187,61 @@ locals:
 Its result is:
 
 ```text
-prelude: [ Statement(let CF = <construct tuple> in),
+prelude: [ ConstructTuple { carrier: CF, doc: <construct tuple>, threads: ["t", …] },
            LocalRebind { local: "t", carrier: CF, slot: Key("__local__t") | Pos(k) },
-           … one per threaded local, in get_control_flow_threaded_vars order … ]
+           … one per threaded local, in `threads` order … ]
 value:   element(1, CF)
 ```
 
-The recognizer and the rebind set come from **one** source,
-`get_control_flow_threaded_vars(expr)`. That is the same function the
-construct's own tuple builder packs from, so a gate that says "this threads"
-can never pair with a smaller write-back set. This is the BT-3738 acceptance
-criterion for `lower_nested_vt_do`, generalized. A construct whose threaded
-set is empty is not a producer, and nothing changes for it.
+**One recognizer, one set.** Today the threaded set is computed by two
+functions that do not agree on coverage: `get_control_flow_threaded_vars`
+(loops and list-ops; delegates to `compute_threaded_locals_for_loop`, which
+returns *empty in REPL mode* and does not recognize `tryDo:`, a Tier 2
+`value` call, or a lookup selector) and `conditional_threaded_locals`
+(conditionals and `on:do:`/`ensure:`). This ADR merges them into one
+`threaded_locals_of(expr) -> Option<ThreadedLocals>` in
+`threading_analysis.rs`, which is both the producer's recognizer (`Some`
+means "this construct threads") and the set every tuple builder packs
+from. It covers every bullet above, in every context including the REPL
+(whose set is the bindings the construct writes). A gate that says "this
+threads" can therefore never pair with a smaller write-back set: this is
+the BT-3738 acceptance criterion for `lower_nested_vt_do`, generalized.
+
+**Transitive closure.** A construct's set includes the sets of every
+producer nested anywhere in its blocks (o7/o8: the outer `on:do:` must
+carry `t`, written only inside a conditional arm's inner `on:do:`). Today
+`compute_threaded_locals_for_loop` adds nested list-op and loop writes but
+not every nested producer kind. `threaded_locals_of` is defined as the
+closure, and a verifier check (`ThreadedLocalDropped` below, applied at
+each nesting level) catches a construct whose frame rebinds a local its
+own `threads` does not list.
+
+A construct whose threaded set is empty is not a producer, and nothing
+changes for it.
+
+### 1a. Sequencing: a local read before a sibling rebinds it
+
+ADR 0118 §3's sequencing rule binds every earlier sibling that is "not a
+literal or plain variable" to a temp before a later sibling's prelude runs.
+That exemption for plain variables was safe because, until this ADR, no
+prelude could change a local. Now one can: in
+
+```beamtalk
+t + ([t := t + 1. 1] on: Error do: [:e | 0])
+```
+
+the left operand `t` must read the value *before* the right operand's
+`LocalRebind`. Source order (and Pharo) gives `0 + 1`. The rule is
+amended: a plain-variable sibling is trivial only if **no later sibling's
+threaded set contains it**; otherwise it is snapshot to a temp like any
+other value. `sequence_children` has the later siblings' sets in hand
+(it already calls `subexpr_needs_prelude` on each), so this is a local
+change to the exemption test, not a new pass. The verifier backs it:
+`VerifyError::LocalReadAfterSiblingRebind` rejects a spliced value that
+reads local `x` by its post-rebind identity when a `LocalRebind` for `x`
+sits in a *later* sibling's prelude. The shape is added to the probe and
+to the `local_touch` corpus generator (a `Touch` on the left of a binary
+op whose right operand is a protected block).
 
 ### 2. `LocalRebind` is lowered by its frame
 
@@ -184,27 +254,47 @@ set is empty is not a producer, and nothing changes for it.
 LocalRebind { local: String, carrier: String, slot: CarrierSlot, frame: FrameId, span: Span },
 ```
 
-`ThreadedIr` already records each loop or conditional frame's resolved
-`ThreadingMode` (`DirectParams`, `TupleAcc(g)`, `Hybrid`,
-`StateAcc(reason)`). This ADR adds the two frame kinds that do not have one
-today, `MethodBody` and `BranchArm`, and a `FrameModes` table that the
-lowering owns. It is filled when a frame opens, read when a `LocalRebind` in
-that frame is lowered, and visible to the verifier. This is the "shared way
-for a producer to learn the enclosing frame's threading mode" that BT-3738
-asks for: the producer does not learn it. It emits a mode-free node, and the
-node's lowering looks it up.
+`ThreadedStmt::Threaded { mode, frame, .. }` already records each loop or
+conditional frame's resolved `ThreadingMode` (`DirectParams`,
+`TupleAcc(g)`, `Hybrid`, `StateAcc(reason)`) **in the IR**. This ADR adds
+the two frame kinds that have no node today, as nodes rather than as a side
+table: `ThreadedStmt::MethodBody { frame, threads, body }` (the method's
+root frame; `threads` is empty except in the REPL, where it is the bindings
+map's keys) and `ThreadedStmt::BranchArm { frame, threads, body }` (one
+conditional or handler arm, whose `threads` are the locals the arm's closer
+packs into its `__local__` `StateAcc` keys, `seed_conditional_locals`'s
+set). A `LocalRebind`'s frame is then structural: its mode and its frame's
+`threads` are read off the enclosing node by the lowering and by the
+verifier alike, with nothing to push and pop. This is the "shared way for a
+producer to learn the enclosing frame's threading mode" that BT-3738 asks
+for: the producer does not learn it. It emits a mode-free node, and the
+node's lowering looks up the enclosing frame.
 
-| Enclosing frame mode | `LocalRebind` lowers to |
-|---|---|
-| `MethodBody` (any context) | `let T1 = <read> in` and `bind_var(t, T1)` |
-| `StateAcc(_)` loop / handler body | `Bind { State_{n+1} ← Put("__local__t", <read>) }` (+ `bind_var`) |
-| `DirectParams` / `Hybrid` | `Bind { Gensym(T1) ← Direct(<read>) }`, which joins the existing `final_loop_arg_identities` rebind chain |
-| `TupleAcc(g)` | as `DirectParams`; the fold's closing tuple picks up the new identity |
-| `BranchArm` | `let T1 = <read> in`, collected by the arm closer's existing family-slot packing |
+**The lowering key is (frame mode × membership).** A frame's mode says how
+its *own* threaded locals travel; it says nothing about a local the frame
+does not thread. A nested producer can rebind a local that is not in the
+enclosing frame's `threads` (a temp declared inside a loop body, a
+method-level local the frame's own analysis did not list), and that local
+must not be forced into the frame's parameter list or its `StateAcc` map
+(in an actor, a stray `__local__` key would persist into the gen_server
+`State`, the BT-2717 class of bug). So:
+
+| Enclosing frame mode | `local` ∈ frame `threads` | `local` ∉ frame `threads` |
+|---|---|---|
+| `MethodBody` (any context but REPL) | n/a (`threads` is empty) | `let T1 = <read> in`, `bind_var(t, T1)` |
+| `MethodBody` (REPL) | `Bind { State_{n+1} ← Put("t", <read>) }` into the bindings map | n/a |
+| `StateAcc(_)` loop / handler body | `Bind { State_{n+1} ← Put("__local__t", <read>) }` + `bind_var` | plain `let` + `bind_var` |
+| `DirectParams` / `Hybrid` | `Bind { Gensym(T1) ← Direct(<read>) }`, joining the existing `final_loop_arg_identities` chain | plain `let` + `bind_var` |
+| `TupleAcc(g)` | as `DirectParams`; the fold's closing tuple picks up the new identity | plain `let` + `bind_var` |
+| `BranchArm` | `Bind { State_{n+1} ← Put("__local__t", <read>) }` into the arm's seeded `StateAcc` | plain `let` + `bind_var` |
 
 `<read>` is `maps:get(Key, element(2, CF))` for a `StateAcc`-carrying
 construct and `element(k, CF)` for a flat-tuple one. The construct reports
-which (`CarrierSlot`), because the construct built the tuple.
+which (`CarrierSlot`), because the construct built the tuple. In an actor
+instance frame `element(2, CF)` is also the `State` family's next version;
+the `State` `Bind` (ADR 0122's `extract_family_slots`) is emitted **first**,
+and each `LocalRebind` then reads from that new `State` version, so one
+carrier read feeds both.
 
 With this in place, these become ordinary consumers that splice a prelude,
 and are deleted: `emit_threaded_assign_rhs` and its three `emit_vt_*`
@@ -212,10 +302,23 @@ helpers, `emit_actor_threaded_assign_rhs_stmts`'s raw-tuple path,
 `push_threaded_var_rebinds`, `push_control_flow_threaded_var_rereads`, the
 `direct_params_list_op_result` side channel, the "control-flow-with-mutations"
 guard in `try_generate_block_local_plain_let`, `lower_nested_vt_do`'s
-write-back and `rebind_threaded_vars_from_state`. `lower_threaded_last`
-stays only as a consumer that does not need the rebinds (a last expression's
-locals do not escape) and drops them by not splicing them, not by special
-case.
+write-back and `rebind_threaded_vars_from_state`.
+
+**Last position does not discard, except at the method root.** A
+construct in last position of a *loop body, branch arm, Tier 2 block body
+or `on:do:` body* must still rebind: its locals are that frame's threaded
+output (`[…] whileTrue: [([t := t + 1] on: Error do: […])]` carries `t`
+out of the loop body through the rebind). Only a `MethodBody` frame's last
+expression may drop its rebinds, and it records that with an explicit
+`DiscardLocals { carrier }` node so the choice is visible to the verifier.
+`lower_threaded_last` becomes that one consumer.
+
+**Non-local return.** A `^` thrown from inside a producer's construct
+leaves the method, so the construct's `LocalRebind`s never run; that is
+correct, and the NLR 4-tuple's state slot carries what the method's catch
+needs (ADR 0041 §State-Carrying Non-Local Returns, unchanged). The
+`ThreadedLocalDropped` check below is defined on the fall-through path and
+ignores the throw path.
 
 ### 3. Families are taken from context, not hard-coded
 
@@ -235,69 +338,90 @@ family.
 
 Each check fails on a repro before the fix:
 
-- **`VerifyError::ThreadedLocalDropped { local, construct_span }`.** A
-  `Statement` binding a construct tuple whose threaded set contains `local`
-  must be followed in the same frame by a `LocalRebind` for `local` before
-  the frame ends, or before any other reference to the carrier. The one
-  exemption is a consumer that provably discards the locals (last position,
-  where the method or block returns), which records it with an explicit
-  `DiscardLocals { construct_span }` node so the exemption is visible in the
-  IR. To check this, the producer records the construct's threaded set on
-  its `Statement` (a `ConstructTuple { threads: Vec<String> }` variant
-  instead of an opaque `Statement`). Fails on o4, o7, o8 and actor o3/o12.
-- **`VerifyError::LocalRebindModeMismatch { frame, mode, lowered_as }`.** A
-  `LocalRebind` lowered to a shape its frame's recorded mode does not allow
-  (a plain `let` inside a `StateAcc` frame, a `Put` at `MethodBody`). This
-  covers the BT-3718 `ensure:` rebind and nested `do:` write-back, which
-  today are guarded only by a hand-written BUnit fixture.
+- **`VerifyError::ThreadedLocalDropped { local, carrier }`.** A
+  `ConstructTuple` whose `threads` contains `local` must be followed in the
+  same frame by a `LocalRebind` for `local` before the frame ends, or
+  before any reference to the carrier other than a family `Bind`
+  (`State`/`SelfVt` extraction, which legitimately reads the carrier first)
+  or a `DiscardLocals` at a `MethodBody` frame. Applied at every nesting
+  level, it also catches the transitive-closure gap of §1: a frame that
+  rebinds `t` while its own enclosing construct's `threads` omits `t`.
+  Fails on o4, o7, o8, s2, s9 and actor o3/o12.
+- **`VerifyError::LocalRebindModeMismatch { frame, mode, member, lowered_as }`.**
+  A `LocalRebind` lowered to a shape the §2 table does not allow for its
+  frame's mode and membership (a plain `let` for a member of a `StateAcc`
+  frame, a `Put` for a non-member, a `Gensym` chain entry for a local that
+  is not a loop parameter). This covers the BT-3718 `ensure:` rebind and
+  nested `do:` write-back, which today are guarded only by a hand-written
+  BUnit fixture.
+- **`VerifyError::LocalReadAfterSiblingRebind`** (§1a).
 - **`ActorStateInClassMethod`** (BT-3725), extended to `ScopeKind::ValueType`.
-  Fails on o3/o12 in value-type methods.
+  Fails on o3/o12 and s2 in value-type methods.
 - **`StateEffectEscapesExpression`** (ADR 0118 §5), already defined, now also
   reported for a `LocalRebind` left in a prelude that is closed in an
   `Opaque` context (a Tier 1 closure body or an FFI argument).
 
-`report_threaded_ir_verify_errors` reports all four. Nothing gets a new
+`report_threaded_ir_verify_errors` reports all five. Nothing gets a new
 `debug_assert!`.
 
 ### 5. `Result tryDo:` is a catch-boundary construct
 
-`Result tryDo: <block literal>` is recognized as a compiler construct, like
-`on:do:`, and lowered **at the IR level** (not as an AST rewrite) to an
-`OnDoCatch` node with a new catch-all clause shape:
+The catch boundary stays in the runtime; codegen only chooses the arity.
+`beamtalk_result` gains one clause:
 
-```text
-snapshot := beamtalk_class_vars:snapshot()
-try  <block body, threaded as an on:do: body: CF = {V, StateAcc}>
-of   CF -> {beamtalk_result:from_tagged_tuple({ok, element(1, CF)}), element(2, CF)}
-catch NLR pass-through arms (unchanged)
-      Class:Reason:Stack -> restore(snapshot),
-                            {beamtalk_result:from_tagged_tuple(
-                               {error, beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack)}),
-                             StateAccAtEntry}
+```erlang
+%% ADR 0131: the Tier 2 twin of 'tryDo:'/1. `Block` is fun(StateAcc) ->
+%% {Value, StateAcc1}. A raise inside the block discards its local writes
+%% (the StateAcc the caller passed in is returned) exactly as it discards
+%% its class-variable writes (protect/1), and as on:do: does.
+-spec 'tryDo:'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
+'tryDo:'(Block, StateAcc) when is_function(Block, 1) ->
+    try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
+        {Value, StateAcc1} -> {from_tagged_tuple({ok, Value}), StateAcc1}
+    catch
+        throw:NLR when ?IS_NLR(NLR) -> throw(NLR);
+        Class:Reason:Stack ->
+            ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
+            {from_tagged_tuple({error, ExObj}), StateAcc}
+    end.
 ```
 
-This is the same runtime sequence as `beamtalk_result:'tryDo:'/1`, so a pure
-block's result is identical whether it takes this path or the native one. It
-is then a producer under §1 like `on:do:`. This answers each objection that
-removed the AST lowering from PR #4187:
+`protect/1`, `?IS_NLR`, `ensure_wrapped` and `from_tagged_tuple` are the
+same calls `'tryDo:'/1` makes, so the Tier 1 and Tier 2 paths share one
+implementation of the boundary rather than a copy across the Rust/Erlang
+line (CLAUDE.md § No duplicate implementations). Codegen, when the argument
+is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo:'(Block,
+StateAcc)` and treats the result as a `StateAcc`-carrying construct tuple:
+it is a §1 producer exactly like a `StateAcc`-mode loop, with no new
+`OnDoCatch` clause shape. `'tryDo:'/1` is unchanged for Tier 1 blocks and
+dynamic sends. A runtime ↔ codegen conformance fixture (a `.bt` that
+exercises both arities and asserts identical `Result`s, class-variable
+state and local state on the raising and non-raising paths) is the
+Rust/Erlang-boundary check CLAUDE.md asks for.
+
+This answers each objection that removed the AST lowering from PR #4187:
 
 | #4187 objection | Answer here |
 |---|---|
-| A final `t := e` was lost in `Result ok: (t := e)` | The body is threaded as a block body, so the last statement is a statement. `Result ok:` is applied to `element(1, CF)` afterwards. |
-| The cascade-receiver rewrite | The construct is recognized only when `Result tryDo:` is the whole send. As a cascade's first message it stays a generic send, and §6's diagnostic applies if the block is Tier 2. |
-| An `Exception` filter vs a native catch-all | There is no class filter. The catch-all clause is the native one, and `ensure_wrapped` is the same call. |
-| Handler-parameter aliasing | There is no handler block and no user-visible parameter. The catch variables are gensyms. |
-| "Only helps once operand-position producers exist" | §1 makes it one. |
+| A final `t := e` was lost in `Result ok: (t := e)` | There is no rewrite: the block body compiles as any Tier 2 body, and the last statement is a statement. |
+| The cascade-receiver rewrite | No rewrite. In a cascade `Result tryDo: […]; …` the first message is still a send of `tryDo:` and takes the same arity choice. |
+| An `Exception` filter vs a native catch-all | The native catch-all is the only one; nothing is reimplemented in codegen. |
+| Handler-parameter aliasing | There is no handler block. |
+| "Only helps once operand-position producers exist" | §1 makes the call a producer. |
 
-`beamtalk_result:'tryDo:'/1` stays for dynamic sends (`perform:`, a block in
-a variable) with Tier 1 blocks.
+The arity choice keys on the **selector and a literal Tier 2 block
+argument**, not on the receiver being spelled `Result`: a shadowed or
+aliased `Result` still gets the right arity, and a non-`Result` receiver
+that happens to answer `tryDo:` gets the Tier 2 fun and a plain `{Value,
+StateAcc}` protocol, the same as any user HOM (§6).
 
 ### 6. A Tier 2 block with no return channel is a compile error
 
 Outside an actor instance method there is no channel through which a callee
-can return a `StateAcc`. So a block literal that writes an outer local,
-passed as an argument to a send that is neither a §1 construct nor an actor
-self-send, is rejected at compile time:
+can return a `StateAcc`. So a **Tier 2 block value** (a block literal that
+writes an outer local, or a local bound to one and not reassigned) that
+flows to a send that is neither a §1 construct nor an actor self-send is
+rejected at compile time:
 
 ```text
 error: block writes outer local `t`, but `ap:` cannot return the write
@@ -308,13 +432,40 @@ error: block writes outer local `t`, but `ap:` cannot return the write
           or use a control-flow message (`do:`, `inject:into:`, `on:do:`) that threads locals
 ```
 
-This replaces today's runtime `perform:` failure and the native-callee arity
-crash. The same send compiled from an actor instance method keeps working
-(BT-912). It is a `#beamtalk_error{}`-shaped diagnostic with a structured
-code, emitted from the semantic-analysis pass that already classifies block
-arguments (`block_analyzer`), so the LSP reports it as you type. Giving class
-and value-type HOMs a real return channel (a callee-side `{Result,
-StateAcc}` protocol) is out of scope and stays an open question (below).
+The same diagnostic, pointing at the binding, covers `b := [t := t + 1].
+CvA ap: b` and a stored closure invoked directly (`b value`, s4): ADR 0128
+already records that forwarding such a block to `do:`/`collect:`/`select:`
+in class or value-type context **silently drops the write**, so the value
+case is a wrong answer today, not only a crash. This replaces today's
+runtime `perform:` failure and the native-callee arity crash. The same send
+compiled from an actor instance method keeps working (BT-912).
+
+**Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
+x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy
+by design, with a warning, and `generate_erlang_interop_wrapper` already
+implements it; this ADR keeps it.
+
+**What it costs.** A Tier 2 block value that is stored but never invoked
+through a channel-less send (`d at: #k put: [t := t + 1]`, a block only
+asked `numArgs`) compiles and runs today and will be rejected. The
+alternative, proving the block is never invoked, needs escape analysis the
+compiler does not have. The rule is accepted as stated: the write in such
+a block could never have taken effect, so the program's author almost
+certainly meant something else, and the help text says what.
+
+**One predicate, in `beamtalk-core`.** The "is a §1 construct" test and
+this diagnostic must agree, or the LSP accepts code that fails at runtime
+(or rejects code that compiles). Both are computed from
+`state_threading_selectors` and the block facts in
+`semantic_analysis` (`block_analyzer`, `block_facts`), which codegen
+already consumes; the §1 recognizer `threaded_locals_of` is implemented
+over those facts, not over a codegen-private table. The agreement is
+checked by a corpus test: every Tier 2 argument the §6 pass accepts must
+lower to a producer, and every one it rejects must not. It is a
+`#beamtalk_error{}`-shaped diagnostic with a structured code, so the LSP
+reports it as you type. Giving class and value-type HOMs a real return
+channel (a callee-side `{Result, StateAcc}` protocol) is out of scope and
+stays an open question (below).
 
 ### REPL and error examples
 
@@ -338,12 +489,21 @@ true
 A local written inside a protected region whose block then raises keeps the
 value it had on entering the region. This is what `on:do:` does today in
 every context (checked 2026-10-08), and it matches ADR 0130 §4's rule for
-class variables. `Result tryDo:` keeps the same rule, which is why §5's catch
-arm returns `StateAccAtEntry`.
+class variables. `Result tryDo:` keeps the same rule, which is why §5's
+catch arm returns the `StateAcc` it was given. **This is a deliberate
+departure from Pharo**, where temps are shared cells and a write before
+the raise survives: on BEAM the protected region's state is a value that
+is simply not returned. It is documented as such in
+`beamtalk-language-features.md` § Control Flow and Mutations (phase 5).
 
-(The REPL threads locals through its bindings map, the outermost
-`StateAcc`, ADR 0041. Its `MethodBody`-equivalent frame lowers `LocalRebind`
-to a `maps:put` into the bindings map. REPL display is unchanged.)
+The REPL threads locals through its bindings map, the outermost `StateAcc`
+(ADR 0041); its root frame is the `MethodBody (REPL)` row of §2's table.
+The REPL is a fourth column of the probe matrix and gets
+`tests/repl-protocol/cases/` coverage for every shape, because REPL
+display is covered by e2e tests and any change to it needs sign-off
+(CLAUDE.md § REPL output). The values shown above are what the shapes
+*should* print; whether a shape's display changes at all is recorded per
+phase.
 
 ## Prior Art
 
@@ -378,9 +538,12 @@ to a `maps:put` into the bindings map. REPL display is unchanged.)
   rewrite. Before, they got `Tuple does not understand '+'`, which points
   nowhere near the cause.
 - **Smalltalk developer.** `x := (coll inject: 0 into: […]) + (… on: … do:
-  [count := count + 1])` behaves as in Pharo. §6 is a departure: in Pharo a
-  user HOM can write a caller's temp. It is justified because BEAM has no
-  shared cell. The error says so, and the actor case still works.
+  [count := count + 1])` behaves as in Pharo on the non-raising path. Two
+  departures, both because BEAM has no shared cell: §6 (in Pharo a user HOM
+  can write a caller's temp; the error says so, and the actor case still
+  works), and the protected-region rule (a write inside an `on:do:` or
+  `tryDo:` block that then raises is discarded; Pharo keeps it). Both are
+  documented in the language reference.
 - **Erlang/BEAM developer.** Generated Core Erlang stays ANF-shaped `let`
   chains. A rebind is a visible `let T1 = maps:get(…)`. Nothing new reaches
   the runtime except `Result tryDo:`'s inline `try`, which calls the same
@@ -411,9 +574,15 @@ to a `maps:put` into the bindings map. REPL display is unchanged.)
 - 🎨 **Language designer**: "One protocol everywhere, so §6 disappears."
 - **Why not now:** it changes the calling convention of every block-taking method, including stdlib natives and Erlang FFI, and needs a migration of compiled code (hot reload of mixed old/new modules). That is its own ADR. This ADR doesn't block it, because §6's error is exactly the set of call sites that protocol would light up.
 
+### E. Lower `Result tryDo:` to an `OnDoCatch` node in codegen (the first draft of §5)
+- 🎨 **Language designer**: "`tryDo:` *is* `on:do:` with a catch-all and a `Result` wrapper. One IR node for both means one verifier obligation for both."
+- 🏭 **Operator**: "No runtime change means no runtime release to coordinate."
+- **Why not:** the catch sequence (`protect/1`, the NLR pass-through, `ensure_wrapped`, `from_tagged_tuple`) would exist twice, once in Erlang for the Tier 1 arity and once as Core Erlang emitted by Rust, with "same runtime sequence" as the only thing keeping them equal. CLAUDE.md requires a shared implementation or a conformance fixture for a rule that crosses the Rust/Erlang boundary. A second runtime clause (§5) shares the implementation and still needs only the fixture. It also keys on the selector and arity rather than on the receiver being spelled `Result`. Rejected on the duplication rule; the review that found this is what changed §5.
+
 ### Tension points
 - Operators favour C for speed. Smalltalkers and language designers favour A for correctness. Phasing C in as Phase 0 of A gives both.
 - BEAM veterans find B more familiar. The deciding argument against it is verifiability, which is the lesson of ADR 0111 and 0118.
+- Language designers are split on E vs §5. "One IR node" is elegant; "one implementation of the boundary" is what the project's duplication rule asks for, and it wins.
 
 ## Alternatives Considered
 
@@ -424,70 +593,105 @@ one corpus program and broke another, and the same shapes stay broken in
 value-type and actor methods (table above). Rejected under CLAUDE.md's "a
 state-threading fix is general or it is not a fix".
 
-### B, C, D
+### B, C, D, E
 See the Steelman Analysis.
+
+### Do nothing (keep wiring positions as they are reported)
+Ten issues over eight months (BT-912 … BT-3718) each wired one more
+position. The second probe table shows the wiring is still incomplete in
+assign-RHS and statement position after all of them, and the `local_touch`
+corpus shows a 49 % failure rate that none of the per-position fixes
+moved. Rejected: the per-position approach has had its chance.
 
 ## Consequences
 
 ### Positive
 - One mechanism for outer-local writes in every position and every context.
-  About ten per-position paths (§2's list) are deleted.
-- The 13 probe shapes and the `local_touch` corpus become verifier-checked.
+  About ten per-position paths (§2's list) are deleted, and the two
+  threaded-set functions become one.
+- The probe shapes and the `local_touch` corpus become verifier-checked.
   A future position bug is a `VerifyError`, not a wrong answer.
-- `Result tryDo:` works with stateful blocks in every position.
+- `Result tryDo:` works with stateful blocks in every position, and stored
+  closures (s4) get a correct error instead of a `perform:` crash.
 - BT-3725's class-method `State` rule gets its value-type twin, and the
   unbound-`State` class goes away at its source.
 - `local_touch` can join `Shapes::ENABLED`, which closes the last gap in the
   ADR 0130 agreement property.
 
 ### Negative
-- L–XL across five phases, touching every control-flow lowering. Each phase
-  must be byte-identical on the existing corpus except where the change is
-  the point (ADR 0122's `.core` diff harness).
-- §6 rejects code that compiles today. All of that code fails at runtime
-  today, so no working program breaks, but a program that never ran that
-  path will now fail to compile.
-- `FrameModes` is new lowering state that must be pushed and popped exactly
-  with frames. A mismatch is a verifier error, not a silent bug, but it is
-  one more invariant.
+- L–XL across six phases, touching every control-flow lowering. Each phase
+  runs under ADR 0122's `.core` diff harness and **lists** its expected
+  diffs rather than claiming none: §3 changes the conditional families in
+  class and value-type methods (statement position included), §1a adds a
+  temp bind to some binary operands, and deleting the
+  "control-flow-with-mutations" guard can change a loop's mode selection
+  (`StateAccFallbackReason::ControlFlowMutations`). A diff outside the
+  listed set fails the phase.
+- §6 rejects code that compiles today. Nearly all of it fails at runtime
+  or silently drops a write (ADR 0128), so no *correct* program breaks;
+  but a Tier 2 block that is stored and never invoked compiles and runs
+  today and will be rejected (§6 "What it costs").
+- Two new IR node kinds (`MethodBody`, `BranchArm`) and a `ConstructTuple`
+  variant with a payload: more IR surface for `verify()`, `render()` and
+  the hand-built fixtures to cover.
+- `beamtalk_result` gains a clause, so this is a runtime change, with the
+  version-skew implications any runtime change has (a compiled module that
+  emits the arity-2 call needs a runtime that has it; the stdlib is built
+  with the compiler, so this is only a concern for externally compiled
+  packages, handled by the ADR 0128/`otp-support` release gate).
+- The protected-region rule ("a raise discards local writes made inside
+  it") is now documented language semantics and a deliberate departure
+  from Pharo, where it was previously only an undocumented consequence of
+  codegen.
 
 ### Neutral
-- The REPL's bindings map is the outermost `StateAcc`. Its frame mode is
-  `StateAcc(Repl)` and needs no special case.
-- Generated code for a statement-position construct is unchanged in shape
-  (same `let` rebinds, now produced by `LocalRebind` lowering).
+- The REPL root frame is `MethodBody (REPL)` in §2's table; REPL cases are
+  added for each shape and display changes are recorded per phase.
+- The NLR path is unchanged: a `^` from inside a producer's construct
+  bypasses its rebinds by design (§2).
 
 ## Implementation
 
 | Phase | Scope | Proof |
 |---|---|---|
-| 0 | §6 diagnostic for Tier 2 blocks to non-intrinsic sends outside actor instance methods. A temporary diagnostic for each operand-position local-threading shape the IR cannot carry yet (removed per phase). Add the probe matrix as a BUnit file covering all three contexts, with `PIN-BUG` assertions citing this ADR's epic. | Probe file red→compile-error. No silent wrong answer remains. |
-| 1 | IR: `LocalRebind`, `ConstructTuple`, `DiscardLocals`, `FrameModes` (`MethodBody`, `BranchArm` added). `ThreadedLocalDropped`, `LocalRebindModeMismatch`, `ScopeKind::ValueType`. Verifier unit tests on hand-built IR for each, failing before phase 2. | Unit tests. `just verify-threaded-ir` clean. |
-| 2 | `local_threading_producer` for loops, list-ops, `do:` and opaque-callable folds. Delete the assign-RHS and loop-body rebind paths for them. | o4, corpus `do`/`fold`/`while`/… with `local_touch`. `.core` diff harness byte-identical elsewhere. |
-| 3 | Conditionals and `match:` families from context (§3). `on:do:`/`ensure:` as producers. Delete `lower_nested_vt_do` write-back and `rebind_threaded_vars_from_state`. **This is BT-3738.** | o1–o3, o5–o12 in all contexts. |
-| 4 | `Result tryDo:` construct (§5). | `tryDo:` probes. `local_touch` + `try_do` corpus. |
-| 5 | Close-out: `local_touch` into `Shapes::ENABLED`, un-`#[ignore]` both properties, `CV_CORPUS_CASES=500` green, remove Phase 0's temporary diagnostics, flip every `PIN-BUG`, docs (`beamtalk-language-features.md` "What Works and What Doesn't", `docs/agents/expanded.md` § State-Threading Codegen, `debugging.md` verifier table), build-time measurement. | CI. |
+| 0 | **One** temporary diagnostic, not one per shape: a construct with a non-empty `threaded_locals_of` set in any position other than statement or assign-RHS of a wired construct is a compile error, driven by an explicit allow-set of `(construct, position, context)` that later phases grow. Plus the §6 diagnostic (block literals and values, FFI exempt). Add the probe matrix (o-, s- and the §1a shape) as a BUnit file over all three method contexts and as `repl-protocol` cases, with `PIN-BUG` assertions citing this ADR's epic. | Probe file red → compile-error on every bold cell. No silent wrong answer remains. S-sized; ships first. |
+| 1 | `threaded_locals_of` in `threading_analysis.rs` over `semantic_analysis` block facts, replacing `get_control_flow_threaded_vars`/`compute_threaded_locals_for_loop`/`conditional_threaded_locals` (transitive closure, REPL-aware). IR: `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` nodes; `ThreadedLocalDropped`, `LocalRebindModeMismatch`, `LocalReadAfterSiblingRebind`, `ScopeKind::ValueType`. Verifier unit tests on hand-built IR for each, failing before phase 2. The §1a sequencing amendment. | Unit tests. `just verify-threaded-ir` clean. Byte-identical `.core` (phase 1 adds nodes but no producer). |
+| 2 | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors and (actor-only) opaque folds, with the §2 per-local lowering rule. Delete the assign-RHS and loop-body rebind paths for them. | o4, s1, s2, s9, corpus `do`/`fold`/`while`/… with `local_touch`. `.core` diffs limited to the listed set. |
+| 3 | Conditionals and `match:` families from context (§3). `on:do:`/`ensure:` as producers. Delete `lower_nested_vt_do` write-back and `rebind_threaded_vars_from_state`. **This is BT-3738.** | o1–o3, o5–o13, s7 in all contexts. |
+| 4 | `beamtalk_result:'tryDo:'/2` and its conformance fixture; codegen arity choice (§5). | `tryDo:` probes. `local_touch` + `try_do` corpus. |
+| 5 | Close-out: `local_touch` into `Shapes::ENABLED`, un-`#[ignore]` both properties, `CV_CORPUS_CASES=500` green, remove Phase 0's allow-set diagnostic, flip every `PIN-BUG`, docs (`beamtalk-language-features.md` "What Works and What Doesn't" and the protected-region rule, `docs/agents/expanded.md` § State-Threading Codegen, `debugging.md` verifier table), build-time measurement. | CI. |
+
+Phases 2 and 3 land **with** the §2 per-local rule and the §1a sequencing
+fix already in from phase 1; shipping either producer without them would
+reintroduce the "fixed one program, broke another" pattern.
 
 Affected components: `beamtalk-codegen` (`threaded_ir/{ir,verify,emit,build}.rs`,
-`util.rs`'s `threaded_expression`, `control_flow/*`, `threaded_expr.rs`,
+`util.rs`'s `threaded_expression`/`sequence_children`,
+`threading_analysis.rs`, `control_flow/*`, `threaded_expr.rs`,
 `blocks.rs`, `value_type_codegen.rs`, `gen_server/methods.rs`),
-`beamtalk-core` (`semantic_analysis/block_analyzer.rs` for §6,
-`test_helpers/class_var_program.rs`), stdlib tests. There is no runtime
-change: `beamtalk_result:'tryDo:'/1` is kept as is.
+`beamtalk-core` (`semantic_analysis/{block_analyzer,block_facts}.rs` for §6
+and the facts `threaded_locals_of` reads, `test_helpers/class_var_program.rs`),
+`beamtalk_stdlib` (`beamtalk_result.erl`, §5), stdlib tests,
+`tests/repl-protocol/cases/`.
 
-**Shared-kernel check.** The threaded-local set has exactly one source,
-`get_control_flow_threaded_vars` (plus `compute_threaded_locals_for_loop`,
-which phase 2 folds into it or asserts equal to it with a
-`LocalRebindModeMismatch`-style verifier check, never a comment). Families
-come from ADR 0122's `ThreadedFamilies` / `eligible_families`. No new
-selector table is introduced: the recognizer reuses
-`beamtalk_core::state_threading_selectors`.
+**Shared-kernel check.** The threaded-local set has exactly one source after
+phase 1, `threaded_locals_of`, built over `semantic_analysis` block facts so
+the §6 pass in `beamtalk-core` and the producer in `beamtalk-codegen` read
+the same facts (the dependency direction core ← codegen is preserved).
+Families come from ADR 0122's `ThreadedFamilies` / `eligible_families`. No
+new selector table is introduced: the recognizer reuses
+`beamtalk_core::state_threading_selectors`. The `tryDo:` boundary has one
+implementation (`protect/1` in the runtime) and a conformance fixture
+across the Rust/Erlang line.
 
 ## Migration Path
 
-No working program changes behaviour. Programs that today fail at runtime or
-answer wrong either become correct (phases 2–4) or get a compile error
-(§6, phase 0). The §6 error's help text gives the rewrite.
+No *correct* program changes behaviour. Programs that today fail at runtime
+or answer wrong either become correct (phases 2–4) or get a compile error
+(§6 and the phase 0 allow-set diagnostic). The §6 error's help text gives
+the rewrite. The one working shape §6 rejects, a Tier 2 block value stored
+and never invoked through a channel-less send, needs its block rewritten to
+return the value rather than write the local.
 
 ## Open Questions
 
@@ -498,7 +702,7 @@ answer wrong either become correct (phases 2–4) or get a compile error
    today. The default is to emit it (correctness first) and measure.
 
 ## References
-- Related issues: BT-3738 (becomes phase 3), BT-3718, BT-3725, BT-3737,
+- Related issues: BT-3738 (becomes phase 3), BT-3718, BT-3725, BT-3737, BT-2717,
   BT-3694, BT-912, BT-3493
 - Related ADRs: ADR 0041, ADR 0111, ADR 0118, ADR 0122, ADR 0128, ADR 0130
 - Documentation: `docs/beamtalk-language-features.md` § Control Flow and
