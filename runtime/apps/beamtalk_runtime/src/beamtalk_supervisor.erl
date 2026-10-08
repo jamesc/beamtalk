@@ -743,10 +743,36 @@ Uses `call_class_method_direct` to bypass the class gen_server for the
 initial `class_initialize:` method lookup (same pattern as `static_init/2`).
 """.
 -spec run_initialize(term()) -> ok.
-run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
+run_initialize({beamtalk_supervisor, ClassName, Module, Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
     %% See static_init/2: the class method runs in a read-only snapshot region.
-    call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, [SupTuple]),
+    %% The supervisor is already started and linked by the time the hook runs.
+    %% If the hook raises (including a class-variable write raising
+    %% `class_state_read_only`), the caller never receives the supervisor, so stop
+    %% it before re-raising: no half-started supervisor, registered name or
+    %% orphaned children are left behind (BT-3720).
+    try
+        call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, [SupTuple])
+    catch
+        Class:Reason:Stacktrace ->
+            stop_failed_supervisor(Pid),
+            erlang:raise(Class, Reason, Stacktrace)
+    end,
+    ok.
+
+-doc """
+Stop a supervisor whose `initialize:` hook raised. Best effort: the process may
+already be gone, and the original error is the one the caller must see.
+""".
+-spec stop_failed_supervisor(term()) -> ok.
+stop_failed_supervisor(Pid) when is_pid(Pid), Pid =/= self() ->
+    try
+        gen_server:stop(Pid)
+    catch
+        _:_ -> ok
+    end,
+    ok;
+stop_failed_supervisor(_) ->
     ok.
 
 -doc """
