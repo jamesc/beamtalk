@@ -246,9 +246,9 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
 
 /// [`verify`] for IR lowered in `scope`: additionally enforces the
 /// per-[`ScopeKind`] family invariant ([`VerifyError::ActorStateInClassMethod`]).
-/// Every production caller goes through this (via
-/// `CoreErlangGenerator::verify_threaded_ir`) so the scope can never be
-/// forgotten at a call site.
+/// Every production caller reaches this with `CoreErlangGenerator::threaded_scope`
+/// — via `CoreErlangGenerator::verify_threaded_ir`, or by passing
+/// `threaded_scope()` to `verify_body_with_opaque_version_gaps` / `verify_simple_bind`.
 pub(in crate::core_erlang) fn verify_in_scope(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
