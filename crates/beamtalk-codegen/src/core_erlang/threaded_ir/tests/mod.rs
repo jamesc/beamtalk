@@ -12,10 +12,10 @@
 //!   of `render()`'s `BindOp`/`ThreadedStmt` variants
 //! - [`tuple_acc`] — ADR 0111 Phase C `TupleAcc` unpack invariants
 //! - [`simple_bind`] — `verify_simple_bind` and
-//!   `verify_body_with_opaque_version_gaps`
+//!   `verify_body_with_opaque_version_gaps`, and `verify_simple_bind`'s
+//!   per-scope invariant
 //! - [`dual_run`] — the dual-run byte-parity harness
 //! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
-//! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
 

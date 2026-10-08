@@ -179,6 +179,13 @@ pub(in crate::core_erlang) enum VerifyError {
 /// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
 /// | `Instance`    | not constrained here | not constrained here | not constrained here           |
 ///
+/// **What enforces it:** exactly the entry points that take a `ScopeKind` —
+/// [`verify_in_scope`], `verify_body_with_opaque_version_gaps` and
+/// `verify_simple_bind` — which every production lowering site reaches via
+/// `CoreErlangGenerator::threaded_scope` / `verify_threaded_ir`. Bare
+/// [`verify`] is `Instance`-scoped and enforces nothing here; it is used only
+/// by tests and test-local wrappers.
+///
 /// `Instance` (actor instance, value-type instance, REPL and every non-method
 /// fixture) is deliberately unconstrained by this check: which of
 /// `State`/`SelfVt` is eligible there is decided by
@@ -229,15 +236,19 @@ pub(in crate::core_erlang) enum CatchRestoreDefect {
 /// result as a hard failure; release callers must degrade a non-empty result
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
 /// (No call site does either yet — see module docs §Status.)
+///
+/// `Instance`-scoped, so it enforces no per-[`ScopeKind`] invariant; no
+/// production code calls it (they use [`verify_in_scope`]), hence test-only.
+#[cfg(test)]
 pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
     verify_in_scope(ir, ScopeKind::Instance)
 }
 
 /// [`verify`] for IR lowered in `scope`: additionally enforces the
 /// per-[`ScopeKind`] family invariant ([`VerifyError::ActorStateInClassMethod`]).
-/// Every production caller goes through this (via
-/// `CoreErlangGenerator::verify_threaded_ir`) so the scope can never be
-/// forgotten at a call site.
+/// Every production caller reaches this with `CoreErlangGenerator::threaded_scope`
+/// — via `CoreErlangGenerator::verify_threaded_ir`, or by passing
+/// `threaded_scope()` to `verify_body_with_opaque_version_gaps` / `verify_simple_bind`.
 pub(in crate::core_erlang) fn verify_in_scope(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
