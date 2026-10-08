@@ -170,24 +170,110 @@ remote_home_pid_is_logged_as_abroad_test() ->
         ?assertEqual(abroad, maps:get(shape, Report))
     end).
 
-%% BT-3723: concurrent first reports must not crash or lose the setup; every
-%% caller returns ok and the setup flag ends up set.
-concurrent_first_reports_all_return_ok_test() ->
-    Key = {beamtalk_class_var_probe, setup},
-    _ = persistent_term:erase(Key),
-    Parent = self(),
-    Pids = [
-        spawn_link(fun() ->
-            R = beamtalk_class_var_probe:report(nil, 'ProbeClass', bump, write, n, true),
-            Parent ! {done, self(), R}
-        end)
-     || _ <- lists:seq(1, 20)
-    ],
-    [
+%% BT-3723: the one-time probe setup must run exactly once however many
+%% processes make their first report at the same instant, and no report may be
+%% logged before the sink handler exists.
+%%
+%% The earlier version of this test was vacuous: `report/6` swallows every
+%% exception and returns `ok`, the sink handler is only installed when
+%% BEAMTALK_CLASS_VAR_PROBE_LOG is set (it was not, so setup was a no-op that
+%% could not race), and the flag ends up `true` even when setup runs many times.
+%%
+%% Here the env var is set, so the real handler install runs. The workers are
+%% held at a barrier and released together; each is call-traced so we count how
+%% many entered the handler install (must be exactly one), and the sink file
+%% must contain one line per report (a report logged before the sink existed
+%% would be lost). Synchronisation is by messages only, no sleeps.
+concurrent_first_reports_set_up_the_sink_exactly_once_test_() ->
+    {timeout, 60, fun concurrent_first_reports_set_up_the_sink_exactly_once/0}.
+
+concurrent_first_reports_set_up_the_sink_exactly_once() ->
+    Workers = 32,
+    SetupKey = {beamtalk_class_var_probe, setup},
+    SinkId = beamtalk_class_var_probe,
+    TmpDir = binary_to_list(beamtalk_file:'tempDirectory'()),
+    SinkFile = filename:join(
+        TmpDir, "bt3723_probe_sink_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".log"
+    ),
+    OldEnv = os:getenv("BEAMTALK_CLASS_VAR_PROBE_LOG"),
+    OldDepth = erlang:system_flag(backtrace_depth, 8),
+    OldPrimary = logger:get_primary_config(),
+    OldHandlers = [{Id, maps:get(level, C)} || #{id := Id} = C <- logger:get_handler_config()],
+    _ = persistent_term:erase(SetupKey),
+    _ = logger:remove_handler(SinkId),
+    true = os:putenv("BEAMTALK_CLASS_VAR_PROBE_LOG", SinkFile),
+    ok = logger:set_primary_config(level, all),
+    InstallMFA = {beamtalk_class_var_probe, ensure_sink_handler, 0},
+    try
+        1 = erlang:trace_pattern(InstallMFA, true, [local]),
+        Parent = self(),
+        Pids = [
+            spawn_link(fun() ->
+                Parent ! {ready, self()},
+                receive
+                    go -> ok
+                end,
+                R = beamtalk_class_var_probe:report(nil, 'ProbeClass', bump, write, n, true),
+                Parent ! {done, self(), R}
+            end)
+         || _ <- lists:seq(1, Workers)
+        ],
+        [
+            receive
+                {ready, P} -> 1 = erlang:trace(P, true, [call])
+            after 5000 -> error({worker_not_ready, P})
+            end
+         || P <- Pids
+        ],
+        %% Release one worker first and wait until it is inside the handler
+        %% install, then release the rest while that install is still in
+        %% flight: every later worker must wait for it, not run ahead of it.
+        [First | Rest] = Pids,
+        First ! go,
+        {M, F, 0} = InstallMFA,
         receive
-            {done, P, R} -> ?assertEqual(ok, R)
-        after 5000 -> ?assert(false)
-        end
-     || P <- Pids
-    ],
-    ?assertEqual(true, persistent_term:get(Key, false)).
+            {trace, First, call, {M, F, []}} -> ok
+        after 10000 -> error(install_not_entered)
+        end,
+        [P ! go || P <- Rest],
+        [
+            receive
+                {done, P, R} -> ?assertEqual(ok, R)
+            after 30000 -> error({worker_not_done, P})
+            end
+         || P <- Pids
+        ],
+        ?assertEqual(true, persistent_term:get(SetupKey, false)),
+        ?assertMatch({ok, _}, logger:get_handler_config(SinkId)),
+        DeliveredRef = erlang:trace_delivered(all),
+        receive
+            {trace_delivered, all, DeliveredRef} -> ok
+        after 5000 -> error(trace_not_delivered)
+        end,
+        Installs = drain_install_calls(InstallMFA, 1),
+        ?assertEqual(1, Installs),
+        %% Removing the handler closes the file, flushing every event.
+        ok = logger:remove_handler(SinkId),
+        {ok, Bin} = file:read_file(SinkFile),
+        Lines = [L || L <- binary:split(Bin, <<"\n">>, [global]), L =/= <<>>],
+        ?assertEqual(Workers, length(Lines))
+    after
+        erlang:trace_pattern(InstallMFA, false, [local]),
+        _ = logger:remove_handler(SinkId),
+        _ = file:delete(SinkFile),
+        case OldEnv of
+            false -> os:unsetenv("BEAMTALK_CLASS_VAR_PROBE_LOG");
+            _ -> os:putenv("BEAMTALK_CLASS_VAR_PROBE_LOG", OldEnv)
+        end,
+        _ = erlang:system_flag(backtrace_depth, OldDepth),
+        [logger:set_handler_config(Id, level, Lvl) || {Id, Lvl} <- OldHandlers, Id =/= SinkId],
+        logger:set_primary_config(level, maps:get(level, OldPrimary)),
+        persistent_term:erase(SetupKey)
+    end.
+
+drain_install_calls({M, F, 0} = MFA, Count) ->
+    receive
+        %% A call trace message carries the argument list, not the arity.
+        {trace, _Pid, call, {M, F, []}} -> drain_install_calls(MFA, Count + 1)
+    after 0 -> Count
+    end.
