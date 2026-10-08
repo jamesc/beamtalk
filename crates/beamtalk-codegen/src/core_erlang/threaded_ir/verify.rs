@@ -314,7 +314,11 @@ fn collect_producer_consumer_counts(
                 *producers.entry(target.clone()).or_insert(0) += 1;
                 *consumers.entry(source.clone()).or_insert(0) += 1;
             }
-            ThreadedStmt::Threaded { body, .. } => {
+            // ADR 0131 §2: the `MethodBody`/`BranchArm` frame nodes scope
+            // their body exactly like a `Threaded` node does.
+            ThreadedStmt::Threaded { body, .. }
+            | ThreadedStmt::MethodBody { body, .. }
+            | ThreadedStmt::BranchArm { body, .. } => {
                 collect_producer_consumer_counts(body, producers, consumers);
             }
             // ADR 0118 phase 3: `condition`'s own Binds are
@@ -336,10 +340,20 @@ fn collect_producer_consumer_counts(
                     *producers.entry(target.clone()).or_insert(0) += 1;
                 }
             }
+            // ADR 0131 §2: a `LoopParam`/`MapPut` rebind is one version step,
+            // counted like a `Bind`'s.
+            ThreadedStmt::LocalRebind { lowering, .. } => {
+                if let Some((source, target)) = lowering.version_step() {
+                    *producers.entry(target.clone()).or_insert(0) += 1;
+                    *consumers.entry(source.clone()).or_insert(0) += 1;
+                }
+            }
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Return(..)
             | ThreadedStmt::Statement(..)
-            | ThreadedStmt::OnDoCatch { .. } => {}
+            | ThreadedStmt::OnDoCatch { .. }
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
 }
@@ -511,7 +525,50 @@ impl VerifyWalk<'_> {
             // treats the rest of the slice as its body); a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
-            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
+            //
+            // ADR 0131 Phase 1b adds `ConstructTuple`/`DiscardLocals` and the
+            // nodes below; their own obligations (`ThreadedLocalDropped`,
+            // `LocalRebindModeMismatch`, `LocalReadAfterSiblingRebind`) are
+            // Phase 1c. Until then a rebind is checked exactly like the
+            // `Bind` it renders as, and a frame node scopes its body like any
+            // other frame.
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Statement(..)
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
+            ThreadedStmt::LocalRebind {
+                state_first,
+                lowering,
+                span,
+                ..
+            } => {
+                if let Some(state) = state_first {
+                    self.check_use(state, *span);
+                }
+                if let Some((source, target)) = lowering.version_step() {
+                    self.check_use(source, *span);
+                    self.check_class_method_family(target, *span);
+                }
+            }
+            // The method's root frame: method level, so no mode is pushed (a
+            // `State` version here is the actor family, exactly as for the
+            // top-level slice).
+            ThreadedStmt::MethodBody { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.walk(body);
+                self.frame_stack.pop();
+            }
+            // A branch arm threads through its seeded `StateAcc` — the same
+            // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
+            // records for an arm today.
+            ThreadedStmt::BranchArm { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.mode_stack
+                    .push(ThreadingMode::StateAcc(StateAccFallbackReason::None));
+                self.walk(body);
+                self.mode_stack.pop();
+                self.frame_stack.pop();
+            }
             ThreadedStmt::OnDoCatch {
                 vars,
                 clauses,
