@@ -19,21 +19,22 @@
 //! front's process start time at spawn time (the same technique
 //! `beamtalk-cli`'s `NodeInfo.start_time` already uses for its own PID-reuse
 //! detection) and refusing to signal a PID whose *current* start time
-//! doesn't match what was recorded. [`read_start_time`] reads a real value
-//! on Windows via `GetProcessTimes`; treat any future platform arm that
-//! instead returns `None` unconditionally as "unknown, trust liveness" —
-//! every sweep would match, closing nothing.
+//! doesn't match what was recorded. `proc_start_time` (from
+//! `beamtalk_workspace::pid_liveness`) reads a real value on Windows via
+//! `GetProcessTimes`; treat any future platform arm that instead returns
+//! `None` unconditionally as "unknown, trust liveness" — every sweep would
+//! match, closing nothing.
 //!
-//! **A narrower race: `sweep` calls [`is_process_alive`] and
-//! [`read_start_time`] as two separate syscalls** — if the process exits in
-//! that exact window, `read_start_time` returns `None` even though a
+//! **A narrower race: `sweep` calls `is_process_alive` and
+//! `proc_start_time` as two separate syscalls** — if the process exits in
+//! that exact window, `proc_start_time` returns `None` even though a
 //! `start_time` *was* recorded for it (`record.start_time: Some(_)`).
 //! Treating that as "unknown, trust liveness" would classify it as
 //! [`Disposition::Reap`], and if a third, unrelated process grabs the
 //! recycled PID before `terminate_process` runs, it gets killed. Telling
 //! "genuinely can't read start time" apart from "raced a process exit" needs
 //! no platform `cfg`: a record only ever has `start_time: Some(_)` if *this*
-//! platform's own [`read_start_time`] produced a real value when the record
+//! platform's own `proc_start_time` produced a real value when the record
 //! was saved, so a `Some(_)`-recorded, `None`-observed pairing can only mean
 //! the observation itself failed this one time — it is never a
 //! platform-incapability signal, which is `start_time: None` instead (see
@@ -57,10 +58,9 @@
 //! goal (never kill an unrelated process, even at the cost of occasionally
 //! leaving a real orphan for the user to notice and clean up by hand) — but
 //! it does depend on an invariant this file cannot enforce at compile time:
-//! every [`read_start_time`] platform arm must be "all-or-nothing" for a
+//! every `proc_start_time` platform arm must be "all-or-nothing" for a
 //! given PID — either it reliably produces a real value for a process this
-//! broker can see, or it never does (`None` unconditionally, like the
-//! `cfg(not(any(target_os = "linux", windows)))` arm below). A future arm
+//! broker can see, or it never does (`None` unconditionally). A future arm
 //! that succeeds for *some* still-alive, still-visible processes but not
 //! others would quietly widen this gap without any test here catching it.
 //!
@@ -88,6 +88,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use beamtalk_workspace::pid_liveness::is_process_alive;
+pub use beamtalk_workspace::pid_liveness::proc_start_time;
 
 use crate::error::Result;
 
@@ -491,7 +494,7 @@ pub enum Disposition {
 
 /// Decide what to do with a record, given what's actually true about its PID
 /// right now (`is_alive`, `actual_start_time` — obtained via
-/// [`is_process_alive`]/[`read_start_time`], injected here so the decision
+/// `is_process_alive`/`proc_start_time`, injected here so the decision
 /// logic itself needs no process I/O to test).
 ///
 /// When the *recorded* start time is unavailable (a platform without the
@@ -529,17 +532,17 @@ pub fn classify_record(
 /// pre-`SIGKILL` re-check: is `actual` consistent with `expected`?
 ///
 /// - `(None, _)` — no recorded start time (old record predating this field,
-///   or a platform [`read_start_time`] never returns a real value on) —
+///   or a platform `proc_start_time` never returns a real value on) —
 ///   treated as a match, the same best-effort stance `beamtalk-cli`'s own
 ///   `NodeInfo.start_time` handling takes when start time isn't available.
 /// - `(Some(_), None)` — a start time *was* recorded, but this observation
 ///   came back empty. Unlike the case above, this is **not**
 ///   ambiguous: `expected` can only be `Some(_)` if this exact platform's
-///   [`read_start_time`] already produced a real value once, for this same
+///   `proc_start_time` already produced a real value once, for this same
 ///   PID, when the record was saved — so a platform that genuinely can't
 ///   read start time would have recorded `None` to begin with, never
 ///   `Some(_)`. The only way to reach `Some(_)` here paired with an observed
-///   `None` is `read_start_time` racing the process actually exiting between
+///   `None` is `proc_start_time` racing the process actually exiting between
 ///   `sweep`'s `is_process_alive` check and its own call (see this module's
 ///   doc comment) — treated as a **mismatch**, so the caller skips signaling
 ///   rather than trusting a liveness snapshot that may already be stale.
@@ -583,7 +586,7 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
     for record in load_all_records(dir)? {
         let alive = is_process_alive(record.pid);
         let actual_start_time = if alive {
-            read_start_time(record.pid)
+            proc_start_time(record.pid)
         } else {
             None
         };
@@ -662,7 +665,7 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
         // TerminateProcess, no graceful-signal equivalent to wait out first),
         // so the PID-reuse window this re-check closes is inherently much
         // smaller than the Unix arm's `TERMINATE_GRACE` — but now that
-        // `read_start_time` is real on Windows too, re-verifying
+        // `proc_start_time` is real on Windows too, re-verifying
         // costs nothing and closes it anyway rather than merely accepting it
         // as "small enough", matching the Unix arm's own belt-and-suspenders
         // stance.
@@ -685,143 +688,10 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
 /// [`classify_record`] uses, applied again immediately before killing to
 /// close the PID-reuse window between `classify_record`'s check and the
 /// actual kill call (see `terminate_process`'s doc comment). Available
-/// wherever [`read_start_time`] returns a real value (Linux, Windows).
+/// wherever `proc_start_time` returns a real value (Linux, Windows).
 #[cfg(any(unix, windows))]
 fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
-    start_time_matches(expected_start_time, read_start_time(pid))
-}
-
-/// Check whether a process is alive by PID.
-///
-/// Unix: `kill(pid, 0)` — signal 0 tests existence without signaling.
-/// Windows: `OpenProcess` + `GetExitCodeProcess`.
-#[must_use]
-pub fn is_process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(pid_i) = i32::try_from(pid) else {
-            return false;
-        };
-        // SAFETY: kill(2) with signal 0 is a standard existence check.
-        let ret = unsafe { libc::kill(pid_i, 0) };
-        if ret == 0 {
-            return true;
-        }
-        // EPERM means the process exists but we lack permission to signal
-        // it — it is still alive.
-        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
-        use windows_sys::Win32::System::Threading::{
-            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        };
-        // SAFETY: Windows API call with documented parameters.
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-        if handle.is_null() {
-            return false;
-        }
-        let mut exit_code: u32 = 0;
-        // SAFETY: handle is valid, exit_code is a local variable.
-        let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
-        // SAFETY: handle is valid, obtained from OpenProcess above.
-        unsafe { CloseHandle(handle) };
-        ok != FALSE && exit_code == STILL_ACTIVE as u32
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        false
-    }
-}
-
-/// Read process start time from `/proc/{pid}/stat` (field 22 per proc(5)).
-/// Linux-only: `/proc` doesn't exist on macOS/BSD/Windows, matching
-/// `beamtalk-cli`'s own `read_proc_start_time` (this crate cannot reuse that
-/// one directly — it is CLI-internal — so this is the same small technique
-/// duplicated, not a novel mechanism).
-#[cfg(target_os = "linux")]
-#[must_use]
-pub fn read_start_time(pid: u32) -> Option<u64> {
-    let stat_path = format!("/proc/{pid}/stat");
-    let content = std::fs::read_to_string(stat_path).ok()?;
-    let after_comm = content.rsplit_once(')')?.1;
-    let starttime_str = after_comm.split_whitespace().nth(19)?;
-    starttime_str.parse::<u64>().ok()
-}
-
-/// Read process creation time via `GetProcessTimes`, giving Windows the same
-/// contract as the Linux `/proc` read above: without a real value here,
-/// `classify_record`'s "unknown start time falls back to trusting liveness"
-/// stance (see its doc comment) leaves the PID-reuse guard **inert** on
-/// Windows — a stale on-disk
-/// [`FrontRecord`] always classified as [`Disposition::Reap`], so a recycled
-/// PID (Windows reuses them more aggressively than Linux) would get an
-/// unconditional `TerminateProcess` against whatever unrelated process now
-/// holds it.
-///
-/// Returns `None` if the process can't be opened (already gone, or a
-/// permissions issue) or the call otherwise fails — same "unknown, fall back
-/// to liveness" contract the Linux arm has.
-#[cfg(windows)]
-#[must_use]
-pub fn read_start_time(pid: u32) -> Option<u64> {
-    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, FILETIME};
-    use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    // SAFETY: Windows API call with documented parameters; handle is checked
-    // for null before use and closed afterward. PROCESS_QUERY_LIMITED_INFORMATION
-    // is sufficient per GetProcessTimes' own documented access-right
-    // requirement (the same right `is_process_alive` above already requests).
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-    if handle.is_null() {
-        return None;
-    }
-
-    let mut creation = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    let mut exit = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    let mut kernel = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    let mut user = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    // SAFETY: handle is valid (checked above); the four out-params are valid,
-    // local, correctly-typed FILETIME buffers for the duration of this call.
-    let ok = unsafe {
-        GetProcessTimes(
-            handle,
-            &raw mut creation,
-            &raw mut exit,
-            &raw mut kernel,
-            &raw mut user,
-        )
-    };
-    // SAFETY: handle is valid, obtained from OpenProcess above.
-    unsafe { CloseHandle(handle) };
-    if ok == FALSE {
-        return None;
-    }
-    Some((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
-}
-
-#[cfg(not(any(target_os = "linux", windows)))]
-#[must_use]
-pub fn read_start_time(_pid: u32) -> Option<u64> {
-    None
+    start_time_matches(expected_start_time, proc_start_time(pid))
 }
 
 #[cfg(test)]
@@ -876,7 +746,7 @@ mod tests {
     /// This used to fall back to trusting liveness (`Reap`), the
     /// same as `alive_with_no_recorded_start_time_falls_back_to_reap` above —
     /// but the two cases aren't actually equivalent. Here a start time *was*
-    /// recorded (`Some(100)`), so this platform's `read_start_time`
+    /// recorded (`Some(100)`), so this platform's `proc_start_time`
     /// definitely produced a real value once for this PID; an observed
     /// `None` now can only mean the read raced the process exiting (see
     /// `start_time_matches`'s doc comment), not a platform limitation. That
@@ -1199,12 +1069,12 @@ mod tests {
         assert!(load_all_records(tmp.path()).unwrap().is_empty());
     }
 
-    // Linux/Windows-only: `read_start_time` only returns a real value on
-    // those two platforms (see its doc comments; the Windows
+    // Linux/Windows-only: `proc_start_time` only returns a real value on
+    // those two platforms (see `beamtalk_workspace::pid_liveness`; the Windows
     // `GetProcessTimes` arm) — `classify_record`'s fallback for a platform
     // where the *observed* start time is unavailable is `Reap` (best effort,
     // matching `beamtalk-cli`'s own stance), which on a CI runner without a
-    // real `read_start_time` would make this test SIGTERM/TerminateProcess
+    // real `proc_start_time` would make this test SIGTERM/TerminateProcess
     // its own test process. Gating this way keeps that real behavior safe to
     // exercise here; `classify_record`'s fallback branch itself is covered
     // platform-independently by `alive_with_no_observed_start_time_is_pid_reused_not_reaped`
@@ -1255,7 +1125,7 @@ mod tests {
         let pid = child.id();
         // Give /proc a moment to have a stable stat entry before reading it.
         std::thread::sleep(Duration::from_millis(50));
-        let real_start_time = read_start_time(pid);
+        let real_start_time = proc_start_time(pid);
         assert!(
             real_start_time.is_some(),
             "should be able to read the freshly-spawned child's start time"
@@ -1315,7 +1185,7 @@ mod tests {
         let pid = child.id();
         // Give the process a moment to be fully queryable before reading it.
         std::thread::sleep(Duration::from_millis(50));
-        let real_start_time = read_start_time(pid);
+        let real_start_time = proc_start_time(pid);
         assert!(
             real_start_time.is_some(),
             "should be able to read the freshly-spawned child's start time"
@@ -1355,11 +1225,11 @@ mod tests {
         let _ = child.wait();
     }
 
-    // ── read_start_time: sanity checks ──────────────────────────────────
+    // ── proc_start_time: sanity checks ──────────────────────────────────
 
     #[cfg(windows)]
     #[test]
-    fn read_start_time_returns_some_for_a_live_process() {
+    fn proc_start_time_returns_some_for_a_live_process() {
         let mut child = std::process::Command::new("ping")
             .args(["-n", "5", "127.0.0.1"])
             .spawn()
@@ -1368,7 +1238,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
 
         assert!(
-            read_start_time(pid).is_some(),
+            proc_start_time(pid).is_some(),
             "GetProcessTimes should succeed for a live, queryable process"
         );
 
@@ -1379,7 +1249,7 @@ mod tests {
     /// Regression test for a mis-ordered `GetProcessTimes` out-param:
     /// the call takes four `*mut FILETIME`
     /// slots (creation, exit, kernel, user) and it's easy to read the wrong
-    /// one back. `read_start_time_returns_some_for_a_live_process` above only
+    /// one back. `proc_start_time_returns_some_for_a_live_process` above only
     /// asserts `.is_some()`, which a swapped-in `exit`/`kernel`/`user` read
     /// would still satisfy — `lpExitTime` is specifically documented to stay
     /// the zero `FILETIME` for a process that hasn't exited yet, so a
@@ -1388,7 +1258,7 @@ mod tests {
     /// right (creation) slot.
     #[cfg(windows)]
     #[test]
-    fn read_start_time_is_stable_and_nonzero_for_a_live_process() {
+    fn proc_start_time_is_stable_and_nonzero_for_a_live_process() {
         let mut child = std::process::Command::new("ping")
             .args(["-n", "10", "127.0.0.1"])
             .spawn()
@@ -1396,9 +1266,9 @@ mod tests {
         let pid = child.id();
         std::thread::sleep(Duration::from_millis(50));
 
-        let first = read_start_time(pid);
+        let first = proc_start_time(pid);
         std::thread::sleep(Duration::from_millis(50));
-        let second = read_start_time(pid);
+        let second = proc_start_time(pid);
 
         assert_ne!(
             first,
@@ -1419,9 +1289,9 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn read_start_time_returns_none_for_a_nonexistent_pid() {
+    fn proc_start_time_returns_none_for_a_nonexistent_pid() {
         assert_eq!(
-            read_start_time(u32::MAX),
+            proc_start_time(u32::MAX),
             None,
             "OpenProcess should fail for a PID essentially guaranteed not to exist"
         );
