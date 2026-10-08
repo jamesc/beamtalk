@@ -92,6 +92,32 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Lowers the body of a closed Core Erlang `fun` that threads nothing out
+    /// (a pure Tier 1 block, an inlined `inject:into:` fold fun, ...): a
+    /// variable scope plus a `state_version` that is restored on exit.
+    ///
+    /// A `fun` is a separate Core Erlang scope: any `State{N}`/`StateAcc{N}`
+    /// its body binds (a conditional with a block-local write threads one
+    /// even though nothing consumes it outside) is unreachable once the
+    /// `fun` returns. Without the restore the bumped counter leaks into the
+    /// enclosing scope, whose next statement then reads (or rebinds from) a
+    /// version that was never bound there -- the `UnboundVersion` /
+    /// `NonLinearVersion` pair the `ThreadedIr` verifier reported on BT-3737's
+    /// generated class-method programs. This is the one place every such
+    /// `fun` lowering gets that discipline (BT-3737), so a new one cannot
+    /// forget half of it; `f` runs with the guard's invariants even on `Err`.
+    pub(in crate::core_erlang) fn with_closed_fun_scope<T>(
+        &mut self,
+        f: impl FnOnce(&mut CoreErlangGenerator) -> T,
+    ) -> T {
+        self.push_scope();
+        let saved_state_version = self.state_version();
+        let out = f(self);
+        self.set_state_version(saved_state_version);
+        self.pop_scope();
+        out
+    }
+
     /// Executes `f` inside a branch context where `in_loop_body` is
     /// `true` and `state_version` is reset to 0.  The previous values are
     /// unconditionally restored — via [`BranchContextGuard`]'s `Drop` impl —

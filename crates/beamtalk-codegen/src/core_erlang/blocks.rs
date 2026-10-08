@@ -174,10 +174,10 @@ impl CoreErlangGenerator {
         }
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
-        self.push_scope();
-        // Track block nesting so self-cast sends route through the mailbox
-        self.block_depth += 1;
-        // Save state_version too. A pure block's body can still
+        //
+        // `with_closed_fun_scope` saves and restores `state_version` (BT-3737
+        // made this the one shared discipline for every closed `fun`). A pure
+        // block's body can still
         // contain a conditional/field-mutation whose own state threading
         // bumps `state_version` (deliberately visible to later statements
         // *within this same block* — see `generate_block_body_slice`'s doc
@@ -189,31 +189,33 @@ impl CoreErlangGenerator {
         // failure at a call site with two sibling block arguments (e.g.
         // `ifOk:ifError:`), where the second block, or the code following
         // the whole call, read the leaked version.
-        let saved_state_version = self.state_version();
+        let body_result = self.with_closed_fun_scope(|this| {
+            // Track block nesting so self-cast sends route through the mailbox
+            this.block_depth += 1;
 
-        let mut param_parts: Vec<Document<'static>> = Vec::new();
-        for (i, param) in block.parameters.iter().enumerate() {
-            if i > 0 {
-                param_parts.push(Document::Str(", "));
+            let mut param_parts: Vec<Document<'static>> = Vec::new();
+            for (i, param) in block.parameters.iter().enumerate() {
+                if i > 0 {
+                    param_parts.push(Document::Str(", "));
+                }
+                let var_name = this.fresh_var(&param.name);
+                param_parts.push(leaf::var(var_name));
             }
-            let var_name = self.fresh_var(&param.name);
-            param_parts.push(leaf::var(var_name));
-        }
-        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
+            let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
-        // Generate block body as Document.
-        // Ensure block_depth and scope are restored even on error.
-        let body_result = self.generate_block_body(block);
-        self.block_depth -= 1;
-        self.set_state_version(saved_state_version);
-        self.pop_scope();
+            // Generate block body as Document; restore block_depth even on error.
+            let body = this.generate_block_body(block);
+            this.block_depth -= 1;
+            body.map(|body| (header, body))
+        });
         // The block is a closed `fun () -> ... end` expression. Any
         // open let-chain produced inside the body is closed by the body
         // handlers and scoped inside the fun, so the block as a whole MUST
         // NOT propagate an open scope to its outer context. Clear the
         // side-channel in case the body's last statement left it set.
         self.loop_mode.direct_params_do_open_chain = false;
-        Ok(docvec![header, body_result?])
+        let (header, body) = body_result?;
+        Ok(docvec![header, body])
     }
 
     /// Generates a Tier 2 stateful block (ADR 0041 Phase 0).
