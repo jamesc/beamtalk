@@ -260,20 +260,9 @@ pub(super) fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<S
     beamtalk_workspace::read_port_file(workspace_id)
 }
 
-/// Read process start time from `/proc/{pid}/stat` (field 22 per proc(5)).
-/// Returns `None` if the process doesn't exist or the file can't be read.
-/// Linux-only: `/proc` filesystem does not exist on macOS/BSD.
-#[cfg(target_os = "linux")]
+/// Read process start time — delegates to `beamtalk_workspace::pid_liveness::proc_start_time`.
 pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
-    let stat_path = format!("/proc/{pid}/stat");
-    let content = fs::read_to_string(stat_path).ok()?;
-    // Fields are space-separated, but comm (field 2) may contain spaces/parens.
-    // Find the LAST ')' to handle pathological comm names.
-    let after_comm = content.rsplit_once(')')?.1;
-    // Fields after comm: state(3), ppid(4), ... starttime is field 22 (1-indexed),
-    // which is the 20th field after comm (fields 3..22 = 20 fields).
-    let starttime_str = after_comm.split_whitespace().nth(19)?;
-    starttime_str.parse::<u64>().ok()
+    beamtalk_workspace::pid_liveness::proc_start_time(pid)
 }
 
 /// Remove a single file, ignoring `NotFound` but propagating other errors.
