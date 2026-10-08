@@ -3,6 +3,27 @@
 ## Status
 Accepted (2026-10-08)
 
+## Implementation Tracking
+
+**Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743)
+**Status:** Planned
+
+| Phase | Issue | Description | Size | PR |
+|---|---|---|---|---|
+| 0a | [BT-3744](https://linear.app/beamtalk/issue/BT-3744) | Pin the probe matrix as BUnit, repl-protocol and `local_touch` corpus shapes | S | |
+| 0b | [BT-3745](https://linear.app/beamtalk/issue/BT-3745) | §6 Tier 2 block-value error; one allow-set error for unmigrated shapes | M | |
+| 1a | [BT-3746](https://linear.app/beamtalk/issue/BT-3746) | `threaded_locals_of`: one transitively-closed, REPL-aware recognizer | M | |
+| 1b | [BT-3747](https://linear.app/beamtalk/issue/BT-3747) | IR nodes `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` | M | |
+| 1c | [BT-3748](https://linear.app/beamtalk/issue/BT-3748) | Verifier checks; `ScopeKind::ValueType`; §1a sequencing amendment | M | |
+| 2 | [BT-3749](https://linear.app/beamtalk/issue/BT-3749) | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors, actor-only opaque folds | M | |
+| 3 | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional/`match:` families from context; `on:do:`/`ensure:` as producers | M | |
+| 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
+| 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic; flip every pin | S | |
+| 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, status → Implemented | S | |
+
+Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3750 → 3751 → 3752.
+Alternative D is tracked separately as [BT-3742](https://linear.app/beamtalk/issue/BT-3742).
+
 ## Context
 
 ### Problem statement
