@@ -261,6 +261,7 @@ pub(super) fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<S
 }
 
 /// Read process start time — delegates to `beamtalk_workspace::pid_liveness::proc_start_time`.
+#[cfg(target_os = "linux")]
 pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
     beamtalk_workspace::pid_liveness::proc_start_time(pid)
 }
