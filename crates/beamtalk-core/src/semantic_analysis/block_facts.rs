@@ -903,7 +903,7 @@ enum NestedBlocks {
     /// Only the blocks of nested local-threading constructs
     /// ([`construct_outer_local_writes`]).
     Producers,
-    /// Only the blocks of nested constructs whose family is threaded today
+    /// Only the nested blocks [`threaded_today_blocks`] selects
     /// ([`threaded_today_block_writes`]).
     ProducersThreadedToday,
 }
@@ -956,8 +956,7 @@ impl OuterWriteWalker<'_> {
                 .map(|c| c.blocks)
                 .unwrap_or_default(),
             NestedBlocks::ProducersThreadedToday => local_threading_construct(send)
-                .filter(|c| c.family.is_threaded_today())
-                .map(|c| c.blocks)
+                .map(|c| threaded_today_blocks(&c, send, ConstructPosition::Nested))
                 .unwrap_or_default(),
         };
         for operand in std::iter::once(receiver).chain(arguments) {
@@ -1266,10 +1265,124 @@ pub fn threaded_block_writes(
     walk_construct_blocks(blocks, bound_outside, NestedBlocks::Producers)
 }
 
-/// [`threaded_block_writes`] closed only over nested constructs whose
-/// family [`LocalThreadingFamily::is_threaded_today`]: the writes today's
-/// lowering threads back. Codegen's tuple builders pack this set; ADR 0131
-/// phases 2-4 grow it until it is [`threaded_block_writes`].
+/// Where a construct sits, for [`threaded_today_blocks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstructPosition {
+    /// The construct whose result codegen unpacks, lowered in the given
+    /// context.
+    Top(TodayLowering),
+    /// A construct nested in a block of another one.
+    Nested,
+}
+
+/// The codegen context facts today's top-level block selection depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TodayLowering {
+    /// `eachWithIndex:`/`do:separatedBy:` thread only inside an actor's own
+    /// fold (codegen's `enumeration_threads_actor_state`).
+    pub actor_fold: bool,
+    /// A `whileTrue:`/`whileFalse:` condition block's writes are packed
+    /// (actor context only; the value-type loop packs only the body's).
+    pub loop_condition: bool,
+}
+
+/// ADR 0131 phase 1 (BT-3746): the blocks of `construct` (recognized from
+/// `send`) whose writes today's lowering threads back. This is the one
+/// rule; [`threaded_today_block_writes`] applies it to nested constructs and
+/// codegen's `threaded_locals_of` to the top-level one, so its `lowered`
+/// set is exactly what the lowering packs.
+///
+/// At the top:
+/// - conditionals and `on:do:`/`ensure:`: every block;
+/// - `whileTrue:`/`whileFalse:` with a literal receiver and body: the body,
+///   plus the condition when [`TodayLowering::loop_condition`];
+/// - `eachWithIndex:`/`do:separatedBy:`: every block, only when
+///   [`TodayLowering::actor_fold`];
+/// - any other loop or fold: the blocks at
+///   [`crate::state_threading_selectors::state_threaded_block_arg_indices`].
+///
+/// Nested, today's lowering carries the writes of conditionals,
+/// `on:do:`/`ensure:` (every block) and of the loop and fold bodies
+/// [`crate::state_threading_selectors::is_nested_threaded_loop_selector`]
+/// names. A nested `whileTrue:`, `detect:`, `count:`, … threads its own
+/// writes, but the enclosing construct does not carry them yet (BT-3749).
+///
+/// In both positions: none for the unary loops, `value` on a block literal
+/// (threaded by codegen's inline-block path), and the families not threaded
+/// today (lookup selectors, `tryDo:`).
+#[must_use]
+pub fn threaded_today_blocks<'a>(
+    construct: &LocalThreadingConstruct<'a>,
+    send: &'a Expression,
+    position: ConstructPosition,
+) -> Vec<&'a Block> {
+    use crate::state_threading_selectors::{
+        is_nested_threaded_loop_selector, state_threaded_block_arg_indices,
+    };
+    let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Keyword(_),
+        arguments,
+        ..
+    } = send.unwrap_parens()
+    else {
+        return Vec::new();
+    };
+    let literal = |e: Option<&'a Expression>| match e {
+        Some(Expression::Block(b)) => Some(b),
+        _ => None,
+    };
+    let at_indices = |sel: &str| -> Vec<&'a Block> {
+        state_threaded_block_arg_indices(sel)
+            .iter()
+            .filter_map(|&i| literal(arguments.get(i)))
+            .collect()
+    };
+    let sel = construct.selector.as_str();
+    match (construct.family, position) {
+        (LocalThreadingFamily::Conditional | LocalThreadingFamily::Exception, _) => {
+            construct.blocks.clone()
+        }
+        (LocalThreadingFamily::Loop | LocalThreadingFamily::Fold, ConstructPosition::Top(ctx)) => {
+            match sel {
+                "whileTrue:" | "whileFalse:" => {
+                    match (literal(Some(receiver.as_ref())), literal(arguments.first())) {
+                        (Some(cond), Some(body)) if ctx.loop_condition => vec![cond, body],
+                        (Some(_), Some(body)) => vec![body],
+                        _ => Vec::new(),
+                    }
+                }
+                "eachWithIndex:" | "do:separatedBy:" => {
+                    let arity = if sel == "eachWithIndex:" { 1 } else { 2 };
+                    if ctx.actor_fold && arguments.len() == arity {
+                        construct.blocks.clone()
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => at_indices(sel),
+            }
+        }
+        (LocalThreadingFamily::Loop | LocalThreadingFamily::Fold, ConstructPosition::Nested) => {
+            if is_nested_threaded_loop_selector(sel) {
+                at_indices(sel)
+            } else {
+                Vec::new()
+            }
+        }
+        (
+            LocalThreadingFamily::BlockValue
+            | LocalThreadingFamily::Lookup
+            | LocalThreadingFamily::TryDo,
+            _,
+        ) => Vec::new(),
+    }
+}
+
+/// [`threaded_block_writes`] closed only over the nested blocks
+/// [`threaded_today_blocks`] selects: the writes today's lowering threads
+/// back. Codegen's tuple builders pack this set; ADR 0131 phases 2-4 grow it
+/// until it is [`threaded_block_writes`].
 #[must_use]
 pub fn threaded_today_block_writes(
     blocks: &[&Block],
@@ -2568,6 +2681,64 @@ mod tests {
             threaded_set("d at: #k ifAbsent: [t := 1]", &["t"]),
             vec!["t"]
         );
+    }
+
+    /// `threaded_today_block_writes` of `src`'s construct, over the blocks
+    /// `threaded_today_blocks` selects at the top in `ctx`.
+    fn today_set(src: &str, outer: &[&str], ctx: TodayLowering) -> Vec<String> {
+        let expr = parse_first_expr(src);
+        let construct = local_threading_construct(&expr).expect("construct");
+        let blocks = threaded_today_blocks(&construct, &expr, ConstructPosition::Top(ctx));
+        threaded_today_block_writes(&blocks, &|n| outer.contains(&n))
+            .into_iter()
+            .map(|w| w.name.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn threaded_today_blocks_is_one_rule_for_top_level_and_nested_constructs() {
+        let actor = TodayLowering {
+            actor_fold: true,
+            loop_condition: true,
+        };
+        let value = TodayLowering {
+            actor_fold: false,
+            loop_condition: false,
+        };
+        // Top level: a `whileTrue:` condition counts only where it is packed.
+        let w = "[t := t + 1. t < 3] whileTrue: [u := 1]";
+        assert_eq!(today_set(w, &["t", "u"], actor), vec!["t", "u"]);
+        assert_eq!(today_set(w, &["t", "u"], value), vec!["u"]);
+        // Top level: a `detect:ifNone:` handler is not packed.
+        let d = "#(1) detect: [:x | a := x. true] ifNone: [b := 0. 0]";
+        assert_eq!(today_set(d, &["a", "b"], actor), vec!["a"]);
+        // Top level: `eachWithIndex:` only in an actor's own fold.
+        let e = "#(1) eachWithIndex: [:x :i | t := i]";
+        assert_eq!(today_set(e, &["t"], actor), vec!["t"]);
+        assert!(today_set(e, &["t"], value).is_empty());
+        // Nested: conditionals, protected blocks and the nested loop/fold
+        // table are carried...
+        for src in [
+            "#(1) do: [:x | flag ifTrue: [t := x]]",
+            "#(1) do: [:x | [t := x] on: Error do: [:e | 0]]",
+            "#(1) do: [:x | 1 to: 2 do: [:k | t := k]]",
+            "#(1) do: [:x | #(2) inject: 0 into: [:a :y | t := y. a]]",
+        ] {
+            assert_eq!(today_set(src, &["t", "flag"], value), vec!["t"], "{src}");
+        }
+        // ...but a nested `whileTrue:`, a `detect:ifNone:` handler, a unary
+        // loop, `[...] value` or `tryDo:` is not (BT-3749), while the ADR
+        // set (`construct_outer_local_writes`) has every one.
+        for src in [
+            "1 to: 3 do: [:i | [t < i] whileTrue: [t := t + 1]]",
+            "#(1) do: [:x | #(2) detect: [:y | true] ifNone: [t := 0. 0]]",
+            "#(1) do: [:x | [t := x. false] whileTrue]",
+            "#(1) do: [:x | [t := x] value]",
+            "#(1) do: [:x | Result tryDo: [t := x]]",
+        ] {
+            assert!(today_set(src, &["t"], actor).is_empty(), "{src}");
+            assert_eq!(threaded_set(src, &["t"]), vec!["t"], "{src}");
+        }
     }
 
     #[test]

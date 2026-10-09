@@ -9,7 +9,6 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
@@ -2125,10 +2124,7 @@ impl CoreErlangGenerator {
         ]);
         self.bind_var(var_name, &core_var);
 
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(value)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(value) {
             let rebind: Vec<&String> = threaded_vars
                 .iter()
                 .filter(|tl| tl.as_str() != var_name)
@@ -3167,9 +3163,7 @@ impl CoreErlangGenerator {
         if !beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {
             return false;
         }
-        self.threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-            .is_some()
+        self.lowered_threaded_locals_of(expr).is_some()
             || !self
                 .exception_construct_threaded_families(expr)
                 .as_slice()
@@ -3280,10 +3274,7 @@ impl CoreErlangGenerator {
             expr_doc,
             " in ",
         ]];
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(expr) {
             let state_var = self.fresh_temp_var("ExState");
             docs.push(docvec![
                 "let ",

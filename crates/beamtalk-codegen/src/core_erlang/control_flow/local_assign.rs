@@ -11,7 +11,6 @@ use super::super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
@@ -266,10 +265,7 @@ impl CoreErlangGenerator {
             leaf::var(tuple_state_var),
             ") in ",
         ]];
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(source_expr)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(source_expr) {
             docs.extend(self.rebind_threaded_vars_from_state(&threaded_vars, new_state));
         }
         Document::Vec(docs)

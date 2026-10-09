@@ -12,12 +12,12 @@
 use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
-use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::semantic_analysis::block_facts::{
-    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, local_threading_construct,
-    threaded_block_writes, threaded_today_block_writes,
+    ConstructPosition, LocalThreadingFamily, OuterLocalWrite, TodayLowering,
+    local_threading_construct, threaded_block_writes, threaded_today_block_writes,
+    threaded_today_blocks,
 };
-use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
 /// Which construct a [`ThreadedLocals`] set belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +34,13 @@ pub(in crate::core_erlang) enum ThreadedConstruct {
 
 /// ADR 0131 §1: the threaded outer locals of one local-threading construct,
 /// built by [`CoreErlangGenerator::threaded_locals_of`].
+///
+/// Production codegen reads only [`Self::lowered`], through
+/// [`CoreErlangGenerator::lowered_threaded_locals_of`]. [`Self::construct`],
+/// [`Self::names`] and the [`ThreadedConstruct::Tier2Value`] /
+/// [`ThreadedConstruct::OpaqueFold`] shapes are ADR 0131 scaffolding: today
+/// only tests read them, and the phase 2–4 producers (BT-3749 and later)
+/// consume them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct ThreadedLocals {
     /// The construct.
@@ -227,20 +234,21 @@ impl CoreErlangGenerator {
     /// their writes belong to whichever construct block contains the
     /// `match:`, and the walk descends into them.
     ///
-    /// The set is the transitive closure over nested producers (ADR 0131 §1
-    /// "Transitive closure"): core's [`threaded_block_writes`] descends into
-    /// the blocks of every nested construct. [`ThreadedLocals::lowered`] uses
-    /// [`threaded_today_block_writes`], which descends only into those whose
-    /// family [`LocalThreadingFamily::is_threaded_today`]. In the REPL the
-    /// set is the bindings the construct writes: every name assigned that is
-    /// not bound inside the construct.
+    /// [`ThreadedLocals::names`] is the transitive closure over nested
+    /// producers (ADR 0131 §1 "Transitive closure"): core's
+    /// [`threaded_block_writes`] descends into the blocks of every nested
+    /// construct. In the REPL it is the bindings the construct writes: every
+    /// name assigned that is not bound inside the construct.
+    /// [`ThreadedLocals::lowered`] is exactly what today's lowering packs:
+    /// core's [`threaded_today_blocks`] (one rule, for the top-level construct
+    /// and, through [`threaded_today_block_writes`], every nested one) picks
+    /// the blocks.
     ///
     /// Facts read: core's `block_facts` ([`local_threading_construct`],
-    /// [`threaded_block_writes`], [`threaded_today_block_writes`], which read
-    /// only the AST and the
+    /// [`threaded_block_writes`], [`threaded_today_blocks`],
+    /// [`threaded_today_block_writes`], which read only the AST and the
     /// `bound_outside` scope predicate) and `state_threading_selectors`
-    /// (through them, plus `state_threaded_block_arg_indices` for
-    /// [`ThreadedLocals::lowered`]). The scope predicate is
+    /// (through them). The scope predicate is
     /// [`Self::lookup_var`]. The same two core functions drive the Phase 0
     /// allow-set check in `beamtalk-core`'s
     /// `semantic_analysis/validators/local_threading.rs`, with that pass's
@@ -252,7 +260,11 @@ impl CoreErlangGenerator {
         let expr = expr.unwrap_parens();
         let set = self.tier2_threaded_locals(expr).or_else(|| {
             let construct = local_threading_construct(expr)?;
-            let lowered_blocks = self.lowered_construct_blocks(&construct, expr);
+            let lowered_blocks = threaded_today_blocks(
+                &construct,
+                expr,
+                ConstructPosition::Top(self.today_lowering()),
+            );
             self.threaded_locals_of_blocks(
                 ThreadedConstruct::Inline(construct.family),
                 &construct.blocks,
@@ -264,16 +276,38 @@ impl CoreErlangGenerator {
         set
     }
 
+    /// The set today's lowering packs for `expr` ([`ThreadedLocals::lowered`]
+    /// of [`Self::threaded_locals_of`]), or `None` when it packs nothing.
+    /// This is what every result-unpacking site reads.
+    pub(in crate::core_erlang) fn lowered_threaded_locals_of(
+        &self,
+        expr: &Expression,
+    ) -> Option<Vec<String>> {
+        self.threaded_locals_of(expr)
+            .and_then(ThreadedLocals::into_lowered)
+    }
+
+    /// The codegen context facts core's [`threaded_today_blocks`] needs for
+    /// a top-level construct.
+    fn today_lowering(&self) -> TodayLowering {
+        TodayLowering {
+            actor_fold: self.enumeration_threads_actor_state(),
+            loop_condition: self.context == CodeGenContext::Actor,
+        }
+    }
+
     /// The block-level kernel of [`Self::threaded_locals_of`]: the threaded
     /// set of a construct of kind `construct` whose blocks are `blocks`,
-    /// with `lowered_blocks` (a subset of `blocks`) the ones today's
-    /// lowering packs. `None` when the set is empty.
+    /// with `lowered_blocks` (a subset of `blocks`, selected by core's
+    /// [`threaded_today_blocks`]) the ones today's lowering packs. `None`
+    /// when the set is empty.
     ///
     /// The loop, fold, conditional and exception generators call it
     /// directly with the blocks they lower, because they are handed the
     /// blocks rather than the send. They pass the same blocks
-    /// [`Self::threaded_locals_of`] derives from the send, so packing and
-    /// unpacking agree by construction.
+    /// [`threaded_today_blocks`] selects from the send, so packing and
+    /// unpacking agree; the agreement corpus test
+    /// (`tests/threaded_locals_agreement.rs`) checks it.
     pub(in crate::core_erlang) fn threaded_locals_of_blocks(
         &self,
         construct: ThreadedConstruct,
@@ -281,12 +315,6 @@ impl CoreErlangGenerator {
         lowered_blocks: &[&Block],
     ) -> Option<ThreadedLocals> {
         let repl = self.is_repl_mode();
-        let names = Self::write_names(threaded_block_writes(blocks, &|name| {
-            repl || self.lookup_var(name).is_some()
-        }));
-        if names.is_empty() {
-            return None;
-        }
         // The REPL threads its loops and folds through the bindings map
         // (`KeyStyle::ReplPlain`), not through `__local__` keys, so today's
         // lowering packs none of their names. Its conditionals and
@@ -303,6 +331,14 @@ impl CoreErlangGenerator {
                 self.lookup_var(name).is_some()
             }))
         };
+        #[cfg(test)]
+        recorded_sets::record_lowered(lowered_blocks, &lowered);
+        let names = Self::write_names(threaded_block_writes(blocks, &|name| {
+            repl || self.lookup_var(name).is_some()
+        }));
+        if names.is_empty() {
+            return None;
+        }
         Some(ThreadedLocals {
             construct,
             names,
@@ -311,9 +347,10 @@ impl CoreErlangGenerator {
     }
 
     /// The lowered set of a loop or fold generator's `body` block (and,
-    /// for `whileTrue:`/`whileFalse:`, its `condition`): the
+    /// for `whileTrue:`/`whileFalse:`, its `condition`, packed in actor
+    /// context only, as [`TodayLowering::loop_condition`] says): the
     /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks
-    /// [`Self::threaded_locals_of`] reads from the send. Empty when it
+    /// [`threaded_today_blocks`] selects from the send. Empty when it
     /// threads nothing.
     pub(in crate::core_erlang) fn loop_threaded_locals(
         &self,
@@ -322,7 +359,9 @@ impl CoreErlangGenerator {
     ) -> Vec<String> {
         let mut blocks: Vec<&Block> = Vec::with_capacity(2);
         if let Some(Expression::Block(cond)) = condition {
-            blocks.push(cond);
+            if self.today_lowering().loop_condition {
+                blocks.push(cond);
+            }
         }
         blocks.push(body);
         // `Loop` and `Fold` lower alike here (they differ only in which
@@ -339,7 +378,7 @@ impl CoreErlangGenerator {
     /// The lowered set of a conditional's branch blocks, or of an
     /// `on:do:`/`ensure:`'s protected body and handler blocks: the
     /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks
-    /// [`Self::threaded_locals_of`] reads from the send. The same set drives
+    /// [`threaded_today_blocks`] selects from the send. The same set drives
     /// the seeding emitted by `generate_*_with_mutations` and the
     /// extraction emitted by the method-body sequencer, so a branch that
     /// does not run never leaves a `__local__` key missing.
@@ -351,63 +390,6 @@ impl CoreErlangGenerator {
         )
         .map(|t| t.lowered)
         .unwrap_or_default()
-    }
-
-    /// The blocks of `construct` (recognized from `expr`) whose writes
-    /// today's tuple builders pack into `__local__` keys. Empty for a
-    /// construct whose result is not unpacked that way yet: the unary loops,
-    /// `value` sent to a block literal (threaded by the inline-block path,
-    /// `get_inline_block_captured_mutations`), the lookup selectors and
-    /// `tryDo:` (ADR 0131 phases 2 and 4), and `eachWithIndex:`/
-    /// `do:separatedBy:` outside an actor's own fold
-    /// ([`Self::enumeration_threads_actor_state`]).
-    fn lowered_construct_blocks<'a>(
-        &self,
-        construct: &LocalThreadingConstruct<'a>,
-        expr: &'a Expression,
-    ) -> Vec<&'a Block> {
-        let Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(_),
-            arguments,
-            ..
-        } = expr
-        else {
-            return Vec::new();
-        };
-        let literal = |e: Option<&'a Expression>| match e {
-            Some(Expression::Block(b)) => Some(b),
-            _ => None,
-        };
-        let sel = construct.selector.as_str();
-        match construct.family {
-            LocalThreadingFamily::Conditional | LocalThreadingFamily::Exception => {
-                construct.blocks.clone()
-            }
-            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
-                "whileTrue:" | "whileFalse:" => {
-                    match (literal(Some(receiver.as_ref())), literal(arguments.first())) {
-                        (Some(cond), Some(body)) => vec![cond, body],
-                        _ => Vec::new(),
-                    }
-                }
-                "eachWithIndex:" | "do:separatedBy:" => {
-                    let arity = if sel == "eachWithIndex:" { 1 } else { 2 };
-                    if arguments.len() == arity && self.enumeration_threads_actor_state() {
-                        construct.blocks.clone()
-                    } else {
-                        Vec::new()
-                    }
-                }
-                _ => state_threaded_block_arg_indices(sel)
-                    .iter()
-                    .filter_map(|&i| literal(arguments.get(i)))
-                    .collect(),
-            },
-            LocalThreadingFamily::BlockValue
-            | LocalThreadingFamily::Lookup
-            | LocalThreadingFamily::TryDo => Vec::new(),
-        }
     }
 
     /// The Tier 2 shapes of [`Self::threaded_locals_of`]: a `value`-family
@@ -561,35 +543,56 @@ impl CoreErlangGenerator {
 }
 
 /// Test-only record of every [`CoreErlangGenerator::threaded_locals_of`]
-/// answer, so the agreement corpus test (`tests/threaded_locals_agreement.rs`)
-/// can compare what codegen computed, in codegen's own scope, against the
-/// `beamtalk-core` diagnostic pass's recognizer.
+/// answer and every lowered set the kernel computes, so the agreement
+/// corpus test (`tests/threaded_locals_agreement.rs`) can check them during
+/// real codegen: the sets against the `beamtalk-core` diagnostic pass's
+/// recognizer, and the unpacking side's lowered set against the packing
+/// side's for the same blocks.
 #[cfg(test)]
 pub(in crate::core_erlang) mod recorded_sets {
     use super::ThreadedLocals;
-    use beamtalk_core::ast::Expression;
+    use beamtalk_core::ast::{Block, Expression};
     use beamtalk_core::source_analysis::Span;
     use std::cell::RefCell;
 
-    /// One answer: the construct's span and its set (`None`: not a
-    /// construct, or it threads nothing).
-    pub(in crate::core_erlang) type Record = (Span, Option<Vec<String>>);
+    /// What one recording captured.
+    #[derive(Debug, Default)]
+    pub(in crate::core_erlang) struct Records {
+        /// Each `threaded_locals_of` answer: the construct's span and its
+        /// `names` (`None`: not a construct, or it threads nothing).
+        pub(in crate::core_erlang) names: Vec<(Span, Option<Vec<String>>)>,
+        /// Each kernel call: the spans of the blocks it packed from, and
+        /// the lowered set.
+        pub(in crate::core_erlang) lowered: Vec<(Vec<Span>, Vec<String>)>,
+    }
 
     thread_local! {
-        static RECORDS: RefCell<Option<Vec<Record>>> = const { RefCell::new(None) };
+        static RECORDS: RefCell<Option<Records>> = const { RefCell::new(None) };
     }
 
     pub(super) fn record(expr: &Expression, set: Option<&ThreadedLocals>) {
         RECORDS.with(|r| {
             if let Some(records) = r.borrow_mut().as_mut() {
-                records.push((expr.span(), set.map(|s| s.names.clone())));
+                records
+                    .names
+                    .push((expr.span(), set.map(|s| s.names.clone())));
+            }
+        });
+    }
+
+    pub(super) fn record_lowered(blocks: &[&Block], lowered: &[String]) {
+        RECORDS.with(|r| {
+            if let Some(records) = r.borrow_mut().as_mut() {
+                let mut spans: Vec<Span> = blocks.iter().map(|b| b.span).collect();
+                spans.sort_by_key(|s| (s.start(), s.end()));
+                records.lowered.push((spans, lowered.to_vec()));
             }
         });
     }
 
     /// Runs `f` and returns what it recorded.
-    pub(in crate::core_erlang) fn recording<T>(f: impl FnOnce() -> T) -> (T, Vec<Record>) {
-        RECORDS.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    pub(in crate::core_erlang) fn recording<T>(f: impl FnOnce() -> T) -> (T, Records) {
+        RECORDS.with(|r| *r.borrow_mut() = Some(Records::default()));
         let out = f();
         let records = RECORDS.with(|r| r.borrow_mut().take()).unwrap_or_default();
         (out, records)

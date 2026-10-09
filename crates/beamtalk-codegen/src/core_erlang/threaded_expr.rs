@@ -68,7 +68,6 @@
 
 use super::threaded_ir::{BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
@@ -495,10 +494,7 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) {
         let mut rebind_parts: Vec<Document<'static>> = Vec::new();
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(value)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(value) {
             for var in &threaded_vars {
                 // Skip the assignment target itself. When the RHS construct mutates
                 // the same local internally (`x := (1 to: 3 do: [:i | x := x + i])`), `var_name`

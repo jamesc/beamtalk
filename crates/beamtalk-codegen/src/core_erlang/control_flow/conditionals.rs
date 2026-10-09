@@ -59,7 +59,6 @@ use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -2293,10 +2292,7 @@ impl CoreErlangGenerator {
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let Some(threaded_vars) = self
-            .threaded_locals_of(source_expr)
-            .and_then(ThreadedLocals::into_lowered)
-        else {
+        let Some(threaded_vars) = self.lowered_threaded_locals_of(source_expr) else {
             return;
         };
         let new_state_name = self.current_state_var();

@@ -12,11 +12,17 @@
 //! parameters and first assignments, innermost frame last), so a scope that
 //! codegen tracks differently from the source shows up as a disagreement.
 //!
+//! It also checks the set today's lowering packs (`ThreadedLocals::lowered`,
+//! the only set that reaches the generated code): every time codegen
+//! computes it for the same blocks, on the packing side (the loop, fold,
+//! conditional and exception generators) or the unpacking side (the
+//! sequencers reading `lowered_threaded_locals_of`), the answer is the same.
+//!
 //! What it does not check yet: that every Tier 2 argument the §6 pass
 //! accepts lowers to a producer and every one it rejects does not. That
 //! needs the producer (ADR 0131 phase 2, BT-3749).
 
-use crate::core_erlang::threading_analysis::recorded_sets::{Record, recording};
+use crate::core_erlang::threading_analysis::recorded_sets::recording;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::{Block, Expression, ExpressionStatement};
 use beamtalk_core::semantic_analysis::block_facts::{
@@ -125,10 +131,19 @@ impl SourceSets {
     }
 }
 
+/// How many comparisons one class contributed.
+#[derive(Default)]
+struct Agreed {
+    /// Non-empty `names` sets that matched the core recognizer.
+    names: usize,
+    /// Block sets whose non-empty lowered set codegen computed more than
+    /// once, always alike.
+    lowered: usize,
+}
+
 /// Codegen's records for one class source, checked against the source
-/// sets. Returns how many non-empty sets agreed, or `None` when codegen
-/// rejected the program.
-fn check_class(name: &str, source: &str) -> Result<Option<usize>, String> {
+/// sets. `None` when codegen rejected the program.
+fn check_class(name: &str, source: &str) -> Result<Option<Agreed>, String> {
     let (module, diagnostics) = parse(lex_with_eof(source));
     assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
     let mut source_sets: HashMap<Span, Vec<String>> = HashMap::new();
@@ -142,13 +157,13 @@ fn check_class(name: &str, source: &str) -> Result<Option<usize>, String> {
             source_sets.extend(SourceSets::method(params, &method.body));
         }
     }
-    let (generated, records): (_, Vec<Record>) =
+    let (generated, records) =
         recording(|| generate_module_with_warnings(&module, CodegenOptions::new(name)));
     if generated.is_err() {
         return Ok(None);
     }
-    let mut agreed = 0;
-    for (span, codegen_set) in records {
+    let mut agreed = Agreed::default();
+    for (span, codegen_set) in records.names {
         let codegen_set = codegen_set.unwrap_or_default();
         // Not a construct for the core recognizer either (a Tier 2 `value`
         // call or a non-construct expression): nothing to compare.
@@ -168,15 +183,30 @@ fn check_class(name: &str, source: &str) -> Result<Option<usize>, String> {
             ));
         }
         if !codegen_set.is_empty() {
-            agreed += 1;
+            agreed.names += 1;
         }
     }
+    let mut lowered: HashMap<Vec<Span>, (Vec<String>, usize)> = HashMap::new();
+    for (blocks, set) in records.lowered {
+        let entry = lowered.entry(blocks.clone()).or_insert((set.clone(), 0));
+        if entry.0 != set {
+            return Err(format!(
+                "for the blocks at {blocks:?} codegen packed {:?} once and {set:?} another time\n{source}",
+                entry.0
+            ));
+        }
+        entry.1 += 1;
+    }
+    agreed.lowered = lowered
+        .values()
+        .filter(|(set, count)| !set.is_empty() && *count > 1)
+        .count();
     Ok(Some(agreed))
 }
 
 #[test]
 fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_class_var_corpus() {
-    let mut agreed = 0;
+    let mut agreed = Agreed::default();
     let mut compiled = 0;
     for seed in 0..96u64 {
         let size = 1 + u32::try_from(seed % 3).unwrap_or(0);
@@ -186,7 +216,8 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_class_var_corpus(
                 match check_class(&class.name, &class.source) {
                     Ok(Some(n)) => {
                         compiled += 1;
-                        agreed += n;
+                        agreed.names += n.names;
+                        agreed.lowered += n.lowered;
                     }
                     Ok(None) => {}
                     Err(e) => panic!("seed {seed} size {size} {spelling:?}: {e}"),
@@ -198,8 +229,14 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_class_var_corpus(
     // inside loops, folds and protected blocks.
     assert!(compiled > 50, "only {compiled} classes compiled");
     assert!(
-        agreed > 20,
-        "only {agreed} non-empty threaded sets compared"
+        agreed.names > 20,
+        "only {} non-empty threaded sets compared",
+        agreed.names
+    );
+    assert!(
+        agreed.lowered > 20,
+        "only {} lowered sets computed on both the packing and unpacking side",
+        agreed.lowered
     );
 }
 
