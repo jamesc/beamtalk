@@ -8,9 +8,9 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape,
-    OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter,
+    NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, TryRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -233,9 +233,13 @@ pub(in crate::core_erlang) fn render(
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
             ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
-            ThreadedStmt::OnDoCatch { vars, clauses, .. } => {
-                docs.push(render_on_do_catch(vars, clauses));
-            }
+            ThreadedStmt::OnDoCatch {
+                vars,
+                entry,
+                try_region,
+                clauses,
+                ..
+            } => docs.push(render_on_do_catch(vars, *entry, try_region, clauses)),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
                 "let ",
                 leaf::var(carrier.clone()),
@@ -367,9 +371,11 @@ fn render_local_rebind(
     }
 }
 
-/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`]: the open-ended
-/// `catch <Type, Error, Stack> -> case {Type, Error} of ...` clause, complete
-/// down to the closing `end end`: the exception-class filter's handler arm, its
+/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`], both halves of the
+/// catch boundary as one unit: the entry snapshot `let`, then the
+/// [`TryRegion`] (`try <body> of R -> R`), then the catch clause
+/// (`catch <Type, Error, Stack> -> case {Type, Error} of ...`), complete down
+/// to the closing `end end`: the exception-class filter's handler arm, its
 /// `<'false'>` re-raise arm and its exhaustive fallback are steps of the node
 /// ([`CatchStep::FilterHandler`], [`CatchStep::FilterMiss`]).
 ///
@@ -377,7 +383,12 @@ fn render_local_rebind(
 /// untouched; the non-NLR arm runs its steps in order, the class-variable
 /// restore first (ADR 0130 §4), so every exception that is not a `^` discards
 /// the protected region's writes before the filter runs.
-fn render_on_do_catch(vars: &OnDoCatchVars, clauses: &[CatchClause]) -> Document<'static> {
+fn render_on_do_catch(
+    vars: &OnDoCatchVars,
+    entry: Option<CatchEntry>,
+    try_region: &TryRegion,
+    clauses: &[CatchClause],
+) -> Document<'static> {
     let raise = || {
         CoreErlangGenerator::emit_raw_raise(
             vars.type_var.clone(),
@@ -385,7 +396,21 @@ fn render_on_do_catch(vars: &OnDoCatchVars, clauses: &[CatchClause]) -> Document
             vars.stack_var.clone(),
         )
     };
+    let entry_doc = match entry {
+        Some(CatchEntry::ClassVarSnapshot) => {
+            CoreErlangGenerator::class_var_snapshot_let_doc(&vars.snapshot_var)
+        }
+        None => Document::Nil,
+    };
     let mut docs: Vec<Document<'static>> = vec![docvec![
+        entry_doc,
+        "try ",
+        try_region.body.clone(),
+        "of ",
+        leaf::var(try_region.result_var.clone()),
+        " -> ",
+        leaf::var(try_region.result_var.clone()),
+        " ",
         "catch <",
         leaf::var(vars.type_var.clone()),
         ", ",
