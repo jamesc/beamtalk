@@ -18,6 +18,12 @@
 //! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
+//! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
+//!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
+//!   `BranchArm` nodes
+//! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
+//!   membership), and its `ConstructTuple`/`DiscardLocals`/`MethodBody`/
+//!   `BranchArm` nodes
 
 use super::*;
 
@@ -51,6 +57,7 @@ mod catch_boundary;
 mod class_method_scope;
 mod close_and_value;
 mod dual_run;
+mod local_rebind;
 mod lower_and_render_shim;
 mod render_naming;
 mod simple_bind;
