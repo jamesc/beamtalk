@@ -607,7 +607,8 @@ run_method_by_name(ClassName, TestName) ->
 Discover methods and module via class registry gen_server.
 
 Returns {TestMethods, FlatMethods, Module} where:
-- TestMethods is the sorted list of test* selectors
+- TestMethods is the sorted list of test* selectors, inherited ones included
+  (see `beamtalk_test_case:test_class_selectors/1`)
 - FlatMethods is a map of all methods (for setUp/tearDown detection)
 - Module is the authoritative BEAM module atom from the class gen_server
 
@@ -628,7 +629,8 @@ discover_methods_via_registry(ClassName) ->
             Error2 = beamtalk_error:with_message(Error1, Msg),
             beamtalk_error:raise(Error2);
         ClassPid ->
-            Methods = gen_server:call(ClassPid, methods),
+            %% Own and inherited (below TestCase) selectors: BT-3768.
+            Methods = beamtalk_test_case:test_class_selectors(ClassName),
             Module = beamtalk_object_class:module_name_safe(ClassPid),
             FlatMethods = maps:from_keys(Methods, true),
             TestMethods = [
