@@ -419,7 +419,7 @@ impl ThreadingPlan {
             KeyStyle::LocalPrefixed
         };
         let context = generator.context;
-        let threaded_locals = generator.compute_threaded_locals_for_loop(body, condition);
+        let threaded_locals = generator.loop_threaded_locals(body, condition);
         // BT-3562 follow-up: `current_field_read_state_var()`, not the raw
         // `current_state_var()` — when this plan is built for a loop nested
         // inside an outer non-hybrid direct-params loop, `in_loop_body` is

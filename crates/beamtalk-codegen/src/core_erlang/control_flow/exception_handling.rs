@@ -48,12 +48,13 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
+use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RenderCtx,
-    ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
+    RenderCtx, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -365,8 +366,8 @@ impl CoreErlangGenerator {
     /// The snapshot variable of the `on:do:` whose exception-class variable is
     /// `ex_class_var`: that (already unique) name with a `Snap` suffix, derived
     /// without minting from the module counter (see `fresh_on_do_catch_vars`).
-    fn derived_snapshot_var(ex_class_var: &str) -> String {
-        [ex_class_var, "Snap"].concat()
+    fn derived_snapshot_var(ex_class_var: &str) -> ErlangVar {
+        ErlangVar::new([ex_class_var, "Snap"].concat())
     }
 
     /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause,
@@ -400,15 +401,19 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Generates the catch clause shared by every compiled `on:do:`
+    /// Generates the `try`/`catch` shared by every compiled `on:do:`
     /// (`generate_on_do`, `generate_on_do_with_mutations`,
     /// `generate_on_do_tier1_try`): the single owner of the catch boundary
     /// (ADR 0130 §4), built as a [`ThreadedStmt::OnDoCatch`] node,
     /// [`threaded_ir::verify`]d (a violated obligation is a
     /// `VerifyError::CatchWithoutClassVarRestore`) and rendered.
     ///
-    /// Produces the complete clause, `handler` being the body of the class
-    /// filter's `'true'` arm (the handler application). The node owns the filter
+    /// Produces `let Snap = beamtalk_class_vars:snapshot() in try <body> of R
+    /// -> R catch ...` as one unit, so both halves of the boundary (the entry
+    /// snapshot and the catch's restore) come from the node and no caller emits
+    /// either. `try_region` is the protected expression and its `of` variable,
+    /// and `handler` the body of the class filter's `'true'` arm (the handler
+    /// application). The node owns the filter
     /// `case` end to end, so its `'false'` re-raise arm and the exhaustive
     /// wildcard clause that keeps `erlc` from rejecting an `on:do:` nested in
     /// another protected region (`ambiguous_catch_try_state`) are present by
@@ -418,22 +423,24 @@ impl CoreErlangGenerator {
     /// and the 3-tuple) bypass the catch untouched so the enclosing method's NLR
     /// handler can intercept them and a `^` keeps the writes made before it;
     /// every other exception then restores the class variables to the
-    /// `snapshot_var` the caller bound before the `try`
-    /// ([`Self::class_var_snapshot_let_doc`]) and only then wraps the exception
-    /// and runs the class filter.
+    /// `snapshot_var` the node's entry bound before the `try` and only then
+    /// wraps the exception and runs the class filter.
     ///
     /// Every context gets the same obligation: with no live class invocation in
     /// the process `snapshot/0` answers `none` and `restore/1` is a no-op, so
     /// nothing here depends on the method context.
-    fn on_do_catch_clause(
+    fn on_do_catch_boundary(
         &mut self,
         vars: OnDoCatchVars,
+        try_region: TryRegion,
         span: beamtalk_core::source_analysis::Span,
         handler: Document<'static>,
     ) -> Document<'static> {
         let snapshot = vars.snapshot_var.clone();
         let node = ThreadedStmt::OnDoCatch {
             vars: Box::new(vars),
+            entry: Some(CatchEntry::ClassVarSnapshot),
+            try_region,
             clauses: vec![
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
@@ -483,7 +490,7 @@ impl CoreErlangGenerator {
     /// compilation strategy rather than the plain closure-based one:
     /// [`Self::needs_mutation_threading`]'s own answer, widened for class
     /// methods to every block that writes an outer local, which is what the
-    /// construct's result-unpacking side (`get_control_flow_threaded_vars`)
+    /// construct's result-unpacking side (`threaded_locals_of`)
     /// keys on. ADR 0130 §3: class variables are not threaded, so a class-
     /// variable write or a self-send never selects this strategy.
     fn block_needs_exception_threading(&self, block: &Block) -> bool {
@@ -491,12 +498,12 @@ impl CoreErlangGenerator {
         self.needs_mutation_threading(&analysis)
             // ADR 0130 §3: a class method threads only its outer locals (class
             // variables are written in place). The extraction side
-            // (`get_control_flow_threaded_vars`) unpacks the construct's
+            // (`threaded_locals_of`) unpacks the construct's
             // `{Result, StateAcc}` tuple exactly when the blocks write an outer
             // local, so the construct must produce that tuple in the same case,
             // including for a write-only local that `needs_mutation_threading`
             // does not count.
-            || (self.in_class_method() && !self.conditional_threaded_locals(&[block]).is_empty())
+            || (self.in_class_method() && !self.branch_threaded_locals(&[block]).is_empty())
     }
 
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
@@ -549,7 +556,6 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_temp_var("Result");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
-        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // Capture expression outputs (ADR 0018 bridge pattern)
         let receiver_code = self.expression_doc(receiver)?;
@@ -558,7 +564,15 @@ impl CoreErlangGenerator {
 
         let handler_apply =
             Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
-        let catch_clause = self.on_do_catch_clause(catch_vars, receiver.span(), handler_apply);
+        let catch_boundary = self.on_do_catch_boundary(
+            catch_vars,
+            TryRegion {
+                body: docvec!["apply ", leaf::var(block_var.clone()), " () "],
+                result_var,
+            },
+            receiver.span(),
+            handler_apply,
+        );
 
         Ok(docvec![
             "let ",
@@ -574,16 +588,7 @@ impl CoreErlangGenerator {
             " = ",
             handler_code,
             " in ",
-            Self::class_var_snapshot_let_doc(&snapshot_var),
-            "try apply ",
-            leaf::var(block_var),
-            " () ",
-            "of ",
-            leaf::var(result_var.clone()),
-            " -> ",
-            leaf::var(result_var),
-            " ",
-            catch_clause,
+            catch_boundary,
         ])
     }
 
@@ -658,7 +663,6 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
-        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
@@ -702,29 +706,22 @@ impl CoreErlangGenerator {
             "let StateAcc = ",
             leaf::var(base_state),
             " in ",
-            Self::class_var_snapshot_let_doc(&snapshot_var),
-            "try ",
         ]];
 
-        // Generate try body (receiver block) with state threading
+        // Generate try body (receiver block) with state threading. The
+        // snapshot `let`, the `try` and its `of` clause come from the catch
+        // boundary node (`on_do_catch_boundary`), which owns both halves.
+        let mut try_docs: Vec<Document<'static>> = Vec::new();
         let (try_result_var, try_final, try_slot) =
-            self.push_exception_arm(&mut docs, receiver_block, &families, outer_version)?;
-        // Return {Result, State[, Family]} from try body
-        // Success: pass the tuple through + catch clause with NLR passthrough.
-        // NLR re-raise via on_do_catch_clause (see generate_on_do).
-        docs.push(self.close_exception_result_tuple(
+            self.push_exception_arm(&mut try_docs, receiver_block, &families, outer_version)?;
+        // Return {Result, State[, Family]} from try body; on success the
+        // `of` clause passes the tuple through.
+        try_docs.push(self.close_exception_result_tuple(
             try_result_var,
             try_final,
             &families,
             &try_slot,
         ));
-        docs.push(docvec![
-            "of ",
-            leaf::var(state_after_try.clone()),
-            " -> ",
-            leaf::var(state_after_try),
-            " ",
-        ]);
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
         let mut handler_docs: Vec<Document<'static>> = Vec::new();
         self.push_scope();
@@ -752,11 +749,16 @@ impl CoreErlangGenerator {
             &handler_slot,
         ));
         self.pop_scope();
-        // The catch clause is one node that owns the class filter end to end:
-        // NLR pass-through, restore, wrap, filter, this handler, the `'false'`
-        // re-raise and the exhaustive fallback.
-        docs.push(self.on_do_catch_clause(
+        // The catch boundary is one node that owns the snapshot `let`, the
+        // `try` and the class filter end to end: NLR pass-through, restore,
+        // wrap, filter, this handler, the `'false'` re-raise and the
+        // exhaustive fallback.
+        docs.push(self.on_do_catch_boundary(
             catch_vars,
+            TryRegion {
+                body: Document::Vec(try_docs),
+                result_var: state_after_try,
+            },
             receiver_block.span,
             Document::Vec(handler_docs),
         ));
@@ -968,7 +970,7 @@ impl CoreErlangGenerator {
         // read back from the `StateAcc` the body returned: the cleanup's own
         // reads of it are otherwise the pre-`try` binding, because a binding made
         // inside the `try` is not in scope here (BT-3718).
-        let threaded = self.conditional_threaded_locals(&[receiver_block, cleanup_block]);
+        let threaded = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
         docs.extend(self.rebind_threaded_vars_from_state(&threaded, "StateAcc"));
 
         // On the SUCCESS path the cleanup runs after the try body, so
@@ -1056,7 +1058,7 @@ impl CoreErlangGenerator {
     /// Builds the Tier 1 (pure protected block) `try`/`catch` body for
     /// `generate_on_do_structural_fallback` — factored out to keep that
     /// function under clippy's line-count limit. Reuses
-    /// `on_do_catch_clause`'s NLR-passthrough + `matches_class` structure;
+    /// `on_do_catch_boundary`'s NLR-passthrough + `matches_class` structure;
     /// only the handler's tier (arity 0 = pure 0-arg, arity 1 = pure 1-arg,
     /// anything else = stateful) is discriminated dynamically here, since it
     /// isn't known statically the way `generate_on_do` knows it from the
@@ -1071,7 +1073,6 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_temp_var("Result");
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_param);
         let ex_obj_var = catch_vars.ex_obj_var.clone();
-        let snapshot_var = catch_vars.snapshot_var.clone();
 
         // arity 1 is ambiguous between a pure 1-arg handler and a stateful
         // 0-arg handler — same documented ambiguity as Block's blockValue*
@@ -1098,23 +1099,15 @@ impl CoreErlangGenerator {
         ];
 
         // No source span: this is the generically-dispatched `onDo` body.
-        let catch_clause = self.on_do_catch_clause(
+        self.on_do_catch_boundary(
             catch_vars,
+            TryRegion {
+                body: docvec!["apply ", Document::Str(self_var), " () "],
+                result_var,
+            },
             beamtalk_core::source_analysis::Span::default(),
             handler_dispatch,
-        );
-
-        docvec![
-            Self::class_var_snapshot_let_doc(&snapshot_var),
-            "try apply ",
-            Document::Str(self_var),
-            " () of ",
-            leaf::var(result_var.clone()),
-            " -> ",
-            leaf::var(result_var),
-            " ",
-            catch_clause,
-        ]
+        )
     }
 
     /// Generates the fallback method body for `onDo` — Block's
@@ -1123,7 +1116,7 @@ impl CoreErlangGenerator {
     /// `generate_block_value_structural_fallback` for the general
     /// Tier 1/Tier 2 discrimination rationale.
     ///
-    /// Reuses `on_do_catch_clause`'s NLR-passthrough + `matches_class`
+    /// Reuses `on_do_catch_boundary`'s NLR-passthrough + `matches_class`
     /// structure so the Tier 1 (pure) case stays behaviourally identical to
     /// the AST-driven `generate_on_do` — only the receiver/handler *tier*
     /// discrimination differs, since a generically dispatched handler's
@@ -1769,7 +1762,7 @@ Actor subclass: Foo
     fn test_on_do_with_state_mutation_in_handler_uses_threading() {
         // Handler block mutates actor field — triggers generate_on_do_with_mutations,
         // which inlines block bodies with StateAcc threading instead of wrapping as
-        // closures. Also exercises on_do_catch_clause and
+        // closures. Also exercises on_do_catch_boundary and
         // generate_exception_body_with_threading.
         let src = "\
 Actor subclass: Srv

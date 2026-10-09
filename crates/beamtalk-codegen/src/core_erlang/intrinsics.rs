@@ -517,13 +517,11 @@ impl CoreErlangGenerator {
             // Also check for nested list ops with cross-scope mutations.
             // Also thread when the body mutates an outer local (including
             // write-only mutations like `[last := i]`) that `needs_mutation_threading`
-            // misses in value-type/class-method context. `compute_threaded_locals_for_loop`
+            // misses in value-type/class-method context. `loop_threaded_locals`
             // is the canonical set the loop codegen actually packs into `StateAcc`.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self
-                    .compute_threaded_locals_for_loop(body_block, None)
-                    .is_empty()
+                || !self.loop_threaded_locals(body_block, None).is_empty()
             {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
@@ -555,9 +553,7 @@ impl CoreErlangGenerator {
             // Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self
-                    .compute_threaded_locals_for_loop(body_block, None)
-                    .is_empty()
+                || !self.loop_threaded_locals(body_block, None).is_empty()
             {
                 let doc =
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
@@ -590,9 +586,7 @@ impl CoreErlangGenerator {
             // Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self
-                    .compute_threaded_locals_for_loop(body_block, None)
-                    .is_empty()
+                || !self.loop_threaded_locals(body_block, None).is_empty()
             {
                 let doc = self.generate_to_by_do_with_mutations(
                     receiver,

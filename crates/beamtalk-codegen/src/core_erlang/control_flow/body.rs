@@ -25,6 +25,7 @@ use super::super::threaded_ir::{
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::list_ops::BodyKind;
 use super::plan::ThreadingPlan;
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Block, Expression};
@@ -449,7 +450,8 @@ impl CoreErlangGenerator {
             return Ok(false);
         }
         let threaded = self
-            .get_control_flow_threaded_vars(expr)
+            .threaded_locals_of(expr)
+            .and_then(ThreadedLocals::into_lowered)
             .unwrap_or_default();
         let open = self.generate_value_type_do_open(expr)?;
         stmts.push(ThreadedStmt::Statement(open, span));
@@ -526,7 +528,10 @@ impl CoreErlangGenerator {
             // `StateAcc`; see `lower_nested_vt_do`.
         } else if is_last && !has_direct_field_assignments {
             let produces_tuple = !hoisted_anything
-                && (self.get_control_flow_threaded_vars(expr).is_some()
+                && (self
+                    .threaded_locals_of(expr)
+                    .and_then(ThreadedLocals::into_lowered)
+                    .is_some()
                     || self.control_flow_has_mutations(expr));
             if produces_tuple {
                 let tuple_var =
@@ -618,6 +623,7 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlDropWhile { .. }
                 | BodyKind::FoldlPartition { .. }
                 | BodyKind::FoldlGroupBy { .. }
+                | BodyKind::FoldlSort { .. }
         ) {
             Some(self.fresh_temp_var("Pred"))
         } else {
@@ -831,7 +837,9 @@ impl CoreErlangGenerator {
                 // the vars THIS construct itself threads, read before
                 // `generate_expression` below (which may push/pop scopes) so
                 // the lookup reflects this statement's own captured set.
-                let inner_threaded_vars = self.get_control_flow_threaded_vars(expr);
+                let inner_threaded_vars = self
+                    .threaded_locals_of(expr)
+                    .and_then(ThreadedLocals::into_lowered);
                 let new_state;
                 if self.lower_nested_vt_do(expr, frame, span, &mut stmts)? {
                     // BT-3718: a nested value-type `do:` has no tuple to unpack
@@ -918,7 +926,8 @@ impl CoreErlangGenerator {
                         | BodyKind::FoldlTakeWhile { .. }
                         | BodyKind::FoldlDropWhile { .. }
                         | BodyKind::FoldlPartition { .. }
-                        | BodyKind::FoldlGroupBy { .. } => {
+                        | BodyKind::FoldlGroupBy { .. }
+                        | BodyKind::FoldlSort { .. } => {
                             // predicate-based selectors — bind predicate result
                             if let Some(pv) = pred_var.as_ref() {
                                 let result_var = self.fresh_temp_var("CondVal");
@@ -1421,6 +1430,31 @@ impl CoreErlangGenerator {
             }
         }
 
+        // FoldlSort — write the comparator's final state back to its
+        // process-dictionary key, then answer the predicate to `lists:sort/2`.
+        // Always map mode (the generator builds the plan without a tuple
+        // accumulator), so the final state is a `StateAcc{N}`.
+        if let BodyKind::FoldlSort { state_key_var } = kind {
+            if let Some(pv) = &pred_var {
+                let final_state = if has_mutations {
+                    self.current_state_var()
+                } else {
+                    "StateAcc".to_string()
+                };
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let _ = call 'erlang':'put'(",
+                        leaf::var(state_key_var.clone()),
+                        ", ",
+                        leaf::var(final_state),
+                        ") in ",
+                        leaf::var(pv.clone()),
+                    ],
+                    epilogue_span,
+                ));
+            }
+        }
+
         Ok(stmts)
     }
 
@@ -1460,7 +1494,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1529,7 +1564,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1609,7 +1645,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1684,7 +1721,8 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlTakeWhile { .. }
                 | BodyKind::FoldlDropWhile { .. }
                 | BodyKind::FoldlPartition { .. }
-                | BodyKind::FoldlGroupBy { .. } => {
+                | BodyKind::FoldlGroupBy { .. }
+                | BodyKind::FoldlSort { .. } => {
                     if let Some(pv) = pred_var {
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -1736,7 +1774,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1798,7 +1837,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let ", leaf::var(pv.clone()), " = 'false' in ",],
@@ -1975,7 +2015,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if is_last {
                     if let Some(pv) = pred_var {
                         // This is the exact shape a `select:` predicate

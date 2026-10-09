@@ -428,7 +428,7 @@ fn enter_block(
 /// `is_state_threaded_block_arg` (argument positions) and
 /// `is_state_threaded_block_receiver` (receiver position) — the single
 /// canonical "which selectors thread which block positions" tables (ADR
-/// 0118 §7), shared with `beamtalk-codegen`'s `get_control_flow_threaded_vars`,
+/// 0118 §7), shared with `beamtalk-codegen`'s `threaded_locals_of`,
 /// so the lint and codegen can never silently drift (CLAUDE.md's "No
 /// duplicate implementations" rule; see those tables' doc comments for the
 /// full selector lists and index mapping).
@@ -1034,8 +1034,8 @@ sealed typed Value subclass: Foo
     }
 
     /// The whole family of loop / list-op selectors that codegen's
-    /// `get_control_flow_threaded_vars` (`crates/beamtalk-codegen/src/core_erlang/
-    /// mod.rs`) recognizes for captured-local threading — none of these
+    /// `threaded_locals_of` (`crates/beamtalk-codegen/src/core_erlang/
+    /// threading_analysis.rs`) recognizes for captured-local threading — none of these
     /// should warn on a mutation of an outer local at the recognized
     /// block-argument position, whatever the accumulator's name.
     #[test]

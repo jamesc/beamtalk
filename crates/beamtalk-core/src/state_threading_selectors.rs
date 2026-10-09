@@ -310,6 +310,31 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
         .is_some_and(|callable| !matches!(callable.unwrap_parens(), Expression::Block(_)))
 }
 
+/// ADR 0131 §1: the block-taking lookup selectors — a send that runs one of
+/// its block literal arguments only when a key (or element) is missing or
+/// present. Returns the 0-based indices of those block arguments, empty for
+/// any other selector.
+///
+/// None of them is threaded today: codegen compiles their blocks as
+/// closures, and the §6 check rejects a block that writes an outer local
+/// there. ADR 0131 phase 2 makes them producers. `detect:ifNone:` is not
+/// listed: it is a fold ([`is_state_threading_keyword_selector`]).
+#[must_use]
+pub fn lookup_block_arg_indices(sel: &str) -> &'static [usize] {
+    match sel {
+        "at:ifAbsent:" | "at:ifAbsentPut:" | "at:ifPresent:" | "removeKey:ifAbsent:" => &[1],
+        "at:ifPresent:ifAbsent:" => &[1, 2],
+        _ => &[],
+    }
+}
+
+/// ADR 0131 §5: `Result tryDo:`, a catch-boundary construct. Keyed on the
+/// selector, not on the receiver being spelled `Result`.
+#[must_use]
+pub fn is_try_do_selector(sel: &str) -> bool {
+    sel == "tryDo:"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,7 +621,7 @@ mod tests {
     ///
     /// This is the selector-table half of "does the codegen threaded-vars
     /// map and the selector predicate agree on which arg indices thread":
-    /// `beamtalk-codegen`'s `get_control_flow_threaded_vars` (`mod.rs`)
+    /// `beamtalk-codegen`'s `threaded_locals_of` (`threading_analysis.rs`)
     /// reads `state_threaded_block_arg_indices` directly for every
     /// `WellKnownSelector`-backed selector below except the conditional
     /// family (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`/`ifNil:`/
