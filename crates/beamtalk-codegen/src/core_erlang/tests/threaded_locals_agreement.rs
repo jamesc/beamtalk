@@ -146,6 +146,10 @@ impl SourceSets {
     }
 }
 
+/// One construct's lowered-set record: the blocks selected, the set, and
+/// which sides (`true`: packing) computed it.
+type ConstructRecord = (Vec<Span>, Vec<String>, HashSet<bool>);
+
 /// How many comparisons one class contributed.
 #[derive(Default)]
 struct Agreed {
@@ -207,7 +211,7 @@ fn check_class(name: &str, source: &str) -> Result<Option<Agreed>, String> {
         }
     }
     // Per construct: the first record, and which sides recorded it.
-    let mut lowered: HashMap<Span, (Vec<Span>, Vec<String>, HashSet<bool>)> = HashMap::new();
+    let mut lowered: HashMap<Span, ConstructRecord> = HashMap::new();
     for (side, blocks, set) in records.lowered {
         let Some(construct) = blocks.first().and_then(|b| owners.get(b)).copied() else {
             continue;
