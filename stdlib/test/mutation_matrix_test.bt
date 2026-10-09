@@ -271,8 +271,16 @@ TestCase subclass: MutationMatrixTest
   // P3-9: sort: with field mutation in comparator block (BT-1487)
   testSortMutation =>
     count := self.a sortMutation: #(3, 1, 2)
-    // count depends on sort algorithm's comparison count, assert > 0
-    self assert: count > 0 equals: true
+    // count depends on the sort algorithm's comparison count, but sorting three
+    // elements takes at least two comparisons, and every comparison's write must
+    // survive into the next one (BT-3771: each started from the pre-sort state).
+    self assert: count >= 2 equals: true
+    self assert: self.a getLog equals: #(1, 2, 3)
+
+  // BT-3771: an assignment as the comparator's last statement is its predicate.
+  testSortMutationAssignLast =>
+    count := self.a sortMutationAssignLast: #(3, 1, 2)
+    self assert: count >= 2 equals: true
     self assert: self.a getLog equals: #(1, 2, 3)
 
   // ── Dictionary ────────────────────────────────────────────────────────

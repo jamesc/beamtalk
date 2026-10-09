@@ -618,6 +618,7 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlDropWhile { .. }
                 | BodyKind::FoldlPartition { .. }
                 | BodyKind::FoldlGroupBy { .. }
+                | BodyKind::FoldlSort { .. }
         ) {
             Some(self.fresh_temp_var("Pred"))
         } else {
@@ -918,7 +919,8 @@ impl CoreErlangGenerator {
                         | BodyKind::FoldlTakeWhile { .. }
                         | BodyKind::FoldlDropWhile { .. }
                         | BodyKind::FoldlPartition { .. }
-                        | BodyKind::FoldlGroupBy { .. } => {
+                        | BodyKind::FoldlGroupBy { .. }
+                        | BodyKind::FoldlSort { .. } => {
                             // predicate-based selectors — bind predicate result
                             if let Some(pv) = pred_var.as_ref() {
                                 let result_var = self.fresh_temp_var("CondVal");
@@ -1421,6 +1423,31 @@ impl CoreErlangGenerator {
             }
         }
 
+        // FoldlSort — write the comparator's final state back to its
+        // process-dictionary key, then answer the predicate to `lists:sort/2`.
+        // Always map mode (the generator builds the plan without a tuple
+        // accumulator), so the final state is a `StateAcc{N}`.
+        if let BodyKind::FoldlSort { state_key_var } = kind {
+            if let Some(pv) = &pred_var {
+                let final_state = if has_mutations {
+                    self.current_state_var()
+                } else {
+                    "StateAcc".to_string()
+                };
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let _ = call 'erlang':'put'(",
+                        leaf::var(state_key_var.clone()),
+                        ", ",
+                        leaf::var(final_state),
+                        ") in ",
+                        leaf::var(pv.clone()),
+                    ],
+                    epilogue_span,
+                ));
+            }
+        }
+
         Ok(stmts)
     }
 
@@ -1460,7 +1487,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1529,7 +1557,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1609,7 +1638,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1684,7 +1714,8 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlTakeWhile { .. }
                 | BodyKind::FoldlDropWhile { .. }
                 | BodyKind::FoldlPartition { .. }
-                | BodyKind::FoldlGroupBy { .. } => {
+                | BodyKind::FoldlGroupBy { .. }
+                | BodyKind::FoldlSort { .. } => {
                     if let Some(pv) = pred_var {
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -1736,7 +1767,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
@@ -1798,7 +1830,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let ", leaf::var(pv.clone()), " = 'false' in ",],
@@ -1975,7 +2008,8 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlTakeWhile { .. }
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
-            | BodyKind::FoldlGroupBy { .. } => {
+            | BodyKind::FoldlGroupBy { .. }
+            | BodyKind::FoldlSort { .. } => {
                 if is_last {
                     if let Some(pv) = pred_var {
                         // This is the exact shape a `select:` predicate
