@@ -474,6 +474,13 @@ impl CoreErlangGenerator {
         self.codegen_warnings.push(diag);
     }
 
+    /// Drains the diagnostics recorded so far. For drivers that build their own
+    /// generator (the REPL assembler, BT-3778) and forward only the `ThreadedIr`
+    /// verifier ones via [`GeneratedModule::into_code_and_verifier_diagnostics`].
+    pub fn take_codegen_warnings(&mut self) -> Vec<Diagnostic> {
+        std::mem::take(&mut self.codegen_warnings)
+    }
+
     /// Emits a codegen diagnostic (gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
     ///
     /// These are informational diagnostics about codegen decisions (calling conventions,

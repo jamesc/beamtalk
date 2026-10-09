@@ -151,6 +151,10 @@ pub(crate) fn parse_test_file(content: &str) -> ParsedTestFile {
 /// Compile a single Beamtalk expression to a Core Erlang eval module.
 ///
 /// Returns the Core Erlang source string for a module with `eval/1`.
+///
+/// A `ThreadedIr` verifier finding (`internal: ...`, ADR 0111 Addendum 17,
+/// BT-3778) is printed to stderr as a warning through the shared
+/// [`crate::diagnostic::print_diagnostics_text`]; compilation still succeeds.
 pub(crate) fn compile_expression_to_core(
     expression: &str,
     module_name: &str,
@@ -179,8 +183,19 @@ pub(crate) fn compile_expression_to_core(
         .ok_or_else(|| "No expression found in parsed source".to_string())?;
 
     // Generate Core Erlang test module (no workspace bindings)
-    beamtalk_repl::codegen::generate_test_expression(&expr.expression, module_name)
-        .map_err(|e| format!("{e}"))
+    let (code, verifier_diagnostics) =
+        beamtalk_repl::codegen::generate_test_expression_surfacing_verifier(
+            &expr.expression,
+            module_name,
+        )
+        .map_err(|e| format!("{e}"))?;
+    crate::diagnostic::print_diagnostics_text(
+        &verifier_diagnostics,
+        module_name,
+        expression,
+        &beamtalk_core::CompilerOptions::default(),
+    );
+    Ok(code)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -757,11 +757,12 @@ impl CoreErlangGenerator {
     /// [`CodegenOptions::with_injected_verifier_violation`], the test hook
     /// that lets driver-level tests prove an `internal:` diagnostic surfaces
     /// without a release build or a real codegen bug.
-    pub(in crate::core_erlang) fn inject_synthetic_verifier_violation(
-        &mut self,
-        enabled: bool,
-        span: Span,
-    ) {
+    ///
+    /// `pub` (hidden) so `beamtalk-repl`'s REPL assembler, which drives its
+    /// own generator rather than `generate_module_with_warnings`, can honor
+    /// the same hook (BT-3778).
+    #[doc(hidden)]
+    pub fn inject_synthetic_verifier_violation(&mut self, enabled: bool, span: Span) {
         if !enabled {
             return;
         }

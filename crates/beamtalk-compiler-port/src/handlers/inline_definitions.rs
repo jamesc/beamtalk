@@ -83,6 +83,7 @@ pub(crate) fn handle_inline_class_definition(
     module_name_override: Option<&str>,
     referenced_aliases: &[ecow::EcoString],
     analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
+    inject_verifier_violation: bool,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -122,6 +123,7 @@ pub(crate) fn handle_inline_class_definition(
 
     // Compile trailing expressions (after class body) so the Erlang side
     // can evaluate them and return their result instead of the class name.
+    let mut trailing_verifier_diagnostics = Vec::new();
     let trailing_core_erlang = if module.expressions.is_empty() {
         None
     } else {
@@ -135,21 +137,18 @@ pub(crate) fn handle_inline_class_definition(
         // facade defined in this same turn is direct-called. `analysis` is
         // `None` when a standalone method merge made it stale; that falls back
         // to `class_send` (correct, just not the direct-call fast path).
-        let trailing_result = match analysis.as_ref() {
-            Some(analysis) => beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
-                &trailing_exprs,
-                expr_module_name,
-                class_module_index.clone(),
-                &analysis.class_hierarchy,
-            ),
-            None => beamtalk_repl::codegen::generate_repl_expressions_with_index(
-                &trailing_exprs,
-                expr_module_name,
-                class_module_index.clone(),
-            ),
-        };
+        let trailing_result = beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
+            &trailing_exprs,
+            expr_module_name,
+            class_module_index.clone(),
+            analysis.as_ref().map(|a| &a.class_hierarchy),
+            inject_verifier_violation,
+        );
         match trailing_result {
-            Ok(code) => Some(code),
+            Ok((code, diagnostics)) => {
+                trailing_verifier_diagnostics = diagnostics;
+                Some(code)
+            }
             Err(e) => {
                 return error_response(&[format_codegen_error(&e, source)]);
             }
@@ -179,14 +178,22 @@ pub(crate) fn handle_inline_class_definition(
         &module,
         codegen_options,
     ) {
-        Ok((code, verifier_diagnostics)) => class_definition_ok_response(
-            &code,
-            &class_module_name,
-            &classes,
-            trailing_core_erlang.as_deref(),
-            &with_verifier_warnings(&warnings, &verifier_diagnostics),
-            referenced_aliases,
-        ),
+        Ok((code, verifier_diagnostics)) => {
+            // Class-module findings first, then the trailing expressions'
+            // (BT-3778).
+            let verifier_diagnostics: Vec<_> = verifier_diagnostics
+                .into_iter()
+                .chain(trailing_verifier_diagnostics)
+                .collect();
+            class_definition_ok_response(
+                &code,
+                &class_module_name,
+                &classes,
+                trailing_core_erlang.as_deref(),
+                &with_verifier_warnings(&warnings, &verifier_diagnostics),
+                referenced_aliases,
+            )
+        }
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
 }
