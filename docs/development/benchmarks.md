@@ -1167,7 +1167,7 @@ for class-variable access anyway, Phase 3 may inline the pair too; the 3 ns it s
 
 - The cost of the invocation boundary itself (`assert_absent/1` + `install/2` on entry, read-back and `erase` in
   `after` of `invoke_class_method/7`), which is Phase 2 and was assumed small next to the `gen_server` round trip.
-- The restore arm taken (an error crossing a catch): only the pass-through path was measured.
+- The restore arm taken (an error crossing a catch): only the pass-through path was measured here; measured later, under load, in "BT-3766" below.
 - `Result tryDo:` and `protect/1`; the subclass-receiver walk after the change (`class_self_send_inherited_override`,
   not hand-lowered); the actor open self-send (BT-3692); the release profile of the CLI (the generated code is the
   same either way).
@@ -1332,6 +1332,61 @@ touches no class variable, so the key binding does not appear in it (0.98, insid
 2142-2677). The +17% over main recorded under BT-3713 comes from the runtime path around the walk
 (`class_self_send/4` plus the single-home invocation boundary), not from the inlined access lowering. It is
 accepted here, and its owner is BT-3700 (late-binding guard and walk), as ADR 0130 already assigns.
+
+## BT-3766: class-variable access helpers and class self-send tag derivation
+
+Two runtime costs removed, plus the two measurements BT-3719 left open.
+
+- `beamtalk_class_vars` access helpers (`get`, `get_late`, `put`, `clear`, `has`, `capture`) now check the receiver
+  with the record match only (`class_tag/1`) and key by the metaclass tag. The class name (`tag_to_name/1`:
+  `atom_to_binary`, slicing, `binary_to_existing_atom`) is derived only inside the error paths, a read-only mirror
+  read, and the declared-set check of a read that misses. Error text is unchanged.
+- `beamtalk_class_dispatch:class_self_send/3`, `class_self_dispatch/3` and `class_self_dispatch_local/3` derive the
+  metaclass tag once and pass it to `check_class_self_extension/5` (it was three `list_to_atom` per send). The 4-arity
+  `ReceiverTag` forms keep two derivations because the receiver tag can differ from the class's own tag there
+  (ClassBuilder `super` path, subclass receiver).
+- `ssb_class_var_class.bt` no longer carries the local `acc` write or its stale comment (the loop body now touches
+  only class variables).
+- New `SsbMain` cases `class_on_do_raise_loop` (`SsbOnDoRaiseClass`, class-side `on:do:` whose protected block always
+  raises, run inside a class invocation, so every iteration takes the restore arm with a live snapshot) and
+  `instance_on_do_raise_loop` (`SsbOnDoRaiseObject`, same loop outside any invocation, so `restore/1` gets `none`).
+  2,000 iterations each, since a raise costs about 1000x a send.
+
+### Method and caveat: this was NOT an idle machine
+
+Method as in "Harness" above: `beamtalk run SsbMain run` (debug CLI), 7 interleaved rounds (before, after, before,
+...), medians with min-max, ns/op. "before" is `origin/main` `c82080e56`'s `beamtalk_class_vars` and
+`beamtalk_class_dispatch` beams, "after" is this change's, swapped into the same runtime `ebin` between runs; the
+compiler, stdlib and the (new) bench package are identical on both sides. A first warm-up run was discarded.
+
+**Load: 4-core shared container, load average 12.1 / 6.1 / 2.4 (1/5/15 min) when the runs started and 9.95 / 7.5 /
+3.4 when they finished. It was loaded throughout (load 10-12 on 4 cores), not idle**, so run-to-run spread is
+wide (min-max often 1.5-2x) and only large effects would show. The acceptance criterion asks for an idle re-run;
+that is filed as a follow-up under BT-3757 (BT-3789) and the figures below must not be read as idle numbers.
+
+| case (ns/op, median [min-max], n = 7) | before | after | ratio |
+|---|---|---|---|
+| gate 3: class-variable loop, 10 reads + 3 writes | 963 [790-2115] | 981 [819-1670] | 1.02 (noise) |
+| gate 1: class self-send, open | 215 [156-297] | 176 [155-382] | 0.82 (noise) |
+| class self-send, open, in `ifTrue:` arm | 285 [211-344] | 279 [210-431] | 0.98 |
+| class self-send, sealed | 149 [132-196] | 186 [133-357] | 1.25 (noise; direct-call path, untouched code) |
+| class self-send, inherited override (walk) | 2614 [2264-3461] | 2565 [2174-3482] | 0.98 |
+| class self-send, inherited plain | 3593 [2792-4239] | 3713 [2662-4884] | 1.03 |
+| gate 4, instance `on:do:` no raise | 3314 [2881-5166] | 3105 [2862-3748] | 0.94 |
+| gate 4, restore arm taken: class-side raise loop | 131418 [98956-188039] | 125957 [115262-163467] | 0.96 |
+| gate 4, raise loop outside a class invocation (`restore/1` gets `none`) | 138589 [90847-216808] | 130114 [94576-183241] | 0.94 |
+
+**Gate 3.** No measurable change (1.02, well inside the spread). That is expected: the compiler inlines class
+variable accesses as `erlang:get(_CVKeyN)` (BT-3719), so the loop never calls the helpers whose class-name
+derivation this change removes. The change helps the paths that do call them (FFI class methods, `capture/2`, block
+writes that are not inlined), which no `SsbMain` case exercises, so no speed-up is claimed. The BT-3719 figure
+(0.70 ratio, projected 410 ns) is therefore still a projection on the BT-3713 idle machine, now with a loaded
+re-run (963 ns here, loaded) that does not contradict it but cannot confirm the 570 ns budget either.
+
+**Gate 4, restore arm taken (first measurement).** The class-side loop that runs `restore/1` with a live snapshot
+costs 125957 ns/iteration against 130114 ns for the same raise loop with a `none` snapshot (ratio 0.97 after,
+0.95 before): the restore arm is not visible against the cost of the raise itself, which dominates by about 1000x.
+Under load this bounds the restore cost at well under the 10% gate; an idle run would tighten it.
 
 ## BT-3700: one derived flag for the class-side self-send guard
 

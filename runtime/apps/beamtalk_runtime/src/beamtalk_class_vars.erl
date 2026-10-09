@@ -46,7 +46,15 @@ entry points' API and take a class *name* (or the key). The access helpers
 (`get`, `get_late`, `put`, `clear`, `has`, `capture`, `with_snapshot`) take
 the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
 `'Name class'`) and derive the key from its tag; a `nil` or non-class-object
-receiver is an internal error.
+receiver is an internal error. On the success path the receiver check is only
+the record match (`class_tag/1`): the class name, which costs a tag-to-name
+derivation, is derived only when an error is raised, a read-only mirror is
+read, or a read misses and checks the declared set (BT-3766). An instance tag
+never has a key installed, so it reaches one of those paths and raises the
+same internal error there; the one exception is a capture fallback form
+(`get/3`, `get_late/3`, `has/3`, `capture/2`) given a capture map, which
+answers from that map without deriving the name. `with_snapshot/2` validates
+the tag fully before planting its marker.
 
 ## Semantics
 
@@ -113,7 +121,7 @@ come from `beamtalk_class_metadata:class_var_kinds/1`, the error values from
 -doc """
 The process-dictionary key holding `ClassName`'s variables: the key shape
 applied to the class's metaclass tag, the same key an access derives from
-`ClassSelf` (`self_key/1`).
+`ClassSelf`.
 
 Not for hot paths: it derives the tag through
 `beamtalk_class_registry:class_object_tag/1` (`list_to_atom`). Callers that
@@ -179,68 +187,68 @@ uninstall(?BT_CLASS_VARS_KEY(_) = Key) ->
 -doc "Read a class variable (live map, or the read-only mirror).".
 -spec get(class_self(), atom()) -> term().
 get(ClassSelf, Name) ->
-    Class = class_name(ClassSelf),
-    read_value(Class, Name, current_map(Class, self_key(ClassSelf), Name)).
+    Tag = class_tag(ClassSelf),
+    read_value(Tag, Name, current_map(Tag, Name)).
 
 -doc "Read a class variable; with no key present, read the creation-time `Captured` map.".
 -spec get(class_self(), atom(), map() | none) -> term().
 get(ClassSelf, Name, Captured) ->
-    Class = class_name(ClassSelf),
-    read_value(Class, Name, map_or_captured(Class, self_key(ClassSelf), Name, Captured)).
+    Tag = class_tag(ClassSelf),
+    read_value(Tag, Name, map_or_captured(Tag, Name, Captured)).
 
 -doc "Read a `late` class variable; raises `uninitialized_state_error` when unassigned.".
 -spec get_late(class_self(), atom()) -> term().
 get_late(ClassSelf, Name) ->
-    Class = class_name(ClassSelf),
-    late_value(Class, Name, current_map(Class, self_key(ClassSelf), Name)).
+    Tag = class_tag(ClassSelf),
+    late_value(Tag, Name, current_map(Tag, Name)).
 
 -doc "`get_late/2` with a creation-time capture fallback.".
 -spec get_late(class_self(), atom(), map() | none) -> term().
 get_late(ClassSelf, Name, Captured) ->
-    Class = class_name(ClassSelf),
-    late_value(Class, Name, map_or_captured(Class, self_key(ClassSelf), Name, Captured)).
+    Tag = class_tag(ClassSelf),
+    late_value(Tag, Name, map_or_captured(Tag, Name, Captured)).
 
 -doc "Write a class variable. Returns the assigned value.".
 -spec put(class_self(), atom(), term()) -> term().
 put(ClassSelf, Name, Value) ->
-    Class = class_name(ClassSelf),
-    Key = self_key(ClassSelf),
+    Tag = class_tag(ClassSelf),
+    Key = ?BT_CLASS_VARS_KEY(Tag),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             erlang:put(Key, Map#{Name => Value}),
             Value;
         ?BT_CLASS_VARS_RO(_) ->
-            beamtalk_class_var_errors:raise_read_only(Class, Name);
+            beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
-            beamtalk_class_var_errors:raise_unreachable(Class, Name, write)
+            beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, write)
     end.
 
 -doc "Remove a class variable (`clearField:`); same errors as `put/3`. Returns `ClassSelf` (`clearField: -> Self`).".
 -spec clear(class_self(), atom()) -> class_self().
 clear(ClassSelf, Name) ->
-    Class = class_name(ClassSelf),
-    Key = self_key(ClassSelf),
+    Tag = class_tag(ClassSelf),
+    Key = ?BT_CLASS_VARS_KEY(Tag),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             erlang:put(Key, maps:remove(Name, Map)),
             ClassSelf;
         ?BT_CLASS_VARS_RO(_) ->
-            beamtalk_class_var_errors:raise_read_only(Class, Name);
+            beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
-            beamtalk_class_var_errors:raise_unreachable(Class, Name, write)
+            beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, write)
     end.
 
 -doc "Presence test (`hasField:`).".
 -spec has(class_self(), atom()) -> boolean().
 has(ClassSelf, Name) ->
-    Class = class_name(ClassSelf),
-    has_value(current_map(Class, self_key(ClassSelf), Name), Name).
+    Tag = class_tag(ClassSelf),
+    has_value(current_map(Tag, Name), Name).
 
 -doc "`has/2` with a creation-time capture fallback.".
 -spec has(class_self(), atom(), map() | none) -> boolean().
 has(ClassSelf, Name, Captured) ->
-    Class = class_name(ClassSelf),
-    has_value(map_or_captured(Class, self_key(ClassSelf), Name, Captured), Name).
+    Tag = class_tag(ClassSelf),
+    has_value(map_or_captured(Tag, Name, Captured), Name).
 
 -doc """
 Capture for a block literal: the live map when the key is present (the
@@ -249,10 +257,10 @@ block's capture, or `none` at method level).
 """.
 -spec capture(class_self(), map() | none) -> map() | none.
 capture(ClassSelf, Outer) ->
-    Class = class_name(ClassSelf),
-    case erlang:get(self_key(ClassSelf)) of
+    Tag = class_tag(ClassSelf),
+    case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Class, undefined);
+        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, undefined);
         undefined -> Outer
     end.
 
@@ -312,12 +320,15 @@ while the class process is unregistered, and a read with no live class raises
 """.
 -spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
 with_snapshot(ClassSelf, Fun) ->
-    %% Validates the receiver (raises on a nil or non-class receiver).
-    _ = class_name(ClassSelf),
-    Key = self_key(ClassSelf),
+    Tag = class_tag(ClassSelf),
+    %% Unlike the access helpers, validate the tag fully before planting the
+    %% marker (an instance tag raises here, not on the first mirror read): this
+    %% is a once-per-region call, not a hot path.
+    _ = tag_to_name(Tag),
+    Key = ?BT_CLASS_VARS_KEY(Tag),
     case erlang:get(Key) of
         undefined ->
-            erlang:put(Key, ?BT_CLASS_VARS_RO(element(2, Key))),
+            erlang:put(Key, ?BT_CLASS_VARS_RO(Tag)),
             try
                 Fun()
             after
@@ -331,24 +342,21 @@ with_snapshot(ClassSelf, Fun) ->
 %% Internal
 %%====================================================================
 
-%% Derive the class name from a ClassSelf (`'Name class'` tag). An instance
-%% tag (no ` class` suffix) or an unknown base atom is a non-class receiver:
-%% internal error.
--spec class_name(term()) -> atom().
-class_name(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
-    tag_to_name(Tag);
-class_name(_) ->
+%% The metaclass tag of a ClassSelf: the cheap receiver check every access
+%% helper runs on its success path (BT-3766). A `nil` or non-object receiver
+%% raises here. The class name is derived (`tag_to_name/1`) only where it is
+%% needed: an error, a read-only mirror read, or the declared-set check of a
+%% read that misses. An instance tag (no ` class` suffix) or an unknown base
+%% atom therefore raises the same internal error at that point instead: no
+%% access ever installs a key for such a tag, so it takes the "no key" path.
+-spec class_tag(term()) -> atom().
+class_tag(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
+    Tag;
+class_tag(_) ->
     beamtalk_class_var_errors:raise_nil_receiver().
 
-%% The key of the class `ClassSelf` is the receiver of: the shape applied to
-%% its metaclass tag, exactly what the inlined accesses build. Only called
-%% after `class_name/1` validated the receiver.
--spec self_key(class_self()) -> key().
-self_key(#beamtalk_object{class = Tag}) ->
-    ?BT_CLASS_VARS_KEY(Tag).
-
 %% The class name a metaclass tag (`'Name class'`) names; a non-class tag
-%% raises the nil-receiver internal error.
+%% raises the nil-receiver internal error. Off the success path only.
 -spec tag_to_name(atom()) -> atom().
 tag_to_name(Tag) ->
     TagBin = atom_to_binary(Tag, utf8),
@@ -363,27 +371,28 @@ tag_to_name(Tag) ->
             end
     end.
 
--spec current_map(atom(), key(), atom()) -> map().
-current_map(Class, Key, Name) ->
-    case erlang:get(Key) of
+-spec current_map(atom(), atom()) -> map().
+current_map(Tag, Name) ->
+    case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
-        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, Name, read)
+        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
+        undefined -> beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, read)
     end.
 
--spec map_or_captured(atom(), key(), atom(), map() | none) -> map().
-map_or_captured(Class, Key, Name, Captured) ->
-    case erlang:get(Key) of
+-spec map_or_captured(atom(), atom(), map() | none) -> map().
+map_or_captured(Tag, Name, Captured) ->
+    case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
+        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
         undefined when is_map(Captured) -> Captured;
-        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, Name, read)
+        undefined -> beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, read)
     end.
 
 %% Resolve the ETS mirror by class *name* on every read, so a restarted class
 %% process is picked up transparently.
 -spec mirror(atom(), atom() | undefined) -> map().
-mirror(Class, Name) ->
+mirror(Tag, Name) ->
+    Class = tag_to_name(Tag),
     case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class)) of
         {ok, Map} -> Map;
         %% Registered but no snapshot row yet (a restarted class process that has
@@ -404,21 +413,21 @@ live_class_pid(Class) ->
 %% A name absent from the map is `nil` when declared (or when the declared
 %% set is unknown), an error only when the declared set is known without it.
 -spec read_value(atom(), atom(), map()) -> term().
-read_value(Class, Name, Map) ->
+read_value(Tag, Name, Map) ->
     case maps:find(Name, Map) of
         {ok, Value} ->
             Value;
         error ->
-            ok = assert_declared(Class, Name),
+            ok = assert_declared(tag_to_name(Tag), Name),
             nil
     end.
 
 -spec late_value(atom(), atom(), map()) -> term().
-late_value(Class, Name, Map) ->
+late_value(Tag, Name, Map) ->
     case maps:find(Name, Map) of
-        {ok, nil} -> beamtalk_class_var_errors:raise_uninitialized(Class, Name);
+        {ok, nil} -> beamtalk_class_var_errors:raise_uninitialized(tag_to_name(Tag), Name);
         {ok, Value} -> Value;
-        error -> beamtalk_class_var_errors:raise_uninitialized(Class, Name)
+        error -> beamtalk_class_var_errors:raise_uninitialized(tag_to_name(Tag), Name)
     end.
 
 %% Never raises on the name: `hasField:` is a non-raising presence test.
