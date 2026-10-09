@@ -1735,18 +1735,40 @@ coverage-all: coverage-runtime coverage-e2e coverage-stdlib coverage-bunit
     echo "📊 Merging eunit + E2E + stdlib coverage data..."
     # Merge all .coverdata files into eunit.coverdata so rebar3 covertool sees them
     # (covertool only imports eunit.coverdata, not e2e/stdlib coverdata)
+    # A truncated or corrupt file (for example from a force-killed E2E BEAM, BT-3785)
+    # makes cover:import/1 crash the cover server, losing everything imported so far.
+    # So probe each file in its own throwaway VM first and merge only the readable
+    # ones, with a visible warning for each file skipped.
+    GOOD=()
+    TOTAL=0
+    for f in _build/test/cover/*.coverdata; do
+        TOTAL=$((TOTAL + 1))
+        if erl -noshell -eval '
+            cover:start(),
+            [F] = init:get_plain_arguments(),
+            case catch cover:import(F) of ok -> halt(0); _ -> halt(1) end.
+        ' -extra "$f" >/dev/null 2>&1; then
+            GOOD+=("$f")
+        else
+            echo "  ⚠️  Skipping unreadable coverdata (truncated or corrupt): $f"
+        fi
+    done
+    if [ "${#GOOD[@]}" -eq 0 ]; then
+        echo "❌ No readable coverdata files in _build/test/cover"
+        exit 1
+    fi
     erl -noshell -eval '
         cover:start(),
-        Files = filelib:wildcard("_build/test/cover/*.coverdata"),
+        Files = init:get_plain_arguments(),
         lists:foreach(fun(F) ->
             io:format("  Importing: ~s~n", [F]),
-            cover:import(F)
+            ok = cover:import(F)
         end, Files),
         ok = cover:export("_build/test/cover/eunit.coverdata"),
-        io:format("  Merged ~p files into eunit.coverdata~n", [length(Files)]),
         cover:stop(),
         init:stop().
-    '
+    ' -extra "${GOOD[@]}"
+    echo "  Merged ${#GOOD[@]} of ${TOTAL} coverdata files"
     rebar3 cover --verbose
     rebar3 covertool generate
     python3 ../scripts/clean-covertool-xml.py
