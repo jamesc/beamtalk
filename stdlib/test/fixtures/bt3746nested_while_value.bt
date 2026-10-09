@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3746 (ADR 0131 Phase 1a): a `whileTrue:` nested in a `to:do:` body
+// writes a method local, in a value-type method. See
+// stdlib/test/bt3746nested_while_test.bt.
+
+Value subclass: Bt3746NestedWhileValue
+  run =>
+    s := 0
+    1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]
+    s
