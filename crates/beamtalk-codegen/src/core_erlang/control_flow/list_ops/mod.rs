@@ -124,6 +124,17 @@ pub(in crate::core_erlang) enum BodyKind {
         /// The item variable (element being iterated).
         item_var: String,
     },
+
+    /// `sort:` comparator body (BT-3771): last expression becomes the
+    /// predicate `lists:sort/2` receives. Not a fold step — `lists:sort`
+    /// controls comparison order — so the comparator threads its `StateAcc`
+    /// through the process dictionary instead of an accumulator: it reads
+    /// `StateAcc` from `state_key_var` on entry and the epilogue writes the
+    /// final `StateAcc{N}` back before answering the predicate.
+    FoldlSort {
+        /// The variable bound to the per-invocation process-dictionary key.
+        state_key_var: String,
+    },
 }
 
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
