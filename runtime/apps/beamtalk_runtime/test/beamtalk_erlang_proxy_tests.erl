@@ -1139,11 +1139,7 @@ native_call_retry_throw_passes_through_test() ->
 native_call_badarg_retry_discards_first_attempt_class_var_writes_test() ->
     %% BT-3728: the retry is a fresh attempt; writes the failed first attempt made
     %% (here `a := 99`) must not be visible to it, nor survive the call.
-    Key = {'$bt_class_vars', 'ProxyRetryTestClass class'},
-    erlang:erase(Key),
-    erlang:erase('$bt_class_vars_home'),
-    try
-        beamtalk_class_vars:install(Key, #{a => 1}),
+    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
         ?assertEqual(
             1,
             beamtalk_erlang_proxy:native_call(
@@ -1151,10 +1147,7 @@ native_call_badarg_retry_discards_first_attempt_class_var_writes_test() ->
             )
         ),
         ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    after
-        erlang:erase(Key),
-        erlang:erase('$bt_class_vars_home')
-    end.
+    end).
 
 native_call_beamtalk_error_passthrough_test() ->
     %% An already-#beamtalk_error{} re-raises unchanged (innermost wins)

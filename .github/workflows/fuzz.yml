@@ -442,6 +442,89 @@ jobs:
           SEED_COUNT=$(ls -1 stdlib/test/*.bt tests/repl-protocol/cases/*.btscript 2>/dev/null | wc -l)
           echo "**Corpus size:** $SEED_COUNT files (stdlib/test + tests/repl-protocol/cases, live)" >> $GITHUB_STEP_SUMMARY
 
+  # BT-3767: the ADR 0130 class-variable agreement corpus at a nightly budget.
+  # PR CI runs a reduced draw inside plain `cargo test` (16 programs on a
+  # BEAM, 64 codegen cases); `just test-class-var-corpus` defaults to 48 and
+  # 512; this job runs 4x both.
+  class-var-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Run class-variable agreement corpus (192 programs, 2048 codegen cases)
+        id: corpus
+        run: just test-class-var-corpus
+        env:
+          CV_CORPUS_CASES: 192
+          PROPTEST_CASES: 2048
+
+      # Like the fuzz jobs above, a failure files an issue. There are no
+      # artifacts: the job log holds the (index, seed, size) pairs and the
+      # failing program sources.
+      - name: Create issue on failure
+        if: steps.corpus.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `## Class-variable agreement corpus failure`,
+              ``,
+              `The nightly \`class-var-corpus\` job (\`just test-class-var-corpus\`, 192 programs on a BEAM, 2048 codegen cases) failed.`,
+              ``,
+              `**Run:** ${runUrl}`,
+              `**Date:** ${new Date().toISOString()}`,
+              ``,
+              `### Action Required`,
+              ``,
+              `1. Open the job log; the report lists each failing program's \`(index, seed, size)\` pair, cause and source.`,
+              `2. If the report says "probably a broken environment", check the runtime/stdlib build first.`,
+              `3. Reproduce locally with \`CV_CORPUS_CASES=192 just test-class-var-corpus\` (narrow with \`CV_CORPUS_SHAPES\`).`,
+              ``,
+              `### References`,
+              ``,
+              `- ADR 0130: class variables; BT-3705, BT-3767`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Class-var agreement corpus failure (run ${context.runId})`,
+              body: body,
+              labels: ['Bug', 'fuzzing', 'High']
+            });
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## Class-Variable Agreement Corpus Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.corpus.outcome }}" = "success" ]; then
+            echo "✅ **Success:** 192 programs agreed on the BEAM; 2048 codegen cases verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failure:** see the job log for the per-program report (index, seed, size, cause, source)" >> $GITHUB_STEP_SUMMARY
+          fi
+
   extended-proptest:
     runs-on: ubuntu-latest
     timeout-minutes: 30

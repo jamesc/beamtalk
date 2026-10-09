@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Tier 2 stateful nested-block bodies: `self`-send mutation buried
-//! inside nested `foldl`/`letrec` loop combinators, and class-builder
-//! cascade state-version handling.
+//! inside nested `foldl`/`letrec` loop combinators, an inline Tier 2
+//! `[...] value` threading a captured local through `StateAcc` (BT-1213),
+//! and class-builder cascade state-version handling.
 
 use super::*;
 
@@ -128,5 +129,103 @@ fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
          outer `greeting:` fun's own `a` parameter should have been threaded into \
          the erlangApply call, not the hardcoded \"Selector\" fallback (which is \
          unbound in this scope and would fail erlc). Generated code:\n{code}"
+    );
+}
+
+/// BT-1213: an inline Tier 2 `[...] value` in an actor method threads a
+/// captured local it mutates through `StateAcc`.
+#[test]
+fn test_bt1213_block_value_with_captured_mutation_actor() {
+    // [count := count + 1] value in actor context
+    // Parse from source to get a realistic AST
+    // Build AST manually: Object subclass: BT1213Actor
+    //   testIt => count := 0. [count := count + 1] value. count
+    let s = Span::new(0, 0);
+    let count_id = || Expression::Identifier(Identifier::new("count", s));
+
+    // count := count + 1
+    let add_expr = Expression::MessageSend {
+        receiver: Box::new(count_id()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![Expression::Literal(Literal::Integer(1), s)],
+        is_cast: false,
+        span: s,
+    };
+    let assign = Expression::Assignment {
+        target: Box::new(count_id()),
+        value: Box::new(add_expr),
+        type_annotation: None,
+        span: s,
+    };
+
+    // [count := count + 1] value
+    let block = Block::new(vec![], vec![bare(assign)], s);
+    let block_value = Expression::MessageSend {
+        receiver: Box::new(Expression::Block(block)),
+        selector: MessageSelector::Unary("value".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: s,
+    };
+
+    // count := 0
+    let init_count = Expression::Assignment {
+        target: Box::new(count_id()),
+        value: Box::new(Expression::Literal(Literal::Integer(0), s)),
+        type_annotation: None,
+        span: s,
+    };
+
+    let method = MethodDefinition::new(
+        MessageSelector::Unary("testIt".into()),
+        vec![],
+        vec![bare(init_count), bare(block_value), bare(count_id())],
+        s,
+    );
+
+    let class = ClassDefinition {
+        name: Identifier::new("BT1213Actor", s),
+        superclass: Some(Identifier::new("Actor", s)),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![method],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        uses: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        shape_version: None,
+        span: Span::new(0, 0),
+    };
+
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+
+    let code = generate_module(&module, CodegenOptions::new("bt@bt1213_actor"))
+        .expect("codegen should work");
+
+    // Actor codegen should thread count through StateAcc
+    assert!(
+        code.contains("__local__count"),
+        "Should thread count through StateAcc. Got:\n{code}"
     );
 }
