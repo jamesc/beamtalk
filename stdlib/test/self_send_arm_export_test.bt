@@ -95,7 +95,16 @@ TestCase subclass: SelfSendArmExportTest
   testOpenArmsCollectReader =>
     self assert: SsoArmExportOpen armsCollectReader equals: #(0, 1, 1)
 
+  testOpenReaderSumToDo =>
+    self assert: SsoArmExportOpen readerSumToDo equals: 31
+
+  testOpenReaderSumTimesRepeat =>
+    self assert: SsoArmExportOpen readerSumTimesRepeat equals: 31
+
   testOpenReaderSumDo => self assert: SsoArmExportOpen readerSumDo equals: 31
+
+  testOpenReaderSumWhile =>
+    self assert: SsoArmExportOpen readerSumWhile equals: 31
 
   testOpenElseArmDo => self assert: SsoArmExportOpen elseArmDo equals: 2
 
@@ -131,3 +140,21 @@ TestCase subclass: SelfSendArmExportTest
 
   testOpenReaderFirstDo =>
     self assert: SsoArmExportOpen readerFirstDo equals: 21
+
+  testOpenReaderFirstToDoInArm =>
+    self assert: SsoArmExportOpen readerFirstToDoInArm equals: 22
+
+  testOpenReaderFirstToDo =>
+    self assert: SsoArmExportOpen readerFirstToDo equals: 21
+
+  testOpenReaderFirstTimesRepeatInArm =>
+    self assert: SsoArmExportOpen readerFirstTimesRepeatInArm equals: 22
+
+  testOpenReaderFirstTimesRepeat =>
+    self assert: SsoArmExportOpen readerFirstTimesRepeat equals: 21
+
+  testOpenReaderFirstWhileInArm =>
+    self assert: SsoArmExportOpen readerFirstWhileInArm equals: 22
+
+  testOpenReaderFirstWhile =>
+    self assert: SsoArmExportOpen readerFirstWhile equals: 21

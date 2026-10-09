@@ -1,8 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3704 (ADR 0130 Phase 1): subclass-override spelling: the base's `bump` never writes and CvsOverrideSub overrides it to write, so every row's write is a late-bound self-send the base cannot see of the class-variable
-// semantics matrix. See class_var_semantics_override_test.bt.
+// BT-3704 (ADR 0130 Phase 1): subclass-override spelling of the class-variable
+// semantics matrix: the base's `bump` never writes and CvsOverrideSub overrides
+// it to write, so every row's write is a late-bound self-send the base cannot
+// see. The rows are the same as cvs_open.bt and cvs_sealed.bt. See
+// fixtures/class_var_semantics_matrix_test.bt.
 
 Object subclass: CvsOverrideBase
   classState: n = 0
@@ -75,6 +78,11 @@ Object subclass: CvsOverrideBase
         self bump
         i := i + 1
       ]
+    self.n
+
+  class rowLoopCondition =>
+    self reset
+    [self n < 3] whileTrue: [self bump]
     self.n
 
   class rowDo =>
@@ -167,6 +175,19 @@ Object subclass: CvsOverrideBase
       self bump
       1 / 0
     ] on: Error do: [:e | self bump]
+    self.n
+
+  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.
+  class rowNonMatchingInnerEnsure =>
+    self reset
+    [
+      [
+        [
+          self bump
+          1 / 0
+        ] on: RuntimeError do: [:e | nil]
+      ] ensure: [self bump]
+    ] on: Error do: [:e | nil]
     self.n
 
   class rowEnsure =>

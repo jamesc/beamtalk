@@ -48,6 +48,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     extract_package_from_module/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
+    clear_pending_load_errors_by_names/1,
     validate_class_update/3,
     is_stdlib_module/1,
     class_name_for_module/1,
@@ -443,6 +444,30 @@ drain_pending_load_errors_by_names(ClassNames) ->
                 fun(ClassName) ->
                     [{CN, Err} || {CN, Err} <- ets:take(beamtalk_pending_load_errors, ClassName)]
                 end,
+                ClassNames
+            )
+    end.
+
+-doc """
+Discard any pending load errors for the given class names (BT-3773).
+Called by every loader immediately before its own `code:load_binary/3`, so the
+drain that follows a failed load only sees errors parked by that attempt, assuming
+no other process loads the same class at the same time (the clear, load and drain
+sequence is not atomic across concurrent loaders; the worst case is a degraded
+error detail, never half-applied state).
+Paths that trigger the same `-on_load` gate but never drain
+(`beamtalk_module_activation`, code-server autoload) otherwise leave an entry
+behind that a later, unrelated failure of the same class would be blamed on.
+Covers every parked kind (`abi_mismatch`, `stdlib_shadowing`).
+""".
+-spec clear_pending_load_errors_by_names([atom()]) -> ok.
+clear_pending_load_errors_by_names(ClassNames) ->
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined ->
+            ok;
+        _ ->
+            lists:foreach(
+                fun(ClassName) -> ets:delete(beamtalk_pending_load_errors, ClassName) end,
                 ClassNames
             )
     end.

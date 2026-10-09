@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3704 (ADR 0130 Phase 1): sealed class spelling of the class-variable
-// semantics matrix. See class_var_semantics_sealed_test.bt.
+// semantics matrix. The rows are the same as cvs_open.bt and
+// cvs_override_base.bt. See fixtures/class_var_semantics_matrix_test.bt.
 
 sealed Object subclass: CvsSealed
   classState: n = 0
@@ -39,6 +40,11 @@ sealed Object subclass: CvsSealed
     x > 0 ifTrue: [self bump]
     self.n
 
+  class rowTimes =>
+    self reset
+    3 timesRepeat: [self bump]
+    self.n
+
   class rowTimesLocal =>
     self reset
     i := 0
@@ -67,6 +73,31 @@ sealed Object subclass: CvsSealed
       whileTrue: [
         self bump
         i := i + 1
+      ]
+    self.n
+
+  class rowLoopCondition =>
+    self reset
+    [self n < 3] whileTrue: [self bump]
+    self.n
+
+  class rowDo =>
+    self reset
+    #(1, 2, 3) do: [:x | self bump]
+    self.n
+
+  class rowCollect =>
+    self reset
+    #(1, 2, 3) collect: [:x | self bump]
+    self.n
+
+  class rowInject =>
+    self reset
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :x |
+        self bump
+        a + x
       ]
     self.n
 
@@ -142,9 +173,32 @@ sealed Object subclass: CvsSealed
     ] on: Error do: [:e | self bump]
     self.n
 
+  // `1 / 0` raises a TypeError, so the inner handler names RuntimeError to decline it.
+  class rowNonMatchingInnerEnsure =>
+    self reset
+    [
+      [
+        [
+          self bump
+          1 / 0
+        ] on: RuntimeError do: [:e | nil]
+      ] ensure: [self bump]
+    ] on: Error do: [:e | nil]
+    self.n
+
   class rowEnsure =>
     self reset
     [self bump] ensure: [self bump]
+    self.n
+
+  class rowEnsureRaise =>
+    self reset
+    [
+      [
+        self bump
+        1 / 0
+      ] ensure: [self bump]
+    ] on: Error do: [:e | nil]
     self.n
 
   class rowBare =>
@@ -222,6 +276,16 @@ sealed Object subclass: CvsSealed
     [
       self bump
       ^self.n
+    ] on: Error do: [:e | nil]
+    99
+
+  class rowOwnNlrEnsure =>
+    self reset
+    [
+      [
+        self bump
+        ^7
+      ] ensure: [self bump]
     ] on: Error do: [:e | nil]
     99
 

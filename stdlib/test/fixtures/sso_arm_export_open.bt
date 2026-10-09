@@ -64,6 +64,31 @@ Object subclass: SsoArmExportOpen
       ]
 
   // The reader runs in the same iteration as the arm and after it.
+  class readerSumToDo -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  class readerSumTimesRepeat -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
   class readerSumDo -> Integer =>
     self.n := 0
     seen := 0
@@ -75,6 +100,20 @@ Object subclass: SsoArmExportOpen
         acc := acc + self reader
       ]
     acc * 10 + self.n
+
+  class readerSumWhile -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    [seen < 3]
+      whileTrue: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  // --- arms -----------------------------------------------------------------
 
   // The write is in the else arm; the other arm is pure.
   class elseArmDo -> Integer =>
@@ -276,5 +315,97 @@ Object subclass: SsoArmExportOpen
         v := self reader
         v > 0 ifTrue: [self mark]
         i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstToDoInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        1
+          to: 3
+          do: [:i |
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            i =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstToDo -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstTimesRepeatInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        3
+          timesRepeat: [
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            seen =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstTimesRepeat -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        seen =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstWhileInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        [seen < 3]
+          whileTrue: [
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            seen =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstWhile -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    [seen < 3]
+      whileTrue: [
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        seen =:= 1 ifTrue: [self bump]
       ]
     self.flag * 10 + self.n
