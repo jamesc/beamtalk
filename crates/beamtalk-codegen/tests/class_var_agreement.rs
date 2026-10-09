@@ -31,9 +31,21 @@
 //! `beamtalk-cli/tests/cli/cli_class_var_agreement.rs`; it needs the runtime,
 //! this one does not.
 //!
-//! The properties draw [`Shapes::ENABLED`] (every shape except `local_touch`,
-//! whose failures are BT-3738 and show only when the program is executed).
-//! `local_touch` has its own property; see `local_touch_shapes_pass_verified_codegen`.
+//! The codegen property draws [`Shapes::all()`], `local_touch` included
+//! (BT-3767): `local_touch`'s failures (BT-3738) show only when the program is
+//! executed, and in-process codegen passes for it, so only the BEAM property
+//! leaves it out.
+//!
+//! # Budget (BT-3767)
+//!
+//! `all_shapes_pass_verified_codegen` runs [`DEFAULT_CODEGEN_CASES`] cases in a
+//! plain `cargo test` (every `just test-rust`, on three OSes per PR); setting
+//! `PROPTEST_CASES` overrides it. `just test-class-var-corpus` runs the full
+//! 512 cases and the nightly `class-var-corpus` job (`fuzz.yml`) 2048.
+//! `programs_interpret_and_render_deterministically` never compiles anything
+//! and keeps the shared 512-case default. Measured on a Linux dev container
+//! (debug build, this file's tests run in parallel): with 512 codegen cases
+//! the file took about 25 s, with 64 about 3 s.
 //!
 //! Only the open and sealed spellings are checked here: the override
 //! spelling is two classes in two files, and a class method's lowering
@@ -45,7 +57,8 @@ use beamtalk_core::test_helpers::class_var_program::{
     Program, Shapes, Spelling, corpus_cases_from_env, corpus_shapes_from_env, normalize_cause,
 };
 use beamtalk_core::test_helpers::test_support::{
-    arb_class_program, core_erlang_structural_issues, draw_class_programs, proptest_config_default,
+    arb_class_program, core_erlang_structural_issues, draw_class_programs, proptest_config_cases,
+    proptest_config_default,
 };
 use proptest::prelude::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -181,12 +194,21 @@ proptest! {
         }
     }
 
-    /// Every enabled shape (ADR 0130 Phase 3, BT-3713) compiles through debug
+}
+
+/// Cases `all_shapes_pass_verified_codegen` runs in a plain `cargo test`;
+/// see the module doc's budget section.
+const DEFAULT_CODEGEN_CASES: u32 = 64;
+
+proptest! {
+    #![proptest_config(proptest_config_cases(DEFAULT_CODEGEN_CASES))]
+
+    /// Every shape, `local_touch` included (BT-3767), compiles through debug
     /// codegen with the verifier on: no panic, no `internal:` diagnostic,
-    /// valid Core Erlang.
+    /// valid Core Erlang, every `on:do:` a class-variable catch boundary.
     #[test]
-    fn enabled_shapes_pass_verified_codegen(
-        (seed, size, program) in arb_class_program(Shapes::ENABLED)
+    fn all_shapes_pass_verified_codegen(
+        (seed, size, program) in arb_class_program(Shapes::all())
     ) {
         if let Err(e) = check_program(0, &program) {
             return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
@@ -194,10 +216,10 @@ proptest! {
     }
 }
 
-/// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen` in
-/// CI (an inlined `inject:into:` fold fun leaked its state version into the
-/// enclosing `StateAcc` loop). Explicit seeds, so no `.proptest-regressions`
-/// file is needed.
+/// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen`
+/// (now `all_shapes_pass_verified_codegen`) in CI (an inlined `inject:into:`
+/// fold fun leaked its state version into the enclosing `StateAcc` loop).
+/// Explicit seeds, so no `.proptest-regressions` file is needed.
 #[test]
 fn bt_3737_ci_seeds_pass_verified_codegen() {
     use beamtalk_core::test_helpers::class_var_program::gen_program;
@@ -250,26 +272,5 @@ fn measure_failure_rate() {
     println!("shapes {shapes:?}: {failed} of {cases} programs fail verified codegen");
     for (c, n) in by_cause {
         println!("  {n:>4} x {c}");
-    }
-}
-
-proptest! {
-    #![proptest_config(proptest_config_default())]
-
-    /// The `local_touch` shape (an outer local mutated inside a protected
-    /// block) together with every other shape. BT-3738 tracks the
-    /// `local_touch` failures. They show only when the program is executed
-    /// (`cli_class_var_agreement.rs`): in-process codegen passes (0 of 2000
-    /// programs measured with `measure_failure_rate` when BT-3713 landed), so
-    /// this property is `#[ignore]`d for symmetry with the execution one and
-    /// to keep the enabled set the same in both.
-    #[test]
-    #[ignore = "local_touch is excluded from the enabled shapes until BT-3738 is fixed"]
-    fn local_touch_shapes_pass_verified_codegen(
-        (seed, size, program) in arb_class_program(Shapes::all())
-    ) {
-        if let Err(e) = check_program(0, &program) {
-            return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
-        }
     }
 }
