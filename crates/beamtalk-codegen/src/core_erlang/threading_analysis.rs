@@ -12,8 +12,54 @@
 use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
-use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
-use std::collections::HashSet;
+use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::semantic_analysis::block_facts::{
+    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, local_threading_construct,
+    threaded_block_writes,
+};
+use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
+
+/// Which construct a [`ThreadedLocals`] set belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ThreadedConstruct {
+    /// A construct `beamtalk_core`'s [`local_threading_construct`]
+    /// recognizes, by family.
+    Inline(LocalThreadingFamily),
+    /// A `value`-family send to a Tier 2 block-valued local.
+    Tier2Value,
+    /// An ADR 0128 opaque-callable fold over a Tier 2 block-valued local,
+    /// in actor instance context.
+    OpaqueFold,
+}
+
+/// ADR 0131 §1: the threaded outer locals of one local-threading construct,
+/// built by [`CoreErlangGenerator::threaded_locals_of`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ThreadedLocals {
+    /// The construct.
+    pub(in crate::core_erlang) construct: ThreadedConstruct,
+    /// The construct's threaded set, sorted and never empty: every outer
+    /// local its blocks write, closed over nested producers. In the REPL
+    /// it includes the workspace bindings the construct writes.
+    pub(in crate::core_erlang) names: Vec<String>,
+    /// The subset of [`Self::names`] today's lowering packs into the
+    /// construct's `{Value, StateAcc}` result under `__local__` keys, sorted
+    /// and possibly empty. ADR 0131 phases 2–4 grow it until it is
+    /// [`Self::names`] for every construct.
+    pub(in crate::core_erlang) lowered: Vec<String>,
+}
+
+impl ThreadedLocals {
+    /// [`Self::lowered`], or `None` when today's lowering packs nothing for
+    /// this construct.
+    pub(in crate::core_erlang) fn into_lowered(self) -> Option<Vec<String>> {
+        if self.lowered.is_empty() {
+            None
+        } else {
+            Some(self.lowered)
+        }
+    }
+}
 
 impl CoreErlangGenerator {
     /// Check if mutation threading should be used for a block.
@@ -154,153 +200,222 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Collects outer-scope locals that are *written* inside a nested
-    /// counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`) or list op, including
-    /// write-only mutations that `collect_list_op_cross_scope_mutations` (read+write
-    /// only) misses.
+    /// ADR 0131 §1 "One recognizer, one set" (BT-3746): the threaded outer
+    /// locals of `expr`, or `None` when `expr` is not a local-threading
+    /// construct or threads no outer local.
     ///
-    /// A name is collected when it is in the nested block's `local_writes`, is not a
-    /// parameter of any enclosing block (`excluded_params` or the nested block's own
-    /// params), and resolves to an existing outer-scope binding (`lookup_var`). The
-    /// `lookup_var` guard is why this needs `&self` rather than being a free function:
-    /// it distinguishes a genuine outer local from a block-internal temporary.
-    pub(in crate::core_erlang) fn collect_nested_loop_outer_local_writes(
+    /// This is the only recognizer of a local-threading construct and the
+    /// only source of its threaded set. Every tuple builder packs from it,
+    /// through [`ThreadedLocals::lowered`] or the block-level kernel
+    /// [`Self::threaded_locals_of_blocks`] it is defined over, and every
+    /// unpacking site reads it back. A gate that says "this threads" can
+    /// therefore never pair with a smaller write-back set.
+    ///
+    /// It covers:
+    ///
+    /// - every construct `beamtalk_core`'s
+    ///   [`local_threading_construct`] recognizes: loops, folds and `do:`
+    ///   (including `eachWithIndex:`/`do:separatedBy:`), the conditional
+    ///   family, `on:do:`/`ensure:`, `value` sent to a block literal, the
+    ///   block-taking lookup selectors and `Result tryDo:`;
+    /// - a `value`-family send to a Tier 2 block-valued local
+    ///   (`tier2_local_vars`);
+    /// - an ADR 0128 opaque-callable fold over such a local, in actor
+    ///   instance context only.
+    ///
+    /// `match:` has no construct of its own. Its arms are not closures, so
+    /// their writes belong to whichever construct block contains the
+    /// `match:`, and the walk descends into them.
+    ///
+    /// The set is the transitive closure over nested producers (ADR 0131 §1
+    /// "Transitive closure"): core's [`threaded_block_writes`] descends into
+    /// the blocks of every nested construct whose family
+    /// [`LocalThreadingFamily::is_threaded_today`]. In the REPL it is the
+    /// bindings the construct writes: every name assigned that is not bound
+    /// inside the construct.
+    ///
+    /// Facts read: core's `block_facts` ([`local_threading_construct`],
+    /// [`threaded_block_writes`], which reads only the AST and the
+    /// `bound_outside` scope predicate) and `state_threading_selectors`
+    /// (through them, plus `state_threaded_block_arg_indices` for
+    /// [`ThreadedLocals::lowered`]). The scope predicate is
+    /// [`Self::lookup_var`]. The same two core functions drive the Phase 0
+    /// allow-set check in `beamtalk-core`'s
+    /// `semantic_analysis/validators/local_threading.rs`, with that pass's
+    /// own scope.
+    pub(in crate::core_erlang) fn threaded_locals_of(
         &self,
         expr: &Expression,
-        excluded_params: &HashSet<String>,
-        out: &mut HashSet<String>,
-    ) {
-        use crate::core_erlang::block_analysis::analyze_block;
-        use beamtalk_core::ast::MessageSelector;
+    ) -> Option<ThreadedLocals> {
+        let expr = expr.unwrap_parens();
+        let set = self.tier2_threaded_locals(expr).or_else(|| {
+            let construct = local_threading_construct(expr)?;
+            let lowered_blocks = self.lowered_construct_blocks(&construct, expr);
+            self.threaded_locals_of_blocks(
+                ThreadedConstruct::Inline(construct.family),
+                &construct.blocks,
+                &lowered_blocks,
+            )
+        });
+        #[cfg(test)]
+        recorded_sets::record(expr, set.as_ref());
+        set
+    }
 
-        // Peel parens then an assignment RHS (which may itself be parenthesized) so
-        // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
-        // `expr_has_nested_counted_loop_threading`.
-        let inner = match expr.unwrap_parens() {
-            Expression::Assignment { value, .. } => value.unwrap_parens(),
-            other => other,
+    /// The block-level kernel of [`Self::threaded_locals_of`]: the threaded
+    /// set of a construct of kind `construct` whose blocks are `blocks`,
+    /// with `lowered_blocks` (a subset of `blocks`) the ones today's
+    /// lowering packs. `None` when the set is empty.
+    ///
+    /// The loop, fold, conditional and exception generators call it
+    /// directly with the blocks they lower, because they are handed the
+    /// blocks rather than the send. They pass the same blocks
+    /// [`Self::threaded_locals_of`] derives from the send, so packing and
+    /// unpacking agree by construction.
+    pub(in crate::core_erlang) fn threaded_locals_of_blocks(
+        &self,
+        construct: ThreadedConstruct,
+        blocks: &[&Block],
+        lowered_blocks: &[&Block],
+    ) -> Option<ThreadedLocals> {
+        let repl = self.is_repl_mode();
+        let names = Self::write_names(threaded_block_writes(blocks, &|name| {
+            repl || self.lookup_var(name).is_some()
+        }));
+        if names.is_empty() {
+            return None;
+        }
+        // The REPL threads its loops and folds through the bindings map
+        // (`KeyStyle::ReplPlain`), not through `__local__` keys, so today's
+        // lowering packs none of their names. Its conditionals and
+        // exception handlers pack the locals bound in the generated code.
+        let repl_map_threaded = repl
+            && matches!(
+                construct,
+                ThreadedConstruct::Inline(LocalThreadingFamily::Loop | LocalThreadingFamily::Fold)
+            );
+        let lowered = if repl_map_threaded || lowered_blocks.is_empty() {
+            Vec::new()
+        } else {
+            Self::write_names(threaded_block_writes(lowered_blocks, &|name| {
+                self.lookup_var(name).is_some()
+            }))
         };
+        Some(ThreadedLocals {
+            construct,
+            names,
+            lowered,
+        })
+    }
+
+    /// The lowered set of a loop or fold generator's `body` block (and,
+    /// for `whileTrue:`/`whileFalse:`, its `condition`): the
+    /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks
+    /// [`Self::threaded_locals_of`] reads from the send. Empty when it
+    /// threads nothing.
+    pub(in crate::core_erlang) fn loop_threaded_locals(
+        &self,
+        body: &Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        let mut blocks: Vec<&Block> = Vec::with_capacity(2);
+        if let Some(Expression::Block(cond)) = condition {
+            blocks.push(cond);
+        }
+        blocks.push(body);
+        // `Loop` and `Fold` lower alike here (they differ only in which
+        // blocks the send contributes, which the caller has already picked).
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
+            &blocks,
+            &blocks,
+        )
+        .map(|t| t.lowered)
+        .unwrap_or_default()
+    }
+
+    /// The lowered set of a conditional's branch blocks, or of an
+    /// `on:do:`/`ensure:`'s protected body and handler blocks: the
+    /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks
+    /// [`Self::threaded_locals_of`] reads from the send. The same set drives
+    /// the seeding emitted by `generate_*_with_mutations` and the
+    /// extraction emitted by the method-body sequencer, so a branch that
+    /// does not run never leaves a `__local__` key missing.
+    pub(in crate::core_erlang) fn branch_threaded_locals(&self, blocks: &[&Block]) -> Vec<String> {
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::Conditional),
+            blocks,
+            blocks,
+        )
+        .map(|t| t.lowered)
+        .unwrap_or_default()
+    }
+
+    /// The blocks of `construct` (recognized from `expr`) whose writes
+    /// today's tuple builders pack into `__local__` keys. Empty for a
+    /// construct whose result is not unpacked that way yet: the unary loops,
+    /// `value` sent to a block literal (threaded by the inline-block path,
+    /// `get_inline_block_captured_mutations`), the lookup selectors and
+    /// `tryDo:` (ADR 0131 phases 2 and 4), and `eachWithIndex:`/
+    /// `do:separatedBy:` outside an actor's own fold
+    /// ([`Self::enumeration_threads_actor_state`]).
+    fn lowered_construct_blocks<'a>(
+        &self,
+        construct: &LocalThreadingConstruct<'a>,
+        expr: &'a Expression,
+    ) -> Vec<&'a Block> {
         let Expression::MessageSend {
             receiver,
-            selector: MessageSelector::Keyword(parts),
+            selector: MessageSelector::Keyword(_),
             arguments,
             ..
-        } = inner
+        } = expr
         else {
-            return;
+            return Vec::new();
         };
-        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-        // ensure:/on:do:/ifNotNil: aren't loops themselves, but a
-        // loop may be nested inside one of their blocks — recurse straight
-        // through (the receiver for ensure:/on:do:, any block arguments for
-        // all three) so a nested loop's outer-local write buried behind one
-        // of these constructs is still found. Mirrors the identical
-        // extension in `control_flow::collect_list_op_cross_scope_mutations`.
-        if beamtalk_core::state_threading_selectors::is_exception_selector(&sel)
-            || beamtalk_core::state_threading_selectors::is_conditional_selector(&sel)
-        {
-            let mut blocks: Vec<&beamtalk_core::ast::Block> = Vec::new();
-            if beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {
-                if let Expression::Block(b) = receiver.as_ref() {
-                    blocks.push(b);
-                }
-            }
-            for arg in arguments {
-                if let Expression::Block(b) = arg {
-                    blocks.push(b);
-                }
-            }
-            for block in blocks {
-                let mut all_excluded: HashSet<String> = excluded_params.clone();
-                all_excluded.extend(Self::block_param_names(block));
-                for stmt in &block.body {
-                    self.collect_nested_loop_outer_local_writes(
-                        &stmt.expression,
-                        &all_excluded,
-                        out,
-                    );
-                }
-            }
-            return;
-        }
-
-        let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
-            | "timesRepeat:" => match arguments.last() {
-                Some(Expression::Block(block)) => block,
-                _ => return,
-            },
-            "inject:into:" | "to:do:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => block,
-                _ => return,
-            },
-            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
-                Expression::Block(block) => block,
-                _ => return,
-            },
-            _ => return,
+        let literal = |e: Option<&'a Expression>| match e {
+            Some(Expression::Block(b)) => Some(b),
+            _ => None,
         };
-
-        let analysis = self
-            .semantic_facts
-            .block_profile(&body_block.span)
-            .cloned()
-            .unwrap_or_else(|| analyze_block(body_block));
-        // Accumulate enclosing params with this block's own params so a loop variable
-        // bound at any enclosing level is never mistaken for a threadable outer local.
-        let mut all_excluded: HashSet<String> = excluded_params.clone();
-        all_excluded.extend(Self::block_param_names(body_block));
-
-        for v in &analysis.local_writes {
-            if !all_excluded.contains(v.as_str()) && self.lookup_var(v).is_some() {
-                out.insert(v.clone());
+        let sel = construct.selector.as_str();
+        match construct.family {
+            LocalThreadingFamily::Conditional | LocalThreadingFamily::Exception => {
+                construct.blocks.clone()
             }
-        }
-
-        // Recurse so deeper nesting (loops two or more levels deep) is detected.
-        for stmt in &body_block.body {
-            self.collect_nested_loop_outer_local_writes(&stmt.expression, &all_excluded, out);
+            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
+                "whileTrue:" | "whileFalse:" => {
+                    match (literal(Some(receiver.as_ref())), literal(arguments.first())) {
+                        (Some(cond), Some(body)) => vec![cond, body],
+                        _ => Vec::new(),
+                    }
+                }
+                "eachWithIndex:" | "do:separatedBy:" => {
+                    let arity = if sel == "eachWithIndex:" { 1 } else { 2 };
+                    if arguments.len() == arity && self.enumeration_threads_actor_state() {
+                        construct.blocks.clone()
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => state_threaded_block_arg_indices(sel)
+                    .iter()
+                    .filter_map(|&i| literal(arguments.get(i)))
+                    .collect(),
+            },
+            LocalThreadingFamily::BlockValue
+            | LocalThreadingFamily::Lookup
+            | LocalThreadingFamily::TryDo => Vec::new(),
         }
     }
 
-    /// Generates code for field access (e.g., self.value).
-    /// Generates a method body with the reply tuple embedded.
-    ///
-    /// This is used for actor method dispatch to ensure state threading works correctly.
-    /// The generated code looks like:
-    /// ```erlang
-    /// let _Val1 = <value1> in let State1 = ... in
-    /// let _Val2 = <value2> in let State2 = ... in
-    ///
-    /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
-    /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
-    ///
-    /// The loop / foldl-list-op extraction set is not re-derived by a
-    /// parallel `threaded_vars_*` family — it delegates to the single packing-side
-    /// authority [`Self::compute_threaded_locals_for_loop`] (which already branches per
-    /// context). The extraction side reading back exactly the set the packing side wrote
-    /// is the invariant that keeps `maps:get/2` from hitting a missing `__local__` key;
-    /// sharing one function makes that symmetry structural rather than a hand-maintained
-    /// mirror. Conditionals retain [`Self::conditional_threaded_locals`], which is already
-    /// the shared seed/extract authority for the inline-`case` path.
-    ///
-    /// ADR 0131 Phase 0 (BT-3745): a construct this recognizes is only reached
-    /// in a position that threads its writes today. The check that enforces
-    /// that (the allow-set error, and the §6 error for a Tier 2 block value
-    /// with no return channel) runs earlier, in `beamtalk-core`'s semantic
-    /// analysis (`semantic_analysis/validators/local_threading.rs`), so the LSP
-    /// reports it as you type; it recognizes constructs with
-    /// `beamtalk_core::semantic_analysis::block_facts::local_threading_construct_blocks`.
-    /// Phase 1a (BT-3746) builds `threaded_locals_of` over the same core facts.
-    pub(in crate::core_erlang) fn get_control_flow_threaded_vars(
-        &self,
-        expr: &Expression,
-    ) -> Option<Vec<String>> {
-        // `_r := (loop)` wraps the construct in parentheses; peel them so
-        // the threaded locals are still discovered when the construct is an
-        // assignment RHS or sub-expression.
-        let expr = expr.unwrap_parens();
+    /// The Tier 2 shapes of [`Self::threaded_locals_of`]: a `value`-family
+    /// send to a Tier 2 block-valued local, and (actor instance context
+    /// only, ADR 0128 §"Explicitly narrowed") an opaque-callable fold over
+    /// one. Their set is the block's captured mutations, recorded by
+    /// `prescan_tier2_local_vars`. Today's tuple builders pack neither (the
+    /// Tier 2 protocol threads them), so [`ThreadedLocals::lowered`] is
+    /// empty.
+    fn tier2_threaded_locals(&self, expr: &Expression) -> Option<ThreadedLocals> {
         let Expression::MessageSend {
             receiver,
             selector,
@@ -310,212 +425,53 @@ impl CoreErlangGenerator {
         else {
             return None;
         };
-
-        // `whileTrue:` / `whileFalse:` are well-known; dispatch via the enum.
-        // The condition block (receiver) and body block (first argument) reads/writes are
-        // unioned by `compute_threaded_locals_for_loop(body, Some(condition))`.
-        if matches!(
-            selector.well_known(),
-            Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
-        ) {
-            let (Expression::Block(_), Some(Expression::Block(body_block))) =
-                (receiver.as_ref(), arguments.first())
-            else {
+        let (construct, local) = if selector.is_block_invocation() {
+            let Expression::Identifier(id) = receiver.as_ref() else {
                 return None;
             };
-            return Self::non_empty(
-                self.compute_threaded_locals_for_loop(body_block, Some(receiver.as_ref())),
+            (ThreadedConstruct::Tier2Value, id.name.as_str())
+        } else if self.context == CodeGenContext::Actor
+            && !self.in_class_method()
+            && !self.is_repl_mode()
+            && beamtalk_core::state_threading_selectors::is_opaque_callable_hom_send(expr)
+        {
+            let callable = beamtalk_core::state_threading_selectors::opaque_fold_callable_arg(
+                &selector.name(),
+                arguments,
             );
-        }
-
-        let MessageSelector::Keyword(parts) = selector else {
+            let Some(Expression::Identifier(id)) = callable.map(Expression::unwrap_parens) else {
+                return None;
+            };
+            (ThreadedConstruct::OpaqueFold, id.name.as_str())
+        } else {
             return None;
         };
-        let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
-
-        // `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
-        // fold (see `enumeration_ops`), packing the block's outer-local mutations
-        // into the same `__local__` StateAcc keys. The element block is the first
-        // argument; `do:separatedBy:`'s separator (the second block) runs in the
-        // fold too, so its outer-local writes are unioned in as well. Gated on
-        // `enumeration_threads_actor_state`: only the actor fold packs those keys
-        // into a `{Acc, State}` reply tuple, so outside it (value types, REPL, a
-        // direct-params loop) there is no `__local__` StateAcc to extract from —
-        // context-dependent threading is exactly why the shared
-        // `state_threaded_block_arg_indices` table excludes these two selectors
-        // (see its doc comment), so they're handled here instead of falling
-        // through to it.
-        match selector_name.as_str() {
-            "eachWithIndex:" if arguments.len() == 1 && self.enumeration_threads_actor_state() => {
-                return self.threaded_locals_of_loop_body(arguments.first());
-            }
-            "do:separatedBy:" if arguments.len() == 2 && self.enumeration_threads_actor_state() => {
-                return Self::non_empty(
-                    self.conditional_threaded_locals(&Self::block_args(arguments)),
-                );
-            }
-            _ => {}
-        }
-
-        // Conditionals thread outer-local mutations through the StateAcc
-        // map under `__local__` keys (see generate_*_with_mutations, which also seed
-        // those keys so extraction is safe even when the taken branch did not write
-        // them). `is_conditional_selector` names exactly the selectors with a
-        // `generate_*_with_mutations` inline-case generator — others (`ifFalse:ifTrue:`,
-        // …) are not routed through that path, so treating them here would be
-        // unreachable.
-        if beamtalk_core::state_threading_selectors::is_conditional_selector(&selector_name) {
-            return Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)));
-        }
-
-        // on:do:/ensure: thread outer-local mutations the same way a
-        // conditional's branches do — the try (receiver) block and any
-        // handler/cleanup block(s) are mutually-exclusive-or-sequential
-        // alternatives that are all compiled, only some of which run at a given
-        // call, so the union of their local writes is the threaded set. The
-        // seeding counterpart (`generate_on_do_with_mutations`/
-        // `generate_ensure_with_mutations`, via `seed_conditional_locals`)
-        // guarantees every `__local__` key extracted here is present even on a
-        // path that didn't itself write it.
-        if beamtalk_core::state_threading_selectors::is_exception_selector(&selector_name) {
-            let mut blocks: Vec<&Block> = Vec::new();
-            if let Expression::Block(b) = receiver.as_ref() {
-                blocks.push(b);
-            }
-            blocks.extend(Self::block_args(arguments));
-            return Self::non_empty(self.conditional_threaded_locals(&blocks));
-        }
-
-        // ADR 0118 §7: everything else is the loop/list-op family —
-        // `to:do:`/`to:by:do:`/`inject:into:` (block at a non-zero index) and
-        // the `timesRepeat:`/`do:`/`collect:`/… foldl family (block at index
-        // 0), all of which pack updated locals into the StateAcc map returned
-        // as `element(2, …)` of the result tuple via
-        // `compute_threaded_locals_for_loop`, the single packing-side
-        // authority. The shared `state_threaded_block_arg_indices` table
-        // (single source with `is_state_threading_keyword_selector`) says
-        // which argument index(es) hold the threaded block(s); every entry
-        // reaching this fallback today has exactly one, but the union path
-        // below stays generic rather than assuming that.
-        match beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices(
-            &selector_name,
-        ) {
-            [] => None,
-            [i] => self.threaded_locals_of_loop_body(arguments.get(*i)),
-            indices => {
-                let blocks: Vec<&Block> = indices
-                    .iter()
-                    .filter_map(|&i| match arguments.get(i) {
-                        Some(Expression::Block(b)) => Some(b),
-                        _ => None,
-                    })
-                    .collect();
-                Self::non_empty(self.conditional_threaded_locals(&blocks))
-            }
-        }
-    }
-
-    /// Computes the threaded outer-locals for a counted loop (`timesRepeat:`,
-    /// `to:do:`, `to:by:do:`) or foldl list/dict op body block via the single packing-side
-    /// authority [`Self::compute_threaded_locals_for_loop`], returning `None` when the set
-    /// is empty (so the caller's `if let Some(..)` short-circuits) or when `body_arg` is
-    /// not a literal block.
-    pub(in crate::core_erlang) fn threaded_locals_of_loop_body(
-        &self,
-        body_arg: Option<&Expression>,
-    ) -> Option<Vec<String>> {
-        let Some(Expression::Block(body_block)) = body_arg else {
+        if !self.tier2_local_vars.contains(local) {
             return None;
-        };
-        Self::non_empty(self.compute_threaded_locals_for_loop(body_block, None))
-    }
-
-    /// `Some(v)` when `v` is non-empty, else `None`. Lets the threaded-locals
-    /// extraction collapse a `Vec<String>` packing-side set into the `Option<Vec<String>>`
-    /// the Actor method-body sequencer consumes, where empty and absent are equivalent.
-    pub(in crate::core_erlang) fn non_empty(v: Vec<String>) -> Option<Vec<String>> {
-        if v.is_empty() { None } else { Some(v) }
-    }
-
-    /// Collects the `Block` arguments of a message send (e.g. the branch
-    /// blocks of a conditional), preserving order.
-    pub(in crate::core_erlang) fn block_args(arguments: &[Expression]) -> Vec<&Block> {
-        arguments
-            .iter()
-            .filter_map(|a| {
-                if let Expression::Block(b) = a {
-                    Some(b)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    /// Computes the outer-local variables that a conditional's branch
-    /// blocks mutate and that must be threaded back through the `StateAcc` map.
-    ///
-    /// A variable is threaded when it is written in some branch, is bound in the
-    /// enclosing (outer) scope, and is not a block parameter. This covers both
-    /// write-only (`flag ifTrue: [m := 9]`) and read+write
-    /// (`flag ifTrue: [sum := sum + 7]`) mutations, while excluding block-local
-    /// temporaries (which are not bound in the outer scope).
-    ///
-    /// The same set drives both the seeding emitted by `generate_*_with_mutations`
-    /// and the extraction emitted by the method-body sequencer, keeping them in
-    /// sync so a non-taken branch never leaves a `__local__` key missing.
-    pub(in crate::core_erlang) fn conditional_threaded_locals(
-        &self,
-        blocks: &[&Block],
-    ) -> Vec<String> {
-        use crate::core_erlang::block_analysis::analyze_block;
-
-        let mut set = HashSet::new();
-        for block in blocks {
-            let analysis = self
-                .semantic_facts
-                .block_profile(&block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(block));
-            let params = Self::block_param_names(block);
-            // `analyze_block` does not propagate `local_writes` out of nested
-            // (non-conditional) blocks, so an outer local mutated by a nested list op in a
-            // branch — e.g. `flag ifTrue: [ items do: [:x | sum := sum + x] ]` — is invisible
-            // to `analysis.local_writes`. Collect those cross-scope mutations too so the var is
-            // both seeded (by `seed_conditional_locals`) and extracted by the method-body
-            // sequencer. The branch body re-threads the nested op's mutation into the branch's
-            // returned StateAcc (the nested op is itself classified as state-threading), so the
-            // seeded key is overwritten with the live value rather than left stale.
-            let mut cross_scope = HashSet::new();
-            for stmt in &block.body {
-                Self::collect_list_op_cross_scope_mutations_recursive(
-                    &stmt.expression,
-                    &self.semantic_facts,
-                    &mut cross_scope,
-                );
-            }
-            for v in analysis.local_writes.iter().chain(cross_scope.iter()) {
-                if params.contains(v) {
-                    continue;
-                }
-                if self.lookup_var(v).is_some() {
-                    set.insert(v.clone());
-                }
-            }
         }
-        let mut out: Vec<String> = set.into_iter().collect();
-        // Deterministic order for stable codegen output.
-        out.sort();
-        out
+        let mut names = self
+            .tier2_local_var_captured_mutations
+            .get(local)
+            .cloned()
+            .unwrap_or_default();
+        if names.is_empty() {
+            return None;
+        }
+        names.sort();
+        names.dedup();
+        Some(ThreadedLocals {
+            construct,
+            names,
+            lowered: Vec::new(),
+        })
     }
 
-    /// Returns the set of block parameter names for exclusion from threaded vars.
-    pub(in crate::core_erlang) fn block_param_names(block: &Block) -> HashSet<String> {
-        block
-            .parameters
-            .iter()
-            .map(|p| p.name.to_string())
-            .collect()
+    /// The sorted, deduplicated names of `writes`.
+    fn write_names(writes: Vec<OuterLocalWrite>) -> Vec<String> {
+        let mut names: Vec<String> = writes.into_iter().map(|w| w.name.to_string()).collect();
+        names.sort();
+        names.dedup();
+        names
     }
 
     /// Validates a block's mutation analysis for shapes that can't correctly thread state:
@@ -599,5 +555,41 @@ impl CoreErlangGenerator {
         }
 
         Ok(())
+    }
+}
+
+/// Test-only record of every [`CoreErlangGenerator::threaded_locals_of`]
+/// answer, so the agreement corpus test (`tests/threaded_locals_agreement.rs`)
+/// can compare what codegen computed, in codegen's own scope, against the
+/// `beamtalk-core` diagnostic pass's recognizer.
+#[cfg(test)]
+pub(in crate::core_erlang) mod recorded_sets {
+    use super::ThreadedLocals;
+    use beamtalk_core::ast::Expression;
+    use beamtalk_core::source_analysis::Span;
+    use std::cell::RefCell;
+
+    /// One answer: the construct's span and its set (`None`: not a
+    /// construct, or it threads nothing).
+    pub(in crate::core_erlang) type Record = (Span, Option<Vec<String>>);
+
+    thread_local! {
+        static RECORDS: RefCell<Option<Vec<Record>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn record(expr: &Expression, set: Option<&ThreadedLocals>) {
+        RECORDS.with(|r| {
+            if let Some(records) = r.borrow_mut().as_mut() {
+                records.push((expr.span(), set.map(|s| s.names.clone())));
+            }
+        });
+    }
+
+    /// Runs `f` and returns what it recorded.
+    pub(in crate::core_erlang) fn recording<T>(f: impl FnOnce() -> T) -> (T, Vec<Record>) {
+        RECORDS.with(|r| *r.borrow_mut() = Some(Vec::new()));
+        let out = f();
+        let records = RECORDS.with(|r| r.borrow_mut().take()).unwrap_or_default();
+        (out, records)
     }
 }

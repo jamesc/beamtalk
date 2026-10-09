@@ -14,6 +14,7 @@ use super::super::sequencing::PrecompiledScope;
 use super::super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
 };
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
@@ -1045,7 +1046,9 @@ impl CoreErlangGenerator {
                             // Extract threaded locals from the control flow state
                             // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
                             let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            if let Some(threaded_vars) = self
+                                .threaded_locals_of(value)
+                                .and_then(ThreadedLocals::into_lowered)
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
@@ -1148,8 +1151,9 @@ impl CoreErlangGenerator {
                         });
                         let field_state = self.current_state_var();
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) =
-                            self.get_control_flow_threaded_vars(&arguments[1])
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(&arguments[1])
+                            .and_then(ThreadedLocals::into_lowered)
                         {
                             for var in &threaded_vars {
                                 let tv_core = self
@@ -1231,7 +1235,10 @@ impl CoreErlangGenerator {
                         let new_state = self.current_state_var();
                         // Extract threaded locals
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(value)
+                            .and_then(ThreadedLocals::into_lowered)
+                        {
                             for var in &threaded_vars {
                                 let tv_core = self
                                     .lookup_var(var)
@@ -1727,7 +1734,10 @@ impl CoreErlangGenerator {
 
                         // Extract threaded locals from the updated state
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(expr)
+                            .and_then(ThreadedLocals::into_lowered)
+                        {
                             for var in &threaded_vars {
                                 let core_var = self
                                     .lookup_var(var)
@@ -2996,7 +3006,7 @@ impl CoreErlangGenerator {
                 // this, `[nested-loop] ensure: [...]`/`on:do:` would be
                 // classified as pure here even though the nested loop's own
                 // cross-scope collector (this call site's sibling,
-                // `compute_threaded_locals_for_loop`) correctly detects the
+                // `loop_threaded_locals`) correctly detects the
                 // mutation — the same "two decision points disagree" shape as
                 // the do:/collect: self-classification gap this issue fixes.
                 if self.block_arg_needs_threading(block) {

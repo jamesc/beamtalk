@@ -516,7 +516,7 @@ impl CoreErlangGenerator {
     /// source of truth for this NARROWER loop/fold-shape table (deliberately
     /// not the broader
     /// `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
-    /// canonical table shared by `get_control_flow_threaded_vars` and
+    /// canonical table shared by `threaded_locals_of` and
     /// `beamtalk-lint`'s `DeadAssignment` check — see that function's doc
     /// comment for why). That table also covers `ifTrue:`/`ifFalse:`/
     /// `ifTrue:ifFalse:` (threaded via dedicated codegen elsewhere, not this
@@ -679,7 +679,7 @@ impl CoreErlangGenerator {
                 // Exclude this wrapping block's own
                 // parameters (e.g. `on:do:`'s exception var, `ifNotNil:`'s bound
                 // value) before merging into `out` — mirrors
-                // `collect_nested_loop_outer_local_writes`'s `all_excluded`
+                // `construct_outer_local_writes`'s block-parameter
                 // threading for the identical construct shape. Without this, a
                 // nested loop reporting a write to the wrapping block's own
                 // param (e.g. `x ifNotNil: [:v | nested do: [:i | v := v + i]]`)
@@ -805,7 +805,7 @@ impl CoreErlangGenerator {
         // The inner counted loop threads back exactly the outer locals its own body
         // mutates (read+write or write-only). If any of those overlap the threaded set
         // the outer loop must thread, the inner tuple must be unpacked into StateAcc.
-        let inner_threaded = self.compute_threaded_locals_for_loop(body_block, None);
+        let inner_threaded = self.loop_threaded_locals(body_block, None);
         inner_threaded.iter().any(|v| threaded_locals.contains(v))
     }
 

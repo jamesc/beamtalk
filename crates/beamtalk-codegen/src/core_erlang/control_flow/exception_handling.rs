@@ -483,7 +483,7 @@ impl CoreErlangGenerator {
     /// compilation strategy rather than the plain closure-based one:
     /// [`Self::needs_mutation_threading`]'s own answer, widened for class
     /// methods to every block that writes an outer local, which is what the
-    /// construct's result-unpacking side (`get_control_flow_threaded_vars`)
+    /// construct's result-unpacking side (`threaded_locals_of`)
     /// keys on. ADR 0130 §3: class variables are not threaded, so a class-
     /// variable write or a self-send never selects this strategy.
     fn block_needs_exception_threading(&self, block: &Block) -> bool {
@@ -491,12 +491,12 @@ impl CoreErlangGenerator {
         self.needs_mutation_threading(&analysis)
             // ADR 0130 §3: a class method threads only its outer locals (class
             // variables are written in place). The extraction side
-            // (`get_control_flow_threaded_vars`) unpacks the construct's
+            // (`threaded_locals_of`) unpacks the construct's
             // `{Result, StateAcc}` tuple exactly when the blocks write an outer
             // local, so the construct must produce that tuple in the same case,
             // including for a write-only local that `needs_mutation_threading`
             // does not count.
-            || (self.in_class_method() && !self.conditional_threaded_locals(&[block]).is_empty())
+            || (self.in_class_method() && !self.branch_threaded_locals(&[block]).is_empty())
     }
 
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
@@ -968,7 +968,7 @@ impl CoreErlangGenerator {
         // read back from the `StateAcc` the body returned: the cleanup's own
         // reads of it are otherwise the pre-`try` binding, because a binding made
         // inside the `try` is not in scope here (BT-3718).
-        let threaded = self.conditional_threaded_locals(&[receiver_block, cleanup_block]);
+        let threaded = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
         docs.extend(self.rebind_threaded_vars_from_state(&threaded, "StateAcc"));
 
         // On the SUCCESS path the cleanup runs after the try body, so
