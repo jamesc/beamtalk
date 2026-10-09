@@ -187,6 +187,15 @@ impl CodegenOptions {
         self
     }
 
+    /// Whether the [`Self::with_injected_verifier_violation`] test hook is
+    /// set. Lets drivers that do not go through `generate_module_with_warnings`
+    /// (the REPL expression path, BT-3778) honor the same hook.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn injects_verifier_violation(&self) -> bool {
+        self.inject_verifier_violation
+    }
+
     /// Sets the class module index for resolving cross-file class references.
     ///
     /// Maps Beamtalk class names (e.g. `"SchemeEnv"`) to their compiled Erlang
