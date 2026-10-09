@@ -1303,7 +1303,7 @@ test_invoke_installs_home_during_method() ->
     ClassName = 'BT3707HomeDuringClass',
     Key = beamtalk_class_vars:key(ClassName),
     Fun = fun(_Args, _ClassSelf) ->
-        {erlang:get(Key), erlang:get('$bt_class_vars_home')}
+        {erlang:get(Key), beamtalk_class_vars_test_support:home_key()}
     end,
     try
         beamtalk_extensions:init(),
@@ -1339,7 +1339,7 @@ test_invoke_nested_invocation_fails_loudly_outer_map_intact() ->
             )
         ),
         ?assertEqual(OuterMap, erlang:get(Key)),
-        ?assertEqual(Key, erlang:get('$bt_class_vars_home'))
+        ?assertEqual(Key, beamtalk_class_vars_test_support:home_key())
     after
         beamtalk_class_vars:uninstall(Key)
     end.
@@ -1363,7 +1363,7 @@ test_invoke_extension_nested_other_class_home_fails_loudly() ->
             )
         ),
         ?assertEqual(OuterMap, erlang:get(OuterKey)),
-        ?assertEqual(OuterKey, erlang:get('$bt_class_vars_home')),
+        ?assertEqual(OuterKey, beamtalk_class_vars_test_support:home_key()),
         ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName)))
     after
         beamtalk_extensions:unregister(ClassName, nestedExt, true),
@@ -1437,7 +1437,7 @@ test_invoke_extension_nlr_keeps_writes() ->
 %% The class's key and the home entry are both gone after a dispatch.
 assert_home_absent(ClassName) ->
     ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName))),
-    ?assertEqual(undefined, erlang:get('$bt_class_vars_home')).
+    ?assertEqual(undefined, beamtalk_class_vars_test_support:home_key()).
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants

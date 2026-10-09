@@ -1765,7 +1765,7 @@ test_local_call_other_class_keeps_home() ->
         %% Y is read through its mirror; X's home entry is untouched.
         Snap = beamtalk_class_vars:snapshot(),
         ?assertEqual(2, beamtalk_object_class:local_call(Y, lcRead, [])),
-        ?assertEqual(KeyX, erlang:get('$bt_class_vars_home')),
+        ?assertEqual(KeyX, beamtalk_class_vars_test_support:home_key()),
         ?assertEqual(#{n => 10}, erlang:get(KeyX)),
         ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcY'))),
         %% X's restore still works afterwards.

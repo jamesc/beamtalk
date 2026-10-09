@@ -1838,7 +1838,10 @@ run_initialize_write_raises_test() ->
             #beamtalk_error{kind = class_state_read_only},
             raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(SupTuple) end)
         ),
-        ?assertEqual(undefined, get({'$bt_class_vars', ClassName})),
+        %% The read-only snapshot region erased exactly the key it planted:
+        %% nothing is left under the class's (tag-keyed) key, and no home.
+        ?assertEqual(undefined, get(beamtalk_class_vars:key(ClassName))),
+        ?assertEqual(undefined, beamtalk_class_vars_test_support:home_key()),
         %% The supervisor is not leaked: process gone, name freed, child stopped.
         receive
             {'DOWN', SupRef, process, SupPid, _} -> ok
@@ -1852,6 +1855,8 @@ run_initialize_write_raises_test() ->
     after
         erase(bt3708_init_write),
         erase(bt1980_init_called),
+        %% A leaked snapshot must not leak into later tests in this process.
+        beamtalk_class_vars_test_support:clean(beamtalk_class_vars:key(ClassName)),
         (try
             unregister(RegName)
         catch
