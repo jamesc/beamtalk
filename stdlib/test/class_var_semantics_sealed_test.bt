@@ -130,6 +130,41 @@ TestCase subclass: ClassVarSemanticsSealedTest
     self assert: CvsSealed rowAsyncWrite equals: #class_state_unreachable
     self assert: CvsSealed n equals: 0
 
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testSyncDirectWriteToOpenDriverRaisesWriteError =>
+    CvsSealed reset
+    self assertWriteAbroadRaises: [CvsSealed rowSyncDirectWriteOpenDriver]
+    self assert: CvsSealed n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testAsyncDirectWriteToActorRaisesWriteError =>
+    CvsSealed reset
+    self assertWriteAbroadRaises: [CvsSealed rowAsyncDirectWrite]
+    self assert: CvsSealed n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  // The closure is kept by the test across a later invocation of the class,
+  // then run from the test's process.
+  testStoredClosureDirectWriteRaisesWriteError =>
+    CvsSealed reset
+    b := CvsSealed makeWriter
+    CvsSealed reset
+    self assertWriteAbroadRaises: [b value]
+    self assert: CvsSealed n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testReturnedClosureDirectWriteRaisesWriteError =>
+    CvsSealed reset
+    self assertWriteAbroadRaises: [CvsSealed makeWriter value]
+    self assert: CvsSealed n equals: 0
+
+  // ADR 0130 §5 control: the same direct-write block run from a later
+  // invocation of the class is at home and writes live (BT-3760)
+  testDirectWriteClosureLaterInvocationWrites =>
+    CvsSealed reset
+    CvsSealed run: CvsSealed makeWriter
+    self assert: CvsSealed n equals: 5
+
   // ADR 0130 §5 runtime-owned snapshot
   testPerformLocallyReadsSnapshot =>
     CvsSealed reset
@@ -166,3 +201,13 @@ TestCase subclass: ClassVarSemanticsSealedTest
     CvsInitSealed reset
     self should: [CvsInitSealed supervise] raise: #class_state_read_only
     self assert: CvsInitSealed n equals: 0
+
+  // ADR 0130 §5 (BT-3760): the write error, not the read error: kind
+  // class_state_unreachable, a message saying n cannot be *written* from this
+  // process, and the hint's remedy.
+  assertWriteAbroadRaises: aBlock =>
+    e := aBlock on: Error do: [:ex | ex]
+    self assert: (e isKindOf: Error) equals: true
+    self assert: e kind equals: #class_state_unreachable
+    self assert: (e message includesSubstring: "class variable n cannot be written from this process") equals: true
+    self assert: (e hint includesSubstring: "return the value and assign it there") equals: true

@@ -21,6 +21,7 @@
 // @load tests/repl-protocol/fixtures/class_var_single_home_loud.bt
 // @load tests/repl-protocol/fixtures/class_var_single_home_ids.bt
 // @load tests/repl-protocol/fixtures/class_var_single_home_tally.bt
+// @load tests/repl-protocol/fixtures/class_var_single_home_keeper.bt
 // @load tests/repl-protocol/fixtures/class_var_single_home_tally_main.bt
 // @load tests/repl-protocol/fixtures/class_var_single_home_probe.bt
 // @load tests/repl-protocol/fixtures/class_var_single_home_probechild.bt
@@ -77,6 +78,62 @@ CvshTally writeViaBatch
 
 // The uncaught error discards the whole invocation's writes, including the
 // reset made before the failed write, so the earlier 5 is unchanged.
+CvshTally total
+// => 5
+
+// ---------------------------------------------------------------------------
+// BT-3760: the ADR 0130 §5 *write* error. The rows above carry `[self add: 1]`,
+// whose read of total raises first; these carry a block whose only
+// class-variable access is a direct write (`[self.total := 5]`), so what is
+// pinned is "cannot be written from this process" and the hint's remedy.
+// Each failed invocation discards its own reset, so total stays 5.
+// ---------------------------------------------------------------------------
+
+// Carried synchronously into CvshBatch's class method.
+CvshTally writeDirectViaBatch
+// => ERROR: class variable total cannot be written from this process
+
+([CvshTally writeDirectViaBatch] on: Error do: [:e | e hint])
+// => A block that writes CvshTally's class variables _
+
+// Carried asynchronously to an actor, which runs it in its own process.
+CvshTally writeDirectViaKeeper
+// => ERROR: class variable total cannot be written from this process
+
+([CvshTally writeDirectViaKeeper] on: Error do: [:e | e hint])
+// => A block that writes CvshTally's class variables _
+
+// Returned from the class and run at once from the REPL process.
+CvshTally makeWriter value
+// => ERROR: class variable total cannot be written from this process
+
+([CvshTally makeWriter value] on: Error do: [:e | e hint])
+// => A block that writes CvshTally's class variables _
+
+// Stored in a REPL binding across a later invocation, then run from the REPL.
+writer := CvshTally makeWriter
+// => _
+
+CvshTally total
+// => 5
+
+writer value
+// => ERROR: class variable total cannot be written from this process
+
+([writer value] on: Error do: [:e | e hint])
+// => A block that writes CvshTally's class variables _
+
+CvshTally total
+// => 5
+
+// Control: the same block run from a later invocation of CvshTally is at
+// home and writes live.
+CvshTally reset
+// => 0
+
+CvshTally run: writer
+// => 5
+
 CvshTally total
 // => 5
 
