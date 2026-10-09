@@ -56,8 +56,8 @@ use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, Method
 use crate::ast_walker::{SendRef, walk_expression, walk_sends};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, analyze_method_body, class_var_accesses, compute_class_var_mutating_selectors,
-    escaping_blocks,
+    ClassVarAccesses, EscapeShape, HasFieldProbe, analyze_method_body, class_var_accesses,
+    compute_class_var_mutating_selectors, escaping_blocks,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::{HashMap, HashSet};
@@ -162,11 +162,11 @@ fn check_method_body(
 
     // (a) reads: returned or stored.
     for (block, shape) in escaping_blocks(body) {
-        let reads = class_var_accesses(&block, &ctx.class_vars).read_names();
-        if !reads.is_empty() {
+        let accesses = class_var_accesses(&block, &ctx.class_vars);
+        if accesses.reads_class_state() {
             report(
                 &block,
-                reads_diagnostic(ctx, &block, &reads, &shape_clause(shape)),
+                reads_diagnostic(ctx, &block, &accesses, &shape_clause(shape)),
             );
         }
     }
@@ -201,9 +201,9 @@ fn check_send(
     // (a) reads: passed to a send that runs or keeps it elsewhere.
     if let Some(how) = ctx.abroad_send_clause(receiver, sel, send.is_cast, actors) {
         for block in blocks() {
-            let reads = class_var_accesses(block, &ctx.class_vars).read_names();
-            if !reads.is_empty() {
-                report(block, reads_diagnostic(ctx, block, &reads, &how));
+            let accesses = class_var_accesses(block, &ctx.class_vars);
+            if accesses.reads_class_state() {
+                report(block, reads_diagnostic(ctx, block, &accesses, &how));
             }
         }
     }
@@ -298,32 +298,38 @@ impl ClassCtx<'_> {
         (!self.hierarchy.is_direct_call_eligible(target, selector)).then(|| target.to_string())
     }
 
-    /// The first class-variable write `block` makes: a direct `self.n := ...`
-    /// ([`class_var_accesses`]), else a `self`/own-class send, cascade messages
-    /// included, that may write one. Nested blocks included.
+    /// The first class-variable write `block` makes, in source order: a
+    /// direct `self.n := ...` ([`class_var_accesses`]) or a `self`/own-class
+    /// send, cascade messages included, that may write one, whichever starts
+    /// first. Nested blocks included.
     fn first_class_var_write(&self, block: &Block) -> Option<String> {
-        if let Some(var) = class_var_accesses(block, &self.class_vars)
+        let direct = class_var_accesses(block, &self.class_vars)
             .writes
             .into_iter()
-            .next()
-        {
-            return Some(format!("class variable '{var}'"));
-        }
-        let mut found = None;
+            .min_by_key(|(_, span)| span.start())
+            .map(|(var, span)| (span.start(), format!("class variable '{var}'")));
+        let mut through_send = None;
         for stmt in &block.body {
             walk_sends(&stmt.expression, &mut |send| {
-                if found.is_some() {
+                if through_send.is_some() {
                     return;
                 }
                 let name = send.selector.name();
                 if let Some(by_reference) = self.own_class_receiver(send.receiver) {
                     if self.may_write_class_var(&name, by_reference) {
-                        found = Some(format!("class variables through '{name}'"));
+                        through_send = Some((
+                            send.receiver.span().start(),
+                            format!("class variables through '{name}'"),
+                        ));
                     }
                 }
             });
         }
-        found
+        direct
+            .into_iter()
+            .chain(through_send)
+            .min_by_key(|(start, _)| *start)
+            .map(|(_, what)| what)
     }
 
     /// How `receiver` reaches this class's own class-side methods:
@@ -475,20 +481,71 @@ fn shape_clause(shape: EscapeShape) -> String {
     }
 }
 
-fn reads_diagnostic(ctx: &ClassCtx<'_>, block: &Block, reads: &[String], how: &str) -> Diagnostic {
-    let vars = reads.join(", ");
+/// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
+/// symbol, `` `hasField:` ``.
+fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> String {
+    let symbols: Vec<String> = probes
+        .iter()
+        .filter_map(|p| match p {
+            HasFieldProbe::Symbol(name) => Some(format!("#{name}")),
+            HasFieldProbe::Computed => None,
+        })
+        .collect();
+    match symbols.as_slice() {
+        [] => "`hasField:`".to_string(),
+        [one] => format!("`hasField: {one}`"),
+        many => format!("`hasField:` ({})", many.join(", ")),
+    }
+}
+
+/// Rule (a): `block` reads class state (a class variable, a `hasField:`
+/// probe, or both) and is `how`.
+fn reads_diagnostic(
+    ctx: &ClassCtx<'_>,
+    block: &Block,
+    accesses: &ClassVarAccesses,
+    how: &str,
+) -> Diagnostic {
     let class = ctx.class_name;
+    let vars = accesses
+        .reads
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (what, captured, hint) = if accesses.has_field_probes.is_empty() {
+        (
+            format!("reads class variable {vars} of {class}"),
+            "reads the values captured at creation",
+            "Read the class variable into a local before building the block, or have the \
+             block call a class method that returns it (ADR 0130 §5)",
+        )
+    } else {
+        let probe = probe_clause(&accesses.has_field_probes);
+        if vars.is_empty() {
+            (
+                format!("probes the class state of {class} with {probe}"),
+                "sees the class variables as they were at creation",
+                "Evaluate the `hasField:` test into a local before building the block, or \
+                 have the block call a class method that makes it (ADR 0130 §5)",
+            )
+        } else {
+            (
+                format!("reads class variable {vars} of {class} and probes it with {probe},"),
+                "reads the values captured at creation",
+                "Read the class variable and evaluate the `hasField:` test into locals before \
+                 building the block, or have the block call a class method that does (ADR \
+                 0130 §5)",
+            )
+        }
+    };
     Diagnostic::warning(
         format!(
-            "block reads class variable {vars} of {class} and is {how}: if run outside an \
-             invocation of {class}, it reads the values captured at creation"
+            "block {what} and is {how}: if run outside an invocation of {class}, it {captured}"
         ),
         block.span,
     )
-    .with_hint(
-        "Read the class variable into a local before building the block, or have the block \
-         call a class method that returns it (ADR 0130 §5)",
-    )
+    .with_hint(hint)
     .with_category(DiagnosticCategory::ClassStateAbroad)
 }
 

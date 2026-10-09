@@ -57,8 +57,7 @@ pub struct EscapeSite {
     pub line: usize,
     /// How the block escapes.
     pub shape: EscapeShape,
-    /// Class variables the block reads, and its `hasField:` probes, sorted
-    /// ([`crate::semantic_analysis::block_facts::ClassVarAccesses::read_names`]).
+    /// Class variables the block reads as `self.name`, sorted.
     pub reads: Vec<String>,
 }
 
@@ -236,7 +235,7 @@ fn scan_method(
     sites: &mut Vec<EscapeSite>,
 ) {
     for (block, shape) in escaping_blocks(&method.body) {
-        let reads = class_var_accesses(&block, vars).read_names();
+        let reads: Vec<String> = class_var_accesses(&block, vars).reads.into_iter().collect();
         if reads.is_empty() {
             continue;
         }

@@ -307,32 +307,34 @@ pub struct ClassVarAccesses {
     /// Class variables read as `self.name`, sorted. The target of a
     /// `self.name := v` write is not a read.
     pub reads: std::collections::BTreeSet<String>,
-    /// Class variables written as `self.name := v`, sorted.
-    pub writes: std::collections::BTreeSet<String>,
-    /// `self hasField: x` probes that ask the class-variable home (they lower
-    /// to `beamtalk_class_vars:has`, which reads through a capture abroad):
-    /// the probed name when `x` is a symbol literal, `hasField:` otherwise.
-    /// A `hasField:` that is a cascade message is not a probe: a cascade
-    /// dispatches every message, the first included, as an ordinary send,
-    /// never through the `HasField` intrinsic.
-    pub has_field_probes: std::collections::BTreeSet<String>,
+    /// Class variables written as `self.name := v`, sorted, each with the
+    /// span of its first write in source order.
+    pub writes: std::collections::BTreeMap<String, Span>,
+    /// `self hasField: x` probes, which ask the class-variable home (they
+    /// lower to `beamtalk_class_vars:has`, which reads through a capture
+    /// abroad). A probe is not a class-variable read: its argument may name no
+    /// declared variable, or be computed. A `hasField:` that is a cascade
+    /// message is not a probe: a cascade dispatches every message, the first
+    /// included, as an ordinary send, never through the `HasField` intrinsic.
+    pub has_field_probes: std::collections::BTreeSet<HasFieldProbe>,
+}
+
+/// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HasFieldProbe {
+    /// A symbol literal, `self hasField: #n`: the probed name, declared or not.
+    Symbol(String),
+    /// Any other argument, `self hasField: k`.
+    Computed,
 }
 
 impl ClassVarAccesses {
     /// Whether the block reads class state at all: a `self.name` read or a
-    /// `hasField:` probe. Exactly the blocks for which codegen binds a capture.
+    /// `hasField:` probe. Exactly the blocks for which codegen binds a capture
+    /// (outside a direct-called method) and the lint's read rule considers.
     #[must_use]
     pub fn reads_class_state(&self) -> bool {
         !self.reads.is_empty() || !self.has_field_probes.is_empty()
-    }
-
-    /// What the block reads, for a diagnostic: the read class variables then
-    /// the probes, sorted and deduplicated.
-    #[must_use]
-    pub fn read_names(&self) -> Vec<String> {
-        let all: std::collections::BTreeSet<&String> =
-            self.reads.iter().chain(&self.has_field_probes).collect();
-        all.into_iter().cloned().collect()
     }
 }
 
@@ -354,7 +356,10 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 } = target.as_ref()
                 {
                     if is_self_reference(receiver) && vars.contains(field.name.as_str()) {
-                        accesses.writes.insert(field.name.to_string());
+                        accesses
+                            .writes
+                            .entry(field.name.to_string())
+                            .or_insert_with(|| target.span());
                         written_targets.insert(std::ptr::from_ref::<Expression>(target));
                     }
                 }
@@ -378,9 +383,9 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
             {
                 let probed = match send.arguments.first() {
                     Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
-                        name.to_string()
+                        HasFieldProbe::Symbol(name.to_string())
                     }
-                    _ => "hasField:".to_string(),
+                    _ => HasFieldProbe::Computed,
                 };
                 accesses.has_field_probes.insert(probed);
             }
@@ -1784,15 +1789,27 @@ mod tests {
         items.iter().map(ToString::to_string).collect()
     }
 
+    fn written(acc: &ClassVarAccesses) -> std::collections::BTreeSet<String> {
+        acc.writes.keys().cloned().collect()
+    }
+
     #[test]
     fn class_var_accesses_write_only_block_reads_nothing() {
         let acc = cv_accesses("[:x | self.n := x]");
-        assert_eq!(acc.writes, names(&["n"]));
+        assert_eq!(written(&acc), names(&["n"]));
         assert!(!acc.reads_class_state(), "{acc:?}");
         // `self.n := self.n + 1` both writes and reads.
         let acc = cv_accesses("[self.n := self.n + 1]");
-        assert_eq!(acc.writes, names(&["n"]));
+        assert_eq!(written(&acc), names(&["n"]));
         assert_eq!(acc.reads, names(&["n"]));
+    }
+
+    #[test]
+    fn class_var_accesses_records_the_first_write_site() {
+        let src = "[self.n := 1. self.n := 2]";
+        let acc = cv_accesses(src);
+        let first = u32::try_from(src.find("self.n").expect("fixture")).expect("small");
+        assert_eq!(acc.writes["n"].start(), first, "{acc:?}");
     }
 
     #[test]
@@ -1809,11 +1826,23 @@ mod tests {
     #[test]
     fn class_var_accesses_has_field_probe_is_a_read_unless_cascaded() {
         let acc = cv_accesses("[self hasField: #n]");
-        assert_eq!(acc.has_field_probes, names(&["n"]));
+        assert_eq!(
+            acc.has_field_probes,
+            [HasFieldProbe::Symbol("n".to_string())].into()
+        );
         assert!(acc.reads_class_state());
-        assert_eq!(acc.read_names(), vec!["n".to_string()]);
+        assert!(
+            acc.reads.is_empty(),
+            "a probe is not a variable read: {acc:?}"
+        );
+        // An undeclared name is still a probe of the class-variable home.
+        let acc = cv_accesses("[self hasField: #nope]");
+        assert_eq!(
+            acc.has_field_probes,
+            [HasFieldProbe::Symbol("nope".to_string())].into()
+        );
         let acc = cv_accesses("[:k | self hasField: k]");
-        assert_eq!(acc.has_field_probes, names(&["hasField:"]));
+        assert_eq!(acc.has_field_probes, [HasFieldProbe::Computed].into());
         let acc = cv_accesses("[self hasField: #n; hasField: #m]");
         assert!(!acc.reads_class_state(), "{acc:?}");
         // Not to `self`: not a probe of the class-variable home.

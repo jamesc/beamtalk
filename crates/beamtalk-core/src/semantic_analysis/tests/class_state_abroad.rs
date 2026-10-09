@@ -616,11 +616,85 @@ fn has_field_probe_is_a_read_but_a_cascaded_has_field_is_not() {
     let d = only("  class a => [self hasField: #n]\n");
     assert_eq!(d.len(), 1, "{d:?}");
     assert!(
-        d[0].message.contains("reads class variable n of Counter"),
+        d[0].message
+            .contains("block probes the class state of Counter with `hasField: #n`"),
         "{}",
+        d[0].message
+    );
+    assert!(
+        !d[0].message.contains("reads class variable"),
+        "a probe is not a class-variable read: {}",
         d[0].message
     );
     // A cascade dispatches `hasField:` as an ordinary send: no capture, no read.
     let d = only("  class a => [self hasField: #n; hasField: #m]\n");
     assert!(d.is_empty(), "{d:?}");
+}
+
+/// The wording names only what the block does: a computed `hasField:`
+/// argument is not rendered as a variable name.
+#[test]
+fn has_field_probe_with_a_computed_argument_names_no_variable() {
+    let d = only("  class a => [:k | self hasField: k]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    let message = &d[0].message;
+    assert!(
+        message.contains("block probes the class state of Counter with `hasField:` and is"),
+        "{message}"
+    );
+    assert!(!message.contains("reads class variable"), "{message}");
+    let hint = d[0].hint.as_deref().unwrap_or_default();
+    assert!(hint.contains("`hasField:` test into a local"), "{hint}");
+    assert!(!hint.contains("Read the class variable"), "{hint}");
+}
+
+/// A probe of an undeclared name still reads class state (codegen binds a
+/// capture), but the message does not claim a class variable `nope` exists.
+#[test]
+fn has_field_probe_of_an_undeclared_name_claims_no_variable() {
+    let d = only("  class a => [self hasField: #nope]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    let message = &d[0].message;
+    assert!(
+        message.contains("probes the class state of Counter with `hasField: #nope`"),
+        "{message}"
+    );
+    assert!(!message.contains("class variable nope"), "{message}");
+    assert!(
+        message.contains("sees the class variables as they were at creation"),
+        "{message}"
+    );
+}
+
+#[test]
+fn reads_and_probes_are_both_named() {
+    let d = only("  class a => [self.n printString. self hasField: #m]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("reads class variable n of Counter and probes it with `hasField: #m`"),
+        "{}",
+        d[0].message
+    );
+}
+
+/// Rule (b) names the block's first write in source order, whether direct or
+/// through a send.
+#[test]
+fn first_write_is_named_in_source_order() {
+    let d = only("  class a => Driver each: [self bump. self.n := 1]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("writes class variables through 'bump'"),
+        "{}",
+        d[0].message
+    );
+    let d = only("  class a => Driver each: [self.n := 1. self bump]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("writes class variable 'n'"),
+        "{}",
+        d[0].message
+    );
 }
