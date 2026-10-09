@@ -407,12 +407,13 @@ where
 {
     // A cascade is visited before its receiver (pre-order), so its folded
     // first send is known by identity by the time the walk reaches it.
-    let mut cascade_firsts: Vec<*const Expression> = Vec::new();
+    let mut cascade_firsts: std::collections::HashSet<*const Expression> =
+        std::collections::HashSet::new();
     walk_expression(expr, &mut |e| {
         f(WalkEvent::Expr(e));
         match e {
             Expression::Cascade { receiver, .. } => {
-                cascade_firsts.push(std::ptr::from_ref::<Expression>(receiver));
+                cascade_firsts.insert(std::ptr::from_ref::<Expression>(receiver));
                 for send in cascade_sends(e) {
                     f(WalkEvent::Send(send));
                 }

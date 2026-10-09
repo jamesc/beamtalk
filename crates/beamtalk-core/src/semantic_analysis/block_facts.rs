@@ -345,7 +345,7 @@ impl ClassVarAccesses {
 pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAccesses {
     let mut accesses = ClassVarAccesses::default();
     // Write targets, by identity: the walk visits an assignment before its target.
-    let mut written_targets: Vec<*const Expression> = Vec::new();
+    let mut written_targets: HashSet<*const Expression> = HashSet::new();
     for stmt in &block.body {
         walk_expression_and_sends(&stmt.expression, &mut |event| match event {
             WalkEvent::Expr(Expression::Assignment { target, .. }) => {
@@ -355,7 +355,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 {
                     if is_self_reference(receiver) && vars.contains(field.name.as_str()) {
                         accesses.writes.insert(field.name.to_string());
-                        written_targets.push(std::ptr::from_ref::<Expression>(target));
+                        written_targets.insert(std::ptr::from_ref::<Expression>(target));
                     }
                 }
             }
