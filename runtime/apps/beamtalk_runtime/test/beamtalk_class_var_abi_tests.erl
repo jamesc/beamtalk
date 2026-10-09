@@ -33,10 +33,24 @@ setup() ->
     %% Owned by this setup process, not by the short-lived `-on_load` hook
     %% process that would otherwise create it on the first parked refusal
     %% (and take it down when that process exits, before the test drains it).
-    beamtalk_class_registry:ensure_pending_errors_table(),
-    ok.
+    %% Created without an heir and deleted in teardown, so it is never handed
+    %% to `beamtalk_runtime_sup` (which logs an unexpected 'ETS-TRANSFER').
+    ensure_pending_errors_table().
 
-teardown(_) ->
+ensure_pending_errors_table() ->
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined ->
+            _ = ets:new(beamtalk_pending_load_errors, [set, public, named_table]),
+            created;
+        _ ->
+            existing
+    end.
+
+teardown(PendingTable) ->
+    case PendingTable of
+        created -> ets:delete(beamtalk_pending_load_errors);
+        existing -> ok
+    end,
     lists:foreach(
         fun(Name) ->
             case beamtalk_class_registry:whereis_class(Name) of

@@ -125,7 +125,6 @@ Read `beamtalk_class_vars:protect/1`, `snapshot/0`, `restore/1` and ADR 0130 §4
 | beamtalk_behaviour_intrinsics.erl:3041 | definition_selector_span_call/5 | beamtalk_compiler:find_definition_selector_spans | not-applicable-no-block | workspace/compiler Erlang call via apply; no Beamtalk block |
 | beamtalk_behaviour_intrinsics.erl:3103 | selector_send_spans_call/3 | beamtalk_compiler:find_selector_send_spans | not-applicable-no-block | workspace/compiler Erlang call via apply; no Beamtalk block |
 | beamtalk_behaviour_intrinsics.erl:3189 | log_selector_rename/6 | repl_eval:emit_rewrite_change_entry | not-applicable-no-block | workspace/compiler Erlang call via apply; no Beamtalk block |
-| beamtalk_behaviour_intrinsics.erl:3411 | meta_for_module/1 | Module:__beamtalk_meta/0 | not-applicable-no-block | compiled metadata thunk |
 | beamtalk_behaviour_intrinsics.erl:3524 | publish_class_removed/2 | pg:get_members | not-applicable-no-block | OTP pg |
 | beamtalk_behaviour_intrinsics.erl:3582 | stop_class_actors/1 | gen_server:call(RegistryPid,{kill,Pid}) | not-applicable-no-block | call to registry process |
 | beamtalk_class_builder.erl:777 | maybe_stop_builder/1 | gen_server:stop builder | not-applicable-no-block | OTP stop |
@@ -143,25 +142,25 @@ Read `beamtalk_class_vars:protect/1`, `snapshot/0`, `restore/1` and ADR 0130 §4
 | beamtalk_class_instantiation.erl:350 | ancestor_builder_defaults/1 | gen_server:call(Pid, field_defaults) | not-applicable-other-process | call to ancestor class process |
 | beamtalk_class_instantiation.erl:384 | handle_new_compiled/4 | Module:new/0,1 (compiled value-type constructor) | not-applicable-no-block | field-default init, no caller-supplied block; {error,E,_} re-raised by caller |
 | beamtalk_class_instantiation.erl:600 | compute_is_constructible/2 | Module:new/0 probe | not-applicable-no-block | field-default init, no caller-supplied block |
-| beamtalk_class_metadata.erl:213 | ensure_table/2 | ets:new | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:268 | insert/5 | ets:insert | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:319 | merge_identity/5 | ets:update_element | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:362 | delete/1 | ets:delete | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:452 | merge_ancestor_map/3 | ReadOwnMapFun(Class) (live __beamtalk_meta/0 or build-time read) | not-applicable-no-block | metadata read, no block |
-| beamtalk_class_metadata.erl:480 | own_class_var_kinds/1 | Module:__beamtalk_meta/0 | not-applicable-no-block | compiled metadata thunk (BT-3764) |
-| beamtalk_class_metadata.erl:567 | match_subclasses/1 | ets:lookup | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:587 | foldl/2 | ets:foldl with internal Erlang Fun | not-applicable-no-block | internal Erlang fold fun, ETS |
-| beamtalk_class_metadata.erl:615 | foldl_modules/2 | ets:foldl with internal Erlang Fun | not-applicable-no-block | internal Erlang fold fun, ETS |
-| beamtalk_class_metadata.erl:665 | put_class_method_fun/3 | ets:insert | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:686 | put_direct_class_methods/2 | ets:update_element | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:736 | lookup_class_method_fun/2 | ets:lookup | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:756 | delete_class_method_funs/1 | ets:match_delete | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:791 | set_runtime_class_methods/2 | ets:update_element | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:814 | reset_runtime_class_methods/1 | ets:update_element | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:857 | insert_subclass_edge/2 | ets:insert | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:866 | delete_subclass_edge/2 | ets:delete_object | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:883 | field/2 | ets:lookup_element | not-applicable-no-block | ETS only |
-| beamtalk_class_metadata.erl:892 | row/1 | ets:lookup | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:216 | ensure_table/2 | ets:new | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:271 | insert/5 | ets:insert | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:322 | merge_identity/5 | ets:update_element | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:365 | delete/1 | ets:delete | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:523 | read_meta_detailed/1 | Module:__beamtalk_meta/0 | not-applicable-no-block | compiled metadata thunk; the shared guarded read behind read_meta/1, beamtalk_behaviour_intrinsics:meta_for_module/1 and beamtalk_class_var_abi:compiled_meta/2 (BT-3764) |
+| beamtalk_class_metadata.erl:541 | merge_ancestor_map/3 | ReadOwnMapFun(Class) (live __beamtalk_meta/0 or build-time read) | not-applicable-no-block | metadata read, no block |
+| beamtalk_class_metadata.erl:656 | match_subclasses/1 | ets:lookup | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:676 | foldl/2 | ets:foldl with internal Erlang Fun | not-applicable-no-block | internal Erlang fold fun, ETS |
+| beamtalk_class_metadata.erl:704 | foldl_modules/2 | ets:foldl with internal Erlang Fun | not-applicable-no-block | internal Erlang fold fun, ETS |
+| beamtalk_class_metadata.erl:754 | put_class_method_fun/3 | ets:insert | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:775 | put_direct_class_methods/2 | ets:update_element | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:825 | lookup_class_method_fun/2 | ets:lookup | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:845 | delete_class_method_funs/1 | ets:match_delete | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:880 | set_runtime_class_methods/2 | ets:update_element | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:903 | reset_runtime_class_methods/1 | ets:update_element | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:946 | insert_subclass_edge/2 | ets:insert | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:955 | delete_subclass_edge/2 | ets:delete_object | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:972 | field/2 | ets:lookup_element | not-applicable-no-block | ETS only |
+| beamtalk_class_metadata.erl:981 | row/1 | ets:lookup | not-applicable-no-block | ETS only |
 | beamtalk_class_monitor.erl:138 | init/1 | pg:get_members + class_name_for_pid | not-applicable-no-block | pg/ETS |
 | beamtalk_class_monitor.erl:244 | restart_within_budget/3 | beamtalk_class_registry:restart_class/1 | not-applicable-no-block | supervisor start_child; no block |
 | beamtalk_class_registry.erl:118 | live_class_entries/0 | all_classes + class_name/module_name_safe | not-applicable-no-block | class process calls |
@@ -183,8 +182,7 @@ Read `beamtalk_class_vars:protect/1`, `snapshot/0`, `restore/1` and ADR 0130 §4
 | beamtalk_class_var_probe.erl:82 | do_report/6 | logger/persistent_term/erlang:process_info | not-applicable-no-block | diagnostic probe, no block |
 | beamtalk_class_var_abi.erl:69 | collect_abi_refusals/1 | ets:new | not-applicable-no-block | ETS table creation |
 | beamtalk_class_var_abi.erl:74 | collect_abi_refusals/1 | Fun() (release-preflight module loads) | not-applicable-reraises | try/after only; deletes the collector table |
-| beamtalk_class_var_abi.erl:158 | compiled_meta/2 | Module:__beamtalk_meta/0 | not-applicable-no-block | compiled metadata thunk (moved from beamtalk_class_vars, BT-3764) |
-| beamtalk_class_var_abi.erl:210 | record_abi_refusal/2 | ets:insert | not-applicable-no-block | ETS (moved from beamtalk_class_vars, BT-3764) |
+| beamtalk_class_var_abi.erl:200 | record_abi_refusal/2 | ets:insert | not-applicable-no-block | ETS (moved from beamtalk_class_vars, BT-3764) |
 | beamtalk_class_vars.erl:291 | protect/1 | Fun() under snapshot/restore | converted | this is protect/1 itself |
 | beamtalk_class_vars.erl:319 | with_snapshot/2 | Fun() in with_snapshot/2 | not-applicable-reraises | try/after only; RO region, writes raise class_state_read_only so nothing to discard |
 | beamtalk_class_vars.erl:357 | tag_to_name/1 | binary_to_existing_atom | not-applicable-no-block | BIF |
