@@ -7389,6 +7389,27 @@ TestCase subclass: DatabaseTest
 - If `setUpOnce` raises an error, all tests in the class fail with a clear message.
 - Per-test `setUp`/`tearDown` still run for each test, providing both shared and per-test state.
 
+#### Shared Tests — Abstract Test Cases
+
+To run one list of tests against several subjects, write the tests once on an `abstract` `TestCase` subclass with a hook the subclasses answer, and give each subject a concrete subclass. A test class runs its own `test*` methods and those it inherits from every superclass below `TestCase` (as well as an inherited `setUp`/`tearDown`/`setUpOnce`/`tearDownOnce`); an `abstract` test class is never run itself.
+
+```beamtalk
+// stdlib/test/fixtures/stack_contract_test.bt
+abstract TestCase subclass: StackContractTest
+  subject => self subclassResponsibility
+
+  testPushPop =>
+    s := self subject new
+    s push: 1
+    self assert: s pop equals: 1
+
+// stdlib/test/list_stack_test.bt
+StackContractTest subclass: ListStackTest
+  subject => ListStack
+```
+
+Put the abstract class under `fixtures/` (fixtures are compiled for every test file, so the subclasses in other test files can name it as their superclass). `stdlib/test/fixtures/class_var_semantics_matrix_test.bt` is a worked example.
+
 #### Parallel Test Execution
 
 By default, `beamtalk test` runs test classes concurrently (`--jobs 0` = auto, uses BEAM scheduler count). Each class runs in its own process.
