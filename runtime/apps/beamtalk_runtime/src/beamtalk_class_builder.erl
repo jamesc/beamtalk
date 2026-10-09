@@ -41,7 +41,12 @@ timeout. The builder is single-use: create, configure, register, done.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([register/1, validate_class_method_arities/2, class_method_arity_error/4]).
+-export([
+    register/1,
+    validate_class_method_arities/2,
+    class_method_arity_error/4,
+    class_method_fun_arity/2
+]).
 
 %% Selector-shape helpers, shared with the workspace app via
 %% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.
@@ -590,11 +595,9 @@ validate_class_method_arities(ClassName, ClassMethodSpecs) when is_map(ClassMeth
                 %% Already found a mismatch; keep the first one.
                 Acc;
             (Selector, Fun, ok) when is_atom(Selector), is_function(Fun) ->
-                {arity, Arity} = erlang:fun_info(Fun, arity),
-                Expected = selector_arity(Selector) + 1,
-                case Arity =:= Expected of
-                    true -> ok;
-                    false -> {error, {Selector, Expected, Arity}}
+                case class_method_fun_arity(Selector, Fun) of
+                    ok -> ok;
+                    {error, {Expected, Actual}} -> {error, {Selector, Expected, Actual}}
                 end;
             (_Selector, _Other, ok) ->
                 ok
@@ -609,6 +612,24 @@ validate_class_method_arities(ClassName, ClassMethodSpecs) when is_map(ClassMeth
             {error, class_method_arity_error(ClassName, Selector, Expected, Actual)}
     end;
 validate_class_method_arities(_ClassName, _Other) ->
+    ok.
+
+-doc """
+The single class-method arity rule: a fun for `Selector` must have arity
+`selector_arity(Selector) + 1`. Returns `ok` on a match, or
+`{error, {Expected, Actual}}` (dispatch arities) on a mismatch. A non-atom
+`Selector` is not checked and returns `ok`, matching how
+`validate_class_method_arities/2` skips non-atom keys.
+""".
+-spec class_method_fun_arity(term(), fun()) -> ok | {error, {non_neg_integer(), non_neg_integer()}}.
+class_method_fun_arity(Selector, Fun) when is_atom(Selector), is_function(Fun) ->
+    {arity, Actual} = erlang:fun_info(Fun, arity),
+    Expected = selector_arity(Selector) + 1,
+    case Actual =:= Expected of
+        true -> ok;
+        false -> {error, {Expected, Actual}}
+    end;
+class_method_fun_arity(_Selector, _Fun) ->
     ok.
 
 -doc """

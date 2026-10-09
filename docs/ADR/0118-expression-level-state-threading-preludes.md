@@ -92,9 +92,9 @@ That patch has now grown into a parallel, unverified sub-system:
 - **A second, older mechanism for the same problem** in class-method
   context (*superseded by ADR 0130: class variables are no longer
   threaded, so this open let-chain no longer exists*). A class-method
-  self-send threads `ClassVars` via an "open let-chain": `generate_expression` emits `let ClassVarsN = … in` with no
-  body and records the result variable in `last_open_scope_result`;
-  consumers must notice and close the scope (`expression_doc_with_open_scope`,
+  self-send threads `ClassVars` via an "open let-chain":
+  `generate_expression` emits `let ClassVarsN = … in` with no body and
+  records the result variable in `last_open_scope_result`; consumers must notice and close the scope (`expression_doc_with_open_scope`,
   `closed_expression_doc`, `capture_subexpr_sequence`,
   `split_subexpr_for_preamble`, `hoist_subexpr_splits`, `bind_args_to_temps`,
   `hoist_open_scope_receiver`/`_argument` — 8 producers/helpers, ~80

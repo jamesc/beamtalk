@@ -692,12 +692,10 @@ ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
 """.
 -spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
 validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
-    {arity, Actual} = erlang:fun_info(Fun, arity),
-    Expected = beamtalk_class_builder:selector_arity(Selector) + 1,
-    case Actual =:= Expected of
-        true ->
+    case beamtalk_class_builder:class_method_fun_arity(Selector, Fun) of
+        ok ->
             ok;
-        false ->
+        {error, {Expected, Actual}} ->
             %% The class name is only needed for the error, so it is resolved on mismatch.
             beamtalk_error:raise(
                 beamtalk_class_builder:class_method_arity_error(
