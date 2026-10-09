@@ -9,7 +9,6 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
@@ -1796,7 +1795,7 @@ impl CoreErlangGenerator {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
             if sel == "do:" {
                 if let Some(Expression::Block(body)) = arguments.first() {
-                    return !self.loop_threaded_locals(body, None).is_empty();
+                    return !self.unpacked_loop_threaded_locals(body, None).is_empty();
                 }
             }
         }
@@ -1830,11 +1829,11 @@ impl CoreErlangGenerator {
                 Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
             ) {
                 if let Some(Expression::Block(body)) = arguments.first() {
-                    // Must match the same check used by generate_while_true/generate_while_false
-                    let analysis = super::block_analysis::analyze_block(body);
-                    if !self.needs_mutation_threading(&analysis)
-                        && !self.body_has_list_op_cross_scope_mutations(body)
-                    {
+                    // The same check `generate_while_true`/`generate_while_false`
+                    // use, including a stateful condition (BT-3746: a
+                    // condition-only write used to produce a tuple nobody
+                    // unpacked).
+                    if !self.while_loop_threads(receiver, body) {
                         return false;
                     }
                     // Verify there are actually threaded locals to extract
@@ -1845,7 +1844,9 @@ impl CoreErlangGenerator {
                     };
                     // see the analogous comment in
                     // `is_counted_loop_with_vt_local_threading`.
-                    return !self.loop_threaded_locals(body, condition).is_empty()
+                    return !self
+                        .unpacked_loop_threaded_locals(body, condition)
+                        .is_empty()
                         || self.loop_body_threads_value_self(body);
                 }
             }
@@ -1973,7 +1974,7 @@ impl CoreErlangGenerator {
     ///
     /// Used by [`Self::emit_vt_threaded_local_assignment`] to rebind the threaded locals
     /// after extracting them from the `StateAcc`. Returns the same set the construct's
-    /// codegen packed into the `StateAcc` (`loop_threaded_locals`).
+    /// codegen packed into the `StateAcc` (`loop_threaded_locals`, read through `unpacked_loop_threaded_locals`).
     pub(in crate::core_erlang) fn vt_construct_threaded_locals(
         &self,
         expr: &Expression,
@@ -1985,11 +1986,11 @@ impl CoreErlangGenerator {
             self.get_while_threaded_locals(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
             Self::counted_loop_body_block(expr)
-                .map(|body| self.loop_threaded_locals(body, None))
+                .map(|body| self.unpacked_loop_threaded_locals(body, None))
                 .unwrap_or_default()
         } else {
             Self::foldl_list_op_body_block(expr)
-                .map(|body| self.loop_threaded_locals(body, None))
+                .map(|body| self.unpacked_loop_threaded_locals(body, None))
                 .unwrap_or_default()
         }
     }
@@ -2125,10 +2126,7 @@ impl CoreErlangGenerator {
         ]);
         self.bind_var(var_name, &core_var);
 
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(value)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(value) {
             let rebind: Vec<&String> = threaded_vars
                 .iter()
                 .filter(|tl| tl.as_str() != var_name)
@@ -2187,7 +2185,8 @@ impl CoreErlangGenerator {
         // be unpacked here — before this issue it had no threaded locals, so
         // this predicate said `false` and the loop's result was sequenced
         // away, discarding the mutation.
-        !self.loop_threaded_locals(body, None).is_empty() || self.loop_body_threads_value_self(body)
+        !self.unpacked_loop_threaded_locals(body, None).is_empty()
+            || self.loop_body_threads_value_self(body)
     }
 
     /// ADR 0122 Decision 3: which extra trailing family the loop construct
@@ -2270,7 +2269,7 @@ impl CoreErlangGenerator {
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::counted_loop_body_block(expr)
-            .map(|body| self.loop_threaded_locals(body, None))
+            .map(|body| self.unpacked_loop_threaded_locals(body, None))
             .unwrap_or_default();
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
@@ -2300,7 +2299,7 @@ impl CoreErlangGenerator {
         let Some(body) = Self::foldl_list_op_body_block(expr) else {
             return false;
         };
-        !self.loop_threaded_locals(body, None).is_empty()
+        !self.unpacked_loop_threaded_locals(body, None).is_empty()
     }
 
     /// Returns the body block of a foldl list-op message send
@@ -2351,7 +2350,7 @@ impl CoreErlangGenerator {
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
-            .map(|body| self.loop_threaded_locals(body, None))
+            .map(|body| self.unpacked_loop_threaded_locals(body, None))
             .unwrap_or_default();
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
@@ -2384,7 +2383,7 @@ impl CoreErlangGenerator {
         } else {
             None
         };
-        self.loop_threaded_locals(body, condition)
+        self.unpacked_loop_threaded_locals(body, condition)
     }
 
     /// Generates a non-last `do:` loop (with value-type/class-method
@@ -3167,9 +3166,7 @@ impl CoreErlangGenerator {
         if !beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {
             return false;
         }
-        self.threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-            .is_some()
+        self.lowered_threaded_locals_of(expr).is_some()
             || !self
                 .exception_construct_threaded_families(expr)
                 .as_slice()
@@ -3280,10 +3277,7 @@ impl CoreErlangGenerator {
             expr_doc,
             " in ",
         ]];
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-        {
+        if let Some(threaded_vars) = self.lowered_threaded_locals_of(expr) {
             let state_var = self.fresh_temp_var("ExState");
             docs.push(docvec![
                 "let ",

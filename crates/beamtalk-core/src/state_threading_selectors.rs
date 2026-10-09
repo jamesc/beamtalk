@@ -328,6 +328,33 @@ pub fn lookup_block_arg_indices(sel: &str) -> &'static [usize] {
     }
 }
 
+/// The loop and fold selectors whose body writes an *enclosing*
+/// local-threading construct threads back today when the loop is nested in
+/// one of its blocks: `do:`, `collect:`, `select:`, `reject:`,
+/// `anySatisfy:`, `allSatisfy:`, `timesRepeat:`, `inject:into:`, `to:do:`,
+/// `to:by:do:`. Narrower than [`is_state_threading_keyword_selector`]: a
+/// nested `whileTrue:`, `detect:`, `count:`, … is threaded by its own
+/// lowering but its writes are not carried by the enclosing construct
+/// (ADR 0131 §1's transitive closure, phase 2, BT-3749). Consumed by
+/// `beamtalk-codegen`'s `collect_list_op_cross_scope_mutations` and by
+/// [`crate::semantic_analysis::block_facts::threaded_today_blocks`].
+#[must_use]
+pub fn is_nested_threaded_loop_selector(sel: &str) -> bool {
+    matches!(
+        sel,
+        "do:"
+            | "collect:"
+            | "select:"
+            | "reject:"
+            | "anySatisfy:"
+            | "allSatisfy:"
+            | "timesRepeat:"
+            | "inject:into:"
+            | "to:do:"
+            | "to:by:do:"
+    )
+}
+
 /// ADR 0131 §5: `Result tryDo:`, a catch-boundary construct. Keyed on the
 /// selector, not on the receiver being spelled `Result`.
 #[must_use]

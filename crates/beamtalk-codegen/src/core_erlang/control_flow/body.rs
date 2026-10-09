@@ -25,7 +25,6 @@ use super::super::threaded_ir::{
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::list_ops::BodyKind;
 use super::plan::ThreadingPlan;
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Block, Expression};
@@ -449,10 +448,7 @@ impl CoreErlangGenerator {
         if !self.is_do_with_vt_local_threading(expr) {
             return Ok(false);
         }
-        let threaded = self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-            .unwrap_or_default();
+        let threaded = self.lowered_threaded_locals_of(expr).unwrap_or_default();
         let open = self.generate_value_type_do_open(expr)?;
         stmts.push(ThreadedStmt::Statement(open, span));
         for var in &threaded {
@@ -528,10 +524,7 @@ impl CoreErlangGenerator {
             // `StateAcc`; see `lower_nested_vt_do`.
         } else if is_last && !has_direct_field_assignments {
             let produces_tuple = !hoisted_anything
-                && (self
-                    .threaded_locals_of(expr)
-                    .and_then(ThreadedLocals::into_lowered)
-                    .is_some()
+                && (self.lowered_threaded_locals_of(expr).is_some()
                     || self.control_flow_has_mutations(expr));
             if produces_tuple {
                 let tuple_var =
@@ -837,9 +830,7 @@ impl CoreErlangGenerator {
                 // the vars THIS construct itself threads, read before
                 // `generate_expression` below (which may push/pop scopes) so
                 // the lookup reflects this statement's own captured set.
-                let inner_threaded_vars = self
-                    .threaded_locals_of(expr)
-                    .and_then(ThreadedLocals::into_lowered);
+                let inner_threaded_vars = self.lowered_threaded_locals_of(expr);
                 let new_state;
                 if self.lower_nested_vt_do(expr, frame, span, &mut stmts)? {
                     // BT-3718: a nested value-type `do:` has no tuple to unpack

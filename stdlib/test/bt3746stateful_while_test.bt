@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3746 (ADR 0131 Phase 1a, PR #4230 review): `whileTrue:` loops whose
+// condition writes a method local, in each method context. Each condition
+// advances `t` to 3, so `run` answers #[3, 2] and the empty-body forms
+// answer 3. A stateful condition (one that sends to `self`) in a value-type
+// or actor method packs its write through the loop's `StateAcc`; the
+// threaded-locals rule (`TodayLowering::threads_loop_condition`) must
+// include it. A plain condition write, or any condition write in a class
+// method, crashes today (BT-3782). Fixtures:
+// fixtures/bt3746stateful_while_{class,value,actor}.bt.
+
+TestCase subclass: Bt3746StatefulWhileTest
+
+  testValueTypeStatefulCondition =>
+    self assert: Bt3746StatefulWhileValue new run equals: #[3, 2]
+
+  testValueTypeStatefulConditionEmptyBody =>
+    self assert: Bt3746StatefulWhileValue new runEmptyBody equals: 3
+
+  testActorStatefulCondition =>
+    self assert: Bt3746StatefulWhileActor spawn run equals: #[3, 2]
+
+  testActorStatefulConditionEmptyBody =>
+    self assert: Bt3746StatefulWhileActor spawn runEmptyBody equals: 3
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity); the correct answer is 3.
+  testClassStatefulConditionEmptyBody =>
+    self should: [Bt3746StatefulWhileClass runEmptyBody] raise: #arity_mismatch
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity); the correct answer is 3.
+  testClassPlainConditionEmptyBody =>
+    self should: [
+      Bt3746StatefulWhileClass plainEmptyBody
+    ] raise: #arity_mismatch
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity, raised with kind `error` rather than `arity_mismatch`); the correct answer is 3.
+  testValueTypePlainConditionEmptyBody =>
+    message := [
+      Bt3746StatefulWhileValue new plainEmptyBody
+    ] on: Exception do: [:e | e message]
+    self assert: message equals: "Wrong number of arguments: block expects 1 but was called with 0"
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity); the correct answer is 3.
+  testActorClassStatefulConditionEmptyBody =>
+    self should: [Bt3746StatefulWhileActor runEmptyBody] raise: #arity_mismatch
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity); the correct answer is 3.
+  testActorClassPlainConditionEmptyBody =>
+    self should: [
+      Bt3746StatefulWhileActor plainEmptyBody
+    ] raise: #arity_mismatch
+
+  // PIN-BUG BT-3782: pins today's answer (the condition block is called with the wrong arity); the correct answer is 3.
+  testActorPlainConditionEmptyBody =>
+    self should: [
+      Bt3746StatefulWhileActor spawn plainEmptyBody
+    ] raise: #arity_mismatch

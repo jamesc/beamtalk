@@ -713,18 +713,8 @@ impl CoreErlangGenerator {
         // them via StateAcc instead of dropping them.
         let body_block = match Self::block_arg_for_selector(&sel, arguments) {
             Some(block)
-                if matches!(
-                    sel.as_str(),
-                    "do:"
-                        | "collect:"
-                        | "select:"
-                        | "reject:"
-                        | "anySatisfy:"
-                        | "allSatisfy:"
-                        | "timesRepeat:"
-                        | "inject:into:"
-                        | "to:do:"
-                        | "to:by:do:"
+                if beamtalk_core::state_threading_selectors::is_nested_threaded_loop_selector(
+                    &sel,
                 ) =>
             {
                 block

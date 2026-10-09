@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a
+// method local, in a class method. The non-empty-body forms loop forever
+// today (BT-3782) and are not compiled here. See
+// stdlib/test/bt3746stateful_while_test.bt.
+
+Object subclass: Bt3746StatefulWhileClass
+
+  class check: n => n < 3
+
+  class runEmptyBody =>
+    t := 0
+    [
+      t := t + 1
+      self check: t
+    ] whileTrue: [nil]
+    t
+
+  class plainEmptyBody =>
+    t := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue: [nil]
+    t

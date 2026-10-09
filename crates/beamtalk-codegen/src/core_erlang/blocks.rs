@@ -20,7 +20,6 @@
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::util::index_lit;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -746,11 +745,7 @@ impl CoreErlangGenerator {
             return BlockExprKind::LocalAssignment;
         }
 
-        if self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-            .is_some()
-        {
+        if self.lowered_threaded_locals_of(expr).is_some() {
             return BlockExprKind::ControlFlowWithThreadedVars;
         }
 
@@ -1010,8 +1005,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         let threaded_vars = self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
+            .lowered_threaded_locals_of(expr)
             .expect("caller guarantees control flow with threaded vars");
 
         if threaded_vars.len() == 1 {
