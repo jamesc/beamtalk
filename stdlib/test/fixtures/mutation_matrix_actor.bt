@@ -334,6 +334,17 @@ Actor subclass: MutationMatrixActor
     self.log := result
     self.counter
 
+  // BT-3771: a comparator whose last statement is an assignment answers the
+  // assigned value as its predicate.
+  sortMutationAssignLast: items =>
+    result := items
+      sort: [:a :b |
+        self.counter := self.counter + 1
+        _r := a < b
+      ]
+    self.log := result
+    self.counter
+
   // ── Dictionary ────────────────────────────────────────────────────────
 
   // P3-10: Dictionary do: with field mutation in iteration block (BT-1488)

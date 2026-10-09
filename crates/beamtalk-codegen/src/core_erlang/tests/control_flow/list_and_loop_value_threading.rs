@@ -297,6 +297,24 @@ fn test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error() 
 }
 
 #[test]
+fn test_value_type_field_write_in_sort_comparator_is_compile_error() {
+    // BT-3771: the `sort:` comparator now lowers through the shared fold-body
+    // dispatch, so a value-type `self.x :=` in it is rejected exactly as in
+    // every other fold body (a fold threads no `Self` slot).
+    let field = field_assignment_rejection_field(
+        concat!(
+            "Value subclass: VtSortSelf\n",
+            "  state: total = 0\n\n",
+            "  run =>\n",
+            "    #(3, 1, 2) sort: [:a :b | self.total := self.total + 1. a < b]\n",
+            "    self.total\n",
+        ),
+        "bt@vtsortself",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
 fn test_value_type_field_write_in_conditional_nested_in_loop_without_sibling_local_is_compile_error()
  {
     // The headline repro: the same shape with NO sibling local
