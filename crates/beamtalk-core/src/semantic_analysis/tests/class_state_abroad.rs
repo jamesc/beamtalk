@@ -671,8 +671,9 @@ fn reads_and_probes_are_both_named() {
     let d = only("  class a => [self.n printString. self hasField: #m]\n");
     assert_eq!(d.len(), 1, "{d:?}");
     assert!(
-        d[0].message
-            .contains("reads class variable n of Counter and probes it with `hasField: #m`"),
+        d[0].message.contains(
+            "reads class variable n of Counter and probes its class state with `hasField: #m`"
+        ),
         "{}",
         d[0].message
     );

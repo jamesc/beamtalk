@@ -32,24 +32,37 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, Identifier};
 use beamtalk_core::semantic_analysis::block_facts::class_var_accesses;
 
+/// The one emitter of a `call 'beamtalk_class_vars':'<function>'(<receiver>,
+/// <args>..)` expression; every helper-call doc below goes through it.
+/// `receiver` is the leading argument (`ClassSelf`), or `None` for the
+/// receiver-less `snapshot`/`restore` boundary calls.
+fn beamtalk_class_vars_call(
+    function: &str,
+    receiver: Option<Document<'static>>,
+    args: Vec<Document<'static>>,
+) -> Document<'static> {
+    let mut parts: Vec<Document<'static>> = vec![
+        Document::Str("call 'beamtalk_class_vars':"),
+        leaf::atom(function),
+        Document::Str("("),
+    ];
+    for (i, arg) in receiver.into_iter().chain(args).enumerate() {
+        if i > 0 {
+            parts.push(Document::Str(", "));
+        }
+        parts.push(arg);
+    }
+    parts.push(Document::Str(")"));
+    Document::Vec(parts)
+}
+
 impl CoreErlangGenerator {
     /// `call 'beamtalk_class_vars':'<function>'(ClassSelf, <args>..)`.
     pub(super) fn class_var_helper_call_doc(
         function: &str,
         args: Vec<Document<'static>>,
     ) -> Document<'static> {
-        let mut parts: Vec<Document<'static>> = vec![
-            Document::Str("call 'beamtalk_class_vars':"),
-            leaf::atom(function),
-            Document::Str("("),
-            leaf::var("ClassSelf"),
-        ];
-        for arg in args {
-            parts.push(Document::Str(", "));
-            parts.push(arg);
-        }
-        parts.push(Document::Str(")"));
-        Document::Vec(parts)
+        beamtalk_class_vars_call(function, Some(leaf::var("ClassSelf")), args)
     }
 
     /// The miss-path helper call of a *read* (`get`, `get_late`, `has`): the
@@ -75,7 +88,9 @@ impl CoreErlangGenerator {
         docvec![
             "let ",
             leaf::var(snapshot_var.name()),
-            " = call 'beamtalk_class_vars':'snapshot'() in "
+            " = ",
+            beamtalk_class_vars_call("snapshot", None, vec![]),
+            " in "
         ]
     }
 
@@ -83,9 +98,9 @@ impl CoreErlangGenerator {
     /// exit half (ADR 0130 §4), the first statement of a catch's non-NLR arm.
     pub(super) fn class_var_restore_doc(snapshot_var: &ErlangVar) -> Document<'static> {
         docvec![
-            "do call 'beamtalk_class_vars':'restore'(",
-            leaf::var(snapshot_var.name()),
-            ") "
+            "do ",
+            beamtalk_class_vars_call("restore", None, vec![leaf::var(snapshot_var.name())]),
+            " "
         ]
     }
 
@@ -99,18 +114,25 @@ impl CoreErlangGenerator {
         docvec![
             "let ",
             leaf::var(capture_var.to_string()),
-            " = call 'beamtalk_class_vars':'capture'(ClassSelf, ",
-            match outer {
-                Some(var) => leaf::var(var.to_string()),
-                None => leaf::atom("none"),
-            },
-            ") in "
+            " = ",
+            Self::class_var_helper_call_doc(
+                "capture",
+                vec![match outer {
+                    Some(var) => leaf::var(var.to_string()),
+                    None => leaf::atom("none"),
+                }]
+            ),
+            " in "
         ]
     }
 
     /// The class key of an inlined access: the method's bound `CVKey` variable
     /// inside a class-method body (minted at the first access and bound by
     /// [`Self::with_class_var_key_binding`]), the inline key tuple elsewhere.
+    ///
+    /// `KeyScope::Unscoped` is the default for a generator that is not lowering
+    /// a class-method body (unit tests that lower a bare access); every
+    /// production class-method body runs under `with_class_var_key_binding`.
     fn class_var_key_ref_doc(&mut self) -> Document<'static> {
         match self.class_var_key_scope.clone() {
             KeyScope::Unscoped => class_var_keys::key_doc("ClassSelf"),

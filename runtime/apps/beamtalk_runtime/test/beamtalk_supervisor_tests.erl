@@ -843,12 +843,7 @@ hierarchy_method_not_found_no_parent_test() ->
 %% Fake class methods for the hierarchy-walk test above
 %%====================================================================
 
-class_children(ClassSelf) ->
-    %% BT-3708: a test flag makes `class children` write a class variable.
-    case get(bt3708_children_write) of
-        true -> beamtalk_class_vars:put(ClassSelf, n, 1);
-        _ -> ok
-    end,
+class_children(_ClassSelf) ->
     [].
 class_strategy(_ClassSelf) -> oneForOne.
 class_maxRestarts(_ClassSelf) -> 3.
@@ -1065,18 +1060,24 @@ start_child_via_class_method_write_raises_test() ->
 
 static_init_class_children_write_raises_test() ->
     FakeClassPid = setup_fake_class('BT3708Children'),
+    %% The fixture's `class children` always writes a class variable. (Loaded
+    %% explicitly: `erlang:function_exported/3` does not trigger a code load.)
+    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
+    beamtalk_class_metadata:insert(
+        'BT3708Children', beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
+    ),
     beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
-    put(bt3708_children_write, true),
     try
         ?assertMatch(
             #beamtalk_error{kind = class_state_read_only},
             raised_beamtalk_error(fun() ->
-                beamtalk_supervisor:static_init(?MODULE, 'BT3708Children')
+                beamtalk_supervisor:static_init(
+                    beamtalk_supervisor_writing_fixture, 'BT3708Children'
+                )
             end)
         ),
         ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Children')))
     after
-        erase(bt3708_children_write),
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Children', FakeClassPid)
     end.
@@ -1769,12 +1770,8 @@ startChild_arity2_success_test() ->
 %%====================================================================
 
 %% Fake class_initialize: method — records that it was invoked.
-class_initialize(ClassSelf, _SupTuple) ->
+class_initialize(_ClassSelf, _SupTuple) ->
     put(bt1980_init_called, true),
-    case get(bt3708_init_write) of
-        true -> beamtalk_class_vars:put(ClassSelf, n, 1);
-        _ -> ok
-    end,
     nil.
 
 'class_initialize:'(A, B) -> class_initialize(A, B).
@@ -1815,6 +1812,7 @@ run_initialize_write_raises_test() ->
     %% variable write raises instead of being silently discarded.
     beamtalk_class_metadata:new(),
     ClassName = 'BT3708InitWrite',
+    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
     RegName = beamtalk_class_registry:registry_name(ClassName),
     FakeClassPid = spawn(fun() ->
         receive
@@ -1824,7 +1822,9 @@ run_initialize_write_raises_test() ->
     try
         register(RegName, FakeClassPid),
         beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
-        beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
+        beamtalk_class_metadata:insert(
+            ClassName, beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
+        ),
         %% BT-3720: a real, named supervisor with a running child stands in for
         %% the one `supervise` started before the hook ran.
         SupName = bt3720_half_started_sup,
@@ -1832,8 +1832,7 @@ run_initialize_write_raises_test() ->
         {ok, WorkerPid} = wait_for_worker(),
         SupRef = erlang:monitor(process, SupPid),
         WorkerRef = erlang:monitor(process, WorkerPid),
-        SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, SupPid},
-        put(bt3708_init_write, true),
+        SupTuple = {beamtalk_supervisor, ClassName, beamtalk_supervisor_writing_fixture, SupPid},
         ?assertMatch(
             #beamtalk_error{kind = class_state_read_only},
             raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(SupTuple) end)
@@ -1853,7 +1852,6 @@ run_initialize_write_raises_test() ->
         end,
         ?assertEqual(undefined, whereis(SupName))
     after
-        erase(bt3708_init_write),
         erase(bt1980_init_called),
         %% A leaked snapshot must not leak into later tests in this process.
         beamtalk_class_vars_test_support:clean(beamtalk_class_vars:key(ClassName)),

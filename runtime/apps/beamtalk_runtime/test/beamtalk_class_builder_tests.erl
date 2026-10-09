@@ -986,6 +986,27 @@ selector_arity_uncovered_binary_chars_test() ->
     ?assertEqual(1, beamtalk_class_builder:selector_arity(',')),
     ?assertEqual(1, beamtalk_class_builder:selector_arity('\\')).
 
+%% class_method_fun_arity/2 — the single class-method arity rule.
+class_method_fun_arity_match_test() ->
+    ?assertEqual(ok, beamtalk_class_builder:class_method_fun_arity(answer, fun(_Self) -> 42 end)),
+    ?assertEqual(
+        ok, beamtalk_class_builder:class_method_fun_arity('+', fun(_Self, _Other) -> 42 end)
+    ).
+
+class_method_fun_arity_mismatch_test() ->
+    %% Expected/Actual are dispatch arities (selector_arity + 1).
+    ?assertEqual(
+        {error, {1, 2}},
+        beamtalk_class_builder:class_method_fun_arity(answer, fun(_Self, _Extra) -> 42 end)
+    ),
+    ?assertEqual(
+        {error, {2, 1}},
+        beamtalk_class_builder:class_method_fun_arity('at:', fun(_Self) -> 42 end)
+    ).
+
+class_method_fun_arity_non_atom_selector_skipped_test() ->
+    ?assertEqual(ok, beamtalk_class_builder:class_method_fun_arity(<<"x">>, fun() -> 42 end)).
+
 %% Sanity checks for the other arity branches.
 selector_arity_keyword_test() ->
     ?assertEqual(1, beamtalk_class_builder:selector_arity('foo:')),

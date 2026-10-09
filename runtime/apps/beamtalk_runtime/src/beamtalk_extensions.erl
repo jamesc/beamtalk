@@ -201,7 +201,7 @@ register(Class, Selector, Fun, Owner, Source) when
     (Source =:= undefined orelse is_binary(Source))
 ->
     Key = {Class, Selector},
-    ok = refuse_old_class_side_arity(Class, Selector, Fun),
+    ok = validate_class_side_arity(Class, Selector, Fun),
 
     %% BT-3669: flag transitions and row writes for one tag are serialized under
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
@@ -260,8 +260,8 @@ fail at call time with a raw `badarity`, so it is refused at registration with a
 structured error naming the selector and the real arity. Instance-side tags are
 unaffected.
 """.
--spec refuse_old_class_side_arity(atom(), atom(), function()) -> ok.
-refuse_old_class_side_arity(Class, Selector, Fun) ->
+-spec validate_class_side_arity(atom(), atom(), function()) -> ok.
+validate_class_side_arity(Class, Selector, Fun) ->
     {arity, Arity} = erlang:fun_info(Fun, arity),
     case Arity =/= 2 andalso beamtalk_class_registry:is_class_name(Class) of
         true ->

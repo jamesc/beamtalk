@@ -692,15 +692,16 @@ ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
 """.
 -spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
 validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
-    %% The class name is only needed for the error, so it is resolved on mismatch.
-    case beamtalk_class_builder:validate_class_method_arities(undefined, #{Selector => Fun}) of
+    case beamtalk_class_builder:class_method_fun_arity(Selector, Fun) of
         ok ->
             ok;
-        {error, Error} ->
-            %% Rebuild the message now that the class is known (`with_selector/2`
-            %% regenerates it; hint and details are untouched).
-            Named = Error#beamtalk_error{class = class_name(ClassPid)},
-            beamtalk_error:raise(beamtalk_error:with_selector(Named, Selector))
+        {error, {Expected, Actual}} ->
+            %% The class name is only needed for the error, so it is resolved on mismatch.
+            beamtalk_error:raise(
+                beamtalk_class_builder:class_method_arity_error(
+                    class_name(ClassPid), Selector, Expected, Actual
+                )
+            )
     end.
 
 -doc "Get instance variable names.".

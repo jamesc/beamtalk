@@ -531,7 +531,9 @@ fn reads_diagnostic(
             )
         } else {
             (
-                format!("reads class variable {vars} of {class} and probes it with {probe},"),
+                format!(
+                    "reads class variable {vars} of {class} and probes its class state with {probe}"
+                ),
                 "reads the values captured at creation",
                 "Read the class variable and evaluate the `hasField:` test into locals before \
                  building the block, or have the block call a class method that does (ADR \
