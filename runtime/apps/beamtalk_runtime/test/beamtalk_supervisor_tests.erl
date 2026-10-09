@@ -3090,3 +3090,156 @@ bt1990_cleanup_class_obj({beamtalk_object, _Class, _Mod, FakeClassPid}) ->
 %% assert only on the OTP translation.
 bt1990_build_from_bt_spec(BtSpec) ->
     [beamtalk_supervisor:spec_to_otp(BtSpec)].
+
+%%====================================================================
+%% BT-3759: concurrent `supervise` while the first caller's initialize: runs
+%%====================================================================
+
+%% Drives the real class_send -> startLink -> dispatch hook path with a real
+%% named supervisor. The first caller's `initialize:` hook blocks on a message
+%% barrier, so the second caller deterministically arrives mid-hook.
+
+concurrent_supervise_initialize_test_() ->
+    {setup, fun setup_class_dispatch_runtime/0, fun teardown_class_dispatch_runtime/1, fun(_) ->
+        [
+            {"initialize: raises: second caller sees the structured error, not a dead pid", fun() ->
+                    concurrent_supervise(fail)
+                end},
+            {"initialize: succeeds: second caller sees a fully initialised supervisor", fun() ->
+                concurrent_supervise(ok)
+            end}
+        ]
+    end}.
+
+concurrent_supervise(HookOutcome) ->
+    ClassName = 'BT3759ConcurrentSupervise',
+    Helper = beamtalk_supervisor_test_helper,
+    Tab = beamtalk_supervisor_test_helper_tab,
+    SupName = bt3759_named_sup,
+    beamtalk_supervisor_test_helper:reset(),
+    beamtalk_supervisor_test_helper:set_mode(named, SupName),
+    ets:insert(Tab, {coordinator, self()}),
+    ClassInfo = #{
+        superclass => none,
+        module => Helper,
+        class_methods => #{testSupervise => <<>>, 'initialize:' => <<>>},
+        class_state => #{}
+    },
+    {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    Parent = self(),
+    Caller = fun(Tag) ->
+        spawn_link(fun() ->
+            Outcome =
+                try
+                    {returned, beamtalk_class_dispatch:class_send(ClassPid, testSupervise, [])}
+                catch
+                    Class:Reason -> {raised, Class, Reason}
+                end,
+            Parent ! {Tag, Outcome}
+        end)
+    end,
+    try
+        Caller(first),
+        %% Barrier: the first caller is now inside the initialize: hook.
+        HookPid =
+            receive
+                {init_entered, P} -> P
+            after 5000 -> error(hook_not_entered)
+            end,
+        Caller(second),
+        %% The second caller must be parked behind the hook and must not have
+        %% been handed the supervisor yet.
+        case await_second_caller(5000) of
+            waiting ->
+                ok;
+            {early, Early} ->
+                SupPid0 = whereis(SupName),
+                error(
+                    {second_caller_returned_before_initialize_finished, Early,
+                        {sup_alive, is_pid(SupPid0) andalso is_process_alive(SupPid0)}}
+                )
+        end,
+        SupPid = whereis(SupName),
+        SupRef = erlang:monitor(process, SupPid),
+        HookPid ! {hook, HookOutcome},
+        First =
+            receive
+                {first, F} -> F
+            after 5000 -> error(first_caller_timeout)
+            end,
+        Second =
+            receive
+                {second, S} -> S
+            after 5000 -> error(second_caller_timeout)
+            end,
+        case HookOutcome of
+            fail ->
+                ?assertMatch({raised, _, _}, First),
+                receive
+                    {'DOWN', SupRef, process, SupPid, _} -> ok
+                after 2000 -> error(supervisor_not_stopped)
+                end,
+                {raised, _, SecondReason} = Second,
+                ?assertMatch(
+                    #beamtalk_error{kind = supervisor_start_failed},
+                    unwrap_raised(SecondReason)
+                );
+            ok ->
+                ?assertMatch({returned, _}, First),
+                {returned, SecondResult} = Second,
+                %% The hook had finished before the second caller returned.
+                ?assertEqual([{initialized, true}], ets:lookup(Tab, initialized)),
+                ?assertMatch(
+                    #{okValue := {beamtalk_supervisor, ClassName, Helper, SupPid}},
+                    SecondResult
+                ),
+                ?assert(is_process_alive(SupPid)),
+                erlang:demonitor(SupRef, [flush])
+        end
+    after
+        case whereis(SupName) of
+            undefined ->
+                ok;
+            Live ->
+                try
+                    gen_server:stop(Live)
+                catch
+                    _:_ -> ok
+                end
+        end,
+        catch gen_server:stop(ClassPid, normal, 5000),
+        beamtalk_supervisor_test_helper:reset()
+    end.
+
+%% Polls (yielding, no fixed sleep) until the second caller is parked on the
+%% initializing gate, or it has already returned/raised.
+await_second_caller(TimeoutMs) ->
+    await_second_caller_loop(erlang:monotonic_time(millisecond) + TimeoutMs).
+
+await_second_caller_loop(Deadline) ->
+    receive
+        {second, Early} -> {early, Early}
+    after 0 ->
+        case init_gate_waiters() of
+            [_ | _] ->
+                waiting;
+            [] ->
+                case erlang:monotonic_time(millisecond) >= Deadline of
+                    true ->
+                        error(second_caller_neither_waiting_nor_returned);
+                    false ->
+                        erlang:yield(),
+                        await_second_caller_loop(Deadline)
+                end
+        end
+    end.
+
+init_gate_waiters() ->
+    case ets:info(beamtalk_supervisor_init_gates, id) of
+        undefined -> [];
+        _ -> [W || {_, waiter, _, _} = W <- ets:tab2list(beamtalk_supervisor_init_gates)]
+    end.
+
+unwrap_raised(#{error := #beamtalk_error{} = E}) -> E;
+unwrap_raised(#beamtalk_error{} = E) -> E;
+unwrap_raised(Other) -> Other.

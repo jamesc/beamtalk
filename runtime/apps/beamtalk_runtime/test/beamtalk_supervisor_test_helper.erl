@@ -16,6 +16,9 @@ Used only by beamtalk_supervisor_tests.erl.
 """.
 
 -export([start_link/0, init/1, set_mode/2, reset/0]).
+%% BT-3759: class-side methods for the concurrent-supervise tests.
+-export([class_testSupervise/1, 'class_initialize:'/2]).
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
 
@@ -58,6 +61,10 @@ start_link() ->
                 {ok, Pid} -> {error, {already_started, Pid}};
                 Other -> Other
             end;
+        [{mode, named, Name}] ->
+            %% Real named supervisor: a second call yields a genuine
+            %% {error, {already_started, Pid}} from supervisor:start_link/3.
+            supervisor:start_link({local, Name}, ?MODULE, []);
         [{mode, error, Reason}] ->
             {error, Reason};
         [] ->
@@ -67,6 +74,34 @@ start_link() ->
 %% OTP supervisor callback: empty one_for_one supervisor.
 init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, []}}.
+
+%%====================================================================
+%% Class-side methods (BT-3759): `X supervise` + `initialize:` stand-ins
+%%====================================================================
+
+-doc "Stand-in for `supervise`: startLink/1 wrapped as the FFI Result map.".
+-spec class_testSupervise(term()) -> map().
+class_testSupervise(ClassSelf) ->
+    beamtalk_result:from_tagged_tuple(beamtalk_supervisor:startLink(ClassSelf)).
+
+-doc """
+Stand-in for the class-side `initialize:` hook. Tells the coordinator (the pid
+in the `coordinator` ETS row) it has been entered, blocks until released, then
+either raises (`{hook, fail}`) or marks the supervisor initialised.
+""".
+-spec 'class_initialize:'(term(), term()) -> nil.
+'class_initialize:'(_ClassSelf, _SupTuple) ->
+    [{coordinator, Coord}] = ets:lookup(?TAB, coordinator),
+    Coord ! {init_entered, self()},
+    receive
+        {hook, ok} ->
+            ets:insert(?TAB, {initialized, true}),
+            nil;
+        {hook, fail} ->
+            beamtalk_error:raise(
+                beamtalk_error:new(type_error, 'BT3759Class', 'initialize:', <<"hook failed">>)
+            )
+    end.
 
 %%====================================================================
 %% Internal

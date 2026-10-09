@@ -55,6 +55,7 @@ start(_StartType, _StartArgs) ->
     %% Root application supervisor registry (`Program rootSupervisor`), owned by
     %% the runtime so it works in REPL, run, service and release alike.
     beamtalk_supervisor:ensure_root_table(),
+    beamtalk_supervisor:ensure_init_gate_table(),
 
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
