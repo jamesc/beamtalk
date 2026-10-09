@@ -128,13 +128,8 @@ fn run_package(pkg: &Package) -> Batch {
         String::from_utf8_lossy(&out.stderr)
     );
     // An `internal:` diagnostic is a verifier failure even when the compile
-    // went on to succeed (a release build degrades the verifier to one).
-    // Today the CLI driver never prints it: `write_core_erlang_with_bindings`
-    // calls `generate_module`, which drops the generator's warnings, so a
-    // release `beamtalk build` ships unverified output silently (ADR 0130
-    // Open Question 2). This check is what turns that into a failure once the
-    // driver surfaces them; the in-process `beamtalk-codegen` property already
-    // asserts it on `generate_module_with_warnings`.
+    // went on to succeed (a release build degrades the verifier to a warning
+    // that the CLI build path prints, ADR 0111 Addendum 17, BT-3724).
     if text.contains("internal:") {
         return Batch::Broken(text);
     }

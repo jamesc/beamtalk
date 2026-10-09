@@ -489,7 +489,7 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 ## Open Questions
 
 1. **Actor state.** Caught errors now agree across both kinds of state. Should actor state also move to a single home, so that stored closures and blocks given to higher-order methods behave the same for actors as §5 makes them for classes (BT-3580 is the actor twin of this bug class)? That needs its own ADR.
-2. **Verifier visibility in release builds.** `report_threaded_ir_verify_errors` records an `internal:` error diagnostic in release builds, but BT-3693 reports that the release CLI printed none. Phase 1's property test must fail on that diagnostic, and the CLI path should be checked.
+2. **Verifier visibility in release builds.** Resolved by BT-3724 (ADR 0111 Addendum 17). The `internal:` verifier finding was produced in release builds but dropped by every driver, because they called `generate_module`. It is now surfaced by the CLI build path and the compiler-port handlers as a warning (category `InternalVerifier`) that never fails a build. Phase 1's property test therefore fails on a release-build finding at the CLI too.
 
 ## Implementation Tracking
 

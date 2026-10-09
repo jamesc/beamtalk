@@ -159,7 +159,9 @@ pub use util::to_module_name;
 // items had before moving into sibling modules — used throughout this crate
 // and, for the fully `pub` items, by `beamtalk-repl`/`beamtalk-cli`/
 // `beamtalk-compiler-port` — so no call site elsewhere needs to change.
-pub use driver::{generate, generate_module, generate_module_with_warnings};
+pub use driver::{
+    generate, generate_module, generate_module_surfacing_verifier, generate_module_with_warnings,
+};
 pub use error::CodeGenError;
 pub use error::Result;
 pub(in crate::core_erlang) use generator::DirectCallClassInfo;
