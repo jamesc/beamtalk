@@ -585,7 +585,8 @@ reports the same message at the same span. No operation is surface-specific.
   outer local flows to a send that cannot return the write.
 - Category `UnmigratedLocalThreading` (removed by BT-3743 phase 5): a
   local-threading construct whose blocks write an outer local sits in a
-  position that does not thread the write back yet.
+  position that does not thread the write back yet, including the statement
+  positions that lose the write (BT-3753).
 - Both are errors with no `[diagnostics]` key and no `@expect` category.
 - The REPL sees only the current input: a stored block bound in one input and
   sent `value` in a later one is not seen by the §6 check and still raises

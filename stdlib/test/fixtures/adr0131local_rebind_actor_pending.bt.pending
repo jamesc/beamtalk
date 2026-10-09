@@ -154,3 +154,27 @@ Actor subclass: Adr0131LocalRebindActorPending
       1
     ] on: Error do: [:e | 0])
     #[r, t]
+
+  // BT-3753: statement-position shapes that answered wrong, raised or failed
+  // to compile before; each is an ADR 0131 Phase 0 compile error now.
+
+  // A loop in a conditional arm.
+  stArmWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  // A `do:` in an `on:do:` body.
+  stProtectedDo =>
+    t := 0
+    [
+      #(1, 2) do: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  // `detect:ifNone:` whose handler writes, as a statement.
+  stDetectIfNone =>
+    t := 0
+    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+    t
