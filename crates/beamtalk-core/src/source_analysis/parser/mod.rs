@@ -653,6 +653,16 @@ pub enum DiagnosticCategory {
     /// carried into another class's class-side method raises
     /// `class_state_unreachable`. A lint, not a guarantee.
     ClassStateAbroad,
+    /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
+    /// writes an outer local, or a local bound to one — flows to a send that
+    /// has no way to return the write (anything but a control-flow construct,
+    /// an actor instance self-send or an Erlang FFI argument). An error.
+    Tier2BlockNoReturnChannel,
+    /// ADR 0131 Phase 0 (BT-3745): a local-threading construct whose blocks
+    /// write an outer local sits in a position that does not thread the
+    /// write back yet (not a statement, and not in the allow-set of
+    /// positions that work today). An error that BT-3743 removes.
+    UnmigratedLocalThreading,
     /// A codegen-internal invariant violation caught by the `ThreadedIr`
     /// verifier (ADR 0111 amendment, BT-3724). Always a *warning* whose
     /// message starts with `internal:`: it flags a compiler bug (the emitted

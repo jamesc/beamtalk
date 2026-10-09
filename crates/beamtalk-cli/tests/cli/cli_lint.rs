@@ -357,7 +357,9 @@ fn expect_above_second_provided_method_suppresses_on_lint_and_build_bt_3671() {
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///
 /// `blk := [x := 2]` stores the block in a variable instead of invoking it
-/// directly at a recognized loop/conditional/list-op call site, so the
+/// directly at a recognized loop/conditional/list-op call site (and never
+/// sends it anything: `blk value` here would be an ADR 0131 §6 compile error,
+/// BT-3745, which `beamtalk build` must not hit), so the
 /// dead-block-assignment lint pass (`beamtalk-lint`'s
 /// `DeadBlockAssignmentPass`) flags the reassignment of the captured outer
 /// local `x` — the same "escaped block" shape as the pass's own
@@ -376,8 +378,7 @@ fn dead_assignment_lint_fires_without_expect_bt_3384() {
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
          \x20\x20\x20\x20blk := [x := 2]\n\
-         \x20\x20\x20\x20blk value\n\
-         \x20\x20\x20\x20x\n",
+         \x20\x20\x20\x20#[blk, x]\n",
     )
     .unwrap();
 
@@ -416,8 +417,7 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
          \x20\x20\x20\x20blk := [x := 2]\n\
-         \x20\x20\x20\x20blk value\n\
-         \x20\x20\x20\x20x\n",
+         \x20\x20\x20\x20#[blk, x]\n",
     )
     .unwrap();
 

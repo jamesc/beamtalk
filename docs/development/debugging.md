@@ -208,7 +208,7 @@ where to start reading:
 | `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. Regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_direct_params`'s own guard; no production constructor). | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
 | `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument, a block passed to a class method, spec/doc codegen), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; every ADR 0118 phase (1a-4, plus 5a/5b/6's `ClassVars` consolidation) has landed, so every expression-position consumer now splices its prelude — `close()` itself still has no production caller as of this writing (`expression_doc` deliberately stays a plain forwarder per ADR 0118 §Decision 5: it is reached only by genuinely un-migrated, self-contained-`Document` boundaries, not by any position this table's matrix rows cover). Wiring `close()`'s `StateEffectEscapesExpression` into a user-facing diagnostic at one of those genuine boundaries (`check_no_unsafe_class_method_self_sends`) is tracked separately as a follow-up (BT-3430), not part of this migration. |
 | `CatchWithoutClassVarRestore` | A compiled `on:do:`'s catch (`ThreadedStmt::OnDoCatch`, ADR 0130 §4) is not a class-variable catch boundary: the non-NLR clause does not begin with `beamtalk_class_vars:restore(Snap)` (or restores some other snapshot, or there is no non-NLR clause), or the two `$bt_nlr` pass-through clauses (the actor 4-tuple and the 3-tuple) are not both ordered before it. The carried `CatchRestoreDefect` names which. Wrong-value Core Erlang, not an unbound variable: an error keeps the writes made inside the protected region, or a `^` throw discards writes it must keep. | `exception_handling.rs`'s `on_do_catch_clause`, the single builder of every compiled `on:do:` catch (class-side, instance-side, value-type, direct-called and the generic `onDo` fallback alike); the `let Snap = beamtalk_class_vars:snapshot() in` before the `try` is emitted beside it by `generate_on_do`, `generate_on_do_with_mutations` and `generate_on_do_tier1_try`. Fix the clause order in `on_do_catch_clause`, never at a call site. `ensure:` is not a boundary and builds no such node. |
-| `ActorStateInClassMethod` | A class-method scope (`ScopeKind::ClassMethod`, from `CoreErlangGenerator::in_class_method`) opens a `StateAcc` loop whose fallback reason is `NoThreadedLocals` (it carries nothing, so its seed can only be the ambient actor `State` — unbound in a class method, BT-3694), or produces a method-level `State` version or a `SelfVt` version anywhere (`ClassMethodDefect::FamilyVersion`; `State` inside a threading frame is the `StateAcc` map's version, which carries threaded locals and is legitimate). A class method threads no family (ADR 0130 §3), so a class-method `StateAcc` loop may only carry threaded locals, seeded from a fresh `maps:new()`. Per scope kind: `ClassMethod` forbids both families and the locals-less loop; `Instance` (actor/value-type/REPL) is not constrained by this check (`eligible_families` owns that, ADR 0122). BT-3725. | The mode-selection predicate that routed the construct into a `StateAcc` shape in a class method (e.g. `condition_has_state_effects` in `control_flow/plan.rs`), or the family-threading code that produced the `State`/`SelfVt` `Bind`. Fix it there, never by guarding at the loop's call site. Every production lowering site verifies through `CoreErlangGenerator::verify_threaded_ir` (scope-aware) rather than bare `verify()`. |
+| `ActorStateInClassMethod` | A class-method scope (`ScopeKind::ClassMethod`, from `CoreErlangGenerator::in_class_method`) opens a `StateAcc` loop whose fallback reason is `NoThreadedLocals` (it carries nothing, so its seed can only be the ambient actor `State` — unbound in a class method, BT-3694), or produces a method-level `State` version or a `SelfVt` version anywhere (`ClassMethodDefect::FamilyVersion`; `State` inside a threading frame is the `StateAcc` map's version, which carries threaded locals and is legitimate). A class method threads no family (ADR 0130 §3), so a class-method `StateAcc` loop may only carry threaded locals, seeded from a fresh `maps:new()`. Per scope kind: `ClassMethod` forbids both families and the locals-less loop; `Instance` (actor/value-type/REPL) is not constrained by this check (`eligible_families` owns that, ADR 0122). BT-3725. | The mode-selection predicate that routed the construct into a `StateAcc` shape in a class method (e.g. `condition_has_state_effects` in `control_flow/plan.rs`), or the family-threading code that produced the `State`/`SelfVt` `Bind`. Fix it there, never by guarding at the loop's call site. Every production lowering site verifies through a scope-aware entry point (`CoreErlangGenerator::verify_threaded_ir`, or `verify_body_with_opaque_version_gaps` / `verify_simple_bind` given `threaded_scope()`) rather than bare `verify()`, which is `Instance`-scoped and enforces nothing here. |
 
 `RoutingMismatch` (BT-3135's structural replacement for the two
 `gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
@@ -481,8 +481,6 @@ These are off by default (too noisy for normal use) and gated behind environment
 |---|---|
 | `BEAMTALK_CODEGEN_DIAGNOSTICS=1` | Enable all codegen diagnostics (info-level hints) |
 | `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level (requires `BEAMTALK_CODEGEN_DIAGNOSTICS=1`) |
-| `BEAMTALK_CLASS_VAR_PROBE=1` | Class-variable census probe (ADR 0130 Phase 0); see below. Changes generated code, so leave it unset for normal builds |
-| `BEAMTALK_CLASS_VAR_PROBE_LOG=<file>` | Runtime side of the probe: append the probe's log events to `<file>` |
 
 ```bash
 # See all codegen decisions
@@ -491,47 +489,6 @@ BEAMTALK_CODEGEN_DIAGNOSTICS=1 beamtalk build myfile.bt
 # Highlight StateAcc fallbacks as warnings
 BEAMTALK_CODEGEN_DIAGNOSTICS=1 BEAMTALK_WARN_STATEACC=1 beamtalk build myfile.bt
 ```
-
-### Class-variable probe
-
-`BEAMTALK_CLASS_VAR_PROBE=1` (ADR 0130 Phase 0, BT-3703) makes the compiler
-emit a `beamtalk_class_var_probe:report/6` call before every class-variable
-read or write in class methods. The runtime logs one OTP logger event with
-`domain => [beamtalk, probe]` per access that is inside a non-inlined block
-(the runtime cannot see those otherwise) or made away from the home class
-process. Each event carries `class`, `selector`, `kind` (`read`/`write`),
-`field`, `in_block`, `at_home` (this process holds the class's variables:
-key presence, ADR 0130 §2, not pid equality), `home_live` (the
-home process is inside a class-method invocation) and `shape` (`home`,
-`carried_sync`: home is blocked in the call that carried the block away, or
-`abroad`). With the flag unset nothing references the probe and the generated
-`.core` is byte-identical (`just core-diff`).
-
-```bash
-# Census over the BUnit suite; the events land in the file named below
-cd stdlib
-BEAMTALK_CLASS_VAR_PROBE=1 BEAMTALK_CLASS_VAR_PROBE_LOG=probe.log \
-    cargo run --bin beamtalk --quiet -- test --quiet
-```
-
-Run only the suites that execute code (`test-bunit`, `test-stdlib`,
-`test-repl-protocol`) with the flag on, not `cargo test`: the flag changes
-generated code, so codegen snapshot tests would fail. Recompile the Erlang
-runtime (`just build-erlang`) first so `beamtalk_class_var_probe` is loadable.
-A census run needs a clean `_build/` (and `runtime/_build/`) **before and
-after**: the flag changes the generated code, the stdlib and test beams are
-cached in `_build/`, so beams compiled without the flag would be reused (and
-miss accesses) and beams compiled with it would be reused by the next normal
-build.
-Side effects of a census run: the probe sets the VM-wide
-`erlang:system_flag(backtrace_depth, 128)` once (not restored) and, when
-`BEAMTALK_CLASS_VAR_PROBE_LOG` is set, lowers the primary logger level to
-`notice` while capping every other handler at `warning`, so do not compare a
-census run's output against golden output. The probe reports a class-side
-`hasField:` as a `read` (BT-3709 lowers it to `beamtalk_class_vars:has/2`;
-a non-literal argument is reported as field `_dynamic`). The static counterpart, escaping closures that read a class variable, is the
-`beamtalk_core::class_var_census` test
-(`cargo test -p beamtalk-core --lib census_over -- --nocapture`).
 
 ### Diagnostic Categories
 

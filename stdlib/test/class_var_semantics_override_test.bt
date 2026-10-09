@@ -148,6 +148,41 @@ TestCase subclass: ClassVarSemanticsOverrideTest
     self assert: CvsOverrideSub rowAsyncWrite equals: #class_state_unreachable
     self assert: CvsOverrideSub n equals: 0
 
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testSyncDirectWriteToOpenDriverRaisesWriteError =>
+    CvsOverrideSub reset
+    self assertWriteAbroadRaises: [CvsOverrideSub rowSyncDirectWriteOpenDriver]
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testAsyncDirectWriteToActorRaisesWriteError =>
+    CvsOverrideSub reset
+    self assertWriteAbroadRaises: [CvsOverrideSub rowAsyncDirectWrite]
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  // The closure is kept by the test across a later invocation of the class,
+  // then run from the test's process.
+  testStoredClosureDirectWriteRaisesWriteError =>
+    CvsOverrideSub reset
+    b := CvsOverrideSub makeWriter
+    CvsOverrideSub reset
+    self assertWriteAbroadRaises: [b value]
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 abroad: a direct write raises the write error (BT-3760)
+  testReturnedClosureDirectWriteRaisesWriteError =>
+    CvsOverrideSub reset
+    self assertWriteAbroadRaises: [CvsOverrideSub makeWriter value]
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 control: the same direct-write block run from a later
+  // invocation of the class is at home and writes live (BT-3760)
+  testDirectWriteClosureLaterInvocationWrites =>
+    CvsOverrideSub reset
+    CvsOverrideSub run: CvsOverrideSub makeWriter
+    self assert: CvsOverrideSub n equals: 5
+
   // ADR 0130 §5 runtime-owned snapshot
   // performLocally: does not walk the superclass chain (documented limit), so an inherited
   // selector is not found; a selector the class itself defines reads the snapshot.
@@ -201,3 +236,13 @@ TestCase subclass: ClassVarSemanticsOverrideTest
     CvsInitOverrideSub reset
     self should: [CvsInitOverrideSub supervise] raise: #class_state_read_only
     self assert: CvsInitOverrideSub n equals: 0
+
+  // ADR 0130 §5 (BT-3760): the write error, not the read error: kind
+  // class_state_unreachable, a message saying n cannot be *written* from this
+  // process, and the hint's remedy.
+  assertWriteAbroadRaises: aBlock =>
+    e := aBlock on: Error do: [:ex | ex]
+    self assert: (e isKindOf: Error) equals: true
+    self assert: e kind equals: #class_state_unreachable
+    self assert: (e message includesSubstring: "class variable n cannot be written from this process") equals: true
+    self assert: (e hint includesSubstring: "return the value and assign it there") equals: true

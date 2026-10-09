@@ -24,8 +24,8 @@
 //! | `StoredInLiteral`      | block is an element of a list/array/map literal   |
 //!
 //! The query is purely syntactic. A block passed as a message argument is not
-//! counted here (whether it escapes depends on the callee); the runtime probe
-//! (`BEAMTALK_CLASS_VAR_PROBE=1`, `beamtalk_class_var_probe`) covers those.
+//! counted here (whether it escapes depends on the callee); the Phase 0 runtime
+//! probe covered those and was removed after the census (BT-3765).
 //! Standalone `Foo class >> sel =>` definitions in parsed files are scanned too.
 //! **Known blind spot:** `.btscript` files (REPL scripts) do not parse as modules,
 //! so standalone definitions typed in them are not seen.

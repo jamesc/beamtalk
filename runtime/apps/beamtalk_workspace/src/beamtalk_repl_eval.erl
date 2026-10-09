@@ -853,7 +853,9 @@ bindings map in REPL codegen) and evaluated in this worker with
 `#{self => Self}` as the only binding. No session state is touched, no workspace
 bindings are merged, and the eval module is purged afterwards. Compile and runtime
 failures are returned as structured `#beamtalk_error{}` — never raised — so the
-Inspector lifts them to a `Result error:` at the FFI boundary.
+Inspector lifts them to a `Result error:` at the FFI boundary. The one exception
+is a `$bt_nlr` throw (a `^` from a block captured elsewhere): control flow, not a
+failure, so it is re-raised untouched to its home frame (BT-3735).
 
 Called via `erlang:apply` from `beamtalk_inspector` (beamtalk_runtime) so the
 runtime keeps no compile-time dependency on beamtalk_workspace.
@@ -912,7 +914,8 @@ eval_not_an_expression_error() ->
 
 %% Load the compiled eval module, run its `eval/1` with the self-binding, and
 %% purge it. Any throw/error/exit is captured into a structured error so the
-%% Inspector never sees a raise.
+%% Inspector never sees a raise, except a `$bt_nlr` throw (a `^` from a captured
+%% block), which is re-raised to its home frame (BT-3735).
 -spec run_self_eval_module(atom(), binary(), map()) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 run_self_eval_module(ModuleName, Binary, Bindings) ->
@@ -926,7 +929,11 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                 %% invocation process (Inspector `evaluate:` called from a class
                 %% method), and a block it runs may write class variables. This
                 %% catch swallows the error, so the writes must be rolled back
-                %% like any other protected region (ADR 0130 §4, BT-3728).
+                %% like any other protected region (ADR 0130 §4, BT-3728). A `^`
+                %% (`$bt_nlr`) unwinding out of a block run here is re-raised below
+                %% to its home frame; `protect/1` passes it through without
+                %% restoring, so the writes made before the `^` are kept, as for
+                %% any `^` crossing a protected region (ADR 0130 §4, BT-3735).
                 {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
                     apply(ModuleName, eval, [Bindings])
                 end),
@@ -942,6 +949,13 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                         {ok, Value}
                 end
             catch
+                %% BT-3735: a `^` out of a captured block is control flow aimed at
+                %% a catch frame further up the caller's stack, not a failure.
+                %% Re-raise it untouched (either tuple shape). If its home frame
+                %% is already gone, no frame matches and the outermost boundary
+                %% (REPL eval / dispatch) wraps it as a structured error.
+                throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
+                    erlang:raise(throw, Nlr, NlrStack);
                 Class:Reason:Stacktrace ->
                     ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
                     {error, beamtalk_repl_errors:ensure_structured_error(ExObj)}

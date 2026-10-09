@@ -106,7 +106,7 @@ are converted via that hook.
 Run an encode pipeline for `Selector`, mapping its failures to a `Json`
 `type_error`.
 
-A `$bt_nlr` throw (either tuple shape) is a `^` out of an `asJson` hook, not an
+A non-local-return throw (`?IS_NLR`) is a `^` out of an `asJson` hook, not an
 error: it passes through so the `^` reaches its home method.
 """.
 -spec encode_with_errors(atom(), fun(() -> binary())) -> binary().
@@ -114,9 +114,7 @@ encode_with_errors(Selector, Encode) ->
     try
         Encode()
     catch
-        throw:{'$bt_nlr', _, _} = Nlr:Stack ->
-            erlang:raise(throw, Nlr, Stack);
-        throw:{'$bt_nlr', _, _, _} = Nlr:Stack ->
+        throw:Nlr:Stack when ?IS_NLR(Nlr) ->
             erlang:raise(throw, Nlr, Stack);
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);

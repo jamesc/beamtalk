@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the value-type (instance method of a `Value subclass:`) column of the ADR 0131 probe
+// matrix. Each method is one probe shape, named after its row in the ADR's
+// tables (o1-o13: operand position; s1-s9: assign-RHS and statement
+// position; `seq`: the §1a sequencing shape; `tryDo*`: the `Result tryDo:`
+// failure the ADR's Context describes). Each starts from `t := 0` and uses the
+// ADR's body (laid out by `beamtalk fmt`); it answers `#[r, t]` (or `#[self.n, t]` for a field
+// write, or the one value the ADR expects). A value type cannot write
+// `self.n :=` (ADR 0042, a hard compile error), so o5/o12/o13 pass the same
+// construct to the functional update `self withN:` and answer `#[v n, t]`. See
+// stdlib/test/adr0131local_rebind_test.bt for the expected answers.
+//
+// The shapes that do not compile in a value-type method today are in
+// adr0131local_rebind_value_pending.bt.pending, so this module compiles: o3,
+// o12, o13 and s2 (codegen failures before BT-3745), and o1, o2, o4-o10, s1,
+// s7, s9 and seq (ADR 0131 Phase 0 compile errors since BT-3745). s4 is a
+// permanent ADR 0131 §6 error and is pinned only in the Rust tests.
+
+Value subclass: Adr0131LocalRebindValue
+  field: n = 0
+
+  o11 =>
+    t := 0
+    4 =:= 5 ifFalse: [t := t + 1]
+    a := t
+    [t := t + 1] ensure: [nil]
+    #[a, t]
+
+  s3 =>
+    t := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]
+    #[r, t]
+
+  s5 =>
+    t := 0
+    r := 4 =:= 5
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]
+    #[r, t]
+
+  s6 =>
+    t := 0
+    r := (Erlang lists)
+      map: [:x |
+        t := t + 1
+        x
+      ]
+      with: #(1)
+    #[r, t]
+
+  s8 =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x]
+    t
+
+  tryDoRaises =>
+    t := 0
+    r := (Result
+      tryDo: [
+        t := t + 1
+        1 / 0
+      ]) isError
+    #[r, t]
+
+  tryDoStatement =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        1
+      ]
+    t
+
+  // BT-3745 review: the implicit-last form of value-type `^#(1, 2) inject:
+  // ...` (which leaks its tuple and is pending). Answers 3.
+  vtLastInject =>
+    t := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]

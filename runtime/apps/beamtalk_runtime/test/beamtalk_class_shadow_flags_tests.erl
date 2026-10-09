@@ -88,31 +88,42 @@ shadow_flag_test_() ->
         end},
         {"extension register/unregister flips the derived flag before the next send (BT-3700)",
             fun() ->
-                Tag = 'Object class',
-                ?assert(direct(Tag, 'Object', bt3700_probe)),
-                ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
-                ok = beamtalk_extensions:register(Tag, bt3700_ext, noop_fun(), bt3700),
+                %% Throwaway class: never touch the real `Object` shared state.
+                Name = 'Bt3700Ext',
+                Tag = 'Bt3700Ext class',
+                _ = persistent_term:erase(Tag),
                 try
+                    ?assert(direct(Tag, Name, bt3700_probe)),
+                    ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                    ok = beamtalk_extensions:register(Tag, bt3700_ext, noop_fun(), bt3700),
                     ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
-                    ?assertNot(direct(Tag, 'Object', bt3700_probe))
+                    ?assertNot(direct(Tag, Name, bt3700_probe)),
+                    ok = beamtalk_extensions:unregister(Name, bt3700_ext, true),
+                    ?assert(direct(Tag, Name, bt3700_probe))
                 after
-                    ok = beamtalk_extensions:unregister('Object', bt3700_ext, true)
-                end,
-                ?assert(direct(Tag, 'Object', bt3700_probe))
+                    beamtalk_extensions:unregister(Name, bt3700_ext, true),
+                    persistent_term:erase(Tag)
+                end
             end},
         {"runtime class-method install/reset flips the derived flag (BT-3700)", fun() ->
-            Name = 'Object',
-            Tag = 'Object class',
-            ?assert(direct(Tag, Name, bt3700_probe)),
-            ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
-            ok = beamtalk_class_metadata:set_runtime_class_methods(Name, [bt3700_rt]),
+            %% Throwaway metadata row: set_runtime_class_methods/2 overwrites the
+            %% row's selectors, so it must never run against the real `Object`.
+            Name = 'Bt3700Rt',
+            Tag = 'Bt3700Rt class',
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
             try
+                ?assert(direct(Tag, Name, bt3700_probe)),
+                ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
+                ok = beamtalk_class_metadata:set_runtime_class_methods(Name, [bt3700_rt]),
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
-                ?assertNot(direct(Tag, Name, bt3700_probe))
+                ?assertNot(direct(Tag, Name, bt3700_probe)),
+                ok = beamtalk_class_metadata:reset_runtime_class_methods(Name),
+                ?assert(direct(Tag, Name, bt3700_probe))
             after
-                ok = beamtalk_class_metadata:reset_runtime_class_methods(Name)
-            end,
-            ?assert(direct(Tag, Name, bt3700_probe))
+                beamtalk_class_metadata:delete(Name),
+                persistent_term:erase(Tag)
+            end
         end},
         {"an install racing a raise never leaves a stale safe flag (BT-3700)", fun() ->
             Tag = 'Bt3700Race class',

@@ -1,0 +1,266 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the REPL column of the ADR 0131 probe matrix.
+//
+// The REPL threads outer locals through its bindings map (the `MethodBody
+// (REPL)` row of ADR 0131 §2). Every probe shape here writes the REPL local
+// `t` inside a threading construct. The ADR's §"REPL and error examples"
+// transcript is the approved display; it comes first, verbatim, followed by
+// the o- and s-shapes of the ADR's two probe tables and the §1a sequencing
+// shape. Shapes that are not REPL-expressible (o5/o12/o13 write a field, o6/o10
+// return with `^` from a method) are covered by the BUnit matrix in
+// stdlib/test/adr0131local_rebind_test.bt.
+//
+// An expression whose answer differs from the ADR today pins today's answer
+// under a `PIN-BUG BT-3743` marker that names the correct answer. Each phase
+// of the BT-3743 epic flips the pins it fixes; phase 5 (BT-3751) flips the
+// rest. Each shape resets `t` first, so one shape's wrong answer does not
+// change the next shape's input (the ADR transcript is the exception: it is
+// one stateful sequence, as the ADR writes it).
+//
+// Since BT-3745 (ADR 0131 Phase 0b) every shape that crashed or answered
+// wrong is a compile error (the Phase 0 allow-set error, or §6), so its pin
+// asserts that error; a rejected input runs nothing, so the `t` that follows
+// it still reads the value before it.
+
+// ===========================================================================
+// ADR 0131 §"REPL and error examples" (approved display)
+// ===========================================================================
+
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the `on:do:` operand leaked its `{Value, StateAcc}` tuple
+// (o1); since BT-3745 it is an ADR 0131 Phase 0 compile error. Correct
+// answer: 2.
+r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1
+// => ERROR: `on:do:` writes outer local `t`, but as the receiver of a message
+
+// PIN-BUG BT-3743: correct answer 1 (the on:do: body's write is kept).
+t
+// => 0
+
+// PIN-BUG BT-3743: `collect:` in receiver position raised (o4); since
+// BT-3745 it is a compile error. Correct answer: 2.
+(#(1, 2) collect: [:x | t := t + x]) size
+// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+
+// PIN-BUG BT-3743: correct answer 4.
+t
+// => 0
+
+// PIN-BUG BT-3743: the Tier 2 block reaches `tryDo:`'s arity-0 native (ADR
+// 0131 §5). Correct answer: true.
+(Result tryDo: [t := t + 1. 1 / 0]) isError
+// => ERROR: tryDo: expected a zero-arity block, got: Block/1
+
+// PIN-BUG BT-3743: correct answer 4 (the protected region raised, so its
+// write is discarded). Today 0, because every write above was lost.
+t
+// => 0
+
+// ===========================================================================
+// o-shapes (operand position)
+// ===========================================================================
+
+// o2: `ensure:` as a binary operand.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the cleanup block could not see `t`; since BT-3745 it is
+// a compile error. Correct answer: 2.
+r := ([t := t + 1. 1] ensure: [t := t + 1]) + 1
+// => ERROR: `ensure:` writes outer local `t`, but as the receiver of a message
+
+// PIN-BUG BT-3743: correct answer 2.
+t
+// => 0
+
+// o3: a read+write conditional as a binary operand.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: codegen referenced an unbound `State` (ADR 0131 §3);
+// since BT-3745 it is a compile error. Correct answer: 2.
+r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
+// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as the receiver of a message
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// o7: an `on:do:` nested in a conditional arm inside another `on:do:`.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the inner tuple leaked, raised, and the outer handler
+// answered 3 (a silent wrong answer); since BT-3745 it is a compile error.
+// Correct answer: 7.
+r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
+// => ERROR: `on:do:` writes outer local `t`
+
+// PIN-BUG BT-3743: correct answer 1 (before BT-3745 the outer `on:do:`
+// dropped `t` from the bindings).
+t
+// => 0
+
+// o8: as o7 without the trailing `7`.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: a silent wrong answer (3) before BT-3745, a compile
+// error since. Correct answer: 2.
+r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
+// => ERROR: `on:do:` writes outer local `t`
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// o11: the statement-position control. A conditional, then `ensure:`.
+t := 0
+// => 0
+
+4 =:= 5 ifFalse: [t := t + 1]
+// => 1
+
+// PIN-BUG BT-3743: unlike the compiled contexts (where o11 passes), an
+// `ensure:` whose body writes a REPL binding cannot see it even as a
+// statement. Correct answer: 2.
+[t := t + 1] ensure: [nil]
+// => ERROR: Undefined variable: t
+
+// PIN-BUG BT-3743: correct answer 2.
+t
+// => 1
+
+// ===========================================================================
+// ADR 0131 §1a: a local read before a sibling rebinds it
+// ===========================================================================
+
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the right operand leaked its tuple; since BT-3745 it is
+// a compile error. Correct answer: 1 (source order reads `t` as 0 before the
+// right operand writes it).
+r := t + ([t := t + 1. 1] on: Error do: [:e | 0])
+// => ERROR: `on:do:` writes outer local `t`, but as an argument of a message
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// ===========================================================================
+// s-shapes (assign-RHS and statement position)
+// ===========================================================================
+
+// s1: `at:ifAbsent:` as an assignment RHS.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the Tier 2 block reached the native `at:ifAbsent:`;
+// since BT-3745 it is an ADR 0131 §6 compile error until `at:ifAbsent:`
+// becomes a producer (phase 2). Correct answer: 0.
+r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
+// => ERROR: block writes outer local `t`, but `at:ifAbsent:` cannot return the write
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// s2: `detect:ifNone:` as an assignment RHS.
+t := 0
+// => 0
+
+r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
+// => 0
+
+t
+// => 1
+
+// s3: `inject:into:` as an assignment RHS.
+t := 0
+// => 0
+
+r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]
+// => 3
+
+t
+// => 2
+
+// s4: a stored closure, invoked directly.
+t := 0
+// => 0
+
+b := [t := t + 1]
+// => _
+
+// PIN-BUG BT-3743: the stored Tier 2 block is sent `value` via perform:.
+// ADR 0131 §6 makes this a compile error when the binding and the send are
+// compiled together (BT-3745); across two REPL inputs the second sees `b`
+// only as a binding, so the runtime error remains. Correct answer: 1.
+b value
+// => ERROR: Cannot call 'value' on Block via perform:
+
+// PIN-BUG BT-3743: correct answer 1 (or a compile error under ADR 0131 §6).
+t
+// => 0
+
+// s5: `ifTrue:ifFalse:` as an assignment RHS.
+t := 0
+// => 0
+
+r := 4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]
+// => 1
+
+t
+// => 1
+
+// s6: an Erlang FFI argument: lossy by design (ADR 0041 §Erlang Interop
+// Boundary), so the write is dropped and `t` stays 0.
+t := 0
+// => 0
+
+r := (Erlang lists) map: [:x | t := t + 1. x] with: #(1)
+// => [1]
+
+t
+// => 0
+
+// s7: `ifNil:` as an assignment RHS.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: the Tier 2 block was called with the wrong arity; since
+// BT-3745 it is a compile error. Correct answer: 1.
+r := nil ifNil: [t := t + 1. 1]
+// => ERROR: `ifNil:` writes outer local `t`, but as the value of an assignment
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// s8: a statement-position `do:`.
+t := 0
+// => 0
+
+#(1, 2) do: [:x | t := t + x]
+// => _
+
+t
+// => 3
+
+// s9: `reject:` in receiver position.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: raised `invalid argument` before BT-3745, a compile error
+// since. Correct answer: 2.
+r := (#(1, 2) reject: [:x | t := t + 1. false]) size
+// => ERROR: `reject:` writes outer local `t`, but as the receiver of a message
+
+// PIN-BUG BT-3743: correct answer 2.
+t
+// => 0

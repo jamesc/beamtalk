@@ -81,9 +81,6 @@ pub struct CodegenOptions {
     /// Test hook: record a synthetic `ThreadedIr` verifier finding after
     /// generation (see [`Self::with_injected_verifier_violation`]).
     pub(in crate::core_erlang) inject_verifier_violation: bool,
-    /// ADR 0130 Phase 0: override for the class-variable census probe.
-    /// `None` = read from `BEAMTALK_CLASS_VAR_PROBE` env var at generator creation.
-    pub(in crate::core_erlang) class_var_probe: Option<bool>,
     /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION` to bake into `__beamtalk_meta`.
     /// Set by the CLI via [`CodegenOptions::with_provenance`]; absent for REPL/tests.
     pub(in crate::core_erlang) beamtalk_version: Option<String>,
@@ -130,7 +127,6 @@ impl CodegenOptions {
             pre_class_hierarchy: Vec::new(),
             codegen_diagnostics: None,
             inject_verifier_violation: false,
-            class_var_probe: None,
             beamtalk_version: None,
             otp_release: None,
             native_type_registry: None,
@@ -190,15 +186,6 @@ impl CodegenOptions {
         self.inject_verifier_violation = true;
         self
     }
-
-    /// Explicitly enable or disable the ADR 0130 class-variable census probe,
-    /// overriding the `BEAMTALK_CLASS_VAR_PROBE` env var.
-    #[must_use]
-    pub fn with_class_var_probe(mut self, enabled: bool) -> Self {
-        self.class_var_probe = Some(enabled);
-        self
-    }
-
     /// Sets the class module index for resolving cross-file class references.
     ///
     /// Maps Beamtalk class names (e.g. `"SchemeEnv"`) to their compiled Erlang

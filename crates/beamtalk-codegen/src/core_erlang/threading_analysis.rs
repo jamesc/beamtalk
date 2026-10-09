@@ -284,6 +284,15 @@ impl CoreErlangGenerator {
     /// sharing one function makes that symmetry structural rather than a hand-maintained
     /// mirror. Conditionals retain [`Self::conditional_threaded_locals`], which is already
     /// the shared seed/extract authority for the inline-`case` path.
+    ///
+    /// ADR 0131 Phase 0 (BT-3745): a construct this recognizes is only reached
+    /// in a position that threads its writes today. The check that enforces
+    /// that (the allow-set error, and the §6 error for a Tier 2 block value
+    /// with no return channel) runs earlier, in `beamtalk-core`'s semantic
+    /// analysis (`semantic_analysis/validators/local_threading.rs`), so the LSP
+    /// reports it as you type; it recognizes constructs with
+    /// `beamtalk_core::semantic_analysis::block_facts::local_threading_construct_blocks`.
+    /// Phase 1a (BT-3746) builds `threaded_locals_of` over the same core facts.
     pub(in crate::core_erlang) fn get_control_flow_threaded_vars(
         &self,
         expr: &Expression,

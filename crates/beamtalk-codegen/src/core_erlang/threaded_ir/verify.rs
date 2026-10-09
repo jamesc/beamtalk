@@ -179,6 +179,13 @@ pub(in crate::core_erlang) enum VerifyError {
 /// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
 /// | `Instance`    | not constrained here | not constrained here | not constrained here           |
 ///
+/// **What enforces it:** exactly the entry points that take a `ScopeKind` —
+/// [`verify_in_scope`], `verify_body_with_opaque_version_gaps` and
+/// `verify_simple_bind` — which every production lowering site reaches via
+/// `CoreErlangGenerator::threaded_scope` / `verify_threaded_ir`. Bare
+/// [`verify`] is `Instance`-scoped and enforces nothing here; it is used only
+/// by tests and test-local wrappers.
+///
 /// `Instance` (actor instance, value-type instance, REPL and every non-method
 /// fixture) is deliberately unconstrained by this check: which of
 /// `State`/`SelfVt` is eligible there is decided by
@@ -229,15 +236,19 @@ pub(in crate::core_erlang) enum CatchRestoreDefect {
 /// result as a hard failure; release callers must degrade a non-empty result
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
 /// (No call site does either yet — see module docs §Status.)
+///
+/// `Instance`-scoped, so it enforces no per-[`ScopeKind`] invariant; no
+/// production code calls it (they use [`verify_in_scope`]), hence test-only.
+#[cfg(test)]
 pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
     verify_in_scope(ir, ScopeKind::Instance)
 }
 
 /// [`verify`] for IR lowered in `scope`: additionally enforces the
 /// per-[`ScopeKind`] family invariant ([`VerifyError::ActorStateInClassMethod`]).
-/// Every production caller goes through this (via
-/// `CoreErlangGenerator::verify_threaded_ir`) so the scope can never be
-/// forgotten at a call site.
+/// Every production caller reaches this with `CoreErlangGenerator::threaded_scope`
+/// — via `CoreErlangGenerator::verify_threaded_ir`, or by passing
+/// `threaded_scope()` to `verify_body_with_opaque_version_gaps` / `verify_simple_bind`.
 pub(in crate::core_erlang) fn verify_in_scope(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
@@ -303,7 +314,11 @@ fn collect_producer_consumer_counts(
                 *producers.entry(target.clone()).or_insert(0) += 1;
                 *consumers.entry(source.clone()).or_insert(0) += 1;
             }
-            ThreadedStmt::Threaded { body, .. } => {
+            // ADR 0131 §2: the `MethodBody`/`BranchArm` frame nodes scope
+            // their body exactly like a `Threaded` node does.
+            ThreadedStmt::Threaded { body, .. }
+            | ThreadedStmt::MethodBody { body, .. }
+            | ThreadedStmt::BranchArm { body, .. } => {
                 collect_producer_consumer_counts(body, producers, consumers);
             }
             // ADR 0118 phase 3: `condition`'s own Binds are
@@ -325,10 +340,20 @@ fn collect_producer_consumer_counts(
                     *producers.entry(target.clone()).or_insert(0) += 1;
                 }
             }
+            // ADR 0131 §2: a `LoopParam`/`MapPut` rebind is one version step,
+            // counted like a `Bind`'s.
+            ThreadedStmt::LocalRebind { lowering, .. } => {
+                if let Some((source, target)) = lowering.version_step() {
+                    *producers.entry(target.clone()).or_insert(0) += 1;
+                    *consumers.entry(source.clone()).or_insert(0) += 1;
+                }
+            }
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Return(..)
             | ThreadedStmt::Statement(..)
-            | ThreadedStmt::OnDoCatch { .. } => {}
+            | ThreadedStmt::OnDoCatch { .. }
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
 }
@@ -500,7 +525,50 @@ impl VerifyWalk<'_> {
             // treats the rest of the slice as its body); a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
-            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
+            //
+            // ADR 0131 Phase 1b adds `ConstructTuple`/`DiscardLocals` and the
+            // nodes below; their own obligations (`ThreadedLocalDropped`,
+            // `LocalRebindModeMismatch`, `LocalReadAfterSiblingRebind`) are
+            // Phase 1c. Until then a rebind is checked exactly like the
+            // `Bind` it renders as, and a frame node scopes its body like any
+            // other frame.
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Statement(..)
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
+            ThreadedStmt::LocalRebind {
+                state_first,
+                lowering,
+                span,
+                ..
+            } => {
+                if let Some(state) = state_first {
+                    self.check_use(state, *span);
+                }
+                if let Some((source, target)) = lowering.version_step() {
+                    self.check_use(source, *span);
+                    self.check_class_method_family(target, *span);
+                }
+            }
+            // The method's root frame: method level, so no mode is pushed (a
+            // `State` version here is the actor family, exactly as for the
+            // top-level slice).
+            ThreadedStmt::MethodBody { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.walk(body);
+                self.frame_stack.pop();
+            }
+            // A branch arm threads through its seeded `StateAcc` — the same
+            // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
+            // records for an arm today.
+            ThreadedStmt::BranchArm { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.mode_stack
+                    .push(ThreadingMode::StateAcc(StateAccFallbackReason::None));
+                self.walk(body);
+                self.mode_stack.pop();
+                self.frame_stack.pop();
+            }
             ThreadedStmt::OnDoCatch {
                 vars,
                 clauses,

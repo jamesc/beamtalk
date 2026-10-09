@@ -763,7 +763,7 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work fine (ADR 0041 Tier 2).
+**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work in actor instance methods (ADR 0041 Tier 2); elsewhere a stored closure that writes an outer local has no way to return the write and is a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
 
 ```beamtalk
 // ❌ ERROR: field assignment inside stored closure
@@ -772,10 +772,9 @@ nestedBlock := [:m | self.x := m]
 // ✅ Field mutation in control flow blocks
 true ifTrue: [self.x := 5]
 
-// ✅ Local variable mutation in stored closure (Tier 2)
+// ✅ Local variable mutation in a control-flow block
 count := 0
-myBlock := [count := count + 1]
-10 timesRepeat: myBlock   // count => 10
+10 timesRepeat: [count := count + 1]   // count => 10
 ```
 
 ### Blocks (Closures)
@@ -2337,7 +2336,7 @@ A wedged, dead, or non-`sys` actor degrades to a single `#status: #unavailable` 
 
 Each `InspectorField` is an immutable `Value` record with `name` (the navigation key), `label`, `value`, `kind`, and `drillable` (`isLeaf` is its negation).
 
-**`evaluate:` is values-only.** On a `#value` cursor, `i evaluate: "self x + self y"` compiles and runs the expression with `self` bound to the inspected value, returning a `Result` — never raising. On an `#actor` cursor it returns `Result error:` with kind `#actor_eval_unsupported` (actor evaluate-in-context is a deferred §7 follow-up). Live updates are **poll-only**: re-issue `refresh`.
+**`evaluate:` is values-only.** On a `#value` cursor, `i evaluate: "self x + self y"` compiles and runs the expression with `self` bound to the inspected value, returning a `Result` — failures are `Result error:`, never a raise. The one exception is a `^` (non-local return) from a block captured elsewhere and run by the expression: it is control flow, not a failure, so `evaluate:` re-raises it to its home method (BT-3735). Class-variable writes made before the `^` are kept, as for any `^` that crosses a protected region (ADR 0130 §4); an error exit still discards them. If the home method has already returned (a stale `^`), nothing catches it and the enclosing eval/dispatch boundary reports it as a structured error. On an `#actor` cursor it returns `Result error:` with kind `#actor_eval_unsupported` (actor evaluate-in-context is a deferred §7 follow-up). Live updates are **poll-only**: re-issue `refresh`.
 
 ```beamtalk
 i := (Point x: 3 y: 4) inspect
@@ -2674,7 +2673,7 @@ The compiler uses a two-tier optimization for block mutations:
 - **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
 - **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
 
-**Local variable mutations** work in all blocks — including stored closures and blocks passed to user-defined higher-order methods. **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
+**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`), and, in a few top-level shapes of an actor instance method, in stored closures and blocks passed to the actor's own methods. Anywhere else there is no way for the callee to hand the write back, and the compiler rejects it (see [What Works and What Doesn't](#what-works-and-what-doesnt)). **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
@@ -2762,20 +2761,27 @@ processItems =>
 
 ### What Works and What Doesn't
 
-**Local variable mutations** work in all blocks — including stored closures and user-defined higher-order methods (ADR 0041 Tier 2):
+**A block that writes an outer local needs a way back** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block literal that assigns a local of the enclosing method (a *Tier 2 block value*, ADR 0041), or a local bound to such a block and never reassigned, may only be used where its write can be threaded back: as the block of a control-flow message (`whileTrue:`, `do:`, `inject:into:`, the conditionals, `on:do:`/`ensure:`, `Result tryDo:`, `[...] value`), or, in an actor instance method at the top level of the method body, as a bare `[...]` argument of a plain `self` send (not `super`, not a cascade) whose block reads every outer local it writes, or as a stored block (bound by a method-body statement) sent `value` in method-body statements only. Passing it to any other send (a user-defined higher-order method, `at:ifAbsent:`, a class-side `self` send) or sending a stored one `value` in a class or value-type method is a compile error, because no callee can return the write. An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary).
+
+```text
+error: block writes outer local `count`, but `ap:` cannot return the write
+  = help: return the new value from the block and assign it: `count := ... ap: [... count + 1]`,
+          or use a control-flow message (`do:`, `inject:into:`, `on:do:`) that threads locals
+```
 
 ```beamtalk
-// ✅ Local mutation in stored closure — works via Tier 2 protocol
+// ❌ ERROR (class or value-type method): `ap:` cannot return the write
 count := 0
-myBlock := [count := count + 1]
-10 timesRepeat: myBlock
-count  // => 10
+CvA ap: [count := count + 1]
 
-// ✅ Local mutation in user-defined HOM — works via Tier 2 protocol
-count := 0
-items myCustomLoop: [:x | count := count + x]
-count  // => sum of items
+// ✅ Return the value instead
+count := CvA ap: [count + 1]
+
+// ✅ Or use a control-flow message that threads locals
+10 timesRepeat: [count := count + 1]
 ```
+
+Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is always accepted, and `r := <construct>` is accepted wherever it threads correctly.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
@@ -2794,7 +2800,7 @@ increment =>
 
 | Property | ✅ Benefit |
 |----------|-----------|
-| **Universal** | Local variable mutations work in all blocks — no whitelist |
+| **Universal** | Local variable mutations work in every control-flow block — no whitelist; a block with no way back is a compile error, not a lost write |
 | **Smalltalk-like** | Natural iteration patterns work, including user-defined HOMs |
 | **Safe** | Field mutations in stored closures are caught at compile time |
 | **Good DX** | Clear errors with fix suggestions |

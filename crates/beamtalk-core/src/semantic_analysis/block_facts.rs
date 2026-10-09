@@ -12,6 +12,7 @@ use crate::ast::{
     Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
     ParameterDefinition,
 };
+use crate::source_analysis::Span;
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -842,6 +843,504 @@ fn propagate_inline_block_writes(
     }
     if nested.has_opaque_callable_hom_send {
         analysis.has_opaque_callable_hom_send = true;
+    }
+}
+
+/// One outer-local write found by [`outer_local_writes`]: the local's name and
+/// the span of the assignment that writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OuterLocalWrite {
+    /// The outer local written.
+    pub name: ecow::EcoString,
+    /// The assignment (or destructuring pattern) that writes it.
+    pub span: Span,
+}
+
+/// ADR 0131 (BT-3745): the outer locals `block` writes, anywhere in its body
+/// including nested blocks, in source order (first write of each name only).
+///
+/// A name is an outer local when `bound_outside(name)` says it is bound in
+/// the scope enclosing `block` and nothing between that scope and the write
+/// (the block's own parameters, a parameter of a nested block, a match-arm or
+/// destructuring binding, or an earlier first assignment that introduced it
+/// as a block local) rebinds it. Write-only writes count: a block that
+/// assigns an outer local without reading it still writes the caller's local
+/// in Smalltalk, so it is a Tier 2 block value (ADR 0041) and its write must
+/// be threaded back or it is lost.
+///
+/// This is the single "does this block write an outer local" fact that both
+/// ADR 0131 diagnostics (§6 and the Phase 0 allow-set, in
+/// `validators/local_threading.rs`) are computed from.
+pub fn outer_local_writes(
+    block: &Block,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+    };
+    walker.block(block);
+    walker.writes
+}
+
+/// Scope-tracking walk behind [`outer_local_writes`].
+struct OuterWriteWalker<'a> {
+    bound_outside: &'a dyn Fn(&str) -> bool,
+    /// Names bound inside the block being analysed, innermost last.
+    frames: Vec<HashSet<ecow::EcoString>>,
+    writes: Vec<OuterLocalWrite>,
+}
+
+impl OuterWriteWalker<'_> {
+    fn bound_inside(&self, name: &str) -> bool {
+        self.frames.iter().any(|f| f.contains(name))
+    }
+
+    fn define(&mut self, name: &ecow::EcoString) {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.insert(name.clone());
+        }
+    }
+
+    /// An assignment to `name` at `span`: an outer write, or the first
+    /// assignment of a block local (which then shadows nothing outside).
+    fn assign(&mut self, name: &ecow::EcoString, span: Span) {
+        if self.bound_inside(name) {
+            return;
+        }
+        if (self.bound_outside)(name) {
+            if !self.writes.iter().any(|w| &w.name == name) {
+                self.writes.push(OuterLocalWrite {
+                    name: name.clone(),
+                    span,
+                });
+            }
+        } else {
+            self.define(name);
+        }
+    }
+
+    fn block(&mut self, block: &Block) {
+        self.frames
+            .push(block.parameters.iter().map(|p| p.name.clone()).collect());
+        for stmt in &block.body {
+            self.expr(&stmt.expression);
+        }
+        self.frames.pop();
+    }
+
+    fn expr(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Assignment {
+                target,
+                value,
+                span,
+                ..
+            } => {
+                self.expr(value);
+                match target.as_ref() {
+                    Expression::Identifier(id) => self.assign(&id.name, *span),
+                    other => self.expr(other),
+                }
+            }
+            Expression::DestructureAssignment {
+                pattern,
+                value,
+                span,
+            } => {
+                self.expr(value);
+                let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                for id in ids {
+                    self.assign(&id.name, *span);
+                }
+            }
+            Expression::Block(block) => self.block(block),
+            Expression::Match { value, arms, .. } => {
+                self.expr(value);
+                for arm in arms {
+                    let (ids, _) =
+                        crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+                    self.frames
+                        .push(ids.into_iter().map(|id| id.name).collect());
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.expr(&arm.body);
+                    self.frames.pop();
+                }
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                self.expr(receiver);
+                for arg in arguments {
+                    self.expr(arg);
+                }
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.expr(receiver);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.expr(arg);
+                    }
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
+            Expression::Return { value, .. } => self.expr(value),
+            Expression::Parenthesized { expression, .. } => self.expr(expression),
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.expr(&pair.key);
+                    self.expr(&pair.value);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+                if let Some(t) = tail {
+                    self.expr(t);
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(e) = segment {
+                        self.expr(e);
+                    }
+                }
+            }
+            Expression::Literal(..)
+            | Expression::Identifier(_)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::Spread { .. }
+            | Expression::Error { .. } => {}
+        }
+    }
+}
+
+/// ADR 0131 §1 / Phase 0 (BT-3745): the selector and the block literals of a
+/// local-threading construct — a send whose literal block(s) codegen inlines
+/// and whose outer-local writes it threads back through a `StateAcc` (or
+/// flat) tuple rather than compiling them as closures. `None` when `expr` is
+/// not such a send.
+///
+/// Derived only from [`crate::state_threading_selectors`] (no new selector
+/// table): a keyword send classified as a state-threading, conditional or
+/// exception selector contributes each of its literal block arguments, plus
+/// its literal block receiver for `whileTrue:`/`whileFalse:` (the condition)
+/// and `on:do:`/`ensure:` (the protected body); a unary loop selector
+/// (`whileTrue`, `whileFalse`, `timesRepeat`, `repeat`) or a block `value`
+/// send contributes its literal block receiver. Only direct `[...]` literals
+/// count, because only those are inlined (a parenthesized or stored block is
+/// a block value, ADR 0131 §6).
+#[must_use]
+pub fn local_threading_construct_blocks(expr: &Expression) -> Option<(String, Vec<&Block>)> {
+    use crate::state_threading_selectors::{
+        is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
+        is_state_threading_keyword_selector, is_state_threading_unary_selector,
+    };
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let sel = selector.name().to_string();
+    let receiver_block = match receiver.as_ref() {
+        Expression::Block(b) => Some(b),
+        _ => None,
+    };
+    let mut blocks: Vec<&Block> = Vec::new();
+    match selector {
+        MessageSelector::Keyword(_) => {
+            let is_construct = is_state_threading_keyword_selector(&sel)
+                || is_conditional_selector(&sel)
+                || is_exception_selector(&sel);
+            if is_construct {
+                if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+                    || is_exception_selector(&sel)
+                {
+                    blocks.extend(receiver_block);
+                }
+                blocks.extend(arguments.iter().filter_map(|a| match a {
+                    Expression::Block(b) => Some(b),
+                    _ => None,
+                }));
+            } else if is_state_threaded_block_receiver(&sel) {
+                blocks.extend(receiver_block);
+            }
+        }
+        MessageSelector::Unary(_) => {
+            if is_state_threading_unary_selector(&sel)
+                || sel == "repeat"
+                || is_state_threaded_block_receiver(&sel)
+            {
+                blocks.extend(receiver_block);
+            }
+        }
+        MessageSelector::Binary(_) => {}
+    }
+    if blocks.is_empty() {
+        None
+    } else {
+        Some((sel, blocks))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tier 2 stored-block promotion facts (ADR 0041). Moved from beamtalk-codegen's
+// `gen_server/methods.rs` (BT-3745) so codegen's `prescan_tier2_local_vars` and
+// the ADR 0131 §6 check (`validators/local_threading.rs`) share one
+// implementation of "which uses of a stored Tier 2 block are safe".
+// ---------------------------------------------------------------------------
+
+/// The outer locals a block literal both reads and writes (`local_writes` ∩
+/// `captured_reads` of [`analyze_block`]), sorted: the set codegen's Tier 2
+/// block protocol threads back (`captured_mutations_for_block`). A block whose
+/// outer-local write is not in this set (a write-only write, or one this
+/// analysis does not propagate out of a nested block) is not promoted, and
+/// the write is lost.
+#[must_use]
+pub fn captured_local_mutations(block: &Block) -> Vec<String> {
+    captured_local_mutations_from_analysis(&analyze_block(block))
+}
+
+/// [`captured_local_mutations`] from an already-computed analysis.
+#[must_use]
+pub fn captured_local_mutations_from_analysis(analysis: &BlockMutationAnalysis) -> Vec<String> {
+    analysis
+        .local_writes
+        .intersection(&analysis.captured_reads)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Normalizes a `Cascade` into its true underlying receiver and the
+/// full ordered list of messages sent to it.
+///
+/// The parser (`parse_cascade`) folds the cascade's *first* message into
+/// `Cascade.receiver` as a whole `MessageSend` — e.g. for `blk value: x;
+/// value: y`, `receiver` is `MessageSend(blk, value:, [x])` and `messages`
+/// holds only the remaining `value: y`. Every safety/codegen decision needs
+/// the TRUE receiver (`blk`) and ALL messages sent to it (both `value: x`
+/// and `value: y`), so this mirrors the same normalization
+/// `generate_cascade` (expressions.rs) already performs for ordinary
+/// (non-Tier-2) cascade codegen.
+#[must_use]
+pub fn normalize_cascade<'a>(
+    receiver: &'a Expression,
+    messages: &'a [crate::ast::CascadeMessage],
+) -> (&'a Expression, Vec<(&'a MessageSelector, &'a [Expression])>) {
+    if let Expression::MessageSend {
+        receiver: inner,
+        selector: first_selector,
+        arguments: first_arguments,
+        ..
+    } = receiver
+    {
+        let mut all: Vec<(&MessageSelector, &[Expression])> =
+            Vec::with_capacity(messages.len() + 1);
+        all.push((first_selector, first_arguments.as_slice()));
+        for msg in messages {
+            all.push((&msg.selector, msg.arguments.as_slice()));
+        }
+        (inner.as_ref(), all)
+    } else {
+        let all: Vec<(&MessageSelector, &[Expression])> = messages
+            .iter()
+            .map(|msg| (&msg.selector, msg.arguments.as_slice()))
+            .collect();
+        (receiver, all)
+    }
+}
+
+/// Returns true if `selector` is a `value`/`value:`/
+/// `value:value:`/`value:value:value:` send — the "safe" family that lets a
+/// Tier 2 block value be invoked without escaping to a call site that
+/// doesn't know to thread state through it.
+#[must_use]
+pub fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
+    selector
+        .well_known()
+        .is_some_and(crate::ast::WellKnownSelector::is_block_value)
+}
+
+/// Scans `expr` for references to `var_name`, returning
+/// `(has_unsafe_use, has_safe_use)`.
+///
+/// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
+/// `value:value:value:` send. Any other reference — a bare return, an
+/// argument to another call, a reassignment, ... — is *unsafe*, since it
+/// would let a Tier 2 block value escape to a call site that doesn't know
+/// to thread state through it. A variable that's *never* referenced at
+/// all yields `(false, false)`, which the caller must treat as unsafe
+/// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
+///
+/// Deliberately conservative: exhaustively matches every `Expression`
+/// variant so a use hidden inside e.g. a map literal or string
+/// interpolation is never silently missed. A shadowing block parameter
+/// with the same name is *not* special-cased — that only makes this
+/// over-conservative (a missed promotion), never unsafe.
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
+)]
+#[must_use]
+pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
+    match expr {
+        Expression::Identifier(id) => (id.name == var_name, false),
+        Expression::Literal(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Error { .. } => (false, false),
+        Expression::Spread { name, .. } => (name.name == var_name, false),
+        Expression::FieldAccess { receiver, .. } => stored_block_var_uses(receiver, var_name),
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            let is_safe_value_send = matches!(
+                receiver.as_ref(),
+                Expression::Identifier(id) if id.name == var_name
+            ) && is_safe_value_family_selector(selector);
+            let (mut unsafe_, mut safe) = if is_safe_value_send {
+                (false, true)
+            } else {
+                stored_block_var_uses(receiver, var_name)
+            };
+            for arg in arguments {
+                let (u, s) = stored_block_var_uses(arg, var_name);
+                unsafe_ |= u;
+                safe |= s;
+            }
+            (unsafe_, safe)
+        }
+        Expression::Block(block) => {
+            // Any reference to var_name inside a nested block literal is
+            // unsafe — see the safety invariant note on
+            // prescan_tier2_local_vars above (a nested block compiles
+            // through a completely different path with no Tier2-tuple
+            // unpacking and no tier2_local_vars reset of its own).
+            let (any_unsafe, any_safe) = block
+                .body
+                .iter()
+                .map(|stmt| stored_block_var_uses(&stmt.expression, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            (any_unsafe || any_safe, false)
+        }
+        Expression::Assignment { target, value, .. } => {
+            let (u1, s1) = stored_block_var_uses(target, var_name);
+            let (u2, s2) = stored_block_var_uses(value, var_name);
+            (u1 || u2, s1 || s2)
+        }
+        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+            stored_block_var_uses(value, var_name)
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            // When the cascade's true underlying receiver (see
+            // `normalize_cascade`) *is* var_name itself (e.g. `blk value: x;
+            // value: y`), the generic recursive scan would hit the plain
+            // `Identifier` arm and unconditionally report it unsafe. Mirror the
+            // `MessageSend` arm's `is_safe_value_send` check instead: if EVERY
+            // message sent to that receiver (including the one folded into
+            // `receiver` by the parser) is itself a safe
+            // `value`/`value:`/`value:value:`/`value:value:value:` send, the
+            // whole cascade is as safe as a single safe value send would be.
+            let (underlying_receiver, all_messages) = normalize_cascade(receiver, messages);
+            let receiver_is_var = matches!(
+                underlying_receiver,
+                Expression::Identifier(id) if id.name == var_name
+            );
+            let all_messages_safe_value_sends = receiver_is_var
+                && !all_messages.is_empty()
+                && all_messages
+                    .iter()
+                    .all(|(sel, _)| is_safe_value_family_selector(sel));
+            let (mut unsafe_, mut safe) = if all_messages_safe_value_sends {
+                (false, true)
+            } else {
+                stored_block_var_uses(underlying_receiver, var_name)
+            };
+            for (_, args) in &all_messages {
+                for arg in *args {
+                    let (u, s) = stored_block_var_uses(arg, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+            }
+            (unsafe_, safe)
+        }
+        Expression::Parenthesized { expression, .. } => stored_block_var_uses(expression, var_name),
+        Expression::Match { value, arms, .. } => {
+            let (mut unsafe_, mut safe) = stored_block_var_uses(value, var_name);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    let (u, s) = stored_block_var_uses(guard, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                let (u, s) = stored_block_var_uses(&arm.body, var_name);
+                unsafe_ |= u;
+                safe |= s;
+            }
+            (unsafe_, safe)
+        }
+        Expression::MapLiteral { pairs, .. } => pairs
+            .iter()
+            .map(|pair| {
+                let (u1, s1) = stored_block_var_uses(&pair.key, var_name);
+                let (u2, s2) = stored_block_var_uses(&pair.value, var_name);
+                (u1 || u2, s1 || s2)
+            })
+            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        Expression::ListLiteral { elements, tail, .. } => {
+            let (mut unsafe_, mut safe) = elements
+                .iter()
+                .map(|e| stored_block_var_uses(e, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            if let Some(t) = tail {
+                let (u, s) = stored_block_var_uses(t, var_name);
+                unsafe_ |= u;
+                safe |= s;
+            }
+            (unsafe_, safe)
+        }
+        Expression::ArrayLiteral { elements, .. } => elements
+            .iter()
+            .map(|e| stored_block_var_uses(e, var_name))
+            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        Expression::StringInterpolation { segments, .. } => segments
+            .iter()
+            .map(|seg| match seg {
+                crate::ast::StringSegment::Interpolation(e) => stored_block_var_uses(e, var_name),
+                crate::ast::StringSegment::Literal(_) => (false, false),
+            })
+            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
     }
 }
 

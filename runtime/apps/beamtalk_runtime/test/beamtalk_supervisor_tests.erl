@@ -214,6 +214,26 @@ start_named_supervisor(Name) ->
     {ok, Pid} = supervisor:start_link({local, Name}, ?MODULE, {SupFlags, []}),
     Pid.
 
+%% Named supervisor with one running worker (BT-3720).
+start_named_supervisor_with_worker(Name, ChildId) ->
+    ChildSpec = #{
+        id => ChildId,
+        start => {?MODULE, start_worker, [self()]},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => []
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, Pid} = supervisor:start_link({local, Name}, ?MODULE, {SupFlags, [ChildSpec]}),
+    Pid.
+
+wait_for_worker() ->
+    receive
+        {worker_ready, WorkerPid} -> {ok, WorkerPid}
+    after 1000 -> error(worker_not_ready)
+    end.
+
 make_supervisor_tuple(ClassName, Module, Pid) ->
     {beamtalk_supervisor, ClassName, Module, Pid}.
 
@@ -1805,13 +1825,30 @@ run_initialize_write_raises_test() ->
         register(RegName, FakeClassPid),
         beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
         beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
-        SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, self()},
+        %% BT-3720: a real, named supervisor with a running child stands in for
+        %% the one `supervise` started before the hook ran.
+        SupName = bt3720_half_started_sup,
+        SupPid = start_named_supervisor_with_worker(SupName, bt3720_child),
+        {ok, WorkerPid} = wait_for_worker(),
+        SupRef = erlang:monitor(process, SupPid),
+        WorkerRef = erlang:monitor(process, WorkerPid),
+        SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, SupPid},
         put(bt3708_init_write, true),
         ?assertMatch(
             #beamtalk_error{kind = class_state_read_only},
             raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(SupTuple) end)
         ),
-        ?assertEqual(undefined, get({'$bt_class_vars', ClassName}))
+        ?assertEqual(undefined, get({'$bt_class_vars', ClassName})),
+        %% The supervisor is not leaked: process gone, name freed, child stopped.
+        receive
+            {'DOWN', SupRef, process, SupPid, _} -> ok
+        after 2000 -> error(supervisor_leaked)
+        end,
+        receive
+            {'DOWN', WorkerRef, process, WorkerPid, _} -> ok
+        after 2000 -> error(child_orphaned)
+        end,
+        ?assertEqual(undefined, whereis(SupName))
     after
         erase(bt3708_init_write),
         erase(bt1980_init_called),
