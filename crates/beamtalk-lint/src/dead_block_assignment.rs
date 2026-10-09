@@ -18,7 +18,7 @@
 //! - **Which positions thread** is the shared
 //!   [`beamtalk_core::state_threading_selectors`] table
 //!   (`is_state_threaded_block_arg` / `is_state_threaded_block_receiver`),
-//!   the one codegen's `get_control_flow_threaded_vars` reads.
+//!   the one codegen's `threaded_locals_of` reads.
 //! - **Shapes a compile error rejects** are never warned about: a write
 //!   inside the span of a [`local_threading_diagnostics`] error (§6
 //!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`) is
@@ -842,8 +842,8 @@ sealed typed Value subclass: Foo
     }
 
     /// The whole family of loop / list-op selectors that codegen's
-    /// `get_control_flow_threaded_vars` (`crates/beamtalk-codegen/src/core_erlang/
-    /// mod.rs`) recognizes for captured-local threading — none of these
+    /// `threaded_locals_of` (`crates/beamtalk-codegen/src/core_erlang/
+    /// threading_analysis.rs`) recognizes for captured-local threading — none of these
     /// should warn on a mutation of an outer local at the recognized
     /// block-argument position, whatever the accumulator's name.
     #[test]

@@ -3093,7 +3093,7 @@ The write made inside the protected block is discarded when the error crosses th
 
 **Class-module ABI.** Every compiled class module records its class-variable calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
 
-**The `class-state-abroad` lint.** Where the compiler can see the case, it says what a block means abroad instead of leaving it to run time: a block literal that reads class variables and is passed to an asynchronous send, handed to an actor, stored or returned, or a block literal that writes class variables and is passed to another class's class-side method that runs in that class's process, gets a `class-state-abroad` warning at the block. Suppress it with `@expect class_state_abroad`, or package-wide with `class-state-abroad = "off"` under `[diagnostics]`. It is a lint, not a guarantee: a block passed through a variable or an instance method is only caught at run time, and only for writes. Cascade messages after the first are inspected (e.g. `self log; bump`), and a `class sealed` method of an open class that makes a late-bound `self` send to a non-sealed selector is flagged when a subclass override could write a class variable.
+**The `class-state-abroad` lint.** Where the compiler can see the case, it says what a block means abroad instead of leaving it to run time: a block literal that reads class variables and is passed to an asynchronous send, handed to an actor, stored or returned, or a block literal that writes class variables and is passed to another class's class-side method that runs in that class's process, gets a `class-state-abroad` warning at the block. Suppress it with `@expect class_state_abroad`, or package-wide with `class-state-abroad = "off"` under `[diagnostics]`. It is a lint, not a guarantee: a block passed through a variable or an instance method is only caught at run time, and only for writes. Cascade messages after the first are inspected (e.g. `self log; bump`), and an inherited method (sealed or not) of an open class that makes a late-bound `self` send to a non-sealed selector is flagged when a subclass override could write a class variable.
 
 This matters most when building a `Collection` subclass: implementing `do:` by delegating to a class-side helper works, and so does a helper that reaches back into its own class.
 
@@ -7388,6 +7388,27 @@ TestCase subclass: DatabaseTest
 - `tearDownOnce` runs even if tests fail.
 - If `setUpOnce` raises an error, all tests in the class fail with a clear message.
 - Per-test `setUp`/`tearDown` still run for each test, providing both shared and per-test state.
+
+#### Shared Tests — Abstract Test Cases
+
+To run one list of tests against several subjects, write the tests once on an `abstract` `TestCase` subclass with a hook the subclasses answer, and give each subject a concrete subclass. A test class runs its own `test*` methods and those it inherits from every superclass below `TestCase` (as well as an inherited `setUp`/`tearDown`/`setUpOnce`/`tearDownOnce`); an `abstract` test class is never run itself.
+
+```beamtalk
+// stdlib/test/fixtures/stack_contract_test.bt
+abstract TestCase subclass: StackContractTest
+  subject => self subclassResponsibility
+
+  testPushPop =>
+    s := self subject new
+    s push: 1
+    self assert: s pop equals: 1
+
+// stdlib/test/list_stack_test.bt
+StackContractTest subclass: ListStackTest
+  subject => ListStack
+```
+
+Put the abstract class under `fixtures/` (fixtures are compiled for every test file, so the subclasses in other test files can name it as their superclass). `stdlib/test/fixtures/class_var_semantics_matrix_test.bt` is a worked example.
 
 #### Parallel Test Execution
 

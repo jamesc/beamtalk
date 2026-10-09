@@ -162,6 +162,15 @@ class_bump(ClassSelf) ->
 - **Callers of `beamtalk_class_dispatch:class_self_dispatch/4` and `class_self_dispatch_local/4`** pass `(Name, Selector, Args, ReceiverTag)`. The arity is unchanged but the old third argument (`ClassVars`) is gone; a stale caller fails with `badarg` or `function_clause`.
 - A hand-written Erlang class module with no `__beamtalk_meta/0` is outside the loader's `class_var_abi` check, so this rule is its only guard: a module built for the old convention is not refused, it just misbehaves.
 
+**Module map.** `beamtalk_class_vars` is the leaf that owns the key and every access; it calls neither `beamtalk_object_class` nor `beamtalk_behaviour_intrinsics`. Around it:
+
+| Module | Owns |
+|---|---|
+| `beamtalk_class_vars` | The process-dictionary key shape (from the generated `beamtalk_class_vars_keys.hrl`), `install/2`/`uninstall/1`, the access helpers, `snapshot/0`/`restore/1`/`protect/1`, `with_snapshot/2`. |
+| `beamtalk_class_var_errors` | The structured errors and hint text (`class_state_unreachable`, `class_state_read_only`, `undeclared_class_variable`, `uninitialized_state_error`), shared by the accesses and the class gen_server's `get_class_var`. |
+| `beamtalk_class_metadata:class_var_kinds/1` | Declared class-variable kinds (`eager`/`late`), flattened over the superclass chain from each level's `__beamtalk_meta/0`. |
+| `beamtalk_class_var_abi` | The `class_var_abi` load gate: `abi/0`, `check_class_info_abi/2` (called by `beamtalk_object_class:start/2` and `update_class/2`) and `collect_abi_refusals/1` (the release preflight). |
+
 ---
 
 ## Error Handling - CRITICAL
@@ -804,6 +813,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `is_class_name/1` | `beamtalk_class_registry:is_class_name/1` |
 | `drain_class_warnings_by_names/1` | `beamtalk_class_registry:drain_class_warnings_by_names/1` |
 | `drain_pending_load_errors_by_names/1` | `beamtalk_class_registry:drain_pending_load_errors_by_names/1` |
+| `clear_pending_load_errors_by_names/1` | `beamtalk_class_registry:clear_pending_load_errors_by_names/1` |
 | `get_method_return_type/2` | `beamtalk_class_registry:get_method_return_type/2` |
 | `get_class_method_return_type/2` | `beamtalk_class_registry:get_class_method_return_type/2` |
 | `class_name/1` | `beamtalk_object_class:class_name/1` |

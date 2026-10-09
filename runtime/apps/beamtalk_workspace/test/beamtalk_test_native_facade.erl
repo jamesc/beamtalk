@@ -32,7 +32,7 @@ mistaken for a delegate selector.
     #{
         native => true,
         backing_module => bt_test_native_backing,
-        class_var_abi => beamtalk_class_vars:abi()
+        class_var_abi => beamtalk_class_var_abi:abi()
     }.
 
 dispatch_increment(_Self) ->

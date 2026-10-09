@@ -136,7 +136,7 @@ impl CoreErlangGenerator {
     /// by the fold and never dispatched as a mismatched-arity fun to the un-threaded
     /// `collection.bt` method). But only an actor fold yields the `{Acc, NewState}`
     /// reply-tuple shape that [`Self::finalize_enumeration_fold`]'s `{'nil', NewState}`
-    /// re-projection and the `get_control_flow_threaded_vars` `__local__` extraction
+    /// re-projection and the `threaded_locals_of` `__local__` extraction
     /// rely on. Value types, class methods and the REPL thread captured locals through
     /// different fold shapes, and a fold nested in a direct-params loop yields an open
     /// let-chain rather than a tuple, so those keep the plain fold result.

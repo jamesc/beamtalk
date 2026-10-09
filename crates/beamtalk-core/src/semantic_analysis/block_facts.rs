@@ -808,7 +808,7 @@ fn propagate_inline_block_writes(
     // param (`on: Error do: [:e | e := 1]`) is confined to that param's own
     // shadowed binding, not a genuine outer-scope mutation. Mirrors the same
     // exclusion `collect_list_op_cross_scope_mutations`/
-    // `collect_nested_loop_outer_local_writes` apply for the identical
+    // `construct_outer_local_writes` applies for the identical
     // construct shape.
     let block_params: HashSet<String> = block
         .parameters
@@ -879,6 +879,7 @@ pub fn outer_local_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        nested: NestedBlocks::All,
     };
     walker.block(block);
     walker.writes
@@ -890,6 +891,21 @@ struct OuterWriteWalker<'a> {
     /// Names bound inside the block being analysed, innermost last.
     frames: Vec<HashSet<ecow::EcoString>>,
     writes: Vec<OuterLocalWrite>,
+    /// Which nested blocks the walk descends into.
+    nested: NestedBlocks,
+}
+
+/// Which nested blocks an [`OuterWriteWalker`] descends into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NestedBlocks {
+    /// Every block ([`outer_local_writes`]).
+    All,
+    /// Only the blocks of nested local-threading constructs
+    /// ([`construct_outer_local_writes`]).
+    Producers,
+    /// Only the blocks of nested constructs whose family is threaded today
+    /// ([`threaded_today_block_writes`]).
+    ProducersThreadedToday,
 }
 
 impl OuterWriteWalker<'_> {
@@ -930,6 +946,30 @@ impl OuterWriteWalker<'_> {
         self.frames.pop();
     }
 
+    /// A message send. Unless every block is walked, only the blocks of a
+    /// nested construct are (its writes are the enclosing construct's too);
+    /// any other block operand is a closure.
+    fn send(&mut self, send: &Expression, receiver: &Expression, arguments: &[Expression]) {
+        let nested: Vec<&Block> = match self.nested {
+            NestedBlocks::All => Vec::new(),
+            NestedBlocks::Producers => local_threading_construct(send)
+                .map(|c| c.blocks)
+                .unwrap_or_default(),
+            NestedBlocks::ProducersThreadedToday => local_threading_construct(send)
+                .filter(|c| c.family.is_threaded_today())
+                .map(|c| c.blocks)
+                .unwrap_or_default(),
+        };
+        for operand in std::iter::once(receiver).chain(arguments) {
+            match operand {
+                Expression::Block(b) if nested.iter().any(|n| std::ptr::eq(*n, b)) => {
+                    self.block(b);
+                }
+                other => self.expr(other),
+            }
+        }
+    }
+
     fn expr(&mut self, expr: &Expression) {
         match expr {
             Expression::Assignment {
@@ -955,7 +995,11 @@ impl OuterWriteWalker<'_> {
                     self.assign(&id.name, *span);
                 }
             }
-            Expression::Block(block) => self.block(block),
+            Expression::Block(block) => {
+                if self.nested == NestedBlocks::All {
+                    self.block(block);
+                }
+            }
             Expression::Match { value, arms, .. } => {
                 self.expr(value);
                 for arm in arms {
@@ -974,12 +1018,7 @@ impl OuterWriteWalker<'_> {
                 receiver,
                 arguments,
                 ..
-            } => {
-                self.expr(receiver);
-                for arg in arguments {
-                    self.expr(arg);
-                }
-            }
+            } => self.send(expr, receiver, arguments),
             Expression::Cascade {
                 receiver, messages, ..
             } => {
@@ -1031,26 +1070,88 @@ impl OuterWriteWalker<'_> {
     }
 }
 
-/// ADR 0131 §1 / Phase 0 (BT-3745): the selector and the block literals of a
-/// local-threading construct — a send whose literal block(s) codegen inlines
-/// and whose outer-local writes it threads back through a `StateAcc` (or
-/// flat) tuple rather than compiling them as closures. `None` when `expr` is
-/// not such a send.
+/// ADR 0131 §1: the kind of a local-threading construct (see
+/// [`local_threading_construct`]). Codegen lowers each family with its own
+/// generator. The families not threaded yet are still recognized, so the
+/// phase that makes one a producer only flips
+/// [`Self::is_threaded_today`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalThreadingFamily {
+    /// `whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`, the
+    /// unary `whileTrue`/`whileFalse`/`timesRepeat`, and `repeat`.
+    Loop,
+    /// A collection fold or `do:`: any other
+    /// [`crate::state_threading_selectors::is_state_threading_keyword_selector`]
+    /// selector, including `detect:ifNone:`, `eachWithIndex:` and
+    /// `do:separatedBy:`.
+    Fold,
+    /// The conditional family
+    /// ([`crate::state_threading_selectors::is_conditional_selector`]).
+    Conditional,
+    /// `on:do:` / `ensure:`.
+    Exception,
+    /// `value`/`value:`… sent to a block literal.
+    BlockValue,
+    /// A block-taking lookup selector
+    /// ([`crate::state_threading_selectors::lookup_block_arg_indices`]).
+    /// Not threaded yet (ADR 0131 phase 2).
+    Lookup,
+    /// `Result tryDo:` (ADR 0131 §5). Not threaded yet (phase 4).
+    TryDo,
+}
+
+impl LocalThreadingFamily {
+    /// Whether codegen threads this family's outer-local writes back today.
+    /// A family that answers `false` compiles its blocks as closures. Neither
+    /// the Phase 0 allow-set check nor codegen's tuple builders act on it
+    /// yet, and a nested one adds nothing to an enclosing construct's
+    /// [`threaded_today_block_writes`] (it does add to
+    /// [`construct_outer_local_writes`]).
+    #[must_use]
+    pub fn is_threaded_today(self) -> bool {
+        !matches!(self, Self::Lookup | Self::TryDo)
+    }
+}
+
+/// ADR 0131 §1: a local-threading construct. It is a send whose literal
+/// block(s) run in the enclosing activation, so an outer-local write inside
+/// them is a state effect of the send. Built by
+/// [`local_threading_construct`].
+#[derive(Debug, Clone)]
+pub struct LocalThreadingConstruct<'a> {
+    /// The send's selector.
+    pub selector: String,
+    /// Which construct it is.
+    pub family: LocalThreadingFamily,
+    /// The construct's block literals, receiver first.
+    pub blocks: Vec<&'a Block>,
+}
+
+/// ADR 0131 §1 (BT-3745, BT-3746): the one recognizer for a local-threading
+/// construct. `None` when `expr` (parentheses peeled) is not one.
 ///
-/// Derived only from [`crate::state_threading_selectors`] (no new selector
-/// table): a keyword send classified as a state-threading, conditional or
-/// exception selector contributes each of its literal block arguments, plus
-/// its literal block receiver for `whileTrue:`/`whileFalse:` (the condition)
-/// and `on:do:`/`ensure:` (the protected body); a unary loop selector
-/// (`whileTrue`, `whileFalse`, `timesRepeat`, `repeat`) or a block `value`
-/// send contributes its literal block receiver. Only direct `[...]` literals
-/// count, because only those are inlined (a parenthesized or stored block is
-/// a block value, ADR 0131 §6).
+/// Derived only from [`crate::state_threading_selectors`], with no selector
+/// table of its own. The blocks it collects:
+///
+/// - a state-threading, conditional or exception keyword selector: each
+///   literal block argument, plus the literal block receiver for
+///   `whileTrue:`/`whileFalse:` (the condition) and `on:do:`/`ensure:` (the
+///   protected body);
+/// - a lookup selector: its block arguments; `tryDo:`: its block argument;
+/// - a unary loop selector (`whileTrue`, `whileFalse`, `timesRepeat`,
+///   `repeat`) or a block `value` send: its literal block receiver.
+///
+/// Only direct `[...]` literals count, because only those are inlined. A
+/// parenthesized or stored block is a block value (ADR 0131 §6).
+///
+/// The Phase 0 allow-set check (`validators/local_threading.rs`) and
+/// codegen's `threaded_locals_of` both recognize constructs with this.
 #[must_use]
-pub fn local_threading_construct_blocks(expr: &Expression) -> Option<(String, Vec<&Block>)> {
+pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingConstruct<'_>> {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
-        is_state_threading_keyword_selector, is_state_threading_unary_selector,
+        is_state_threading_keyword_selector, is_state_threading_unary_selector, is_try_do_selector,
+        lookup_block_arg_indices,
     };
     let Expression::MessageSend {
         receiver,
@@ -1067,41 +1168,131 @@ pub fn local_threading_construct_blocks(expr: &Expression) -> Option<(String, Ve
         Expression::Block(b) => Some(b),
         _ => None,
     };
+    let literal_args = || {
+        arguments.iter().filter_map(|a| match a {
+            Expression::Block(b) => Some(b),
+            _ => None,
+        })
+    };
     let mut blocks: Vec<&Block> = Vec::new();
-    match selector {
+    let family = match selector {
         MessageSelector::Keyword(_) => {
-            let is_construct = is_state_threading_keyword_selector(&sel)
-                || is_conditional_selector(&sel)
-                || is_exception_selector(&sel);
-            if is_construct {
-                if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
-                    || is_exception_selector(&sel)
-                {
+            if is_exception_selector(&sel) {
+                blocks.extend(receiver_block);
+                blocks.extend(literal_args());
+                LocalThreadingFamily::Exception
+            } else if is_conditional_selector(&sel) {
+                blocks.extend(literal_args());
+                LocalThreadingFamily::Conditional
+            } else if is_state_threading_keyword_selector(&sel) {
+                let is_while = matches!(sel.as_str(), "whileTrue:" | "whileFalse:");
+                if is_while {
                     blocks.extend(receiver_block);
                 }
-                blocks.extend(arguments.iter().filter_map(|a| match a {
-                    Expression::Block(b) => Some(b),
-                    _ => None,
-                }));
+                blocks.extend(literal_args());
+                if is_while || matches!(sel.as_str(), "timesRepeat:" | "to:do:" | "to:by:do:") {
+                    LocalThreadingFamily::Loop
+                } else {
+                    LocalThreadingFamily::Fold
+                }
             } else if is_state_threaded_block_receiver(&sel) {
                 blocks.extend(receiver_block);
+                LocalThreadingFamily::BlockValue
+            } else if !lookup_block_arg_indices(&sel).is_empty() {
+                blocks.extend(lookup_block_arg_indices(&sel).iter().filter_map(|&i| {
+                    match arguments.get(i) {
+                        Some(Expression::Block(b)) => Some(b),
+                        _ => None,
+                    }
+                }));
+                LocalThreadingFamily::Lookup
+            } else if is_try_do_selector(&sel) {
+                blocks.extend(literal_args());
+                LocalThreadingFamily::TryDo
+            } else {
+                return None;
             }
         }
         MessageSelector::Unary(_) => {
-            if is_state_threading_unary_selector(&sel)
-                || sel == "repeat"
-                || is_state_threaded_block_receiver(&sel)
-            {
-                blocks.extend(receiver_block);
+            blocks.extend(receiver_block);
+            if is_state_threading_unary_selector(&sel) || sel == "repeat" {
+                LocalThreadingFamily::Loop
+            } else if is_state_threaded_block_receiver(&sel) {
+                LocalThreadingFamily::BlockValue
+            } else {
+                return None;
             }
         }
-        MessageSelector::Binary(_) => {}
-    }
+        MessageSelector::Binary(_) => return None,
+    };
     if blocks.is_empty() {
         None
     } else {
-        Some((sel, blocks))
+        Some(LocalThreadingConstruct {
+            selector: sel,
+            family,
+            blocks,
+        })
     }
+}
+
+/// ADR 0131 §1 "Transitive closure" (BT-3746): the outer locals a
+/// local-threading construct writes, in source order (first write of each
+/// name only). This is the construct's threaded set.
+///
+/// It holds the writes in the construct's own blocks, plus the writes of
+/// every construct nested in them, transitively (o7/o8: an outer `on:do:`
+/// carries a local written only inside a conditional arm's inner `on:do:`).
+/// A nested construct counts whether or not its family is threaded today:
+/// the set is what ADR 0131 threads, and
+/// [`threaded_today_block_writes`] is the part threaded now. Any other
+/// nested block is a closure, and its writes are not this construct's: the
+/// §6 check deals with them. `bound_outside` and the scope rules are those
+/// of [`outer_local_writes`].
+#[must_use]
+pub fn construct_outer_local_writes(
+    construct: &LocalThreadingConstruct<'_>,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    threaded_block_writes(&construct.blocks, bound_outside)
+}
+
+/// [`construct_outer_local_writes`] over a given list of construct blocks.
+#[must_use]
+pub fn threaded_block_writes(
+    blocks: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    walk_construct_blocks(blocks, bound_outside, NestedBlocks::Producers)
+}
+
+/// [`threaded_block_writes`] closed only over nested constructs whose
+/// family [`LocalThreadingFamily::is_threaded_today`]: the writes today's
+/// lowering threads back. Codegen's tuple builders pack this set; ADR 0131
+/// phases 2-4 grow it until it is [`threaded_block_writes`].
+#[must_use]
+pub fn threaded_today_block_writes(
+    blocks: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    walk_construct_blocks(blocks, bound_outside, NestedBlocks::ProducersThreadedToday)
+}
+
+fn walk_construct_blocks(
+    blocks: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+    nested: NestedBlocks,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        nested,
+    };
+    for block in blocks {
+        walker.block(block);
+    }
+    walker.writes
 }
 
 // ---------------------------------------------------------------------------
@@ -2245,5 +2436,156 @@ mod tests {
             "block parameter should NOT be in captured_reads"
         );
         assert!(analysis.local_reads.contains("x"));
+    }
+
+    // -- ADR 0131 §1 recognizer and threaded set (BT-3746) -------------------
+
+    fn parse_first_expr(src: &str) -> Expression {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        assert!(diagnostics.is_empty(), "{src}: {diagnostics:?}");
+        module
+            .expressions
+            .into_iter()
+            .next()
+            .expect("one expression")
+            .expression
+    }
+
+    /// The threaded set of `src`'s construct with `outer` bound outside it.
+    fn threaded_set(src: &str, outer: &[&str]) -> Vec<String> {
+        let expr = parse_first_expr(src);
+        let construct =
+            local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not a construct"));
+        construct_outer_local_writes(&construct, &|n| outer.contains(&n))
+            .into_iter()
+            .map(|w| w.name.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn local_threading_construct_classifies_every_family() {
+        use LocalThreadingFamily::{BlockValue, Conditional, Exception, Fold, Lookup, Loop, TryDo};
+        for (src, family, blocks) in [
+            ("[i < 3] whileTrue: [i := i + 1]", Loop, 2),
+            ("[i < 3] whileTrue", Loop, 1),
+            ("[i := i + 1] repeat", Loop, 1),
+            ("3 timesRepeat: [i := i + 1]", Loop, 1),
+            ("1 to: 3 do: [:k | i := k]", Loop, 1),
+            ("1 to: 9 by: 2 do: [:k | i := k]", Loop, 1),
+            ("items do: [:x | i := x]", Fold, 1),
+            ("items inject: 0 into: [:a :x | a + x]", Fold, 1),
+            ("items detect: [:x | x > 1] ifNone: [0]", Fold, 2),
+            ("items eachWithIndex: [:x :k | i := k]", Fold, 1),
+            ("items do: [:x | i := x] separatedBy: [i := 0]", Fold, 2),
+            ("flag ifTrue: [i := 1] ifFalse: [i := 2]", Conditional, 2),
+            ("flag and: [i := 1. true]", Conditional, 1),
+            ("x ifNil: [i := 1]", Conditional, 1),
+            ("[i := 1] on: Error do: [:e | i := 2]", Exception, 2),
+            ("[i := 1] ensure: [i := 2]", Exception, 2),
+            ("[i := 1] value", BlockValue, 1),
+            ("[:a | i := a] value: 3", BlockValue, 1),
+            ("d at: #k ifAbsent: [i := 1]", Lookup, 1),
+            ("d at: #k ifAbsentPut: [i := 1]", Lookup, 1),
+            ("Result tryDo: [i := 1]", TryDo, 1),
+        ] {
+            let expr = parse_first_expr(src);
+            let construct =
+                local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
+            assert_eq!(construct.family, family, "{src}");
+            assert_eq!(construct.blocks.len(), blocks, "{src}");
+            assert_eq!(
+                family.is_threaded_today(),
+                !matches!(family, Lookup | TryDo),
+                "{src}"
+            );
+        }
+        for src in [
+            "items foo: [:x | i := x]",
+            "([i := 1]) value",
+            "b value",
+            "items do: blk",
+            "d at: #k ifAbsent: blk",
+            "3 + 4",
+        ] {
+            assert!(
+                local_threading_construct(&parse_first_expr(src)).is_none(),
+                "{src} must not be a construct"
+            );
+        }
+    }
+
+    #[test]
+    fn construct_outer_local_writes_is_transitively_closed_over_producers() {
+        // o7: the outer `on:do:` carries `t`, written only inside a
+        // conditional arm's inner `on:do:`.
+        assert_eq!(
+            threaded_set(
+                "[flag ifTrue: [[t := t + 1. 1] on: Error do: [:e | 0]] ifFalse: [0]] \
+                 on: Error do: [:e | 0]",
+                &["flag", "t"],
+            ),
+            vec!["t"]
+        );
+        // A loop nested in a fold nested in a conditional.
+        assert_eq!(
+            threaded_set(
+                "flag ifTrue: [#(1) do: [:x | 1 to: 2 do: [:k | s := s + k]]]",
+                &["flag", "s"],
+            ),
+            vec!["s"]
+        );
+        // Write-only writes count.
+        assert_eq!(
+            threaded_set("#(1, 2) do: [:x | last := x]", &["last"]),
+            vec!["last"]
+        );
+    }
+
+    #[test]
+    fn construct_outer_local_writes_stops_at_closures_and_unthreaded_constructs() {
+        // A block passed to an ordinary send is a closure: its write is the
+        // §6 check's business, not the enclosing construct's.
+        let src = "#(1) do: [:x | CvA ap: [t := t + 1. 1]]";
+        assert!(threaded_set(src, &["t"]).is_empty());
+        // `outer_local_writes`, which the §6 check uses, does see it.
+        let expr = parse_first_expr(src);
+        let construct = local_threading_construct(&expr).expect("construct");
+        assert_eq!(
+            outer_local_writes(construct.blocks[0], &|n| n == "t").len(),
+            1
+        );
+        // A nested construct that is not threaded today is in the set, but
+        // not in the part threaded today.
+        let src = "#(1) do: [:x | Result tryDo: [t := 1]]";
+        assert_eq!(threaded_set(src, &["t"]), vec!["t"]);
+        let expr = parse_first_expr(src);
+        let construct = local_threading_construct(&expr).expect("construct");
+        assert!(threaded_today_block_writes(&construct.blocks, &|n| n == "t").is_empty());
+        // Its own set is recognized too.
+        assert_eq!(threaded_set("Result tryDo: [t := 1]", &["t"]), vec!["t"]);
+        assert_eq!(
+            threaded_set("d at: #k ifAbsent: [t := 1]", &["t"]),
+            vec!["t"]
+        );
+    }
+
+    #[test]
+    fn construct_outer_local_writes_respects_inner_bindings() {
+        // `tmp` is a block local (first assigned inside), `x` a parameter.
+        assert_eq!(
+            threaded_set(
+                "#(1) do: [:x | tmp := x. tmp := tmp + 1. x := 0. t := tmp]",
+                &["t"],
+            ),
+            vec!["t"]
+        );
+        // A `match:` arm binding shadows the outer name.
+        assert!(threaded_set("#(1) do: [:x | x match: [n -> n + 1]]", &["n"]).is_empty());
+        // Source order, first write of each name only.
+        assert_eq!(
+            threaded_set("flag ifTrue: [b := 1. a := 2. b := 3]", &["a", "b"]),
+            vec!["b", "a"]
+        );
     }
 }

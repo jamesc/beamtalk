@@ -32,15 +32,15 @@ with_clean(Fun) ->
 
 %% Run Fun with declared class variables `x`, `late` (and `a`) mocked for ?C.
 with_declared(Fun) ->
-    meck:new(beamtalk_behaviour_intrinsics, [passthrough, no_link]),
-    meck:expect(beamtalk_behaviour_intrinsics, classAllClassVarKindsByName, fun
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds, fun
         (?C) -> #{x => eager, a => eager, late => late};
         (_) -> #{}
     end),
     try
         with_clean(Fun)
     after
-        meck:unload(beamtalk_behaviour_intrinsics)
+        meck:unload(beamtalk_class_metadata)
     end.
 
 raised_error(Fun) ->

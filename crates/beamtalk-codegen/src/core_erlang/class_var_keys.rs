@@ -38,7 +38,7 @@ pub(super) const RO_TAG: &str = "$bt_class_vars_ro";
 /// `__beamtalk_meta/0` as `class_var_abi` (ADR 0130 §3): `1` is "class methods
 /// are `class_<sel>(ClassSelf, Args...)` and class variables live in the
 /// class process's dictionary". The runtime's load gate
-/// (`beamtalk_class_vars:check_class_info_abi/2`, enforced at class registration,
+/// (`beamtalk_class_var_abi:check_class_info_abi/2`, enforced at class registration,
 /// hot reload and the release preflight) compares a module's `class_var_abi`
 /// with `?BT_CLASS_VAR_ABI` in the generated header: this constant is the one
 /// place the value is written.

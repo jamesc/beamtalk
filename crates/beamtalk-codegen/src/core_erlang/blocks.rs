@@ -20,6 +20,7 @@
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::util::index_lit;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -745,7 +746,11 @@ impl CoreErlangGenerator {
             return BlockExprKind::LocalAssignment;
         }
 
-        if self.get_control_flow_threaded_vars(expr).is_some() {
+        if self
+            .threaded_locals_of(expr)
+            .and_then(ThreadedLocals::into_lowered)
+            .is_some()
+        {
             return BlockExprKind::ControlFlowWithThreadedVars;
         }
 
@@ -986,7 +991,7 @@ impl CoreErlangGenerator {
     /// construct (`whileTrue:`/`whileFalse:`/`timesRepeat:`/loops, `ifTrue:`/
     /// `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`, `on:do:`/`ensure:`, …) — one
     /// this block's own top-level [`BlockMutationAnalysis`] doesn't classify
-    /// as captured-mutating (see [`Self::get_control_flow_threaded_vars`]),
+    /// as captured-mutating (see [`Self::threaded_locals_of`]),
     /// so the enclosing block still compiled as a plain (non-`StateAcc`) fun.
     ///
     /// Every one of these constructs' `generate_*_with_mutations`
@@ -1005,7 +1010,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         let threaded_vars = self
-            .get_control_flow_threaded_vars(expr)
+            .threaded_locals_of(expr)
+            .and_then(ThreadedLocals::into_lowered)
             .expect("caller guarantees control flow with threaded vars");
 
         if threaded_vars.len() == 1 {

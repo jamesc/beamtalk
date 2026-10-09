@@ -15,9 +15,8 @@ dispatches through the 'Class' instance method chain.
 ## What This Tests
 
 1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
-   the currently registered Class implementation module's
-   `dispatch/4` (in this suite, `beamtalk_class_chain_test_helper:dispatch/4`)
-   via `try_class_chain_fallthrough/3`.
+   the `Class` instance-method chain (in this suite, a `testClassProtocol`
+   extension registered on `Class`) via `try_class_chain_fallthrough/3`.
 
 2. **Metaclass tag preservation**: The `self` argument received by
    the Class method has the 'Counter class' tag, not 'Counter'.
@@ -31,8 +30,8 @@ dispatches through the 'Class' instance method chain.
 
 ## Phase 0 Outcome
 
-The testClassProtocol probe was provided by beamtalk_class_chain_test_helper
-(test-only module) to keep production code clean. The dispatch mechanism
+The testClassProtocol probe is a test-registered extension on `Class`
+(removed in teardown) to keep production code clean. The dispatch mechanism
 (try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
 """.
 
@@ -46,52 +45,27 @@ The testClassProtocol probe was provided by beamtalk_class_chain_test_helper
 setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
-    %% Register 'Class' with the test helper module so testClassProtocol is available.
-    %% In production, beamtalk_class_bt has no probe methods; the test helper
-    %% provides testClassProtocol only for this wire check test suite.
-    register_class_with_test_helper(),
+    %% Provide the testClassProtocol probe as an instance-side extension on
+    %% 'Class' (the supported open-class path) instead of re-pointing the
+    %% registered 'Class' at a test module. Redefining 'Class' from a non-stdlib
+    %% module is refused by the stdlib-shadowing gate once the compiled stdlib
+    %% 'Class' is registered (any fresh VM that ran beamtalk_stdlib:init/0).
+    register_probe(),
     ok.
 
 teardown(_) ->
-    %% Restore 'Class' to the production stub so other test modules in the
-    %% same VM don't see the test helper module as Class's implementation.
-    ClassInfo = #{
-        name => 'Class',
-        superclass => 'Object',
-        module => beamtalk_class_bt,
-        instance_variables => [],
-        class_methods => #{},
-        instance_methods => #{}
-    },
-    case beamtalk_class_registry:whereis_class('Class') of
-        undefined -> ok;
-        _Pid -> beamtalk_object_class:update_class('Class', ClassInfo)
-    end,
+    unregister_probe(),
     ok.
 
-%% Register or update 'Class' to use the test helper module.
-register_class_with_test_helper() ->
-    ClassInfo = #{
-        name => 'Class',
-        superclass => 'Object',
-        module => beamtalk_class_chain_test_helper,
-        instance_variables => [],
-        class_methods => #{
-            'superclass' => #{arity => 0}
-        },
-        instance_methods => #{
-            testClassProtocol => #{arity => 0}
-        }
-    },
-    Result =
-        case beamtalk_class_registry:whereis_class('Class') of
-            undefined ->
-                beamtalk_object_class:start('Class', ClassInfo);
-            _Pid ->
-                beamtalk_object_class:update_class('Class', ClassInfo)
-        end,
-    {ok, _} = Result,
-    ok.
+%% Install / remove the testClassProtocol probe on 'Class'. dispatch/5 checks
+%% the extension registry before the class's own methods, so the probe is
+%% reached by try_class_chain_fallthrough/3 without touching 'Class' itself.
+register_probe() ->
+    ProbeFun = fun([], Self) -> {class_protocol_ok, Self} end,
+    ok = beamtalk_extensions:register('Class', testClassProtocol, ProbeFun, class_chain_tests).
+
+unregister_probe() ->
+    ok = beamtalk_extensions:unregister('Class', testClassProtocol).
 
 %%====================================================================
 %% Test Suite
@@ -119,7 +93,7 @@ class_chain_test_() ->
 %% When Counter (a class object) receives testClassProtocol,
 %% it is NOT defined in Counter's class methods, so the dispatch
 %% falls through to 'Class' instance methods, where
-%% beamtalk_class_chain_test_helper:dispatch/4 handles it.
+%% the testClassProtocol extension probe handles it.
 test_dispatch_fallthrough() ->
     ok = ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
@@ -172,19 +146,20 @@ test_fallthrough_absent_class() ->
     ok = ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    %% Kill 'Class' process if it's running to test the absent case.
+    %% The probe extension is checked before the Class process is consulted,
+    %% so remove it for the absent-Class case and restore it afterwards.
+    unregister_probe(),
+    ClassPid = beamtalk_class_registry:whereis_class('Class'),
+    ?assert(is_pid(ClassPid)),
+    ClassModule = beamtalk_object_class:module_name(ClassPid),
+    %% Kill 'Class' to test the absent case.
     %% Use monitor + DOWN to avoid flaky timer:sleep on loaded CI nodes.
-    case beamtalk_class_registry:whereis_class('Class') of
-        undefined ->
-            ok;
-        ClassPid ->
-            Ref = erlang:monitor(process, ClassPid),
-            exit(ClassPid, kill),
-            receive
-                {'DOWN', Ref, process, ClassPid, _Reason} -> ok
-            after 1000 ->
-                ?assert(false)
-            end
+    Ref = erlang:monitor(process, ClassPid),
+    exit(ClassPid, kill),
+    receive
+        {'DOWN', Ref, process, ClassPid, _Reason} -> ok
+    after 1000 ->
+        ?assert(false)
     end,
 
     try
@@ -194,8 +169,10 @@ test_fallthrough_absent_class() ->
             beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
         )
     after
-        %% Restore Class so subsequent tests (if order changes) are not affected
-        register_class_with_test_helper()
+        %% Re-register the real 'Class' (same module it had) and the probe so
+        %% later tests and modules in the same VM are not affected.
+        ok = ClassModule:register_class(),
+        register_probe()
     end.
 
 %%====================================================================

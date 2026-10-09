@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// InheritedCounterTest — a TestCase subclass with no test method of its own
+// (BT-3768): runAll and run: run the test methods it inherits from CounterTest.
+
+CounterTest subclass: InheritedCounterTest
+
+  helper => nil
