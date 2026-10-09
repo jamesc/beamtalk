@@ -5,6 +5,7 @@
 //! `CatchWithoutClassVarRestore` and the order `render()` emits.
 
 use super::*;
+use crate::core_erlang::erlang_types::ErlangVar;
 
 fn vars() -> OnDoCatchVars {
     let v = |n: &str| n.to_string();
@@ -22,7 +23,7 @@ fn vars() -> OnDoCatchVars {
         ex_obj_var: v("ExObj1"),
         match_var: v("Match1"),
         ex_class_var: v("ExClass1"),
-        snapshot_var: v("ExClass1Snap"),
+        snapshot_var: ErlangVar::new("ExClass1Snap"),
         filter_fallback_var: v("ExClass1NoMatch"),
     }
 }
@@ -34,7 +35,7 @@ fn handler() -> beamtalk_cerl_doc::Document<'static> {
 fn restore_steps(snapshot: &str) -> Vec<CatchStep> {
     vec![
         CatchStep::ClassVarRestore {
-            snapshot: snapshot.to_string(),
+            snapshot: ErlangVar::new(snapshot),
         },
         CatchStep::WrapException,
         CatchStep::ClassFilter,
@@ -44,8 +45,17 @@ fn restore_steps(snapshot: &str) -> Vec<CatchStep> {
 }
 
 fn node(clauses: Vec<CatchClause>) -> ThreadedStmt {
+    node_with_entry(Some(CatchEntry::ClassVarSnapshot), clauses)
+}
+
+fn node_with_entry(entry: Option<CatchEntry>, clauses: Vec<CatchClause>) -> ThreadedStmt {
     ThreadedStmt::OnDoCatch {
         vars: Box::new(vars()),
+        entry,
+        try_region: TryRegion {
+            body: beamtalk_cerl_doc::Document::Str("apply Block1 () "),
+            result_var: "Result1".to_string(),
+        },
         clauses,
         span: span(),
     }
@@ -77,6 +87,17 @@ fn defect(ir: &[ThreadedStmt]) -> Option<CatchRestoreDefect> {
 #[test]
 fn well_formed_catch_boundary_verifies_clean() {
     assert_eq!(verify(&[node(well_formed())]), Vec::new());
+}
+
+/// BT-3763: the entry half is checked too. A node with a well-formed catch but
+/// no snapshot `let` before its `try` would otherwise reach `erlc` as an
+/// unbound `ExClass1Snap`.
+#[test]
+fn a_catch_boundary_without_the_snapshot_entry_fails() {
+    let ir = [node_with_entry(None, well_formed())];
+    assert_eq!(defect(&ir), Some(CatchRestoreDefect::NoSnapshotEntry));
+    let text = lower_and_render(&ir).to_pretty_string();
+    assert!(!text.contains("'beamtalk_class_vars':'snapshot'"));
 }
 
 #[test]
@@ -143,7 +164,7 @@ fn a_non_nlr_arm_that_does_not_begin_with_the_restore_fails() {
             steps: vec![
                 CatchStep::WrapException,
                 CatchStep::ClassVarRestore {
-                    snapshot: "ExClass1Snap".to_string(),
+                    snapshot: ErlangVar::new("ExClass1Snap"),
                 },
                 CatchStep::ClassFilter,
                 CatchStep::FilterHandler(handler()),
@@ -208,7 +229,13 @@ fn render_orders_both_nlr_arms_before_the_restore_before_the_filter() {
     let wrap = at("'beamtalk_exception_handler':'ensure_wrapped'");
     let filter = at("'beamtalk_exception_handler':'matches_class'(ExClass1, ExObj1)");
     assert!(four < three && three < restore && restore < wrap && wrap < filter);
-    assert!(text.starts_with("catch <Type1, Error1, Stack1> -> case {Type1, Error1} of "));
+    // BT-3763: the node renders both halves as one unit, the snapshot `let`
+    // first, then the protected `try`, then the catch.
+    assert!(text.starts_with(
+        "let ExClass1Snap = call 'beamtalk_class_vars':'snapshot'() in \
+         try apply Block1 () of Result1 -> Result1 \
+         catch <Type1, Error1, Stack1> -> case {Type1, Error1} of "
+    ));
     assert!(text.ends_with(" end end"));
 }
 
@@ -246,7 +273,7 @@ fn a_filter_with_no_miss_arm_or_fallback_fails() {
         CatchClause::NonNlr {
             steps: vec![
                 CatchStep::ClassVarRestore {
-                    snapshot: "ExClass1Snap".to_string(),
+                    snapshot: ErlangVar::new("ExClass1Snap"),
                 },
                 CatchStep::WrapException,
                 CatchStep::ClassFilter,
@@ -264,7 +291,7 @@ fn a_filter_closed_without_its_handler_fails() {
         CatchClause::NonNlr {
             steps: vec![
                 CatchStep::ClassVarRestore {
-                    snapshot: "ExClass1Snap".to_string(),
+                    snapshot: ErlangVar::new("ExClass1Snap"),
                 },
                 CatchStep::WrapException,
                 CatchStep::ClassFilter,
