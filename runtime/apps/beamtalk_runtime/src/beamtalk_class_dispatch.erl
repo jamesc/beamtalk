@@ -586,6 +586,18 @@ class_send_dispatch(ClassPid, Selector, Args) ->
                     SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
                     beamtalk_supervisor:run_initialize(SupTuple),
                     ResultMap#{okValue := SupTuple};
+                {beamtalk_supervisor, _, _, _} = SupTuple when Selector =:= supervise ->
+                    %% Idempotent branch: wait for a concurrent first caller's
+                    %% initialize: hook to finish (BT-3759).
+                    beamtalk_supervisor:await_initialized(SupTuple),
+                    Result;
+                #{
+                    '$beamtalk_class' := 'Result',
+                    isOk := true,
+                    okValue := {beamtalk_supervisor, _, _, _} = SupTuple
+                } when Selector =:= supervise ->
+                    beamtalk_supervisor:await_initialized(SupTuple),
+                    Result;
                 _ ->
                     Result
             end;

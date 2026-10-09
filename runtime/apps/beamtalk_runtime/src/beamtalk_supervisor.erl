@@ -57,6 +57,8 @@ functions that call OTP APIs from the caller's process context.
     ensure_root_table/0,
     clear_root/0,
     run_initialize/1,
+    await_initialized/1,
+    ensure_init_gate_table/0,
     start_child_via_class_method/4,
     start_dynamic_child/2,
     start_dynamic_child/3,
@@ -71,6 +73,13 @@ functions that call OTP APIs from the caller's process context.
 %% Stores `{root, SupervisorTuple}` where SupervisorTuple is a
 %% `{beamtalk_supervisor, ClassName, Module, Pid}` value.
 -define(ROOT_SUPERVISOR_TABLE, beamtalk_root_supervisor).
+%% BT-3759: bag of `initializing` gates (see run_initialize/1).
+-define(INIT_GATE_TABLE, beamtalk_supervisor_init_gates).
+%% Upper bound on how long an already_started caller waits for a concurrent
+%% initialize: hook (covers an initializer that dies before it claims the gate).
+-define(INIT_WAIT_TIMEOUT, 60000).
+%% Poll interval for a waiting caller (see wait_loop/8).
+-define(INIT_POLL_MS, 200).
 
 %%% ============================================================================
 %%% Public API
@@ -125,9 +134,12 @@ startLink(Self) ->
             %% The hook unpacks the Result tagged map produced by FFI
             %% coercion, rewrites the inner tag to beamtalk_supervisor,
             %% runs initialize: in the caller's process, and rewraps.
+            arm_init_gate(Pid),
             {ok, {beamtalk_supervisor_new, ClassName, Module, Pid}};
         {error, {already_started, Pid}} ->
-            %% Idempotent branch: no initialize: re-run.
+            %% Idempotent branch: no initialize: re-run. The dispatch hook
+            %% calls await_initialized/1 so a concurrent first caller's hook
+            %% has finished before this caller sees the pid (BT-3759).
             {ok, {beamtalk_supervisor, ClassName, Module, Pid}};
         {error, Reason} ->
             ?LOG_ERROR("Supervisor start failed", #{
@@ -733,31 +745,264 @@ clear_root() ->
 -doc """
 Run the class-side `initialize:` lifecycle hook on a supervisor tuple.
 
-Called from `beamtalk_message_dispatch:send/3` AFTER `class_send` returns
-the supervisor tuple from a `supervise` call. This ensures `initialize:`
+Called from `beamtalk_class_dispatch:class_send_dispatch/3` AFTER `class_send`
+returns the supervisor tuple from a `supervise` call. This ensures `initialize:`
 runs in the caller's process — where the class gen_server is free to answer
 `has_method`, `superclass`, and other hierarchy lookups that Beamtalk
 dispatch requires.
 
 Uses `call_class_method_direct` to bypass the class gen_server for the
 initial `class_initialize:` method lookup (same pattern as `static_init/2`).
+
+## Concurrent `supervise` callers (BT-3759)
+
+The hook cannot run inside the serialised class call (it needs the class
+gen_server free, so that would deadlock), so start -> initialize -> publish is
+made atomic for callers with an `initializing` gate instead:
+
+  * `startLink/1` (in the class process) arms a gate for a freshly started
+    supervisor pid before the class gen_server is released.
+  * This function claims the gate (records the caller as owner) and releases it
+    once the hook has finished or failed; on failure the supervisor is stopped
+    BEFORE the gate is released.
+  * A second `supervise` caller gets `{already_started, Pid}`; the dispatch hook
+    then calls `await_initialized/1`, which blocks the caller (never the class
+    process) until the gate is released. It then sees either the initialised
+    supervisor or a structured `supervisor_start_failed` error, never an
+    uninitialised supervisor or a dead pid.
+
+The wait applies only to the `supervise` selector (the dispatch hook), so other
+class methods returning the supervisor tuple never block on the gate. A gate
+that is armed but never claimed (the first caller never reached this function)
+is reclaimed by the first waiter to hit the deadline: the orphan supervisor is
+stopped and the gate released so the next `supervise` starts afresh.
+
+Known limits: only `supervise` waits (`current` called while a hook is still
+running can return the supervisor before it is initialised); the wait blocks the
+calling process, so a class gen_server whose method calls `Y supervise` stalls
+for the duration; and a user `class supervise` override that does not return the
+supervisor to the dispatch hook leaves its gate unclaimed until a later waiter
+reclaims it at the deadline.
+
+Re-entrancy: a hook that itself calls `supervise` on the same class runs in the
+gate owner, which `await_initialized/1` lets straight through. A different
+process that the hook waits on and that calls `supervise` would wait on the
+gate until `?INIT_WAIT_TIMEOUT` and then get the structured error.
 """.
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, ClassName, Module, Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
+    claim_init_gate(Pid),
     %% See static_init/2: the class method runs in a read-only snapshot region.
     %% The supervisor is already started and linked by the time the hook runs.
     %% If the hook raises (including a class-variable write raising
     %% `class_state_read_only`), the caller never receives the supervisor, so stop
     %% it before re-raising: no half-started supervisor, registered name or
-    %% orphaned children are left behind (BT-3720).
+    %% orphaned children are left behind (BT-3720). The gate is released only
+    %% after the stop so waiters observe a dead supervisor and raise.
     try
         call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, [SupTuple])
     catch
         Class:Reason:Stacktrace ->
             stop_failed_supervisor(Pid),
+            release_init_gate(Pid),
             erlang:raise(Class, Reason, Stacktrace)
     end,
+    release_init_gate(Pid),
+    ok.
+
+-doc """
+Block until any in-flight `initialize:` hook for this supervisor has finished
+(BT-3759). Returns `ok` immediately when no hook is running or when the caller
+is the hook's own process. Raises a structured `supervisor_start_failed` error
+if the hook failed (supervisor stopped) or the wait timed out.
+""".
+-spec await_initialized(term()) -> ok.
+await_initialized({beamtalk_supervisor, ClassName, _Module, Pid}) when is_pid(Pid) ->
+    ensure_init_gate_table(),
+    Self = self(),
+    Rows = ets:lookup(?INIT_GATE_TABLE, Pid),
+    %% Only the `gate` row means a hook is in flight; leftover waiter rows alone
+    %% never do.
+    case gate_held(Pid, Rows) andalso not lists:member({Pid, owner, Self}, Rows) of
+        true -> wait_for_init_gate(ClassName, Pid);
+        false -> ok
+    end;
+await_initialized(_) ->
+    ok.
+
+-spec wait_for_init_gate(atom(), pid()) -> ok.
+wait_for_init_gate(ClassName, Pid) ->
+    Ref = make_ref(),
+    Waiter = {Pid, waiter, self(), Ref},
+    ets:insert(?INIT_GATE_TABLE, Waiter),
+    %% Re-check after registering: if the gate was released in between we will
+    %% not be notified.
+    Rows = ets:lookup(?INIT_GATE_TABLE, Pid),
+    case gate_held(Pid, Rows) of
+        false ->
+            gate_released(ClassName, Pid, Waiter, Ref);
+        true ->
+            SupMon = erlang:monitor(process, Pid),
+            Deadline = erlang:monotonic_time(millisecond) + init_wait_timeout(),
+            wait_loop(ClassName, Pid, Waiter, Ref, SupMon, undefined, Rows, Deadline)
+    end.
+
+%% The gate is released when its `gate` row is gone; stray waiter rows (inserted
+%% after the release took the gate) do not hold it.
+-spec gate_held(pid(), list()) -> boolean().
+gate_held(Pid, Rows) ->
+    lists:member({Pid, gate}, Rows).
+
+-spec gate_released(atom(), pid(), tuple(), reference()) -> ok.
+gate_released(ClassName, Pid, Waiter, Ref) ->
+    ets:delete_object(?INIT_GATE_TABLE, Waiter),
+    flush_init_notice(Ref),
+    check_initialized(ClassName, Pid).
+
+%% Poll every ?INIT_POLL_MS so a waiter that registered before the owner
+%% claimed the gate (no owner row yet) still starts monitoring the owner once it
+%% appears, and so a gate that is armed but never claimed is detected at the
+%% deadline instead of leaving `supervise` stuck for good.
+-spec wait_loop(
+    atom(), pid(), tuple(), reference(), reference(), reference() | undefined, list(), integer()
+) -> ok.
+wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon0, Rows, Deadline) ->
+    OwnerMon =
+        case {OwnerMon0, [O || {_, owner, O} <- Rows]} of
+            {undefined, [Owner | _]} -> erlang:monitor(process, Owner);
+            _ -> OwnerMon0
+        end,
+    receive
+        {Ref, initialized} ->
+            demonitor_all([SupMon, OwnerMon]),
+            check_initialized(ClassName, Pid);
+        {'DOWN', SupMon, process, Pid, _} ->
+            %% Supervisor gone: drop its gate rows (also covers a gate that was
+            %% armed but never claimed).
+            demonitor_all([OwnerMon]),
+            release_init_gate(Pid),
+            flush_init_notice(Ref),
+            init_wait_failed(ClassName);
+        {'DOWN', OwnerMon, process, _, _} when OwnerMon =/= undefined ->
+            %% The hook's process died without finishing: nobody will
+            %% release the gate or publish the supervisor.
+            demonitor_all([SupMon]),
+            abandon_init_gate(ClassName, Pid, Ref)
+    after ?INIT_POLL_MS ->
+        NewRows = ets:lookup(?INIT_GATE_TABLE, Pid),
+        case gate_held(Pid, NewRows) of
+            false ->
+                demonitor_all([SupMon, OwnerMon]),
+                gate_released(ClassName, Pid, Waiter, Ref);
+            true ->
+                case erlang:monotonic_time(millisecond) >= Deadline of
+                    false ->
+                        wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon, NewRows, Deadline);
+                    true ->
+                        demonitor_all([SupMon, OwnerMon]),
+                        case [O || {_, owner, O} <- NewRows] of
+                            [] ->
+                                %% Gate armed but never claimed: the first caller
+                                %% never reached run_initialize/1. Reclaim the
+                                %% orphan so the next supervise starts afresh.
+                                abandon_init_gate(ClassName, Pid, Ref);
+                            _ ->
+                                ets:delete_object(?INIT_GATE_TABLE, Waiter),
+                                init_wait_failed(ClassName)
+                        end
+                end
+        end
+    end.
+
+-spec abandon_init_gate(atom(), pid(), reference()) -> no_return().
+abandon_init_gate(ClassName, Pid, Ref) ->
+    stop_failed_supervisor(Pid),
+    release_init_gate(Pid),
+    flush_init_notice(Ref),
+    init_wait_failed(ClassName).
+
+-spec flush_init_notice(reference()) -> ok.
+flush_init_notice(Ref) ->
+    receive
+        {Ref, initialized} -> ok
+    after 0 -> ok
+    end.
+
+-spec demonitor_all([reference() | undefined]) -> ok.
+demonitor_all(Refs) ->
+    lists:foreach(
+        fun
+            (undefined) -> ok;
+            (R) -> erlang:demonitor(R, [flush])
+        end,
+        Refs
+    ).
+
+-spec check_initialized(atom(), pid()) -> ok.
+check_initialized(ClassName, Pid) ->
+    case is_process_alive(Pid) of
+        true -> ok;
+        false -> init_wait_failed(ClassName)
+    end.
+
+-spec init_wait_failed(atom()) -> no_return().
+init_wait_failed(ClassName) ->
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            supervisor_start_failed,
+            ClassName,
+            supervise,
+            <<"supervisor initialize: did not complete for a concurrent supervise call">>
+        )
+    ).
+
+-doc "Create the `initializing` gate table if needed (public bag, runtime-owned).".
+-spec ensure_init_gate_table() -> ok.
+ensure_init_gate_table() ->
+    case ets:info(?INIT_GATE_TABLE, id) of
+        undefined ->
+            try
+                ets:new(?INIT_GATE_TABLE, [named_table, public, bag])
+            catch
+                error:badarg -> ok
+            end,
+            ok;
+        _ ->
+            ok
+    end.
+
+-spec arm_init_gate(pid()) -> ok.
+arm_init_gate(Pid) ->
+    ensure_init_gate_table(),
+    %% Drop rows left by supervisors that died before their gate was claimed.
+    lists:foreach(
+        fun(Dead) -> ets:delete(?INIT_GATE_TABLE, Dead) end,
+        [
+            P
+         || P <- lists:usort([element(1, R) || R <- ets:tab2list(?INIT_GATE_TABLE)]),
+            not is_process_alive(P)
+        ]
+    ),
+    ets:insert(?INIT_GATE_TABLE, {Pid, gate}),
+    ok.
+
+-spec claim_init_gate(pid()) -> ok.
+claim_init_gate(Pid) ->
+    ensure_init_gate_table(),
+    ets:insert(?INIT_GATE_TABLE, [{Pid, gate}, {Pid, owner, self()}]),
+    ok.
+
+-spec release_init_gate(pid()) -> ok.
+release_init_gate(Pid) ->
+    ensure_init_gate_table(),
+    lists:foreach(
+        fun
+            ({_, waiter, WaiterPid, Ref}) -> WaiterPid ! {Ref, initialized};
+            (_) -> ok
+        end,
+        ets:take(?INIT_GATE_TABLE, Pid)
+    ),
     ok.
 
 -doc """
@@ -1406,3 +1651,8 @@ ensure_root_table() ->
         _ ->
             ok
     end.
+
+%% Overridable (application env) so tests can exercise the timeout paths.
+-spec init_wait_timeout() -> non_neg_integer().
+init_wait_timeout() ->
+    application:get_env(beamtalk_runtime, init_wait_timeout_ms, ?INIT_WAIT_TIMEOUT).
