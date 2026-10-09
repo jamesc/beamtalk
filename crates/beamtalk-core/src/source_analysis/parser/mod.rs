@@ -653,6 +653,13 @@ pub enum DiagnosticCategory {
     /// carried into another class's class-side method raises
     /// `class_state_unreachable`. A lint, not a guarantee.
     ClassStateAbroad,
+    /// A codegen-internal invariant violation caught by the `ThreadedIr`
+    /// verifier (ADR 0111 amendment, BT-3724). Always a *warning* whose
+    /// message starts with `internal:`: it flags a compiler bug (the emitted
+    /// code may be wrong), never a problem in the user's program, and never
+    /// blocks a build. Not suppressible by `@expect`, not a `[diagnostics]`
+    /// key — the user cannot act on it except by reporting it.
+    InternalVerifier,
 }
 
 /// A secondary note attached to a diagnostic.

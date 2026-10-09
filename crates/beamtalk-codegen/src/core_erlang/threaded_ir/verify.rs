@@ -662,9 +662,51 @@ impl CoreErlangGenerator {
             false,
             "ThreadedIr verify found a {invariant_label}: {errors:?}"
         );
-        self.add_codegen_warning(
-            Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
-                .with_category(DiagnosticCategory::Type),
-        );
+        self.add_codegen_warning(verify_errors_to_diagnostic(errors, invariant_label, span));
     }
+
+    /// Records one synthetic verifier finding through the release-mode path
+    /// (the warning, without [`Self::report_threaded_ir_verify_errors`]'s
+    /// debug-build hard failure). Backs
+    /// [`CodegenOptions::with_injected_verifier_violation`], the test hook
+    /// that lets driver-level tests prove an `internal:` diagnostic surfaces
+    /// without a release build or a real codegen bug.
+    pub(in crate::core_erlang) fn inject_synthetic_verifier_violation(
+        &mut self,
+        enabled: bool,
+        span: Span,
+    ) {
+        if !enabled {
+            return;
+        }
+        let errors = [VerifyError::ThreadingModeUnpackMismatch {
+            mode: ThreadingMode::DirectParams,
+            at: span,
+        }];
+        self.add_codegen_warning(verify_errors_to_diagnostic(
+            &errors,
+            "injected verifier violation (test hook)",
+            span,
+        ));
+    }
+}
+
+/// Builds the release-mode diagnostic for a `ThreadedIr` verifier finding
+/// (ADR 0111 amendment, BT-3724): a **warning** (never an error, so it can
+/// not fail a build that would otherwise produce usable code) whose message
+/// starts with `internal:` and whose category is
+/// [`DiagnosticCategory::InternalVerifier`], so drivers can forward exactly
+/// these and nothing else out of `GeneratedModule::warnings`.
+///
+/// Independent of `cfg(debug_assertions)` so a unit test can assert it
+/// without a release build; [`CoreErlangGenerator::report_threaded_ir_verify_errors`]
+/// is its only production caller.
+#[must_use]
+pub(in crate::core_erlang) fn verify_errors_to_diagnostic(
+    errors: &[VerifyError],
+    invariant_label: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::warning(format!("internal: {invariant_label}: {errors:?}"), span)
+        .with_category(DiagnosticCategory::InternalVerifier)
 }

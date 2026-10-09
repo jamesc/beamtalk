@@ -194,6 +194,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
+        DiagnosticCategory::InternalVerifier => "InternalVerifier",
     }
 }
 
@@ -414,6 +415,7 @@ mod tests {
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
             (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
+            (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);

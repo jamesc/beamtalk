@@ -18,6 +18,7 @@
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
+//! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
 
@@ -55,4 +56,5 @@ mod lower_and_render_shim;
 mod render_naming;
 mod simple_bind;
 mod tuple_acc;
+mod verifier_diagnostic;
 mod verify_walk;

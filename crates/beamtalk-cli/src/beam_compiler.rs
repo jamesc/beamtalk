@@ -612,18 +612,28 @@ pub fn write_core_erlang_with_source(
 ) -> Result<()> {
     validate_module_name(module_name)?;
 
-    let core_erlang = beamtalk_codegen::core_erlang::generate_module(
-        module,
-        beamtalk_codegen::core_erlang::CodegenOptions::new(module_name)
-            .with_source_opt(source_text)
-            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
-            .with_provenance(
-                env!("BEAMTALK_VERSION"),
-                crate::commands::build_stamp::current_otp_version(),
-            ),
-    )
-    .into_diagnostic()
-    .wrap_err("Failed to generate Core Erlang")?;
+    let (core_erlang, verifier_diagnostics) =
+        beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(
+            module,
+            beamtalk_codegen::core_erlang::CodegenOptions::new(module_name)
+                .with_source_opt(source_text)
+                // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+                .with_provenance(
+                    env!("BEAMTALK_VERSION"),
+                    crate::commands::build_stamp::current_otp_version(),
+                ),
+        )
+        .into_diagnostic()
+        .wrap_err("Failed to generate Core Erlang")?;
+
+    // ADR 0111 amendment (BT-3724): a verifier finding is a warning; the
+    // output is still written.
+    crate::diagnostic::print_diagnostics_text(
+        &verifier_diagnostics,
+        output_path.as_str(),
+        source_text.unwrap_or_default(),
+        &beamtalk_core::CompilerOptions::default(),
+    );
 
     write_core_erlang_bytes(&core_erlang, output_path)
 }
@@ -801,6 +811,11 @@ impl ProvisionSink {
 ///
 /// # Errors
 ///
+/// Returns the `ThreadedIr` verifier diagnostics (ADR 0111 amendment, BT-3724)
+/// — warnings only; the file is written regardless. The caller prints them.
+///
+/// # Errors
+///
 /// Returns an error if the module name is invalid, code generation fails,
 /// or the output file cannot be written.
 #[allow(clippy::too_many_arguments)]
@@ -814,7 +829,7 @@ pub fn write_core_erlang_with_bindings(
     source: Option<(&str, Option<&str>)>,
     native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
     analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
-) -> Result<()> {
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
     validate_module_name(module_name)?;
 
     let (source_text, source_path) = match source {
@@ -851,11 +866,27 @@ pub fn write_core_erlang_with_bindings(
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    let core_erlang = beamtalk_codegen::core_erlang::generate_module(module, codegen_options)
-        .into_diagnostic()
-        .wrap_err("Failed to generate Core Erlang")?;
+    write_core_erlang_with_options(module, codegen_options, output_path)
+}
 
-    write_core_erlang_bytes(&core_erlang, output_path)
+/// Generates Core Erlang with fully prepared `codegen_options` and writes it,
+/// returning only the `ThreadedIr` verifier diagnostics (warnings; the output
+/// is written regardless — ADR 0111 amendment, BT-3724).
+///
+/// Split out of [`write_core_erlang_with_bindings`] so a test can inject a
+/// verifier violation through the options.
+fn write_core_erlang_with_options(
+    module: &beamtalk_core::ast::Module,
+    codegen_options: beamtalk_codegen::core_erlang::CodegenOptions,
+    output_path: &Utf8Path,
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    let (core_erlang, verifier_diagnostics) =
+        beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(module, codegen_options)
+            .into_diagnostic()
+            .wrap_err("Failed to generate Core Erlang")?;
+
+    write_core_erlang_bytes(&core_erlang, output_path)?;
+    Ok(verifier_diagnostics)
 }
 
 /// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).
@@ -1065,7 +1096,7 @@ pub(crate) fn compile_source_with_bindings(
     // Save diagnostics for the caller to build a summary.
     // `diagnostics` is no longer needed after this point — the printing loop above
     // borrowed them by reference and the error check already bailed if needed.
-    let returned_diags = diagnostics;
+    let mut returned_diags = diagnostics;
 
     // Generate Core Erlang (with source text for CompiledMethod introspection, and bindings)
     // Use an absolute path so reload works regardless of the
@@ -1109,7 +1140,7 @@ pub(crate) fn compile_source_with_bindings(
         &analysis_result.method_return_types,
         &analysis_result.external_protocols,
     );
-    write_core_erlang_with_bindings(
+    let verifier_diagnostics = write_core_erlang_with_bindings(
         &module,
         module_name,
         core_output,
@@ -1128,6 +1159,20 @@ pub(crate) fn compile_source_with_bindings(
         Some(analysis_result),
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
+
+    // ADR 0111 amendment (BT-3724): `internal:` verifier findings are
+    // warnings raised after the error gate above, so they never fail a build
+    // (not even under `--warnings-as-errors`); they are printed and returned
+    // for the caller's summary like any other diagnostic.
+    if !verifier_diagnostics.is_empty() {
+        crate::diagnostic::print_diagnostics_text(
+            &verifier_diagnostics,
+            source_path.as_str(),
+            &source,
+            options,
+        );
+        returned_diags.extend(verifier_diagnostics);
+    }
 
     debug!("Generated Core Erlang: {}", core_output);
     Ok(returned_diags)
@@ -1166,6 +1211,42 @@ mod tests {
         let content = fs::read_to_string(output_path).unwrap();
         assert!(content.contains("module 'test_module'"));
         assert!(content.contains("attributes ['behaviour' = ['gen_server']]"));
+    }
+
+    /// BT-3724 (ADR 0111 amendment): an injected `ThreadedIr` verifier
+    /// violation reaches the CLI build path as an `internal:` warning, and the
+    /// build still succeeds and writes its output.
+    #[test]
+    fn injected_verifier_violation_is_a_warning_and_build_succeeds() {
+        use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
+
+        let temp = TempDir::new().unwrap();
+        let output_path = Utf8PathBuf::from_path_buf(temp.path().join("probe.core")).unwrap();
+        let tokens =
+            beamtalk_core::source_analysis::lex_with_eof("Object subclass: Probe\n  go => 1\n");
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        let options = beamtalk_codegen::core_erlang::CodegenOptions::new("probe");
+        let clean = write_core_erlang_with_options(&module, options.clone(), &output_path).unwrap();
+        assert!(
+            clean.is_empty(),
+            "valid program emits no new diagnostics: {clean:?}"
+        );
+
+        let diags = write_core_erlang_with_options(
+            &module,
+            options.with_injected_verifier_violation(),
+            &output_path,
+        )
+        .expect("a verifier finding must not fail the build");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert_eq!(
+            diags[0].category,
+            Some(DiagnosticCategory::InternalVerifier)
+        );
+        assert!(diags[0].message.starts_with("internal: "));
+        assert!(output_path.exists());
     }
 
     #[test]

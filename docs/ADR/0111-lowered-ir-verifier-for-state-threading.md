@@ -5,6 +5,8 @@ Implemented (2026-08-11)
 
 > **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06).** The `ClassVars` storage family is removed from `ThreadedIr`: class variables are written in place in the class process, so there is nothing to thread, and `VersionPrefix::ClassVars`, the `ClassVars` loop and fold slots, `ShadowWriteMissing` and the shadow-write flag on `Bind` are deleted. The `State` and `SelfVt` families, non-local return and the verifier are unchanged. `ThreadedStmt::OnDoCatch` is the one node that carries class-variable semantics now, and `verify()` reports `VerifyError::CatchWithoutClassVarRestore` for a catch whose non-NLR arm does not begin with `restore/1` (both `$bt_nlr` arms first). The addenda below describe `ClassVars` threading and the ADR 0110 shadow write as history.
 
+> **Amended by Addendum 17 (2026-10-09, BT-3724).** Release-build verifier findings are surfaced by the CLI build path and the compiler port as `internal:` warnings (category `InternalVerifier`); they never fail a build.
+
 ## Implementation Tracking
 
 **Epic:** [BT-3128](https://linear.app/beamtalk/issue/BT-3128) — Lowered IR + Verifier for State Threading (ADR 0111)
@@ -4534,3 +4536,16 @@ still need. Every construct family `docs/development/debugging.md`'s
 "ThreadedIr verifier" section describes is now migrated; no
 loop-shape-specific `#[allow(dead_code)]` marker remains; the measurement
 gate is cleared. Epic BT-3447 is Done.
+
+## Addendum 17 (2026-10-09): BT-3724 — release-build verifier findings are surfaced as `internal:` warnings
+
+**Problem.** The Failure behavior paragraph says a release-build `VerifyError` degrades to "a diagnostic attached to the compile result" and "a warning, not a refusal to compile valid code". Neither held. `report_threaded_ir_verify_errors` recorded `Diagnostic::error(..)` (category `Type`) on the generator's `codegen_warnings`, and every production driver (the CLI build path in `beam_compiler.rs`, the compiler-port `compile`, `inline_definitions` and `compile_method` handlers) called `generate_module`, which discards `GeneratedModule.warnings`. The diagnostic was produced and never shown (BT-3693 saw nothing in a release CLI build), and had it been plumbed through unchanged, an error-severity entry would have failed the build.
+
+**Decision.**
+
+1. **Always reported, as a warning.** A verifier finding is a `Severity::Warning`, so it never blocks a build, not even under `--warnings-as-errors` (it is raised after the CLI's error gate). The message keeps the `internal:` prefix and the category is a new `DiagnosticCategory::InternalVerifier`, not `Type`. It has no `[diagnostics]` key and no `@expect` category: it reports a compiler bug the user cannot fix in their program. Debug and CI builds still hard-fail through the `debug_assert!` in `report_threaded_ir_verify_errors`; nothing about that changes.
+2. **Scope: only these diagnostics.** The CLI build path and the compiler-port handlers call `generate_module_surfacing_verifier`, which returns the code plus only the `InternalVerifier` entries of `GeneratedModule.warnings` (`GeneratedModule::into_code_and_verifier_diagnostics`). Every other codegen warning (stateful block at an Erlang boundary, non-literal callable, flatten diagnostics) is still dropped, exactly as before. Surfacing those is a separate follow-up, because it changes build and REPL output for ordinary programs. The CLI prints the findings with the file's other diagnostics and returns them in the build summary; the compiler port appends the message to the response's `warnings`.
+3. **Testable without a release build.** The diagnostic is built by `verify_errors_to_diagnostic`, which does not depend on `cfg(debug_assertions)`, and is unit-tested directly. `CodegenOptions::with_injected_verifier_violation` (a `#[doc(hidden)]` test hook) records one synthetic finding through the release path, so driver-level tests prove the warning surfaces and the build still succeeds and writes its output.
+4. **No false positives on valid code.** Verification already ran unconditionally in release, so this adds no compile-time cost. Valid programs emit no new diagnostics: `just verify-threaded-ir` and the stdlib build are clean.
+
+**Effect on earlier text.** "Failure behavior" and "Negative consequences" stand as written; they described this behavior, and the implementation now matches them. ADR 0130 Open Question 2 is resolved by this addendum.

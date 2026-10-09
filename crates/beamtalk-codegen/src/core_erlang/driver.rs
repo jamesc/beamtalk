@@ -53,6 +53,26 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     generate_module_with_warnings(module, options).map(|m| m.code)
 }
 
+/// Generates Core Erlang for a module, returning the code and only the
+/// `ThreadedIr` verifier diagnostics (ADR 0111 amendment, BT-3724).
+///
+/// The production entry point for drivers that must surface a codegen-internal
+/// invariant violation to the user without also surfacing every other codegen
+/// warning ([`GeneratedModule::into_code_and_verifier_diagnostics`]). The
+/// diagnostics are warnings: generation still succeeds with the generator's
+/// (unverified) output.
+///
+/// # Errors
+///
+/// Same as [`generate_module_with_warnings`].
+pub fn generate_module_surfacing_verifier(
+    module: &Module,
+    options: CodegenOptions,
+) -> Result<(String, Vec<beamtalk_core::source_analysis::Diagnostic>)> {
+    generate_module_with_warnings(module, options)
+        .map(GeneratedModule::into_code_and_verifier_diagnostics)
+}
+
 /// Generates Core Erlang for a module, returning the code and any diagnostic warnings.
 ///
 /// Like [`generate_module`] but also returns warnings emitted during generation.
@@ -297,6 +317,8 @@ pub fn generate_module_with_warnings(
     } else {
         generator.generate_value_type_module(module)?
     };
+
+    generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
 
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
