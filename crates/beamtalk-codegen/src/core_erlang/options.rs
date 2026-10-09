@@ -186,6 +186,7 @@ impl CodegenOptions {
         self.inject_verifier_violation = true;
         self
     }
+
     /// Sets the class module index for resolving cross-file class references.
     ///
     /// Maps Beamtalk class names (e.g. `"SchemeEnv"`) to their compiled Erlang

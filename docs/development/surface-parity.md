@@ -600,8 +600,8 @@ the surfaces that generate code show it: CLI `build`/`test` print it with the
 file's other diagnostics (it never fails a build, even under
 `--warnings-as-errors`), and REPL/MCP load carry it in the compile response
 `warnings`. `check`, `lint` and the LSP do not run codegen and never show it.
-No operation is surface-specific. It has no `[diagnostics]` key and no
-`@expect` category, and `--no-warnings` does not hide it. **Gap:** REPL/MCP
+It has no `[diagnostics]` key and no `@expect` category, and `--no-warnings`
+does not hide it. **Known parity gap ([BT-3778](https://linear.app/beamtalk/issue/BT-3778)):** REPL/MCP
 `eval` of a bare expression (and `.btscript` test expressions) builds its own
 generator and still drops it; load/compile paths carry it. Other codegen
 warnings are still not forwarded.

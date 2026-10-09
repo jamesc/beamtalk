@@ -21,9 +21,6 @@
 //! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
 //!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
 //!   `BranchArm` nodes
-//! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
-//!   membership), and its `ConstructTuple`/`DiscardLocals`/`MethodBody`/
-//!   `BranchArm` nodes
 //! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
