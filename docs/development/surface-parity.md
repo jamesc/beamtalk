@@ -591,6 +591,21 @@ reports the same message at the same span. No operation is surface-specific.
   sent `value` in a later one is not seen by the §6 check and still raises
   `stateful_block_dispatch` at run time.
 
+### `internal:` ThreadedIr verifier warning (ADR 0111 Addendum 17, BT-3724)
+
+A codegen invariant violation caught by the `ThreadedIr` verifier is reported
+in release builds as a warning whose message starts with `internal:`
+(category `InternalVerifier`). It is raised during code generation, so only
+the surfaces that generate code show it: CLI `build`/`test` print it with the
+file's other diagnostics (it never fails a build, even under
+`--warnings-as-errors`), and REPL/MCP load carry it in the compile response
+`warnings`. `check`, `lint` and the LSP do not run codegen and never show it.
+It has no `[diagnostics]` key and no `@expect` category, and `--no-warnings`
+does not hide it. **Known parity gap ([BT-3778](https://linear.app/beamtalk/issue/BT-3778)):** REPL/MCP
+`eval` of a bare expression (and `.btscript` test expressions) builds its own
+generator and still drops it; load/compile paths carry it. Other codegen
+warnings are still not forwarded.
+
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 
 A class that `uses:` a trait declared in *another* file only has the trait's

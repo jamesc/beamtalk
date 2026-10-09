@@ -10,7 +10,7 @@ use eetf::Term;
 use crate::decode::merge_method;
 use crate::respond::{
     class_definition_ok_response, error_response, format_codegen_error,
-    protocol_definition_ok_response, type_alias_definition_ok_response,
+    protocol_definition_ok_response, type_alias_definition_ok_response, with_verifier_warnings,
 };
 
 /// Derive a BEAM module name for a class, using either an explicit
@@ -175,13 +175,16 @@ pub(crate) fn handle_inline_class_definition(
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_codegen::core_erlang::generate_module(&module, codegen_options) {
-        Ok(code) => class_definition_ok_response(
+    match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(
+        &module,
+        codegen_options,
+    ) {
+        Ok((code, verifier_diagnostics)) => class_definition_ok_response(
             &code,
             &class_module_name,
             &classes,
             trailing_core_erlang.as_deref(),
-            &warnings,
+            &with_verifier_warnings(&warnings, &verifier_diagnostics),
             referenced_aliases,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
@@ -249,12 +252,13 @@ pub(crate) fn handle_inline_protocol_definition(
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_codegen::core_erlang::generate_module(module, codegen_options) {
-        Ok(code) => protocol_definition_ok_response(
+    match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(module, codegen_options)
+    {
+        Ok((code, verifier_diagnostics)) => protocol_definition_ok_response(
             &code,
             &protocol_module_name,
             &protocol_names,
-            warnings,
+            &with_verifier_warnings(warnings, &verifier_diagnostics),
             referenced_aliases,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
