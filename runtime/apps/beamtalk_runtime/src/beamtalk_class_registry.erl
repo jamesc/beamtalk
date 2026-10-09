@@ -451,7 +451,10 @@ drain_pending_load_errors_by_names(ClassNames) ->
 -doc """
 Discard any pending load errors for the given class names (BT-3773).
 Called by every loader immediately before its own `code:load_binary/3`, so the
-drain that follows a failed load only ever sees errors parked by that attempt.
+drain that follows a failed load only sees errors parked by that attempt, assuming
+no other process loads the same class at the same time (the clear, load and drain
+sequence is not atomic across concurrent loaders; the worst case is a degraded
+error detail, never half-applied state).
 Paths that trigger the same `-on_load` gate but never drain
 (`beamtalk_module_activation`, code-server autoload) otherwise leave an entry
 behind that a later, unrelated failure of the same class would be blamed on.

@@ -11,7 +11,8 @@ and the pending-load-error table it drains.
 * A refusal parked by a load that nothing drained (`beamtalk_module_activation`,
   code-server autoload) must not be blamed on a later, unrelated failure of the
   same class: every loader clears the class's parked entries immediately before
-  its own `code:load_binary/3`, so a drain only sees errors from its own attempt.
+  its own `code:load_binary/3`, so a drain only sees errors from its own attempt (absent a concurrent load of
+  the same class, which this module does not cover).
 * A module whose `-on_load` gate refuses on a stale `class_var_abi` surfaces as
   a structured `abi_mismatch` from `install_reload_result/2`, not as
   `{load_error, on_load_failure}`.

@@ -481,8 +481,10 @@ load_class_binary(ModuleName, LoadPath, Binary, Classes) ->
 -doc """
 `code:load_binary/3` with the pending-load-error table scoped to this attempt
 (BT-3773). Every REPL loader load goes through here, so the drain after a
-failed load only ever sees a structured refusal (`abi_mismatch`,
-`stdlib_shadowing`) parked by THIS load's `-on_load` hook: an entry left behind
+failed load sees a structured refusal (`abi_mismatch`,
+`stdlib_shadowing`) parked by THIS load's `-on_load` hook (assuming no concurrent
+load of the same class: clear/load/drain is not atomic, so a racing loader can
+clear it and the load then falls back to `on_load_failure`): an entry left behind
 by an earlier load nothing drained (`beamtalk_module_activation`, code-server
 autoload) is discarded first instead of being blamed on this load's real cause.
 """.
