@@ -33,7 +33,9 @@
 //!   Everywhere else no callee can hand a `StateAcc` back.
 //! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
 //!   temporary). A local-threading construct
-//!   ([`local_threading_construct_blocks`]) whose blocks write an outer local
+//!   ([`local_threading_construct`], of a family threaded today) whose
+//!   threaded set ([`construct_outer_local_writes`], the same recognizer and
+//!   set codegen's `threaded_locals_of` reads) is not empty
 //!   is accepted as a statement unless [`DENY_SET`] lists the statement
 //!   shape (BT-3753), and otherwise only in the
 //!   `(construct, position, context)` combinations listed in [`ALLOW_SET`]:
@@ -43,8 +45,9 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, captured_local_mutations, is_safe_value_family_selector,
-    local_threading_construct_blocks, outer_local_writes, stored_block_var_uses,
+    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
+    is_safe_value_family_selector, local_threading_construct, outer_local_writes,
+    stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -165,7 +168,7 @@ impl fmt::Display for ConstructKind {
 
 /// The role of the block literal a statement sits in, read off the
 /// local-threading construct that block belongs to
-/// ([`local_threading_construct_blocks`]).
+/// ([`local_threading_construct`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Container {
     /// An arm of a conditional: the `ifTrue:`, `ifNil:` and `and:`/`or:`
@@ -1005,12 +1008,13 @@ impl<'d> Walker<'d> {
                 // The role of each block literal the construct inlines (the
                 // same recognizer as `check_construct`); any other block is a
                 // block value.
-                let construct = local_threading_construct_blocks(expr);
+                let construct =
+                    local_threading_construct(expr).filter(|c| c.family.is_threaded_today());
                 let role = |e: &Expression, is_receiver: bool| match (e, &construct) {
-                    (Expression::Block(b), Some((sel, blocks)))
-                        if blocks.iter().any(|c| std::ptr::eq(*c, b)) =>
+                    (Expression::Block(b), Some(c))
+                        if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) =>
                     {
-                        Container::of(sel, is_receiver)
+                        Container::of(&c.selector, is_receiver)
                     }
                     _ => Container::Other,
                 };
@@ -1157,10 +1161,13 @@ impl<'d> Walker<'d> {
 
     /// The Phase 0 allow-set check for a construct at `position`.
     fn check_construct(&mut self, expr: &Expression, position: Position) {
-        let Some((selector, blocks)) = local_threading_construct_blocks(expr) else {
+        let Some(construct) =
+            local_threading_construct(expr).filter(|c| c.family.is_threaded_today())
+        else {
             return;
         };
-        let writes: Vec<OuterLocalWrite> = blocks.iter().flat_map(|b| self.writes_of(b)).collect();
+        let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
+        let selector = construct.selector;
         let Some(first) = writes.first().cloned() else {
             return;
         };
@@ -1294,7 +1301,7 @@ impl<'d> Walker<'d> {
         let actor_self_send =
             inlined && self.context == Actor && is_self_send && top != TopLevel::None;
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
-        // send of a §1 selector (`local_threading_construct_blocks`).
+        // send of a §1 selector (`local_threading_construct`).
         let construct_send = inlined && is_section1_selector(&sel);
 
         // A block literal receiver. EXEMPTION: a bare `[...]` receiver of an
@@ -1481,7 +1488,7 @@ fn is_section1_selector(selector: &str) -> bool {
     is_state_threading_keyword_selector(selector)
         || is_conditional_selector(selector)
         || is_exception_selector(selector)
-        || selector == "tryDo:"
+        || crate::state_threading_selectors::is_try_do_selector(selector)
 }
 
 /// Whether a block literal *receiver* of `selector` is inlined: a block

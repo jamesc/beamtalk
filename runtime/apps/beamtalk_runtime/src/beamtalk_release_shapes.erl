@@ -108,7 +108,7 @@ extracted without the class-registration machinery it provides.
 
 Returns `{error, {abi_mismatch, Messages}}` if any module under `EmitLibDirs`
 was compiled for a different `class_var_abi` than this runtime accepts
-(ADR 0130, `beamtalk_class_vars:check_class_info_abi/2`): the release must be
+(ADR 0130, `beamtalk_class_var_abi:check_class_info_abi/2`): the release must be
 rebuilt from a recompiled package, so this is a hard failure of the
 preflight, not a skipped shape. Messages are `beamtalk_error:format/1` text
 naming each module. Any other module
@@ -140,7 +140,7 @@ extract_shapes(RuntimeLibDirs, EmitLibDirs) ->
             %% extraction (so `beamtalk release` fails) instead of skipping the
             %% module's shape like any other activation failure.
             try
-                beamtalk_class_vars:collect_abi_refusals(fun() ->
+                beamtalk_class_var_abi:collect_abi_refusals(fun() ->
                     {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
                         EmitModules, #{}
                     ),

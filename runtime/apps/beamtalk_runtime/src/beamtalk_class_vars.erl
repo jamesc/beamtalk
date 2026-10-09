@@ -31,10 +31,13 @@ value is either
   snapshot) is told apart from an empty map (`class_state_snapshot_lookup/1`)
   and raises `class_state_unreachable` instead of reading `#{}`.
 
-`install/2` and `uninstall/1` are the only writers of the class key together
-with the `?BT_CLASS_VARS_HOME` entry, which records the key of the live
-invocation. `snapshot/0`, `restore/1` and `protect/1` operate on the home
-entry only.
+`install/2` and `uninstall/1` are the only writers of the `?BT_CLASS_VARS_HOME`
+entry, which records the key of the live invocation; they set and erase it
+together with the class key. The class key itself is also written by `put/3`
+and `clear/2` (the live map), `restore/1` (a snapshot's map) and
+`with_snapshot/2` (the read-only marker, erased again afterwards).
+`snapshot/0`, `restore/1` and `protect/1` act on the class key the home entry
+names.
 
 ## Receivers
 
@@ -60,6 +63,14 @@ receiver is an internal error.
   set is non-empty and does not contain the name.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
+
+## Dependencies
+
+This module is a leaf of the object system: it never calls
+`beamtalk_object_class` or `beamtalk_behaviour_intrinsics`. Declared kinds
+come from `beamtalk_class_metadata:class_var_kinds/1`, the error values from
+`beamtalk_class_var_errors` (shared with the class gen_server), and the
+`class_var_abi` load gate lives in `beamtalk_class_var_abi`.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -84,16 +95,12 @@ receiver is an internal error.
     snapshot/0,
     restore/1,
     protect/1,
-    with_snapshot/2,
-    abi/0,
-    check_class_info_abi/2,
-    collect_abi_refusals/1
+    with_snapshot/2
 ]).
 
 -export_type([key/0, snapshot/0, class_self/0]).
 
 -define(HOME, ?BT_CLASS_VARS_HOME).
--define(ABI_REFUSALS_TABLE, beamtalk_abi_refusals).
 
 -type key() :: ?BT_CLASS_VARS_KEY(atom()).
 -type snapshot() :: none | {key(), map()}.
@@ -114,7 +121,7 @@ already hold the metaclass tag must use `key_for_tag/1`.
 """.
 -spec key(atom()) -> key().
 key(nil) ->
-    nil_receiver();
+    beamtalk_class_var_errors:raise_nil_receiver();
 key(ClassName) when is_atom(ClassName) ->
     key_for_tag(beamtalk_class_registry:class_object_tag(ClassName)).
 
@@ -203,9 +210,9 @@ put(ClassSelf, Name, Value) ->
             erlang:put(Key, Map#{Name => Value}),
             Value;
         ?BT_CLASS_VARS_RO(_) ->
-            raise_read_only(Class, Name);
+            beamtalk_class_var_errors:raise_read_only(Class, Name);
         undefined ->
-            raise_unreachable(Class, Name, write)
+            beamtalk_class_var_errors:raise_unreachable(Class, Name, write)
     end.
 
 -doc "Remove a class variable (`clearField:`); same errors as `put/3`. Returns `ClassSelf` (`clearField: -> Self`).".
@@ -218,9 +225,9 @@ clear(ClassSelf, Name) ->
             erlang:put(Key, maps:remove(Name, Map)),
             ClassSelf;
         ?BT_CLASS_VARS_RO(_) ->
-            raise_read_only(Class, Name);
+            beamtalk_class_var_errors:raise_read_only(Class, Name);
         undefined ->
-            raise_unreachable(Class, Name, write)
+            beamtalk_class_var_errors:raise_unreachable(Class, Name, write)
     end.
 
 -doc "Presence test (`hasField:`).".
@@ -329,7 +336,7 @@ with_snapshot(ClassSelf, Fun) ->
 class_name(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
     tag_to_name(Tag);
 class_name(_) ->
-    nil_receiver().
+    beamtalk_class_var_errors:raise_nil_receiver().
 
 %% The key of the class `ClassSelf` is the receiver of: the shape applied to
 %% its metaclass tag, exactly what the inlined accesses build. Only called
@@ -345,12 +352,12 @@ tag_to_name(Tag) ->
     TagBin = atom_to_binary(Tag, utf8),
     case beamtalk_class_registry:class_display_name(TagBin) of
         TagBin ->
-            nil_receiver();
+            beamtalk_class_var_errors:raise_nil_receiver();
         Base ->
             try
                 binary_to_existing_atom(Base, utf8)
             catch
-                error:badarg -> nil_receiver()
+                error:badarg -> beamtalk_class_var_errors:raise_nil_receiver()
             end
     end.
 
@@ -359,7 +366,7 @@ current_map(Class, Key, Name) ->
     case erlang:get(Key) of
         Map when is_map(Map) -> Map;
         ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
-        undefined -> raise_unreachable(Class, Name, read)
+        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, Name, read)
     end.
 
 -spec map_or_captured(atom(), key(), atom(), map() | none) -> map().
@@ -368,7 +375,7 @@ map_or_captured(Class, Key, Name, Captured) ->
         Map when is_map(Map) -> Map;
         ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
         undefined when is_map(Captured) -> Captured;
-        undefined -> raise_unreachable(Class, Name, read)
+        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, Name, read)
     end.
 
 %% Resolve the ETS mirror by class *name* on every read, so a restarted class
@@ -379,7 +386,7 @@ mirror(Class, Name) ->
         {ok, Map} -> Map;
         %% Registered but no snapshot row yet (a restarted class process that has
         %% not recorded its first snapshot): not an empty map.
-        not_found -> raise_no_snapshot(Class, Name)
+        not_found -> beamtalk_class_var_errors:raise_no_snapshot(Class, Name)
     end.
 
 %% No registered class process is a class-level condition, not a variable-level
@@ -388,7 +395,7 @@ mirror(Class, Name) ->
 -spec live_class_pid(atom()) -> pid().
 live_class_pid(Class) ->
     case beamtalk_class_registry:whereis_class(Class) of
-        undefined -> raise_unreachable(Class, undefined, read);
+        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, undefined, read);
         Pid -> Pid
     end.
 
@@ -407,9 +414,9 @@ read_value(Class, Name, Map) ->
 -spec late_value(atom(), atom(), map()) -> term().
 late_value(Class, Name, Map) ->
     case maps:find(Name, Map) of
-        {ok, nil} -> raise_uninitialized(Class, Name);
+        {ok, nil} -> beamtalk_class_var_errors:raise_uninitialized(Class, Name);
         {ok, Value} -> Value;
-        error -> raise_uninitialized(Class, Name)
+        error -> beamtalk_class_var_errors:raise_uninitialized(Class, Name)
     end.
 
 %% Never raises on the name: `hasField:` is a non-raising presence test.
@@ -419,7 +426,7 @@ has_value(Map, Name) ->
 
 -spec assert_declared(atom(), atom()) -> ok.
 assert_declared(Class, Name) ->
-    case beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(Class) of
+    case beamtalk_class_metadata:class_var_kinds(Class) of
         Kinds when map_size(Kinds) =:= 0 ->
             %% Empty declared-kinds map (no metadata, no live class, or no
             %% declared class variables): today's `get_class_var` answers nil,
@@ -428,309 +435,6 @@ assert_declared(Class, Name) ->
         Kinds ->
             case maps:is_key(Name, Kinds) of
                 true -> ok;
-                false -> raise_undeclared(Class, Name)
+                false -> beamtalk_class_var_errors:raise_undeclared(Class, Name)
             end
     end.
-
-%%====================================================================
-%% The class_var_abi load gate (ADR 0130 Phase 3, last item)
-%%====================================================================
-
--doc """
-The `class_var_abi` value this runtime accepts: the calling convention of
-compiled class methods (`class_<sel>(ClassSelf, Args...)`, class variables in
-the class process's dictionary). Generated from the Rust `ABI_VERSION`
-(`class_var_keys` in `beamtalk-codegen`), the same constant codegen emits
-into every module's `__beamtalk_meta/0`, so the two cannot disagree.
-""".
--spec abi() -> pos_integer().
-abi() -> ?BT_CLASS_VAR_ABI.
-
--doc """
-Run `Fun` while collecting the ABI refusals `check_class_info_abi/2` records,
-returning `{Result, Refusals}` (`Refusals :: [{Module, #beamtalk_error{}}]`,
-sorted). `beamtalk_release_shapes:extract_shapes/2` uses it to turn a refused
-module into a failed release preflight: a refusal happens inside a module's
-`-on_load` hook, whose failure reason the code server does not return.
-
-The collector is a named public ETS table owned by the caller (the `-on_load`
-hook runs in the code server, not the caller, so it cannot be passed by
-argument). Creating a named table is atomic: a second concurrent collection, or
-a leftover table, raises `abi_collection_in_progress` (an `error` exit the
-caller maps to `{error, _}`) instead of blaming one collection's refusals on
-another. The table is deleted afterwards, and the VM deletes it if the caller is
-killed, so a dead caller never leaves the collector claimed.
-""".
--spec collect_abi_refusals(fun(() -> Result)) ->
-    {Result, [{atom() | undefined, #beamtalk_error{}}]}
-when
-    Result :: term().
-collect_abi_refusals(Fun) ->
-    Table =
-        try
-            ets:new(?ABI_REFUSALS_TABLE, [named_table, public, set])
-        catch
-            error:badarg -> erlang:error(abi_collection_in_progress)
-        end,
-    try
-        Result = Fun(),
-        {Result, lists:sort(ets:tab2list(Table))}
-    after
-        ets:delete(Table)
-    end.
-
--doc """
-Refuse a compiled Beamtalk class module whose `class_var_abi` is not exactly
-`abi/0` (ADR 0130 §3, Implementation Phase 3): `{error, #beamtalk_error{kind =
-abi_mismatch}}` naming the module and saying to recompile.
-
-Called by `beamtalk_object_class:start/2` (registration) and
-`beamtalk_object_class:update_class/2` (hot reload) before anything is
-installed, with the `ClassInfo` the registration carries. The gate covers
-*compiled Beamtalk class modules*, identified the way the loader identifies
-them, by `__beamtalk_meta/0`:
-
-- the compiler-emitted meta map in `ClassInfo` (`meta`, which always has the
-  `class` key; the only form available while the module's `-on_load` hook is
-  still running, when `erlang:function_exported/3` is `false`), or
-- an exported `__beamtalk_meta/0` on `ClassInfo`'s `module`.
-
-Among those, a missing `class_var_abi` key (every module compiled before the
-flip) or any value other than `abi/0` is refused: the check is "equal to the
-current value", never "present and unequal". A module without
-`__beamtalk_meta/0` (a hand-written Erlang class module, an EUnit fixture, a
-ClassBuilder class) is outside the gate; its obligation is the FFI rule (use
-`beamtalk_class_vars`, never return `class_var_result`).
-""".
--spec check_class_info_abi(atom(), map()) -> ok | {error, #beamtalk_error{}}.
-check_class_info_abi(ClassName, ClassInfo) ->
-    Module = maps:get(module, ClassInfo, undefined),
-    case compiled_meta(Module, maps:get(meta, ClassInfo, undefined)) of
-        none ->
-            ok;
-        {invalid, Why} ->
-            %% A crashing or non-map `__beamtalk_meta/0` is a different failure
-            %% from "compiled before ADR 0130": report it as such.
-            refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, {invalid, Why}));
-        {ok, Meta} ->
-            case maps:find(class_var_abi, Meta) of
-                {ok, ?BT_CLASS_VAR_ABI} ->
-                    ok;
-                Found ->
-                    refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, Found))
-            end
-    end.
-
--spec refuse_abi(atom(), atom() | undefined, #beamtalk_error{}) -> {error, #beamtalk_error{}}.
-refuse_abi(ClassName, Module, Error) ->
-    ?LOG_ERROR(
-        "Refused ~p: ~ts",
-        [Module, Error#beamtalk_error.message],
-        #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
-    ),
-    record_abi_refusal(Module, Error),
-    record_pending_load_error(ClassName, Error),
-    {error, Error}.
-
-%% BT-3722: a refusal inside a module's `-on_load` hook is reported by the code
-%% server as a bare `{error, on_load_failure}`. Park the structured error in the
-%% pending-load-error table (the same channel `stdlib_shadowing` uses) so the
-%% REPL/CLI loaders, which drain it by class name after a failed load, show the
-%% `abi_mismatch` (expected/found/remedy) instead of `on_load_failure`. Skipped
-%% while a release preflight is collecting refusals: that caller reads them from
-%% the collector and never drains this table, so an entry would go stale.
--spec record_pending_load_error(atom(), #beamtalk_error{}) -> ok.
-record_pending_load_error(ClassName, Error) ->
-    case ets:info(?ABI_REFUSALS_TABLE) of
-        undefined -> beamtalk_class_registry:record_pending_load_error(ClassName, Error);
-        _ -> ok
-    end.
-
--spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | {invalid, term()} | none.
-compiled_meta(_Module, #{class := _} = Meta) ->
-    {ok, Meta};
-compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> {ok, Meta};
-                Other -> {invalid, {not_a_map, Other}}
-            catch
-                Class:Reason -> {invalid, {crashed, Class, Reason}}
-            end;
-        false ->
-            none
-    end;
-compiled_meta(_, _) ->
-    none.
-
--spec abi_mismatch_error(atom(), atom() | undefined, {ok, term()} | error | {invalid, term()}) ->
-    #beamtalk_error{}.
-abi_mismatch_error(ClassName, Module, Found) ->
-    {Reported, Declared} =
-        case Found of
-            {ok, Value} ->
-                {Value, io_lib:format("class_var_abi ~p", [Value])};
-            error ->
-                {missing, "no class_var_abi entry (compiled before ADR 0130)"};
-            {invalid, Why} ->
-                {invalid_meta,
-                    io_lib:format(
-                        "an invalid __beamtalk_meta/0 (~0p), so its class_var_abi is unknown", [
-                            Why
-                        ]
-                    )}
-        end,
-    Message = iolist_to_binary(
-        io_lib:format(
-            "Module ~s (class ~s) was compiled with ~s, but this runtime requires "
-            "class_var_abi ~p",
-            [Module, ClassName, Declared, ?BT_CLASS_VAR_ABI]
-        )
-    ),
-    Error0 = beamtalk_error:new(abi_mismatch, ClassName),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error2 = beamtalk_error:with_details(Error1, #{
-        module => Module, expected => ?BT_CLASS_VAR_ABI, found => Reported
-    }),
-    beamtalk_error:with_hint(
-        Error2,
-        <<
-            "Recompile the package with the current beamtalk compiler. The class-variable "
-            "calling convention changed (ADR 0130), so a module compiled by an older compiler "
-            "cannot be loaded."
-        >>
-    ).
-
--spec record_abi_refusal(atom() | undefined, #beamtalk_error{}) -> ok.
-record_abi_refusal(Module, Error) ->
-    try
-        ets:insert(?ABI_REFUSALS_TABLE, {Module, Error}),
-        ok
-    catch
-        error:badarg -> ok
-    end.
-
--spec nil_receiver() -> no_return().
-nil_receiver() ->
-    Error0 = beamtalk_error:new(internal_error, 'UndefinedObject'),
-    Error = beamtalk_error:with_message(
-        Error0, <<"class-variable access with a nil or non-class receiver">>
-    ),
-    beamtalk_error:raise(Error).
-
-%% ADR 0130 §5: message, details and hint of `class_state_unreachable`.
--spec raise_unreachable(atom(), atom() | undefined, read | write) -> no_return().
-raise_unreachable(Class, undefined, _Mode) ->
-    %% Name-less variant (`capture/2`, mirror reads without a variable name): no
-    %% live class process is registered for the class.
-    Error0 = beamtalk_error:new(class_state_unreachable, Class),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        iolist_to_binary(
-            io_lib:format("~s's class state cannot be reached: no live ~s class process", [
-                Class, Class
-            ])
-        )
-    ),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Error1,
-            <<
-                "No class process is registered for this class right now (it is not loaded, "
-                "was removed, or is being restarted). Load the class or retry once it is running."
-            >>
-        )
-    );
-raise_unreachable(Class, Name, Mode) ->
-    Verb =
-        case Mode of
-            read -> "read";
-            write -> "written"
-        end,
-    Message = iolist_to_binary(
-        io_lib:format("~s's class variable ~s cannot be ~s from this process", [Class, Name, Verb])
-    ),
-    Hint = iolist_to_binary(
-        io_lib:format(
-            "A block that writes ~s's class variables ran outside any ~s class "
-            "method (it was passed to another class's class method or an actor, or "
-            "stored or returned and run later outside ~s's own methods). A block "
-            "can read ~s's class variables anywhere, as the values they had when the "
-            "block was made, but can only write them from ~s's own method: return the "
-            "value and assign it there.",
-            [Class, Class, Class, Class, Class]
-        )
-    ),
-    Error0 = beamtalk_error:new(class_state_unreachable, Class),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
-
-%% The class process is registered but has recorded no snapshot row yet.
--spec raise_no_snapshot(atom(), atom() | undefined) -> no_return().
-raise_no_snapshot(Class, Name) ->
-    Error0 = beamtalk_error:new(class_state_unreachable, Class),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        iolist_to_binary(
-            io_lib:format("~s's class state cannot be reached: no snapshot recorded yet", [Class])
-        )
-    ),
-    Error2 =
-        case Name of
-            undefined -> Error1;
-            _ -> beamtalk_error:with_details(Error1, #{class_variable => Name})
-        end,
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Error2,
-            <<
-                "The class process was just (re)started and has not recorded its class "
-                "variables yet; retry shortly."
-            >>
-        )
-    ).
-
--spec raise_read_only(atom(), atom()) -> no_return().
-raise_read_only(Class, Name) ->
-    Message = iolist_to_binary(
-        io_lib:format("~s's class variable ~s is read-only here", [Class, Name])
-    ),
-    Hint = iolist_to_binary(
-        io_lib:format(
-            "This code runs against a read-only snapshot of ~s's class variables "
-            "(supervisor definition, a class `initialize:` hook, or `performLocally:`). "
-            "Assign the variable from one of ~s's own class methods, sent as a normal "
-            "class-side message.",
-            [Class, Class]
-        )
-    ),
-    Error0 = beamtalk_error:new(class_state_read_only, Class),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
-
--spec raise_undeclared(atom(), atom()) -> no_return().
-raise_undeclared(Class, Name) ->
-    Message = iolist_to_binary(
-        io_lib:format("~s has no class variable named ~s", [Class, Name])
-    ),
-    Error0 = beamtalk_error:new(undeclared_class_variable, Class),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Error2, <<"Declare it with `classState:` on the class, or check the spelling.">>
-        )
-    ).
-
-%% Same kind and hint as the class gen_server's `get_class_var` error (one
-%% source for the text), but no selector: no `fieldAt:` was sent here.
--spec raise_uninitialized(atom(), atom()) -> no_return().
-raise_uninitialized(Class, Name) ->
-    #beamtalk_error{hint = Hint} =
-        beamtalk_object_class:class_var_uninitialized_error(Class, Name),
-    Error0 = beamtalk_error:new(uninitialized_state_error, Class),
-    Error1 = beamtalk_error:with_details(Error0, #{class_variable => Name}),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).

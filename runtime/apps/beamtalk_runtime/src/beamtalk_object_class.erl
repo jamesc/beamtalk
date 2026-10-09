@@ -57,7 +57,6 @@ and join the `beamtalk_classes` pg group for enumeration.
     set_class_var/3,
     has_class_var/2,
     clear_class_var/2,
-    class_var_uninitialized_error/2,
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
@@ -158,8 +157,8 @@ before any class registers.
 start(ClassName, ClassInfo) ->
     %% ADR 0130 Phase 3: refuse a compiled module with a different
     %% `class_var_abi` before any process is started (see
-    %% `beamtalk_class_vars:check_class_info_abi/2`).
-    case beamtalk_class_vars:check_class_info_abi(ClassName, ClassInfo) of
+    %% `beamtalk_class_var_abi:check_class_info_abi/2`).
+    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
         ok -> do_start(ClassName, ClassInfo);
         {error, _} = Refused -> Refused
     end.
@@ -284,7 +283,7 @@ refuses, though the class process keeps its previous metadata.
 """.
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->
-    case beamtalk_class_vars:check_class_info_abi(ClassName, ClassInfo) of
+    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
         ok ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined ->
@@ -1570,11 +1569,13 @@ handle_call(
         true ->
             case maps:find(Name, ClassVars) of
                 {ok, nil} ->
-                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State};
+                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
+                        State};
                 {ok, Value} ->
                     {reply, Value, State};
                 error ->
-                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State}
+                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
+                        State}
             end;
         false ->
             {reply, maps:get(Name, ClassVars, nil), State}
@@ -1724,39 +1725,14 @@ notify_compiler_server_register(ClassName, Meta) ->
 True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
 `ClassName` or an ancestor — the class-side counterpart to
 `beamtalk_reflection`'s `declared_late/2`, via
-`beamtalk_behaviour_intrinsics:classAllClassVarKindsByName/1` (B5a's
+`beamtalk_class_metadata:class_var_kinds/1` (B5a's
 flattened class-variable kind metadata). Keyed on *declared* late so a
 typo'd class variable name keeps today's plain `nil`.
 """.
 -spec class_var_declared_late(class_name(), atom()) -> boolean().
 class_var_declared_late(ClassName, Name) ->
-    Kinds = beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(ClassName),
+    Kinds = beamtalk_class_metadata:class_var_kinds(ClassName),
     maps:get(Name, Kinds, eager) =:= late.
-
--doc """
-Builds (but does not raise) the `uninitialized_state_error` for an
-unassigned declared-`late` class variable read via `get_class_var` (ADR 0124
-§1/§4i/B4) — the class-side counterpart to `beamtalk_reflection`'s
-`raise_uninitialized_state/2`, which DOES raise directly because it runs on
-the actor's already-`try`-wrapped `dispatch/4` path (`beamtalk_actor.erl`).
-`get_class_var`'s `handle_call` clause has no such wrapper, so this only
-constructs the error value for that clause to reply with as `{error, Error}`
-(see its own comment) rather than raising in the class gen_server's own
-process. No declared-type metadata is available for class variables the
-way `beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1` supplies for
-instance fields (`__beamtalk_meta/0` carries no `class_field_types` key), so
-the hint names the variable without a `(:: Type)` suffix.
-""".
--spec class_var_uninitialized_error(class_name(), atom()) -> #beamtalk_error{}.
-class_var_uninitialized_error(ClassName, Name) ->
-    Hint = iolist_to_binary(
-        io_lib:format(
-            "~s class variable '~s' is declared `late` and has not been assigned yet",
-            [ClassName, Name]
-        )
-    ),
-    Error0 = beamtalk_error:new(uninitialized_state_error, ClassName, 'fieldAt:'),
-    beamtalk_error:with_hint(Error0, Hint).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
