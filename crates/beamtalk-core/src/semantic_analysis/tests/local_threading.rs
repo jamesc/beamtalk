@@ -164,7 +164,7 @@ fn section6_shadowing_block_parameter_is_not_the_tier2_local() {
 /// Each actor §6 exemption is exactly the syntactic shape codegen threads,
 /// and each near miss is rejected. The exempt shapes are the methods of the
 /// compiled fixture `stdlib/test/fixtures/adr0131section6exemptions_actor.bt`,
-/// whose BUnit test (`adr0131section6exemptions_test.bt`) asserts they really
+/// whose `BUnit` test (`adr0131section6exemptions_test.bt`) asserts they really
 /// thread the write; this test checks the fixture compiles clean, so a change
 /// to either the exemptions or codegen's recognizers (`detect_tier2_self_send`,
 /// `prescan_tier2_local_vars`/`is_tier2_value_call`,
