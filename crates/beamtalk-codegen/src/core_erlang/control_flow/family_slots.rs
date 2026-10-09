@@ -114,7 +114,7 @@ impl FamilyVersionStep {
 /// already live at the point the construct's result tuple closes. Kept a
 /// caller-supplied lookup rather than read off the live generator directly:
 /// every existing hand-rolled call site sources "current" differently (a
-/// bare `self.state_version()`/`self.class_var_version()`/`self.self_version()`
+/// bare `self.state_version()`/`self.self_version()`
 /// read at the method's own top frame, vs. a `Letrec` loop's own already-
 /// minted `Gensym` fun-parameter identity for the SAME family inside its
 /// body) — this helper stays pure data-in/data-out over [`ThreadedFamilies`]

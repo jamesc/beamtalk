@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Object System Context
+
 -module(beamtalk_class_vars_tests).
 -moduledoc "EUnit tests for beamtalk_class_vars (ADR 0130 Phase 2).".
 

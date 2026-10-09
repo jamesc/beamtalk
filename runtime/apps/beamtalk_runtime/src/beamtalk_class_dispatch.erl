@@ -215,7 +215,7 @@ from inside a class method).
 `ClassSelf#beamtalk_object.class_mod` is set to the *defining* module
 so Newspeak-style self-sends inside the inherited method resolve against
 the class that actually contains the code (same rule as the gen_server
-path at line 316).
+path, `invoke_class_method/7`).
 
 Returns the plain `Result` (ADR 0130 §3: class methods neither take nor
 return class variables; the home installed by the enclosing invocation is
@@ -235,7 +235,9 @@ run with that receiver (so its class-variable key is the receiver's), not with
 a `ClassSelf` rebuilt from the static builder class.
 """.
 -spec class_self_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
-class_self_dispatch(ClassName, Selector, Args, ReceiverTag) ->
+class_self_dispatch(ClassName, Selector, Args, ReceiverTag) when
+    is_list(Args), is_atom(ReceiverTag)
+->
     case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
@@ -373,7 +375,9 @@ class_self_dispatch_local(ClassName, Selector, Args) ->
 """.
 -spec class_self_dispatch_local(class_name(), selector(), list(), atom()) ->
     term() | no_return().
-class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) ->
+class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) when
+    is_list(Args), is_atom(ReceiverTag)
+->
     case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;

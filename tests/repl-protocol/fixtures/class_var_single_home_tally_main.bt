@@ -46,7 +46,3 @@ Object subclass: CvshTally
     [self.total]
 
   class run: aBlock => aBlock value
-
-  class performRead => self performLocally: #total withArguments: #()
-
-  class snapshotTotal => self total

@@ -416,7 +416,7 @@ impl CoreErlangGenerator {
             .iter()
             .map(ToString::to_string)
             .collect();
-        *self.class_var_names_mut() = class_var_names;
+        let prev_class_var_names = std::mem::replace(self.class_var_names_mut(), class_var_names);
 
         let (mut frame, param_vars) = MethodFrame::enter(
             self,
@@ -441,7 +441,7 @@ impl CoreErlangGenerator {
         // `frame` drops here (pops the scope, clears `in_class_method`,
         // restores the selector) on the success and error paths alike.
         drop(frame);
-        self.class_var_names_mut().clear();
+        *self.class_var_names_mut() = prev_class_var_names;
         self.context = prev_context;
 
         let body_doc = body_result?;

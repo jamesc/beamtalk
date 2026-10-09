@@ -105,7 +105,7 @@ pub struct CoreErlangGenerator {
     /// Variable binding and scope management.
     pub(in crate::core_erlang) var_context: VariableContext,
     /// State threading for field assignments. `VersionCounter` is the
-    /// single implementation shared with `ClassContext::class_var_version` and
+    /// single implementation shared with
     /// `ValueTypeContext::self_version` (formerly `StateThreading`).
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
@@ -132,7 +132,7 @@ pub struct CoreErlangGenerator {
     /// directly after such a sibling closes yields that now-closed
     /// sibling's frame instead of the enclosing scope's own frame (BT-3623).
     /// `enter_branch_context` saves/sets/restores this field the same way it
-    /// does `state_version`/`class_var_version`/`self_version`; `0` means
+    /// does `state_version`/`self_version`; `0` means
     /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
     pub(in crate::core_erlang) active_branch_frame: u32,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params

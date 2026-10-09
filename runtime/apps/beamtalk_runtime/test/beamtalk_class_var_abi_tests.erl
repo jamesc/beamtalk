@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Object System Context
+
 -module(beamtalk_class_var_abi_tests).
 -moduledoc """
 EUnit tests for the `class_var_abi` load gate (ADR 0130 Phase 3, last item):

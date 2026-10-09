@@ -41417,20 +41417,18 @@
         "mutate",
         "mutation",
         "object",
-        "performRead",
         "property",
         "readViaBatch",
         "reset",
         "run:",
         "set",
-        "snapshotTotal",
         "subclassing",
         "total",
         "writeDirectViaBatch",
         "writeDirectViaKeeper",
         "writeViaBatch"
       ],
-      "source": "// ADR 0130 / BT-3715: CvshTally, driven with CvshBatch and CvshKeeper\n// (separate files).\n\nObject subclass: CvshTally\n  classState: total = 0\n\n  class add: x => self.total := self.total + x\n\n  class total -> Integer => self.total\n\n  class reset => self.total := 0\n\n  class readViaBatch =>\n    self reset\n    self add: 5\n    CvshBatch each: [self.total]\n\n  class writeViaBatch =>\n    self reset\n    CvshBatch each: [self add: 1]\n    self.total\n\n  class makeBumper => [self add: 1]\n\n  // BT-3760: a block whose only class-variable access is a direct write.\n  class makeWriter => [self.total := 5]\n\n  class writeDirectViaBatch =>\n    self reset\n    @expect class_state_abroad \"BT-3760: the direct write runs in CvshBatch's process\"\n    CvshBatch each: [self.total := 5]\n    self.total\n\n  class writeDirectViaKeeper =>\n    self reset\n    k := CvshKeeper spawn\n    k keep: [self.total := 5]\n    k run\n    self.total\n\n  class makeReader =>\n    @expect class_state_abroad \"BT-3715: run from the REPL it reads the creation-time value\"\n    [self.total]\n\n  class run: aBlock => aBlock value\n\n  class performRead => self performLocally: #total withArguments: #()\n\n  class snapshotTotal => self total",
+      "source": "// ADR 0130 / BT-3715: CvshTally, driven with CvshBatch and CvshKeeper\n// (separate files).\n\nObject subclass: CvshTally\n  classState: total = 0\n\n  class add: x => self.total := self.total + x\n\n  class total -> Integer => self.total\n\n  class reset => self.total := 0\n\n  class readViaBatch =>\n    self reset\n    self add: 5\n    CvshBatch each: [self.total]\n\n  class writeViaBatch =>\n    self reset\n    CvshBatch each: [self add: 1]\n    self.total\n\n  class makeBumper => [self add: 1]\n\n  // BT-3760: a block whose only class-variable access is a direct write.\n  class makeWriter => [self.total := 5]\n\n  class writeDirectViaBatch =>\n    self reset\n    @expect class_state_abroad \"BT-3760: the direct write runs in CvshBatch's process\"\n    CvshBatch each: [self.total := 5]\n    self.total\n\n  class writeDirectViaKeeper =>\n    self reset\n    k := CvshKeeper spawn\n    k keep: [self.total := 5]\n    k run\n    self.total\n\n  class makeReader =>\n    @expect class_state_abroad \"BT-3715: run from the REPL it reads the creation-time value\"\n    [self.total]\n\n  class run: aBlock => aBlock value",
       "explanation": "ADR 0130 / BT-3715: CvshTally, driven with CvshBatch and CvshKeeper (separate files)."
     },
     {

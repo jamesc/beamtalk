@@ -41,7 +41,7 @@ timeout. The builder is single-use: create, configure, register, done.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([register/1, validate_class_method_arities/2]).
+-export([register/1, validate_class_method_arities/2, class_method_arity_error/4]).
 
 %% Selector-shape helpers, shared with the workspace app via
 %% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.

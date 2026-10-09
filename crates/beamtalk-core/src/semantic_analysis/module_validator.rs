@@ -120,7 +120,7 @@ pub fn validate_single_definition(module: &Module) -> Vec<Diagnostic> {
 /// codegen.
 ///
 /// (Self-dispatch/state-routing codegen in the *same* file — `gen_server`
-/// callbacks, class-var shadow-writes — no longer depends on this agreement
+/// callbacks, class-variable routing — no longer depends on this agreement
 /// at all: `CoreErlangGenerator::current_class` identifies "the class I am
 /// generating right now" straight from the parsed `Module` (`ADR 0119`'s
 /// `module_matches_class` replacement), never by re-deriving and comparing a
