@@ -2,6 +2,9 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_class_vars_test_support).
+
+%%% **DDD Context:** Runtime Context (test support)
+
 -moduledoc """
 EUnit helpers for tests that need a class-variable home in the test process
 (ADR 0130 §1).
@@ -12,9 +15,13 @@ they go through `beamtalk_class_vars:key/1`, `key_for_tag/1`, `install/2`,
 home entry through the generated `?BT_CLASS_VARS_HOME` macro). The one
 conformance test that pins the literal key shape is
 `beamtalk_class_vars_tests:key_test/0`.
+
+Lives in `beamtalk_test_support` because both `beamtalk_runtime` and
+`beamtalk_workspace` EUnit suites use it (see `beamtalk_test_corpus`'s
+moduledoc for why shared test helpers live in this app).
 """.
 
--include("beamtalk_class_vars_keys.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk_class_vars_keys.hrl").
 
 -export([with_home/3, with_home_key/3, home_key/0, clean/1]).
 
