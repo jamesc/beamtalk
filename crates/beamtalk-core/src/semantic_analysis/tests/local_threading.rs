@@ -825,3 +825,23 @@ fn adr0131_statement_probe_pins() {
         wrong.join("\n")
     );
 }
+
+#[test]
+fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
+    // BT-3746 follow-up (PR #4230): a `whileTrue:` nested as a statement in a
+    // `to:do:` or `do:` body answers 0 instead of 3 in every method context.
+    for body in [
+        "s := 0\n1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
+        "s := 0\n#(1, 2, 3) do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
+        "s := 0\n1 to: 3 do: [:i | [s >= i] whileFalse: [s := s + 1]]\ns",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
