@@ -225,7 +225,10 @@ the selector.
 """.
 -spec class_self_dispatch(class_name(), selector(), list()) -> term() | no_return().
 class_self_dispatch(ClassName, Selector, Args) ->
-    class_self_dispatch(ClassName, Selector, Args, receiver_tag(ClassName)).
+    %% The receiver is `ClassName` itself, so one tag serves as both the
+    %% extension key and the receiver's tag (BT-3766: one derivation per send).
+    Tag = receiver_tag(ClassName),
+    class_self_dispatch(ClassName, Tag, Selector, Args, Tag).
 
 -doc """
 `class_self_dispatch/3` with the live receiver's metaclass tag
@@ -238,7 +241,14 @@ a `ClassSelf` rebuilt from the static builder class.
 class_self_dispatch(ClassName, Selector, Args, ReceiverTag) when
     is_list(Args), is_atom(ReceiverTag)
 ->
-    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
+    %% `ReceiverTag` can differ from `ClassName`'s own tag here (the ClassBuilder
+    %% `super` path above), so the extension key is derived separately.
+    class_self_dispatch(ClassName, receiver_tag(ClassName), Selector, Args, ReceiverTag).
+
+-spec class_self_dispatch(class_name(), atom(), selector(), list(), atom()) ->
+    term() | no_return().
+class_self_dispatch(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
+    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -263,7 +273,10 @@ builder-class `super` sends (ADR 0084) rely on them.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->
-    case check_class_self_extension(ClassName, Selector, Args, receiver_tag(ClassName)) of
+    %% The receiving class is `ClassName`: its tag is both the extension key and
+    %% the receiver's tag, derived once per send (BT-3766).
+    Tag = receiver_tag(ClassName),
+    case check_class_self_extension(ClassName, Tag, Selector, Args, Tag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -272,7 +285,7 @@ class_self_send(ClassName, Selector, Args) ->
                 Selector,
                 Args,
                 find_class_method_from_class(Selector, ClassName),
-                receiver_tag(ClassName)
+                Tag
             )
     end.
 
@@ -285,7 +298,7 @@ true -> class_foo(...) ; false -> class_self_send/3 walk end`. The direct call
 is only equivalent to the walk when the receiving class is exactly the
 compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
 compiled method that the walk honours: a class-side extension on the class
-(`check_class_self_extension/4`) or a runtime-installed class-method fun
+(`check_class_self_extension/5`) or a runtime-installed class-method fun
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
@@ -367,7 +380,8 @@ ETS read the dispatch hot path already uses.
 """.
 -spec class_self_dispatch_local(class_name(), selector(), list()) -> term() | no_return().
 class_self_dispatch_local(ClassName, Selector, Args) ->
-    class_self_dispatch_local(ClassName, Selector, Args, receiver_tag(ClassName)).
+    Tag = receiver_tag(ClassName),
+    class_self_dispatch_local(ClassName, Tag, Selector, Args, Tag).
 
 -doc """
 `class_self_dispatch_local/3` with the live receiver's metaclass tag; see
@@ -378,7 +392,13 @@ class_self_dispatch_local(ClassName, Selector, Args) ->
 class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) when
     is_list(Args), is_atom(ReceiverTag)
 ->
-    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
+    %% `ReceiverTag` can differ from `ClassName`'s own tag (a subclass receiver).
+    class_self_dispatch_local(ClassName, receiver_tag(ClassName), Selector, Args, ReceiverTag).
+
+-spec class_self_dispatch_local(class_name(), atom(), selector(), list(), atom()) ->
+    term() | no_return().
+class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
+    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -421,13 +441,15 @@ Returns `{ok, Outcome}` when an extension matched (`Outcome` already
 unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
--spec check_class_self_extension(class_name(), selector(), list(), atom()) ->
+-spec check_class_self_extension(class_name(), atom(), selector(), list(), atom()) ->
     {ok, term()} | not_found | no_return().
-check_class_self_extension(ClassName, Selector, Args, ReceiverTag) ->
-    %% `ClassName` picks the extension; `ReceiverTag` is the live receiver's
-    %% metaclass tag, so the extension body reads the receiver's class-variable
-    %% key (a subclass receiver differs from `ClassName`).
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
+    %% `ClassTag` (`ClassName`'s own metaclass tag, derived once by the caller)
+    %% picks the extension; `ReceiverTag` is the live receiver's metaclass tag,
+    %% so the extension body reads the receiver's class-variable key. The two
+    %% are the same atom except on the ClassBuilder `super` path
+    %% (`class_self_dispatch/4`, `class_self_dispatch_local/4` with a subclass
+    %% receiver), where the caller passes them separately.
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
             Module = self_dispatch_module(ClassName),
@@ -810,7 +832,7 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
 class — `class_self_dispatch/3` / `class_self_dispatch_local/3`, below —
-goes through `check_class_self_extension/4` instead, which checks the same
+goes through `check_class_self_extension/5` instead, which checks the same
 registry under the same priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.

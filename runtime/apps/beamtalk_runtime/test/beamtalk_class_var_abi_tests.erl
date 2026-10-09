@@ -374,14 +374,14 @@ collect_abi_refusals_test_() ->
                 end),
                 receive
                     collecting -> ok
-                after 5000 -> ?assert(false)
+                after 5000 -> error(timeout_waiting_for_collector)
                 end,
                 ?assertNotEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
                 Ref = monitor(process, Pid),
                 exit(Pid, kill),
                 receive
                     {'DOWN', Ref, process, Pid, killed} -> ok
-                after 5000 -> ?assert(false)
+                after 5000 -> error(timeout_waiting_for_collector_owner_down)
                 end,
                 ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
                 ?assertMatch({ok, []}, beamtalk_class_var_abi:collect_abi_refusals(fun() -> ok end))
