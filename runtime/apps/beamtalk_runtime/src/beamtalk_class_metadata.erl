@@ -88,6 +88,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_methods/1,
     lookup_superclass/1,
     flatten_ancestor_map/2,
+    class_var_kinds/1,
     lookup_is_abstract/1,
     match_subclasses/1,
     foldl/2,
@@ -441,6 +442,51 @@ flatten_ancestor_map(ClassAtom, ReadOwnMapFun) ->
         {ok, none} -> #{};
         {ok, Super} -> merge_ancestor_map(Super, ReadOwnMapFun, #{});
         not_found -> #{}
+    end.
+
+-doc """
+The declared class-variable (`classState:`) kinds of `Name`, flattened over
+its ancestor chain (ADR 0124 §1): variable name -> `eager | late`, closer
+levels winning, read from each level's compiled `__beamtalk_meta/0`
+(`class_field_kinds`) via the module this table records for it.
+
+Returns `#{}` for a class with no metadata row (never registered, or removed),
+and a level whose module exports no readable `__beamtalk_meta/0` (a
+ClassBuilder or hand-written Erlang class) contributes nothing. Kept here, in
+the metadata leaf, so that `beamtalk_class_vars` (the class-variable access
+leaf, `undeclared_class_variable`) and `beamtalk_object_class` (the declared-
+`late` branch of `get_class_var`) share one implementation without the access
+leaf calling up into the class gen_server or the reflection intrinsics.
+""".
+-spec class_var_kinds(class_name()) -> #{atom() => eager | late}.
+class_var_kinds(Name) ->
+    case lookup_module(Name) of
+        not_found ->
+            #{};
+        {ok, _} ->
+            maps:merge(
+                flatten_ancestor_map(Name, fun own_class_var_kinds/1),
+                own_class_var_kinds(Name)
+            )
+    end.
+
+%% One level's own `class_field_kinds`; `#{}` when it cannot be read.
+-spec own_class_var_kinds(class_name()) -> #{atom() => eager | late}.
+own_class_var_kinds(Name) ->
+    case lookup_module(Name) of
+        {ok, Module} ->
+            case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+                true ->
+                    try
+                        maps:get(class_field_kinds, Module:'__beamtalk_meta'(), #{})
+                    catch
+                        _:_ -> #{}
+                    end;
+                false ->
+                    #{}
+            end;
+        not_found ->
+            #{}
     end.
 
 -spec merge_ancestor_map(

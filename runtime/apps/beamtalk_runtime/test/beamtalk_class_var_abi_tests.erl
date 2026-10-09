@@ -4,7 +4,7 @@
 -module(beamtalk_class_var_abi_tests).
 -moduledoc """
 EUnit tests for the `class_var_abi` load gate (ADR 0130 Phase 3, last item):
-`beamtalk_class_vars:check_class_info_abi/2`, enforced at class registration
+`beamtalk_class_var_abi:check_class_info_abi/2`, enforced at class registration
 (`beamtalk_object_class:start/2`, including through a module's `-on_load`
 hook), at hot reload (`beamtalk_object_class:update_class/2`) and by the
 release preflight (`beamtalk_release_shapes:extract_shapes/2`).
@@ -30,6 +30,10 @@ setup() ->
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table(),
+    %% Owned by this setup process, not by the short-lived `-on_load` hook
+    %% process that would otherwise create it on the first parked refusal
+    %% (and take it down when that process exits, before the test drains it).
+    beamtalk_class_registry:ensure_pending_errors_table(),
     ok.
 
 teardown(_) ->
@@ -170,7 +174,7 @@ registration_test_() ->
             {"a refusal collected for a release preflight is not parked (BT-3722)", fun() ->
                 Mod = 'bt@bt3722_abi_collected',
                 Bin = old_binary(Mod, 'BT3722AbiCollected', ""),
-                {Result, Refusals} = beamtalk_class_vars:collect_abi_refusals(fun() ->
+                {Result, Refusals} = beamtalk_class_var_abi:collect_abi_refusals(fun() ->
                     load(Mod, Bin)
                 end),
                 ?assertMatch({error, on_load_failure}, Result),
@@ -185,7 +189,7 @@ registration_test_() ->
             {"a module with the current class_var_abi registers", fun() ->
                 Mod = 'bt@bt3713_abi_current',
                 Abi = lists:flatten(
-                    io_lib:format(", class_var_abi => ~p", [beamtalk_class_vars:abi()])
+                    io_lib:format(", class_var_abi => ~p", [beamtalk_class_var_abi:abi()])
                 ),
                 Bin = old_binary(Mod, 'BT3713AbiCurrent', Abi),
                 ?assertMatch({module, Mod}, load(Mod, Bin)),
@@ -227,7 +231,7 @@ refusal_error_test_() ->
                 ),
                 ?assertNotEqual(nomatch, binary:match(Error#beamtalk_error.hint, <<"Recompile">>)),
                 ?assertEqual(
-                    #{module => Mod, expected => beamtalk_class_vars:abi(), found => missing},
+                    #{module => Mod, expected => beamtalk_class_var_abi:abi(), found => missing},
                     Error#beamtalk_error.details
                 ),
                 ?assertEqual(
@@ -240,28 +244,28 @@ refusal_error_test_() ->
                 Meta = #{class => 'BT3713AbiOldMissing', superclass => 'Object'},
                 ?assertMatch(
                     {error, #beamtalk_error{kind = abi_mismatch}},
-                    beamtalk_class_vars:check_class_info_abi(
+                    beamtalk_class_var_abi:check_class_info_abi(
                         'BT3713AbiOldMissing', #{module => not_loaded_yet, meta => Meta}
                     )
                 ),
                 ?assertEqual(
                     ok,
-                    beamtalk_class_vars:check_class_info_abi(
+                    beamtalk_class_var_abi:check_class_info_abi(
                         'BT3713AbiOldMissing',
                         #{
                             module => not_loaded_yet,
-                            meta => Meta#{class_var_abi => beamtalk_class_vars:abi()}
+                            meta => Meta#{class_var_abi => beamtalk_class_var_abi:abi()}
                         }
                     )
                 ),
                 %% "Equal to the current value", never "present and unequal".
                 ?assertMatch(
                     {error, #beamtalk_error{kind = abi_mismatch}},
-                    beamtalk_class_vars:check_class_info_abi(
+                    beamtalk_class_var_abi:check_class_info_abi(
                         'BT3713AbiOldMissing',
                         #{
                             module => not_loaded_yet,
-                            meta => Meta#{class_var_abi => beamtalk_class_vars:abi() + 1}
+                            meta => Meta#{class_var_abi => beamtalk_class_var_abi:abi() + 1}
                         }
                     )
                 )
@@ -285,7 +289,7 @@ invalid_meta_test_() ->
                         "'__beamtalk_meta'() -> erlang:error(boom).\n"
                     ),
                     {module, Mod} = load(Mod, Bin),
-                    {error, Error} = beamtalk_class_vars:check_class_info_abi(
+                    {error, Error} = beamtalk_class_var_abi:check_class_info_abi(
                         'BT3726Crash', #{module => Mod}
                     ),
                     ?assertEqual(abi_mismatch, Error#beamtalk_error.kind),
@@ -311,7 +315,7 @@ invalid_meta_test_() ->
                 {module, Mod} = load(Mod, Bin),
                 ?assertMatch(
                     {error, #beamtalk_error{details = #{found := invalid_meta}}},
-                    beamtalk_class_vars:check_class_info_abi('BT3726NonMap', #{module => Mod})
+                    beamtalk_class_var_abi:check_class_info_abi('BT3726NonMap', #{module => Mod})
                 )
             end}
         ]
@@ -322,8 +326,8 @@ collect_abi_refusals_test_() ->
         [
             {"collects refusals and releases the collector", fun() ->
                 Meta = #{class => 'BT3726Coll', superclass => 'Object'},
-                {Result, Refusals} = beamtalk_class_vars:collect_abi_refusals(fun() ->
-                    _ = beamtalk_class_vars:check_class_info_abi(
+                {Result, Refusals} = beamtalk_class_var_abi:collect_abi_refusals(fun() ->
+                    _ = beamtalk_class_var_abi:check_class_info_abi(
                         'BT3726Coll', #{module => bt3726_coll, meta => Meta}
                     ),
                     done
@@ -333,10 +337,10 @@ collect_abi_refusals_test_() ->
                 ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
             end},
             {"a leftover/concurrent collection raises instead of blaming it", fun() ->
-                {ok, _} = beamtalk_class_vars:collect_abi_refusals(fun() ->
+                {{ok, ok}, []} = beamtalk_class_var_abi:collect_abi_refusals(fun() ->
                     ?assertError(
                         abi_collection_in_progress,
-                        beamtalk_class_vars:collect_abi_refusals(fun() -> ok end)
+                        beamtalk_class_var_abi:collect_abi_refusals(fun() -> ok end)
                     ),
                     {ok, ok}
                 end),
@@ -345,7 +349,7 @@ collect_abi_refusals_test_() ->
             {"the collector is released when its owner is killed", fun() ->
                 Self = self(),
                 Pid = spawn(fun() ->
-                    beamtalk_class_vars:collect_abi_refusals(fun() ->
+                    beamtalk_class_var_abi:collect_abi_refusals(fun() ->
                         Self ! collecting,
                         receive
                             never -> ok
@@ -364,11 +368,12 @@ collect_abi_refusals_test_() ->
                 after 5000 -> ?assert(false)
                 end,
                 ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
-                ?assertMatch({ok, []}, beamtalk_class_vars:collect_abi_refusals(fun() -> ok end))
+                ?assertMatch({ok, []}, beamtalk_class_var_abi:collect_abi_refusals(fun() -> ok end))
             end},
             {"the collector is released when Fun crashes", fun() ->
                 ?assertError(
-                    boom, beamtalk_class_vars:collect_abi_refusals(fun() -> erlang:error(boom) end)
+                    boom,
+                    beamtalk_class_var_abi:collect_abi_refusals(fun() -> erlang:error(boom) end)
                 ),
                 ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals))
             end}
@@ -405,13 +410,14 @@ metadata_less_test_() ->
             end},
             {"a ClassInfo with neither a module nor a meta map is outside the gate", fun() ->
                 ?assertEqual(
-                    ok, beamtalk_class_vars:check_class_info_abi('NoModule', #{name => 'NoModule'})
+                    ok,
+                    beamtalk_class_var_abi:check_class_info_abi('NoModule', #{name => 'NoModule'})
                 ),
                 %% A hand-built meta map without the compiler's `class` key is not
                 %% compiler metadata.
                 ?assertEqual(
                     ok,
-                    beamtalk_class_vars:check_class_info_abi(
+                    beamtalk_class_var_abi:check_class_info_abi(
                         'NoModule', #{module => 'NoModule', meta => #{backing_module => x}}
                     )
                 )
@@ -476,7 +482,7 @@ abi_single_source_test() ->
     Mod = 'bt@release_shapes_root',
     {module, Mod} = code:ensure_loaded(Mod),
     #{class_var_abi := Emitted} = Mod:'__beamtalk_meta'(),
-    ?assertEqual(beamtalk_class_vars:abi(), Emitted).
+    ?assertEqual(beamtalk_class_var_abi:abi(), Emitted).
 
 %%====================================================================
 %% The release preflight (extract_shapes/2)
