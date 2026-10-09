@@ -275,7 +275,7 @@ restore({Key, Map}) when is_map(Map) ->
     ok.
 
 -doc """
-Run `Fun`; on any exception other than a `$bt_nlr` throw (either tuple shape)
+Run `Fun`; on any exception other than a `^` non-local-return throw (`?IS_NLR`)
 restore the pre-call snapshot and re-raise.
 """.
 -spec protect(fun(() -> T)) -> T when T :: term().
@@ -284,9 +284,7 @@ protect(Fun) ->
     try
         Fun()
     catch
-        throw:{'$bt_nlr', _, _} = Nlr:Stack ->
-            erlang:raise(throw, Nlr, Stack);
-        throw:{'$bt_nlr', _, _, _} = Nlr:Stack ->
+        throw:Nlr:Stack when ?IS_NLR(Nlr) ->
             erlang:raise(throw, Nlr, Stack);
         Class:Reason:Stack ->
             restore(Snap),
