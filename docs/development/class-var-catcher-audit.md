@@ -25,16 +25,17 @@ Every site must carry a marker, a full-line comment inside the enclosing functio
 %% bt-catcher-audit: <disposition> - <reason>
 ```
 
-The reason may wrap onto plain comment lines below. A marker governs every site after it in the same function until the next marker.
+The reason may wrap onto plain comment lines below. A marker governs only the **first** catching region below it in the same function, so every region carries its own marker, even when several share a reason (a nested region is marked inside its parent). A region added later under an existing marker is therefore unmarked until someone audits it.
 
 The lint fails on:
 
-- a site with no marker;
+- a site with no marker of its own;
+- a form `epp_dodger` cannot parse (it could hide a site, so it is reported rather than skipped);
 - an unknown disposition, or a marker with no reason;
 - a **stale** marker, one that governs no site (the code it described has gone);
 - a `converted` marker in a function that neither calls `beamtalk_class_vars:protect/1` or `restore/1` nor takes a `snapshot/0` that the module restores. A converted site therefore cannot silently lose its conversion.
 
-`escript scripts/ci/lint-class-var-catchers.escript --list` prints every site with its disposition. `--self-test` runs the fixtures in `scripts/ci/fixtures/lint-class-var-catchers/`, which prove the lint fails on an unmarked `Block()` under a `catch` and on each bad-marker shape; `just lint-class-var-catchers` runs it first.
+`escript scripts/ci/lint-class-var-catchers.escript --list` prints every site with its disposition. `--self-test` runs the fixtures in `scripts/ci/fixtures/lint-class-var-catchers/`, which prove the lint fails on an unmarked `Block()` under a `catch`, on a second region below another region's marker, on an unparseable form, and on each bad-marker shape; `just lint-class-var-catchers` runs it first.
 
 ## Dispositions
 

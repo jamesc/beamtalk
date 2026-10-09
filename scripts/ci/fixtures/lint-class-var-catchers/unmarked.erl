@@ -2,15 +2,16 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %% Fixture for scripts/ci/lint-class-var-catchers.escript --self-test (BT-3769).
-%% Every catching region here runs a dynamic call with no marker and no
-%% protect/1, so each must be reported as `unmarked` on its try/catch line.
+%% Every reported region here runs a dynamic call with no marker of its own and
+%% no protect/1, so each must be reported as `unmarked` on its try/catch line.
 %%
-%% expect: unmarked 18
-%% expect: unmarked 25
-%% expect: unmarked 32
-%% expect: unmarked 39
-%% expect: unmarked 46
-%% expect: unmarked 53
+%% expect: unmarked 19
+%% expect: unmarked 26
+%% expect: unmarked 33
+%% expect: unmarked 40
+%% expect: unmarked 47
+%% expect: unmarked 54
+%% expect: unmarked 67
 -module(unmarked).
 
 %% The acceptance-criteria case: a bare Block() under a catch.
@@ -51,3 +52,21 @@ nested_fun(Block, List) ->
 
 old_style_catch(Block) ->
     catch Block().
+
+%% A marker governs only the first catching region below it, so a second
+%% region added later in the same function is unmarked.
+second_region_under_marker(Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
+    A =
+        try
+            Fun()
+        catch
+            _:_ -> a
+        end,
+    B =
+        try
+            Fun()
+        catch
+            _:_ -> b
+        end,
+    {A, B}.

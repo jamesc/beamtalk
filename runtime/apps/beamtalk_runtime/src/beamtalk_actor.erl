@@ -3131,6 +3131,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
+            %% bt-catcher-audit: not-applicable-other-process - method runs in the actor process,
+            %% no class home entry
             try
                 Fun(Args, State)
             catch
@@ -3186,6 +3188,8 @@ call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
             wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason, Stacktrace)
     end;
 call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
+    %% bt-catcher-audit: not-applicable-other-process - DNU handler runs in the actor process, no
+    %% class home entry
     try
         DnuFun(DnuArgs, State)
     catch

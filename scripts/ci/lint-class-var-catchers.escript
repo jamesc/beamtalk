@@ -38,8 +38,9 @@
 %%
 %%     %% bt-catcher-audit: <disposition> - <reason>
 %%
-%% A marker governs every site after it in the same function until the next
-%% marker. The dispositions (docs/development/class-var-catcher-audit.md):
+%% A marker governs only the first catching region below it in the same
+%% function, so a region added later needs its own marker; mark each region,
+%% even when several share one reason. The dispositions (docs/development/class-var-catcher-audit.md):
 %%
 %%     converted                     restores via protect/1 or snapshot+restore
 %%                                   (the function must call protect/1 or
@@ -225,10 +226,8 @@ analyze(File) ->
 analyze_forms(File, Forms, Markers) ->
     Funs = function_regions(Forms),
     %% A form epp_dodger could not parse may hide a site: fail rather than skip.
-    ParseErrors = [
-        {File, line(F), parse_error, erl_syntax:error_marker_info(F)}
-     || F <- Forms, erl_syntax:type(F) =:= error_marker
-    ],
+    %% With `no_fail` such a form comes back as a `text` node (raw source).
+    ParseErrors = [parse_error(File, F) || F <- Forms, is_unparsed(F)],
     %% Per function: catching regions, and whether it restores class variables.
     Self = module_name(Forms),
     ModuleRestores = lists:member(restore, class_var_calls(Self, Forms)),
@@ -239,34 +238,18 @@ analyze_forms(File, Forms, Markers) ->
     ],
     MarkerErrors = ParseErrors ++ lists:append([validate_marker(File, M) || M <- Markers]),
     {Sites, Governed, SiteErrors} = lists:foldl(
-        fun({{Start, _End}, Name, Regions, Restores}, {SAcc, GAcc, EAcc}) ->
-            lists:foldl(
-                fun({Line, Calls, Protected}, {SA, GA, EA}) ->
-                    Marker = governing_marker(Markers, Start, Line),
-                    Relevant = Calls =/= [] orelse (Protected andalso Marker =/= none),
-                    case Relevant of
-                        false ->
-                            {SA, GA, EA};
-                        true ->
-                            CallText = lists:join(", ", lists:usort(Calls)),
-                            Site = #{
-                                line => Line,
-                                function => Name,
-                                calls => CallText,
-                                marker => Marker
-                            },
-                            Errs = site_errors(File, Line, CallText, Marker, Restores),
-                            GA1 =
-                                case Marker of
-                                    none -> GA;
-                                    {ML, _, _} -> [ML | GA]
-                                end,
-                            {[Site | SA], GA1, Errs ++ EA}
-                    end
+        fun({{Start, _End}, Name, Regions, Restores}, Acc0) ->
+            %% Walk the function's regions top-down; `Prev` is the line of the
+            %% region before, which bounds the markers this one can claim.
+            {Acc, _} = lists:foldl(
+                fun({Line, _, _} = Region, {Acc1, Prev}) ->
+                    Marker = governing_marker(Markers, Prev, Line),
+                    {check_region(File, Name, Region, Marker, Restores, Acc1), Line}
                 end,
-                {SAcc, GAcc, EAcc},
-                Regions
-            )
+                {Acc0, Start - 1},
+                lists:keysort(1, Regions)
+            ),
+            Acc
         end,
         {[], [], []},
         PerFun
@@ -275,7 +258,36 @@ analyze_forms(File, Forms, Markers) ->
         {File, L, stale_marker, D}
      || {L, D, _} <- Markers, lists:member(D, ?DISPOSITIONS), not lists:member(L, Governed)
     ],
-    {lists:reverse(Sites), SiteErrors ++ MarkerErrors ++ Stale}.
+    {lists:reverse(Sites), lists:usort(SiteErrors ++ MarkerErrors ++ Stale)}.
+
+is_unparsed(Form) ->
+    lists:member(erl_syntax:type(Form), [error_marker, text]).
+
+parse_error(File, Form) ->
+    Detail =
+        case erl_syntax:type(Form) of
+            error_marker -> erl_syntax:error_marker_info(Form);
+            text -> string:slice(string:trim(erl_syntax:text_string(Form)), 0, 60)
+        end,
+    {File, line(Form), parse_error, Detail}.
+
+%% Record one catching region as a site (and its errors) when it makes a
+%% dynamic call, or calls protect/1 under a marker; otherwise ignore it.
+check_region(File, Name, {Line, Calls, Protected}, Marker, Restores, {Sites, Governed, Errors}) ->
+    case Calls =/= [] orelse (Protected andalso Marker =/= none) of
+        false ->
+            {Sites, Governed, Errors};
+        true ->
+            CallText = lists:join(", ", lists:usort(Calls)),
+            Site = #{line => Line, function => Name, calls => CallText, marker => Marker},
+            Governed1 =
+                case Marker of
+                    none -> Governed;
+                    {ML, _, _} -> [ML | Governed]
+                end,
+            {[Site | Sites], Governed1,
+                site_errors(File, Line, CallText, Marker, Restores) ++ Errors}
+    end.
 
 site_errors(File, Line, CallText, none, _Restores) ->
     [{File, Line, unmarked, CallText}];
@@ -294,9 +306,12 @@ validate_marker(File, {L, D, Reason}) ->
             []
     end.
 
-%% The nearest marker at or above the site, inside the function's region.
-governing_marker(Markers, Start, Line) ->
-    case [M || {L, _, _} = M <- Markers, L >= Start, L =< Line] of
+%% A marker governs only the first catching region after it: the nearest
+%% marker above `Line` and below the previous region of the same function
+%% (`Prev`, or the line before the function's region for its first region).
+%% A region added later under an existing marker therefore needs its own.
+governing_marker(Markers, Prev, Line) ->
+    case [M || {L, _, _} = M <- Markers, L > Prev, L =< Line] of
         [] -> none;
         In -> lists:last(In)
     end.

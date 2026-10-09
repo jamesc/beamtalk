@@ -49,16 +49,19 @@ marked_above(Block) ->
         end
     end).
 
-%% One marker governs every later site in the function; a later marker
-%% takes over from there.
-two_sites(Fun, Module) ->
+%% Each catching region carries its own marker, even when the reason repeats;
+%% a nested region is marked inside its parent.
+three_sites(Fun, Module) ->
     %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
     A =
         try
-            Fun()
+            Fun(),
+            %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
+            catch Fun()
         catch
             _:_ -> a
         end,
+    %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
     B = (catch Fun()),
     %% bt-catcher-audit: not-applicable-reraises - every clause re-raises
     C =

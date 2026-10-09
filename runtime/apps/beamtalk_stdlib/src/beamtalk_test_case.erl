@@ -801,6 +801,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
         %% Inject suite fixture so test methods can access self.suiteFixture
         SetUpInstance = inject_suite_fixture(SetUpInstance0, SuiteFixture),
         TestResult =
+            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
+            %% or runner worker, no home entry
             try
                 Module:dispatch(MethodName, [], SetUpInstance),
                 {pass, MethodName}
@@ -837,6 +839,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             after
                 case HasTearDown of
                     true ->
+                        %% bt-catcher-audit: not-applicable-other-process - runs in the spawned
+                        %% test process or runner worker, no home entry
                         try
                             Module:dispatch(tearDown, [], SetUpInstance)
                             % Don't mask the original test failure
