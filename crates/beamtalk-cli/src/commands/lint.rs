@@ -659,10 +659,8 @@ fn collect_package_class_files(
 /// when the path cannot be canonicalized (e.g. it does not yet exist). Used
 /// as a normalized key for path-based deduplication.
 fn canonicalize_or_clone(path: &Utf8Path) -> Utf8PathBuf {
-    std::fs::canonicalize(path.as_std_path())
-        .ok()
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-        .unwrap_or_else(|| path.to_path_buf())
+    Utf8PathBuf::from_path_buf(beamtalk_project::package::try_canonicalize(path.as_std_path()))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Parse each lint target and collect class-info metadata from the package's
