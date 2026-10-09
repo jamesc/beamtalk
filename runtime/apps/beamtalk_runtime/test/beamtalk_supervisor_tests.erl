@@ -3268,3 +3268,21 @@ orphaned_init_gate_is_reclaimed_test() ->
         ets:delete(beamtalk_supervisor_init_gates, Sup),
         catch exit(Sup, kill)
     end.
+
+%% BT-3759 review: waiter rows left after the gate was released must neither
+%% block a caller nor get a live, initialised supervisor stopped.
+stray_waiter_rows_do_not_hold_gate_test() ->
+    beamtalk_supervisor:ensure_init_gate_table(),
+    application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
+    {ok, Sup} = gen_event:start(),
+    Stray = {Sup, waiter, self(), make_ref()},
+    ets:insert(beamtalk_supervisor_init_gates, Stray),
+    try
+        SupTuple = {beamtalk_supervisor, 'BT3759Stray', undefined, Sup},
+        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple)),
+        ?assert(is_process_alive(Sup))
+    after
+        application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
+        ets:delete(beamtalk_supervisor_init_gates, Sup),
+        catch gen_event:stop(Sup)
+    end.

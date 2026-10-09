@@ -777,6 +777,13 @@ that is armed but never claimed (the first caller never reached this function)
 is reclaimed by the first waiter to hit the deadline: the orphan supervisor is
 stopped and the gate released so the next `supervise` starts afresh.
 
+Known limits: only `supervise` waits (`current` called while a hook is still
+running can return the supervisor before it is initialised); the wait blocks the
+calling process, so a class gen_server whose method calls `Y supervise` stalls
+for the duration; and a user `class supervise` override that does not return the
+supervisor to the dispatch hook leaves its gate unclaimed until a later waiter
+reclaims it at the deadline.
+
 Re-entrancy: a hook that itself calls `supervise` on the same class runs in the
 gate owner, which `await_initialized/1` lets straight through. A different
 process that the hook waits on and that calls `supervise` would wait on the
@@ -814,14 +821,12 @@ if the hook failed (supervisor stopped) or the wait timed out.
 await_initialized({beamtalk_supervisor, ClassName, _Module, Pid}) when is_pid(Pid) ->
     ensure_init_gate_table(),
     Self = self(),
-    case ets:lookup(?INIT_GATE_TABLE, Pid) of
-        [] ->
-            ok;
-        Rows ->
-            case lists:member({Pid, owner, Self}, Rows) of
-                true -> ok;
-                false -> wait_for_init_gate(ClassName, Pid)
-            end
+    Rows = ets:lookup(?INIT_GATE_TABLE, Pid),
+    %% Only the `gate` row means a hook is in flight; leftover waiter rows alone
+    %% never do.
+    case gate_held(Pid, Rows) andalso not lists:member({Pid, owner, Self}, Rows) of
+        true -> wait_for_init_gate(ClassName, Pid);
+        false -> ok
     end;
 await_initialized(_) ->
     ok.
@@ -833,15 +838,27 @@ wait_for_init_gate(ClassName, Pid) ->
     ets:insert(?INIT_GATE_TABLE, Waiter),
     %% Re-check after registering: if the gate was released in between we will
     %% not be notified.
-    case ets:lookup(?INIT_GATE_TABLE, Pid) of
-        Rows when Rows =:= []; Rows =:= [Waiter] ->
-            ets:delete_object(?INIT_GATE_TABLE, Waiter),
-            check_initialized(ClassName, Pid);
-        Rows ->
+    Rows = ets:lookup(?INIT_GATE_TABLE, Pid),
+    case gate_held(Pid, Rows) of
+        false ->
+            gate_released(ClassName, Pid, Waiter, Ref);
+        true ->
             SupMon = erlang:monitor(process, Pid),
             Deadline = erlang:monotonic_time(millisecond) + init_wait_timeout(),
             wait_loop(ClassName, Pid, Waiter, Ref, SupMon, undefined, Rows, Deadline)
     end.
+
+%% The gate is released when its `gate` row is gone; stray waiter rows (inserted
+%% after the release took the gate) do not hold it.
+-spec gate_held(pid(), list()) -> boolean().
+gate_held(Pid, Rows) ->
+    lists:member({Pid, gate}, Rows).
+
+-spec gate_released(atom(), pid(), tuple(), reference()) -> ok.
+gate_released(ClassName, Pid, Waiter, Ref) ->
+    ets:delete_object(?INIT_GATE_TABLE, Waiter),
+    flush_init_notice(Ref),
+    check_initialized(ClassName, Pid).
 
 %% Poll every ?INIT_POLL_MS so a waiter that registered before the owner
 %% claimed the gate (no owner row yet) still starts monitoring the owner once it
@@ -873,12 +890,12 @@ wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon0, Rows, Deadline) ->
             demonitor_all([SupMon]),
             abandon_init_gate(ClassName, Pid, Ref)
     after ?INIT_POLL_MS ->
-        case ets:lookup(?INIT_GATE_TABLE, Pid) of
-            [] ->
+        NewRows = ets:lookup(?INIT_GATE_TABLE, Pid),
+        case gate_held(Pid, NewRows) of
+            false ->
                 demonitor_all([SupMon, OwnerMon]),
-                flush_init_notice(Ref),
-                check_initialized(ClassName, Pid);
-            NewRows ->
+                gate_released(ClassName, Pid, Waiter, Ref);
+            true ->
                 case erlang:monotonic_time(millisecond) >= Deadline of
                     false ->
                         wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon, NewRows, Deadline);
@@ -886,9 +903,9 @@ wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon0, Rows, Deadline) ->
                         demonitor_all([SupMon, OwnerMon]),
                         case [O || {_, owner, O} <- NewRows] of
                             [] ->
-                                %% Armed but never claimed: the first caller never
-                                %% reached run_initialize/1. Reclaim the orphan so
-                                %% the next supervise starts a fresh supervisor.
+                                %% Gate armed but never claimed: the first caller
+                                %% never reached run_initialize/1. Reclaim the
+                                %% orphan so the next supervise starts afresh.
                                 abandon_init_gate(ClassName, Pid, Ref);
                             _ ->
                                 ets:delete_object(?INIT_GATE_TABLE, Waiter),
