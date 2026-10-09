@@ -92,7 +92,7 @@ fn sort_comparator_field_write_reads_its_own_stateacc() {
 #[test]
 fn sort_comparator_statement_shapes_compile() {
     for src in [
-        // Last statement a local assignment, a field assignment, a self-send.
+        // A local assignment / field assignment / self-send before the predicate.
         "Actor subclass: S1
   state: n = 0
 
@@ -103,6 +103,18 @@ fn sort_comparator_statement_shapes_compile() {
     a := #(3, 1, 2) sort: [:e :f | c := c + 1. c < 9].
     b := #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. e < f].
     d := #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. self h0: e].
+    c
+",
+        // The predicate is itself the last statement's assignment: to a block-local, to a
+        // threaded outer local, and to a field (the comparator answers the assigned value).
+        "Actor subclass: S4
+  state: n = 0
+
+  probe =>
+    c := false.
+    #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. r := e < f].
+    #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. c := e < f].
+    #(3, 1, 2) sort: [:e :f | self.n := e < f].
     c
 ",
         // A conditional with a threaded write, and a non-local return.

@@ -277,6 +277,12 @@ TestCase subclass: MutationMatrixTest
     self assert: count >= 2 equals: true
     self assert: self.a getLog equals: #(1, 2, 3)
 
+  // BT-3771: an assignment as the comparator's last statement is its predicate.
+  testSortMutationAssignLast =>
+    count := self.a sortMutationAssignLast: #(3, 1, 2)
+    self assert: count >= 2 equals: true
+    self assert: self.a getLog equals: #(1, 2, 3)
+
   // ── Dictionary ────────────────────────────────────────────────────────
 
   // P3-10: Dictionary do: with field mutation in iteration block (BT-1488)
