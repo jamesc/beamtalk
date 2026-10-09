@@ -473,10 +473,26 @@ re-check) otherwise.
     {ok, [binary()]} | {error, term()}.
 load_class_binary(ModuleName, LoadPath, Binary, Classes) ->
     NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(Classes),
-    case code:load_binary(ModuleName, LoadPath, Binary) of
+    case load_binary_scoped(ModuleName, LoadPath, Binary, Classes) of
         {module, ModuleName} -> {ok, NewlyNonLeafSuperclasses};
         {error, Reason} -> {error, Reason}
     end.
+
+-doc """
+`code:load_binary/3` with the pending-load-error table scoped to this attempt
+(BT-3773). Every REPL loader load goes through here, so the drain after a
+failed load sees a structured refusal (`abi_mismatch`,
+`stdlib_shadowing`) parked by THIS load's `-on_load` hook (assuming no concurrent
+load of the same class: clear/load/drain is not atomic, so a racing loader can
+clear it and the load then falls back to `on_load_failure`): an entry left behind
+by an earlier load nothing drained (`beamtalk_module_activation`, code-server
+autoload) is discarded first instead of being blamed on this load's real cause.
+""".
+-spec load_binary_scoped(atom(), string(), binary(), [map()]) ->
+    {module, atom()} | {error, term()}.
+load_binary_scoped(ModuleName, LoadPath, Binary, Classes) ->
+    ok = beamtalk_runtime_api:clear_pending_load_errors_by_names(class_name_atoms(Classes)),
+    code:load_binary(ModuleName, LoadPath, Binary).
 
 -doc """
 Activate a loaded module: register classes, trigger hot reload,
@@ -794,7 +810,7 @@ load_protocol_module(ProtocolInfo, Path, State) ->
             undefined -> "";
             _ -> Path
         end,
-    case code:load_binary(ModuleName, LoadPath, Binary) of
+    case load_binary_scoped(ModuleName, LoadPath, Binary, ProtocolClassNames) of
         {module, ModuleName} ->
             %% activate_module calls register_class/0 which registers the protocol
             activate_module(ModuleName, ProtocolClassNames, Path),
@@ -820,7 +836,7 @@ load_protocol_module_stateless(ProtocolInfo, Path) ->
         #{name => binary_to_list(P), superclass => "Object"}
      || P <- Protocols
     ],
-    case code:load_binary(ModuleName, Path, Binary) of
+    case load_binary_scoped(ModuleName, Path, Binary, ProtocolClassNames) of
         {module, ModuleName} ->
             activate_module(ModuleName, ProtocolClassNames, Path),
             {ok, ProtocolClassNames};
@@ -4397,7 +4413,7 @@ load_recompiled_method(
     %% Pass the class's on-disk source path (when known) so `code:which/1`
     %% reports a real path — keeping a patched project class classified as a
     %% project class, not "stdlib"/"dynamic".
-    case code:load_binary(ModName, SourcePath, Binary) of
+    case load_binary_scoped(ModName, SourcePath, Binary, Classes) of
         {module, ModName} ->
             %% (2) Install in memory. The memory install is the visible effect;
             %% the ChangeEntry below is step (3) — emitted only after install
