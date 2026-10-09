@@ -20,12 +20,17 @@
 //!   reassigned, that flows to a send that cannot return the write: anything
 //!   but a §1 construct (a [`crate::state_threading_selectors`] selector, the
 //!   conditional family, `on:do:`/`ensure:`, `tryDo:`, a block `value` send on
-//!   a literal block), an actor instance self-send (BT-912), or an Erlang FFI
-//!   argument (ADR 0041 §Erlang Interop Boundary: lossy by design, codegen's
-//!   `generate_erlang_interop_wrapper` warns). In an actor instance method a
-//!   stored block may also be sent `value`, passed to a self-send or folded
-//!   by a collection HOM (ADR 0128); everywhere else no callee can hand a
-//!   `StateAcc` back.
+//!   a literal block), an actor instance self-send (BT-912) in the exact
+//!   shape codegen's `detect_tier2_self_send` threads (a bare `self`
+//!   receiver, not a cascade message, at the method body's top level, with a
+//!   bare block argument whose writes are all captured mutations), or an
+//!   Erlang FFI argument (ADR 0041 §Erlang Interop Boundary: lossy by design,
+//!   codegen's `generate_erlang_interop_wrapper` warns). In an actor instance
+//!   method a stored block may also be sent a `value`-family message, but
+//!   only as a bare identifier receiver in a method-body statement, for a
+//!   binding codegen's `prescan_tier2_local_vars` promotes; passing a stored
+//!   block on (to a self-send or a collection HOM) drops its write.
+//!   Everywhere else no callee can hand a `StateAcc` back.
 //! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
 //!   temporary). A local-threading construct
 //!   ([`local_threading_construct_blocks`]) whose blocks write an outer local
@@ -37,8 +42,8 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, captured_local_mutations, local_threading_construct_blocks,
-    outer_local_writes, stored_block_var_uses,
+    OuterLocalWrite, captured_local_mutations, is_safe_value_family_selector,
+    local_threading_construct_blocks, outer_local_writes, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -934,7 +939,7 @@ impl<'d> Walker<'d> {
                 && self.context == Actor
                 && promotable
                 && top == TopLevel::Statement
-                && is_block_value_selector(selector);
+                && is_safe_value_family_selector(selector);
             if !ok {
                 self.report_local(&id.name, &sel, receiver.span());
             }
@@ -1031,12 +1036,6 @@ fn receiver_has_channel(selector: &str) -> bool {
     crate::state_threading_selectors::is_state_threaded_block_receiver(selector)
         || crate::state_threading_selectors::is_state_threading_unary_selector(selector)
         || matches!(selector, "whileTrue:" | "whileFalse:" | "repeat")
-}
-
-fn is_block_value_selector(selector: &MessageSelector) -> bool {
-    selector
-        .well_known()
-        .is_some_and(crate::ast::WellKnownSelector::is_block_value)
 }
 
 #[cfg(test)]
