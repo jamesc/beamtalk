@@ -3,10 +3,9 @@
 
 // BT-3702: ADR 0130 Phase 0 gate 3. Open class whose class-side loop does ten
 // class-variable reads and three writes per iteration, straight-line, no sends.
-// The values stay small integers (no bignum growth), and the local `acc`
-// write is there because a loop body whose only mutation is a class-variable
-// write is rejected at compile time (language features, "The one shape still
-// rejected").
+// The values stay small integers (no bignum growth). The loop body touches
+// nothing but class variables (BT-3766 dropped the local write the threaded
+// lowering before ADR 0130 needed).
 
 Object subclass: SsbClassVarClass
   classState: a = 1
@@ -14,13 +13,11 @@ Object subclass: SsbClassVarClass
   classState: c = 3
 
   class loop: n :: Integer -> Integer =>
-    acc := 0
     1
       to: n
       do: [:i |
-        acc := i
         self.a := self.b + self.c
         self.b := self.a - self.c
         self.c := self.a - self.b + self.c - self.a + self.b - self.c
       ]
-    acc
+    n
