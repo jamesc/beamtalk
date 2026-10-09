@@ -674,6 +674,35 @@ fn family_binds_may_read_the_carrier_ahead_of_the_rebinds() {
 }
 
 #[test]
+fn a_non_family_bind_between_the_tuple_and_its_rebinds_drops_the_local() {
+    // Only a `State`/`SelfVt` `Direct` step (a family extraction) may sit
+    // between the construct tuple and its rebinds; a local's own `Bind` is
+    // ordinary code and closes the construct.
+    let frame = FrameId::ROOT;
+    let enclosing = frame_of(&build_method_body(frame, Vec::new(), Vec::new()));
+    let mut body = build_local_threading_prelude(
+        &enclosing,
+        CARRIER,
+        tuple_doc(),
+        &[key_slot("t", "_T1")],
+        Vec::new(),
+        span(),
+        mint(frame, "__local__t"),
+    );
+    body.insert(
+        1,
+        ThreadedStmt::Bind {
+            target: local("u", 1, frame),
+            source: local("u", 0, frame),
+            op: BindOp::Direct(ValueRef::Literal("1")),
+            span: span(),
+        },
+    );
+    let errors = verify(&[build_method_body(frame, Vec::new(), body)]);
+    assert_eq!(errors, vec![dropped("t"), dropped("t")]);
+}
+
+#[test]
 fn discard_locals_drops_legitimately_only_at_the_method_body() {
     let tuple = build_construct_tuple(CARRIER, tuple_doc(), threads(&["t"]), span());
     let discard = build_discard_locals(CARRIER, span());

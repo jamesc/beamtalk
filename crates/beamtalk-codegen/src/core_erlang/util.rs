@@ -928,7 +928,8 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0131 §1a amends the plain-variable exemption: a plain-variable
     /// child is trivial only if no later sibling (up to *k*) that needs a
-    /// prelude threads it ([`Self::threaded_locals_of`]). Otherwise a later
+    /// prelude threads it through a construct reachable inside it
+    /// ([`Self::reachable_threaded_locals`]). Otherwise a later
     /// sibling's `LocalRebind` could run before the parent reads it, so it
     /// is compiled ahead and snapshot to a `Tmp` like any other value
     /// ([`Self::snapshot_before_sibling_rebind`]). The verifier backs the
@@ -1016,10 +1017,12 @@ impl CoreErlangGenerator {
     /// ADR 0131 §1a: whether the plain-variable child `child` must be
     /// snapshot to a `Tmp` before its later siblings' preludes run — true
     /// when it names an outer local that some later sibling needing a
-    /// prelude threads ([`Self::threaded_locals_of`]'s set), so that
-    /// sibling's `LocalRebind` may change the binding before the parent
-    /// reads it. Anything other than a plain variable is decided by the
-    /// ordinary rule.
+    /// prelude threads through any construct reachable inside it
+    /// ([`Self::reachable_threaded_locals`]: the sibling itself, or a
+    /// construct nested in its operands, as in `t + (self id: (c ifTrue: [t
+    /// := t + 1. 1] ifFalse: [0]))`), so that construct's `LocalRebind` may
+    /// change the binding before the parent reads it. Anything other than a
+    /// plain variable is decided by the ordinary rule.
     fn snapshot_before_sibling_rebind(&self, child: &Expression, later: &[&Expression]) -> bool {
         let Expression::Identifier(id) = child else {
             return false;
@@ -1027,8 +1030,9 @@ impl CoreErlangGenerator {
         later.iter().any(|sibling| {
             self.subexpr_needs_prelude(sibling)
                 && self
-                    .threaded_locals_of(sibling)
-                    .is_some_and(|set| set.names.iter().any(|n| *n == id.name.as_str()))
+                    .reachable_threaded_locals(sibling)
+                    .iter()
+                    .any(|n| *n == id.name.as_str())
         })
     }
 

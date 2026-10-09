@@ -183,8 +183,10 @@ pub(in crate::core_erlang) enum VerifyError {
     /// ADR 0131 §4: a [`ThreadedStmt::ConstructTuple`] whose `threads` lists
     /// `local` is not followed, in the same frame, by a
     /// [`ThreadedStmt::LocalRebind`] for `local` before the frame ends or
-    /// before anything other than a family `Bind` (the `State`/`SelfVt`
-    /// extraction that legitimately reads the carrier first) or a
+    /// before anything other than a family `Bind` (a `Direct` step of the
+    /// `State`/`SelfVt` family: the extraction that legitimately reads the
+    /// carrier first; its value is an opaque `Doc`, so which carrier it reads
+    /// is not checked) or a
     /// [`ThreadedStmt::DiscardLocals`] at a `MethodBody` frame — so the
     /// construct's write to `local` is lost (o4, o7, o8, s2, s9, actor
     /// o3/o12). The opaque statement that follows may be the consumer's read
@@ -553,8 +555,16 @@ impl VerifyWalk<'_> {
                         at: *span,
                     }),
                 },
-                // A family extraction reads the carrier ahead of the rebinds.
-                ThreadedStmt::Bind { .. } if open.is_some() => {}
+                // A family extraction reads the carrier ahead of the rebinds:
+                // a `Direct` step of the `State`/`SelfVt` family
+                // (`extract_family_slots`). Its value is an opaque `Doc`, so
+                // which carrier it reads is not checked.
+                ThreadedStmt::Bind {
+                    target,
+                    op: BindOp::Direct(_),
+                    ..
+                } if open.is_some()
+                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) => {}
                 ThreadedStmt::DiscardLocals { carrier, .. }
                     if discard_ok && open.as_ref().is_some_and(|o| o.carrier == carrier) =>
                 {
@@ -935,6 +945,13 @@ pub(in crate::core_erlang) struct SequencedSibling<'a> {
 /// not change the binding the parent reads. Reached in production through
 /// `sequence_children`, which reports the result via
 /// [`CoreErlangGenerator::report_threaded_ir_verify_errors`].
+///
+/// **Cannot fire in production yet:** no producer emits a
+/// [`ThreadedStmt::LocalRebind`] until ADR 0131 Phase 2 (BT-3749)'s
+/// `local_threading_producer`, so today every sibling prelude is
+/// rebind-free and this check is exercised only by hand-built IR
+/// (`threaded_ir/tests/local_rebind.rs`). Phase 2 must add a corpus test
+/// proving it fires on a real compile.
 pub(in crate::core_erlang) fn verify_sibling_reads(
     siblings: &[SequencedSibling<'_>],
 ) -> Vec<VerifyError> {
