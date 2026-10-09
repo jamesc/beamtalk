@@ -27,6 +27,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
     run_all_structured/1,
     run_single_structured/2,
     find_test_classes/0,
+    test_class_selectors/1,
     spawn_test_execution/6,
     %% Exported for beamtalk_test_runner
     run_test_method/4,
@@ -63,6 +64,7 @@ Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
     %% ADR 0130 §4: this catch swallows the block's error, so it is a catch
     %% boundary; `protect/1` restores the class-variable map before we classify.
+    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
     try beamtalk_class_vars:protect(Block) of
         _ ->
             % Block completed without error
@@ -362,14 +364,42 @@ run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     structure_results(ClassName, Results, Duration).
 
 -doc """
-Find all loaded TestCase subclasses.
+Find all loaded, concrete TestCase subclasses.
 
 Uses the class hierarchy ETS table to find all classes that inherit
-from TestCase. Returns class names as atoms.
+from TestCase. Returns class names as atoms. An `abstract` subclass is
+left out (BT-3768): it holds `test*` methods for its concrete subclasses
+to inherit and is never run itself.
 """.
 -spec find_test_classes() -> [atom()].
 find_test_classes() ->
-    beamtalk_class_registry:all_subclasses('TestCase').
+    [
+        ClassName
+     || ClassName <- beamtalk_class_registry:all_subclasses('TestCase'),
+        beamtalk_class_metadata:lookup_is_abstract(ClassName) =/= {ok, true}
+    ].
+
+-doc """
+Instance selectors of a test class: its own and those it inherits from every
+superclass below `TestCase` (BT-3768), so `test*`, `setUp` and `tearDown`
+methods defined on an abstract test case are run for each concrete subclass.
+`TestCase`'s own methods are not included. Walks the chain with
+`beamtalk_behaviour_intrinsics:walk_hierarchy/3`, reading each level's
+methods from its class process; call it from outside those processes.
+""".
+-spec test_class_selectors(atom()) -> [atom()].
+test_class_selectors(ClassName) ->
+    Selectors = beamtalk_behaviour_intrinsics:walk_hierarchy(
+        ClassName,
+        fun
+            ('TestCase', _ClassPid, Acc) ->
+                {halt, Acc};
+            (_Name, ClassPid, Acc) ->
+                {cont, ordsets:union(Acc, ordsets:from_list(gen_server:call(ClassPid, methods)))}
+        end,
+        ordsets:new()
+    ),
+    ordsets:to_list(Selectors).
 
 %%% Internal helpers
 
@@ -775,6 +805,8 @@ instance map after setUp, so test methods can access `self.suiteFixture`.
 -spec run_test_method(atom(), atom(), atom(), map() | none, term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
+    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
+    %% worker, no home entry
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
@@ -798,6 +830,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
         %% Inject suite fixture so test methods can access self.suiteFixture
         SetUpInstance = inject_suite_fixture(SetUpInstance0, SuiteFixture),
         TestResult =
+            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
+            %% or runner worker, no home entry
             try
                 Module:dispatch(MethodName, [], SetUpInstance),
                 {pass, MethodName}
@@ -834,6 +868,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             after
                 case HasTearDown of
                     true ->
+                        %% bt-catcher-audit: not-applicable-other-process - runs in the spawned
+                        %% test process or runner worker, no home entry
                         try
                             Module:dispatch(tearDown, [], SetUpInstance)
                             % Don't mask the original test failure
@@ -941,6 +977,8 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             %% No suite lifecycle — skip overhead
             TestFun(nil);
         true ->
+            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
+            %% or runner worker, no home entry
             try
                 Fixture =
                     case HasSetUpOnce of
@@ -982,6 +1020,8 @@ check_suite_lifecycle_methods(Module, none) ->
 -doc "Run tearDownOnce, swallowing errors to avoid masking test results.".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.
 run_teardown_once(Module, Fixture, true) ->
+    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
+    %% worker, no home entry
     try
         Instance = Module:new(),
         WithFixture = inject_suite_fixture(Instance, Fixture),
@@ -1093,7 +1133,12 @@ so it must run outside the class process.
 spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) ->
     spawn(fun() ->
         try
-            Result = execute_tests(Selector, Args, ClassName, TestModule, FlatMethods),
+            %% FlatMethods holds only the class's own instance methods; add the
+            %% inherited ones (BT-3768). Safe here: this is not the class process.
+            AllMethods = maps:merge(
+                maps:from_keys(test_class_selectors(ClassName), true), FlatMethods
+            ),
+            Result = execute_tests(Selector, Args, ClassName, TestModule, AllMethods),
             gen_server:reply(From, {ok, Result})
         catch
             C:E:ST ->

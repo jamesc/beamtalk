@@ -2781,7 +2781,7 @@ count := CvA ap: [count + 1]
 10 timesRepeat: [count := count + 1]
 ```
 
-Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is always accepted, and `r := <construct>` is accepted wherever it threads correctly.
+Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is accepted unless it is one of the statement shapes that lose the write today ([BT-3753](https://linear.app/beamtalk/issue/BT-3753)): most constructs nested in a conditional arm, a protected body or a loop body of a class or value-type method (for example `flag ifTrue: [items do: [:x | count := count + x]]`), `eachWithIndex:`, `do:separatedBy:`, `keysAndValuesDo:`, `ifNil:`, `and:`/`or:` and `anySatisfy:` statements in class and value-type methods (and `[...] value` in a class method), a `detect:ifNone:` statement whose `ifNone:` block writes, and a construct nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
@@ -7388,6 +7388,27 @@ TestCase subclass: DatabaseTest
 - `tearDownOnce` runs even if tests fail.
 - If `setUpOnce` raises an error, all tests in the class fail with a clear message.
 - Per-test `setUp`/`tearDown` still run for each test, providing both shared and per-test state.
+
+#### Shared Tests — Abstract Test Cases
+
+To run one list of tests against several subjects, write the tests once on an `abstract` `TestCase` subclass with a hook the subclasses answer, and give each subject a concrete subclass. A test class runs its own `test*` methods and those it inherits from every superclass below `TestCase` (as well as an inherited `setUp`/`tearDown`/`setUpOnce`/`tearDownOnce`); an `abstract` test class is never run itself.
+
+```beamtalk
+// stdlib/test/fixtures/stack_contract_test.bt
+abstract TestCase subclass: StackContractTest
+  subject => self subclassResponsibility
+
+  testPushPop =>
+    s := self subject new
+    s push: 1
+    self assert: s pop equals: 1
+
+// stdlib/test/list_stack_test.bt
+StackContractTest subclass: ListStackTest
+  subject => ListStack
+```
+
+Put the abstract class under `fixtures/` (fixtures are compiled for every test file, so the subclasses in other test files can name it as their superclass). `stdlib/test/fixtures/class_var_semantics_matrix_test.bt` is a worked example.
 
 #### Parallel Test Execution
 

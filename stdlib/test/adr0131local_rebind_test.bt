@@ -115,3 +115,26 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testVtLastInjectValue =>
     self assert: ((Adr0131LocalRebindValue new) vtLastInject) equals: 3
+
+  // BT-3753: statement-position shapes that answer right today (the ones that
+  // do not are Phase 0 compile errors, in adr0131local_rebind_pending_test).
+  testStBlockValueValue =>
+    self assert: ((Adr0131LocalRebindValue new) stBlockValue) equals: 1
+
+  testStArmDoActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stArmDo: true) equals: 3
+
+  testStArmInjectActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stArmInject: true) equals: 3
+
+  testStEachWithIndexActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stEachWithIndex) equals: 3
+
+  testStDoSeparatedByActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stDoSeparatedBy) equals: 13
+
+  testStKeysAndValuesDoActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stKeysAndValuesDo) equals: 3
+
+  testStBlockValueActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stBlockValue) equals: 1

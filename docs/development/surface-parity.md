@@ -585,7 +585,8 @@ reports the same message at the same span. No operation is surface-specific.
   outer local flows to a send that cannot return the write.
 - Category `UnmigratedLocalThreading` (removed by BT-3743 phase 5): a
   local-threading construct whose blocks write an outer local sits in a
-  position that does not thread the write back yet.
+  position that does not thread the write back yet, including the statement
+  positions that lose the write (BT-3753).
 - Both are errors with no `[diagnostics]` key and no `@expect` category.
 - The REPL sees only the current input: a stored block bound in one input and
   sent `value` in a later one is not seen by the §6 check and still raises
@@ -598,12 +599,13 @@ in release builds as a warning whose message starts with `internal:`
 (category `InternalVerifier`). It is raised during code generation, so only
 the surfaces that generate code show it: CLI `build`/`test` print it with the
 file's other diagnostics (it never fails a build, even under
-`--warnings-as-errors`), and REPL/MCP load carry it in the compile response
+`--warnings-as-errors`), and REPL/MCP load and eval carry it in the compile response
 `warnings`. `check`, `lint` and the LSP do not run codegen and never show it.
 It has no `[diagnostics]` key and no `@expect` category, and `--no-warnings`
-does not hide it. **Known parity gap ([BT-3778](https://linear.app/beamtalk/issue/BT-3778)):** REPL/MCP
-`eval` of a bare expression (and `.btscript` test expressions) builds its own
-generator and still drops it; load/compile paths carry it. Other codegen
+does not hide it. REPL/MCP `eval` of an expression (including `trace: true`
+and the trailing expressions after an inline class definition) appends it to
+the response `warnings` only when a finding exists (BT-3778), and
+`.btscript` test-expression compilation prints it to stderr. Other codegen
 warnings are still not forwarded.
 
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)

@@ -579,3 +579,269 @@ fn allow_set_value_type_return_of_list_op_differs_from_implicit_last() {
     let last = in_value("#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]");
     assert!(adr0131_diagnostics(&last).is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// BT-3753: statement positions that lose the write
+// ---------------------------------------------------------------------------
+
+#[test]
+fn deny_set_nested_statement_names_the_enclosing_block() {
+    let src = in_class("4 > 3 ifTrue: [#(1, 2) do: [:e | t := t + e]]\nt");
+    let diags = adr0131_diagnostics(&src);
+    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    assert_eq!(p0.len(), 1, "{diags:?}");
+    assert_eq!(
+        p0[0].message.as_str(),
+        "`do:` writes outer local `t`, but as a statement inside a conditional arm in a \
+         class method the write is not threaded back yet (BT-3743)"
+    );
+    assert!(
+        p0[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("not inside a conditional arm")),
+        "{:?}",
+        p0[0]
+    );
+}
+
+#[test]
+fn deny_set_method_body_statement_is_rejected_per_context() {
+    // `eachWithIndex:` loses the write as a class or value-type method
+    // statement and answers right in an actor method.
+    let body = "#(1, 2) eachWithIndex: [:x :i | t := t + x]\nt";
+    for src in [in_class(body), in_value(body)] {
+        let diags = adr0131_diagnostics(&src);
+        let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+        assert_eq!(p0.len(), 1, "{src}: {diags:?}");
+        assert!(p0[0].message.contains("as a statement in"), "{:?}", p0[0]);
+    }
+    assert!(adr0131_diagnostics(&in_actor(body)).is_empty());
+}
+
+#[test]
+fn deny_set_block_local_writes_are_not_in_scope() {
+    // A construct that writes only a local of its own enclosing block
+    // (`crosses: false`) is BT-3776, not rejected here.
+    let src = in_value(
+        "4 > 3 ifTrue: [\n  n := 0\n  #(1, 2) collect: [:i | n := n + 1. i]\n  t := t + n\n]\nt",
+    );
+    assert!(adr0131_diagnostics(&src).is_empty());
+}
+
+#[test]
+fn deny_set_state_access_changes_a_class_loop_body() {
+    // A `do:` in a `to:do:` body loses the write, unless the loop body
+    // touches the class's state (class_method_protected_locals.bt
+    // `nestedDoInACountedLoop`, probed).
+    let plain = in_class("1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j]]\nt");
+    assert_eq!(adr0131_diagnostics(&plain).len(), 1);
+    let stateful = in_class("1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j. self ap: [nil]]]\nt");
+    assert!(
+        of_category(
+            &adr0131_diagnostics(&stateful),
+            DiagnosticCategory::UnmigratedLocalThreading
+        )
+        .is_empty()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// BT-3753: the statement-position probe matrix (`DENY_SET`)
+// ---------------------------------------------------------------------------
+
+/// The construct kinds of the statement-position probe matrix: each body,
+/// with `@` for the local it writes and `X` for an extra statement inside its
+/// block (the `stateful` variants), and how much it adds to that local.
+/// `%c` is the condition: the method parameter `c`, or `4 =:= 4` at the REPL.
+const STATEMENT_PROBE_KINDS: &[(&str, &str, i64)] = &[
+    ("do", "#(1, 2) do: [:e | @ := @ + eX]", 3),
+    ("while", "[@ < 2] whileTrue: [@ := @ + 1X]", 2),
+    ("times", "2 timesRepeat: [@ := @ + 1X]", 2),
+    ("toDo", "1 to: 2 do: [:i | @ := @ + iX]", 3),
+    (
+        "inject",
+        "#(1, 2) inject: 0 into: [:a :x | @ := @ + xX. a + x]",
+        3,
+    ),
+    ("collect", "#(1, 2) collect: [:x | @ := @ + xX]", 3),
+    ("ifTrue", "%c ifTrue: [@ := @ + 1X]", 1),
+    ("ifNil", "nil ifNil: [@ := @ + 1X]", 1),
+    ("and", "%c and: [@ := @ + 1X. true]", 1),
+    ("onDo", "[@ := @ + 1X] on: Error do: [:e | 0]", 1),
+    ("ensure", "[@ := @ + 1X] ensure: [nil]", 1),
+    ("value", "[@ := @ + 1X] value", 1),
+    ("ewi", "#(1, 2) eachWithIndex: [:x :i | @ := @ + xX]", 3),
+    (
+        "dsb",
+        "#(1, 2) do: [:x | @ := @ + xX] separatedBy: [@ := @ + 10]",
+        13,
+    ),
+    (
+        "kv",
+        "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | @ := @ + wX]",
+        3,
+    ),
+    (
+        "dinH",
+        "#(1, 2) detect: [:e | e > 5] ifNone: [@ := @ + 1X]",
+        1,
+    ),
+    (
+        "dinS",
+        "#(1, 2) detect: [:e | @ := @ + 1X. e > 5] ifNone: [nil]",
+        2,
+    ),
+    ("any", "#(1, 2) anySatisfy: [:e | @ := @ + 1X. e > 5]", 2),
+];
+
+/// The block roles of the statement-position probe matrix, with `S` for the
+/// probed statement.
+const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
+    ("top", "S"),
+    ("arm", "%c ifTrue: [S]"),
+    ("armTF", "%c ifTrue: [S] ifFalse: [nil]"),
+    ("armNil", "nil ifNil: [S]"),
+    ("armAnd", "%c and: [S. true]"),
+    ("armNL", "%c ifTrue: [S. 5]"),
+    ("prot", "[S. 7] on: Error do: [:e | 0]"),
+    ("protLast", "[S] on: Error do: [:e | 0]"),
+    ("ens", "[S. 7] ensure: [nil]"),
+    ("ensLast", "[S] ensure: [nil]"),
+    ("handler", "[Error signal: \"x\"] on: Error do: [:e | S. 0]"),
+    ("ensBlk", "[nil] ensure: [S]"),
+    ("loop", "i := 0. [i < 1] whileTrue: [i := i + 1. S]"),
+    ("timesC", "1 timesRepeat: [S]"),
+    ("toDoC", "1 to: 1 do: [:z | S]"),
+    ("iter", "#(1) do: [:z | S]"),
+    ("coll", "#(1) collect: [:z | S. z]"),
+    ("val", "[S] value"),
+    ("armIter", "#(1) do: [:z | %c ifTrue: [S]]"),
+    ("iterArm", "%c ifTrue: [#(1) do: [:z | S]]"),
+    (
+        "armLoop",
+        "i := 0. [i < 1] whileTrue: [i := i + 1. %c ifTrue: [S]]",
+    ),
+    ("protArm", "%c ifTrue: [[S. 7] on: Error do: [:e | 0]]"),
+    ("iterIter", "#(1) do: [:y | #(1) do: [:z | S]]"),
+    // REPL-only roles.
+    ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
+];
+
+/// The probe statement for `kind` in `container`. `target` says which local
+/// the construct writes and how the block reads it back: `outer` writes the
+/// method-level `t`; `local` writes a local `u` of the innermost block and
+/// then sets `t := u`; `direct` first writes `t := t + 0` in the block;
+/// `dlocal` writes `u` and then `t := t + u`; `cvar`, `selfsend` and
+/// `cvarOuter` write `t` with a class-variable write or a self-send inside
+/// the construct's block, or a class-variable write before it.
+fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) -> String {
+    let (_, snippet, _) = STATEMENT_PROBE_KINDS
+        .iter()
+        .find(|(k, _, _)| *k == kind)
+        .unwrap_or_else(|| panic!("unknown kind {kind}"));
+    let (_, template) = STATEMENT_PROBE_CONTAINERS
+        .iter()
+        .find(|(c, _)| *c == container)
+        .unwrap_or_else(|| panic!("unknown container {container}"));
+    let extra = match target {
+        "cvar" => ". self.n := 1",
+        "selfsend" => ". self plain",
+        "cvarOuter" | "outer" | "local" | "direct" | "dlocal" => "",
+        other => panic!("unknown target {other}"),
+    };
+    let snippet = snippet.replace('X', extra);
+    let stmt = match target {
+        "local" => format!("u := 0. {}. t := u", snippet.replace('@', "u")),
+        "dlocal" => format!("u := 0. {}. t := t + u", snippet.replace('@', "u")),
+        "direct" => format!("t := t + 0. {}", snippet.replace('@', "t")),
+        "cvarOuter" => format!("self.n := 1. {}", snippet.replace('@', "t")),
+        _ => snippet.replace('@', "t"),
+    };
+    template.replace('S', &stmt).replace("%c", cond)
+}
+
+/// PIN-BUG BT-3743: the statement-position probe matrix, measured on the
+/// real build (BT-3753). Every shape `adr0131_statement_probes.tsv` records
+/// as answering wrong, raising or failing to compile (`bad`) is rejected by
+/// an ADR 0131 diagnostic, and every shape it records as answering right
+/// (`ok`) is not, except where a [`DENY_SET`] row is coarser than one
+/// measurement (`over`: the row's kind family or block role also covers
+/// shapes measured wrong). `gap` lines (a construct that writes only a local
+/// of its own enclosing block, which the enclosing block then loses) are
+/// wrong today but not in BT-3753's scope; BT-3776 rejects or fixes them and
+/// flips them to `bad` or `ok`. A phase that makes a shape answer right
+/// deletes or narrows its row and flips its line to `ok`, which keeps this
+/// green.
+#[test]
+fn adr0131_statement_probe_pins() {
+    let table = include_str!("adr0131_statement_probes.tsv");
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for line in table
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let cols: Vec<&str> = line.split('\t').collect();
+        let [context, container, target, kind, verdict] = cols[..] else {
+            panic!("bad line {line:?}");
+        };
+        let diags = if context == "repl" {
+            let body = statement_probe(kind, container, target, "4 =:= 4");
+            adr0131_diagnostics_with(&format!("{body}\n"), &["t"])
+        } else {
+            let body = statement_probe(kind, container, target, "c");
+            let method = format!("probe: c =>\n    t := 0\n    {body}\n    t\n");
+            let src = match context {
+                "class" => format!(
+                    "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class {method}"
+                ),
+                "value" => format!("Value subclass: P\n  plain => 0\n  {method}"),
+                "actor" => format!("Actor subclass: P\n  state: n = 0\n  plain => 0\n  {method}"),
+                other => panic!("unknown context {other}"),
+            };
+            adr0131_diagnostics(&src)
+        };
+        let rejected = !diags.is_empty();
+        let expected_rejected = match verdict {
+            "bad" | "over" => Some(true),
+            "ok" => Some(false),
+            "gap" => None,
+            other => panic!("unknown verdict {other}"),
+        };
+        if expected_rejected.is_some_and(|e| e != rejected) {
+            wrong.push(format!(
+                "{context}\t{container}\t{target}\t{kind}\tmeasured {verdict}, but {}",
+                if rejected { "rejected" } else { "accepted" }
+            ));
+        }
+        checked += 1;
+    }
+    assert!(checked > 1000, "only {checked} probes");
+    assert!(
+        wrong.is_empty(),
+        "{} mismatches:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+#[test]
+fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
+    // BT-3746 follow-up (PR #4230): a `whileTrue:` nested as a statement in a
+    // `to:do:` or `do:` body answers 0 instead of 3 in every method context.
+    for body in [
+        "s := 0\n1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
+        "s := 0\n#(1, 2, 3) do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
+        "s := 0\n1 to: 3 do: [:i | [s >= i] whileFalse: [s := s + 1]]\ns",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}

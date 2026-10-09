@@ -1,51 +1,58 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Lint: warn when a local variable is reassigned inside a block whose call
-//! site the compiler does NOT recognize for captured-local state-threading,
-//! on a value type.
+//! Lint: warn when a block literal writes an outer local but sits where no
+//! call site threads the write back, and no compile error already says so.
 //!
 //! **DDD Context:** Compilation
 //!
-//! **This lint does not fire for every block literal passed directly to a
-//! message send**, even though value types capture variables by value and a
-//! reassignment inside such a block is normally lost: for a block literal
-//! passed directly to a loop, conditional, or list-op selector the
-//! compiler's codegen recognizes, ADR 0041's state-threading ("known inline
-//! call sites", plus `ifTrue:`/`ifFalse:` threading) packs
-//! captured-and-mutated outer locals into a `StateAcc` and rebinds them in
-//! the caller's scope after the call returns — the reassignment DOES escape
-//! the block. `is_state_threaded_block_arg` below
-//! is the exemption list for exactly these shapes; see its doc comment for
-//! the codegen cross-reference, and `stdlib/test/bt3385dead_assignment_test.bt`
-//! for the `BUnit` runtime coverage.
+//! A block that assigns a local of its enclosing method (an *outer local*,
+//! ADR 0131) only has that write seen by the caller when the block is run
+//! inline at a call site codegen threads (ADR 0041: loops, conditionals,
+//! list ops, `on:do:`/`ensure:`, a literal block's `value`). This pass is
+//! derived from the same core facts as the ADR 0131 compile errors rather
+//! than a scan of its own:
+//!
+//! - **What a block writes** is [`block_facts::outer_local_writes`], the fact
+//!   behind §6 and the Phase 0 allow-set.
+//! - **Which positions thread** is the shared
+//!   [`beamtalk_core::state_threading_selectors`] table
+//!   (`is_state_threaded_block_arg` / `is_state_threaded_block_receiver`),
+//!   the one codegen's `threaded_locals_of` reads.
+//! - **Shapes a compile error rejects** are never warned about: a write
+//!   inside the span of a [`local_threading_diagnostics`] error (§6
+//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`) is
+//!   that error's to report, so `beamtalk lint` and `beamtalk build` never
+//!   flag the same write twice, and when a later phase widens either error
+//!   this lint steps back without a change here.
+//!
+//! What is left for the lint (pinned by `lint_and_section6_agree` below):
+//!
+//! - a block stored or returned but never sent (`blk := [x := 2]`,
+//!   `^[x := 2]`, `#(blk)`, a field store) — §6 errors only once the block
+//!   reaches a send (BT-3756 tracks the rest);
+//! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
+//!   §Erlang Interop Boundary: lossy by design);
+//! - a block literal at a construct position §6 accepts but the shared
+//!   table does not thread (a `whileTrue:` condition, BT-3782; `eachWithIndex:` /
+//!   `do:separatedBy:` outside an actor, `tryDo:` until ADR 0131 Phase 4),
+//!   which crashes or loses the write at runtime today. As the Phase 0
+//!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
 //! ```text
-//! // Fine — do: is a recognized selector, the mutation is threaded through
+//! // Fine — do: threads the write back
 //! count := 0
 //! #(1, 2, 3) do: [:item | count := count + 1]
-//! count  // => 3
 //!
-//! // Still worth a warning — blk escapes and is invoked indirectly; this
-//! // currently raises a runtime error ("captures mutable state
-//! // and must be invoked directly") rather than silently dropping the
-//! // mutation, but it is still a trap worth flagging before it crashes
+//! // Warned — blk is stored and never sent, so its write never reaches count
 //! blk := [count := count + 1]
-//! blk value
 //! ```
 //!
-//! This lint warns about local reassignments inside a block literal that is
-//! either stored/returned or passed to a selector the compiler does not
-//! recognize for state-threading, on a value type. It does NOT warn for:
-//! - Actor subclasses (where state mutations in blocks DO propagate)
-//! - A block literal passed directly to a selector `is_state_threaded_block_arg`
-//!   recognizes (loops, conditionals, `do:`/`collect:`/`inject:into:`-style
-//!   iteration — the mutation IS threaded back to the caller)
-//! - A block literal that is the *receiver* of a selector
-//!   `is_state_threaded_block_receiver` recognizes (`[...] value`,
-//!   `[...] ensure: [...]`, `[...] on: Error do: [...]` — codegen inlines
-//!   the receiver body, so the mutation IS threaded back too)
-//! - Variables defined locally within the block (not captured from outer scope)
+//! Not warned at all: Actor subclasses (their blocks thread through the
+//! actor's own state protocol, and §6 covers what does not), and a block's
+//! own locals (`[t := 1. t := 2]`).
+//!
+//! [`block_facts::outer_local_writes`]: beamtalk_core::semantic_analysis::block_facts::outer_local_writes
 
 use std::collections::HashSet;
 
@@ -53,47 +60,72 @@ use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
+use beamtalk_core::semantic_analysis::block_facts::outer_local_writes;
+use beamtalk_core::semantic_analysis::{
+    extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
+};
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
-/// Lint pass that warns about dead variable assignments inside blocks on value types.
+/// Lint pass that warns about outer-local writes in blocks that no call site
+/// threads back, on value types.
 pub(crate) struct DeadBlockAssignmentPass;
 
 impl LintPass for DeadBlockAssignmentPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        // Top-level expressions (script context — always value type semantics)
-        let mut scope = LintScope::new();
-        walk_expr_seq(&module.expressions, &mut scope, None, diagnostics);
-
         // See `hierarchy_for_lint` doc comment for why this is needed
         // instead of `class.class_kind`.
         let hierarchy = hierarchy_for_lint(module);
 
+        let rejected: Vec<Span> = local_threading_diagnostics(module, &hierarchy)
+            .iter()
+            .flat_map(|d| std::iter::once(d.span).chain(d.notes.iter().filter_map(|n| n.span)))
+            .collect();
+        let mut out = Out {
+            rejected: &rejected,
+            reported: HashSet::new(),
+            diagnostics,
+        };
+
+        // Top-level expressions (script context — always value type semantics)
+        let mut scope = LintScope::new();
+        walk_expr_seq(&module.expressions, &mut scope, &mut out);
+
         for class in &module.classes {
-            // Skip Actor subclasses (including indirect ones) — block
-            // mutations DO propagate for actors.
+            // Skip Actor subclasses (including indirect ones).
             if hierarchy.resolve_class_kind(&class.name.name) == ClassKind::Actor {
                 continue;
             }
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                check_method(method, diagnostics);
+                check_method(method, &mut out);
             }
         }
 
-        // Standalone method definitions: need to determine class kind from the hierarchy
+        // Standalone method definitions: resolve the full ancestor chain
+        // rather than only the direct superclass.
         for standalone in &module.method_definitions {
-            // Resolves the full ancestor chain rather than only the
-            // direct superclass.
             if hierarchy.resolve_class_kind(&standalone.class_name.name) == ClassKind::Actor {
                 continue;
             }
-            check_method(&standalone.method, diagnostics);
+            check_method(&standalone.method, &mut out);
         }
     }
 }
 
+/// Where warnings go, and what is not warned about.
+struct Out<'a> {
+    /// The spans of the ADR 0131 compile errors for this module and of
+    /// their notes: a write is theirs when one of these contains it (each
+    /// error both spans its block or construct and notes the write itself).
+    rejected: &'a [Span],
+    /// `(local, write span)` pairs already warned about: a write inside
+    /// nested unthreaded blocks is seen once per enclosing block.
+    reported: HashSet<(String, Span)>,
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
 // ── Scope tracking ────────────────────────────────────────────────────────────
 
-/// Lightweight scope stack tracking which variables are defined at each depth.
+/// Lightweight scope stack tracking which variables are bound at each depth.
 struct LintScope {
     levels: Vec<HashSet<String>>,
 }
@@ -126,106 +158,75 @@ impl LintScope {
         }
     }
 
-    /// Returns `true` if `name` is defined in an OUTER scope (not the current one).
-    fn is_defined_in_outer_scope(&self, name: &str) -> bool {
-        // Check all levels except the innermost
-        self.levels
-            .iter()
-            .rev()
-            .skip(1)
-            .any(|level| level.contains(name))
-    }
-
-    /// Returns `true` if `name` is defined in the current (innermost) scope.
-    fn is_defined_in_current_scope(&self, name: &str) -> bool {
-        self.levels.last().is_some_and(|level| level.contains(name))
+    fn is_bound(&self, name: &str) -> bool {
+        self.levels.iter().any(|level| level.contains(name))
     }
 }
 
-// ── Traversal helpers ─────────────────────────────────────────────────────────
+// ── Traversal ─────────────────────────────────────────────────────────────────
 
 /// Check a method: push a new scope, define method parameters, traverse body.
-fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
+fn check_method(method: &MethodDefinition, out: &mut Out<'_>) {
     let mut scope = LintScope::new();
     scope.push();
     for param in &method.parameters {
         scope.define(param.name.name.as_str());
     }
-    walk_expr_seq(&method.body, &mut scope, None, diagnostics);
+    walk_expr_seq(&method.body, &mut scope, out);
     scope.pop();
 }
 
 /// Where a block literal sits relative to the message send it belongs to.
 #[derive(Debug, Clone, Copy)]
-enum BlockPosition {
-    /// The block is the send's receiver (`[...] value`, `[...] ensure: [...]`).
-    Receiver,
-    /// The block is the argument at this index in the send's argument list.
-    Arg(usize),
+enum BlockPosition<'s> {
+    /// Not a direct receiver or argument of a send: stored, returned, an
+    /// element of a literal, a statement of its own, ...
+    Value,
+    /// The receiver of `selector` (`[...] value`, `[...] ensure: [...]`).
+    Receiver(&'s str),
+    /// The argument at this index of `selector`.
+    Arg(&'s str, usize),
 }
 
-/// Context about the enclosing message send for a block literal.
-#[derive(Debug, Clone)]
-struct BlockMessageContext {
-    /// The full selector name (e.g., `inject:into:`, `do:`, `ifTrue:`)
-    selector: String,
-    /// Receiver, or which argument position, the block occupies.
-    position: BlockPosition,
-}
-
-/// Walk a sequence of expressions in order.
-fn walk_expr_seq(
-    exprs: &[ExpressionStatement],
-    scope: &mut LintScope,
-    safe_params: Option<&HashSet<String>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for stmt in exprs {
-        walk_expr(&stmt.expression, scope, safe_params, diagnostics);
+impl BlockPosition<'_> {
+    /// Whether codegen threads a block literal's outer-local writes back to
+    /// the caller at this position, per the shared
+    /// [`beamtalk_core::state_threading_selectors`] table.
+    fn threads(self) -> bool {
+        use beamtalk_core::state_threading_selectors as table;
+        match self {
+            BlockPosition::Value => false,
+            BlockPosition::Receiver(selector) => table::is_state_threaded_block_receiver(selector),
+            BlockPosition::Arg(selector, index) => {
+                table::is_state_threaded_block_arg(selector, index)
+            }
+        }
     }
 }
 
-/// Recursively walk a single expression, optionally checking for dead block assignments.
-///
-/// When `safe_params` is `Some`, we are inside a block and should check assignments
-/// for dead captured-variable mutations. When `None`, we are at method/script level
-/// and only need to track definitions + recurse into blocks.
-#[allow(clippy::too_many_lines)]
-fn walk_expr(
-    expr: &Expression,
-    scope: &mut LintScope,
-    safe_params: Option<&HashSet<String>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+/// Walk a sequence of expressions in order.
+fn walk_expr_seq(exprs: &[ExpressionStatement], scope: &mut LintScope, out: &mut Out<'_>) {
+    for stmt in exprs {
+        walk_expr(&stmt.expression, scope, out);
+    }
+}
+
+/// Recursively walk a single expression, tracking bindings and checking
+/// every block literal by its position.
+fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
     #[allow(clippy::enum_glob_use)]
     use Expression::*;
 
     match expr {
-        Assignment {
-            target,
-            value,
-            span,
-            ..
-        } => {
-            if let Identifier(id) = target.as_ref() {
-                let name = id.name.as_str();
-                // Inside a block: check for dead assignment to outer-scope variable
-                if let Some(safe) = safe_params {
-                    if scope.is_defined_in_outer_scope(name)
-                        && !scope.is_defined_in_current_scope(name)
-                        && !safe.contains(name)
-                    {
-                        emit_dead_assignment_warning(name, *span, diagnostics);
-                    }
-                }
-                scope.define(name);
+        Assignment { target, value, .. } => {
+            walk_expr(value, scope, out);
+            match target.as_ref() {
+                Identifier(id) => scope.define(id.name.as_str()),
+                other => walk_expr(other, scope, out),
             }
-            walk_expr(value, scope, safe_params, diagnostics);
         }
 
-        Block(block) => {
-            enter_block(block, scope, None, diagnostics);
-        }
+        Block(block) => enter_block(block, BlockPosition::Value, scope, out),
 
         MessageSend {
             receiver,
@@ -233,83 +234,79 @@ fn walk_expr(
             arguments,
             ..
         } => {
-            // A block literal in receiver position gets the same
-            // selector-aware treatment as a block argument, so
-            // `[count := count + 1] value` / `[...] ensure: [...]` are
-            // recognized as inlined-and-threaded rather than escaping.
+            let selector = selector.name();
             if let Block(block) = receiver.as_ref() {
-                let ctx = BlockMessageContext {
-                    selector: selector.name().to_string(),
-                    position: BlockPosition::Receiver,
-                };
-                enter_block(block, scope, Some(&ctx), diagnostics);
+                enter_block(block, BlockPosition::Receiver(&selector), scope, out);
             } else {
-                walk_expr(receiver, scope, safe_params, diagnostics);
+                walk_expr(receiver, scope, out);
             }
-            walk_msg_args(&selector.name(), arguments, scope, safe_params, diagnostics);
+            walk_msg_args(&selector, arguments, scope, out);
         }
 
         Cascade {
             receiver, messages, ..
         } => {
-            walk_expr(receiver, scope, safe_params, diagnostics);
+            walk_expr(receiver, scope, out);
             for msg in messages {
-                walk_msg_args(
-                    &msg.selector.name(),
-                    &msg.arguments,
-                    scope,
-                    safe_params,
-                    diagnostics,
-                );
+                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, out);
             }
         }
 
-        FieldAccess { receiver, .. } => walk_expr(receiver, scope, safe_params, diagnostics),
-        Return { value, .. } => walk_expr(value, scope, safe_params, diagnostics),
-        Parenthesized { expression, .. } => walk_expr(expression, scope, safe_params, diagnostics),
+        FieldAccess { receiver, .. } => walk_expr(receiver, scope, out),
+        Return { value, .. } => walk_expr(value, scope, out),
+        Parenthesized { expression, .. } => walk_expr(expression, scope, out),
 
-        DestructureAssignment {
-            pattern,
-            value,
-            span,
-            ..
-        } => {
-            walk_expr(value, scope, safe_params, diagnostics);
-            check_destructure_for_dead_assignments(pattern, *span, scope, safe_params, diagnostics);
-            define_pattern_vars_in_scope(pattern, scope);
+        DestructureAssignment { pattern, value, .. } => {
+            walk_expr(value, scope, out);
+            let (ids, _) = extract_pattern_bindings(pattern);
+            for id in ids {
+                scope.define(id.name.as_str());
+            }
         }
 
         Match { value, arms, .. } => {
-            walk_expr(value, scope, safe_params, diagnostics);
-            walk_match_arms(arms, scope, safe_params, diagnostics);
+            walk_expr(value, scope, out);
+            for arm in arms {
+                // Pattern-bound variables are local to the arm.
+                scope.push();
+                let (ids, _) = extract_match_arm_bindings(&arm.pattern);
+                for id in ids {
+                    scope.define(id.name.as_str());
+                }
+                if let Some(guard) = &arm.guard {
+                    walk_expr(guard, scope, out);
+                }
+                walk_expr(&arm.body, scope, out);
+                scope.pop();
+            }
         }
 
         MapLiteral { pairs, .. } => {
             for pair in pairs {
-                walk_expr(&pair.key, scope, safe_params, diagnostics);
-                walk_expr(&pair.value, scope, safe_params, diagnostics);
+                walk_expr(&pair.key, scope, out);
+                walk_expr(&pair.value, scope, out);
             }
         }
 
         ListLiteral { elements, tail, .. } => {
             for elem in elements {
-                walk_expr(elem, scope, safe_params, diagnostics);
+                walk_expr(elem, scope, out);
             }
             if let Some(t) = tail {
-                walk_expr(t, scope, safe_params, diagnostics);
+                walk_expr(t, scope, out);
             }
         }
 
         ArrayLiteral { elements, .. } => {
             for elem in elements {
-                walk_expr(elem, scope, safe_params, diagnostics);
+                walk_expr(elem, scope, out);
             }
         }
 
         StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let StringSegment::Interpolation(e) = seg {
-                    walk_expr(e, scope, safe_params, diagnostics);
+                    walk_expr(e, scope, out);
                 }
             }
         }
@@ -325,277 +322,65 @@ fn walk_expr(
     }
 }
 
-/// Check destructure pattern names for dead assignments before defining them.
-fn check_destructure_for_dead_assignments(
-    pattern: &beamtalk_core::ast::Pattern,
-    span: beamtalk_core::source_analysis::Span,
-    scope: &LintScope,
-    safe_params: Option<&HashSet<String>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if let Some(safe) = safe_params {
-        for name in collect_pattern_var_names(pattern) {
-            if scope.is_defined_in_outer_scope(&name)
-                && !scope.is_defined_in_current_scope(&name)
-                && !safe.contains(&name)
-            {
-                emit_dead_assignment_warning(&name, span, diagnostics);
-            }
-        }
-    }
-}
-
-/// Walk match arms, scoping pattern-bound variables to each arm.
-fn walk_match_arms(
-    arms: &[beamtalk_core::ast::MatchArm],
-    scope: &mut LintScope,
-    safe_params: Option<&HashSet<String>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for arm in arms {
-        // Pattern-bound variables are local to the arm — push a scope
-        // so they don't trigger false positives for outer-scope names.
-        scope.push();
-        define_pattern_vars_in_scope(&arm.pattern, scope);
-        if let Some(guard) = &arm.guard {
-            walk_expr(guard, scope, safe_params, diagnostics);
-        }
-        walk_expr(&arm.body, scope, safe_params, diagnostics);
-        scope.pop();
-    }
-}
-
-/// Walk message arguments, entering blocks with appropriate context.
-///
-/// `safe_params` is forwarded to non-block arguments so that assignments inside
-/// parenthesised expressions (e.g. `foo bar: (x := 1)`) are still checked when
-/// the message send itself is inside a block.
+/// Walk message arguments, checking each block literal by its position.
 fn walk_msg_args(
     selector: &str,
     arguments: &[Expression],
     scope: &mut LintScope,
-    safe_params: Option<&HashSet<String>>,
-    diagnostics: &mut Vec<Diagnostic>,
+    out: &mut Out<'_>,
 ) {
     for (i, arg) in arguments.iter().enumerate() {
         if let Expression::Block(block) = arg {
-            let ctx = BlockMessageContext {
-                selector: selector.to_string(),
-                position: BlockPosition::Arg(i),
-            };
-            enter_block(block, scope, Some(&ctx), diagnostics);
+            enter_block(block, BlockPosition::Arg(selector, i), scope, out);
         } else {
-            walk_expr(arg, scope, safe_params, diagnostics);
+            walk_expr(arg, scope, out);
         }
     }
 }
 
-/// Enter a block: push scope, define params, walk body with dead-assignment checking.
+/// Check a block literal at `position`, then walk its body in a new scope.
 fn enter_block(
     block: &Block,
+    position: BlockPosition<'_>,
     scope: &mut LintScope,
-    msg_ctx: Option<&BlockMessageContext>,
-    diagnostics: &mut Vec<Diagnostic>,
+    out: &mut Out<'_>,
 ) {
+    if !position.threads() {
+        for write in outer_local_writes(block, &|name| scope.is_bound(name)) {
+            let rejected = out.rejected.iter().any(|r| r.contains(write.span));
+            if !rejected && out.reported.insert((write.name.to_string(), write.span)) {
+                emit_dead_assignment_warning(&write.name, write.span, out.diagnostics);
+            }
+        }
+    }
     scope.push();
     for param in &block.parameters {
         scope.define(param.name.as_str());
     }
-    if is_state_threaded_block(msg_ctx) {
-        // This block literal sits at a (selector, receiver-or-argument
-        // position) that the compiler's Value-type / class-method
-        // state-threading codegen (ADR 0041; see `is_state_threaded_block`'s
-        // doc comment for the exact codegen cross-reference) recognizes and
-        // threads captured-and-mutated outer locals through. A reassignment
-        // here DOES escape the block — it is not dead — so skip the check
-        // entirely for this block's body (`None` disables it, same as
-        // method/script-level code outside any block).
-        walk_expr_seq(&block.body, scope, None, diagnostics);
-    } else {
-        walk_expr_seq(&block.body, scope, Some(&HashSet::new()), diagnostics);
-    }
+    walk_expr_seq(&block.body, scope, out);
     scope.pop();
 }
 
-/// Returns `true` if `msg_ctx` identifies a block literal at a (selector,
-/// receiver-or-argument position) that codegen recognizes for Value-type /
-/// class-method captured-local state-threading, meaning a reassignment to
-/// an outer local inside the block is threaded back out and visible after
-/// the call returns — contradicting this lint's general "capture by value,
-/// mutation lost" assumption.
-///
-/// Delegates to `beamtalk_core::state_threading_selectors`'s
-/// `is_state_threaded_block_arg` (argument positions) and
-/// `is_state_threaded_block_receiver` (receiver position) — the single
-/// canonical "which selectors thread which block positions" tables (ADR
-/// 0118 §7), shared with `beamtalk-codegen`'s `threaded_locals_of`,
-/// so the lint and codegen can never silently drift (CLAUDE.md's "No
-/// duplicate implementations" rule; see those tables' doc comments for the
-/// full selector lists and index mapping).
-///
-/// Mutating ANY captured outer local inside these shapes persists after the
-/// call returns (confirmed empirically by `BUnit` runtime tests, see
-/// `stdlib/test/bt3385dead_assignment_test.bt` for the argument positions
-/// and `stdlib/test/dead_assignment_receiver_threading_test.bt` for the
-/// receiver positions) — not just an `inject:into:` accumulator parameter,
-/// so the lint's exemption covers the whole block body, not only a
-/// narrower accumulator-only case.
-///
-/// Deliberately NOT included, so the lint keeps firing there: a block
-/// stored in a variable or passed to a user-defined (non-intrinsic) method
-/// and invoked indirectly via `value`/`value:`/`perform:` — the compiler does
-/// not silently drop such a mutation, but currently refuses
-/// the indirect invocation outright at runtime (a separate, more confusing
-/// failure mode outside this lint's scope) rather than threading it through;
-/// `eachWithIndex:`/`do:separatedBy:`, whose threading is context-dependent
-/// (see the shared table's doc comment) and so conservatively excluded from
-/// it entirely.
-///
-/// `on:do:`'s handler and `ensure:`'s cleanup block are included too: the
-/// shared canonical table has no carve-out for them — codegen threads both
-/// the same way as the loop/conditional family
-/// (`generate_on_do_with_mutations`/`generate_ensure_with_mutations`) — see
-/// `on_do_and_ensure_handler_no_longer_warn` below.
-fn is_state_threaded_block(msg_ctx: Option<&BlockMessageContext>) -> bool {
-    use beamtalk_core::state_threading_selectors as table;
-
-    let Some(ctx) = msg_ctx else {
-        return false;
-    };
-    match ctx.position {
-        BlockPosition::Receiver => table::is_state_threaded_block_receiver(&ctx.selector),
-        BlockPosition::Arg(index) => table::is_state_threaded_block_arg(&ctx.selector, index),
-    }
-}
-
 /// Emit a dead-assignment warning diagnostic.
-fn emit_dead_assignment_warning(
-    name: &str,
-    span: beamtalk_core::source_analysis::Span,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn emit_dead_assignment_warning(name: &str, span: Span, diagnostics: &mut Vec<Diagnostic>) {
     diagnostics.push(
         Diagnostic::lint(
             format!(
-                "assignment to `{name}` inside a block relies on the block being \
-                 invoked directly at this call site — storing it, returning it, or \
-                 passing it to a method that calls it indirectly will not see this \
-                 update (BT-3385: an escaped block that captures and mutates `{name}` \
-                 currently raises a runtime error rather than silently dropping the \
-                 mutation, so this is worth fixing before it crashes, not just before \
-                 it surprises)"
+                "assignment to outer local `{name}` inside a block that no call site \
+                 threads back: the block is stored, returned, or passed where its write \
+                 to `{name}` is lost (or, for an escaped block, raises at runtime)"
             ),
             span,
         )
         .with_hint(
-            "If this block is passed directly to a loop, conditional, or \
-             iteration method (do:, collect:, inject:into:, ifTrue:, ...), \
-             the reassignment IS safe and this warning does not apply there. \
-             Otherwise, invoke the block inline instead of storing or passing \
-             it for indirect invocation, or use `inject:into:` to accumulate \
-             a value as the block's own return value."
+            "Pass the block literal directly to a loop, conditional, or iteration \
+             method that threads it (do:, collect:, inject:into:, ifTrue:, ...), or \
+             return the new value from the block and assign it, e.g. with \
+             `inject:into:` to accumulate a value as the block's own result."
                 .to_string(),
         )
         .with_category(DiagnosticCategory::DeadAssignment),
     );
-}
-
-/// Collect all variable names bound by a pattern.
-fn collect_pattern_var_names(pattern: &beamtalk_core::ast::Pattern) -> Vec<String> {
-    let mut names = Vec::new();
-    collect_pattern_var_names_inner(pattern, &mut names);
-    names
-}
-
-fn collect_pattern_var_names_inner(pattern: &beamtalk_core::ast::Pattern, names: &mut Vec<String>) {
-    use beamtalk_core::ast::Pattern;
-    match pattern {
-        Pattern::Variable(id) => names.push(id.name.to_string()),
-        Pattern::Tuple { elements, .. } => {
-            for elem in elements {
-                collect_pattern_var_names_inner(elem, names);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for elem in elements {
-                collect_pattern_var_names_inner(elem, names);
-            }
-            if let Some(rest_pat) = rest {
-                collect_pattern_var_names_inner(rest_pat, names);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for elem in elements {
-                collect_pattern_var_names_inner(elem, names);
-            }
-            if let Some(t) = tail {
-                collect_pattern_var_names_inner(t, names);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_var_names_inner(&pair.value, names);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_, binding) in keywords {
-                collect_pattern_var_names_inner(binding, names);
-            }
-        }
-        // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (bindings/scope land with narrowing and codegen).
-        Pattern::Binary { .. }
-        | Pattern::Wildcard(_)
-        | Pattern::Literal(_, _)
-        | Pattern::Nil(_)
-        | Pattern::Type { .. } => {}
-    }
-}
-
-/// Define pattern-bound variable names in the lint scope.
-fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &mut LintScope) {
-    use beamtalk_core::ast::Pattern;
-    match pattern {
-        Pattern::Variable(id) => scope.define(id.name.as_str()),
-        Pattern::Tuple { elements, .. } => {
-            for elem in elements {
-                define_pattern_vars_in_scope(elem, scope);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for elem in elements {
-                define_pattern_vars_in_scope(elem, scope);
-            }
-            if let Some(rest_pat) = rest {
-                define_pattern_vars_in_scope(rest_pat, scope);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for elem in elements {
-                define_pattern_vars_in_scope(elem, scope);
-            }
-            if let Some(t) = tail {
-                define_pattern_vars_in_scope(t, scope);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                define_pattern_vars_in_scope(&pair.value, scope);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_, binding) in keywords {
-                define_pattern_vars_in_scope(binding, scope);
-            }
-        }
-        // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (bindings/scope land with narrowing and codegen).
-        Pattern::Binary { .. }
-        | Pattern::Wildcard(_)
-        | Pattern::Literal(_, _)
-        | Pattern::Nil(_)
-        | Pattern::Type { .. } => {}
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -631,16 +416,6 @@ mod tests {
             "Expected variable name in message, got: {}",
             diags[0].message
         );
-    }
-
-    /// Accumulation in a block passed to an unrecognized (user-defined-shaped)
-    /// selector — not one of `is_state_threaded_block_arg`'s known loop/
-    /// conditional/list-op shapes, so still flagged.
-    #[test]
-    fn accumulation_in_unrecognized_selector_block_warns() {
-        let diags = lint("count := 0.\nfoo customLoop: [:item | count := count + 1]");
-        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
-        assert!(diags[0].message.contains("`count`"));
     }
 
     /// Multiple dead assignments in the same stored block.
@@ -1007,22 +782,45 @@ sealed typed Value subclass: Foo
         }
     }
 
-    /// Receiver position is only exempt for the selectors codegen actually
-    /// inlines — a block literal receiving anything else (a user-defined
-    /// selector, `perform:`, `valueWithArguments:`, unary `whileTrue`) is a
-    /// closure whose mutation is lost, so the lint still fires. A keyword
-    /// `whileTrue:`/`whileFalse:` CONDITION block with a local write is the
-    /// worst case — it crashes at runtime today (BT-3607; see the shared
-    /// table's doc comment) — so it stays flagged too.
+    /// A block literal at a send codegen does not inline (a user-defined
+    /// selector, `perform:withArguments:`, `valueWithArguments:`) or a stored
+    /// block later sent anything is an ADR 0131 §6 compile error, so the
+    /// lint leaves it to that error rather than flagging the write twice.
     #[test]
-    fn unrecognized_receiver_selector_still_warns() {
+    fn section6_rejected_shapes_do_not_warn() {
         for src in [
+            "count := 0.\nfoo customLoop: [:item | count := count + 1]",
             "count := 0.\n[count := count + 1] customRun: 1",
             "count := 0.\n[count := count + 1] perform: #value withArguments: #()",
             "count := 0.\n[:x | count := count + x] valueWithArguments: #(1)",
+            "count := 0.\nblk := [count := count + 1].\nblk value",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+        // Nested: §6 rejects the inner block's write to `y`; the stored outer
+        // block's own write to `x` is still the lint's.
+        let diags = lint("x := 0.\ny := 0.\nblk := [x := 1. foo run: [y := 2]]");
+        assert_eq!(diags.len(), 1, "Expected only `x` to warn, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Construct positions §6 accepts but the shared table does not thread (BT-3782, BT-3753)
+    /// still warn: in a value-type context a keyword `whileTrue:`/
+    /// `whileFalse:` CONDITION block's write crashes at runtime today
+    /// ("function expects 1 arguments but was called with 0"), and
+    /// `eachWithIndex:`/`do:separatedBy:` lose theirs.
+    #[test]
+    fn unthreaded_construct_positions_still_warn() {
+        for src in [
             "i := 0.\n[i := i + 1. i < 3] whileTrue",
             "i := 0.\n[i := i + 1. i < 3] whileTrue: [nil]",
             "i := 0.\n[i := i + 1. i >= 3] whileFalse: [nil]",
+            "i := 0.\n#(1, 2) eachWithIndex: [:e :ix | i := i + e]",
+            "i := 0.\n#(1, 2) do: [:e | nil] separatedBy: [i := i + 1]",
         ] {
             let diags = lint(src);
             assert_eq!(
@@ -1031,6 +829,16 @@ sealed typed Value subclass: Foo
                 "Expected 1 lint for {src:?}, got: {diags:?}"
             );
         }
+    }
+
+    /// A threaded construct nested inside a stored block does not hide the
+    /// stored block's own escape: the write is lost because `blk` is never
+    /// sent, whatever runs it inline inside the block.
+    #[test]
+    fn threaded_construct_inside_stored_block_warns() {
+        let diags = lint("x := 0.\nblk := [#(1, 2) do: [:e | x := x + e]]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
     }
 
     /// The whole family of loop / list-op selectors that codegen's
@@ -1098,5 +906,111 @@ sealed typed Value subclass: Foo
             Some(beamtalk_core::source_analysis::DiagnosticCategory::DeadAssignment),
             "Expected DeadAssignment category on lint diagnostic"
         );
+    }
+
+    // ── Agreement with the ADR 0131 compile errors ────────────────────────────
+
+    /// Who reports an outer-local write in a shape.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Owner {
+        /// Threaded back by codegen: neither the lint nor a compile error.
+        Neither,
+        /// An ADR 0131 compile error (§6 or the Phase 0 allow-set); no lint.
+        CompileError,
+        /// The lint alone: a block value stored or returned but never sent.
+        Lint,
+        /// Wrong at runtime today but accepted by §6: exactly one of the two,
+        /// whichever owns it at the moment (the Phase 0 allow-set is being
+        /// widened over these, BT-3753; the lint steps back when it is).
+        Either,
+    }
+
+    /// One shape set checked against both `beamtalk lint` and the compile
+    /// errors `beamtalk build` reports (the full [`analyse`] pipeline, not
+    /// the [`local_threading_diagnostics`] shortcut the lint itself uses):
+    /// they never both report a shape, and each shape lands with the owner
+    /// listed. Each shape is a statement of a value-type method that has
+    /// outer locals `x` and `i` bound and reads `x` afterwards.
+    ///
+    /// [`analyse`]: beamtalk_core::semantic_analysis::analyse
+    #[test]
+    fn lint_and_section6_agree() {
+        use Owner::{CompileError, Either, Lint, Neither};
+        let shapes: &[(&str, Owner)] = &[
+            // Threaded call sites.
+            ("#(1, 2) do: [:e | x := x + e]", Neither),
+            ("#(1, 2) inject: 0 into: [:a :e | x := x + e. a]", Neither),
+            ("1 to: 2 do: [:k | x := x + k]", Neither),
+            ("[i < 2] whileTrue: [i := i + 1. x := x + 1]", Neither),
+            ("x > 0 ifTrue: [x := 1] ifFalse: [x := 2]", Neither),
+            ("[x := x + 1] value", Neither),
+            ("[x := 1] on: Error do: [:e | x := 2]", Neither),
+            ("[nil] ensure: [x := 2]", Neither),
+            ("blk := [:t | t := 1. t]", Neither),
+            // §6: a block value that reaches a send with no return channel.
+            ("self customLoop: [x := x + 1]", CompileError),
+            ("[x := x + 1] customRun: 1", CompileError),
+            ("[:n | x := x + n] valueWithArguments: #(1)", CompileError),
+            ("self run: ([x := 1])", CompileError),
+            ("self run: [x := 1]; yourself", CompileError),
+            ("blk := [x := 1]\n    blk value", CompileError),
+            ("blk := [x := 1]\n    self run: blk", CompileError),
+            // A block stored or returned and never sent.
+            ("blk := [x := 2]", Lint),
+            ("blk := [x := 2]\n    #[blk]", Lint),
+            ("blk := [x := 2]\n    ^blk", Lint),
+            ("^[x := 2]", Lint),
+            ("#[[x := 2]]", Lint),
+            ("blk := [#(1, 2) do: [:e | x := x + e]]", Lint),
+            // An Erlang FFI argument: lossy by design (ADR 0041 §Erlang
+            // Interop Boundary), so §6 exempts it for good.
+            ("(Erlang lists) map: [:e | x := x + 1. e] with: #(1)", Lint),
+            // Accepted by §6, wrong at runtime today (probed in a TestCase:
+            // the condition crashes, eachWithIndex:/do:separatedBy: answer 0).
+            ("[i := i + 1. i < 3] whileTrue: [nil]", Either),
+            ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),
+            ("#(1, 2) do: [:e | nil] separatedBy: [x := x + 1]", Either),
+            // Raises a type_error today (PIN-BUG BT-3743, ADR 0131 Phase 4).
+            ("Result tryDo: [x := x + 1. 1]", Either),
+        ];
+        let compile_error_categories = [
+            DiagnosticCategory::Tier2BlockNoReturnChannel,
+            DiagnosticCategory::UnmigratedLocalThreading,
+        ];
+        let mut failures = Vec::new();
+        for &(shape, expected) in shapes {
+            let src = format!(
+                "Object subclass: Probe\n  run =>\n    x := 0\n    i := 0\n    {shape}\n    x\n"
+            );
+            let (module, parse_diags) = parse(lex_with_eof(&src));
+            assert!(
+                parse_diags.iter().all(|d| d.severity != Severity::Error),
+                "shape {shape:?} does not parse: {parse_diags:?}"
+            );
+            let compile_error = beamtalk_core::semantic_analysis::analyse(&module)
+                .diagnostics
+                .iter()
+                .any(|d| {
+                    d.category
+                        .is_some_and(|c| compile_error_categories.contains(&c))
+                });
+            let mut lint_diags = Vec::new();
+            DeadBlockAssignmentPass.check(&module, &mut lint_diags);
+            let lint = !lint_diags.is_empty();
+            let actual = match (compile_error, lint) {
+                (false, false) => Neither,
+                (true, false) => CompileError,
+                (false, true) => Lint,
+                (true, true) => {
+                    failures.push(format!("{shape:?}: reported by both"));
+                    continue;
+                }
+            };
+            let ok = actual == expected || (expected == Either && actual != Neither);
+            if !ok {
+                failures.push(format!("{shape:?}: expected {expected:?}, got {actual:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

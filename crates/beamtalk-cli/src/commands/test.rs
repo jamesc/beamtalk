@@ -67,11 +67,48 @@ pub(crate) struct TestCaseClass {
     // beamtalk_test_runner in the Erlang runtime.
 }
 
-/// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
+/// Discover direct `TestCase` subclasses in a `.bt` file by parsing the AST.
 ///
-/// Returns discovered test classes and any `@load` directives.
+/// Returns discovered test classes and any `@load` directives. Equivalent to
+/// [`discover_test_classes_in_hierarchy`] with no known superclasses, so a
+/// class whose superclass is another (abstract) test case is not found.
 pub(crate) fn discover_test_classes(
     source_path: &Utf8Path,
+) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
+    discover_test_classes_in_hierarchy(source_path, &HashMap::new())
+}
+
+/// Whether `superclass` is `TestCase` or, following `superclass_index`
+/// (class name → superclass name, e.g. the fixture classes), reaches it.
+fn inherits_from_test_case(superclass: &str, superclass_index: &HashMap<String, String>) -> bool {
+    let mut current = superclass;
+    // Bounded by the index size so a cyclic index cannot loop forever.
+    for _ in 0..=superclass_index.len() {
+        if current == "TestCase" {
+            return true;
+        }
+        match superclass_index.get(current) {
+            Some(next) => current = next,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
+///
+/// A class qualifies when its superclass is `TestCase` or reaches it through
+/// `superclass_index` (BT-3768: an abstract test case under `fixtures/`
+/// holding the `test*` methods, with one-line concrete subclasses in the test
+/// files). An indirect subclass qualifies even with no `test*` method of its
+/// own: the `BUnit` runtime runs the test methods it inherits from every
+/// superclass below `TestCase` (`beamtalk_test_case:test_class_selectors/1`)
+/// and skips an `abstract` test class.
+///
+/// Returns discovered test classes and any `@load` directives.
+pub(crate) fn discover_test_classes_in_hierarchy(
+    source_path: &Utf8Path,
+    superclass_index: &HashMap<String, String>,
 ) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -99,7 +136,7 @@ pub(crate) fn discover_test_classes(
     let test_case_classes: Vec<_> = module
         .classes
         .iter()
-        .filter(|c| c.superclass_name() == "TestCase")
+        .filter(|c| inherits_from_test_case(c.superclass_name(), superclass_index))
         .collect();
 
     if test_case_classes.len() > 1 {
@@ -128,7 +165,8 @@ pub(crate) fn discover_test_classes(
         // No setUp/tearDown/serial detection here — the BUnit runner
         // (beamtalk_test_runner) handles all lifecycle and serialization in Erlang.
 
-        if !test_methods.is_empty() {
+        // An indirect subclass inherits its test methods (see the doc comment).
+        if !test_methods.is_empty() || class.superclass_name() != "TestCase" {
             test_classes.push(TestCaseClass {
                 class_name,
                 superclass_name: class.superclass_name().to_string(),
@@ -1467,7 +1505,8 @@ fn compile_single_test_file(
         &pipeline.class_superclass_index,
     );
 
-    let (mut test_classes, load_files) = discover_test_classes(test_file)?;
+    let (mut test_classes, load_files) =
+        discover_test_classes_in_hierarchy(test_file, &file_super_index)?;
 
     // When multiple packages are in scope, prefix the test module name with
     // the owning package name to prevent `bt@smoke_test.beam` collisions
@@ -2484,6 +2523,41 @@ mod tests {
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].class_name, "MyTest");
         assert_eq!(classes[0].test_methods, vec!["testAdd"]);
+    }
+
+    #[test]
+    fn test_discover_indirect_subclass_through_superclass_index() {
+        // BT-3768: the abstract test case lives in a fixture; the concrete
+        // subclass has no test method of its own and inherits them.
+        let (_temp, file) = write_bt_file(
+            "concrete_test.bt",
+            "AbstractMatrixTest subclass: ConcreteTest\n  subject => 42\n",
+        );
+        let index: HashMap<String, String> =
+            [("AbstractMatrixTest".to_string(), "TestCase".to_string())]
+                .into_iter()
+                .collect();
+
+        let (classes, _) = discover_test_classes_in_hierarchy(&file, &index).unwrap();
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].class_name, "ConcreteTest");
+        assert!(classes[0].test_methods.is_empty());
+
+        // Without the index the superclass is unknown, so nothing is found.
+        let (classes, _) = discover_test_classes(&file).unwrap();
+        assert!(classes.is_empty());
+    }
+
+    #[test]
+    fn test_inherits_from_test_case_stops_on_a_cycle() {
+        let index: HashMap<String, String> = [
+            ("A".to_string(), "B".to_string()),
+            ("B".to_string(), "A".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        assert!(!inherits_from_test_case("A", &index));
+        assert!(inherits_from_test_case("TestCase", &index));
     }
 
     #[test]

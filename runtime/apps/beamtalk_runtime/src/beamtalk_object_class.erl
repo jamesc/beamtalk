@@ -633,6 +633,8 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     Fun = ResolveFun(ModuleName),
                     case erlang:function_exported(ModuleName, Fun, 1) of
                         true ->
+                            %% bt-catcher-audit: not-applicable-no-block - generated
+                            %% selector-table probe, no user code
                             try
                                 ModuleName:Fun(Selector)
                             catch
@@ -1068,6 +1070,7 @@ exits/errors propagate.
 """.
 -spec safe_xref(fun(() -> ok)) -> ok.
 safe_xref(Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a gen_server call to beamtalk_xref
     try Fun() of
         ok -> ok
     catch
@@ -1390,6 +1393,8 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             NewModule = NewState#class_state.module,
             case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
                 true ->
+                    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
+                    %% literal getter, no block
                     try NewModule:'__beamtalk_meta'() of
                         Meta when is_map(Meta) ->
                             %% This `update_class` path is hit by ordinary
@@ -2093,6 +2098,8 @@ ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
 read_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 M when is_map(M) -> M;
                 _ -> #{}

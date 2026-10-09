@@ -506,6 +506,8 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                             %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
                             %% We call it inside a try/catch to translate raw Erlang exceptions
                             %% into structured beamtalk errors instead of letting them escape.
+                            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
+                            %% by every in-tree caller (or replied by an actor)
                             try
                                 case ModuleName:dispatch(Selector, Args, Self, State) of
                                     {reply, _, _} = Reply -> Reply;

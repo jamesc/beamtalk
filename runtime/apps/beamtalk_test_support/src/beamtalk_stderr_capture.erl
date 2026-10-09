@@ -44,6 +44,8 @@ capture(Fun) when is_function(Fun, 0) ->
     true = unregister(standard_error),
     true = register(standard_error, Capturer),
     Outcome =
+        %% bt-catcher-audit: not-applicable-reraises - restores standard_error, then
+        %% erlang:raise/3s the original
         try
             Fun(),
             ok

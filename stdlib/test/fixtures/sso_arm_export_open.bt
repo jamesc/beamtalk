@@ -64,6 +64,31 @@ Object subclass: SsoArmExportOpen
       ]
 
   // The reader runs in the same iteration as the arm and after it.
+  class readerSumToDo -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  class readerSumTimesRepeat -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
   class readerSumDo -> Integer =>
     self.n := 0
     seen := 0
@@ -75,6 +100,20 @@ Object subclass: SsoArmExportOpen
         acc := acc + self reader
       ]
     acc * 10 + self.n
+
+  class readerSumWhile -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    [seen < 3]
+      whileTrue: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  // --- arms -----------------------------------------------------------------
 
   // The write is in the else arm; the other arm is pure.
   class elseArmDo -> Integer =>
@@ -104,14 +143,14 @@ Object subclass: SsoArmExportOpen
     self.n
 
   // The loop itself sits in an arm of the method.
+  // BT-3753: no `seen` counter here: a write to an outer local from a
+  // loop in an arm is lost today, so ADR 0131 Phase 0 rejects it.
   class loopInArm -> Integer =>
     self.n := 1
-    seen := 0
     self.n > 0
       ifTrue: [
         #(1, 2, 3)
           do: [:i |
-            seen := seen + 1
             i =:= 1 ifTrue: [self bump]
             self plain
           ]
@@ -249,16 +288,16 @@ Object subclass: SsoArmExportOpen
   // counting the iterations whose reader saw the write). "InArm": the loop sits in
   // an arm that already wrote, so the outer arm's older write is in place: reads 1, 2, 2 -> flag 2, n 2 -> 22. Without it: reads 0, 1, 1 -> flag 2,
   // n 1 -> 21. A stale read answers 2 / 1.
+  // BT-3753: no `seen` counter here: a write to an outer local from a
+  // loop in an arm is lost today, so ADR 0131 Phase 0 rejects it.
   class readerFirstDoInArm -> Integer =>
     self.n := 0
     self.flag := 0
-    seen := 0
     self.n >= 0
       ifTrue: [
         self bump
         #(1, 2, 3)
           do: [:i |
-            seen := seen + 1
             v := self reader
             v > 1 ifTrue: [self mark]
             i =:= 1 ifTrue: [self bump]
@@ -276,5 +315,101 @@ Object subclass: SsoArmExportOpen
         v := self reader
         v > 0 ifTrue: [self mark]
         i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  // BT-3753: no `seen` counter here: a write to an outer local from a
+  // loop in an arm is lost today, so ADR 0131 Phase 0 rejects it.
+  class readerFirstToDoInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        1
+          to: 3
+          do: [:i |
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            i =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstToDo -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  // BT-3753: `seen` is a local of the arm: a loop in an arm that writes a
+  // method-level local loses the write today, which ADR 0131 Phase 0 rejects.
+  class readerFirstTimesRepeatInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        seen := 0
+        3
+          timesRepeat: [
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            seen =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstTimesRepeat -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        seen =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
+
+  // BT-3753: `seen` is a local of the arm: a loop in an arm that writes a
+  // method-level local loses the write today, which ADR 0131 Phase 0 rejects.
+  class readerFirstWhileInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        seen := 0
+        [seen < 3]
+          whileTrue: [
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            seen =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstWhile -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    [seen < 3]
+      whileTrue: [
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        seen =:= 1 ifTrue: [self bump]
       ]
     self.flag * 10 + self.n

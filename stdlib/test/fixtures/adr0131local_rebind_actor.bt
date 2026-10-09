@@ -110,3 +110,43 @@ Actor subclass: Adr0131LocalRebindActor
         1
       ]
     t
+
+  // BT-3753: the statement-position shapes that are Phase 0 compile errors in
+  // class and value-type methods but answer right in an actor method.
+  stArmDo: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  stArmInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          inject: 0
+          into: [:a :e |
+            t := t + e
+            a + e
+          ]
+      ]
+    t
+
+  stEachWithIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:x :i | t := t + x]
+    t
+
+  stDoSeparatedBy =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
+    t
+
+  stKeysAndValuesDo =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  stBlockValue =>
+    t := 0
+    [t := t + 1] value
+    t

@@ -14,7 +14,7 @@ mod compile;
 mod compile_method;
 pub(crate) mod completion;
 mod diagnostics_and_version;
-mod expression;
+pub(crate) mod expression;
 pub(crate) mod inline_definitions;
 mod method_span;
 mod source_queries;
