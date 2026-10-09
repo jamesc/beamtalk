@@ -63,7 +63,7 @@ All carry a `converted` marker, so the lint fails if one loses its conversion:
 
 ## What the lint cannot see, and watch items
 
-The lint checks direct dynamic calls only. A catch around a static call that reaches Beamtalk code further down (for example `beamtalk_message_dispatch:send/3`) is not a site, so the `protect/1` rule still needs a reviewer there. A marker's disposition is also a judgement the lint cannot check. The audit's watch items, none of which needs `protect/1` today:
+The lint checks direct dynamic calls only. A catch around a static call that reaches Beamtalk code further down (for example `beamtalk_message_dispatch:send/3`, or a block handed to `lists:foreach(Block, List)`) is not a site, so the `protect/1` rule still needs a reviewer there. A marker's disposition is also a judgement the lint cannot check. The audit's watch items, none of which needs `protect/1` today:
 
 - `beamtalk_json:encode_with_errors/2` runs `asJson` hooks in-process; every clause re-raises (`not-applicable-reraises`).
 - `beamtalk_shape_chain:apply_step/3`: `migrateFromVN:` hook errors become `{error, _}`, but the callers re-raise or run in an actor (`not-applicable-reraises`). If a caller ever swallows inside a class invocation, wrap the `Invoke` fun built in `beamtalk_shape_migration:migrate/4` in `protect/1`.
