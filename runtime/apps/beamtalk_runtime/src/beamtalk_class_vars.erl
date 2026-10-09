@@ -531,7 +531,22 @@ refuse_abi(ClassName, Module, Error) ->
         #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
     ),
     record_abi_refusal(Module, Error),
+    record_pending_load_error(ClassName, Error),
     {error, Error}.
+
+%% BT-3722: a refusal inside a module's `-on_load` hook is reported by the code
+%% server as a bare `{error, on_load_failure}`. Park the structured error in the
+%% pending-load-error table (the same channel `stdlib_shadowing` uses) so the
+%% REPL/CLI loaders, which drain it by class name after a failed load, show the
+%% `abi_mismatch` (expected/found/remedy) instead of `on_load_failure`. Skipped
+%% while a release preflight is collecting refusals: that caller reads them from
+%% the collector and never drains this table, so an entry would go stale.
+-spec record_pending_load_error(atom(), #beamtalk_error{}) -> ok.
+record_pending_load_error(ClassName, Error) ->
+    case ets:info(?ABI_REFUSALS_TABLE) of
+        undefined -> beamtalk_class_registry:record_pending_load_error(ClassName, Error);
+        _ -> ok
+    end.
 
 -spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | {invalid, term()} | none.
 compiled_meta(_Module, #{class := _} = Meta) ->

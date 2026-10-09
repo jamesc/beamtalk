@@ -58,7 +58,8 @@ teardown(_) ->
     ).
 
 class_names() ->
-    ['BT3713AbiOldMissing', 'BT3713AbiOldZero', 'BT3713AbiCurrent', 'BT3713AbiHot', 'BT3713AbiErl'].
+    ['BT3713AbiOldMissing', 'BT3713AbiOldZero', 'BT3713AbiCurrent', 'BT3713AbiHot', 'BT3713AbiErl'] ++
+        ['BT3722AbiPending', 'BT3722AbiCollected'].
 
 modules() ->
     [
@@ -66,7 +67,9 @@ modules() ->
         'bt@bt3713_abi_old_zero',
         'bt@bt3713_abi_current',
         'bt@bt3713_abi_hot_old',
-        'bt3713_abi_erlang_class'
+        'bt3713_abi_erlang_class',
+        'bt@bt3722_abi_pending',
+        'bt@bt3722_abi_collected'
     ].
 
 %% The abstract forms of a compiled-class-shaped module. `AbiEntry` is the
@@ -137,6 +140,47 @@ registration_test_() ->
                 Bin = old_binary(Mod, 'BT3713AbiOldZero', ", class_var_abi => 0"),
                 ?assertMatch({error, on_load_failure}, load(Mod, Bin)),
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldZero'))
+            end},
+            {"the refusal is parked for the REPL/CLI loaders as a structured abi_mismatch (BT-3722)",
+                fun() ->
+                    Mod = 'bt@bt3722_abi_pending',
+                    Bin = old_binary(Mod, 'BT3722AbiPending', ", class_var_abi => 0"),
+                    ?assertMatch({error, on_load_failure}, load(Mod, Bin)),
+                    ?assertMatch(
+                        [
+                            {'BT3722AbiPending', #beamtalk_error{
+                                kind = abi_mismatch,
+                                class = 'BT3722AbiPending',
+                                details = #{expected := _, found := 0},
+                                hint = <<"Recompile", _/binary>>
+                            }}
+                        ],
+                        beamtalk_class_registry:drain_pending_load_errors_by_names([
+                            'BT3722AbiPending'
+                        ])
+                    ),
+                    %% Drained exactly once.
+                    ?assertEqual(
+                        [],
+                        beamtalk_class_registry:drain_pending_load_errors_by_names([
+                            'BT3722AbiPending'
+                        ])
+                    )
+                end},
+            {"a refusal collected for a release preflight is not parked (BT-3722)", fun() ->
+                Mod = 'bt@bt3722_abi_collected',
+                Bin = old_binary(Mod, 'BT3722AbiCollected', ""),
+                {Result, Refusals} = beamtalk_class_vars:collect_abi_refusals(fun() ->
+                    load(Mod, Bin)
+                end),
+                ?assertMatch({error, on_load_failure}, Result),
+                ?assertMatch([{Mod, #beamtalk_error{kind = abi_mismatch}}], Refusals),
+                ?assertEqual(
+                    [],
+                    beamtalk_class_registry:drain_pending_load_errors_by_names([
+                        'BT3722AbiCollected'
+                    ])
+                )
             end},
             {"a module with the current class_var_abi registers", fun() ->
                 Mod = 'bt@bt3713_abi_current',
