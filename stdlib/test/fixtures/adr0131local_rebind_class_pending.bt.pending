@@ -8,6 +8,12 @@
 //
 //   o3, o12: erlc `unbound variable 'State'` in `class_*` (ADR 0131 §3)
 //   s2: ThreadedIr verifier panic (verify.rs)
+//   o1, o2, o4-o10, o13, s1, s7, s9, seq: ADR 0131 Phase 0 compile errors
+//     (BT-3745: the allow-set error, or §6 for s1's `at:ifAbsent:` block)
+//
+// Every method here is rejected by an ADR 0131 diagnostic today (and o3, o12,
+// s2 are now rejected before codegen too); `adr0131_probe_matrix_pins` in
+// beamtalk-core checks that.
 
 Object subclass: Adr0131LocalRebindClassPending
   classState: n = 0
@@ -25,4 +31,140 @@ Object subclass: Adr0131LocalRebindClassPending
   class s2 =>
     t := 0
     r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
+    #[r, t]
+
+  class o1 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+    #[r, t]
+
+  class o2 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] ensure: [t := t + 1]) + 1
+    #[r, t]
+
+  class o4 =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  class o5 =>
+    t := 0
+    self.n := [
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]
+    #[self.n, t]
+
+  class o6: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^#[([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]), t]
+      ]
+    #[0, t]
+
+  class o7: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+      7
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  class o8: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  // o9: o1's operand as the method's last expression.
+  class o9 =>
+    t := 0
+    ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+
+  // o10: o1's operand as a `^` value inside an arm.
+  class o10: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    0
+
+  class o13: c =>
+    t := 0
+    self.n := c
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]
+    #[self.n, t]
+
+  class s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  class s7 =>
+    t := 0
+    r := nil
+      ifNil: [
+        t := t + 1
+        1
+      ]
+    #[r, t]
+
+  class s9 =>
+    t := 0
+    r := (#(1, 2)
+      reject: [:x |
+        t := t + 1
+        false
+      ]) size
+    #[r, t]
+
+  class seq =>
+    t := 0
+    r := t + ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0])
     #[r, t]

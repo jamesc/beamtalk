@@ -572,6 +572,24 @@ is surface-specific.
   class-variable write from a supervisor factory, a `class initialize:` hook
   or `performLocally:` raises `class_state_read_only` on every surface.
 
+### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
+
+Two compile errors, computed in `beamtalk-core` semantic analysis
+(`analyse_full`, `validators/local_threading.rs`), so every surface that
+reports semantic diagnostics (CLI `build`/`check`/`lint`/`test`, REPL eval and
+load, LSP `textDocument/publishDiagnostics`, MCP `lint`/`diagnostic_summary`)
+reports the same message at the same span. No operation is surface-specific.
+
+- Category `Tier2BlockNoReturnChannel` (permanent): a block that writes an
+  outer local flows to a send that cannot return the write.
+- Category `UnmigratedLocalThreading` (removed by BT-3743 phase 5): a
+  local-threading construct whose blocks write an outer local sits in a
+  position that does not thread the write back yet.
+- Both are errors with no `[diagnostics]` key and no `@expect` category.
+- The REPL sees only the current input: a stored block bound in one input and
+  sent `value` in a later one is not seen by the §6 check and still raises
+  `stateful_block_dispatch` at run time.
+
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 
 A class that `uses:` a trait declared in *another* file only has the trait's

@@ -90,12 +90,10 @@ TestCase subclass: Tier2StoredBlockMatrixTest
 
   // ── P2: Edge cases ─────────────────────────────────────────────────────
 
-  // P2-10 (BT-2814): same-method, captured-LOCAL (not field) Tier 2 block
-  // invoked in argument position — the raw {Result,State} tuple used to
-  // leak into the enclosing arithmetic instead of being unpacked.
-  testLocalBlockInArgumentPosition =>
-    result := self.a localBlockInArgumentPosition: 5
-    self assert: result equals: 15
+  // P2-10 (BT-2814): a same-method, captured-LOCAL Tier 2 block invoked in
+  // argument position computed its value but dropped its write, so since
+  // BT-3745 it is an ADR 0131 §6 compile error (pinned in beamtalk-core's
+  // `section6_exemptions_match_codegen_shapes`) and has no runtime test here.
 
   // P2-11 (BT-2815): same-method, LOCAL var block with a captured-local-ONLY
   // mutation, invoked via a cascade — the mutation used to never thread back

@@ -11,6 +11,11 @@
 //     (ADR 0131 §3: conditional families are hard-coded to `[State]`)
 //   class s2: ThreadedIr verifier panic (verify.rs); value s2: erlc
 //     `unbound variable 'State'`
+//
+// BT-3745 (ADR 0131 Phase 0b) added every cell that crashed or answered wrong
+// (each now an ADR 0131 Phase 0 allow-set or §6 compile error, pinned by
+// `adr0131_probe_matrix_pins` in beamtalk-core): the tests from testO1Class
+// on, including the actor column (fixtures/adr0131local_rebind_actor_pending).
 
 TestCase subclass: Adr0131LocalRebindPendingTest
 
@@ -34,3 +39,129 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testS2Value =>
     self assert: ((Adr0131LocalRebindValuePending new) s2) equals: #[0, 1]
+
+  testO1Class =>
+    self assert: (Adr0131LocalRebindClassPending o1) equals: #[2, 1]
+
+  testO1Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o1) equals: #[2, 1]
+
+  testO1Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o1) equals: #[2, 1]
+
+  testO2Class =>
+    self assert: (Adr0131LocalRebindClassPending o2) equals: #[2, 2]
+
+  testO2Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o2) equals: #[2, 2]
+
+  testO2Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o2) equals: #[2, 2]
+
+  testO3Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o3) equals: #[2, 1]
+
+  testO4Class =>
+    self assert: (Adr0131LocalRebindClassPending o4) equals: #[2, 3]
+
+  testO4Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o4) equals: #[2, 3]
+
+  testO4Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o4) equals: #[2, 3]
+
+  testO5Class =>
+    self assert: (Adr0131LocalRebindClassPending o5) equals: #[1, 1]
+
+  testO5Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o5) equals: #[1, 1]
+
+  testO6Class =>
+    self assert: (Adr0131LocalRebindClassPending o6: true) equals: #[1, 1]
+
+  testO6Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o6: true) equals: #[1, 1]
+
+  testO6Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o6: true) equals: #[1, 1]
+
+  testO7Class =>
+    self assert: (Adr0131LocalRebindClassPending o7: false) equals: #[7, 1]
+
+  testO7Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o7: false) equals: #[7, 1]
+
+  testO7Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o7: false) equals: #[7, 1]
+
+  testO8Class =>
+    self assert: (Adr0131LocalRebindClassPending o8: false) equals: #[2, 1]
+
+  testO8Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o8: false) equals: #[2, 1]
+
+  testO8Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o8: false) equals: #[2, 1]
+
+  testO9Class =>
+    self assert: (Adr0131LocalRebindClassPending o9) equals: 2
+
+  testO9Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o9) equals: 2
+
+  testO9Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o9) equals: 2
+
+  testO10Class =>
+    self assert: (Adr0131LocalRebindClassPending o10: true) equals: 2
+
+  testO10Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) o10: true) equals: 2
+
+  testO10Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o10: true) equals: 2
+
+  testO12Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) o12: false) equals: #[2, 1]
+
+  testO13Class =>
+    self assert: (Adr0131LocalRebindClassPending o13: false) equals: #[1, 1]
+
+  testS1Class =>
+    self assert: (Adr0131LocalRebindClassPending s1) equals: #[0, 1]
+
+  testS1Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) s1) equals: #[0, 1]
+
+  testS1Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) s1) equals: #[0, 1]
+
+  testS2Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) s2) equals: #[0, 1]
+
+  testS7Class =>
+    self assert: (Adr0131LocalRebindClassPending s7) equals: #[1, 1]
+
+  testS7Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) s7) equals: #[1, 1]
+
+  testS9Class =>
+    self assert: (Adr0131LocalRebindClassPending s9) equals: #[2, 2]
+
+  testS9Value =>
+    self assert: ((Adr0131LocalRebindValuePending new) s9) equals: #[2, 2]
+
+  testS9Actor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) s9) equals: #[2, 2]
+
+  testSeqClass =>
+    self assert: (Adr0131LocalRebindClassPending seq) equals: #[1, 1]
+
+  testSeqValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) seq) equals: #[1, 1]
+
+  testSeqActor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) seq) equals: #[1, 1]
+
+  testVtReturnInjectValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) vtReturnInject) equals: 3

@@ -12,148 +12,32 @@
 // A test asserts the ADR's Expected answer. A test whose answer differs today
 // pins today's answer under a `PIN-BUG BT-3743` marker naming the correct
 // answer; the BT-3743 phases flip the pins they fix, and phase 5 (BT-3751)
-// flips the rest. A shape that does not compile in a context today (an
-// unbound `State` from erlc, or a ThreadedIr verifier panic) cannot be pinned
-// in a compiled module; it is written with its Expected answer in
+// flips the rest. A shape that does not compile in a context today cannot be
+// pinned in a compiled module; it is written with its Expected answer in
 // adr0131local_rebind_pending_test.bt.pending (and its fixtures in
 // fixtures/*_pending.bt.pending), which the runner does not discover. The
 // phase that makes it compile drops the `.pending` suffix.
 //
+// BT-3745 (ADR 0131 Phase 0b) made every shape that crashed or answered wrong
+// a compile error: the §6 error for a Tier 2 block value with no return
+// channel, or the Phase 0 allow-set error for a construct in a position that
+// does not thread its outer-local writes yet (BT-3743). Those cells moved to the pending
+// files; the compile errors themselves are pinned by
+// `adr0131_probe_matrix_pins` in
+// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs, which
+// checks that every pending fixture method is rejected and every method here
+// is not. Class and value-type s4 (`b := [t := t + 1]. b value`) is a
+// permanent §6 error and is pinned only there.
+//
 // Value-type o5/o13 differ from the ADR table's "pass": a value type cannot
 // write `self.n :=` (ADR 0042), so the fixture passes the same construct to
-// the functional update `self withN:` (an argument position), which leaks
-// (o5) or does not compile (o13, pending) today.
+// the functional update `self withN:` (an argument position), which is a
+// compile error (pending) today.
 
 TestCase subclass: Adr0131LocalRebindTest
 
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 1].
-  testO1Class =>
-    self should: [Adr0131LocalRebindClass o1] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 1].
-  testO1Value =>
-    self should: [(Adr0131LocalRebindValue new) o1] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 1].
-  testO1Actor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) o1
-    ] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 2].
-  testO2Class =>
-    self should: [Adr0131LocalRebindClass o2] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 2].
-  testO2Value =>
-    self should: [(Adr0131LocalRebindValue new) o2] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[2, 2].
-  testO2Actor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) o2
-    ] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 1].
-  testO3Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) o3) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 3].
-  testO4Class => self assert: (Adr0131LocalRebindClass o4) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 3].
-  testO4Value => self assert: ((Adr0131LocalRebindValue new) o4) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 3].
-  testO4Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) o4) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple is stored and `t`'s write is dropped); the correct answer is #[1, 1].
-  testO5Class =>
-    r := Adr0131LocalRebindClass o5
-    self assert: (r at: 1) class equals: Tuple
-    self assert: (r at: 2) equals: 0
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple is stored and `t`'s write is dropped); the correct answer is #[1, 1].
-  testO5Value =>
-    r := (Adr0131LocalRebindValue new) o5
-    self assert: (r at: 1) class equals: Tuple
-    self assert: (r at: 2) equals: 0
-
   testO5Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) o5) equals: #[1, 1]
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple is stored and `t`'s write is dropped); the correct answer is #[1, 1].
-  testO6Class =>
-    r := Adr0131LocalRebindClass o6: true
-    self assert: (r at: 1) class equals: Tuple
-    self assert: (r at: 2) equals: 0
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple is stored and `t`'s write is dropped); the correct answer is #[1, 1].
-  testO6Value =>
-    r := (Adr0131LocalRebindValue new) o6: true
-    self assert: (r at: 1) class equals: Tuple
-    self assert: (r at: 2) equals: 0
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple is stored and `t`'s write is dropped); the correct answer is #[1, 1].
-  testO6Actor =>
-    r := (Adr0131LocalRebindActor spawn) o6: true
-    self assert: (r at: 1) class equals: Tuple
-    self assert: (r at: 2) equals: 0
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[7, 1].
-  testO7Class =>
-    self assert: (Adr0131LocalRebindClass o7: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[7, 1].
-  testO7Value =>
-    self assert: ((Adr0131LocalRebindValue new) o7: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[7, 1].
-  testO7Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) o7: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[2, 1].
-  testO8Class =>
-    self assert: (Adr0131LocalRebindClass o8: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[2, 1].
-  testO8Value =>
-    self assert: ((Adr0131LocalRebindValue new) o8: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the inner tuple leaks and raises, so the outer handler answers 3 and `t`'s write is dropped); the correct answer is #[2, 1].
-  testO8Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) o8: false) equals: #[3, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO9Class =>
-    self should: [Adr0131LocalRebindClass o9] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO9Value =>
-    self should: [(Adr0131LocalRebindValue new) o9] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO9Actor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) o9
-    ] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO10Class =>
-    self should: [Adr0131LocalRebindClass o10: true] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO10Value =>
-    self should: [
-      (Adr0131LocalRebindValue new) o10: true
-    ] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is 2.
-  testO10Actor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) o10: true
-    ] raise: #does_not_understand
 
   testO11Class => self assert: (Adr0131LocalRebindClass o11) equals: #[1, 2]
 
@@ -163,34 +47,8 @@ TestCase subclass: Adr0131LocalRebindTest
   testO11Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) o11) equals: #[1, 2]
 
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 1].
-  testO12Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) o12: false) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the arm block reaches `value` via `perform:`); the correct answer is #[1, 1].
-  testO13Class =>
-    self should: [
-      Adr0131LocalRebindClass o13: false
-    ] raise: #stateful_block_dispatch
-
   testO13Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) o13: false) equals: #[1, 1]
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the native `at:ifAbsent:` (`function_clause`)); the correct answer is #[0, 1].
-  testS1Class =>
-    self should: [Adr0131LocalRebindClass s1] raise: #internal_error
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the native `at:ifAbsent:`); the correct answer is #[0, 1].
-  testS1Value =>
-    self should: [(Adr0131LocalRebindValue new) s1] raise: #function_clause
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the native `at:ifAbsent:` (`function_clause`)); the correct answer is #[0, 1].
-  testS1Actor =>
-    self should: [(Adr0131LocalRebindActor spawn) s1] raise: #internal_error
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[0, 1].
-  testS2Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) s2) equals: #[0, 0]
 
   testS3Class => self assert: (Adr0131LocalRebindClass s3) equals: #[3, 2]
 
@@ -198,16 +56,6 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testS3Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) s3) equals: #[3, 2]
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block is sent `value` via `perform:`; ADR 0131 §6 makes this a compile error); the correct answer is 1.
-  testS4Class =>
-    self should: [Adr0131LocalRebindClass s4] raise: #stateful_block_dispatch
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block is sent `value` via `perform:`; ADR 0131 §6 makes this a compile error); the correct answer is 1.
-  testS4Value =>
-    self should: [
-      (Adr0131LocalRebindValue new) s4
-    ] raise: #stateful_block_dispatch
 
   testS4Actor => self assert: ((Adr0131LocalRebindActor spawn) s4) equals: 1
 
@@ -226,13 +74,6 @@ TestCase subclass: Adr0131LocalRebindTest
   testS6Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) s6) equals: #[#(1), 0]
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block is called with arity 0); the correct answer is #[1, 1].
-  testS7Class =>
-    self should: [Adr0131LocalRebindClass s7] raise: #arity_mismatch
-
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block is called with arity 0 (an uncategorised `error` here, `arity_mismatch` in a class method)); the correct answer is #[1, 1].
-  testS7Value => self should: [(Adr0131LocalRebindValue new) s7] raise: #error
-
   testS7Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) s7) equals: #[1, 1]
 
@@ -241,30 +82,6 @@ TestCase subclass: Adr0131LocalRebindTest
   testS8Value => self assert: ((Adr0131LocalRebindValue new) s8) equals: 3
 
   testS8Actor => self assert: ((Adr0131LocalRebindActor spawn) s8) equals: 3
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 2].
-  testS9Class => self assert: (Adr0131LocalRebindClass s9) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 2].
-  testS9Value => self assert: ((Adr0131LocalRebindValue new) s9) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the write to `t` is dropped); the correct answer is #[2, 2].
-  testS9Actor =>
-    self assert: ((Adr0131LocalRebindActor spawn) s9) equals: #[2, 0]
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[1, 1].
-  testSeqClass =>
-    self should: [Adr0131LocalRebindClass seq] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[1, 1].
-  testSeqValue =>
-    self should: [(Adr0131LocalRebindValue new) seq] raise: #does_not_understand
-
-  // PIN-BUG BT-3743: pins today's answer (the construct's `{Value, StateAcc}` tuple leaks into the send); the correct answer is #[1, 1].
-  testSeqActor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) seq
-    ] raise: #does_not_understand
 
   // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is #[true, 0].
   testTryDoRaisesClass =>
@@ -295,3 +112,6 @@ TestCase subclass: Adr0131LocalRebindTest
     self should: [
       (Adr0131LocalRebindActor spawn) tryDoStatement
     ] raise: #type_error
+
+  testVtLastInjectValue =>
+    self assert: ((Adr0131LocalRebindValue new) vtLastInject) equals: 3

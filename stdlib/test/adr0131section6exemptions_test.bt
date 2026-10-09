@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3745 (ADR 0131 §6): each exempt actor shape in
+// fixtures/adr0131section6exemptions_actor.bt really threads its write. If
+// codegen stops threading one, this fails and the §6 exemption for it must
+// go (crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs).
+
+TestCase subclass: Adr0131Section6ExemptionsTest
+
+  testSelfSendStatement =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) selfSendStatement equals: 1
+
+  testSelfSendAssign =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) selfSendAssign equals: #[7, 1]
+
+  testSelfSendReturn =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) selfSendReturn equals: 1
+
+  testStoredValue =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) storedValue equals: 2
+
+  testStoredValueCascade =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) storedValueCascade equals: 3
