@@ -2226,10 +2226,8 @@ impl CoreErlangGenerator {
         // The fun body executes at runtime as a class method's own top frame,
         // even when the builder cascade lexically sits inside a block
         // (`block_depth > 0` at the cascade's position). Reset `block_depth`
-        // so the class-variable probe's `InBlock` flag
-        // (`class_var_probe_doc`) uniformly means "inside a non-inlined
-        // block" across compiled methods and ClassBuilder funs alike; restored
-        // on every exit path below.
+        // so the body is generated as a top frame, as a compiled class
+        // method's is; restored on every exit path below.
         let saved_block_depth = self.block_depth;
         self.block_depth = 0;
         // Likewise the fun is a method's own top frame (home by construction),

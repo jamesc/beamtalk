@@ -78,9 +78,6 @@ pub struct CodegenOptions {
     /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
     /// `Some(true/false)` = override the env var (used by tests).
     pub(in crate::core_erlang) codegen_diagnostics: Option<bool>,
-    /// ADR 0130 Phase 0: override for the class-variable census probe.
-    /// `None` = read from `BEAMTALK_CLASS_VAR_PROBE` env var at generator creation.
-    pub(in crate::core_erlang) class_var_probe: Option<bool>,
     /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION` to bake into `__beamtalk_meta`.
     /// Set by the CLI via [`CodegenOptions::with_provenance`]; absent for REPL/tests.
     pub(in crate::core_erlang) beamtalk_version: Option<String>,
@@ -126,7 +123,6 @@ impl CodegenOptions {
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
             codegen_diagnostics: None,
-            class_var_probe: None,
             beamtalk_version: None,
             otp_release: None,
             native_type_registry: None,
@@ -172,14 +168,6 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_codegen_diagnostics(mut self, enabled: bool) -> Self {
         self.codegen_diagnostics = Some(enabled);
-        self
-    }
-
-    /// Explicitly enable or disable the ADR 0130 class-variable census probe,
-    /// overriding the `BEAMTALK_CLASS_VAR_PROBE` env var.
-    #[must_use]
-    pub fn with_class_var_probe(mut self, enabled: bool) -> Self {
-        self.class_var_probe = Some(enabled);
         self
     }
 

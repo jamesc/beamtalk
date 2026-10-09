@@ -1653,7 +1653,16 @@ install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
             activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
             {ok, ClassNames};
         {error, Reason} ->
-            {error, {load_error, Reason}}
+            %% BT-3722: surface a structured refusal (e.g. `abi_mismatch`)
+            %% parked during the module's `-on_load` instead of `on_load_failure`.
+            case
+                beamtalk_runtime_api:drain_pending_load_errors_by_names(
+                    class_name_atoms(ClassNames)
+                )
+            of
+                [{_ClassName, StructuredError} | _] -> {error, StructuredError};
+                [] -> {error, {load_error, Reason}}
+            end
     end.
 
 %%% ----------------------------------------------------------------------------

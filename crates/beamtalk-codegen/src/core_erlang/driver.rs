@@ -85,7 +85,6 @@ pub fn generate_module_with_warnings(
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
-    generator.override_class_var_probe(options.class_var_probe);
 
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,

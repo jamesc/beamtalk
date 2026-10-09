@@ -419,6 +419,8 @@ Effort: L to XL overall (Phase 3 alone deletes several thousand lines across 11 
 
 **Phase 0 census result (BT-3703).** Tooling: `BEAMTALK_CLASS_VAR_PROBE=1` makes codegen precede every class-variable read or write with a `beamtalk_class_var_probe:report/6` call (`docs/development/debugging.md` § Class-variable probe); with it off the generated `.core` is byte-identical to `main` over the whole stdlib, bootstrap and BUnit corpus (`just core-diff`). The static count is `beamtalk_core::class_var_census` (test-support, not a shipped surface). Corpora: `stdlib/test/**` (including `fixtures/`), `test-package-compiler/cases/**`, `tests/repl-protocol/cases` and the `tests/repl-protocol/fixtures` the scripts `:load`; `just test-bunit`, `just test-stdlib` and `just test-repl-protocol` were run with the probe on.
 
+The runtime probe (`beamtalk_class_var_probe` and its codegen hooks) was removed after the census (BT-3765), since every class-variable access now goes through `beamtalk_class_vars` or an inlined `get` that raises abroad; the static query `beamtalk_core::class_var_census` remains, test-support only (`cargo test -p beamtalk-core --lib census_over -- --nocapture`).
+
 | Shape | Static (escaping closures) | Runtime hits | Notes |
 |---|---|---|---|
 | Returned block reading a class variable | 3 | 3 reads abroad, 3 at home | `makeReader` in `CvsOpen`, `CvsOverrideBase`, `CvsSealed` (BT-3704 matrix fixtures); the abroad read is the closure called after the method returned |
