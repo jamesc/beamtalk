@@ -3122,7 +3122,7 @@ concurrent_supervise(HookOutcome) ->
     ClassInfo = #{
         superclass => none,
         module => Helper,
-        class_methods => #{testSupervise => <<>>, 'initialize:' => <<>>},
+        class_methods => #{supervise => <<>>, 'initialize:' => <<>>},
         class_state => #{}
     },
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
@@ -3131,7 +3131,7 @@ concurrent_supervise(HookOutcome) ->
         spawn_link(fun() ->
             Outcome =
                 try
-                    {returned, beamtalk_class_dispatch:class_send(ClassPid, testSupervise, [])}
+                    {returned, beamtalk_class_dispatch:class_send(ClassPid, supervise, [])}
                 catch
                     Class:Reason -> {raised, Class, Reason}
                 end,
@@ -3243,3 +3243,28 @@ init_gate_waiters() ->
 unwrap_raised(#{error := #beamtalk_error{} = E}) -> E;
 unwrap_raised(#beamtalk_error{} = E) -> E;
 unwrap_raised(Other) -> Other.
+
+%%% BT-3759 review: an armed gate that nobody claims must not wedge `supervise`.
+
+orphaned_init_gate_is_reclaimed_test() ->
+    beamtalk_supervisor:ensure_init_gate_table(),
+    application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
+    %% A proc_lib process stands in for the never-initialised supervisor so
+    %% that stop_failed_supervisor/1 (proc_lib:stop) can stop it.
+    {ok, Sup} = gen_event:start(),
+    ets:insert(beamtalk_supervisor_init_gates, {Sup, gate}),
+    try
+        SupTuple = {beamtalk_supervisor, 'BT3759Orphan', undefined, Sup},
+        ?assertError(
+            #{error := #beamtalk_error{kind = supervisor_start_failed}},
+            beamtalk_supervisor:await_initialized(SupTuple)
+        ),
+        %% Gate rows are gone, so the next caller is not blocked.
+        ?assertEqual([], ets:lookup(beamtalk_supervisor_init_gates, Sup)),
+        ?assertNot(is_process_alive(Sup)),
+        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple))
+    after
+        application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
+        ets:delete(beamtalk_supervisor_init_gates, Sup),
+        catch exit(Sup, kill)
+    end.

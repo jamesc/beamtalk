@@ -78,6 +78,8 @@ functions that call OTP APIs from the caller's process context.
 %% Upper bound on how long an already_started caller waits for a concurrent
 %% initialize: hook (covers an initializer that dies before it claims the gate).
 -define(INIT_WAIT_TIMEOUT, 60000).
+%% Poll interval for a waiting caller (see wait_loop/8).
+-define(INIT_POLL_MS, 200).
 
 %%% ============================================================================
 %%% Public API
@@ -769,6 +771,12 @@ made atomic for callers with an `initializing` gate instead:
     supervisor or a structured `supervisor_start_failed` error, never an
     uninitialised supervisor or a dead pid.
 
+The wait applies only to the `supervise` selector (the dispatch hook), so other
+class methods returning the supervisor tuple never block on the gate. A gate
+that is armed but never claimed (the first caller never reached this function)
+is reclaimed by the first waiter to hit the deadline: the orphan supervisor is
+stopped and the gate released so the next `supervise` starts afresh.
+
 Re-entrancy: a hook that itself calls `supervise` on the same class runs in the
 gate owner, which `await_initialized/1` lets straight through. A different
 process that the hook waits on and that calls `supervise` would wait on the
@@ -831,31 +839,77 @@ wait_for_init_gate(ClassName, Pid) ->
             check_initialized(ClassName, Pid);
         Rows ->
             SupMon = erlang:monitor(process, Pid),
-            OwnerMon =
-                case [O || {_, owner, O} <- Rows] of
-                    [Owner | _] -> erlang:monitor(process, Owner);
-                    [] -> undefined
-                end,
-            receive
-                {Ref, initialized} ->
-                    demonitor_all([SupMon, OwnerMon]),
-                    check_initialized(ClassName, Pid);
-                {'DOWN', SupMon, process, Pid, _} ->
-                    demonitor_all([OwnerMon]),
-                    ets:delete_object(?INIT_GATE_TABLE, Waiter),
-                    init_wait_failed(ClassName);
-                {'DOWN', OwnerMon, process, _, _} when OwnerMon =/= undefined ->
-                    %% The hook's process died without finishing: nobody will
-                    %% release the gate or publish the supervisor.
-                    demonitor_all([SupMon]),
-                    stop_failed_supervisor(Pid),
-                    release_init_gate(Pid),
-                    init_wait_failed(ClassName)
-            after ?INIT_WAIT_TIMEOUT ->
+            Deadline = erlang:monotonic_time(millisecond) + init_wait_timeout(),
+            wait_loop(ClassName, Pid, Waiter, Ref, SupMon, undefined, Rows, Deadline)
+    end.
+
+%% Poll every ?INIT_POLL_MS so a waiter that registered before the owner
+%% claimed the gate (no owner row yet) still starts monitoring the owner once it
+%% appears, and so a gate that is armed but never claimed is detected at the
+%% deadline instead of leaving `supervise` stuck for good.
+-spec wait_loop(
+    atom(), pid(), tuple(), reference(), reference(), reference() | undefined, list(), integer()
+) -> ok.
+wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon0, Rows, Deadline) ->
+    OwnerMon =
+        case {OwnerMon0, [O || {_, owner, O} <- Rows]} of
+            {undefined, [Owner | _]} -> erlang:monitor(process, Owner);
+            _ -> OwnerMon0
+        end,
+    receive
+        {Ref, initialized} ->
+            demonitor_all([SupMon, OwnerMon]),
+            check_initialized(ClassName, Pid);
+        {'DOWN', SupMon, process, Pid, _} ->
+            %% Supervisor gone: drop its gate rows (also covers a gate that was
+            %% armed but never claimed).
+            demonitor_all([OwnerMon]),
+            release_init_gate(Pid),
+            flush_init_notice(Ref),
+            init_wait_failed(ClassName);
+        {'DOWN', OwnerMon, process, _, _} when OwnerMon =/= undefined ->
+            %% The hook's process died without finishing: nobody will
+            %% release the gate or publish the supervisor.
+            demonitor_all([SupMon]),
+            abandon_init_gate(ClassName, Pid, Ref)
+    after ?INIT_POLL_MS ->
+        case ets:lookup(?INIT_GATE_TABLE, Pid) of
+            [] ->
                 demonitor_all([SupMon, OwnerMon]),
-                ets:delete_object(?INIT_GATE_TABLE, Waiter),
-                init_wait_failed(ClassName)
-            end
+                flush_init_notice(Ref),
+                check_initialized(ClassName, Pid);
+            NewRows ->
+                case erlang:monotonic_time(millisecond) >= Deadline of
+                    false ->
+                        wait_loop(ClassName, Pid, Waiter, Ref, SupMon, OwnerMon, NewRows, Deadline);
+                    true ->
+                        demonitor_all([SupMon, OwnerMon]),
+                        case [O || {_, owner, O} <- NewRows] of
+                            [] ->
+                                %% Armed but never claimed: the first caller never
+                                %% reached run_initialize/1. Reclaim the orphan so
+                                %% the next supervise starts a fresh supervisor.
+                                abandon_init_gate(ClassName, Pid, Ref);
+                            _ ->
+                                ets:delete_object(?INIT_GATE_TABLE, Waiter),
+                                init_wait_failed(ClassName)
+                        end
+                end
+        end
+    end.
+
+-spec abandon_init_gate(atom(), pid(), reference()) -> no_return().
+abandon_init_gate(ClassName, Pid, Ref) ->
+    stop_failed_supervisor(Pid),
+    release_init_gate(Pid),
+    flush_init_notice(Ref),
+    init_wait_failed(ClassName).
+
+-spec flush_init_notice(reference()) -> ok.
+flush_init_notice(Ref) ->
+    receive
+        {Ref, initialized} -> ok
+    after 0 -> ok
     end.
 
 -spec demonitor_all([reference() | undefined]) -> ok.
@@ -904,6 +958,15 @@ ensure_init_gate_table() ->
 -spec arm_init_gate(pid()) -> ok.
 arm_init_gate(Pid) ->
     ensure_init_gate_table(),
+    %% Drop rows left by supervisors that died before their gate was claimed.
+    lists:foreach(
+        fun(Dead) -> ets:delete(?INIT_GATE_TABLE, Dead) end,
+        [
+            P
+         || P <- lists:usort([element(1, R) || R <- ets:tab2list(?INIT_GATE_TABLE)]),
+            not is_process_alive(P)
+        ]
+    ),
     ets:insert(?INIT_GATE_TABLE, {Pid, gate}),
     ok.
 
@@ -1571,3 +1634,8 @@ ensure_root_table() ->
         _ ->
             ok
     end.
+
+%% Overridable (application env) so tests can exercise the timeout paths.
+-spec init_wait_timeout() -> non_neg_integer().
+init_wait_timeout() ->
+    application:get_env(beamtalk_runtime, init_wait_timeout_ms, ?INIT_WAIT_TIMEOUT).

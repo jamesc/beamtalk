@@ -17,7 +17,7 @@ Used only by beamtalk_supervisor_tests.erl.
 
 -export([start_link/0, init/1, set_mode/2, reset/0]).
 %% BT-3759: class-side methods for the concurrent-supervise tests.
--export([class_testSupervise/1, 'class_initialize:'/2]).
+-export([class_supervise/1, 'class_initialize:'/2]).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
@@ -80,8 +80,8 @@ init([]) ->
 %%====================================================================
 
 -doc "Stand-in for `supervise`: startLink/1 wrapped as the FFI Result map.".
--spec class_testSupervise(term()) -> map().
-class_testSupervise(ClassSelf) ->
+-spec class_supervise(term()) -> map().
+class_supervise(ClassSelf) ->
     beamtalk_result:from_tagged_tuple(beamtalk_supervisor:startLink(ClassSelf)).
 
 -doc """
