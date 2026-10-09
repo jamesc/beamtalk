@@ -87,6 +87,53 @@ fn sort_comparator_field_write_reads_its_own_stateacc() {
     assert_compiles_through_erlc("test", &code);
 }
 
+/// BT-3771: the comparator's statement shapes, now lowered by the shared fold-body
+/// dispatch, in every context that reaches the mutating `sort:` path.
+#[test]
+fn sort_comparator_statement_shapes_compile() {
+    for src in [
+        // Last statement a local assignment, a field assignment, a self-send.
+        "Actor subclass: S1
+  state: n = 0
+
+  h0: x -> Boolean => true
+
+  probe =>
+    c := 0.
+    a := #(3, 1, 2) sort: [:e :f | c := c + 1. c < 9].
+    b := #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. e < f].
+    d := #(3, 1, 2) sort: [:e :f | self.n := self.n + 1. self h0: e].
+    c
+",
+        // A conditional with a threaded write, and a non-local return.
+        "Actor subclass: S2
+  state: n = 0
+
+  probe =>
+    c := 0.
+    #(3, 1, 2) sort: [:e :f | e > 2 ifTrue: [c := c + 1]. e < f].
+    #(3, 1, 2) sort: [:e :f | e > 5 ifTrue: [^c]. self.n := self.n + 1. e < f].
+    c
+",
+        // A value-type method and a class method.
+        "Value subclass: S3
+  state: x = 0
+
+  probe =>
+    c := 0.
+    #(3, 1, 2) sort: [:e :f | c := c + 1. e < f].
+    c
+
+  class cprobe =>
+    c := 0.
+    #(3, 1, 2) sort: [:e :f | c := c + 1. e < f].
+    c
+",
+    ] {
+        check(src);
+    }
+}
+
 #[test]
 fn inject_fold_with_conditional_local_write_inside_stateacc_loop() {
     // The `while` is `StateAcc` shaped (the loop-body self-send is a state effect to the
