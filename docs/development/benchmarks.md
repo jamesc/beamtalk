@@ -1386,7 +1386,7 @@ re-run (963 ns here, loaded) that does not contradict it but cannot confirm the 
 **Gate 4, restore arm taken (first measurement).** The class-side loop that runs `restore/1` with a live snapshot
 costs 125957 ns/iteration against 130114 ns for the same raise loop with a `none` snapshot (ratio 0.97 after,
 0.95 before): the restore arm is not visible against the cost of the raise itself, which dominates by about 1000x.
-Under load this bounds the restore cost at well under the 10% gate; an idle run would tighten it.
+Under load the restore cost is not detectable: the min-max ranges overlap heavily, so this is not a bound on it; an idle run would tighten it.
 
 ## BT-3700: one derived flag for the class-side self-send guard
 

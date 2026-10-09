@@ -52,9 +52,9 @@ derivation, is derived only when an error is raised, a read-only mirror is
 read, or a read misses and checks the declared set (BT-3766). An instance tag
 never has a key installed, so it reaches one of those paths and raises the
 same internal error there; the one exception is a capture fallback form
-(`get/3`, `get_late/3`, `has/3`, `capture/2`) given a capture map, which
-answers from that map without deriving the name. `with_snapshot/2` validates
-the tag fully before planting its marker.
+(`get/3`, `get_late/3`, `has/3`) given a capture map, which answers from that
+map without deriving the name. `capture/2` and `with_snapshot/2` validate the
+tag fully (once per block-literal creation or region, not a hot path).
 
 ## Semantics
 
@@ -258,6 +258,9 @@ block's capture, or `none` at method level).
 -spec capture(class_self(), map() | none) -> map() | none.
 capture(ClassSelf, Outer) ->
     Tag = class_tag(ClassSelf),
+    %% Once per block-literal creation, not a hot path: keep the full receiver
+    %% check (an instance tag raises here) as `with_snapshot/2` does.
+    _ = tag_to_name(Tag),
     case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
         ?BT_CLASS_VARS_RO(_) -> mirror(Tag, undefined);
@@ -349,6 +352,8 @@ with_snapshot(ClassSelf, Fun) ->
 %% read that misses. An instance tag (no ` class` suffix) or an unknown base
 %% atom therefore raises the same internal error at that point instead: no
 %% access ever installs a key for such a tag, so it takes the "no key" path.
+%% The one exception is `get/3`, `get_late/3` and `has/3` given a capture map,
+%% which answer from that map without deriving the name.
 -spec class_tag(term()) -> atom().
 class_tag(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
     Tag;
