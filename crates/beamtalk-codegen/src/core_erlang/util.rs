@@ -925,6 +925,16 @@ impl CoreErlangGenerator {
     /// pre-compiled child is registered in `precompiled_subexprs` so the
     /// parent's compile substitutes it; the caller hands the returned
     /// scope back to [`Self::finish_precompiled_scope`] afterwards.
+    ///
+    /// ADR 0131 §1a amends the plain-variable exemption: a plain-variable
+    /// child is trivial only if no later sibling (up to *k*) that needs a
+    /// prelude threads it ([`Self::threaded_locals_of`]). Otherwise a later
+    /// sibling's `LocalRebind` could run before the parent reads it, so it
+    /// is compiled ahead and snapshot to a `Tmp` like any other value
+    /// ([`Self::snapshot_before_sibling_rebind`]). The verifier backs the
+    /// rule: [`threaded_ir::verify_sibling_reads`] reports a child still
+    /// read in place while a later sibling's prelude rebinds it
+    /// (`LocalReadAfterSiblingRebind`).
     pub(super) fn sequence_children(
         &mut self,
         children: &[&Expression],
@@ -939,21 +949,35 @@ impl CoreErlangGenerator {
             return Ok((prelude, scope));
         };
 
-        let mut compiled: Vec<(&Expression, bool, ThreadedValue)> = Vec::with_capacity(k + 1);
-        for child in &children[..=k] {
-            if Self::is_trivial_subexpr(child.unwrap_parens()) {
+        // `None`: left for the parent to compile in place (reading the
+        // named local, if a plain variable); `Some(i)`: `compiled[i]`.
+        let mut order: Vec<(Option<usize>, Option<&str>, Span)> = Vec::with_capacity(k + 1);
+        let mut compiled: Vec<(&Expression, bool, bool, ThreadedValue)> = Vec::with_capacity(k + 1);
+        for (i, child) in children[..=k].iter().enumerate() {
+            let inner = child.unwrap_parens();
+            let snapshot = self.snapshot_before_sibling_rebind(inner, &children[i + 1..=k]);
+            if Self::is_trivial_subexpr(inner) && !snapshot {
+                let reads = match inner {
+                    Expression::Identifier(id) => Some(id.name.as_str()),
+                    _ => None,
+                };
+                order.push((None, reads, inner.span()));
                 continue;
             }
-            let is_producer = self.is_prelude_producer(child.unwrap_parens());
+            let is_producer = self.is_prelude_producer(inner);
             let tv = self.threaded_expression(child, frame)?;
-            compiled.push((child, is_producer, tv));
+            order.push((Some(compiled.len()), None, inner.span()));
+            compiled.push((child, is_producer, snapshot, tv));
         }
         let last = compiled.len().saturating_sub(1);
 
-        for (i, (child, is_producer, tv)) in compiled.into_iter().enumerate() {
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::with_capacity(compiled.len());
+        for (i, (child, is_producer, snapshot, tv)) in compiled.into_iter().enumerate() {
             let span = child.unwrap_parens().span();
-            let must_bind = i < last && !tv.value_is_trivial();
+            let must_bind = i < last && (snapshot || !tv.value_is_trivial());
+            let start = prelude.len();
             prelude.extend(tv.prelude);
+            ranges.push(start..prelude.len());
             let value_doc = self.threaded_value_doc(&tv.value);
             if must_bind {
                 let (binding, var) = self.bind_subexpr_to_temp("Tmp", value_doc);
@@ -968,7 +992,44 @@ impl CoreErlangGenerator {
                 self.register_precompiled_subexpr(&mut scope, child, value_doc, is_producer)?;
             }
         }
+
+        let siblings: Vec<super::threaded_ir::SequencedSibling<'_>> = order
+            .iter()
+            .map(|(idx, reads, span)| super::threaded_ir::SequencedSibling {
+                reads_in_place: *reads,
+                prelude: idx.map_or(&[][..], |i| &prelude[ranges[i].clone()]),
+                span: *span,
+            })
+            .collect();
+        let errors = super::threaded_ir::verify_sibling_reads(&siblings);
+        let at = order
+            .first()
+            .map_or_else(Span::default, |(_, _, span)| *span);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "sequenced sibling reads a local a later sibling rebinds",
+            at,
+        );
         Ok((prelude, scope))
+    }
+
+    /// ADR 0131 §1a: whether the plain-variable child `child` must be
+    /// snapshot to a `Tmp` before its later siblings' preludes run — true
+    /// when it names an outer local that some later sibling needing a
+    /// prelude threads ([`Self::threaded_locals_of`]'s set), so that
+    /// sibling's `LocalRebind` may change the binding before the parent
+    /// reads it. Anything other than a plain variable is decided by the
+    /// ordinary rule.
+    fn snapshot_before_sibling_rebind(&self, child: &Expression, later: &[&Expression]) -> bool {
+        let Expression::Identifier(id) = child else {
+            return false;
+        };
+        later.iter().any(|sibling| {
+            self.subexpr_needs_prelude(sibling)
+                && self
+                    .threaded_locals_of(sibling)
+                    .is_some_and(|set| set.names.iter().any(|n| *n == id.name.as_str()))
+        })
     }
 
     /// Renders a [`ThreadedValue`]'s value for use by a consumer that has

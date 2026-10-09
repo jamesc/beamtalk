@@ -173,6 +173,7 @@ mod nlr;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod sibling_snapshot;
 mod supervisor;
 mod threaded_locals;
 mod threaded_locals_agreement;

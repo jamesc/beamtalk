@@ -186,6 +186,7 @@ pub(in crate::core_erlang) fn render(
                 frame,
                 body,
                 produces,
+                threads: _,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
             ThreadedStmt::NlrCatch {
@@ -206,6 +207,7 @@ pub(in crate::core_erlang) fn render(
                 fn_name,
                 mode,
                 frame,
+                threads: _,
                 counter,
                 condition,
                 condition_value,

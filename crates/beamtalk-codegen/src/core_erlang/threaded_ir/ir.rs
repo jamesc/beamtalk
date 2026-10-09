@@ -562,6 +562,15 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     Threaded {
         mode: ThreadingMode,
         frame: FrameId,
+        /// ADR 0131 §2: the outer locals this frame threads itself (a fold's
+        /// `ThreadingPlan::threaded_locals`) — the membership half of a nested
+        /// [`LocalRebind`](Self::LocalRebind)'s lowering key, read off this
+        /// node by [`RebindFrame::of`] for the lowering and the verifier
+        /// alike. Empty for a frame that threads no outer local (and, until
+        /// ADR 0131 Phase 3 replaces them with [`BranchArm`](Self::BranchArm),
+        /// for the branch-arm wrappers `verify_and_render_branch_arm` builds).
+        /// Rendering ignores it.
+        threads: Vec<String>,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
         span: Span,
@@ -644,6 +653,10 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         fn_name: String,
         mode: ThreadingMode,
         frame: FrameId,
+        /// ADR 0131 §2: the outer locals this loop threads
+        /// (`ThreadingPlan::threaded_locals`), exactly as
+        /// [`Threaded`](Self::Threaded)'s `threads`. Rendering ignores it.
+        threads: Vec<String>,
         /// Present only for counted loops (`to:do:`/`to:by:do:`/
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
@@ -817,9 +830,13 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// threaded out, read from `carrier` at `slot`. How the new value is
     /// bound is decided by the enclosing frame's recorded mode and the
     /// local's membership in that frame's threaded set — never by the
-    /// producer — and recorded in `lowering` (see [`RebindLowering`] for the
-    /// §2 table, and `build::rebind_shape` for the one function that applies
-    /// it). `frame` is the enclosing frame's identity.
+    /// producer — and recorded in `lowering` (see [`RebindLowering`], and
+    /// [`RebindShape::for_frame`] for the §2 table, the one function that
+    /// applies it). `frame` is the enclosing frame's identity; the verifier
+    /// checks it against the node that actually encloses the rebind
+    /// ([`VerifyError::LocalRebindFrameMismatch`](super::verify::VerifyError::LocalRebindFrameMismatch)),
+    /// and `lowering`'s shape against that node's §2 cell
+    /// ([`VerifyError::LocalRebindModeMismatch`](super::verify::VerifyError::LocalRebindModeMismatch)).
     ///
     /// `value_var` is the Core Erlang name the read value is bound to,
     /// minted at lowering time (ADR 0111 Addendum 2 Gap 2: never at render
@@ -966,12 +983,85 @@ impl RebindShape {
     }
 }
 
+/// The enclosing frame a [`ThreadedStmt::LocalRebind`] is lowered by: its
+/// identity, its kind/mode (the frame-mode half of ADR 0131 §2's lowering
+/// key) and its threaded set (the membership half). Read off the enclosing
+/// node by [`Self::of`] — by a producer's lowering
+/// (`build::build_local_rebind`) and by the verifier
+/// (`VerifyError::LocalRebindModeMismatch`) alike, so the two can never
+/// disagree about which cell of the table applies. A rebind's lowering is
+/// never looked up in a side table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct RebindFrame {
+    pub(in crate::core_erlang) frame: FrameId,
+    pub(in crate::core_erlang) kind: RebindFrameKind,
+    pub(in crate::core_erlang) threads: Vec<String>,
+}
+
+impl RebindFrame {
+    /// Reads the frame off its node: a [`ThreadedStmt::MethodBody`] or
+    /// [`ThreadedStmt::BranchArm`], or a loop/fold
+    /// ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`]) with
+    /// its recorded [`ThreadingMode`]. Each records its own `threads`. `None`
+    /// for a node that is not a frame.
+    pub(in crate::core_erlang) fn of(node: &ThreadedStmt) -> Option<Self> {
+        let (frame, kind, threads) = match node {
+            ThreadedStmt::MethodBody { frame, threads, .. } => {
+                (*frame, RebindFrameKind::MethodBody, threads)
+            }
+            ThreadedStmt::BranchArm { frame, threads, .. } => {
+                (*frame, RebindFrameKind::BranchArm, threads)
+            }
+            ThreadedStmt::Threaded {
+                mode,
+                frame,
+                threads,
+                ..
+            }
+            | ThreadedStmt::ConditionalLoop {
+                mode,
+                frame,
+                threads,
+                ..
+            } => (*frame, RebindFrameKind::Loop(mode.clone()), threads),
+            _ => return None,
+        };
+        Some(Self {
+            frame,
+            kind,
+            threads: threads.clone(),
+        })
+    }
+
+    /// The frame a slice with no enclosing frame node is verified in: the
+    /// implicit non-REPL method root ([`FrameId::ROOT`], threading nothing).
+    /// A REPL root threads its bindings and must be an explicit
+    /// [`ThreadedStmt::MethodBody`].
+    pub(in crate::core_erlang) fn implicit_root() -> Self {
+        Self {
+            frame: FrameId::ROOT,
+            kind: RebindFrameKind::MethodBody,
+            threads: Vec::new(),
+        }
+    }
+
+    /// Whether `local` is one of this frame's own threaded locals.
+    pub(in crate::core_erlang) fn threads_local(&self, local: &str) -> bool {
+        self.threads.iter().any(|t| t == local)
+    }
+
+    /// ADR 0131 §2's table cell for `local` in this frame.
+    pub(in crate::core_erlang) fn shape_for(&self, local: &str) -> RebindShape {
+        RebindShape::for_frame(&self.kind, self.threads_local(local))
+    }
+}
+
 /// How one [`ThreadedStmt::LocalRebind`] is bound: its [`RebindShape`] plus
 /// the lowering-time names that shape needs. Chosen at lowering time from
 /// the enclosing frame (`build::build_local_rebind`, which applies
-/// [`RebindShape::for_frame`]); ADR 0131 Phase 1c's
-/// `LocalRebindModeMismatch` re-derives the shape from the enclosing node and
-/// compares (this is its `lowered_as`).
+/// [`RebindShape::for_frame`]); the verifier's
+/// `LocalRebindModeMismatch` re-derives the shape from the enclosing node
+/// ([`RebindFrame::shape_for`]) and compares (this is its `lowered_as`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(in crate::core_erlang) enum RebindLowering {

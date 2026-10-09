@@ -2341,6 +2341,7 @@ impl CoreErlangGenerator {
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
+            threads: Vec::new(),
             body: stmts,
             produces,
             span,
@@ -2399,6 +2400,7 @@ mod tests {
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                threads: Vec::new(),
                 body: vec![
                     make_put("n", "_Val1", target.clone(), source.clone()),
                     make_put("n", "_Val2", target.clone(), source),
@@ -2442,6 +2444,7 @@ mod tests {
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                threads: Vec::new(),
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),

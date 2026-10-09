@@ -80,6 +80,7 @@ fn lower_and_render_threaded_direct_params_emits_real_letrec() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         body: vec![ThreadedStmt::Bind {
             target: local("sum", 1, frame),
             source: sum_source.clone(),

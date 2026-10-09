@@ -12,8 +12,8 @@
 use super::super::CoreErlangGenerator;
 use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, RebindFrameKind, RebindLowering,
-    RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, RebindFrame, RebindLowering, RebindShape,
+    ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
@@ -82,6 +82,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
     let stmt = ThreadedStmt::Threaded {
         mode: ThreadingMode::TupleAcc(mode_gate_slots),
         frame,
+        threads: threaded_locals.to_vec(),
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: node_gate_slots,
@@ -363,63 +364,6 @@ impl ThreadedValue {
 // conditional/handler arms — mirroring how `CloseContext` landed ahead of its
 // consumers in ADR 0118 phase 1a. Hence the `#[allow(dead_code)]`s below.
 
-/// The enclosing frame a [`ThreadedStmt::LocalRebind`] is lowered by: its
-/// identity, its kind/mode (the frame-mode half of ADR 0131 §2's lowering
-/// key) and its threaded set (the membership half). One entry of a
-/// producer's frame stack, read off the enclosing node by [`Self::of`] — a
-/// rebind's lowering is never looked up in a side table.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::core_erlang) struct RebindFrame {
-    pub(in crate::core_erlang) frame: FrameId,
-    pub(in crate::core_erlang) kind: RebindFrameKind,
-    pub(in crate::core_erlang) threads: Vec<String>,
-}
-
-#[allow(dead_code)]
-impl RebindFrame {
-    /// Reads the frame off its node. A [`ThreadedStmt::MethodBody`] or
-    /// [`ThreadedStmt::BranchArm`] records its own `threads`; a loop/fold
-    /// ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`])
-    /// records its [`ThreadingMode`] but not the locals it threads (a
-    /// `StateAcc` loop's locals ride its map, a `TupleAcc` fold's are
-    /// `Gensym` unpack targets), so `loop_threads` supplies them — the
-    /// loop's own `ThreadingPlan::threaded_locals`. `None` for a node that
-    /// is not a frame.
-    pub(in crate::core_erlang) fn of(node: &ThreadedStmt, loop_threads: &[String]) -> Option<Self> {
-        let (frame, kind, threads) = match node {
-            ThreadedStmt::MethodBody { frame, threads, .. } => {
-                (*frame, RebindFrameKind::MethodBody, threads.clone())
-            }
-            ThreadedStmt::BranchArm { frame, threads, .. } => {
-                (*frame, RebindFrameKind::BranchArm, threads.clone())
-            }
-            ThreadedStmt::Threaded { mode, frame, .. }
-            | ThreadedStmt::ConditionalLoop { mode, frame, .. } => (
-                *frame,
-                RebindFrameKind::Loop(mode.clone()),
-                loop_threads.to_vec(),
-            ),
-            _ => return None,
-        };
-        Some(Self {
-            frame,
-            kind,
-            threads,
-        })
-    }
-
-    /// Whether `local` is one of this frame's own threaded locals.
-    pub(in crate::core_erlang) fn threads_local(&self, local: &str) -> bool {
-        self.threads.iter().any(|t| t == local)
-    }
-
-    /// ADR 0131 §2's table cell for `local` in this frame.
-    pub(in crate::core_erlang) fn shape_for(&self, local: &str) -> RebindShape {
-        RebindShape::for_frame(&self.kind, self.threads_local(local))
-    }
-}
-
 /// One threaded local of a construct, as its producer reports it: where it
 /// sits in the construct tuple and the lowering-time name its new value
 /// binds to (the producer `bind_var`s `local` to `value_var`).
@@ -452,7 +396,7 @@ pub(in crate::core_erlang) fn build_construct_tuple(
 /// supplies that shape's lowering-time names (a `LoopParam`'s source and
 /// target identities, a `MapPut`'s key and `State` version step — minted
 /// from the live generator by a production caller). A `lower` that answers
-/// a different shape is what Phase 1c's `LocalRebindModeMismatch` reports.
+/// a different shape is what `VerifyError::LocalRebindModeMismatch` reports.
 #[allow(dead_code)]
 pub(in crate::core_erlang) fn build_local_rebind(
     enclosing: &RebindFrame,
