@@ -72,9 +72,13 @@ pub(crate) struct DeadBlockAssignmentPass;
 
 impl LintPass for DeadBlockAssignmentPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        let rejected: Vec<Span> = local_threading_diagnostics(module)
+        // See `hierarchy_for_lint` doc comment for why this is needed
+        // instead of `class.class_kind`.
+        let hierarchy = hierarchy_for_lint(module);
+
+        let rejected: Vec<Span> = local_threading_diagnostics(module, &hierarchy)
             .iter()
-            .map(|d| d.span)
+            .flat_map(|d| std::iter::once(d.span).chain(d.notes.iter().filter_map(|n| n.span)))
             .collect();
         let mut out = Out {
             rejected: &rejected,
@@ -85,10 +89,6 @@ impl LintPass for DeadBlockAssignmentPass {
         // Top-level expressions (script context — always value type semantics)
         let mut scope = LintScope::new();
         walk_expr_seq(&module.expressions, &mut scope, &mut out);
-
-        // See `hierarchy_for_lint` doc comment for why this is needed
-        // instead of `class.class_kind`.
-        let hierarchy = hierarchy_for_lint(module);
 
         for class in &module.classes {
             // Skip Actor subclasses (including indirect ones).
@@ -113,7 +113,9 @@ impl LintPass for DeadBlockAssignmentPass {
 
 /// Where warnings go, and what is not warned about.
 struct Out<'a> {
-    /// Primary spans of the ADR 0131 compile errors for this module.
+    /// The spans of the ADR 0131 compile errors for this module and of
+    /// their notes: a write is theirs when one of these contains it (each
+    /// error both spans its block or construct and notes the write itself).
     rejected: &'a [Span],
     /// `(local, write span)` pairs already warned about: a write inside
     /// nested unthreaded blocks is seen once per enclosing block.

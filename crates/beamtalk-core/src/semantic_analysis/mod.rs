@@ -558,25 +558,19 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// ADR 0131 (BT-3754): only the outer-local threading compile errors for
 /// `module` — §6 ([`DiagnosticCategory::Tier2BlockNoReturnChannel`]) and the
 /// Phase 0 allow-set ([`DiagnosticCategory::UnmigratedLocalThreading`]) —
-/// exactly as [`analyse_full`] reports them, against a hierarchy built from
-/// `module` alone and with no REPL-known variables.
+/// exactly as [`analyse_full`] reports them, against `hierarchy` and with no
+/// REPL-known variables.
 ///
 /// For `beamtalk-lint`'s `dead_assignment` pass, which must not warn about
 /// a write these errors already reject: it asks this function rather than
 /// keeping a second copy of their exemption rules.
 ///
-/// # Panics
-///
-/// Never in practice: `ClassHierarchy::build` is documented infallible.
-///
 /// [`DiagnosticCategory::Tier2BlockNoReturnChannel`]: crate::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel
 /// [`DiagnosticCategory::UnmigratedLocalThreading`]: crate::source_analysis::DiagnosticCategory::UnmigratedLocalThreading
 #[must_use]
-pub fn local_threading_diagnostics(module: &Module) -> Vec<Diagnostic> {
-    let (hierarchy, _) = ClassHierarchy::build(module);
-    let hierarchy = hierarchy.expect("ClassHierarchy::build is infallible");
+pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    validators::check_local_threading(module, &hierarchy, &[], &mut diagnostics);
+    validators::check_local_threading(module, hierarchy, &[], &mut diagnostics);
     diagnostics
 }
 
