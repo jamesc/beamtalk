@@ -129,12 +129,17 @@ pub fn print_diagnostics_text(
 }
 
 /// Whether `diagnostic` is hidden from text output: lints (shown only by
-/// `beamtalk lint`) and, under `suppress_warnings`, warnings and hints.
+/// `beamtalk lint`) and, under `suppress_warnings`, warnings and hints. The
+/// `InternalVerifier` warning (a compiler bug the user can only report,
+/// ADR 0111 Addendum 17) is exempt from `suppress_warnings`: hiding it would
+/// restore the silent miscompile that BT-3724 exists to remove.
 fn is_suppressed(diagnostic: &CoreDiagnostic, options: &beamtalk_core::CompilerOptions) -> bool {
     matches!(diagnostic.severity, Severity::Lint)
         || (options.suppress_warnings
             && !options.warnings_as_errors
-            && matches!(diagnostic.severity, Severity::Warning | Severity::Hint))
+            && matches!(diagnostic.severity, Severity::Warning | Severity::Hint)
+            && diagnostic.category
+                != Some(beamtalk_core::source_analysis::DiagnosticCategory::InternalVerifier))
 }
 
 /// Prints the flattened-provision diagnostics among `diagnostics` (ADR 0127
@@ -411,5 +416,19 @@ mod tests {
             "{}",
             rendered[0].message
         );
+    }
+
+    #[test]
+    fn internal_verifier_warning_is_not_hidden_by_no_warnings() {
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+        let options = beamtalk_core::CompilerOptions {
+            suppress_warnings: true,
+            ..beamtalk_core::CompilerOptions::default()
+        };
+        let ordinary = CoreDiagnostic::warning("unused variable", Span::new(0, 5));
+        let internal = CoreDiagnostic::warning("internal: invariant violated", Span::new(0, 5))
+            .with_category(DiagnosticCategory::InternalVerifier);
+        assert!(is_suppressed(&ordinary, &options));
+        assert!(!is_suppressed(&internal, &options));
     }
 }

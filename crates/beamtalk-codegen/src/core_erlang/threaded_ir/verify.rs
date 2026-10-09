@@ -15,8 +15,8 @@ use std::collections::HashMap;
 
 use super::super::CoreErlangGenerator;
 use super::ir::{
-    BindOp, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, StateAccFallbackReason,
-    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
+    StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -132,12 +132,20 @@ pub(in crate::core_erlang) enum VerifyError {
 
     /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch
     /// boundary, and its [`ThreadedStmt::OnDoCatch`] node does not honour the
-    /// obligation — the non-NLR clause does not begin with
+    /// obligation — the entry `let Snap = beamtalk_class_vars:snapshot() in`
+    /// is missing, the non-NLR clause does not begin with
     /// `beamtalk_class_vars:restore(Snap)`, or it is missing, or the two
     /// `$bt_nlr` pass-through clauses (3-tuple and actor 4-tuple) are not both
-    /// ordered before it. This is wrong-value Core Erlang, not an unbound
-    /// variable: an error keeps the writes made inside the protected region,
-    /// or a `^` throw discards writes it must keep. See [`CatchRestoreDefect`].
+    /// ordered before it. A wrong restore is wrong-value Core Erlang, not an
+    /// unbound variable: an error keeps the writes made inside the protected
+    /// region, or a `^` throw discards writes it must keep. See
+    /// [`CatchRestoreDefect`].
+    ///
+    /// **What it guards:** today one builder (`on_do_catch_boundary`) makes
+    /// every node, verifies it as a one-element IR and renders it at once, so
+    /// a well-formed builder cannot trip this. The check exists for a second
+    /// constructor, or an edit to that builder, that drops either half; the
+    /// `catch_boundary.rs` tests build such nodes directly.
     CatchWithoutClassVarRestore {
         defect: CatchRestoreDefect,
         at: Span,
@@ -217,6 +225,9 @@ pub(in crate::core_erlang) enum ClassMethodDefect {
 /// ([`VerifyError::CatchWithoutClassVarRestore`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CatchRestoreDefect {
+    /// The entry half is missing: no `let Snap = beamtalk_class_vars:snapshot()
+    /// in` before the `try`, so the restore reads an unbound variable.
+    NoSnapshotEntry,
     /// There is no non-NLR clause at all.
     NoNonNlrClause,
     /// The non-NLR clause does not begin with the class-variable restore.
@@ -571,10 +582,12 @@ impl VerifyWalk<'_> {
             }
             ThreadedStmt::OnDoCatch {
                 vars,
+                entry,
                 clauses,
                 span,
+                ..
             } => {
-                if let Some(defect) = check_catch_restore(vars, clauses) {
+                if let Some(defect) = check_catch_restore(vars, *entry, clauses) {
                     self.errors
                         .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
                 }
@@ -626,13 +639,18 @@ impl VerifyWalk<'_> {
 }
 
 /// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:
-/// the first defect found, or `None` when the non-NLR clause begins with the
-/// restore of the node's own snapshot and both NLR pass-through shapes are
-/// ordered before it.
+/// the first defect found, or `None` when the entry binds the snapshot, the
+/// non-NLR clause begins with the restore of that same snapshot and both NLR
+/// pass-through shapes are ordered before it.
 fn check_catch_restore(
     vars: &OnDoCatchVars,
+    entry: Option<CatchEntry>,
     clauses: &[CatchClause],
 ) -> Option<CatchRestoreDefect> {
+    match entry {
+        Some(CatchEntry::ClassVarSnapshot) => {}
+        None => return Some(CatchRestoreDefect::NoSnapshotEntry),
+    }
     let Some(non_nlr_at) = clauses
         .iter()
         .position(|c| matches!(c, CatchClause::NonNlr { .. }))
@@ -730,9 +748,51 @@ impl CoreErlangGenerator {
             false,
             "ThreadedIr verify found a {invariant_label}: {errors:?}"
         );
-        self.add_codegen_warning(
-            Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
-                .with_category(DiagnosticCategory::Type),
-        );
+        self.add_codegen_warning(verify_errors_to_diagnostic(errors, invariant_label, span));
     }
+
+    /// Records one synthetic verifier finding through the release-mode path
+    /// (the warning, without [`Self::report_threaded_ir_verify_errors`]'s
+    /// debug-build hard failure). Backs
+    /// [`CodegenOptions::with_injected_verifier_violation`], the test hook
+    /// that lets driver-level tests prove an `internal:` diagnostic surfaces
+    /// without a release build or a real codegen bug.
+    pub(in crate::core_erlang) fn inject_synthetic_verifier_violation(
+        &mut self,
+        enabled: bool,
+        span: Span,
+    ) {
+        if !enabled {
+            return;
+        }
+        let errors = [VerifyError::ThreadingModeUnpackMismatch {
+            mode: ThreadingMode::DirectParams,
+            at: span,
+        }];
+        self.add_codegen_warning(verify_errors_to_diagnostic(
+            &errors,
+            "injected verifier violation (test hook)",
+            span,
+        ));
+    }
+}
+
+/// Builds the release-mode diagnostic for a `ThreadedIr` verifier finding
+/// (ADR 0111 amendment, BT-3724): a **warning** (never an error, so it can
+/// not fail a build that would otherwise produce usable code) whose message
+/// starts with `internal:` and whose category is
+/// [`DiagnosticCategory::InternalVerifier`], so drivers can forward exactly
+/// these and nothing else out of `GeneratedModule::warnings`.
+///
+/// Independent of `cfg(debug_assertions)` so a unit test can assert it
+/// without a release build; [`CoreErlangGenerator::report_threaded_ir_verify_errors`]
+/// is its only production caller.
+#[must_use]
+pub(in crate::core_erlang) fn verify_errors_to_diagnostic(
+    errors: &[VerifyError],
+    invariant_label: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::warning(format!("internal: {invariant_label}: {errors:?}"), span)
+        .with_category(DiagnosticCategory::InternalVerifier)
 }

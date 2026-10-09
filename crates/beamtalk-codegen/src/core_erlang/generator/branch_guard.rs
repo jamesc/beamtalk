@@ -103,9 +103,15 @@ impl CoreErlangGenerator {
     /// enclosing scope, whose next statement then reads (or rebinds from) a
     /// version that was never bound there -- the `UnboundVersion` /
     /// `NonLinearVersion` pair the `ThreadedIr` verifier reported on BT-3737's
-    /// generated class-method programs. This is the one place every such
-    /// `fun` lowering gets that discipline (BT-3737), so a new one cannot
-    /// forget half of it; `f` runs with the guard's invariants even on `Err`.
+    /// generated class-method programs. This is the one place a `fun` whose
+    /// body is lowered against the enclosing scope gets that discipline
+    /// (BT-3737), so a new one cannot forget half of it; `f` runs with the
+    /// guard's invariants even on `Err`. A `fun` whose body starts from its
+    /// own `StateAcc` (every fold lambda, including the `sort:` comparator,
+    /// and every loop `letrec`/condition fun) gets it from
+    /// [`Self::with_branch_context`] instead, whose guard also restores
+    /// `state_version` (BT-3771 audited every closed-`fun` lowering; see
+    /// `tests/closed_fun_state_version.rs`).
     pub(in crate::core_erlang) fn with_closed_fun_scope<T>(
         &mut self,
         f: impl FnOnce(&mut CoreErlangGenerator) -> T,

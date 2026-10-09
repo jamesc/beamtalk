@@ -25,6 +25,7 @@
 
 use super::CoreErlangGenerator;
 use super::class_var_keys::{self, KeyScope};
+use super::erlang_types::ErlangVar;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -69,21 +70,21 @@ impl CoreErlangGenerator {
 
     /// `let Snap = call 'beamtalk_class_vars':'snapshot'() in ` — the catch
     /// boundary's entry half (ADR 0130 §4), emitted before every compiled
-    /// `on:do:`'s `try`.
-    pub(super) fn class_var_snapshot_let_doc(snapshot_var: &str) -> Document<'static> {
+    /// `on:do:`'s `try` by its `ThreadedStmt::OnDoCatch` node.
+    pub(super) fn class_var_snapshot_let_doc(snapshot_var: &ErlangVar) -> Document<'static> {
         docvec![
             "let ",
-            leaf::var(snapshot_var.to_string()),
+            leaf::var(snapshot_var.name()),
             " = call 'beamtalk_class_vars':'snapshot'() in "
         ]
     }
 
     /// `do call 'beamtalk_class_vars':'restore'(Snap) ` — the catch boundary's
     /// exit half (ADR 0130 §4), the first statement of a catch's non-NLR arm.
-    pub(super) fn class_var_restore_doc(snapshot_var: &str) -> Document<'static> {
+    pub(super) fn class_var_restore_doc(snapshot_var: &ErlangVar) -> Document<'static> {
         docvec![
             "do call 'beamtalk_class_vars':'restore'(",
-            leaf::var(snapshot_var.to_string()),
+            leaf::var(snapshot_var.name()),
             ") "
         ]
     }

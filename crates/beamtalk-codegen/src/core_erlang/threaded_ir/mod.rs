@@ -82,9 +82,9 @@ pub(super) use build::{
 };
 pub(super) use emit::{RenderCtx, render, render_value};
 pub(super) use ir::{
-    BindOp, CatchClause, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
-    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, ValueRef,
-    VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
+    ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 #[cfg(test)]
 pub(super) use ir::{CarrierSlot, RebindFrameKind, RebindLowering, RebindShape};
