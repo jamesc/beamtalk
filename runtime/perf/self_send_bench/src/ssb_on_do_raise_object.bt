@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3766: the raising `on:do:` loop of `SsbOnDoRaiseClass`, instance side and
+// outside any class invocation, so the catch arm's `restore/1` gets `none`.
+
+Value subclass: SsbOnDoRaiseObject
+
+  run: n :: Integer -> Integer =>
+    1 to: n do: [:i | [Error signal: "x"] on: Error do: [:e | 0]]
+    n

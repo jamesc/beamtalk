@@ -247,6 +247,20 @@ non_class_receiver_test() ->
             internal_error, raised_kind(fun() -> beamtalk_class_vars:put(Instance, a, 2) end)
         ),
         ?assertEqual(#{a => 1}, erlang:get(?KEY)),
+        %% Every other helper rejects an instance receiver too.
+        lists:foreach(
+            fun(Fun) -> ?assertEqual(internal_error, raised_kind(Fun)) end,
+            [
+                fun() -> beamtalk_class_vars:get(Instance, a) end,
+                fun() -> beamtalk_class_vars:has(Instance, a) end,
+                fun() -> beamtalk_class_vars:clear(Instance, a) end,
+                fun() -> beamtalk_class_vars:capture(Instance, none) end
+            ]
+        ),
+        ?assertEqual(#{a => 1}, erlang:get(?KEY)),
+        %% Documented exception: a capture fallback form given a capture map
+        %% answers from that map without validating the receiver.
+        ?assertEqual(1, beamtalk_class_vars:get(Instance, a, #{a => 1})),
         %% Unknown base atom: structured error, not badarg.
         Unknown = #beamtalk_object{
             class = 'NoSuchClassAtomBT3706Xq class', class_mod = cvtc, pid = self()

@@ -47,6 +47,17 @@ Object subclass: SsbMain
       report: "instance_on_do_loop"
       ns: (self timeOnDo: SsbOnDoObject new n: n)
       n: n
+    // A raise costs about 1000x a send: time fewer iterations so the whole
+    // run stays inside the `beamtalk run` call timeout.
+    rn := 2000
+    self
+      report: "class_on_do_raise_loop"
+      ns: (self timeClass: SsbOnDoRaiseClass n: rn)
+      n: rn
+    self
+      report: "instance_on_do_raise_loop"
+      ns: (self timeOnDo: SsbOnDoRaiseObject new n: rn)
+      n: rn
     nil
 
   class timeOnDo: o n: n =>
