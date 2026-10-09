@@ -804,6 +804,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `is_class_name/1` | `beamtalk_class_registry:is_class_name/1` |
 | `drain_class_warnings_by_names/1` | `beamtalk_class_registry:drain_class_warnings_by_names/1` |
 | `drain_pending_load_errors_by_names/1` | `beamtalk_class_registry:drain_pending_load_errors_by_names/1` |
+| `clear_pending_load_errors_by_names/1` | `beamtalk_class_registry:clear_pending_load_errors_by_names/1` |
 | `get_method_return_type/2` | `beamtalk_class_registry:get_method_return_type/2` |
 | `get_class_method_return_type/2` | `beamtalk_class_registry:get_class_method_return_type/2` |
 | `class_name/1` | `beamtalk_object_class:class_name/1` |
