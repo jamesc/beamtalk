@@ -152,18 +152,8 @@ record_pending_load_error(ClassName, Error) ->
 -spec compiled_meta(atom() | undefined, term()) -> {ok, map()} | {invalid, term()} | none.
 compiled_meta(_Module, #{class := _} = Meta) ->
     {ok, Meta};
-compiled_meta(Module, _) when is_atom(Module), Module =/= undefined ->
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> {ok, Meta};
-                Other -> {invalid, {not_a_map, Other}}
-            catch
-                Class:Reason -> {invalid, {crashed, Class, Reason}}
-            end;
-        false ->
-            none
-    end;
+compiled_meta(Module, _) when Module =/= undefined ->
+    beamtalk_class_metadata:read_meta_detailed(Module);
 compiled_meta(_, _) ->
     none.
 

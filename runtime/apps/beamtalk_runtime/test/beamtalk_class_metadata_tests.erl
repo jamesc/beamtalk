@@ -826,3 +826,64 @@ class_var_kinds_unregistered_class_is_empty_test() ->
     with_clean_table(fun() ->
         ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds('CvkGhost'))
     end).
+
+%%====================================================================
+%% read_meta/1, read_meta_detailed/1 (BT-3764) — the one guarded
+%% `__beamtalk_meta/0` read.
+%%====================================================================
+
+%% Compile and load a module whose `__beamtalk_meta/0` body is `BodyExpr`.
+load_meta_body_module(Mod, BodyExpr) ->
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [BodyExpr]}]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    Mod.
+
+read_meta_test_() ->
+    {setup,
+        fun() ->
+            {
+                load_meta_module(bt3764_meta_ok, #{class => 'MetaOk'}),
+                load_meta_body_module(
+                    bt3764_meta_not_map, erl_parse:abstract(not_a_map, [{line, 3}])
+                ),
+                load_meta_body_module(
+                    bt3764_meta_crash,
+                    {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [{atom, 3, boom}]}
+                )
+            }
+        end,
+        fun({Ok, NotMap, Crash}) ->
+            unload_module(Ok),
+            unload_module(NotMap),
+            unload_module(Crash)
+        end,
+        fun({Ok, NotMap, Crash}) ->
+            [
+                ?_assertEqual({ok, #{class => 'MetaOk'}}, beamtalk_class_metadata:read_meta(Ok)),
+                ?_assertEqual(not_available, beamtalk_class_metadata:read_meta(NotMap)),
+                ?_assertEqual(not_available, beamtalk_class_metadata:read_meta(Crash)),
+                ?_assertEqual(
+                    not_available, beamtalk_class_metadata:read_meta(bt3764_no_such_module)
+                ),
+                ?_assertEqual(
+                    {ok, #{class => 'MetaOk'}}, beamtalk_class_metadata:read_meta_detailed(Ok)
+                ),
+                ?_assertEqual(
+                    {invalid, {not_a_map, not_a_map}},
+                    beamtalk_class_metadata:read_meta_detailed(NotMap)
+                ),
+                ?_assertEqual(
+                    {invalid, {crashed, error, boom}},
+                    beamtalk_class_metadata:read_meta_detailed(Crash)
+                ),
+                ?_assertEqual(
+                    none, beamtalk_class_metadata:read_meta_detailed(bt3764_no_such_module)
+                ),
+                ?_assertEqual(none, beamtalk_class_metadata:read_meta_detailed("not an atom"))
+            ]
+        end}.

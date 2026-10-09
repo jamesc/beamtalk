@@ -89,6 +89,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_superclass/1,
     flatten_ancestor_map/2,
     class_var_kinds/1,
+    read_meta/1,
+    read_meta_detailed/1,
     lookup_is_abstract/1,
     match_subclasses/1,
     foldl/2,
@@ -463,31 +465,69 @@ class_var_kinds(Name) ->
     case lookup_module(Name) of
         not_found ->
             #{};
-        {ok, _} ->
+        {ok, Module} ->
             maps:merge(
                 flatten_ancestor_map(Name, fun own_class_var_kinds/1),
-                own_class_var_kinds(Name)
+                module_class_var_kinds(Module)
             )
     end.
 
-%% One level's own `class_field_kinds`; `#{}` when it cannot be read.
+%% One ancestor level's own `class_field_kinds`; `#{}` when it cannot be read.
 -spec own_class_var_kinds(class_name()) -> #{atom() => eager | late}.
 own_class_var_kinds(Name) ->
     case lookup_module(Name) of
-        {ok, Module} ->
-            case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-                true ->
-                    try
-                        maps:get(class_field_kinds, Module:'__beamtalk_meta'(), #{})
-                    catch
-                        _:_ -> #{}
-                    end;
-                false ->
-                    #{}
-            end;
-        not_found ->
-            #{}
+        {ok, Module} -> module_class_var_kinds(Module);
+        not_found -> #{}
     end.
+
+-spec module_class_var_kinds(module()) -> #{atom() => eager | late}.
+module_class_var_kinds(Module) ->
+    case read_meta(Module) of
+        {ok, Meta} -> maps:get(class_field_kinds, Meta, #{});
+        not_available -> #{}
+    end.
+
+-doc """
+Read a compiled class module's `__beamtalk_meta/0`.
+
+Returns `{ok, Meta}` when `Module` exports `__beamtalk_meta/0` and the call
+returns a map; `not_available` when it is not exported (a ClassBuilder or
+hand-written Erlang class), crashes, or returns a non-map. This is the one
+guarded meta read for callers that treat every failure as "no metadata"
+(`beamtalk_behaviour_intrinsics:meta_for_module/1`, `class_var_kinds/1`).
+A caller that must tell the failures apart uses `read_meta_detailed/1`.
+""".
+-spec read_meta(atom()) -> {ok, map()} | not_available.
+read_meta(Module) ->
+    case read_meta_detailed(Module) of
+        {ok, Meta} -> {ok, Meta};
+        _ -> not_available
+    end.
+
+-doc """
+Read a compiled class module's `__beamtalk_meta/0`, keeping why it failed.
+
+Returns `{ok, Meta}` for a map; `none` when `Module` is not an atom or does not
+export `__beamtalk_meta/0`; `{invalid, {not_a_map, Other}}` or
+`{invalid, {crashed, Class, Reason}}` when the export exists but is unusable.
+`beamtalk_class_var_abi` reports the `invalid` cases as an `abi_mismatch`
+distinct from a module compiled before the ABI existed.
+""".
+-spec read_meta_detailed(term()) -> {ok, map()} | {invalid, term()} | none.
+read_meta_detailed(Module) when is_atom(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> {ok, Meta};
+                Other -> {invalid, {not_a_map, Other}}
+            catch
+                Class:Reason -> {invalid, {crashed, Class, Reason}}
+            end;
+        false ->
+            none
+    end;
+read_meta_detailed(_) ->
+    none.
 
 -spec merge_ancestor_map(
     class_name(), fun((class_name()) -> #{atom() => term()}), #{atom() => term()}

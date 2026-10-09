@@ -3365,16 +3365,7 @@ atom `none`. Callers must normalize both to Beamtalk `nil`.
 """.
 -spec meta_for_module(atom()) -> {ok, map()} | not_available.
 meta_for_module(Module) ->
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> {ok, Meta}
-            catch
-                _:_ -> not_available
-            end;
-        false ->
-            not_available
-    end.
+    beamtalk_class_metadata:read_meta(Module).
 
 -doc """
 Generic fold over the superclass chain starting from ClassName.
