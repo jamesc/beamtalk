@@ -840,6 +840,25 @@ pub mod test_support {
         }
     }
 
+    /// A proptest configuration with a smaller per-run budget than
+    /// [`proptest_config_default`], for properties too slow to run 512 cases
+    /// in every `cargo test` (BT-3767: the class-variable agreement codegen
+    /// properties).
+    ///
+    /// `cases` is `default_cases`, unless the `PROPTEST_CASES` env var is
+    /// set, in which case it wins (that is how `just test-class-var-corpus`
+    /// and the nightly job ask for the full budget).
+    #[must_use]
+    pub fn proptest_config_cases(default_cases: u32) -> proptest::prelude::ProptestConfig {
+        let default = proptest::prelude::ProptestConfig::default();
+        let cases = if std::env::var_os("PROPTEST_CASES").is_some() {
+            default.cases
+        } else {
+            default_cases
+        };
+        proptest::prelude::ProptestConfig { cases, ..default }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;

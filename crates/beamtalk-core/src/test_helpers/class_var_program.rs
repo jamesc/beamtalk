@@ -44,8 +44,9 @@ use std::rc::Rc;
 /// A set of language shapes the generator may use.
 ///
 /// The full set is what ADR 0130 must make correct; [`Shapes::ENABLED`] is the
-/// set the (non-ignored) properties enforce: every shape except
-/// [`Shapes::LOCAL_TOUCH`], whose failures are BT-3738.
+/// set the (non-ignored) BEAM execution property enforces: every shape except
+/// [`Shapes::LOCAL_TOUCH`], whose failures are BT-3738. The in-process codegen
+/// property draws the full set (BT-3767).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Shapes(u32);
 
@@ -187,8 +188,10 @@ impl Shapes {
         })
     }
 
-    /// The shapes the agreement properties enforce: every shape except
-    /// [`Shapes::LOCAL_TOUCH`].
+    /// The shapes the BEAM execution agreement property enforces: every shape
+    /// except [`Shapes::LOCAL_TOUCH`]. (The in-process codegen property draws
+    /// [`Shapes::all`], since `LOCAL_TOUCH` compiles cleanly and only fails
+    /// when executed; BT-3767.)
     ///
     /// ADR 0130 Phase 3 (BT-3713) flipped the properties from the three shapes
     /// that passed before it (writing and plain self-sends, `ifTrue:`, early
@@ -1308,12 +1311,22 @@ impl Gen {
     }
 }
 
+/// Draws [`gen_program`] makes before giving up on a seed.
+const MAX_GEN_ATTEMPTS: u64 = 64;
+
 /// Builds a program from `seed`. `size` (1..=3) scales helper count and
 /// nesting depth. The result is always interpretable within the step budget:
 /// an over-budget draw is replaced by the next derived seed.
+///
+/// # Panics
+///
+/// Panics if [`MAX_GEN_ATTEMPTS`] derived seeds in a row are all over the
+/// step budget (BT-3767). Returning a stand-in program instead would let the
+/// agreement properties pass vacuously; this is test support, so a loud
+/// failure naming the seed is the right answer.
 #[must_use]
 pub fn gen_program(seed: u64, size: u32, shapes: Shapes) -> Program {
-    for attempt in 0..64u64 {
+    for attempt in 0..MAX_GEN_ATTEMPTS {
         let mut g = Gen {
             rng: Rng(seed ^ attempt.wrapping_mul(0xA24B_AED4_963E_E407)),
             shapes,
@@ -1324,14 +1337,189 @@ pub fn gen_program(seed: u64, size: u32, shapes: Shapes) -> Program {
             return p;
         }
     }
-    // Practically unreachable; keeps `gen_program` total.
-    Program {
-        helpers: Vec::new(),
-        run: Block {
-            stmts: Vec::new(),
-            tail: Box::new(Expr::Lit(0)),
-        },
-        overridden: Vec::new(),
+    panic!(
+        "gen_program: {MAX_GEN_ATTEMPTS} draws for seed {seed} size {size} shapes {shapes:?} \
+         were all over the step budget; the generator or the budget is broken"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Shapes used (read back off the IR)
+// ---------------------------------------------------------------------------
+
+impl Program {
+    /// The shapes this program actually uses, read off its IR independently
+    /// of the generator's flags, so coverage of every named shape can be
+    /// asserted shape by shape (BT-3767) rather than by keyword.
+    #[must_use]
+    pub fn shapes_used(&self) -> Shapes {
+        let mut walk = ShapeWalk(Shapes::NONE);
+        let top = Pos {
+            in_block: false,
+            in_loop: false,
+        };
+        for body in self.helpers.iter().chain([&self.run]) {
+            walk.block(body, top);
+        }
+        walk.0
+    }
+}
+
+/// Where a node sits: inside some block (an `ifTrue:` arm, a loop body, a
+/// protected or stored block), and inside a loop or fold body.
+#[derive(Clone, Copy)]
+struct Pos {
+    in_block: bool,
+    in_loop: bool,
+}
+
+impl Pos {
+    fn block(self) -> Pos {
+        Pos {
+            in_block: true,
+            ..self
+        }
+    }
+
+    /// A loop or fold body (whatever encloses the loop).
+    const LOOP_BODY: Pos = Pos {
+        in_block: true,
+        in_loop: true,
+    };
+}
+
+/// Accumulates [`Program::shapes_used`].
+struct ShapeWalk(Shapes);
+
+impl ShapeWalk {
+    fn mark(&mut self, s: Shapes) {
+        self.0 = self.0.with(s);
+    }
+
+    /// A loop or fold at `p`: its own shape, plus `NESTED_LOOPS` inside another.
+    fn mark_loop(&mut self, s: Shapes, p: Pos) {
+        self.mark(s);
+        if p.in_loop {
+            self.mark(Shapes::NESTED_LOOPS);
+        }
+    }
+
+    fn block(&mut self, b: &Block, p: Pos) {
+        self.stmts(&b.stmts, p);
+        self.expr(&b.tail, p);
+    }
+
+    fn stmts(&mut self, stmts: &[Stmt], p: Pos) {
+        for s in stmts {
+            self.stmt(s, p);
+        }
+    }
+
+    /// A condition's left operand: a send there (alone or under `+`) is
+    /// `SEND_IN_COND`, not `SEND_IN_EXPR`.
+    fn cond_operand(&mut self, e: &Expr, p: Pos) {
+        match e {
+            Expr::Send { arg, .. } => {
+                self.mark(Shapes::HELPER_SEND.with(Shapes::SEND_IN_COND));
+                self.expr(arg, p);
+            }
+            Expr::Add(inner, _) => self.cond_operand(inner, p),
+            other => self.expr(other, p),
+        }
+    }
+
+    fn stmt(&mut self, s: &Stmt, p: Pos) {
+        match s {
+            Stmt::Write(_, e) => {
+                if p.in_block {
+                    self.mark(Shapes::DIRECT_BLOCK_WRITE);
+                }
+                self.expr(e, p);
+            }
+            // A send evaluated for effect is a plain `HELPER_SEND`.
+            Stmt::Eval(Expr::Send { arg, .. }) => {
+                self.mark(Shapes::HELPER_SEND);
+                self.expr(arg, p);
+            }
+            Stmt::Let(_, e) | Stmt::Eval(e) => self.expr(e, p),
+            Stmt::Store(_, b) => {
+                self.mark(Shapes::STORED_CLOSURE);
+                self.block(b, p.block());
+            }
+            Stmt::If { cond, then, els } => {
+                self.mark(Shapes::COND);
+                self.cond_operand(&cond.lhs, p);
+                self.stmts(then, p.block());
+                if let Some(els) = els {
+                    self.stmts(els, p.block());
+                }
+            }
+            Stmt::Do { body, .. } => {
+                self.mark_loop(Shapes::LOOP_DO, p);
+                self.stmts(body, Pos::LOOP_BODY);
+            }
+            Stmt::ToDo { body, .. } => {
+                self.mark_loop(Shapes::LOOP_TO_DO, p);
+                self.stmts(body, Pos::LOOP_BODY);
+            }
+            Stmt::Times { body, .. } => {
+                self.mark_loop(Shapes::LOOP_TIMES, p);
+                self.stmts(body, Pos::LOOP_BODY);
+            }
+            Stmt::While { extra, body, .. } => {
+                self.mark_loop(Shapes::LOOP_WHILE, p);
+                if let Some(extra) = extra {
+                    self.cond_operand(extra, p);
+                }
+                self.stmts(body, Pos::LOOP_BODY);
+            }
+            Stmt::Return(e) => {
+                self.mark(Shapes::RETURN);
+                self.expr(e, p);
+            }
+            Stmt::Raise => self.mark(Shapes::RAISE),
+            Stmt::Touch(_) => self.mark(Shapes::LOCAL_TOUCH),
+        }
+    }
+
+    /// An expression in value position: a send here is `SEND_IN_EXPR`.
+    fn expr(&mut self, e: &Expr, p: Pos) {
+        match e {
+            Expr::Lit(_) | Expr::Local(_) | Expr::Cv(_) | Expr::CallStored(_) => {}
+            Expr::Add(inner, _) => self.expr(inner, p),
+            Expr::Send { arg, .. } => {
+                self.mark(Shapes::HELPER_SEND.with(Shapes::SEND_IN_EXPR));
+                self.expr(arg, p);
+            }
+            Expr::OnDo { body, handler, .. } => {
+                self.mark(Shapes::ON_DO);
+                self.block(body, p.block());
+                self.block(handler, p.block());
+            }
+            Expr::Ensure { body, cleanup } => {
+                self.mark(Shapes::ENSURE);
+                self.block(body, p.block());
+                self.block(cleanup, p.block());
+            }
+            Expr::TryDo(body) => {
+                self.mark(Shapes::TRY_DO);
+                self.block(body, p.block());
+            }
+            Expr::Inject { init, body, .. } => {
+                self.mark_loop(Shapes::LOOP_FOLD, p);
+                self.expr(init, p);
+                self.block(body, Pos::LOOP_BODY);
+            }
+            Expr::CollectSum { body, .. } => {
+                self.mark_loop(Shapes::LOOP_FOLD, p);
+                self.block(body, Pos::LOOP_BODY);
+            }
+            Expr::TouchSum(inner) => {
+                self.mark(Shapes::LOCAL_TOUCH);
+                self.expr(inner, p);
+            }
+            Expr::Raise => self.mark(Shapes::RAISE),
+        }
     }
 }
 
@@ -2107,8 +2295,10 @@ mod tests {
             "self h0:",
         ];
         let mut seen = vec![false; kinds.len()];
+        let mut used = Shapes::NONE;
         for seed in 0..400 {
             let p = gen_program(seed, 3, Shapes::all());
+            used = used.with(p.shapes_used());
             let src: String = p
                 .render(0, Spelling::Open)
                 .into_iter()
@@ -2120,6 +2310,31 @@ mod tests {
         }
         for (i, kw) in kinds.iter().enumerate() {
             assert!(seen[i], "no generated program contains {kw:?}");
+        }
+        // BT-3767: every named shape, read back off the IR, not only the
+        // ones a keyword can spot (`nested_loops`, `direct_block_write`,
+        // `send_in_expr`, `local_touch` have none).
+        for (name, shape) in Shapes::NAMED {
+            assert!(used.has(shape), "no generated program uses shape {name}");
+        }
+    }
+
+    /// The other half of `generator_covers_every_shape`: a shape left out of
+    /// the requested set is never read back off the IR, so the
+    /// [`Program::shapes_used`] detector and the generator's flags agree
+    /// shape by shape (a detector that fired for any program would make the
+    /// coverage assertion vacuous).
+    #[test]
+    fn excluded_shapes_are_never_generated() {
+        for (name, shape) in Shapes::NAMED {
+            let without = Shapes::all().without(shape);
+            for seed in 0..100 {
+                let used = gen_program(seed, 3, without).shapes_used();
+                assert!(
+                    !used.has(shape),
+                    "seed {seed}: shape {name} generated although excluded"
+                );
+            }
         }
     }
 
