@@ -34,9 +34,12 @@
 //! a missing or stale `runtime/` build fails with one line naming
 //! `just build-stdlib` (a plain `cargo test` does not build the stdlib). A
 //! batch whose output still looks like an environment failure (`Undefined
-//! function`, `setUp failed`, `abi_mismatch`, or every program and spelling
-//! failing with the same message) is reported as a broken environment, not as
-//! N wrong answers, and is not bisected.
+//! function`, `setUp failed`, `abi_mismatch`, or every program and spelling of
+//! at least [`MIN_PROGRAMS_SAME_MESSAGE`] programs failing with the same
+//! message) is reported as probably a broken environment, not as N wrong
+//! answers, and is not bisected. A real codegen bug can look like that, so the
+//! report still carries every `(index, seed, size)` pair in the batch and the
+//! first failing program's detail and source.
 //!
 //! # Budget (BT-3767)
 //!
@@ -79,12 +82,30 @@ const ENVIRONMENT_MARKERS: [(&str, &str); 3] = [
     ),
 ];
 
-/// The one-line report for an environment failure.
-fn environment_headline(cause: &str) -> String {
+/// Fewest distinct programs in a batch before "every program and spelling
+/// failed with the same message" counts as an environment failure: with fewer,
+/// one codegen bug hitting a narrowed draw (`CV_CORPUS_SHAPES`, a small
+/// `CV_CORPUS_CASES`) looks the same.
+const MIN_PROGRAMS_SAME_MESSAGE: usize = 4;
+
+/// The one-line report for a failed [`preflight`]: certainly the environment.
+fn preflight_headline(cause: &str) -> String {
     format!(
         "class-variable agreement: broken environment, not codegen: {cause}. \
          The runtime/stdlib under runtime/ is probably stale or unbuilt; run \
          `just build-stdlib` and retry."
+    )
+}
+
+/// The one-line report for a batch that looks like an environment failure
+/// after the preflight passed: probable, not certain.
+fn environment_headline(cause: &str) -> String {
+    format!(
+        "class-variable agreement: probably a broken environment (or a codegen \
+         bug that fails every program the same way): {cause}. The preflight \
+         passed, but the runtime/stdlib under runtime/ may still be stale; run \
+         `just build-stdlib` and retry. If it persists, reproduce from the \
+         (index, seed, size) pairs and the first failing program below."
     )
 }
 
@@ -111,9 +132,7 @@ fn preflight() {
             .args(repl_startup::beam_pa_args(&paths))
             .args(["-eval", eval])
             .output()
-            .unwrap_or_else(|e| {
-                panic!("{}", environment_headline(&format!("cannot run erl: {e}")))
-            });
+            .unwrap_or_else(|e| panic!("{}", preflight_headline(&format!("cannot run erl: {e}"))));
         let stdout = String::from_utf8_lossy(&out.stdout);
         let missing: Vec<&str> = stdout
             .lines()
@@ -122,7 +141,7 @@ fn preflight() {
         assert!(
             missing.is_empty() && stdout.contains("PREFLIGHT_DONE"),
             "{}\n{}{}",
-            environment_headline(&if missing.is_empty() {
+            preflight_headline(&if missing.is_empty() {
                 "preflight: erl did not finish the runtime check".to_string()
             } else {
                 format!("preflight: the runtime lacks {}", missing.join(", "))
@@ -264,9 +283,10 @@ fn run_package(pkg: &Package) -> Batch {
 
 /// Why `text` (a failed run of `pkg`) looks like a broken environment rather
 /// than a wrong program, or `None` (BT-3767): it contains one of
-/// [`ENVIRONMENT_MARKERS`], or every program and spelling of a package of
-/// more than one program failed with the same message (generated programs
-/// expect different answers, so identical messages are not one bug).
+/// [`ENVIRONMENT_MARKERS`], or every program and spelling of a package of at
+/// least [`MIN_PROGRAMS_SAME_MESSAGE`] programs failed with the same message
+/// (generated programs expect different answers, so identical messages across
+/// that many are unlikely to be one bug).
 fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
     if let Some((marker, cause)) = ENVIRONMENT_MARKERS.iter().find(|(m, _)| text.contains(m)) {
         let line = text.lines().find(|l| l.contains(marker)).unwrap_or(marker);
@@ -274,6 +294,7 @@ fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
     }
     let programs = {
         let mut ids: Vec<usize> = pkg.test_names.iter().map(|(i, _, _)| *i).collect();
+        ids.sort_unstable();
         ids.dedup();
         ids.len()
     };
@@ -283,9 +304,13 @@ fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
         .map(|(_, _, name)| failure_message(text, name))
         .collect();
     match messages.as_deref() {
-        Some([first, rest @ ..]) if programs > 1 && rest.iter().all(|m| m == first) => Some(
-            format!("every program and spelling failed with the same message (`{first}`)"),
-        ),
+        Some([first, rest @ ..])
+            if programs >= MIN_PROGRAMS_SAME_MESSAGE && rest.iter().all(|m| m == first) =>
+        {
+            Some(format!(
+                "every program and spelling failed with the same message (`{first}`)"
+            ))
+        }
         _ => None,
     }
 }
@@ -327,6 +352,67 @@ fn tail(text: &str) -> String {
     lines[start..].join("\n")
 }
 
+/// Appends `c`'s full source (open spelling) and expected answer.
+fn write_source(s: &mut String, c: &Case) {
+    for class in c.program.render(c.index, Spelling::Open) {
+        let _ = writeln!(s, "{}", class.source);
+    }
+    let _ = writeln!(s, "expected {:?}", c.program.interpret());
+}
+
+/// The panic message for a batch classified as an environment failure: the
+/// headline, every `(index, seed, size)` pair in the batch, the first failing
+/// program's per-spelling results and source (the first program when no test
+/// result line names one), then the output tail, so a wrong guess is never a
+/// dead end.
+fn environment_report(headline: &str, text: &str, pkg: &Package, cases: &[&Case]) -> String {
+    let mut s = format!("{headline}\n\n");
+    let pairs: Vec<String> = cases
+        .iter()
+        .map(|c| format!("({}, {}, {})", c.index, c.seed, c.size))
+        .collect();
+    let _ = writeln!(
+        s,
+        "batch of {} programs, (index, seed, size): {}",
+        cases.len(),
+        pairs.join(" ")
+    );
+    let first_failing = pkg
+        .test_names
+        .iter()
+        .find(|(_, _, name)| failure_message(text, name).is_some())
+        .map(|(index, _, _)| *index);
+    let first = first_failing
+        .and_then(|i| cases.iter().find(|c| c.index == i))
+        .or_else(|| cases.first());
+    if let Some(c) = first {
+        let _ = writeln!(
+            s,
+            "--- {} program {} (seed {}, size {})",
+            if first_failing.is_some() {
+                "first failing"
+            } else {
+                "no test result line; first"
+            },
+            c.index,
+            c.seed,
+            c.size
+        );
+        for (index, spelling, name) in &pkg.test_names {
+            if *index == c.index {
+                let _ = writeln!(
+                    s,
+                    "  {spelling:?}: {}",
+                    failure_message(text, name).unwrap_or("(no FAIL line)")
+                );
+            }
+        }
+        write_source(&mut s, c);
+    }
+    let _ = write!(s, "--- output tail\n{}", tail(text));
+    s
+}
+
 /// Runs `cases` and returns every failure, bisecting broken batches.
 fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
     if cases.is_empty() {
@@ -359,7 +445,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
         Batch::Broken {
             text,
             environment: Some(headline),
-        } => panic!("{headline}\n\n{}", tail(&text)),
+        } => panic!("{}", environment_report(&headline, &text, &pkg, cases)),
         Batch::Broken {
             text,
             environment: None,
@@ -457,10 +543,7 @@ fn report(shapes: Shapes, all: &[Case], failed: &[Failed]) -> String {
         // the printed (seed, size) pair.
         if i < MAX_SOURCES_PRINTED {
             if let Some(c) = all.iter().find(|c| c.index == f.index) {
-                for class in c.program.render(c.index, Spelling::Open) {
-                    let _ = writeln!(s, "{}", class.source);
-                }
-                let _ = writeln!(s, "expected {:?}", c.program.interpret());
+                write_source(&mut s, c);
             }
         }
     }
@@ -500,10 +583,20 @@ fn class_var_agreement_local_touch() {
 #[test]
 fn class_var_agreement_classifies_runner_output() {
     use beamtalk_core::test_helpers::class_var_program::gen_program;
-    let programs: Vec<(usize, Program)> = (0..2)
-        .map(|i| (i, gen_program(i as u64, 1, Shapes::ENABLED)))
+    let cases: Vec<Case> = (0..MIN_PROGRAMS_SAME_MESSAGE)
+        .map(|index| Case {
+            index,
+            seed: 1000 + index as u64,
+            size: 1,
+            program: gen_program(1000 + index as u64, 1, Shapes::ENABLED),
+        })
         .collect();
-    let pkg = render_package(&programs);
+    let package_of = |cases: &[Case]| {
+        let programs: Vec<(usize, Program)> =
+            cases.iter().map(|c| (c.index, c.program.clone())).collect();
+        render_package(&programs)
+    };
+    let pkg = package_of(&cases);
     let names: Vec<&str> = pkg.test_names.iter().map(|(_, _, n)| n.as_str()).collect();
     let line = |name: &str, msg: &str| format!("  FAIL {TEST_CLASS} {name}: {msg}\n");
 
@@ -517,9 +610,18 @@ fn class_var_agreement_classifies_runner_output() {
     let prose = format!("note: {} failed to FAIL", names[0]);
     assert_eq!(failure_message(&prose, names[0]), None);
 
-    // Every program and spelling failing with the same message.
+    // Every program and spelling failing with the same message, across
+    // `MIN_PROGRAMS_SAME_MESSAGE` programs.
     let same: String = names.iter().map(|n| line(n, "boom")).collect();
     assert!(environment_cause(&pkg, &same).is_some_and(|c| c.contains("same message")));
+    // ... but below the threshold it may be one codegen bug: not classified.
+    let small = package_of(&cases[..MIN_PROGRAMS_SAME_MESSAGE - 1]);
+    let small_same: String = small
+        .test_names
+        .iter()
+        .map(|(_, _, n)| line(n, "boom"))
+        .collect();
+    assert_eq!(environment_cause(&small, &small_same), None);
     // ... but different messages are wrong answers.
     let differ: String = names
         .iter()
@@ -538,5 +640,22 @@ fn class_var_agreement_classifies_runner_output() {
         cause.contains("missing from the runtime or stdlib build"),
         "{cause}"
     );
-    assert!(environment_headline(&cause).contains("just build-stdlib"));
+    let headline = environment_headline(&cause);
+    assert!(headline.contains("just build-stdlib"), "{headline}");
+    assert!(headline.contains("preflight passed"), "{headline}");
+    assert!(headline.contains("codegen bug"), "{headline}");
+
+    // The environment report carries every repro pair and the first failing
+    // program's detail, not only the tail.
+    let refs: Vec<&Case> = cases.iter().collect();
+    let report = environment_report(&headline, &stale, &pkg, &refs);
+    for c in &cases {
+        let pair = format!("({}, {}, {})", c.index, c.seed, c.size);
+        assert!(report.contains(&pair), "missing {pair}:\n{report}");
+    }
+    assert!(
+        report.contains("first failing program 0 (seed 1000, size 1)"),
+        "{report}"
+    );
+    assert!(report.contains("expected "), "{report}");
 }

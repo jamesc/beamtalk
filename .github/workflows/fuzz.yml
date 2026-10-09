@@ -473,10 +473,57 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Run class-variable agreement corpus (192 programs, 2048 codegen cases)
+        id: corpus
         run: just test-class-var-corpus
         env:
           CV_CORPUS_CASES: 192
           PROPTEST_CASES: 2048
+
+      # Like the fuzz jobs above, a failure files an issue. There are no
+      # artifacts: the job log holds the (index, seed, size) pairs and the
+      # failing program sources.
+      - name: Create issue on failure
+        if: steps.corpus.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `## Class-variable agreement corpus failure`,
+              ``,
+              `The nightly \`class-var-corpus\` job (\`just test-class-var-corpus\`, 192 programs on a BEAM, 2048 codegen cases) failed.`,
+              ``,
+              `**Run:** ${runUrl}`,
+              `**Date:** ${new Date().toISOString()}`,
+              ``,
+              `### Action Required`,
+              ``,
+              `1. Open the job log; the report lists each failing program's \`(index, seed, size)\` pair, cause and source.`,
+              `2. If the report says "probably a broken environment", check the runtime/stdlib build first.`,
+              `3. Reproduce locally with \`CV_CORPUS_CASES=192 just test-class-var-corpus\` (narrow with \`CV_CORPUS_SHAPES\`).`,
+              ``,
+              `### References`,
+              ``,
+              `- ADR 0130: class variables; BT-3705, BT-3767`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Class-var agreement corpus failure (run ${context.runId})`,
+              body: body,
+              labels: ['Bug', 'fuzzing', 'High']
+            });
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## Class-Variable Agreement Corpus Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.corpus.outcome }}" = "success" ]; then
+            echo "✅ **Success:** 192 programs agreed on the BEAM; 2048 codegen cases verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failure:** see the job log for the per-program report (index, seed, size, cause, source)" >> $GITHUB_STEP_SUMMARY
+          fi
 
   extended-proptest:
     runs-on: ubuntu-latest
