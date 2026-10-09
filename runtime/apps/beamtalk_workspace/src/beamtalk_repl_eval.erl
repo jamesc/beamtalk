@@ -853,7 +853,9 @@ bindings map in REPL codegen) and evaluated in this worker with
 `#{self => Self}` as the only binding. No session state is touched, no workspace
 bindings are merged, and the eval module is purged afterwards. Compile and runtime
 failures are returned as structured `#beamtalk_error{}` — never raised — so the
-Inspector lifts them to a `Result error:` at the FFI boundary.
+Inspector lifts them to a `Result error:` at the FFI boundary. The one exception
+is a `$bt_nlr` throw (a `^` from a block captured elsewhere): control flow, not a
+failure, so it is re-raised untouched to its home frame (BT-3735).
 
 Called via `erlang:apply` from `beamtalk_inspector` (beamtalk_runtime) so the
 runtime keeps no compile-time dependency on beamtalk_workspace.
@@ -929,9 +931,10 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                 %% catch swallows the error, so the writes must be rolled back
                 %% like any other protected region (ADR 0130 §4, BT-3728). A `^`
                 %% (`$bt_nlr`) unwinding out of a block run here is re-raised below
-                %% to its home frame; `protect_discard/1` rolls the writes back on
-                %% that exit too, so `evaluate:` never leaks a write (BT-3735).
-                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect_discard(fun() ->
+                %% to its home frame; `protect/1` passes it through without
+                %% restoring, so the writes made before the `^` are kept, as for
+                %% any `^` crossing a protected region (ADR 0130 §4, BT-3735).
+                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
                     apply(ModuleName, eval, [Bindings])
                 end),
                 case maybe_await_future(RawResult) of

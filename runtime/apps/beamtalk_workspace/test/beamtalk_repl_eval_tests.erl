@@ -1997,8 +1997,8 @@ eval_success_test_() ->
         {"eval_with_self wraps a runtime exception", fun eval_with_self_runtime_exception/0},
         {"eval_with_self discards class-variable writes made before a caught error",
             fun eval_with_self_discards_class_var_writes/0},
-        {"eval_with_self re-raises a $bt_nlr throw and discards class-variable writes",
-            fun eval_with_self_reraises_nlr_and_discards_class_var_writes/0},
+        {"eval_with_self re-raises a $bt_nlr throw and keeps class-variable writes made before it",
+            fun eval_with_self_reraises_nlr_and_keeps_class_var_writes/0},
         {"eval_with_self re-raises a 4-tuple (actor) $bt_nlr throw",
             fun eval_with_self_reraises_actor_nlr/0},
         {"a stale $bt_nlr re-raised by eval_with_self surfaces as a structured error",
@@ -2553,9 +2553,10 @@ eval_with_self_discards_class_var_writes() ->
 
 %% BT-3735: a `^` out of a captured block run by `evaluate:` is a `$bt_nlr` throw
 %% aimed at a catch frame further up the caller's stack. `evaluate:` must re-raise
-%% it (not swallow it into `{error, _}`), and the class-variable writes the block
-%% made before the `^` are discarded like any other `evaluate:` exit.
-eval_with_self_reraises_nlr_and_discards_class_var_writes() ->
+%% it (not swallow it into `{error, _}`). A `^` is not a failure, so the
+%% class-variable writes the block made before it are KEPT (ADR 0130 §4: a `^`
+%% passing through a protected region keeps the writes made before it).
+eval_with_self_reraises_nlr_and_keeps_class_var_writes() ->
     erlang:put(eval_self_cv_class, 'EvalSelfNlrClass'),
     Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
     Key = {'$bt_class_vars', Tag},
@@ -2575,8 +2576,8 @@ eval_with_self_reraises_nlr_and_discards_class_var_writes() ->
             catch
                 throw:Thrown -> {thrown, Thrown}
             end,
-        %% The write is discarded regardless of how the eval exited ...
-        ?assertEqual(1, beamtalk_class_vars:get(ClassSelf, a)),
+        %% The write made before the `^` survives (it is not an error exit) ...
+        ?assertEqual(99, beamtalk_class_vars:get(ClassSelf, a)),
         %% ... and the `^` propagates instead of becoming `{error, _}`.
         ?assertEqual({thrown, {'$bt_nlr', Token, 1}}, Outcome)
     after

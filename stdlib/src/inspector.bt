@@ -168,7 +168,8 @@ sealed typed Object subclass: Inspector
   /// `Result ok: theValue` (or `Result error:` if the expression fails to compile
   /// or raises). A `^` from a block captured elsewhere and run by `src` is not a
   /// failure: it is re-raised to its home method (BT-3735), and class-variable
-  /// writes made before it are discarded. For an `#actor` or `#foreign` cursor it returns
+  /// writes made before it are kept (an error exit still discards them). For an
+  /// `#actor` or `#foreign` cursor it returns
   /// `Result error: (beamtalk_error actor_eval_unsupported)`: actor
   /// evaluate-in-context cannot bind `self` to a frozen snapshot and is a deferred
   /// follow-up (ADR 0095 §7) — drill with `at:` instead.

@@ -84,7 +84,6 @@ receiver is an internal error.
     snapshot/0,
     restore/1,
     protect/1,
-    protect_discard/1,
     with_snapshot/2,
     abi/0,
     check_class_info_abi/2,
@@ -289,23 +288,6 @@ protect(Fun) ->
             erlang:raise(throw, Nlr, Stack);
         throw:{'$bt_nlr', _, _, _} = Nlr:Stack ->
             erlang:raise(throw, Nlr, Stack);
-        Class:Reason:Stack ->
-            restore(Snap),
-            erlang:raise(Class, Reason, Stack)
-    end.
-
--doc """
-Like `protect/1`, but also restores the pre-call snapshot when `Fun` exits via
-a `$bt_nlr` throw, then re-raises it. For a region whose writes must not
-survive any non-value exit, including a `^` that unwinds out through it to a
-home frame further up the stack (Inspector `evaluate:`, BT-3735).
-""".
--spec protect_discard(fun(() -> T)) -> T when T :: term().
-protect_discard(Fun) ->
-    Snap = snapshot(),
-    try
-        Fun()
-    catch
         Class:Reason:Stack ->
             restore(Snap),
             erlang:raise(Class, Reason, Stack)
