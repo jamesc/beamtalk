@@ -14,8 +14,8 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
-    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, local_threading_construct,
-    threaded_block_writes, threaded_today_block_writes,
+    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, expression_threaded_writes,
+    local_threading_construct, threaded_block_writes, threaded_today_block_writes,
 };
 use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
@@ -264,6 +264,36 @@ impl CoreErlangGenerator {
         set
     }
 
+    /// ADR 0131 §1a: the outer locals threaded by any local-threading
+    /// construct reachable from `expr` without crossing a closure boundary —
+    /// `expr` itself, or a construct nested anywhere in its operands
+    /// (`self id: (c ifTrue: [t := …] …)`, `(c ifTrue: [t := …] …) + 0`),
+    /// closed over the constructs nested in those. The union of
+    /// [`Self::threaded_locals_of`]'s set for `expr` (which also covers its
+    /// Tier 2 shapes) and core's [`expression_threaded_writes`], under the
+    /// same scope predicate. Sorted, deduplicated.
+    pub(in crate::core_erlang) fn reachable_threaded_locals(
+        &self,
+        expr: &Expression,
+    ) -> Vec<String> {
+        let mut names = Self::write_names(expression_threaded_writes(expr, &|name| {
+            self.binds_threadable_local(name)
+        }));
+        if let Some(set) = self.threaded_locals_of(expr) {
+            names.extend(set.names);
+            names.sort();
+            names.dedup();
+        }
+        names
+    }
+
+    /// The scope predicate every threaded-set walk uses: `name` is bound
+    /// outside the construct (any name in the REPL, whose set is the
+    /// bindings the construct writes).
+    fn binds_threadable_local(&self, name: &str) -> bool {
+        self.is_repl_mode() || self.lookup_var(name).is_some()
+    }
+
     /// The block-level kernel of [`Self::threaded_locals_of`]: the threaded
     /// set of a construct of kind `construct` whose blocks are `blocks`,
     /// with `lowered_blocks` (a subset of `blocks`) the ones today's
@@ -280,10 +310,10 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         lowered_blocks: &[&Block],
     ) -> Option<ThreadedLocals> {
-        let repl = self.is_repl_mode();
         let names = Self::write_names(threaded_block_writes(blocks, &|name| {
-            repl || self.lookup_var(name).is_some()
+            self.binds_threadable_local(name)
         }));
+        let repl = self.is_repl_mode();
         if names.is_empty() {
             return None;
         }

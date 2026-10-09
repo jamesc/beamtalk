@@ -165,6 +165,19 @@ Value subclass: Adr0131LocalRebindValuePending
     ] on: Error do: [:e | 0])
     #[r, t]
 
+  // BT-3748 review: the §1a shape with the threading construct nested inside
+  // the right operand (an argument of a send, the receiver of a binary send)
+  // rather than the operand itself. Source order reads `t` first: #[1, 1].
+  seqArg: flag =>
+    t := 0
+    r := t + (0 max: (flag ifTrue: [t := t + 1. 1] ifFalse: [0]))
+    #[r, t]
+
+  seqRecv: flag =>
+    t := 0
+    r := t + ((flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0)
+    #[r, t]
+
   // BT-3745 review: `^` of a list op answers the leaked `{3, StateAcc}`
   // tuple today (the implicit-last `vtLastInject` answers 3), so it is a
   // Phase 0 compile error.

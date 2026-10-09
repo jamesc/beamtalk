@@ -1926,6 +1926,7 @@ Actor subclass: Srv
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                threads: Vec::new(),
                 body: vec![
                     make_put("count", "_Val1", target.clone(), source.clone()),
                     make_put("count", "_Val2", target.clone(), source),
@@ -1971,6 +1972,7 @@ Actor subclass: Srv
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                threads: Vec::new(),
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),

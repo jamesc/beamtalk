@@ -13,10 +13,11 @@
 
 use std::collections::HashMap;
 
-use super::super::CoreErlangGenerator;
+use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RebindFrame,
+    RebindFrameKind, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -172,7 +173,78 @@ pub(in crate::core_erlang) enum VerifyError {
     /// only be seeded from the ambient actor `State` — unbound in a class
     /// method, which `erlc` rejects as `unbound variable 'State'` (BT-3694).
     /// See [`ClassMethodDefect`].
+    ///
+    /// ADR 0131 §3/§4 extends the rule to [`ScopeKind::ValueType`]: a
+    /// value-type method has no `State` parameter either, so a method-level
+    /// `State` version is the same unbound-`State` bug there (o3/o12/s2 in
+    /// value-type methods). Its own `SelfVt` family is legitimate.
     ActorStateInClassMethod { defect: ClassMethodDefect, at: Span },
+
+    /// ADR 0131 §4: a [`ThreadedStmt::ConstructTuple`] whose `threads` lists
+    /// `local` is not followed, in the same frame, by a
+    /// [`ThreadedStmt::LocalRebind`] for `local` before the frame ends or
+    /// before anything other than a family `Bind` (a `Direct` step of the
+    /// `State`/`SelfVt` family: the extraction that legitimately reads the
+    /// carrier first; its value is an opaque `Doc`, so which carrier it reads
+    /// is not checked) or a
+    /// [`ThreadedStmt::DiscardLocals`] at a `MethodBody` frame — so the
+    /// construct's write to `local` is lost (o4, o7, o8, s2, s9, actor
+    /// o3/o12). The opaque statement that follows may be the consumer's read
+    /// of `element(1, carrier)`; the verifier cannot see inside a
+    /// `Statement`, so it treats every one as a potential carrier read.
+    ///
+    /// Also reported for a `LocalRebind` of `carrier` that its construct's
+    /// `threads` does not list (or with no construct of that carrier
+    /// open): the transitive-closure gap of ADR 0131 §1, where a frame
+    /// rebinds `t` while the construct that carries it out omits `t`.
+    /// Applied at every nesting level. A `^` thrown from inside the construct
+    /// skips its rebinds by design; this is defined on the fall-through path.
+    ThreadedLocalDropped {
+        local: String,
+        carrier: String,
+        at: Span,
+    },
+
+    /// ADR 0131 §4: a [`ThreadedStmt::LocalRebind`] lowered to a shape
+    /// ([`RebindLowering::shape`](super::ir::RebindLowering::shape),
+    /// `lowered_as`) that ADR 0131 §2's table
+    /// ([`RebindShape::for_frame`]) does not allow for its enclosing frame's
+    /// mode and the local's membership in that frame's `threads`: a plain
+    /// `let` for a member of a `StateAcc` frame (the write never reaches the
+    /// map the frame threads out), a `Put` for a non-member (a stray
+    /// `__local__` key, persisted into an actor's `gen_server` `State` —
+    /// the BT-2717 class), a `Gensym` chain entry for a local that is not a
+    /// loop parameter. The enclosing frame is read off the node that
+    /// actually encloses the rebind ([`RebindFrame::of`]), exactly as the
+    /// lowering reads it.
+    LocalRebindModeMismatch {
+        frame: FrameId,
+        mode: RebindFrameKind,
+        member: bool,
+        lowered_as: RebindShape,
+        at: Span,
+    },
+
+    /// ADR 0131 §2: a [`ThreadedStmt::LocalRebind`]'s recorded `frame` is not
+    /// the frame of the node that encloses it — the rebind was lowered
+    /// against one frame's mode and spliced into another, so its shape (and
+    /// any `LoopParam`/`MapPut` version step) belongs to the wrong frame.
+    LocalRebindFrameMismatch {
+        local: String,
+        recorded: FrameId,
+        enclosing: FrameId,
+        at: Span,
+    },
+
+    /// ADR 0131 §1a: sibling `at` of a sequenced send reads outer local
+    /// `local` in place — compiled by its parent after every sibling's
+    /// prelude has been spliced, so by `local`'s post-rebind identity —
+    /// while a [`ThreadedStmt::LocalRebind`] for `local` sits in a *later*
+    /// sibling's prelude. Source order (and Pharo) says the earlier sibling
+    /// reads the value before the rebind: `t + ([t := t + 1. 1] on: Error
+    /// do: [:e | 0])` is `0 + 1`. The fix is `sequence_children`'s snapshot
+    /// of such a sibling to a `Tmp`; see [`verify_sibling_reads`].
+    LocalReadAfterSiblingRebind { local: String, at: Span },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -185,6 +257,7 @@ pub(in crate::core_erlang) enum VerifyError {
 /// | scope         | method-level `State` | `SelfVt` family      | `StateAcc` loop with no locals |
 /// |---------------|----------------------|----------------------|--------------------------------|
 /// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
+/// | `ValueType`   | forbidden            | not constrained here | not constrained here           |
 /// | `Instance`    | not constrained here | not constrained here | not constrained here           |
 ///
 /// **What enforces it:** exactly the entry points that take a `ScopeKind` —
@@ -194,14 +267,18 @@ pub(in crate::core_erlang) enum VerifyError {
 /// [`verify`] is `Instance`-scoped and enforces nothing here; it is used only
 /// by tests and test-local wrappers.
 ///
-/// `Instance` (actor instance, value-type instance, REPL and every non-method
-/// fixture) is deliberately unconstrained by this check: which of
-/// `State`/`SelfVt` is eligible there is decided by
-/// `CoreErlangGenerator::eligible_families` (ADR 0122), not re-derived here.
+/// `Instance` (actor instance, REPL and every non-method fixture) is
+/// deliberately unconstrained by this check: which of `State`/`SelfVt` is
+/// eligible there is decided by `CoreErlangGenerator::eligible_families`
+/// (ADR 0122), not re-derived here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ScopeKind {
     /// A class-side method body (`CoreErlangGenerator::in_class_method`).
     ClassMethod,
+    /// ADR 0131 §3: a value-type instance method body
+    /// (`CodeGenContext::ValueType`, not a class method). Threads `SelfVt`
+    /// when it writes a field, never the actor `State` family.
+    ValueType,
     /// Any other scope.
     Instance,
 }
@@ -302,6 +379,7 @@ pub(in crate::core_erlang) fn verify_in_scope(
         producers: &producers,
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
+        rebind_frames: Vec::new(),
         scope,
         errors: &mut errors,
     };
@@ -377,14 +455,155 @@ struct VerifyWalk<'a> {
     producers: &'a HashMap<VersionedVar, usize>,
     frame_stack: Vec<FrameId>,
     mode_stack: Vec<ThreadingMode>,
+    /// ADR 0131 §2: the frame nodes enclosing the current statement
+    /// ([`RebindFrame::of`] each `MethodBody`/`BranchArm`/`Threaded`/
+    /// `ConditionalLoop`), innermost last. Empty means the implicit non-REPL
+    /// method root ([`RebindFrame::implicit_root`]).
+    rebind_frames: Vec<RebindFrame>,
     scope: ScopeKind,
     errors: &'a mut Vec<VerifyError>,
 }
 
 impl VerifyWalk<'_> {
     fn walk(&mut self, stmts: &[ThreadedStmt]) {
+        self.check_construct_rebinds(stmts);
         for stmt in stmts {
             self.walk_stmt(stmt);
+        }
+    }
+
+    /// The frame node enclosing the statement being walked.
+    fn enclosing_frame(&self) -> RebindFrame {
+        self.rebind_frames
+            .last()
+            .cloned()
+            .unwrap_or_else(RebindFrame::implicit_root)
+    }
+
+    /// Walks a frame node's children with `node` pushed as the enclosing
+    /// [`RebindFrame`].
+    fn in_frame(&mut self, node: &ThreadedStmt, f: impl FnOnce(&mut Self)) {
+        let frame = RebindFrame::of(node);
+        let pushed = frame.is_some();
+        if let Some(frame) = frame {
+            self.rebind_frames.push(frame);
+        }
+        f(self);
+        if pushed {
+            self.rebind_frames.pop();
+        }
+    }
+
+    /// [`VerifyError::ThreadedLocalDropped`] over one frame's straight-line
+    /// statement list (called by [`Self::walk`] for every list, so at every
+    /// nesting level). A construct's prelude is `ConstructTuple`, its family
+    /// `Bind`s, then one `LocalRebind` per threaded local
+    /// (`build_local_threading_prelude`); anything else before every listed
+    /// local is rebound closes the construct and drops the rest. A
+    /// `DiscardLocals` of the open carrier drops them legitimately only at a
+    /// `MethodBody` frame.
+    fn check_construct_rebinds(&mut self, stmts: &[ThreadedStmt]) {
+        /// The construct whose rebinds are still being read.
+        struct Open<'s> {
+            carrier: &'s str,
+            threads: &'s [String],
+            pending: Vec<&'s str>,
+            at: Span,
+        }
+        fn close(open: &mut Option<Open<'_>>, dropped: &mut Vec<VerifyError>) {
+            if let Some(o) = open.take() {
+                dropped.extend(o.pending.into_iter().map(|local| {
+                    VerifyError::ThreadedLocalDropped {
+                        local: local.to_string(),
+                        carrier: o.carrier.to_string(),
+                        at: o.at,
+                    }
+                }));
+            }
+        }
+        let discard_ok = self.enclosing_frame().kind == RebindFrameKind::MethodBody;
+        let mut open: Option<Open<'_>> = None;
+        let mut dropped: Vec<VerifyError> = Vec::new();
+        for stmt in stmts {
+            match stmt {
+                ThreadedStmt::ConstructTuple {
+                    carrier,
+                    threads,
+                    span,
+                    ..
+                } => {
+                    close(&mut open, &mut dropped);
+                    open = Some(Open {
+                        carrier,
+                        threads,
+                        pending: threads.iter().map(String::as_str).collect(),
+                        at: *span,
+                    });
+                }
+                ThreadedStmt::LocalRebind {
+                    local,
+                    carrier,
+                    span,
+                    ..
+                } => match open.as_mut() {
+                    Some(o) if o.carrier == carrier && o.threads.contains(local) => {
+                        o.pending.retain(|p| p != local);
+                    }
+                    _ => dropped.push(VerifyError::ThreadedLocalDropped {
+                        local: local.clone(),
+                        carrier: carrier.clone(),
+                        at: *span,
+                    }),
+                },
+                // A family extraction reads the carrier ahead of the rebinds:
+                // a `Direct` step of the `State`/`SelfVt` family
+                // (`extract_family_slots`). Its value is an opaque `Doc`, so
+                // which carrier it reads is not checked.
+                ThreadedStmt::Bind {
+                    target,
+                    op: BindOp::Direct(_),
+                    ..
+                } if open.is_some()
+                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) => {}
+                ThreadedStmt::DiscardLocals { carrier, .. }
+                    if discard_ok && open.as_ref().is_some_and(|o| o.carrier == carrier) =>
+                {
+                    open = None;
+                }
+                _ => close(&mut open, &mut dropped),
+            }
+        }
+        close(&mut open, &mut dropped);
+        self.errors.extend(dropped);
+    }
+
+    /// [`VerifyError::LocalRebindFrameMismatch`] and
+    /// [`VerifyError::LocalRebindModeMismatch`] for one rebind, against the
+    /// node that encloses it.
+    fn check_rebind_lowering(
+        &mut self,
+        local: &str,
+        frame: FrameId,
+        lowered_as: RebindShape,
+        at: Span,
+    ) {
+        let enclosing = self.enclosing_frame();
+        if frame != enclosing.frame {
+            self.errors.push(VerifyError::LocalRebindFrameMismatch {
+                local: local.to_string(),
+                recorded: frame,
+                enclosing: enclosing.frame,
+                at,
+            });
+        }
+        if enclosing.shape_for(local) != lowered_as {
+            self.errors.push(VerifyError::LocalRebindModeMismatch {
+                frame: enclosing.frame,
+                member: enclosing.threads_local(local),
+                mode: enclosing.kind,
+                lowered_as,
+                at,
+            });
         }
     }
 
@@ -417,13 +636,16 @@ impl VerifyWalk<'_> {
     /// version produced at method level (empty `mode_stack`) is the actor
     /// `State` family. `SelfVt` is never a `StateAcc` map, so it is flagged
     /// everywhere. Version 0 is a frame's entry parameter, never produced.
+    ///
+    /// In a [`ScopeKind::ValueType`] scope only the method-level `State`
+    /// family is flagged: `SelfVt` is the value type's own family.
     fn check_class_method_family(&mut self, var: &VersionedVar, at: Span) {
-        if self.scope != ScopeKind::ClassMethod || var.version == 0 {
+        if self.scope == ScopeKind::Instance || var.version == 0 {
             return;
         }
         let is_family = match var.prefix {
             VersionPrefix::State => self.mode_stack.is_empty(),
-            VersionPrefix::SelfVt => true,
+            VersionPrefix::SelfVt => self.scope == ScopeKind::ClassMethod,
             VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
         };
         if is_family {
@@ -485,11 +707,12 @@ impl VerifyWalk<'_> {
                 body,
                 produces,
                 span,
+                ..
             } => {
                 self.check_class_method_mode(mode, *span);
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.walk(body);
+                self.in_frame(stmt, |this| this.walk(body));
                 for v in produces {
                     self.check_use(v, Span::default());
                     self.check_class_method_family(v, *span);
@@ -520,11 +743,13 @@ impl VerifyWalk<'_> {
                 // comment.
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.walk(condition);
-                if let ValueRef::Version(v) = condition_value {
-                    self.check_use(v, Span::default());
-                }
-                self.walk(body);
+                self.in_frame(stmt, |this| {
+                    this.walk(condition);
+                    if let ValueRef::Version(v) = condition_value {
+                        this.check_use(v, Span::default());
+                    }
+                    this.walk(body);
+                });
                 for v in produces {
                     self.check_use(v, Span::default());
                     self.check_class_method_family(v, *span);
@@ -537,17 +762,18 @@ impl VerifyWalk<'_> {
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
             //
-            // ADR 0131 Phase 1b adds `ConstructTuple`/`DiscardLocals` and the
-            // nodes below; their own obligations (`ThreadedLocalDropped`,
-            // `LocalRebindModeMismatch`, `LocalReadAfterSiblingRebind`) are
-            // Phase 1c. Until then a rebind is checked exactly like the
-            // `Bind` it renders as, and a frame node scopes its body like any
-            // other frame.
+            // ADR 0131: a `ConstructTuple`/`DiscardLocals` is checked with
+            // its siblings, by `check_construct_rebinds` (`ThreadedLocalDropped`).
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Statement(..)
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
+            // ADR 0131 §2/§4: a rebind's version step is checked exactly like
+            // the `Bind` it renders as, and its frame and shape against the
+            // node that encloses it.
             ThreadedStmt::LocalRebind {
+                local,
+                frame,
                 state_first,
                 lowering,
                 span,
@@ -560,13 +786,14 @@ impl VerifyWalk<'_> {
                     self.check_use(source, *span);
                     self.check_class_method_family(target, *span);
                 }
+                self.check_rebind_lowering(local, *frame, lowering.shape(), *span);
             }
             // The method's root frame: method level, so no mode is pushed (a
             // `State` version here is the actor family, exactly as for the
             // top-level slice).
             ThreadedStmt::MethodBody { frame, body, .. } => {
                 self.frame_stack.push(*frame);
-                self.walk(body);
+                self.in_frame(stmt, |this| this.walk(body));
                 self.frame_stack.pop();
             }
             // A branch arm threads through its seeded `StateAcc` — the same
@@ -576,7 +803,7 @@ impl VerifyWalk<'_> {
                 self.frame_stack.push(*frame);
                 self.mode_stack
                     .push(ThreadingMode::StateAcc(StateAccFallbackReason::None));
-                self.walk(body);
+                self.in_frame(stmt, |this| this.walk(body));
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
@@ -696,12 +923,66 @@ fn catch_filter_closed(clauses: &[CatchClause]) -> bool {
     })
 }
 
+/// One child of a sequenced send, as `sequence_children` splices it (ADR
+/// 0131 §1a): the input to [`verify_sibling_reads`].
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct SequencedSibling<'a> {
+    /// The outer local this child reads *in place*: a plain-variable child
+    /// the sequencing rule left for its parent to compile, which therefore
+    /// reads the local after every sibling's prelude has run. `None` for a
+    /// child compiled ahead (its value, or its `Tmp` snapshot, is fixed
+    /// before any later sibling's prelude).
+    pub(in crate::core_erlang) reads_in_place: Option<&'a str>,
+    /// The prelude this child contributed, in splice order.
+    pub(in crate::core_erlang) prelude: &'a [ThreadedStmt],
+    pub(in crate::core_erlang) span: Span,
+}
+
+/// [`VerifyError::LocalReadAfterSiblingRebind`] (ADR 0131 §1a): reports every
+/// sibling that reads local `x` in place while a later sibling's prelude
+/// holds a top-level [`ThreadedStmt::LocalRebind`] for `x`. A rebind nested
+/// inside a frame node of that prelude belongs to the inner frame and does
+/// not change the binding the parent reads. Reached in production through
+/// `sequence_children`, which reports the result via
+/// [`CoreErlangGenerator::report_threaded_ir_verify_errors`].
+///
+/// **Cannot fire in production yet:** no producer emits a
+/// [`ThreadedStmt::LocalRebind`] until ADR 0131 Phase 2 (BT-3749)'s
+/// `local_threading_producer`, so today every sibling prelude is
+/// rebind-free and this check is exercised only by hand-built IR
+/// (`threaded_ir/tests/local_rebind.rs`). Phase 2 must add a corpus test
+/// proving it fires on a real compile.
+pub(in crate::core_erlang) fn verify_sibling_reads(
+    siblings: &[SequencedSibling<'_>],
+) -> Vec<VerifyError> {
+    let mut errors = Vec::new();
+    for (i, sibling) in siblings.iter().enumerate() {
+        let Some(local) = sibling.reads_in_place else {
+            continue;
+        };
+        let rebound_later = siblings[i + 1..].iter().any(|later| {
+            later.prelude.iter().any(
+                |stmt| matches!(stmt, ThreadedStmt::LocalRebind { local: l, .. } if l == local),
+            )
+        });
+        if rebound_later {
+            errors.push(VerifyError::LocalReadAfterSiblingRebind {
+                local: local.to_string(),
+                at: sibling.span,
+            });
+        }
+    }
+    errors
+}
+
 impl CoreErlangGenerator {
     /// The [`ScopeKind`] the generator is currently lowering — the one place
     /// that maps generator state to the verifier's scope (BT-3725).
     pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {
         if self.in_class_method() {
             ScopeKind::ClassMethod
+        } else if self.context == CodeGenContext::ValueType {
+            ScopeKind::ValueType
         } else {
             ScopeKind::Instance
         }

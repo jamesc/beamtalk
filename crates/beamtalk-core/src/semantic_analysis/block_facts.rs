@@ -904,6 +904,7 @@ pub fn outer_local_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        blocks_entered: 0,
         nested: NestedBlocks::All,
     };
     walker.block(block);
@@ -918,6 +919,8 @@ struct OuterWriteWalker<'a> {
     writes: Vec<OuterLocalWrite>,
     /// Which nested blocks the walk descends into.
     nested: NestedBlocks,
+    /// How many walked blocks enclose the current expression.
+    blocks_entered: usize,
 }
 
 /// Which nested blocks an [`OuterWriteWalker`] descends into.
@@ -947,7 +950,9 @@ impl OuterWriteWalker<'_> {
     /// An assignment to `name` at `span`: an outer write, or the first
     /// assignment of a block local (which then shadows nothing outside).
     fn assign(&mut self, name: &ecow::EcoString, span: Span) {
-        if self.bound_inside(name) {
+        // Outside every walked block (only [`expression_threaded_writes`]
+        // walks there): the expression's own write, not a construct's.
+        if self.blocks_entered == 0 || self.bound_inside(name) {
             return;
         }
         if (self.bound_outside)(name) {
@@ -965,9 +970,11 @@ impl OuterWriteWalker<'_> {
     fn block(&mut self, block: &Block) {
         self.frames
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
+        self.blocks_entered += 1;
         for stmt in &block.body {
             self.expr(&stmt.expression);
         }
+        self.blocks_entered -= 1;
         self.frames.pop();
     }
 
@@ -1303,6 +1310,33 @@ pub fn threaded_today_block_writes(
     walk_construct_blocks(blocks, bound_outside, NestedBlocks::ProducersThreadedToday)
 }
 
+/// ADR 0131 §1a: the outer locals written inside every local-threading
+/// construct reachable from `expr` without crossing a closure boundary, in
+/// source order (first write of each name only) — the union of the threaded
+/// sets ([`construct_outer_local_writes`]) of `expr` itself if it is a
+/// construct, of a construct passed as an argument or used as a receiver
+/// anywhere inside it (`self id: (c ifTrue: [t := …] …)`, `(c ifTrue: [t := …]
+/// …) + 0`), and transitively of the constructs nested in those. A block
+/// operand that is not a construct block is a closure and is not entered;
+/// an assignment in `expr` outside every construct block is `expr`'s own
+/// write and is not included. `bound_outside` and the scope rules are those
+/// of [`outer_local_writes`].
+#[must_use]
+pub fn expression_threaded_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        blocks_entered: 0,
+        nested: NestedBlocks::Producers,
+    };
+    walker.expr(expr);
+    walker.writes
+}
+
 fn walk_construct_blocks(
     blocks: &[&Block],
     bound_outside: &dyn Fn(&str) -> bool,
@@ -1312,6 +1346,7 @@ fn walk_construct_blocks(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        blocks_entered: 0,
         nested,
     };
     for block in blocks {
@@ -2672,6 +2707,36 @@ mod tests {
             threaded_set("d at: #k ifAbsent: [t := 1]", &["t"]),
             vec!["t"]
         );
+    }
+
+    #[test]
+    fn expression_threaded_writes_unions_every_reachable_construct() {
+        let writes = |src: &str| -> Vec<String> {
+            expression_threaded_writes(&parse_first_expr(src), &|n| n == "t" || n == "u")
+                .into_iter()
+                .map(|w| w.name.to_string())
+                .collect()
+        };
+        // The expression itself, an argument and a receiver (BT-3748 review).
+        assert_eq!(writes("flag ifTrue: [t := 1] ifFalse: [0]"), vec!["t"]);
+        assert_eq!(
+            writes("self id: (flag ifTrue: [t := t + 1. 1] ifFalse: [0])"),
+            vec!["t"]
+        );
+        assert_eq!(
+            writes("(flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0"),
+            vec!["t"]
+        );
+        // Two constructs, in source order.
+        assert_eq!(
+            writes("(flag ifTrue: [u := 1] ifFalse: [0]) + ([t := 1] on: Error do: [:e | 0])"),
+            vec!["u", "t"]
+        );
+        // A closure is not entered, and the expression's own write is not a
+        // construct's.
+        assert!(writes("self id: [t := t + 1. 1]").is_empty());
+        assert!(writes("t := 3").is_empty());
+        assert!(writes("x + (t := 3)").is_empty());
     }
 
     #[test]

@@ -100,6 +100,7 @@ fn close_does_not_report_binds_nested_inside_a_threaded_node() {
         prelude: vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
+            threads: Vec::new(),
             body: vec![ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, 1, frame),
                 source: VersionedVar::new(VersionPrefix::State, 0, frame),

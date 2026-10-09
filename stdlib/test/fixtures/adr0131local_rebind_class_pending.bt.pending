@@ -169,6 +169,19 @@ Object subclass: Adr0131LocalRebindClassPending
     ] on: Error do: [:e | 0])
     #[r, t]
 
+  // BT-3748 review: the §1a shape with the threading construct nested inside
+  // the right operand (an argument of a send, the receiver of a binary send)
+  // rather than the operand itself. Source order reads `t` first: #[1, 1].
+  class seqArg: flag =>
+    t := 0
+    r := t + (0 max: (flag ifTrue: [t := t + 1. 1] ifFalse: [0]))
+    #[r, t]
+
+  class seqRecv: flag =>
+    t := 0
+    r := t + ((flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0)
+    #[r, t]
+
   // BT-3753: statement-position shapes that answered wrong, raised or failed
   // to compile before; each is an ADR 0131 Phase 0 compile error now.
 

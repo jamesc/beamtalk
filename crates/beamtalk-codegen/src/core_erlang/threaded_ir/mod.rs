@@ -77,17 +77,19 @@ pub(super) use build::{
 // `AccParam`/`CloseContext` below.
 #[cfg(test)]
 pub(super) use build::{
-    RebindFrame, ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
+    ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
     build_local_rebind, build_local_threading_prelude, build_method_body,
 };
 pub(super) use emit::{RenderCtx, render, render_value};
+// ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
     StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
     ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 #[cfg(test)]
-pub(super) use ir::{CarrierSlot, RebindFrameKind, RebindLowering, RebindShape};
+pub(super) use ir::{CarrierSlot, RebindFrame, RebindFrameKind, RebindLowering, RebindShape};
+pub(super) use verify::{SequencedSibling, verify_sibling_reads};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s

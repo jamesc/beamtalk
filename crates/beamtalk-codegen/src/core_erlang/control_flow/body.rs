@@ -107,6 +107,7 @@ impl CoreErlangGenerator {
             let node = ThreadedStmt::Threaded {
                 mode: mode.clone(),
                 frame,
+                threads: plan.threaded_locals.clone(),
                 body: stmts,
                 produces: Vec::new(),
                 span,
@@ -132,6 +133,7 @@ impl CoreErlangGenerator {
             let fixture = ThreadedStmt::Threaded {
                 mode,
                 frame,
+                threads: plan.threaded_locals.clone(),
                 body: backfilled_body,
                 produces: Vec::new(),
                 span,

@@ -159,6 +159,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Doc(ir_cond_doc),
@@ -240,6 +241,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition,
         condition_value,
@@ -404,6 +406,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::Hybrid,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Doc(ir_cond_doc),
@@ -451,6 +454,7 @@ fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nes
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::Hybrid,
         frame,
+        threads: Vec::new(),
         body: vec![ThreadedStmt::Bind {
             target: VersionedVar::new(VersionPrefix::State, 1, frame),
             source: VersionedVar::new(VersionPrefix::State, 0, frame),

@@ -16,6 +16,7 @@ fn verify_silent_on_well_formed_direct_params_fixture() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         body: vec![
             ThreadedStmt::Bind {
                 target: local("sum", 1, frame),
@@ -56,6 +57,7 @@ fn verify_silent_on_well_formed_conditional_loop_fixture() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
@@ -91,6 +93,7 @@ fn verify_silent_on_conditional_loop_with_condition_prelude() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: vec![ThreadedStmt::Bind {
             target: state_v1,
@@ -124,6 +127,7 @@ fn verify_unbound_version_conditional_loop_condition_references_unbound_version(
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Version(VersionedVar::new(VersionPrefix::State, 1, frame)),
@@ -156,6 +160,7 @@ fn verify_unbound_version_conditional_loop_frame_flow_matches_threaded() {
         fn_name: "while".to_string(),
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
@@ -259,9 +264,11 @@ fn verify_frame_flow_grandparent_binding_visible_in_grandchild_frame() {
         ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame: f1,
+            threads: Vec::new(),
             body: vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::DirectParams,
                 frame: f2,
+                threads: Vec::new(),
                 body: vec![ThreadedStmt::Bind {
                     target: self_var(2, f2),
                     source: self_var(1, f0), // grandparent's binding
@@ -289,6 +296,7 @@ fn verify_frame_flow_sibling_frame_binding_not_visible() {
         ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame: f1,
+            threads: Vec::new(),
             body: vec![ThreadedStmt::Bind {
                 target: local("sum", 1, f1),
                 source: local("sum", 0, f1),
@@ -301,6 +309,7 @@ fn verify_frame_flow_sibling_frame_binding_not_visible() {
         ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame: f2,
+            threads: Vec::new(),
             body: vec![ThreadedStmt::Bind {
                 target: local("count", 1, f2),
                 // References F1's Sum1 — F1 is a sibling, not an
@@ -449,6 +458,7 @@ fn verify_unpack_mismatch_inside_direct_params_mode() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::DirectParams,
         frame,
+        threads: Vec::new(),
         body: vec![ThreadedStmt::Bind {
             target: local("sum", 1, frame),
             source: local("sum", 0, frame),
@@ -479,6 +489,7 @@ fn verify_unpack_silent_inside_stateacc_mode() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
         frame,
+        threads: Vec::new(),
         body: vec![ThreadedStmt::Bind {
             target: local("sum", 1, frame),
             source: local("sum", 0, frame),
