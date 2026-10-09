@@ -587,6 +587,8 @@ activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
 register_classes(_ClassInfoList, ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
+            %% only
             try
                 ModuleName:register_class()
             catch
@@ -1422,6 +1424,8 @@ publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures) ->
 read_installed_shape_version(ModuleName) ->
     case erlang:function_exported(ModuleName, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try ModuleName:'__beamtalk_meta'() of
                 Meta when is_map(Meta) -> maps:get(shape_version, Meta, 1);
                 _ -> 1

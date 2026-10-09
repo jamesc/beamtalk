@@ -1352,6 +1352,8 @@ here unchanged.)
 -spec with_live_supervisor(atom(), atom(), fun(() -> term())) ->
     term() | {error, #beamtalk_error{}}.
 with_live_supervisor(ClassName, Selector, Fun) ->
+    %% bt-catcher-audit: not-applicable-other-process - Fun is a supervisor:* call; child code
+    %% runs in the supervisor
     try
         Fun()
     catch

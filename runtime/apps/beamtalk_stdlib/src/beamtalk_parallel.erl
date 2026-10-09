@@ -196,6 +196,8 @@ already in its mailbox that could otherwise coincidentally match a bare
 -spec run_worker(pid(), reference(), pos_integer(), function()) -> ok.
 run_worker(Caller, CallRef, Idx, Block) ->
     Result =
+        %% bt-catcher-audit: not-applicable-other-process - block runs in a spawned worker, not
+        %% the caller
         try
             Value = Block(),
             beamtalk_result:from_tagged_tuple({ok, Value})

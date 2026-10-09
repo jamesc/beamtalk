@@ -63,6 +63,7 @@ Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
     %% ADR 0130 §4: this catch swallows the block's error, so it is a catch
     %% boundary; `protect/1` restores the class-variable map before we classify.
+    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
     try beamtalk_class_vars:protect(Block) of
         _ ->
             % Block completed without error
@@ -775,6 +776,8 @@ instance map after setUp, so test methods can access `self.suiteFixture`.
 -spec run_test_method(atom(), atom(), atom(), map() | none, term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
+    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
+    %% worker, no home entry
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
@@ -941,6 +944,8 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             %% No suite lifecycle — skip overhead
             TestFun(nil);
         true ->
+            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
+            %% or runner worker, no home entry
             try
                 Fixture =
                     case HasSetUpOnce of
@@ -982,6 +987,8 @@ check_suite_lifecycle_methods(Module, none) ->
 -doc "Run tearDownOnce, swallowing errors to avoid masking test results.".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.
 run_teardown_once(Module, Fixture, true) ->
+    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
+    %% worker, no home entry
     try
         Instance = Module:new(),
         WithFixture = inject_suite_fixture(Instance, Fixture),

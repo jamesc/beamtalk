@@ -1275,6 +1275,8 @@ restart_class(ClassName) ->
             Meta =
                 case erlang:function_exported(Module, '__beamtalk_meta', 0) of
                     true ->
+                        %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
+                        %% literal getter, no block
                         try Module:'__beamtalk_meta'() of
                             M when is_map(M) -> M;
                             _ -> #{}

@@ -68,6 +68,8 @@ handle_spawn(Args, ClassName, _Module, true) ->
         end,
     {error, abstract_class_error(ClassName, Selector)};
 handle_spawn(Args, ClassName, Module, false) ->
+    %% bt-catcher-audit: not-applicable-other-process - Module:spawn runs init/1 in the new actor
+    %% process
     try
         SpawnResult =
             case Args of
@@ -315,6 +317,8 @@ collect_ancestor_defaults(Name, Acc, Depth) ->
 -doc "Read a compiled ancestor's default field values from its `new/0` map.".
 -spec ancestor_compiled_defaults(atom()) -> map().
 ancestor_compiled_defaults(Module) ->
+    %% bt-catcher-audit: not-applicable-no-block - compiled field-default constructor, no
+    %% caller-supplied block
     try erlang:apply(Module, new, []) of
         Instance when is_map(Instance) ->
             maps:without(beamtalk_tagged_map:internal_fields(), Instance);
@@ -381,6 +385,8 @@ handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
             undefined -> compute_is_constructible(Module, false);
             C -> C
         end,
+    %% bt-catcher-audit: not-applicable-no-block - compiled field-default constructor, no
+    %% caller-supplied block
     try
         Result =
             case Args of
@@ -597,6 +603,8 @@ compute_is_constructible(Module, false) ->
                 false ->
                     false;
                 true ->
+                    %% bt-catcher-audit: not-applicable-no-block - compiled field-default
+                    %% constructor probe, no caller-supplied block
                     try erlang:apply(Module, new, []) of
                         _ -> true
                     catch

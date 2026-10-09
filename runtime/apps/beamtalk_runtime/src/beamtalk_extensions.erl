@@ -713,6 +713,7 @@ registered pid, degrading to a no-op. Other exits/errors propagate.
 """.
 -spec safe_xref(fun(() -> ok)) -> ok.
 safe_xref(Fun) ->
+    %% bt-catcher-audit: not-applicable-other-process - Fun is a gen_server call to beamtalk_xref
     try Fun() of
         ok -> ok
     catch

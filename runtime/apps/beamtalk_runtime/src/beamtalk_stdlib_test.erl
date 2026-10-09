@@ -94,6 +94,8 @@ run_and_assert(TestModule, Assertions) ->
 
 %% Value assertion: compare format_result(Value) =:= Expected
 run_one({value, EvalMod, Expected, VarName, Location}, Bindings) ->
+    %% bt-catcher-audit: not-applicable-other-process - runs in the EUnit test process, not a
+    %% class invocation
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),

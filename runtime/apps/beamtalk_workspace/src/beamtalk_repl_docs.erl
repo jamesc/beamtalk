@@ -423,6 +423,7 @@ method_doc_signature_resolved(ClassPid, ClassSide, Selector) ->
             true -> fun resolve_class_side_method_obj/2;
             false -> fun resolve_method_obj/2
         end,
+    %% bt-catcher-audit: not-applicable-no-block - Resolve is class reflection/doc formatting
     try Resolve(ClassPid, Selector) of
         {ok, MethodObj, _DefClass} ->
             {Sig, Doc, _IsSealed, _IsInternal} = method_doc_info(MethodObj, Selector),
