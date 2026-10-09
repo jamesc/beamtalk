@@ -1794,3 +1794,71 @@ fn repl_beamtalk_class_named_emits_direct_call() {
         "Beamtalk classNamed: must not go through class_send in: {code}"
     );
 }
+
+// ---- BT-3778 (ADR 0111 Addendum 17): verifier diagnostics surface from REPL codegen ----
+
+#[test]
+fn test_repl_surfacing_verifier_reports_only_internal_findings() {
+    use beamtalk_core::source_analysis::DiagnosticCategory;
+    use beamtalk_repl::codegen::{
+        generate_repl_expressions_surfacing_verifier,
+        generate_repl_expressions_traced_surfacing_verifier,
+        generate_test_expression_surfacing_verifier,
+    };
+
+    let src = "x := 1. x + 2";
+    let module = parse_source(src);
+    let exprs: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+
+    // Valid code: no diagnostics, and identical code to the plain entry point.
+    let (code, diags) = generate_repl_expressions_surfacing_verifier(
+        &exprs,
+        "repl_surf",
+        std::collections::HashMap::new(),
+        None,
+        false,
+    )
+    .expect("codegen should work");
+    assert!(diags.is_empty(), "valid code has no findings: {diags:?}");
+    assert_eq!(
+        code,
+        generate_repl_expressions(&exprs, "repl_surf").expect("codegen should work")
+    );
+
+    // Injected finding: surfaced, categorised, and generation still succeeds.
+    let (code, diags) = generate_repl_expressions_surfacing_verifier(
+        &exprs,
+        "repl_surf",
+        std::collections::HashMap::new(),
+        None,
+        true,
+    )
+    .expect("a verifier finding must not fail generation");
+    assert!(code.contains("eval"), "output is still produced");
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(
+        diags[0].category,
+        Some(DiagnosticCategory::InternalVerifier)
+    );
+    assert!(diags[0].message.starts_with("internal:"));
+
+    let (_, traced) = generate_repl_expressions_traced_surfacing_verifier(
+        &exprs,
+        src,
+        "repl_surf_t",
+        std::collections::HashMap::new(),
+        None,
+        true,
+    )
+    .expect("trace codegen should work");
+    assert_eq!(traced.len(), 1, "{traced:?}");
+
+    // test-stdlib entry point: valid code has no findings.
+    let (_, diags) = generate_test_expression_surfacing_verifier(&exprs[1], "test_surf")
+        .expect("codegen should work");
+    assert!(diags.is_empty(), "{diags:?}");
+}

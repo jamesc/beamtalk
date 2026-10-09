@@ -183,7 +183,7 @@ catch it) and an `internal:` **warning** in release builds (category
 `InternalVerifier`; the compile still succeeds, and it never fails a build,
 even under `--warnings-as-errors`; ADR 0111 Addendum 17, BT-3724). The CLI
 build path prints it with the file's other diagnostics; the compiler port
-(REPL/MCP load) appends it to the response `warnings`. Only these
+(REPL/MCP load and eval) appends it to the response `warnings`. Only these
 diagnostics are forwarded out of codegen; other codegen warnings are still
 dropped. To test the release path without a release build, use
 `CodegenOptions::with_injected_verifier_violation()` (a hidden test hook) or

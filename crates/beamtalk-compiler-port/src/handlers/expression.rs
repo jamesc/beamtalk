@@ -14,7 +14,7 @@ use crate::diagnostics::{collect_warning_messages, filter_error_diagnostics};
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     diagnostic_error_response, error_response, format_codegen_error, method_definition_ok_response,
-    method_signature_terms, ok_response,
+    method_signature_terms, ok_response, with_verifier_warnings,
 };
 
 use super::inline_definitions::{
@@ -108,8 +108,22 @@ pub(crate) fn parse_and_check_expression(
 }
 
 /// Handle a single `compile_expression` request.
-#[allow(clippy::too_many_lines)]
 pub(crate) fn handle_compile_expression(request: &Map) -> Term {
+    handle_compile_expression_with_options(
+        request,
+        &beamtalk_codegen::core_erlang::CodegenOptions::new("repl_eval"),
+    )
+}
+
+/// [`handle_compile_expression`] with a `CodegenOptions` seam: only its
+/// `with_injected_verifier_violation` test hook is consumed (BT-3778) — the
+/// REPL expression path builds its own generator, so no other option applies.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn handle_compile_expression_with_options(
+    request: &Map,
+    options: &beamtalk_codegen::core_erlang::CodegenOptions,
+) -> Term {
+    let inject_verifier_violation = options.injects_verifier_violation();
     // Extract required fields
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -179,6 +193,7 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
             module_name_override.as_deref(),
             &referenced_aliases,
             analysis,
+            inject_verifier_violation,
         );
     }
 
@@ -254,13 +269,17 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
+    match beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
         &expressions,
         &module_name,
         class_module_index,
-        &analysis.class_hierarchy,
+        Some(&analysis.class_hierarchy),
+        inject_verifier_violation,
     ) {
-        Ok(code) => ok_response(&code, &warnings),
+        Ok((code, verifier_diagnostics)) => ok_response(
+            &code,
+            &with_verifier_warnings(&warnings, &verifier_diagnostics),
+        ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
@@ -274,6 +293,18 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
 /// Returns the same `ok_response` format as `compile_expression` — the difference
 /// is in the generated module semantics, not the port protocol.
 pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
+    handle_compile_expression_trace_with_options(
+        request,
+        &beamtalk_codegen::core_erlang::CodegenOptions::new("repl_eval"),
+    )
+}
+
+/// [`handle_compile_expression_trace`] with the same `CodegenOptions` test-hook
+/// seam as [`handle_compile_expression_with_options`].
+pub(crate) fn handle_compile_expression_trace_with_options(
+    request: &Map,
+    options: &beamtalk_codegen::core_erlang::CodegenOptions,
+) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
     };
@@ -335,14 +366,18 @@ pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_repl::codegen::generate_repl_expressions_traced_with_hierarchy(
+    match beamtalk_repl::codegen::generate_repl_expressions_traced_surfacing_verifier(
         &expressions,
         &source,
         &module_name,
         class_module_index,
-        &analysis.class_hierarchy,
+        Some(&analysis.class_hierarchy),
+        options.injects_verifier_violation(),
     ) {
-        Ok(code) => ok_response(&code, &warnings),
+        Ok((code, verifier_diagnostics)) => ok_response(
+            &code,
+            &with_verifier_warnings(&warnings, &verifier_diagnostics),
+        ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
