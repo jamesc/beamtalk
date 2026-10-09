@@ -1306,11 +1306,15 @@ pub struct TodayLowering {
     /// `eachWithIndex:`/`do:separatedBy:` thread only inside an actor's own
     /// fold (codegen's `enumeration_threads_actor_state`).
     pub actor_fold: bool,
-    /// Actor context: every `whileTrue:`/`whileFalse:` condition's writes
-    /// are packed.
+    /// Codegen's `CodeGenContext::Actor`: every `whileTrue:`/`whileFalse:`
+    /// condition's writes are packed. This includes the class methods of an
+    /// `Actor subclass:`, which keep the actor context (only
+    /// `in_class_method` flips), as before ADR 0131. Such a condition still
+    /// crashes at run time today, as in every class method (BT-3782).
     pub actor_context: bool,
     /// A class method: no condition goes through the stateful-condition
-    /// lowering ([`is_stateful_while_condition`]).
+    /// lowering ([`is_stateful_while_condition`]). It does not override
+    /// [`Self::actor_context`] for an actor class's class methods.
     pub class_method: bool,
 }
 

@@ -343,6 +343,24 @@ const HAND_WRITTEN: &[(&str, &str)] = &[
     s := 0
     #(4, 5) eachWithIndex: [:x :i | s := s + i]
     s
+
+  class check: n => n < 3
+
+  class classStateful =>
+    t := 0
+    [
+      t := t + 1
+      self check: t
+    ] whileTrue: [nil]
+    t
+
+  class classPlain =>
+    t := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue: [nil]
+    t
 ",
     ),
     (
@@ -387,11 +405,12 @@ fn threaded_locals_of_agrees_on_hand_written_shapes_in_every_context() {
             Err(e) => panic!("{name}: {e}"),
         }
     }
-    // Value-type and class-method loops read their result back through the
-    // same `loop_threaded_locals` the generator packs with, so only the
-    // actor constructs are seen from both sides here.
+    // Value-type loops read their result back through
+    // `unpacked_loop_threaded_locals`, actor ones through
+    // `lowered_threaded_locals_of`; class-method statement loops in this set
+    // are not unpacked, so they are seen from the packing side only.
     assert!(
-        both_sides >= 3,
+        both_sides >= 6,
         "only {both_sides} constructs compared on both sides"
     );
 }

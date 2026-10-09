@@ -381,7 +381,24 @@ impl CoreErlangGenerator {
             .map(|t| t.lowered)
             .unwrap_or_default();
         #[cfg(test)]
-        recorded_sets::record_lowered(recorded_sets::Side::Pack, &blocks, &lowered);
+        recorded_sets::record_lowered(recorded_sets::loop_side(), &blocks, &lowered);
+        lowered
+    }
+
+    /// [`Self::loop_threaded_locals`] for a site that reads the loop's
+    /// result back (the value-type open-let extraction and its gates),
+    /// rather than the generator packing it. The set is the same; the agreement
+    /// test records the two sides separately.
+    pub(in crate::core_erlang) fn unpacked_loop_threaded_locals(
+        &self,
+        body: &Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        let compute = || self.loop_threaded_locals(body, condition);
+        #[cfg(test)]
+        let lowered = recorded_sets::as_unpack(compute);
+        #[cfg(not(test))]
+        let lowered = compute();
         lowered
     }
 
@@ -605,6 +622,22 @@ pub(in crate::core_erlang) mod recorded_sets {
 
     thread_local! {
         static RECORDS: RefCell<Option<Records>> = const { RefCell::new(None) };
+        static LOOP_SIDE: std::cell::Cell<Side> = const { std::cell::Cell::new(Side::Pack) };
+    }
+
+    /// The side a `loop_threaded_locals` call is on (`Pack` unless inside
+    /// [`as_unpack`]).
+    pub(super) fn loop_side() -> Side {
+        LOOP_SIDE.with(std::cell::Cell::get)
+    }
+
+    /// Runs `f` with `loop_threaded_locals` calls recorded as the unpacking
+    /// side.
+    pub(super) fn as_unpack<T>(f: impl FnOnce() -> T) -> T {
+        let before = LOOP_SIDE.with(|s| s.replace(Side::Unpack));
+        let out = f();
+        LOOP_SIDE.with(|s| s.set(before));
+        out
     }
 
     pub(super) fn record(expr: &Expression, set: Option<&ThreadedLocals>) {
