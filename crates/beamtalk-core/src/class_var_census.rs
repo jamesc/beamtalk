@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::{MethodDefinition, Module};
-use crate::semantic_analysis::block_facts::{class_var_reads, escaping_blocks};
+use crate::semantic_analysis::block_facts::{class_var_accesses, escaping_blocks};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 
 pub use crate::semantic_analysis::block_facts::EscapeShape;
@@ -57,7 +57,7 @@ pub struct EscapeSite {
     pub line: usize,
     /// How the block escapes.
     pub shape: EscapeShape,
-    /// Class variables the block reads, sorted.
+    /// Class variables the block reads as `self.name`, sorted.
     pub reads: Vec<String>,
 }
 
@@ -235,7 +235,7 @@ fn scan_method(
     sites: &mut Vec<EscapeSite>,
 ) {
     for (block, shape) in escaping_blocks(&method.body) {
-        let reads = class_var_reads(&block, vars);
+        let reads: Vec<String> = class_var_accesses(&block, vars).reads.into_iter().collect();
         if reads.is_empty() {
             continue;
         }

@@ -8,9 +8,13 @@
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops.
 
+use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
     Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
     ParameterDefinition,
+};
+use crate::ast_walker::{
+    SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
 };
 use crate::source_analysis::Span;
 use std::collections::HashSet;
@@ -195,23 +199,6 @@ pub fn compute_class_var_mutating_selectors(
     mutating
 }
 
-/// The one receiver every message of a cascade is sent to.
-///
-/// The parser folds a cascade's first message into `Cascade::receiver` as a
-/// whole `MessageSend`, so the shared receiver is that send's inner receiver
-/// (or `receiver` itself when it is not a send). The later messages are stored
-/// as bare selector/arguments, so callers judging them must pair each with
-/// this receiver (BT-3716).
-#[must_use]
-pub fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
-    match receiver {
-        Expression::MessageSend {
-            receiver: inner, ..
-        } => inner,
-        other => other,
-    }
-}
-
 /// Whether `receiver` is the unqualified class reference `class_name`.
 fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
     matches!(
@@ -232,24 +219,10 @@ fn same_class_reference_send_selectors(
 ) -> HashSet<String> {
     let mut selectors = HashSet::new();
     for stmt in body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            match e {
-                Expression::MessageSend {
-                    receiver, selector, ..
-                } if is_own_class_reference(receiver, class_name) => {
-                    selectors.insert(selector.name().to_string());
-                }
-                // `Counter log; bump`: the folded first send is visited as its
-                // own `MessageSend`; the later messages share its receiver but
-                // never appear as nodes (BT-3716).
-                Expression::Cascade {
-                    receiver, messages, ..
-                } if is_own_class_reference(cascade_shared_receiver(receiver), class_name) => {
-                    for msg in messages {
-                        selectors.insert(msg.selector.name().to_string());
-                    }
-                }
-                _ => {}
+        // Cascades expanded: `Counter log; bump` sends both (BT-3716).
+        walk_sends(&stmt.expression, &mut |send| {
+            if is_own_class_reference(send.receiver, class_name) {
+                selectors.insert(send.selector.name().to_string());
             }
         });
     }
@@ -325,32 +298,101 @@ pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)
     found
 }
 
-/// Class variables read (as `self.name`) anywhere inside `block`, including
-/// nested blocks, sorted. A `self.name := v` write target is not a read.
+/// How a block literal written in a class method touches its home class's
+/// variables (ADR 0130 §5), nested blocks included: the one answer behind
+/// codegen's block-creation capture (`block_reads_class_var`), the
+/// `class-state-abroad` lint and the Phase 0 census (BT-3761).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClassVarAccesses {
+    /// Class variables read as `self.name`, sorted. The target of a
+    /// `self.name := v` write is not a read.
+    pub reads: std::collections::BTreeSet<String>,
+    /// Class variables written as `self.name := v`, sorted, each with the
+    /// span of its first write in source order.
+    pub writes: std::collections::BTreeMap<String, Span>,
+    /// `self hasField: x` probes, which ask the class-variable home (they
+    /// lower to `beamtalk_class_vars:has`, which reads through a capture
+    /// abroad). A probe is not a class-variable read: its argument may name no
+    /// declared variable, or be computed. A `hasField:` that is a cascade
+    /// message is not a probe: a cascade dispatches every message, the first
+    /// included, as an ordinary send, never through the `HasField` intrinsic.
+    pub has_field_probes: std::collections::BTreeSet<HasFieldProbe>,
+}
+
+/// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HasFieldProbe {
+    /// A symbol literal, `self hasField: #n`: the probed name, declared or not.
+    Symbol(String),
+    /// Any other argument, `self hasField: k`.
+    Computed,
+}
+
+impl ClassVarAccesses {
+    /// Whether the block reads class state at all: a `self.name` read or a
+    /// `hasField:` probe. Exactly the blocks for which codegen binds a capture
+    /// (outside a direct-called method) and the lint's read rule considers.
+    #[must_use]
+    pub fn reads_class_state(&self) -> bool {
+        !self.reads.is_empty() || !self.has_field_probes.is_empty()
+    }
+}
+
+/// THE walker for "which class variables does `block` read and write"
+/// (BT-3761): see [`ClassVarAccesses`]. `vars` are the class variables
+/// visible to the class (own and inherited); a `self.name` for any other
+/// `name` is an instance-field access and not counted.
 #[allow(clippy::implicit_hasher)] // concrete HashSet, matching ClassContext-style callers
-pub fn class_var_reads(block: &Block, vars: &HashSet<String>) -> Vec<String> {
-    let mut written_targets = Vec::new();
-    let mut reads = std::collections::BTreeSet::new();
-    let root = Expression::Block(block.clone());
-    crate::ast_walker::walk_expression(&root, &mut |expr| {
-        if let Expression::Assignment { target, .. } = expr {
-            if let Expression::FieldAccess { span, .. } = &**target {
-                written_targets.push(*span);
+#[must_use]
+pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAccesses {
+    let mut accesses = ClassVarAccesses::default();
+    // Write targets, by identity: the walk visits an assignment before its target.
+    let mut written_targets: HashSet<*const Expression> = HashSet::new();
+    for stmt in &block.body {
+        walk_expression_and_sends(&stmt.expression, &mut |event| match event {
+            WalkEvent::Expr(Expression::Assignment { target, .. }) => {
+                if let Expression::FieldAccess {
+                    receiver, field, ..
+                } = target.as_ref()
+                {
+                    if is_self_reference(receiver) && vars.contains(field.name.as_str()) {
+                        accesses
+                            .writes
+                            .entry(field.name.to_string())
+                            .or_insert_with(|| target.span());
+                        written_targets.insert(std::ptr::from_ref::<Expression>(target));
+                    }
+                }
             }
-        }
-        if let Expression::FieldAccess {
-            receiver,
-            field,
-            span,
-        } = expr
-        {
-            let is_self = matches!(&**receiver, Expression::Identifier(id) if id.name == "self");
-            if is_self && vars.contains(field.name.as_str()) && !written_targets.contains(span) {
-                reads.insert(field.name.to_string());
+            WalkEvent::Expr(
+                e @ Expression::FieldAccess {
+                    receiver, field, ..
+                },
+            ) => {
+                if is_self_reference(receiver)
+                    && vars.contains(field.name.as_str())
+                    && !written_targets.contains(&std::ptr::from_ref(e))
+                {
+                    accesses.reads.insert(field.name.to_string());
+                }
             }
-        }
-    });
-    reads.into_iter().collect()
+            WalkEvent::Send(send)
+                if send.site == SendSite::Plain
+                    && is_self_reference(send.receiver)
+                    && send.selector.well_known() == Some(WellKnownSelector::HasField) =>
+            {
+                let probed = match send.arguments.first() {
+                    Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
+                        HasFieldProbe::Symbol(name.to_string())
+                    }
+                    _ => HasFieldProbe::Computed,
+                };
+                accesses.has_field_probes.insert(probed);
+            }
+            _ => {}
+        });
+    }
+    accesses
 }
 
 /// Shared statement-list walker behind [`analyze_block`] and [`analyze_method_body`].
@@ -462,20 +504,7 @@ fn analyze_expression(
             arguments,
             ..
         } => {
-            // Detect self-sends (may mutate actor state)
-            if is_self_reference(receiver) {
-                analysis.has_self_sends = true;
-                // Record the selector too (see `self_send_selectors` doc).
-                analysis
-                    .self_send_selectors
-                    .insert(selector.name().to_string());
-            }
-            // Detect `self.field value(:...)` — invoking a block stored in a
-            // field. The field may hold a Tier 2 (state-mutating) block, so this is
-            // conservatively treated as a potential mutation source.
-            if is_self_field_value_send(receiver, selector) {
-                analysis.has_field_value_call = true;
-            }
+            record_send_target(receiver, selector, analysis);
             if crate::state_threading_selectors::is_opaque_callable_hom_send(expr) {
                 analysis.has_opaque_callable_hom_send = true;
             }
@@ -563,45 +592,19 @@ fn analyze_expression(
             analyze_expression(value, analysis, ctx);
         }
 
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            // `analyze_expression(receiver, ..)` below already checks whether the
-            // cascade's FIRST message is a `self.field value(:...)` send: the
-            // parser folds it into `receiver` as a whole `MessageSend` (see
-            // `parse_cascade`), so `receiver` here IS that MessageSend, and the
-            // `MessageSend` arm's own `is_self_field_value_send` check covers it.
-            //
-            // The SECOND and later cascaded
-            // messages are sent to that same underlying receiver too — cascade
-            // semantics evaluate the receiver once and send every message to it —
-            // but `messages` here only stores their selector/arguments, not a
-            // re-wrapped MessageSend, so nothing before this fix ever checked
-            // whether one of THEM was a `self.field value(:...)` send. Extract the
-            // one true underlying receiver shared by every cascaded message (the
-            // inner receiver of the folded first-message MessageSend, or
-            // `receiver` itself if there was no message to fold) and check each
-            // later message's own selector against it directly.
+        Expression::Cascade { receiver, .. } => {
+            // The parser folds the FIRST message into `receiver` as a whole
+            // `MessageSend`, which the `MessageSend` arm analyses (receiver,
+            // send target and arguments). The later messages go to the same
+            // shared receiver but are not nodes of their own, so record each
+            // one's send target here, paired with that receiver by the shared
+            // cascade expansion (BT-3716, BT-3761): a mutating self-send hidden
+            // behind an earlier pure cascade message (`self pureLog: x; check:
+            // x`) must reach `compute_class_var_mutating_selectors`.
             analyze_expression(receiver, analysis, ctx);
-            let cascade_receiver = cascade_shared_receiver(receiver);
-            for msg in messages {
-                if is_self_field_value_send(cascade_receiver, &msg.selector) {
-                    analysis.has_field_value_call = true;
-                }
-                // A cascade's 2nd+ message is sent to
-                // the same shared receiver as the first (see the comment above),
-                // so a self-send there is recorded in `self_send_selectors` the
-                // same way the `MessageSend` arm records the first message —
-                // otherwise a mutating self-send hidden behind an earlier pure
-                // cascade message (`self pureLog: x; check: x`) is invisible to
-                // `compute_class_var_mutating_selectors`'s purity closure.
-                if is_self_reference(cascade_receiver) {
-                    analysis.has_self_sends = true;
-                    analysis
-                        .self_send_selectors
-                        .insert(msg.selector.name().to_string());
-                }
-                for arg in &msg.arguments {
+            for send in cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater) {
+                record_send_target(send.receiver, send.selector, analysis);
+                for arg in send.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }
             }
@@ -648,6 +651,28 @@ fn analyze_expression(
             analyze_expression(value, analysis, ctx);
             collect_pattern_bindings(pattern, analysis, ctx);
         }
+    }
+}
+
+/// Records what sending `selector` to `receiver` may do to actor state: a
+/// self-send (which may mutate it; the selector is kept, see
+/// `self_send_selectors`), or a `self.field value(:...)` send invoking a block
+/// stored in a field, which may be a Tier 2 (state-mutating) block and is
+/// conservatively treated as a potential mutation source. Shared by an
+/// ordinary send and each later cascade message.
+fn record_send_target(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    analysis: &mut BlockMutationAnalysis,
+) {
+    if is_self_reference(receiver) {
+        analysis.has_self_sends = true;
+        analysis
+            .self_send_selectors
+            .insert(selector.name().to_string());
+    }
+    if is_self_field_value_send(receiver, selector) {
+        analysis.has_field_value_call = true;
     }
 }
 
@@ -1753,6 +1778,85 @@ mod tests {
             Some(Expression::Block(block)) => block,
             other => panic!("{src}: expected a block literal, got {other:?}"),
         }
+    }
+
+    fn cv_accesses(src: &str) -> ClassVarAccesses {
+        let vars: HashSet<String> = ["n".to_string(), "m".to_string()].into();
+        class_var_accesses(&parse_block(src), &vars)
+    }
+
+    fn names(items: &[&str]) -> std::collections::BTreeSet<String> {
+        items.iter().map(ToString::to_string).collect()
+    }
+
+    fn written(acc: &ClassVarAccesses) -> std::collections::BTreeSet<String> {
+        acc.writes.keys().cloned().collect()
+    }
+
+    #[test]
+    fn class_var_accesses_write_only_block_reads_nothing() {
+        let acc = cv_accesses("[:x | self.n := x]");
+        assert_eq!(written(&acc), names(&["n"]));
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // `self.n := self.n + 1` both writes and reads.
+        let acc = cv_accesses("[self.n := self.n + 1]");
+        assert_eq!(written(&acc), names(&["n"]));
+        assert_eq!(acc.reads, names(&["n"]));
+    }
+
+    #[test]
+    fn class_var_accesses_records_the_first_write_site() {
+        let src = "[self.n := 1. self.n := 2]";
+        let acc = cv_accesses(src);
+        let first = u32::try_from(src.find("self.n").expect("fixture")).expect("small");
+        assert_eq!(acc.writes["n"].start(), first, "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_sees_reads_in_nested_blocks_and_cascade_messages() {
+        let acc = cv_accesses("[:x | x foo; bar: self.n]");
+        assert_eq!(acc.reads, names(&["n"]));
+        let acc = cv_accesses("[[:y | y + self.m]]");
+        assert_eq!(acc.reads, names(&["m"]));
+        // An instance field of the same spelling is not a class variable.
+        let acc = cv_accesses("[self.other + other.n]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_has_field_probe_is_a_read_unless_cascaded() {
+        let acc = cv_accesses("[self hasField: #n]");
+        assert_eq!(
+            acc.has_field_probes,
+            [HasFieldProbe::Symbol("n".to_string())].into()
+        );
+        assert!(acc.reads_class_state());
+        assert!(
+            acc.reads.is_empty(),
+            "a probe is not a variable read: {acc:?}"
+        );
+        // An undeclared name is still a probe of the class-variable home.
+        let acc = cv_accesses("[self hasField: #nope]");
+        assert_eq!(
+            acc.has_field_probes,
+            [HasFieldProbe::Symbol("nope".to_string())].into()
+        );
+        let acc = cv_accesses("[:k | self hasField: k]");
+        assert_eq!(acc.has_field_probes, [HasFieldProbe::Computed].into());
+        let acc = cv_accesses("[self hasField: #n; hasField: #m]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // Not to `self`: not a probe of the class-variable home.
+        let acc = cv_accesses("[:o | o hasField: #n]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn analyze_block_records_later_cascade_self_sends() {
+        let analysis = analyze_block(&parse_block("[self log; bump: 1]"));
+        assert_eq!(
+            analysis.self_send_selectors,
+            ["log".to_string(), "bump:".to_string()].into()
+        );
     }
 
     #[test]
