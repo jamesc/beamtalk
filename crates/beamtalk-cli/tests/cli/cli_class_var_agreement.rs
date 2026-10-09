@@ -40,15 +40,17 @@
 //! `Undefined function`, `setUp failed` or `abi_mismatch`, or every test
 //! failed and either every failure message carries the same one of those
 //! markers or every program and spelling failed with the same message. A
-//! suspicion is only a guess: before reporting it, the harness re-runs one
-//! program of the batch alone. A broken runtime or stdlib fails every subset
-//! the same way, so only when that re-run shows the same kind of environment
-//! failure is the batch reported as probably a broken environment (not as N
+//! suspicion is only a guess: before reporting it, the harness re-runs two
+//! different programs of the batch (the first and the last) separately. A
+//! broken runtime or stdlib fails every subset the same way, so only when
+//! both re-runs show the same kind of environment failure is the batch
+//! reported as probably a broken environment (not as N
 //! wrong answers, and not bisected). Otherwise the guess is dropped and the
 //! batch is reported and bisected like any other, so one program's codegen
 //! bug (say a one-class ABI stamp bug hitting `abi_mismatch` at load) is
-//! isolated rather than hiding the batch. The confirmation costs one extra
-//! `beamtalk test` run, paid only on the environment path. Anything else (a
+//! isolated rather than hiding the batch (one probe alone could be that very
+//! program, failing the same way, hence two). The confirmation costs two extra
+//! `beamtalk test` runs, paid only on the environment path. Anything else (a
 //! marker in only some tests, or any smaller batch) is a program's failure,
 //! since the preflight already passed. The environment report still carries
 //! every `(index, seed, size)` pair in the batch, the marker's (or first
@@ -412,6 +414,16 @@ fn environment_confirmed(first: &EnvCause, probe: &Package, rerun: &Run) -> bool
     )
 }
 
+/// Do all of `probes` (two different programs of the suspect batch, each run
+/// alone) confirm `first`? One probe could be the very program with the bug
+/// (failing alone the same way), so every probe must confirm (BT-3767).
+fn environment_confirmed_by(first: &EnvCause, probes: &[(Package, Run)]) -> bool {
+    !probes.is_empty()
+        && probes
+            .iter()
+            .all(|(pkg, run)| environment_confirmed(first, pkg, run))
+}
+
 /// The test runner's own failure message for test method `name`: the rest of
 /// its `FAIL <class> <method>: <message>` result line (see
 /// `fail_detail_line` in `commands/test.rs`), or `None` when it did not fail.
@@ -544,6 +556,13 @@ fn environment_report(
     s
 }
 
+/// Runs one case's program alone, for the environment confirmation.
+fn run_alone(case: &Case) -> (Package, Run) {
+    let pkg = render_package(&[(case.index, case.program.clone())]);
+    let run = run_package(&pkg);
+    (pkg, run)
+}
+
 /// Runs `cases` and returns every failure, bisecting broken batches.
 fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
     if cases.is_empty() {
@@ -562,27 +581,33 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
     };
     let run = run_package(&pkg);
     let batch = match classify(&pkg, &run, Some(MIN_ENVIRONMENT_PROGRAMS)) {
-        // Suspected environment: confirm by re-running one program alone
-        // (the last; a broken environment fails every program, so any one
-        // will do) before reporting it. Unconfirmed, classify the batch
-        // again without the guess, so its programs are isolated.
+        // Suspected environment: confirm by re-running two different programs
+        // alone (the first and the last; a broken environment fails every
+        // subset, while a single buggy program fails only itself) before
+        // reporting it. Unconfirmed, classify the batch again without the
+        // guess, so its programs are isolated.
         Batch::Broken {
             environment: Some(cause),
             ..
         } => {
-            let probe = cases[cases.len() - 1];
-            let probe_pkg = render_package(&[(probe.index, probe.program.clone())]);
-            if environment_confirmed(&cause, &probe_pkg, &run_package(&probe_pkg)) {
+            let first_probe = cases[0];
+            let last_probe = cases[cases.len() - 1];
+            let probes = [first_probe, last_probe].map(run_alone);
+            if cases.len() > 1 && environment_confirmed_by(&cause, &probes) {
                 // Not (probably) a program's fault: no bisection; the report
                 // leads with the cause, then every repro pair, the marker's
                 // (or first failing) program, and any failures already
                 // recorded.
                 let headline = format!(
-                    "{} Confirmed by re-running program {} (seed {}, size {}) alone.",
+                    "{} Confirmed by re-running programs {} (seed {}, size {}) and {} \
+                     (seed {}, size {}) separately.",
                     environment_headline(&cause.detail),
-                    probe.index,
-                    probe.seed,
-                    probe.size
+                    first_probe.index,
+                    first_probe.seed,
+                    first_probe.size,
+                    last_probe.index,
+                    last_probe.seed,
+                    last_probe.size
                 );
                 panic!(
                     "{}",
@@ -928,13 +953,14 @@ fn class_var_agreement_classifies_runner_output_report() {
 }
 
 /// BT-3767: a suspected environment failure is reported only when re-running
-/// one program of the batch alone fails the same way; otherwise the batch is
+/// two different programs of the batch alone both fail the same way; otherwise the batch is
 /// classified again without the guess and bisected. No BEAM.
 #[test]
 fn class_var_agreement_classifies_runner_output_confirm() {
     let cases = fixture_cases();
     let pkg = package_of(&cases);
     let probe = package_of(&cases[cases.len() - 1..]);
+    let first_probe = package_of(&cases[..1]);
     let failed_run = |text: String| Run {
         success: false,
         text,
@@ -992,4 +1018,23 @@ fn class_var_agreement_classifies_runner_output_confirm() {
         &probe,
         &failed_run(all_fail(&probe, "bang"))
     ));
+
+    // Two probes (first and last program, each alone): both must fail the
+    // same way. One probe crashing while the other runs cleanly (the one-class
+    // ABI stamp bug in a single program) is not an environment failure.
+    let crash_run = || failed_run(crash.to_string());
+    let clean = || Run {
+        success: true,
+        text: String::new(),
+    };
+    let both = vec![
+        (first_probe.clone(), crash_run()),
+        (probe.clone(), crash_run()),
+    ];
+    assert!(environment_confirmed_by(&crashed, &both));
+    let one_clean = vec![(first_probe.clone(), clean()), (probe.clone(), crash_run())];
+    assert!(!environment_confirmed_by(&crashed, &one_clean));
+    let other_clean = vec![(first_probe, crash_run()), (probe, clean())];
+    assert!(!environment_confirmed_by(&crashed, &other_clean));
+    assert!(!environment_confirmed_by(&crashed, &[]));
 }
