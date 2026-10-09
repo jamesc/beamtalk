@@ -783,7 +783,7 @@ bench:
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
@@ -814,6 +814,21 @@ lint-removed-facade-names:
 [windows]
 lint-removed-facade-names:
     @echo "lint-removed-facade-names: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-3758): runtime/stdlib Erlang sources must recognise `^` non-local
+# returns with the `?IS_NLR(T)` guard from beamtalk.hrl, never a hand-rolled
+# `{'$bt_nlr', ...}` pattern, so a future NLR shape change cannot miss a site.
+# To clear a failure: use `throw:Nlr:Stack when ?IS_NLR(Nlr)`; a file that must
+# construct/destructure the tuple goes on the script's ALLOWLIST with a reason.
+# Unix-only (shells out to bash); Linux CI covers it, so the Windows variant is
+# a no-op.
+[unix]
+lint-nlr-tuple-matches:
+    @bash scripts/ci/lint-nlr-tuple-matches.sh
+
+[windows]
+lint-nlr-tuple-matches:
+    @echo "lint-nlr-tuple-matches: skipped on Windows (covered by Linux CI)"
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders

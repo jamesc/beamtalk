@@ -191,11 +191,13 @@
 %% by `beamtalk_result:'tryDo:'/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension
-%% invocation, `tryDo:`) must relay rather than report them. Single source
-%% of truth for the shape check, shared by `beamtalk_class_dispatch.erl`,
-%% `beamtalk_dispatch.erl`, and `beamtalk_result.erl` — per CLAUDE.md's
-%% no-duplicate-implementation rule, a future NLR shape change only needs to
-%% land here.
+%% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
+%% relay rather than report them. Single source of truth for the shape check
+%% across the runtime and stdlib apps — per CLAUDE.md's no-duplicate-
+%% implementation rule, a future NLR shape change only needs to land here.
+%% `just lint-nlr-tuple-matches` (scripts/ci/lint-nlr-tuple-matches.sh)
+%% rejects hand-rolled `{'$bt_nlr', ...}` patterns elsewhere in runtime
+%% sources.
 -define(IS_NLR(T),
     (is_tuple(T) andalso
         (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
