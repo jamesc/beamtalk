@@ -601,7 +601,10 @@ file's other diagnostics (it never fails a build, even under
 `--warnings-as-errors`), and REPL/MCP load carry it in the compile response
 `warnings`. `check`, `lint` and the LSP do not run codegen and never show it.
 No operation is surface-specific. It has no `[diagnostics]` key and no
-`@expect` category. Other codegen warnings are still not forwarded.
+`@expect` category, and `--no-warnings` does not hide it. **Gap:** REPL/MCP
+`eval` of a bare expression (and `.btscript` test expressions) builds its own
+generator and still drops it; load/compile paths carry it. Other codegen
+warnings are still not forwarded.
 
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 

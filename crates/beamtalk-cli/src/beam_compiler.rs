@@ -809,8 +809,6 @@ impl ProvisionSink {
 /// ADR 0007 Phase 3: Same as [`write_core_erlang`] but accepts
 /// a binding table for pragma-driven dispatch.
 ///
-/// # Errors
-///
 /// Returns the `ThreadedIr` verifier diagnostics (ADR 0111 amendment, BT-3724)
 /// — warnings only; the file is written regardless. The caller prints them.
 ///
