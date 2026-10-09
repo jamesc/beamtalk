@@ -879,7 +879,7 @@ pub fn outer_local_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
-        producers_only: false,
+        nested: NestedBlocks::All,
     };
     walker.block(block);
     walker.writes
@@ -891,9 +891,21 @@ struct OuterWriteWalker<'a> {
     /// Names bound inside the block being analysed, innermost last.
     frames: Vec<HashSet<ecow::EcoString>>,
     writes: Vec<OuterLocalWrite>,
-    /// Descend only into the blocks of nested threaded constructs
-    /// ([`construct_outer_local_writes`]); otherwise into every block.
-    producers_only: bool,
+    /// Which nested blocks the walk descends into.
+    nested: NestedBlocks,
+}
+
+/// Which nested blocks an [`OuterWriteWalker`] descends into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NestedBlocks {
+    /// Every block ([`outer_local_writes`]).
+    All,
+    /// Only the blocks of nested local-threading constructs
+    /// ([`construct_outer_local_writes`]).
+    Producers,
+    /// Only the blocks of nested constructs whose family is threaded today
+    /// ([`threaded_today_block_writes`]).
+    ProducersThreadedToday,
 }
 
 impl OuterWriteWalker<'_> {
@@ -934,17 +946,19 @@ impl OuterWriteWalker<'_> {
         self.frames.pop();
     }
 
-    /// A message send. With `producers_only`, only the blocks of a nested
-    /// construct threaded today are walked (its writes are the enclosing
-    /// construct's too); any other block operand is a closure.
+    /// A message send. Unless every block is walked, only the blocks of a
+    /// nested construct are (its writes are the enclosing construct's too);
+    /// any other block operand is a closure.
     fn send(&mut self, send: &Expression, receiver: &Expression, arguments: &[Expression]) {
-        let nested: Vec<&Block> = if self.producers_only {
-            local_threading_construct(send)
+        let nested: Vec<&Block> = match self.nested {
+            NestedBlocks::All => Vec::new(),
+            NestedBlocks::Producers => local_threading_construct(send)
+                .map(|c| c.blocks)
+                .unwrap_or_default(),
+            NestedBlocks::ProducersThreadedToday => local_threading_construct(send)
                 .filter(|c| c.family.is_threaded_today())
                 .map(|c| c.blocks)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+                .unwrap_or_default(),
         };
         for operand in std::iter::once(receiver).chain(arguments) {
             match operand {
@@ -982,7 +996,7 @@ impl OuterWriteWalker<'_> {
                 }
             }
             Expression::Block(block) => {
-                if !self.producers_only {
+                if self.nested == NestedBlocks::All {
                     self.block(block);
                 }
             }
@@ -1091,7 +1105,8 @@ impl LocalThreadingFamily {
     /// A family that answers `false` compiles its blocks as closures. Neither
     /// the Phase 0 allow-set check nor codegen's tuple builders act on it
     /// yet, and a nested one adds nothing to an enclosing construct's
-    /// [`construct_outer_local_writes`].
+    /// [`threaded_today_block_writes`] (it does add to
+    /// [`construct_outer_local_writes`]).
     #[must_use]
     pub fn is_threaded_today(self) -> bool {
         !matches!(self, Self::Lookup | Self::TryDo)
@@ -1226,12 +1241,14 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
 /// name only). This is the construct's threaded set.
 ///
 /// It holds the writes in the construct's own blocks, plus the writes of
-/// every construct nested in them whose family
-/// [`LocalThreadingFamily::is_threaded_today`], transitively (o7/o8: an
-/// outer `on:do:` carries a local written only inside a conditional arm's
-/// inner `on:do:`). Any other nested block is a closure, and its writes are
-/// not this construct's: the §6 check deals with them. `bound_outside` and
-/// the scope rules are those of [`outer_local_writes`].
+/// every construct nested in them, transitively (o7/o8: an outer `on:do:`
+/// carries a local written only inside a conditional arm's inner `on:do:`).
+/// A nested construct counts whether or not its family is threaded today:
+/// the set is what ADR 0131 threads, and
+/// [`threaded_today_block_writes`] is the part threaded now. Any other
+/// nested block is a closure, and its writes are not this construct's: the
+/// §6 check deals with them. `bound_outside` and the scope rules are those
+/// of [`outer_local_writes`].
 #[must_use]
 pub fn construct_outer_local_writes(
     construct: &LocalThreadingConstruct<'_>,
@@ -1246,11 +1263,31 @@ pub fn threaded_block_writes(
     blocks: &[&Block],
     bound_outside: &dyn Fn(&str) -> bool,
 ) -> Vec<OuterLocalWrite> {
+    walk_construct_blocks(blocks, bound_outside, NestedBlocks::Producers)
+}
+
+/// [`threaded_block_writes`] closed only over nested constructs whose
+/// family [`LocalThreadingFamily::is_threaded_today`]: the writes today's
+/// lowering threads back. Codegen's tuple builders pack this set; ADR 0131
+/// phases 2-4 grow it until it is [`threaded_block_writes`].
+#[must_use]
+pub fn threaded_today_block_writes(
+    blocks: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    walk_construct_blocks(blocks, bound_outside, NestedBlocks::ProducersThreadedToday)
+}
+
+fn walk_construct_blocks(
+    blocks: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+    nested: NestedBlocks,
+) -> Vec<OuterLocalWrite> {
     let mut walker = OuterWriteWalker {
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
-        producers_only: true,
+        nested,
     };
     for block in blocks {
         walker.block(block);
@@ -2518,9 +2555,14 @@ mod tests {
             outer_local_writes(construct.blocks[0], &|n| n == "t").len(),
             1
         );
-        // A nested construct that is not threaded today adds nothing...
-        assert!(threaded_set("#(1) do: [:x | Result tryDo: [t := 1]]", &["t"]).is_empty());
-        // ...but its own set is recognized.
+        // A nested construct that is not threaded today is in the set, but
+        // not in the part threaded today.
+        let src = "#(1) do: [:x | Result tryDo: [t := 1]]";
+        assert_eq!(threaded_set(src, &["t"]), vec!["t"]);
+        let expr = parse_first_expr(src);
+        let construct = local_threading_construct(&expr).expect("construct");
+        assert!(threaded_today_block_writes(&construct.blocks, &|n| n == "t").is_empty());
+        // Its own set is recognized too.
         assert_eq!(threaded_set("Result tryDo: [t := 1]", &["t"]), vec!["t"]);
         assert_eq!(
             threaded_set("d at: #k ifAbsent: [t := 1]", &["t"]),

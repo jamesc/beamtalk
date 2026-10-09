@@ -15,7 +15,7 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, local_threading_construct,
-    threaded_block_writes,
+    threaded_block_writes, threaded_today_block_writes,
 };
 use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
@@ -229,13 +229,15 @@ impl CoreErlangGenerator {
     ///
     /// The set is the transitive closure over nested producers (ADR 0131 §1
     /// "Transitive closure"): core's [`threaded_block_writes`] descends into
-    /// the blocks of every nested construct whose family
-    /// [`LocalThreadingFamily::is_threaded_today`]. In the REPL it is the
-    /// bindings the construct writes: every name assigned that is not bound
-    /// inside the construct.
+    /// the blocks of every nested construct. [`ThreadedLocals::lowered`] uses
+    /// [`threaded_today_block_writes`], which descends only into those whose
+    /// family [`LocalThreadingFamily::is_threaded_today`]. In the REPL the
+    /// set is the bindings the construct writes: every name assigned that is
+    /// not bound inside the construct.
     ///
     /// Facts read: core's `block_facts` ([`local_threading_construct`],
-    /// [`threaded_block_writes`], which reads only the AST and the
+    /// [`threaded_block_writes`], [`threaded_today_block_writes`], which read
+    /// only the AST and the
     /// `bound_outside` scope predicate) and `state_threading_selectors`
     /// (through them, plus `state_threaded_block_arg_indices` for
     /// [`ThreadedLocals::lowered`]). The scope predicate is
@@ -297,7 +299,7 @@ impl CoreErlangGenerator {
         let lowered = if repl_map_threaded || lowered_blocks.is_empty() {
             Vec::new()
         } else {
-            Self::write_names(threaded_block_writes(lowered_blocks, &|name| {
+            Self::write_names(threaded_today_block_writes(lowered_blocks, &|name| {
                 self.lookup_var(name).is_some()
             }))
         };
