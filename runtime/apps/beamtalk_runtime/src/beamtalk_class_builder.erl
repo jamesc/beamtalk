@@ -144,46 +144,49 @@ register(BuilderState) when is_map(BuilderState) ->
 -doc "Attempt to start or update the class gen_server.".
 -spec do_register(atom(), map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
 do_register(ClassName, ClassInfo) ->
+    case start_or_update(ClassName, ClassInfo) of
+        {ok, Pid} ->
+            notify_class_loaded(ClassName),
+            {ok, Pid};
+        {error, _Phase, #beamtalk_error{kind = abi_mismatch} = Refused} ->
+            %% ADR 0130 `class_var_abi` gate (registration or hot reload):
+            %% already structured (it names the module and says to recompile);
+            %% do not bury it in an internal_error.
+            {error, Refused};
+        {error, Phase, Reason} ->
+            ?LOG_WARNING("ClassBuilder register failed", #{
+                class => ClassName,
+                phase => Phase,
+                reason => Reason,
+                module => ?MODULE,
+                domain => [beamtalk, runtime]
+            }),
+            Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
+            Error = beamtalk_error:with_hint(
+                Error1,
+                iolist_to_binary(io_lib:format("~s failed: ~p", [Phase, Reason]))
+            ),
+            {error, Error}
+    end.
+
+%% Start the class gen_server, or update it in place when it already exists
+%% (hot reload). A failure is tagged with the step that failed.
+-spec start_or_update(atom(), map()) ->
+    {ok, pid()} | {error, start | update_class, term()}.
+start_or_update(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
         {ok, Pid} ->
             ?LOG_DEBUG("Registered class via ClassBuilder", #{
                 class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
             }),
-            notify_class_loaded(ClassName),
             {ok, Pid};
         {error, {already_started, _}} ->
-            %% Hot reload path: class already exists, update its metadata.
             case beamtalk_object_class:update_class(ClassName, ClassInfo) of
-                {ok, _IVars} ->
-                    notify_class_loaded(ClassName),
-                    {ok, beamtalk_class_registry:whereis_class(ClassName)};
-                {error, #beamtalk_error{kind = abi_mismatch} = Refused} ->
-                    {error, Refused};
-                {error, Reason} ->
-                    ?LOG_WARNING("ClassBuilder update_class failed", #{
-                        class => ClassName,
-                        reason => Reason,
-                        module => ?MODULE,
-                        domain => [beamtalk, runtime]
-                    }),
-                    Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
-                    Error = beamtalk_error:with_hint(
-                        Error1,
-                        iolist_to_binary(io_lib:format("update_class failed: ~p", [Reason]))
-                    ),
-                    {error, Error}
+                {ok, _IVars} -> {ok, beamtalk_class_registry:whereis_class(ClassName)};
+                {error, Reason} -> {error, update_class, Reason}
             end;
-        {error, #beamtalk_error{kind = abi_mismatch} = Refused} ->
-            %% ADR 0130 `class_var_abi` gate: already structured (it names the
-            %% module and says to recompile); do not bury it in an internal_error.
-            {error, Refused};
         {error, Reason} ->
-            Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
-            Error = beamtalk_error:with_hint(
-                Error1,
-                iolist_to_binary(io_lib:format("start failed: ~p", [Reason]))
-            ),
-            {error, Error}
+            {error, start, Reason}
     end.
 
 -doc """
