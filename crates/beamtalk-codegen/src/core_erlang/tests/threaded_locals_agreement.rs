@@ -13,16 +13,24 @@
 //! codegen tracks differently from the source shows up as a disagreement.
 //!
 //! It also checks the set today's lowering packs (`ThreadedLocals::lowered`,
-//! the only set that reaches the generated code): every time codegen
-//! computes it for the same blocks, on the packing side (the loop, fold,
-//! conditional and exception generators) or the unpacking side (the
-//! sequencers reading `lowered_threaded_locals_of`), the answer is the same.
+//! the only set that reaches the generated code), per construct: the packing
+//! side (the loop, fold, conditional and exception generators) and the
+//! unpacking side (the sequencers reading `lowered_threaded_locals_of`) must
+//! select the same blocks of the construct and compute the same set. Records
+//! are keyed by the construct that owns the blocks (from the source), so a
+//! block-selection drift between the two sides is compared, not filed under
+//! two keys.
+//!
+//! `class_var_program` generates class methods only, so it never produces a
+//! value-type or actor loop, nor a stateful `whileTrue:` condition (a
+//! condition that sends to `self` outside a class method).
+//! [`HAND_WRITTEN`] adds those shapes in every method context.
 //!
 //! What it does not check yet: that every Tier 2 argument the §6 pass
 //! accepts lowers to a producer and every one it rejects does not. That
 //! needs the producer (ADR 0131 phase 2, BT-3749).
 
-use crate::core_erlang::threading_analysis::recorded_sets::recording;
+use crate::core_erlang::threading_analysis::recorded_sets::{Side, recording};
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::{Block, Expression, ExpressionStatement};
 use beamtalk_core::semantic_analysis::block_facts::{
@@ -32,20 +40,24 @@ use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 use beamtalk_core::test_helpers::class_var_program::{Shapes, Spelling, gen_program};
 use std::collections::{HashMap, HashSet};
 
-/// The source-scope threaded set of every construct in a method body.
+/// The source-scope threaded set of every construct in a method body, and
+/// which construct owns each construct block.
 struct SourceSets {
     frames: Vec<HashSet<String>>,
     sets: HashMap<Span, Vec<String>>,
+    /// Construct block span -> the span of the send it belongs to.
+    owners: HashMap<Span, Span>,
 }
 
 impl SourceSets {
-    fn method(params: Vec<String>, body: &[ExpressionStatement]) -> HashMap<Span, Vec<String>> {
+    fn method(params: Vec<String>, body: &[ExpressionStatement]) -> Self {
         let mut walk = SourceSets {
             frames: vec![params.into_iter().collect()],
             sets: HashMap::new(),
+            owners: HashMap::new(),
         };
         walk.body(body);
-        walk.sets
+        walk
     }
 
     fn bound(&self, name: &str) -> bool {
@@ -102,6 +114,9 @@ impl SourceSets {
                             .collect();
                     names.sort();
                     self.sets.insert(expr.span(), names);
+                    for block in &construct.blocks {
+                        self.owners.insert(block.span, expr.span());
+                    }
                 }
                 self.expr(receiver);
                 for arg in arguments {
@@ -136,9 +151,11 @@ impl SourceSets {
 struct Agreed {
     /// Non-empty `names` sets that matched the core recognizer.
     names: usize,
-    /// Block sets whose non-empty lowered set codegen computed more than
-    /// once, always alike.
+    /// Constructs whose non-empty lowered set both the packing and the
+    /// unpacking side computed, with the same blocks and the same set.
     lowered: usize,
+    /// Per construct: how many blocks were selected, and the lowered set.
+    selections: Vec<(usize, Vec<String>)>,
 }
 
 /// Codegen's records for one class source, checked against the source
@@ -147,6 +164,7 @@ fn check_class(name: &str, source: &str) -> Result<Option<Agreed>, String> {
     let (module, diagnostics) = parse(lex_with_eof(source));
     assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
     let mut source_sets: HashMap<Span, Vec<String>> = HashMap::new();
+    let mut owners: HashMap<Span, Span> = HashMap::new();
     for class in &module.classes {
         for method in class.methods.iter().chain(&class.class_methods) {
             let params = method
@@ -154,7 +172,9 @@ fn check_class(name: &str, source: &str) -> Result<Option<Agreed>, String> {
                 .iter()
                 .map(|p| p.name.name.to_string())
                 .collect();
-            source_sets.extend(SourceSets::method(params, &method.body));
+            let walk = SourceSets::method(params, &method.body);
+            source_sets.extend(walk.sets);
+            owners.extend(walk.owners);
         }
     }
     let (generated, records) =
@@ -186,20 +206,31 @@ fn check_class(name: &str, source: &str) -> Result<Option<Agreed>, String> {
             agreed.names += 1;
         }
     }
-    let mut lowered: HashMap<Vec<Span>, (Vec<String>, usize)> = HashMap::new();
-    for (blocks, set) in records.lowered {
-        let entry = lowered.entry(blocks.clone()).or_insert((set.clone(), 0));
-        if entry.0 != set {
+    // Per construct: the first record, and which sides recorded it.
+    let mut lowered: HashMap<Span, (Vec<Span>, Vec<String>, HashSet<bool>)> = HashMap::new();
+    for (side, blocks, set) in records.lowered {
+        let Some(construct) = blocks.first().and_then(|b| owners.get(b)).copied() else {
+            continue;
+        };
+        let entry = lowered
+            .entry(construct)
+            .or_insert_with(|| (blocks.clone(), set.clone(), HashSet::new()));
+        if entry.0 != blocks || entry.1 != set {
             return Err(format!(
-                "for the blocks at {blocks:?} codegen packed {:?} once and {set:?} another time\n{source}",
-                entry.0
+                "for the construct at {construct:?} codegen selected {:?} packing {:?} once, \
+                 and {blocks:?} packing {set:?} on the {side:?} side\n{source}",
+                entry.0, entry.1
             ));
         }
-        entry.1 += 1;
+        entry.2.insert(side == Side::Pack);
     }
+    agreed.selections = lowered
+        .values()
+        .map(|(blocks, set, _)| (blocks.len(), set.clone()))
+        .collect();
     agreed.lowered = lowered
         .values()
-        .filter(|(set, count)| !set.is_empty() && *count > 1)
+        .filter(|(_, set, sides)| !set.is_empty() && sides.len() == 2)
         .count();
     Ok(Some(agreed))
 }
@@ -240,6 +271,127 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_class_var_corpus(
     );
 }
 
+/// Hand-written shapes the generated corpus does not produce: loops,
+/// folds, conditionals and protected blocks writing method locals in
+/// value-type, actor and class methods, including a stateful `whileTrue:`
+/// condition (BT-3746 review: a value-type condition that sends to `self`
+/// is packed by the stateful-condition lowering).
+const HAND_WRITTEN: &[(&str, &str)] = &[
+    (
+        "bt@hw_value",
+        "Value subclass: HwValue
+  check: n => n < 3
+
+  stateful =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self check: t
+    ] whileTrue: [u := u + 1]
+    #[t, u]
+
+  plain =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue: [u := u + 1]
+    #[t, u]
+
+  nested =>
+    s := 0
+    1 to: 3 do: [:i | #(1, 2) do: [:x | s := s + x]]
+    s
+
+  cond: f =>
+    s := 0
+    f ifTrue: [#(1, 2) do: [:x | s := s + x]] ifFalse: [s := 9]
+    s
+
+  guarded =>
+    s := 0
+    [#(1, 2) do: [:x | s := s + x]] ensure: [nil]
+    s
+",
+    ),
+    (
+        "bt@hw_actor",
+        "Actor subclass: HwActor
+  check: n => n < 3
+
+  stateful =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self check: t
+    ] whileTrue: [u := u + 1]
+    #[t, u]
+
+  nested =>
+    s := 0
+    1 to: 3 do: [:i | #(1, 2) do: [:x | s := s + x]]
+    s
+
+  each =>
+    s := 0
+    #(4, 5) eachWithIndex: [:x :i | s := s + i]
+    s
+",
+    ),
+    (
+        "bt@hw_class",
+        "Object subclass: HwClass
+  class plain =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue: [u := u + 1]
+    #[t, u]
+
+  class nested =>
+    s := 0
+    1 to: 3 do: [:i | #(1, 2) do: [:x | s := s + x]]
+    s
+",
+    ),
+];
+
+#[test]
+fn threaded_locals_of_agrees_on_hand_written_shapes_in_every_context() {
+    let mut both_sides = 0;
+    for (name, source) in HAND_WRITTEN {
+        match check_class(name, source) {
+            Ok(Some(n)) => {
+                both_sides += n.lowered;
+                // Every stateful `whileTrue:` (value type and actor) packs its
+                // condition's write: two blocks, `t` and `u`.
+                if name != &"bt@hw_class" {
+                    assert!(
+                        n.selections
+                            .contains(&(2, vec!["t".to_string(), "u".to_string()])),
+                        "{name}: the stateful whileTrue: condition is not packed: {:?}",
+                        n.selections
+                    );
+                }
+            }
+            Ok(None) => panic!("{name}: codegen rejected the program"),
+            Err(e) => panic!("{name}: {e}"),
+        }
+    }
+    // Value-type and class-method loops read their result back through the
+    // same `loop_threaded_locals` the generator packs with, so only the
+    // actor constructs are seen from both sides here.
+    assert!(
+        both_sides >= 3,
+        "only {both_sides} constructs compared on both sides"
+    );
+}
+
 #[test]
 fn source_sets_walk_sees_assignment_order() {
     // Sanity check of the oracle itself: `t` is bound before the loop, `u`
@@ -247,7 +399,7 @@ fn source_sets_walk_sees_assignment_order() {
     let src = "Object subclass: P\n  class m => \n    t := 0\n    #(1) do: [:x | t := x. u := x]\n    t\n";
     let (module, _) = parse(lex_with_eof(src));
     let method = &module.classes[0].class_methods[0];
-    let sets = SourceSets::method(Vec::new(), &method.body);
+    let sets = SourceSets::method(Vec::new(), &method.body).sets;
     assert_eq!(
         sets.values().collect::<Vec<_>>(),
         vec![&vec!["t".to_string()]]

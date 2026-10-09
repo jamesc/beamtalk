@@ -1829,11 +1829,11 @@ impl CoreErlangGenerator {
                 Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
             ) {
                 if let Some(Expression::Block(body)) = arguments.first() {
-                    // Must match the same check used by generate_while_true/generate_while_false
-                    let analysis = super::block_analysis::analyze_block(body);
-                    if !self.needs_mutation_threading(&analysis)
-                        && !self.body_has_list_op_cross_scope_mutations(body)
-                    {
+                    // The same check `generate_while_true`/`generate_while_false`
+                    // use, including a stateful condition (BT-3746: a
+                    // condition-only write used to produce a tuple nobody
+                    // unpacked).
+                    if !self.while_loop_threads(receiver, body) {
                         return false;
                     }
                     // Verify there are actually threaded locals to extract

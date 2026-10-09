@@ -265,11 +265,18 @@ impl CoreErlangGenerator {
                 expr,
                 ConstructPosition::Top(self.today_lowering()),
             );
-            self.threaded_locals_of_blocks(
+            let set = self.threaded_locals_of_blocks(
                 ThreadedConstruct::Inline(construct.family),
                 &construct.blocks,
                 &lowered_blocks,
-            )
+            );
+            #[cfg(test)]
+            recorded_sets::record_lowered(
+                recorded_sets::Side::Unpack,
+                &lowered_blocks,
+                set.as_ref().map_or(&[][..], |s| &s.lowered),
+            );
+            set
         });
         #[cfg(test)]
         recorded_sets::record(expr, set.as_ref());
@@ -292,7 +299,8 @@ impl CoreErlangGenerator {
     fn today_lowering(&self) -> TodayLowering {
         TodayLowering {
             actor_fold: self.enumeration_threads_actor_state(),
-            loop_condition: self.context == CodeGenContext::Actor,
+            actor_context: self.context == CodeGenContext::Actor,
+            class_method: self.in_class_method(),
         }
     }
 
@@ -331,8 +339,6 @@ impl CoreErlangGenerator {
                 self.lookup_var(name).is_some()
             }))
         };
-        #[cfg(test)]
-        recorded_sets::record_lowered(lowered_blocks, &lowered);
         let names = Self::write_names(threaded_block_writes(blocks, &|name| {
             repl || self.lookup_var(name).is_some()
         }));
@@ -347,8 +353,8 @@ impl CoreErlangGenerator {
     }
 
     /// The lowered set of a loop or fold generator's `body` block (and,
-    /// for `whileTrue:`/`whileFalse:`, its `condition`, packed in actor
-    /// context only, as [`TodayLowering::loop_condition`] says): the
+    /// for `whileTrue:`/`whileFalse:`, its `condition`, when
+    /// [`TodayLowering::threads_loop_condition`] says it is packed): the
     /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks
     /// [`threaded_today_blocks`] selects from the send. Empty when it
     /// threads nothing.
@@ -359,20 +365,24 @@ impl CoreErlangGenerator {
     ) -> Vec<String> {
         let mut blocks: Vec<&Block> = Vec::with_capacity(2);
         if let Some(Expression::Block(cond)) = condition {
-            if self.today_lowering().loop_condition {
+            if self.today_lowering().threads_loop_condition(cond) {
                 blocks.push(cond);
             }
         }
         blocks.push(body);
         // `Loop` and `Fold` lower alike here (they differ only in which
         // blocks the send contributes, which the caller has already picked).
-        self.threaded_locals_of_blocks(
-            ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
-            &blocks,
-            &blocks,
-        )
-        .map(|t| t.lowered)
-        .unwrap_or_default()
+        let lowered = self
+            .threaded_locals_of_blocks(
+                ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
+                &blocks,
+                &blocks,
+            )
+            .map(|t| t.lowered)
+            .unwrap_or_default();
+        #[cfg(test)]
+        recorded_sets::record_lowered(recorded_sets::Side::Pack, &blocks, &lowered);
+        lowered
     }
 
     /// The lowered set of a conditional's branch blocks, or of an
@@ -383,6 +393,20 @@ impl CoreErlangGenerator {
     /// extraction emitted by the method-body sequencer, so a branch that
     /// does not run never leaves a `__local__` key missing.
     pub(in crate::core_erlang) fn branch_threaded_locals(&self, blocks: &[&Block]) -> Vec<String> {
+        let lowered = self.branch_lowered_locals(blocks);
+        #[cfg(test)]
+        recorded_sets::record_lowered(recorded_sets::Side::Pack, blocks, &lowered);
+        lowered
+    }
+
+    /// Whether any of `blocks` writes a local today's conditional and
+    /// exception lowering threads ([`Self::branch_threaded_locals`]'s set is
+    /// not empty). A gate on one block of a construct, not a packing site.
+    pub(in crate::core_erlang) fn blocks_write_threaded_local(&self, blocks: &[&Block]) -> bool {
+        !self.branch_lowered_locals(blocks).is_empty()
+    }
+
+    fn branch_lowered_locals(&self, blocks: &[&Block]) -> Vec<String> {
         self.threaded_locals_of_blocks(
             ThreadedConstruct::Inline(LocalThreadingFamily::Conditional),
             blocks,
@@ -543,11 +567,11 @@ impl CoreErlangGenerator {
 }
 
 /// Test-only record of every [`CoreErlangGenerator::threaded_locals_of`]
-/// answer and every lowered set the kernel computes, so the agreement
-/// corpus test (`tests/threaded_locals_agreement.rs`) can check them during
-/// real codegen: the sets against the `beamtalk-core` diagnostic pass's
-/// recognizer, and the unpacking side's lowered set against the packing
-/// side's for the same blocks.
+/// answer and every lowered set the packing and unpacking sides compute, so
+/// the agreement corpus test (`tests/threaded_locals_agreement.rs`) can
+/// check them during real codegen: the sets against the `beamtalk-core`
+/// diagnostic pass's recognizer, and, per construct, the packing side's
+/// block selection and lowered set against the unpacking side's.
 #[cfg(test)]
 pub(in crate::core_erlang) mod recorded_sets {
     use super::ThreadedLocals;
@@ -555,15 +579,28 @@ pub(in crate::core_erlang) mod recorded_sets {
     use beamtalk_core::source_analysis::Span;
     use std::cell::RefCell;
 
+    /// Which side of a construct computed a lowered set.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(in crate::core_erlang) enum Side {
+        /// A generator building the construct's result tuple
+        /// (`loop_threaded_locals`, `branch_threaded_locals`).
+        Pack,
+        /// A sequencer reading it back (`threaded_locals_of`).
+        Unpack,
+    }
+
+    /// One lowered set: which side, the spans of the blocks it was
+    /// computed from (sorted), and the set.
+    pub(in crate::core_erlang) type Lowered = (Side, Vec<Span>, Vec<String>);
+
     /// What one recording captured.
     #[derive(Debug, Default)]
     pub(in crate::core_erlang) struct Records {
         /// Each `threaded_locals_of` answer: the construct's span and its
         /// `names` (`None`: not a construct, or it threads nothing).
         pub(in crate::core_erlang) names: Vec<(Span, Option<Vec<String>>)>,
-        /// Each kernel call: the spans of the blocks it packed from, and
-        /// the lowered set.
-        pub(in crate::core_erlang) lowered: Vec<(Vec<Span>, Vec<String>)>,
+        /// Each lowered set computed.
+        pub(in crate::core_erlang) lowered: Vec<Lowered>,
     }
 
     thread_local! {
@@ -580,12 +617,12 @@ pub(in crate::core_erlang) mod recorded_sets {
         });
     }
 
-    pub(super) fn record_lowered(blocks: &[&Block], lowered: &[String]) {
+    pub(super) fn record_lowered(side: Side, blocks: &[&Block], lowered: &[String]) {
         RECORDS.with(|r| {
             if let Some(records) = r.borrow_mut().as_mut() {
                 let mut spans: Vec<Span> = blocks.iter().map(|b| b.span).collect();
                 spans.sort_by_key(|s| (s.start(), s.end()));
-                records.lowered.push((spans, lowered.to_vec()));
+                records.lowered.push((side, spans, lowered.to_vec()));
             }
         });
     }

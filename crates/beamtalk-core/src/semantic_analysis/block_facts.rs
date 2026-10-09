@@ -1281,9 +1281,34 @@ pub struct TodayLowering {
     /// `eachWithIndex:`/`do:separatedBy:` thread only inside an actor's own
     /// fold (codegen's `enumeration_threads_actor_state`).
     pub actor_fold: bool,
-    /// A `whileTrue:`/`whileFalse:` condition block's writes are packed
-    /// (actor context only; the value-type loop packs only the body's).
-    pub loop_condition: bool,
+    /// Actor context: every `whileTrue:`/`whileFalse:` condition's writes
+    /// are packed.
+    pub actor_context: bool,
+    /// A class method: no condition goes through the stateful-condition
+    /// lowering ([`is_stateful_while_condition`]).
+    pub class_method: bool,
+}
+
+impl TodayLowering {
+    /// Whether today's lowering packs the writes of `condition`, a
+    /// `whileTrue:`/`whileFalse:` condition block: in actor context always,
+    /// elsewhere when the condition goes through the stateful-condition
+    /// lowering ([`is_stateful_while_condition`]), whose
+    /// `generate_local_var_assignment_in_loop` writes each local into the
+    /// loop's `StateAcc`.
+    #[must_use]
+    pub fn threads_loop_condition(self, condition: &Block) -> bool {
+        self.actor_context || is_stateful_while_condition(condition, self.class_method)
+    }
+}
+
+/// Whether a `whileTrue:`/`whileFalse:` condition block is lowered as a
+/// stateful condition (codegen's `condition_has_state_effects`, which
+/// delegates here): outside a class method, a condition with a state effect
+/// (a self-send or a field write).
+#[must_use]
+pub fn is_stateful_while_condition(condition: &Block, class_method: bool) -> bool {
+    !class_method && analyze_block(condition).has_state_effects()
 }
 
 /// ADR 0131 phase 1 (BT-3746): the blocks of `construct` (recognized from
@@ -1295,7 +1320,7 @@ pub struct TodayLowering {
 /// At the top:
 /// - conditionals and `on:do:`/`ensure:`: every block;
 /// - `whileTrue:`/`whileFalse:` with a literal receiver and body: the body,
-///   plus the condition when [`TodayLowering::loop_condition`];
+///   plus the condition when [`TodayLowering::threads_loop_condition`];
 /// - `eachWithIndex:`/`do:separatedBy:`: every block, only when
 ///   [`TodayLowering::actor_fold`];
 /// - any other loop or fold: the blocks at
@@ -1347,7 +1372,9 @@ pub fn threaded_today_blocks<'a>(
             match sel {
                 "whileTrue:" | "whileFalse:" => {
                     match (literal(Some(receiver.as_ref())), literal(arguments.first())) {
-                        (Some(cond), Some(body)) if ctx.loop_condition => vec![cond, body],
+                        (Some(cond), Some(body)) if ctx.threads_loop_condition(cond) => {
+                            vec![cond, body]
+                        }
                         (Some(_), Some(body)) => vec![body],
                         _ => Vec::new(),
                     }
@@ -2699,16 +2726,28 @@ mod tests {
     fn threaded_today_blocks_is_one_rule_for_top_level_and_nested_constructs() {
         let actor = TodayLowering {
             actor_fold: true,
-            loop_condition: true,
+            actor_context: true,
+            class_method: false,
         };
         let value = TodayLowering {
             actor_fold: false,
-            loop_condition: false,
+            actor_context: false,
+            class_method: false,
+        };
+        let class = TodayLowering {
+            actor_fold: false,
+            actor_context: false,
+            class_method: true,
         };
         // Top level: a `whileTrue:` condition counts only where it is packed.
         let w = "[t := t + 1. t < 3] whileTrue: [u := 1]";
         assert_eq!(today_set(w, &["t", "u"], actor), vec!["t", "u"]);
         assert_eq!(today_set(w, &["t", "u"], value), vec!["u"]);
+        // ...or where it is a stateful condition (a self-send), outside a
+        // class method.
+        let sw = "[t := t + 1. self check: t] whileTrue: [u := 1]";
+        assert_eq!(today_set(sw, &["t", "u"], value), vec!["t", "u"]);
+        assert_eq!(today_set(sw, &["t", "u"], class), vec!["u"]);
         // Top level: a `detect:ifNone:` handler is not packed.
         let d = "#(1) detect: [:x | a := x. true] ifNone: [b := 0. 0]";
         assert_eq!(today_set(d, &["a", "b"], actor), vec!["a"]);

@@ -503,7 +503,7 @@ impl CoreErlangGenerator {
             // local, so the construct must produce that tuple in the same case,
             // including for a write-only local that `needs_mutation_threading`
             // does not count.
-            || (self.in_class_method() && !self.branch_threaded_locals(&[block]).is_empty())
+            || (self.in_class_method() && self.blocks_write_threaded_local(&[block]))
     }
 
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception

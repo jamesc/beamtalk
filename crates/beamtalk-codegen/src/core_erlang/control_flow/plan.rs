@@ -258,13 +258,16 @@ pub(in crate::core_erlang) fn condition_has_state_effects(
     generator: &CoreErlangGenerator,
     condition: &Expression,
 ) -> bool {
-    if generator.in_class_method() {
-        return false;
-    }
-    if let Expression::Block(cond_block) = condition {
-        block_analysis::analyze_block(cond_block).has_state_effects()
-    } else {
-        false
+    // The one rule, shared with the threaded-locals selection
+    // (`TodayLowering::threads_loop_condition`, BT-3746).
+    match condition {
+        Expression::Block(cond_block) => {
+            beamtalk_core::semantic_analysis::block_facts::is_stateful_while_condition(
+                cond_block,
+                generator.in_class_method(),
+            )
+        }
+        _ => false,
     }
 }
 
