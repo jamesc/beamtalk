@@ -9,6 +9,7 @@
 // answers 0. Fixtures: fixtures/bt3746nested_while_{class,value,actor}.bt.
 
 TestCase subclass: Bt3746NestedWhileTest
+
   // PIN-BUG BT-3749: pins today's answer (the nested `whileTrue:` write is lost); the correct answer is 3.
   testClassMethod => self assert: Bt3746NestedWhileClass run equals: 0
 

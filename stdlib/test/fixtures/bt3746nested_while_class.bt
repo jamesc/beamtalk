@@ -6,6 +6,7 @@
 // stdlib/test/bt3746nested_while_test.bt.
 
 Object subclass: Bt3746NestedWhileClass
+
   class run =>
     s := 0
     1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]
