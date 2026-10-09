@@ -33,15 +33,15 @@
 //! `beamtalk_class_vars:snapshot/0` and the stdlib `TestCase` class loads, so
 //! a missing or stale `runtime/` build fails with one line naming
 //! `just build-stdlib` (a plain `cargo test` does not build the stdlib). A
-//! batch is reported as probably a broken environment, not as N wrong answers,
-//! and is not bisected, when its output contains `Undefined function`,
-//! `setUp failed` or `abi_mismatch` and either no test produced a result line
-//! (the runner crashed after load) or every test of at least
-//! [`MIN_PROGRAMS_SAME_MESSAGE`] programs failed; or when every program and
-//! spelling of that many programs failed with the same message. Anything else
-//! (a marker in only some tests, or in a smaller batch) is a program's failure,
-//! since the preflight already passed, and is reported and bisected like any
-//! other. A real codegen bug can still look like an environment failure, so
+//! batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] distinct programs (every
+//! environment rule needs that many) is reported as probably a broken
+//! environment, not as N wrong answers, and is not bisected, when its output
+//! contains `Undefined function`, `setUp failed` or `abi_mismatch` and either
+//! no test produced a result line (the runner crashed after load) or every
+//! test failed; or when every program and spelling failed with the same
+//! message. Anything else (a marker in only some tests, or any smaller batch)
+//! is a program's failure, since the preflight already passed, and is
+//! reported and bisected like any other. A real codegen bug can still look like an environment failure, so
 //! that report carries every `(index, seed, size)` pair in the batch, the
 //! marker's (or first failing) program's detail and source, and any failures
 //! already recorded.
@@ -71,8 +71,10 @@ use std::sync::OnceLock;
 const DEFAULT_CASES: usize = 16;
 
 /// Output fragments that mean the environment (a stale or missing
-/// `runtime/` / stdlib build), not the generated program, is at fault, when
-/// every test in the batch failed (see [`environment_cause`]).
+/// `runtime/` / stdlib build), not the generated program, is at fault, in a
+/// batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] programs where either no
+/// test produced a result line (a runner crash after load) or every test
+/// failed (see [`environment_cause`]).
 const ENVIRONMENT_MARKERS: [(&str, &str); 3] = [
     (
         "Undefined function",
@@ -88,11 +90,15 @@ const ENVIRONMENT_MARKERS: [(&str, &str); 3] = [
     ),
 ];
 
-/// Fewest distinct programs in a batch before "every test failed" (with an
-/// [`ENVIRONMENT_MARKERS`] entry, or all with the same message) counts as an
-/// environment failure: with fewer, one codegen bug hitting a narrowed draw
-/// (`CV_CORPUS_SHAPES`, a small `CV_CORPUS_CASES`) looks the same.
-const MIN_PROGRAMS_SAME_MESSAGE: usize = 4;
+/// Fewest distinct programs in a batch before any rule of
+/// [`environment_cause`] (a marker with no result lines or with every test
+/// failed, or one message everywhere) counts as an environment failure. The
+/// default (16) and nightly (192) draws are above it, so a real runner crash
+/// short-circuits at the top level. With fewer programs (a bisection
+/// sub-batch, or a narrowed draw via `CV_CORPUS_SHAPES` or a small
+/// `CV_CORPUS_CASES`), one codegen bug looks the same, so the batch goes to
+/// `Batch::Tests` or the cheap offender search, which blame the right program.
+const MIN_ENVIRONMENT_PROGRAMS: usize = 4;
 
 /// The one-line report for a failed [`preflight`]: certainly the environment.
 fn preflight_headline(cause: &str) -> String {
@@ -231,9 +237,10 @@ enum Batch {
     Tests(Vec<String>, String),
     /// Did not compile, crashed before any result line, or failed in a way
     /// [`environment_cause`] attributes to the environment. `environment` is
-    /// then [`environment_headline`] (an [`ENVIRONMENT_MARKERS`] entry with no
-    /// result lines or with every test of a large enough batch failing, or
-    /// one message everywhere); such a batch is reported, never bisected.
+    /// then [`environment_headline`] (in a batch of at least
+    /// [`MIN_ENVIRONMENT_PROGRAMS`] programs: an [`ENVIRONMENT_MARKERS`] entry
+    /// with no result lines or with every test failing, or one message
+    /// everywhere); such a batch is reported, never bisected.
     /// `None` is a compile failure or crash, bisected to its programs.
     Broken {
         text: String,
@@ -294,20 +301,26 @@ fn run_package(pkg: &Package) -> Batch {
 /// Why `text` (a failed run of `pkg`) looks like a broken environment rather
 /// than a wrong program, or `None` (BT-3767). The preflight has already ruled
 /// out a stale runtime, so this is deliberately narrow; one codegen bug must
-/// never hide the rest of the batch:
+/// never hide the rest of the batch. A batch of fewer than
+/// [`MIN_ENVIRONMENT_PROGRAMS`] distinct programs is never environment (it
+/// falls through to `Batch::Tests` or bisection, which blame its programs).
+/// In a larger batch:
 ///
 /// - No test produced a result line (the runner crashed after load) and the
-///   output contains an [`ENVIRONMENT_MARKERS`] entry: environment, whatever
-///   the batch size.
+///   output contains an [`ENVIRONMENT_MARKERS`] entry: environment.
 /// - Some tests failed and some did not: never environment (reported and
 ///   bisected like any other failure).
-/// - Every test failed, in a batch of at least [`MIN_PROGRAMS_SAME_MESSAGE`]
-///   programs: environment when the output contains a marker, or when every
-///   program and spelling failed with the same message (generated programs
-///   expect different answers, so identical messages across that many are
-///   unlikely to be one bug). A smaller batch falls through to
-///   `Batch::Tests`, which reports each message.
+/// - Every test failed: environment when the output contains a marker, or
+///   when every program and spelling failed with the same message (generated
+///   programs expect different answers, so identical messages across that
+///   many are unlikely to be one bug).
 fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
+    let mut programs: Vec<usize> = pkg.test_names.iter().map(|(i, _, _)| *i).collect();
+    programs.sort_unstable();
+    programs.dedup();
+    if programs.len() < MIN_ENVIRONMENT_PROGRAMS {
+        return None;
+    }
     let reported: Vec<Option<&str>> = pkg
         .test_names
         .iter()
@@ -316,15 +329,6 @@ fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
     let messages: Vec<&str> = if reported.iter().all(Option::is_none) {
         Vec::new()
     } else {
-        let programs = {
-            let mut ids: Vec<usize> = pkg.test_names.iter().map(|(i, _, _)| *i).collect();
-            ids.sort_unstable();
-            ids.dedup();
-            ids.len()
-        };
-        if programs < MIN_PROGRAMS_SAME_MESSAGE {
-            return None;
-        }
         reported.into_iter().collect::<Option<_>>()?
     };
     if let Some((marker, cause)) = ENVIRONMENT_MARKERS.iter().find(|(m, _)| text.contains(m)) {
@@ -450,7 +454,7 @@ fn environment_report(
     if !earlier.is_empty() {
         let _ = writeln!(
             s,
-            "--- {} failures recorded before this batch",
+            "--- failures recorded before this batch: {}",
             earlier.len()
         );
         for f in earlier {
@@ -639,11 +643,11 @@ fn class_var_agreement_local_touch() {
     property(Shapes::all());
 }
 
-/// `MIN_PROGRAMS_SAME_MESSAGE` small programs, program `i` from seed
+/// `MIN_ENVIRONMENT_PROGRAMS` small programs, program `i` from seed
 /// `1000 + i`, size 1 (for the classification tests below).
 fn fixture_cases() -> Vec<Case> {
     use beamtalk_core::test_helpers::class_var_program::gen_program;
-    (0..MIN_PROGRAMS_SAME_MESSAGE)
+    (0..MIN_ENVIRONMENT_PROGRAMS)
         .map(|index| Case {
             index,
             seed: 1000 + index as u64,
@@ -684,11 +688,11 @@ fn class_var_agreement_classifies_runner_output() {
     assert_eq!(failure_message(&prose, names[0]), None);
 
     // Every program and spelling failing with the same message, across
-    // `MIN_PROGRAMS_SAME_MESSAGE` programs.
+    // `MIN_ENVIRONMENT_PROGRAMS` programs.
     let same: String = names.iter().map(|n| line(n, "boom")).collect();
     assert!(environment_cause(&pkg, &same).is_some_and(|c| c.contains("same message")));
     // ... but below the threshold it may be one codegen bug: not classified.
-    let small = package_of(&cases[..MIN_PROGRAMS_SAME_MESSAGE - 1]);
+    let small = package_of(&cases[..MIN_ENVIRONMENT_PROGRAMS - 1]);
     let small_same: String = small
         .test_names
         .iter()
@@ -709,12 +713,14 @@ fn class_var_agreement_classifies_runner_output() {
     let one_marker = line(names[0], "Undefined function: beamtalk_x:y/0");
     assert_eq!(environment_cause(&pkg, &one_marker), None);
 
-    // A runner crash after load: a marker and no result line at all is an
-    // environment failure, whatever the batch size.
+    // A runner crash after load: a marker and no result line at all, in a
+    // `MIN_ENVIRONMENT_PROGRAMS`-program batch, is an environment failure.
     let crash = "Running tests...\nerror: abi_mismatch: module compiled for ABI 3\n";
     assert!(environment_cause(&pkg, crash).is_some_and(|c| c.contains("ABI")));
+    // ... but a 1-program batch (a bisection sub-batch) is that program's
+    // load-time failure: not classified, so the offender search blames it.
     let tiny = package_of(&cases[..1]);
-    assert!(environment_cause(&tiny, crash).is_some());
+    assert_eq!(environment_cause(&tiny, crash), None);
     // ... but no marker and no result line is a crash, bisected as usual.
     assert_eq!(environment_cause(&pkg, "Running tests...\nboom\n"), None);
 
@@ -728,7 +734,7 @@ fn class_var_agreement_classifies_runner_output() {
     assert_eq!(environment_cause(&tiny, &tiny_marker), None);
 
     // A stale stdlib: the marker in every test of a
-    // `MIN_PROGRAMS_SAME_MESSAGE`-program batch is an environment failure.
+    // `MIN_ENVIRONMENT_PROGRAMS`-program batch is an environment failure.
     let stale: String = names
         .iter()
         .map(|n| {
@@ -778,7 +784,7 @@ fn class_var_agreement_classifies_runner_output_report() {
     }];
     let report = environment_report(&headline, &stale, &pkg, &refs, &earlier);
     assert!(
-        report.contains("1 failures recorded before this batch")
+        report.contains("failures recorded before this batch: 1")
             && report.contains("program 7 (seed 4242, size 3): wrong answer"),
         "{report}"
     );
