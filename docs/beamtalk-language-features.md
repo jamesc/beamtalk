@@ -2781,7 +2781,7 @@ count := CvA ap: [count + 1]
 10 timesRepeat: [count := count + 1]
 ```
 
-Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is always accepted, and `r := <construct>` is accepted wherever it threads correctly.
+Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is accepted unless it is one of the statement shapes that lose the write today ([BT-3753](https://linear.app/beamtalk/issue/BT-3753)): most constructs nested in a conditional arm, a protected body or a loop body of a class or value-type method (for example `flag ifTrue: [items do: [:x | count := count + x]]`), `eachWithIndex:`, `do:separatedBy:`, `keysAndValuesDo:`, `ifNil:`, `and:`/`or:` and `anySatisfy:` statements in class and value-type methods (and `[...] value` in a class method), a `detect:ifNone:` statement whose `ifNone:` block writes, and a construct nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

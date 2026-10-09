@@ -168,3 +168,78 @@ Object subclass: Adr0131LocalRebindClassPending
       1
     ] on: Error do: [:e | 0])
     #[r, t]
+
+  // BT-3753: statement-position shapes that answered wrong, raised or failed
+  // to compile before; each is an ADR 0131 Phase 0 compile error now.
+
+  // A `do:` in a conditional arm.
+  class stArmDo: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  // A loop in a conditional arm.
+  class stArmWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  // `inject:into:` in a conditional arm.
+  class stArmInject: c =>
+    t := 0
+    c ifTrue: [
+      #(1, 2) inject: 0 into: [:a :e |
+        t := t + e
+        a + e
+      ]
+    ]
+    t
+
+  // A `do:` in an `on:do:` body.
+  class stProtectedDo =>
+    t := 0
+    [
+      #(1, 2) do: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  // `eachWithIndex:` as a statement.
+  class stEachWithIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:x :i | t := t + x]
+    t
+
+  // `do:separatedBy:` as a statement.
+  class stDoSeparatedBy =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
+    t
+
+  // `keysAndValuesDo:` as a statement.
+  class stKeysAndValuesDo =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  // `[...] value` as a statement.
+  class stBlockValue =>
+    t := 0
+    [t := t + 1] value
+    t
+
+  // A conditional in a `whileTrue:` body (erlc `unbound variable` before).
+  class stLoopArm =>
+    t := 0
+    i := 0
+    [i < 2] whileTrue: [
+      i := i + 1
+      i > 1 ifTrue: [t := t + 5]
+    ]
+    t
+
+  // `detect:ifNone:` whose handler writes, as a statement.
+  class stDetectIfNone =>
+    t := 0
+    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+    t

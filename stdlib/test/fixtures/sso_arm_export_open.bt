@@ -104,14 +104,14 @@ Object subclass: SsoArmExportOpen
     self.n
 
   // The loop itself sits in an arm of the method.
+  // BT-3753: no `seen` counter here: a write to an outer local from a
+  // loop in an arm is lost today, so ADR 0131 Phase 0 rejects it.
   class loopInArm -> Integer =>
     self.n := 1
-    seen := 0
     self.n > 0
       ifTrue: [
         #(1, 2, 3)
           do: [:i |
-            seen := seen + 1
             i =:= 1 ifTrue: [self bump]
             self plain
           ]
@@ -249,16 +249,16 @@ Object subclass: SsoArmExportOpen
   // counting the iterations whose reader saw the write). "InArm": the loop sits in
   // an arm that already wrote, so the outer arm's older write is in place: reads 1, 2, 2 -> flag 2, n 2 -> 22. Without it: reads 0, 1, 1 -> flag 2,
   // n 1 -> 21. A stale read answers 2 / 1.
+  // BT-3753: no `seen` counter here: a write to an outer local from a
+  // loop in an arm is lost today, so ADR 0131 Phase 0 rejects it.
   class readerFirstDoInArm -> Integer =>
     self.n := 0
     self.flag := 0
-    seen := 0
     self.n >= 0
       ifTrue: [
         self bump
         #(1, 2, 3)
           do: [:i |
-            seen := seen + 1
             v := self reader
             v > 1 ifTrue: [self mark]
             i =:= 1 ifTrue: [self bump]

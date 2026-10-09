@@ -34,10 +34,11 @@
 //! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
 //!   temporary). A local-threading construct
 //!   ([`local_threading_construct_blocks`]) whose blocks write an outer local
-//!   is accepted as a statement, and otherwise only in the
-//!   `(construct, position, context)` combinations listed in [`ALLOW_SET`],
-//!   which are the ones that answer right today. Anywhere else it is an error
-//!   naming the construct, the position and BT-3743.
+//!   is accepted as a statement unless [`DENY_SET`] lists the statement
+//!   shape (BT-3753), and otherwise only in the
+//!   `(construct, position, context)` combinations listed in [`ALLOW_SET`]:
+//!   the ones that answer right today. Anywhere else it is an error naming the
+//!   construct, the position and BT-3743.
 
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -84,15 +85,20 @@ impl fmt::Display for MethodContext {
 /// places.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConstructKind {
-    /// `whileTrue:`, `whileFalse:`, `timesRepeat:`, `to:do:`, `to:by:do:`,
-    /// `repeat` and the unary loops.
+    /// `whileTrue:`, `whileFalse:`, `repeat` and the unary `whileTrue`/
+    /// `whileFalse`.
     Loop,
-    /// `do:`, `keysAndValuesDo:`, `doWithKey:`.
+    /// `to:do:`, `to:by:do:`, `timesRepeat:` and the unary `timesRepeat`.
+    CountedLoop,
+    /// `do:`.
     Do,
+    /// `keysAndValuesDo:`, `doWithKey:`.
+    KeyedDo,
     /// The value-returning list ops: `collect:`, `select:`, `reject:`,
-    /// `inject:into:`, `detect:`, `count:`, … (and `detect:ifNone:` when only
-    /// its search block writes).
+    /// `inject:into:`, `detect:`, `count:`, …
     ListOp,
+    /// `detect:ifNone:` when only its search block writes an outer local.
+    DetectIfNoneSearch,
     /// `anySatisfy:`, `allSatisfy:`.
     Satisfy,
     /// `detect:ifNone:` whose `ifNone:` handler writes an outer local.
@@ -118,15 +124,17 @@ impl ConstructKind {
     fn of(selector: &str, handler_writes: bool) -> Self {
         use crate::state_threading_selectors::is_exception_selector;
         match selector {
-            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "to:do:" | "to:by:do:"
-            | "whileTrue" | "whileFalse" | "timesRepeat" | "repeat" => Self::Loop,
-            "do:" | "keysAndValuesDo:" | "doWithKey:" => Self::Do,
+            "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "repeat" => Self::Loop,
+            "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
+            "do:" => Self::Do,
+            "keysAndValuesDo:" | "doWithKey:" => Self::KeyedDo,
             "anySatisfy:" | "allSatisfy:" => Self::Satisfy,
             "eachWithIndex:" | "do:separatedBy:" => Self::Enumeration,
             "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" => Self::IfTrue,
             "ifNil:" | "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => Self::IfNil,
             "and:" | "or:" => Self::AndOr,
             "detect:ifNone:" if handler_writes => Self::DetectIfNone,
+            "detect:ifNone:" => Self::DetectIfNoneSearch,
             s if is_exception_selector(s) => Self::Exception,
             s if s.starts_with("value") => Self::BlockValue,
             _ => Self::ListOp,
@@ -138,10 +146,13 @@ impl fmt::Display for ConstructKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Loop => "loop",
+            Self::CountedLoop => "counted loop",
             Self::Do => "`do:` iteration",
+            Self::KeyedDo => "`keysAndValuesDo:` iteration",
             Self::ListOp => "collection operation",
             Self::Satisfy => "`anySatisfy:`/`allSatisfy:` test",
             Self::DetectIfNone => "`detect:ifNone:` handler",
+            Self::DetectIfNoneSearch => "`detect:ifNone:` search",
             Self::Enumeration => "`eachWithIndex:`/`do:separatedBy:` iteration",
             Self::IfTrue => "conditional",
             Self::IfNil => "nil test",
@@ -152,12 +163,99 @@ impl fmt::Display for ConstructKind {
     }
 }
 
+/// The role of the block literal a statement sits in, read off the
+/// local-threading construct that block belongs to
+/// ([`local_threading_construct_blocks`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Container {
+    /// An arm of a conditional: the `ifTrue:`, `ifNil:` and `and:`/`or:`
+    /// families.
+    Arm,
+    /// The protected body of `on:do:`/`ensure:` (the receiver block).
+    ProtectedBody,
+    /// An `on:do:` handler or an `ensure:` cleanup block.
+    Handler,
+    /// The condition or body of a [`ConstructKind::Loop`].
+    LoopBody,
+    /// The body of a [`ConstructKind::CountedLoop`].
+    CountedLoopBody,
+    /// A block of a `do:`-style iteration, whose value is discarded
+    /// ([`ConstructKind::Do`], [`ConstructKind::KeyedDo`],
+    /// [`ConstructKind::Enumeration`]).
+    DoBody,
+    /// A block of a value-returning collection operation
+    /// ([`ConstructKind::ListOp`], [`ConstructKind::Satisfy`] and the
+    /// `detect:ifNone:` kinds).
+    ListOpBody,
+    /// A block literal sent `value`.
+    EvaluatedBlock,
+    /// Any other block: a block value, whose statements run in a frame of
+    /// their own.
+    Other,
+}
+
+impl Container {
+    /// The role of a block that is the receiver (`receiver: true`) or an
+    /// argument of a construct send of `selector`.
+    fn of(selector: &str, receiver: bool) -> Self {
+        match ConstructKind::of(selector, false) {
+            IfTrue | IfNil | AndOr => Self::Arm,
+            Exception if receiver => Self::ProtectedBody,
+            Exception => Self::Handler,
+            Loop => Self::LoopBody,
+            CountedLoop => Self::CountedLoopBody,
+            BlockValue => Self::EvaluatedBlock,
+            Do | KeyedDo | Enumeration => Self::DoBody,
+            ListOp | Satisfy | DetectIfNone | DetectIfNoneSearch => Self::ListOpBody,
+        }
+    }
+}
+
+impl fmt::Display for Container {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Arm => "a conditional arm",
+            Self::ProtectedBody => "a protected body (`on:do:`/`ensure:`)",
+            Self::Handler => "an exception handler or `ensure:` block",
+            Self::LoopBody => "a loop",
+            Self::CountedLoopBody => "a counted loop",
+            Self::DoBody => "a `do:` iteration",
+            Self::ListOpBody => "a collection operation",
+            Self::EvaluatedBlock => "an evaluated block",
+            Self::Other => "a block",
+        })
+    }
+}
+
 /// Where a construct's value goes. `nested` is true inside any block body
 /// (the construct's frame is then a block, not the method).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Position {
-    /// An expression statement of a method or block body (including the last).
+    /// An expression statement of a method body (including the last).
     Statement,
+    /// An expression statement of a block body (including the last).
+    /// `container` is the role of the outermost enclosing block (the one
+    /// directly under the method body), and `last` is whether the statement
+    /// of that block containing this one is its last (its value). `crosses`
+    /// is whether the construct writes a local bound outside its innermost
+    /// enclosing block (as opposed to only locals of that block). `deep` is
+    /// whether it is nested in two blocks or more. `stateful` is whether the
+    /// outermost block of a method sends to `self` or `super` or writes a
+    /// field ([`touches_state`]): codegen then threads the block's loops with
+    /// the method's state, which threads some outer locals in class and
+    /// value-type methods and loses more of them in actor methods (probed,
+    /// BT-3753). `direct` is whether an enclosing block
+    /// has a statement `x := ...x...` that reads and writes a local bound
+    /// outside it ([`rebinds_outer_local`]): codegen then threads that block
+    /// as a read+write scope.
+    NestedStatement {
+        container: Container,
+        crosses: bool,
+        last: bool,
+        deep: bool,
+        stateful: bool,
+        direct: bool,
+    },
     /// `x := <here>`.
     AssignValue { nested: bool },
     /// `self.f := <here>`.
@@ -189,6 +287,9 @@ impl fmt::Display for Position {
         let nested_suffix = |nested: bool| if nested { " inside a block" } else { "" };
         match self {
             Self::Statement => f.write_str("a statement"),
+            Self::NestedStatement { container, .. } => {
+                write!(f, "a statement inside {container}")
+            }
             Self::AssignValue { nested } => {
                 write!(f, "the value of an assignment{}", nested_suffix(*nested))
             }
@@ -216,8 +317,11 @@ impl fmt::Display for Position {
 }
 
 use ConstructKind::{
-    AndOr, BlockValue, DetectIfNone, Do, Enumeration, Exception, IfNil, IfTrue, ListOp, Loop,
-    Satisfy,
+    AndOr, BlockValue, CountedLoop, DetectIfNone, DetectIfNoneSearch, Do, Enumeration, Exception,
+    IfNil, IfTrue, KeyedDo, ListOp, Loop, Satisfy,
+};
+use Container::{
+    Arm, CountedLoopBody, DoBody, EvaluatedBlock, Handler, ListOpBody, LoopBody, ProtectedBody,
 };
 use MethodContext::{Actor, Class, Repl, ValueType};
 
@@ -233,8 +337,9 @@ struct Allowed {
 /// thread outer-local writes correctly today, measured with the ADR's probe
 /// matrix (`stdlib/test/adr0131local_rebind_test.bt`,
 /// `tests/repl-protocol/cases/adr0131_local_rebind.btscript`) and the probes
-/// recorded on BT-3745. A statement is always accepted. Every combination
-/// not listed here is a compile error ([`DiagnosticCategory::UnmigratedLocalThreading`]).
+/// recorded on BT-3745. A statement is accepted unless [`DENY_SET`] lists it.
+/// Every other combination not listed here is a compile error
+/// ([`DiagnosticCategory::UnmigratedLocalThreading`]).
 ///
 /// This is the one table: phases 2-4 of ADR 0131 (BT-3749, BT-3738, BT-3750)
 /// grow it as each producer lands, and phase 5 (BT-3751) deletes the check.
@@ -243,15 +348,25 @@ const ALLOW_SET: &[Allowed] = &[
     // `r := <construct>` in the method body (s3, s5, and the per-context
     // passes of the ADR's second probe table).
     Allowed {
-        kinds: &[Loop, ListOp, IfTrue, Exception],
+        kinds: &[
+            Loop,
+            CountedLoop,
+            ListOp,
+            DetectIfNoneSearch,
+            IfTrue,
+            Exception,
+        ],
         position: Position::AssignValue { nested: false },
         contexts: &[Class, ValueType],
     },
     Allowed {
         kinds: &[
             Loop,
+            CountedLoop,
             Do,
+            KeyedDo,
             ListOp,
+            DetectIfNoneSearch,
             Satisfy,
             Enumeration,
             IfTrue,
@@ -265,8 +380,11 @@ const ALLOW_SET: &[Allowed] = &[
     Allowed {
         kinds: &[
             Loop,
+            CountedLoop,
             Do,
+            KeyedDo,
             ListOp,
+            DetectIfNoneSearch,
             Satisfy,
             DetectIfNone,
             Enumeration,
@@ -280,13 +398,13 @@ const ALLOW_SET: &[Allowed] = &[
     // `r := <list op>` inside a conditional arm or loop body whose block
     // writes a method-level local (BT-3425, BT-3428, BT-1329).
     Allowed {
-        kinds: &[ListOp],
+        kinds: &[ListOp, DetectIfNoneSearch],
         position: Position::AssignValue { nested: true },
         contexts: &[Actor],
     },
     // `#(a, b) := <list op>` at the REPL (`destructuring.btscript`).
     Allowed {
-        kinds: &[ListOp],
+        kinds: &[ListOp, DetectIfNoneSearch],
         position: Position::DestructureValue,
         contexts: &[Repl],
     },
@@ -294,8 +412,11 @@ const ALLOW_SET: &[Allowed] = &[
     Allowed {
         kinds: &[
             Loop,
+            CountedLoop,
             Do,
+            KeyedDo,
             ListOp,
+            DetectIfNoneSearch,
             Enumeration,
             IfTrue,
             IfNil,
@@ -308,20 +429,32 @@ const ALLOW_SET: &[Allowed] = &[
     // `^<construct>` as a method-body statement (the value only: the method
     // ends, so its rebinds are dropped).
     Allowed {
-        kinds: &[Loop, Do, ListOp, IfTrue, Exception],
+        kinds: &[
+            Loop,
+            CountedLoop,
+            Do,
+            KeyedDo,
+            ListOp,
+            DetectIfNoneSearch,
+            IfTrue,
+            Exception,
+        ],
         position: Position::ReturnValue { nested: false },
         contexts: &[Class],
     },
     Allowed {
-        kinds: &[Do],
+        kinds: &[Do, KeyedDo],
         position: Position::ReturnValue { nested: false },
         contexts: &[ValueType],
     },
     Allowed {
         kinds: &[
             Loop,
+            CountedLoop,
             Do,
+            KeyedDo,
             ListOp,
+            DetectIfNoneSearch,
             DetectIfNone,
             Enumeration,
             IfTrue,
@@ -335,7 +468,7 @@ const ALLOW_SET: &[Allowed] = &[
     },
     // `^<construct>` inside a block (a non-local return).
     Allowed {
-        kinds: &[Do],
+        kinds: &[Do, KeyedDo],
         position: Position::ReturnValue { nested: true },
         contexts: &[Class, ValueType],
     },
@@ -346,12 +479,210 @@ const ALLOW_SET: &[Allowed] = &[
     },
 ];
 
-/// Whether the allow-set accepts `kind` in `position` in `context`.
+/// One deny-set row: every listed construct kind, as a statement in every
+/// listed context, of the method body (`container: None`) or nested in a
+/// block whose [`Position::NestedStatement`] fields match (`None` matches
+/// either value).
+struct Denied {
+    kinds: &'static [ConstructKind],
+    container: Option<Container>,
+    crosses: Option<bool>,
+    last: Option<bool>,
+    deep: Option<bool>,
+    stateful: Option<bool>,
+    direct: Option<bool>,
+    contexts: &'static [MethodContext],
+}
+
+impl Denied {
+    fn denies(&self, kind: ConstructKind, position: Position, context: MethodContext) -> bool {
+        let at = match position {
+            Position::Statement => self.container.is_none(),
+            Position::NestedStatement {
+                container,
+                crosses,
+                last,
+                deep,
+                stateful,
+                direct,
+            } => {
+                self.container == Some(container)
+                    && self.crosses.is_none_or(|c| c == crosses)
+                    && self.last.is_none_or(|l| l == last)
+                    && self.deep.is_none_or(|d| d == deep)
+                    && self.stateful.is_none_or(|s| s == stateful)
+                    && self.direct.is_none_or(|d| d == direct)
+            }
+            _ => false,
+        };
+        at && self.kinds.contains(&kind) && self.contexts.contains(&context)
+    }
+}
+
+/// Every construct kind.
+const ALL: &[ConstructKind] = &[
+    Loop,
+    CountedLoop,
+    Do,
+    KeyedDo,
+    ListOp,
+    DetectIfNoneSearch,
+    Satisfy,
+    DetectIfNone,
+    Enumeration,
+    IfTrue,
+    IfNil,
+    AndOr,
+    Exception,
+    BlockValue,
+];
+
+/// Every construct kind but the conditionals.
+const ALL_BUT_CONDITIONALS: &[ConstructKind] = &[
+    Loop,
+    CountedLoop,
+    Do,
+    KeyedDo,
+    ListOp,
+    DetectIfNoneSearch,
+    Satisfy,
+    DetectIfNone,
+    Enumeration,
+    Exception,
+    BlockValue,
+];
+
+/// Every construct kind but the conditionals and `on:do:`/`ensure:`.
+const ALL_BUT_CONDITIONALS_AND_HANDLERS: &[ConstructKind] = &[
+    Loop,
+    CountedLoop,
+    Do,
+    KeyedDo,
+    ListOp,
+    DetectIfNoneSearch,
+    Satisfy,
+    DetectIfNone,
+    Enumeration,
+    BlockValue,
+];
+
+/// A [`DENY_SET`] row.
+#[allow(clippy::too_many_arguments)] // one argument per key, so a row fits a line
+const fn deny(
+    container: Option<Container>,
+    crosses: Option<bool>,
+    last: Option<bool>,
+    deep: Option<bool>,
+    stateful: Option<bool>,
+    direct: Option<bool>,
+    contexts: &'static [MethodContext],
+    kinds: &'static [ConstructKind],
+) -> Denied {
+    Denied {
+        kinds,
+        container,
+        crosses,
+        last,
+        deep,
+        stateful,
+        direct,
+        contexts,
+    }
+}
+
+/// ADR 0131 Phase 0 (BT-3753): the statement positions that do *not* thread
+/// outer-local writes today. A construct in statement position is accepted
+/// unless a row here lists it; every other position is accepted only if
+/// [`ALLOW_SET`] lists it.
+///
+/// Measured on the real build (debug, BT-3753) with the probe matrix in
+/// `semantic_analysis/tests/adr0131_statement_probes.tsv`, pinned by
+/// `adr0131_statement_probe_pins`: one `t := 0` method per construct kind,
+/// per block role, per method context, per write target. A row lists the
+/// kinds whose probe answered wrong, raised, panicked codegen or failed erlc
+/// for its [`Position::NestedStatement`] facts. Only constructs that write a
+/// local bound outside their innermost block (`crosses: true`) are rows; a
+/// construct that writes only a local of that block is BT-3776. The same
+/// phases that grow [`ALLOW_SET`] shrink this table, and phase 5 (BT-3751)
+/// deletes it. Never add a row for a shape an existing test shows answering
+/// right.
+#[rustfmt::skip] // one row per line: a measured table
+const DENY_SET: &[Denied] = &[
+    deny(None, None, None, None, None, None, &[Actor], &[DetectIfNone]),
+    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[Repl], &[IfNil]),
+    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr]),
+    deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
+    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
+    deny(Some(Arm), Some(true), Some(false), None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(Arm), Some(true), Some(true), Some(true), None, None, &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[CountedLoop, Do, ListOp, Satisfy, Exception]),
+    deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
+    deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(true), &[Actor], &[BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
+    deny(Some(DoBody), Some(true), None, Some(false), None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(true), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(false), None, Some(false), &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(true), None, Some(false), &[Class, ValueType], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(DoBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(DoBody), Some(true), None, Some(false), None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
+    deny(Some(DoBody), Some(true), None, Some(true), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
+    deny(Some(EvaluatedBlock), Some(true), None, None, None, Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
+    deny(Some(EvaluatedBlock), Some(true), None, None, None, None, &[Class, ValueType], ALL),
+    deny(Some(EvaluatedBlock), Some(true), None, None, None, None, &[Repl], &[Exception]),
+    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[BlockValue]),
+    deny(Some(Handler), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
+    deny(Some(Handler), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
+    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(false), &[Actor, ValueType], ALL_BUT_CONDITIONALS_AND_HANDLERS),
+    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(false), &[Class], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
+    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
+    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Actor], &[BlockValue]),
+    deny(Some(ListOpBody), Some(true), None, None, None, Some(false), &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS_AND_HANDLERS),
+    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
+    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
+    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
+    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], ALL),
+    deny(Some(LoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[DetectIfNoneSearch, DetectIfNone, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Class, ValueType], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Repl], ALL),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Repl], ALL),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[IfTrue, IfNil, AndOr, Exception]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
+    // A self-send or field write in the outermost block (`stateful`).
+    deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, CountedLoop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
+];
+
+/// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
+/// statement unless [`DENY_SET`] lists it, anything else only if
+/// [`ALLOW_SET`] does.
 pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-    position == Position::Statement
-        || ALLOW_SET.iter().any(|row| {
+    match position {
+        Position::Statement | Position::NestedStatement { .. } => !DENY_SET
+            .iter()
+            .any(|row| row.denies(kind, position, context)),
+        _ => ALLOW_SET.iter().any(|row| {
             row.position == position && row.kinds.contains(&kind) && row.contexts.contains(&context)
-        })
+        }),
+    }
 }
 
 /// Runs both ADR 0131 checks over every method body and module-level
@@ -454,6 +785,17 @@ struct Walker<'d> {
     /// For each enclosing block, innermost last: the index in `scope` of
     /// its first frame.
     block_frames: Vec<usize>,
+    /// For each enclosing block, innermost last: its role.
+    containers: Vec<Container>,
+    /// For the method body and each enclosing block, innermost last:
+    /// whether the statement being walked in that body is its last.
+    last_statements: Vec<bool>,
+    /// Whether the outermost enclosing block touches the method's state
+    /// (see [`Position::NestedStatement`]).
+    outer_stateful: bool,
+    /// For each enclosing block, innermost last: whether it rebinds a local
+    /// bound outside it (see [`Position::NestedStatement`]).
+    direct_blocks: Vec<bool>,
     /// How many times each name is assigned anywhere in the method.
     assign_counts: HashMap<EcoString, usize>,
     tier2_locals: HashMap<EcoString, Tier2Local>,
@@ -511,6 +853,10 @@ impl<'d> Walker<'d> {
             scope: Vec::new(),
             depth: 0,
             block_frames: Vec::new(),
+            containers: Vec::new(),
+            last_statements: Vec::new(),
+            outer_stateful: false,
+            direct_blocks: Vec::new(),
             assign_counts,
             tier2_locals: HashMap::new(),
             reported_locals: HashSet::new(),
@@ -562,19 +908,32 @@ impl<'d> Walker<'d> {
     }
 
     fn body(&mut self, body: &[ExpressionStatement]) {
-        for stmt in body {
+        self.last_statements.push(false);
+        for (i, stmt) in body.iter().enumerate() {
+            if let Some(last) = self.last_statements.last_mut() {
+                *last = i + 1 == body.len();
+            }
             self.expr(&stmt.expression, Position::Statement);
         }
+        self.last_statements.pop();
     }
 
-    fn block(&mut self, block: &Block) {
+    fn block(&mut self, block: &Block, container: Container) {
+        if self.depth == 0 {
+            self.outer_stateful = self.context != Repl && touches_state(block);
+        }
+        let direct = rebinds_outer_local(block, &|name| self.is_bound(name));
+        self.direct_blocks.push(direct);
         self.block_frames.push(self.scope.len());
+        self.containers.push(container);
         self.scope
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
         self.depth += 1;
         self.body(&block.body);
         self.depth -= 1;
         self.pop_frame();
+        self.containers.pop();
+        self.direct_blocks.pop();
         self.block_frames.pop();
     }
 
@@ -587,11 +946,17 @@ impl<'d> Walker<'d> {
         self.tier2_locals.retain(|_, local| local.frame < depth);
     }
 
-    /// Walks `expr` as an operand: a block literal is walked as a block, any
-    /// other expression at `position`.
+    /// Walks `expr` as an operand: a block literal is walked as a block (of
+    /// role [`Container::Other`]), any other expression at `position`.
     fn operand(&mut self, expr: &Expression, position: Position) {
+        self.operand_in(expr, position, Container::Other);
+    }
+
+    /// As [`Walker::operand`], walking a block literal as a block of role
+    /// `container`.
+    fn operand_in(&mut self, expr: &Expression, position: Position, container: Container) {
         match expr {
-            Expression::Block(block) => self.block(block),
+            Expression::Block(block) => self.block(block, container),
             other => self.expr(other, position),
         }
     }
@@ -636,9 +1001,23 @@ impl<'d> Walker<'d> {
                 self.check_construct(expr, position);
                 let top = self.top_level(position);
                 self.check_send(receiver, selector, arguments, true, top);
-                self.operand(receiver, Position::Receiver);
+                // The role of each block literal the construct inlines (the
+                // same recognizer as `check_construct`); any other block is a
+                // block value.
+                let construct = local_threading_construct_blocks(expr);
+                let role = |e: &Expression, is_receiver: bool| match (e, &construct) {
+                    (Expression::Block(b), Some((sel, blocks)))
+                        if blocks.iter().any(|c| std::ptr::eq(*c, b)) =>
+                    {
+                        Container::of(sel, is_receiver)
+                    }
+                    _ => Container::Other,
+                };
+                let receiver_role = role(receiver, true);
+                self.operand_in(receiver, Position::Receiver, receiver_role);
                 for arg in arguments {
-                    self.operand(arg, Position::Argument);
+                    let arg_role = role(arg, false);
+                    self.operand_in(arg, Position::Argument, arg_role);
                 }
             }
             Expression::Cascade {
@@ -680,7 +1059,7 @@ impl<'d> Walker<'d> {
                     }
                 }
             }
-            Expression::Block(block) => self.block(block),
+            Expression::Block(block) => self.block(block, Container::Other),
             Expression::FieldAccess { receiver, .. } => self.expr(receiver, Position::Receiver),
             Expression::Match { value, arms, .. } => {
                 self.operand(value, Position::MatchSubject);
@@ -777,9 +1156,6 @@ impl<'d> Walker<'d> {
 
     /// The Phase 0 allow-set check for a construct at `position`.
     fn check_construct(&mut self, expr: &Expression, position: Position) {
-        if position == Position::Statement {
-            return;
-        }
         let Some((selector, blocks)) = local_threading_construct_blocks(expr) else {
             return;
         };
@@ -801,6 +1177,19 @@ impl<'d> Walker<'d> {
         // transitive closure, which is not there yet).
         let crosses_block = writes.iter().any(|w| !self.is_frame_local(&w.name));
         let position = match position {
+            // Codegen lowers a nested statement with the construct that owns
+            // the *outermost* enclosing block (the one directly under the
+            // method body): an arm inside a `do:` body threads as the `do:`
+            // body does, a `do:` inside an arm as the arm does (probed,
+            // BT-3753).
+            Position::Statement if self.depth > 0 => Position::NestedStatement {
+                container: self.containers.first().copied().unwrap_or(Container::Other),
+                crosses: crosses_block,
+                last: self.last_statements.get(1).copied().unwrap_or(false),
+                deep: self.depth > 1,
+                stateful: self.outer_stateful,
+                direct: self.direct_blocks.iter().any(|d| *d),
+            },
             Position::AssignValue { nested: true } if !crosses_block => {
                 Position::AssignValue { nested: false }
             }
@@ -812,18 +1201,7 @@ impl<'d> Walker<'d> {
         if is_allowed(kind, position, self.context) {
             return;
         }
-        let rhs_ok = is_allowed(kind, Position::AssignValue { nested: false }, self.context);
-        let hint = if rhs_ok && !matches!(position, Position::AssignValue { .. }) {
-            format!(
-                "assign the `{selector}` result to a local in a statement of its own \
-                 (`v := ...`) and use `v` here"
-            )
-        } else {
-            format!(
-                "evaluate the `{selector}` as a statement of its own, at the level of the \
-                 method body, and read the locals it writes afterwards"
-            )
-        };
+        let hint = self.construct_hint(&selector, kind, position, &first.name);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
@@ -848,6 +1226,42 @@ impl<'d> Walker<'d> {
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
+    }
+
+    /// The help text for a construct the Phase 0 check rejects at
+    /// `position`: the nearest position that does thread `name` today.
+    fn construct_hint(
+        &self,
+        selector: &str,
+        kind: ConstructKind,
+        position: Position,
+        name: &str,
+    ) -> String {
+        let top_ok = is_allowed(kind, Position::Statement, self.context);
+        let rhs_ok = is_allowed(kind, Position::AssignValue { nested: false }, self.context);
+        match position {
+            Position::NestedStatement { container, .. } if top_ok => format!(
+                "evaluate the `{selector}` as a statement of the method body, not inside \
+                 {container}, and read the locals it writes afterwards"
+            ),
+            Position::Statement | Position::NestedStatement { .. } => format!(
+                "compute the new value of `{name}` without writing it from the block, and \
+                 assign it in a statement of the method body (`{name} := coll inject: {name} \
+                 into: [:acc :x | ...]`)"
+            ),
+            Position::AssignValue { .. } => format!(
+                "evaluate the `{selector}` as a statement of its own, at the level of the \
+                 method body, and read the locals it writes afterwards"
+            ),
+            _ if rhs_ok => format!(
+                "assign the `{selector}` result to a local in a statement of its own \
+                 (`v := ...`) and use `v` here"
+            ),
+            _ => format!(
+                "evaluate the `{selector}` as a statement of its own, at the level of the \
+                 method body, and read the locals it writes afterwards"
+            ),
+        }
     }
 
     /// The §6 check for one send: its literal block arguments and receiver,
@@ -999,6 +1413,55 @@ impl<'d> Walker<'d> {
     }
 }
 
+/// Whether a statement of `block` (not of a nested block) is an assignment
+/// `x := ...` to a local bound outside `block` (`is_outer`) whose value reads
+/// `x`.
+fn rebinds_outer_local(block: &Block, is_outer: &dyn Fn(&str) -> bool) -> bool {
+    let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
+    block.body.iter().any(|stmt| {
+        let Expression::Assignment { target, value, .. } = &stmt.expression else {
+            return false;
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return false;
+        };
+        if params.contains(id.name.as_str()) || !is_outer(&id.name) {
+            return false;
+        }
+        let mut reads = false;
+        crate::ast_walker::walk_expression(value, &mut |e| {
+            if matches!(e, Expression::Identifier(r) if r.name == id.name) {
+                reads = true;
+            }
+        });
+        reads
+    })
+}
+
+/// Whether `block` (at any depth) sends to `self` or `super`, or assigns a
+/// field (`self.x := ...`).
+fn touches_state(block: &Block) -> bool {
+    let mut found = false;
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::MessageSend { receiver, .. } | Expression::Cascade { receiver, .. } => {
+                if matches!(receiver.unwrap_parens(), Expression::Super(_))
+                    || matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+                {
+                    found = true;
+                }
+            }
+            Expression::Assignment { target, .. }
+                if matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
+            {
+                found = true;
+            }
+            _ => {}
+        });
+    }
+    found
+}
+
 /// Whether codegen's Tier 2 block protocol threads back every outer local in
 /// `writes` (each is in [`captured_local_mutations`]).
 fn threads_all(block: &Block, writes: &[OuterLocalWrite]) -> bool {
@@ -1046,18 +1509,31 @@ mod tests {
     fn allow_set_rows_are_non_empty_and_never_list_a_statement() {
         for row in ALLOW_SET {
             assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
-            assert_ne!(
-                row.position,
-                Position::Statement,
-                "a statement is always accepted; the table only lists other positions"
+            assert!(
+                !matches!(
+                    row.position,
+                    Position::Statement | Position::NestedStatement { .. }
+                ),
+                "statements are accepted unless DENY_SET lists them"
             );
         }
     }
 
     #[test]
-    fn statement_is_always_allowed() {
-        for context in [Class, ValueType, Actor, Repl] {
-            assert!(is_allowed(DetectIfNone, Position::Statement, context));
+    fn deny_set_rows_are_non_empty() {
+        for row in DENY_SET {
+            assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
         }
+    }
+
+    #[test]
+    fn statement_is_allowed_unless_denied() {
+        // `do:` as a method-body statement answers right everywhere (s8).
+        for context in [Class, ValueType, Actor, Repl] {
+            assert!(is_allowed(Do, Position::Statement, context));
+        }
+        // `detect:ifNone:` with a writing handler loses the write as a
+        // statement in an actor method (BT-3753).
+        assert!(!is_allowed(DetectIfNone, Position::Statement, Actor));
     }
 }

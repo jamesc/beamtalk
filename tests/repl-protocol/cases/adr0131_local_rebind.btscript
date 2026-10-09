@@ -264,3 +264,56 @@ r := (#(1, 2) reject: [:x | t := t + 1. false]) size
 // PIN-BUG BT-3743: correct answer 2.
 t
 // => 0
+
+// ===========================================================================
+// BT-3753: statement-position constructs nested in a block
+// ===========================================================================
+
+// A `do:` in a conditional arm.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: leaked the bindings map as its value and left `t` at 0;
+// since BT-3753 it is an ADR 0131 Phase 0 compile error. Correct answer: 3.
+4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]
+// => ERROR: `do:` writes outer local `t`, but as a statement inside a conditional arm
+
+// PIN-BUG BT-3743: correct answer 3.
+t
+// => 0
+
+// A loop in a `do:` body.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: raised `invalid argument` before BT-3753, a compile error
+// since. Correct answer: 2.
+#(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]
+// => ERROR: `whileTrue:` writes outer local `t`, but as a statement inside a `do:` iteration
+
+// PIN-BUG BT-3743: correct answer 2.
+t
+// => 0
+
+// `nil ifNil:` as a statement.
+t := 0
+// => 0
+
+// PIN-BUG BT-3743: called the block with the wrong arity before BT-3753, a
+// compile error since. Correct answer: 1.
+nil ifNil: [t := t + 1]
+// => ERROR: `ifNil:` writes outer local `t`, but as a statement in a top-level expression
+
+// PIN-BUG BT-3743: correct answer 1.
+t
+// => 0
+
+// A conditional in a conditional arm answers right and is accepted.
+t := 0
+// => 0
+
+4 =:= 4 ifTrue: [4 =:= 4 ifTrue: [t := t + 1]]
+// => _
+
+t
+// => 1
