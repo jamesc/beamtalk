@@ -53,11 +53,11 @@
 //! process and raises, but rule (b) only covers class-side receivers.
 
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
-use crate::ast_walker::walk_expression;
+use crate::ast_walker::{SendRef, walk_expression, walk_sends};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, analyze_method_body, cascade_shared_receiver, class_var_reads,
-    compute_class_var_mutating_selectors, escaping_blocks,
+    EscapeShape, analyze_method_body, class_var_accesses, compute_class_var_mutating_selectors,
+    escaping_blocks,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::{HashMap, HashSet};
@@ -162,7 +162,7 @@ fn check_method_body(
 
     // (a) reads: returned or stored.
     for (block, shape) in escaping_blocks(body) {
-        let reads = class_var_reads(&block, &ctx.class_vars);
+        let reads = class_var_accesses(&block, &ctx.class_vars).read_names();
         if !reads.is_empty() {
             report(
                 &block,
@@ -173,68 +173,35 @@ fn check_method_body(
 
     let actors = actor_locals(body, ctx);
     for stmt in body {
-        walk_expression(&stmt.expression, &mut |e| match e {
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                is_cast,
-                ..
-            } => check_send(
-                ctx,
-                &actors,
-                receiver,
-                &selector.name(),
-                arguments,
-                *is_cast,
-                &mut report,
-            ),
-            // The walker folds a cascade to its first send (visited above as a
-            // `MessageSend`); the later messages go to the same receiver and
-            // never appear as nodes, so judge each here (BT-3716). A cascaded
-            // message is never a cast.
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                let shared = cascade_shared_receiver(receiver);
-                for msg in messages {
-                    check_send(
-                        ctx,
-                        &actors,
-                        shared,
-                        &msg.selector.name(),
-                        &msg.arguments,
-                        false,
-                        &mut report,
-                    );
-                }
-            }
-            _ => {}
+        // Cascades expanded: a later cascade message is judged against the
+        // shared receiver like any send (BT-3716).
+        walk_sends(&stmt.expression, &mut |send| {
+            check_send(ctx, &actors, send, &mut report);
         });
     }
 }
 
-/// Rules (a) (reads) and (b) (writes) for one send of `selector` to
-/// `receiver` with `arguments`.
+/// Rules (a) (reads) and (b) (writes) for one send.
 fn check_send(
     ctx: &ClassCtx<'_>,
     actors: &HashSet<String>,
-    receiver: &Expression,
-    sel: &str,
-    arguments: &[Expression],
-    is_cast: bool,
+    send: SendRef<'_>,
     report: &mut impl FnMut(&Block, Diagnostic),
 ) {
+    let receiver = send.receiver;
+    let sel = &send.selector.name();
     let blocks = || {
-        arguments.iter().filter_map(|a| match a.unwrap_parens() {
-            Expression::Block(b) => Some(b),
-            _ => None,
-        })
+        send.arguments
+            .iter()
+            .filter_map(|a| match a.unwrap_parens() {
+                Expression::Block(b) => Some(b),
+                _ => None,
+            })
     };
     // (a) reads: passed to a send that runs or keeps it elsewhere.
-    if let Some(how) = ctx.abroad_send_clause(receiver, sel, is_cast, actors) {
+    if let Some(how) = ctx.abroad_send_clause(receiver, sel, send.is_cast, actors) {
         for block in blocks() {
-            let reads = class_var_reads(block, &ctx.class_vars);
+            let reads = class_var_accesses(block, &ctx.class_vars).read_names();
             if !reads.is_empty() {
                 report(block, reads_diagnostic(ctx, block, &reads, &how));
             }
@@ -331,59 +298,31 @@ impl ClassCtx<'_> {
         (!self.hierarchy.is_direct_call_eligible(target, selector)).then(|| target.to_string())
     }
 
-    /// The first class-variable write `block` makes: a direct `self.n := ...`,
-    /// or a `self`/own-class send that may write one. Nested blocks included.
+    /// The first class-variable write `block` makes: a direct `self.n := ...`
+    /// ([`class_var_accesses`]), else a `self`/own-class send, cascade messages
+    /// included, that may write one. Nested blocks included.
     fn first_class_var_write(&self, block: &Block) -> Option<String> {
-        let root = Expression::Block(block.clone());
+        if let Some(var) = class_var_accesses(block, &self.class_vars)
+            .writes
+            .into_iter()
+            .next()
+        {
+            return Some(format!("class variable '{var}'"));
+        }
         let mut found = None;
-        walk_expression(&root, &mut |e| {
-            if found.is_some() {
-                return;
-            }
-            match e {
-                Expression::Assignment { target, .. } => {
-                    if let Expression::FieldAccess {
-                        receiver, field, ..
-                    } = &**target
-                    {
-                        if matches!(&**receiver, Expression::Identifier(id) if id.name == "self")
-                            && self.class_vars.contains(field.name.as_str())
-                        {
-                            found = Some(format!("class variable '{}'", field.name));
-                        }
+        for stmt in &block.body {
+            walk_sends(&stmt.expression, &mut |send| {
+                if found.is_some() {
+                    return;
+                }
+                let name = send.selector.name();
+                if let Some(by_reference) = self.own_class_receiver(send.receiver) {
+                    if self.may_write_class_var(&name, by_reference) {
+                        found = Some(format!("class variables through '{name}'"));
                     }
                 }
-                Expression::MessageSend {
-                    receiver, selector, ..
-                } => {
-                    let name = selector.name();
-                    if let Some(by_reference) = self.own_class_receiver(receiver) {
-                        if self.may_write_class_var(&name, by_reference) {
-                            found = Some(format!("class variables through '{name}'"));
-                        }
-                    }
-                }
-                // `[Counter log; bump]`: only the first message is visited as a
-                // send, so judge the later ones against the shared receiver
-                // (BT-3716).
-                Expression::Cascade {
-                    receiver, messages, ..
-                } => {
-                    if let Some(by_reference) =
-                        self.own_class_receiver(cascade_shared_receiver(receiver))
-                    {
-                        if let Some(msg) = messages
-                            .iter()
-                            .find(|m| self.may_write_class_var(&m.selector.name(), by_reference))
-                        {
-                            found =
-                                Some(format!("class variables through '{}'", msg.selector.name()));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        });
+            });
+        }
         found
     }
 

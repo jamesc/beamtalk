@@ -15,6 +15,10 @@
 //!
 //! - [`walk_module`] — convenience: pre-order walk of **all** expressions in a module.
 //!
+//! - [`walk_sends`] / [`walk_expression_and_sends`] / [`cascade_sends`] — every
+//!   message send with cascades expanded, each cascade message paired with the
+//!   cascade's shared receiver (BT-3761).
+//!
 //! # Why this exists
 //!
 //! Before this module, every lint pass and many validator checks had their own
@@ -29,7 +33,7 @@
 //! awareness (e.g. `cascade_candidate`) keep their own recursive traversal.
 //! This module handles the common pre-order-visitor pattern.
 
-use crate::ast::{Expression, ExpressionStatement, Module, StringSegment};
+use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module, StringSegment};
 
 // ── Module-level iterators ────────────────────────────────────────────────────
 
@@ -288,6 +292,165 @@ where
     }
 }
 
+// ── Cascade-expanding send iterator ──────────────────────────────────────────
+
+/// Where a [`SendRef`] sits relative to a cascade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendSite {
+    /// An ordinary `MessageSend` node that is not a cascade message.
+    Plain,
+    /// A cascade's first message. The parser folds it into the cascade's
+    /// receiver as a whole `MessageSend`; it is reported here, at the cascade,
+    /// and not again when the walk reaches that folded node.
+    CascadeFirst,
+    /// A cascade's second or later message, which the AST stores as a bare
+    /// selector and arguments; it never appears as a node of its own.
+    CascadeLater,
+}
+
+/// One message send, with the receiver it is actually sent to: for a cascade
+/// message, the cascade's shared receiver.
+#[derive(Debug, Clone, Copy)]
+pub struct SendRef<'a> {
+    /// The expression the message is sent to.
+    pub receiver: &'a Expression,
+    /// The message selector.
+    pub selector: &'a MessageSelector,
+    /// The message arguments.
+    pub arguments: &'a [Expression],
+    /// Whether the send is a cast (`!`). A later cascade message never is.
+    pub is_cast: bool,
+    /// Whether, and where, the send is a cascade message.
+    pub site: SendSite,
+}
+
+/// The one receiver every message of a cascade is sent to.
+///
+/// The parser folds a cascade's first message into `Cascade::receiver` as a
+/// whole `MessageSend`, so the shared receiver is that send's inner receiver
+/// (or `receiver` itself when it is not a send). The later messages are stored
+/// as bare selector/arguments, so callers judging them must pair each with
+/// this receiver (BT-3716). Private: [`cascade_sends`] does the pairing.
+fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
+    match receiver {
+        Expression::MessageSend {
+            receiver: inner, ..
+        } => inner,
+        other => other,
+    }
+}
+
+/// Every message of the cascade `expr`, in source order, each paired with the
+/// cascade's shared receiver: the folded first message
+/// ([`SendSite::CascadeFirst`]) then each later one
+/// ([`SendSite::CascadeLater`]). Empty when `expr` is not a cascade.
+///
+/// The one place that expands a cascade into sends: every pass that judges
+/// "what is sent to what" goes through this (or [`walk_sends`]), so none of
+/// them can forget the later messages again (BT-3716, BT-3761).
+pub fn cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
+    let (first, later) = match expr {
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            let shared = cascade_shared_receiver(receiver);
+            let first = match receiver.as_ref() {
+                Expression::MessageSend {
+                    selector,
+                    arguments,
+                    is_cast,
+                    ..
+                } => Some(SendRef {
+                    receiver: shared,
+                    selector,
+                    arguments,
+                    is_cast: *is_cast,
+                    site: SendSite::CascadeFirst,
+                }),
+                _ => None,
+            };
+            let later = messages.iter().map(move |msg| SendRef {
+                receiver: shared,
+                selector: &msg.selector,
+                arguments: &msg.arguments,
+                is_cast: false,
+                site: SendSite::CascadeLater,
+            });
+            (first, Some(later))
+        }
+        _ => (None, None),
+    };
+    first.into_iter().chain(later.into_iter().flatten())
+}
+
+/// One step of [`walk_expression_and_sends`].
+#[derive(Debug, Clone, Copy)]
+pub enum WalkEvent<'a> {
+    /// An expression node, exactly as [`walk_expression`] visits it.
+    Expr(&'a Expression),
+    /// A message send, cascades expanded (see [`walk_sends`]).
+    Send(SendRef<'a>),
+}
+
+/// [`walk_expression`] that also reports every message send as a
+/// [`WalkEvent::Send`], immediately after the node that carries it: each
+/// `MessageSend` node once, and each cascade's messages (first included,
+/// paired with the shared receiver) at the `Cascade` node. A cascade's folded
+/// first `MessageSend` is still visited as a [`WalkEvent::Expr`] but is not
+/// reported as a second send.
+///
+/// For passes that need sends and other nodes (field accesses, assignments)
+/// in one ordered walk; [`walk_sends`] is the sends-only form.
+pub fn walk_expression_and_sends<F>(expr: &Expression, f: &mut F)
+where
+    F: FnMut(WalkEvent<'_>),
+{
+    // A cascade is visited before its receiver (pre-order), so its folded
+    // first send is known by identity by the time the walk reaches it.
+    let mut cascade_firsts: Vec<*const Expression> = Vec::new();
+    walk_expression(expr, &mut |e| {
+        f(WalkEvent::Expr(e));
+        match e {
+            Expression::Cascade { receiver, .. } => {
+                cascade_firsts.push(std::ptr::from_ref::<Expression>(receiver));
+                for send in cascade_sends(e) {
+                    f(WalkEvent::Send(send));
+                }
+            }
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                is_cast,
+                ..
+            } if !cascade_firsts.contains(&std::ptr::from_ref(e)) => {
+                f(WalkEvent::Send(SendRef {
+                    receiver,
+                    selector,
+                    arguments,
+                    is_cast: *is_cast,
+                    site: SendSite::Plain,
+                }));
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Every message send in `expr` (nested blocks included), in pre-order, with
+/// cascades expanded: each message of a cascade is reported once, paired with
+/// the cascade's shared receiver.
+pub fn walk_sends<F>(expr: &Expression, f: &mut F)
+where
+    F: FnMut(SendRef<'_>),
+{
+    walk_expression_and_sends(expr, &mut |event| {
+        if let WalkEvent::Send(send) = event {
+            f(send);
+        }
+    });
+}
+
 /// Walks all expressions in every statement sequence of a module (pre-order).
 ///
 /// Equivalent to calling `walk_expression` on every expression in every
@@ -475,6 +638,76 @@ mod tests {
         let expr = first_module_expr("obj foo: 1; bar: 2\n");
         assert!(matches!(expr, Expression::Cascade { .. }));
         assert_eq!(count_visits(&expr), 5);
+    }
+
+    /// `(receiver rendering, selector, is_cast, site)` of every send in `src`.
+    fn sends_of(src: &str) -> Vec<(String, String, bool, SendSite)> {
+        let expr = first_module_expr(src);
+        let mut sends = Vec::new();
+        walk_sends(&expr, &mut |s| {
+            let receiver = match s.receiver {
+                Expression::Identifier(id) => id.name.to_string(),
+                Expression::MessageSend { selector, .. } => format!("<{}>", selector.name()),
+                other => format!("{other:?}"),
+            };
+            sends.push((receiver, s.selector.name().to_string(), s.is_cast, s.site));
+        });
+        sends
+    }
+
+    #[test]
+    fn walk_sends_expands_a_cascade_once_with_the_shared_receiver() {
+        assert_eq!(
+            sends_of("obj foo: 1; bar: 2; baz\n"),
+            vec![
+                ("obj".into(), "foo:".into(), false, SendSite::CascadeFirst),
+                ("obj".into(), "bar:".into(), false, SendSite::CascadeLater),
+                ("obj".into(), "baz".into(), false, SendSite::CascadeLater),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_sends_cascade_receiver_chain_is_an_ordinary_send() {
+        // `obj make foo; bar` cascades to the result of `obj make`.
+        assert_eq!(
+            sends_of("obj make foo; bar\n"),
+            vec![
+                ("<make>".into(), "foo".into(), false, SendSite::CascadeFirst),
+                ("<make>".into(), "bar".into(), false, SendSite::CascadeLater),
+                ("obj".into(), "make".into(), false, SendSite::Plain),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_sends_reports_plain_sends_in_nested_blocks_and_cascade_arguments() {
+        assert_eq!(
+            sends_of("obj foo; bar: [x baz]\n"),
+            vec![
+                ("obj".into(), "foo".into(), false, SendSite::CascadeFirst),
+                ("obj".into(), "bar:".into(), false, SendSite::CascadeLater),
+                ("x".into(), "baz".into(), false, SendSite::Plain),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_expression_and_sends_visits_every_node_once() {
+        let expr = first_module_expr("obj foo: 1; bar: 2\n");
+        let (mut nodes, mut sends) = (0, 0);
+        walk_expression_and_sends(&expr, &mut |event| match event {
+            WalkEvent::Expr(_) => nodes += 1,
+            WalkEvent::Send(_) => sends += 1,
+        });
+        assert_eq!(nodes, count_visits(&expr));
+        assert_eq!(sends, 2);
+    }
+
+    #[test]
+    fn cascade_sends_is_empty_for_a_non_cascade() {
+        let expr = first_module_expr("obj foo\n");
+        assert_eq!(cascade_sends(&expr).count(), 0);
     }
 
     #[test]

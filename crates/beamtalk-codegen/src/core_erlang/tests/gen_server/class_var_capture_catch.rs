@@ -423,3 +423,25 @@ fn has_field_in_a_builder_fun_inside_a_direct_called_method_still_asks_the_runti
     );
     assert_compiles_through_erlc("test", &code);
 }
+
+/// BT-3761: the capture walker is `block_facts::class_var_accesses`, shared
+/// with the `class-state-abroad` lint. A class-variable read in a cascade's
+/// later message binds a capture like any read.
+#[test]
+fn class_variable_read_in_a_later_cascade_message_binds_a_capture() {
+    let src = concat!(
+        "Object subclass: Counter\n",
+        "  classState: n = 0\n\n",
+        "  class cascaded => [:x | x foo; bar: self.n]\n",
+    );
+    let code = codegen(src);
+    let cascaded = function_text(&code, "'class_cascaded'/1 = fun");
+    let var = capture_var(cascaded, 0);
+    assert!(
+        cascaded.contains(&format!(
+            "call 'beamtalk_class_vars':'get'(ClassSelf, 'n', {var})"
+        )),
+        "the cascaded read takes the capture: {cascaded}"
+    );
+    assert_compiles_through_erlc("test", &code);
+}

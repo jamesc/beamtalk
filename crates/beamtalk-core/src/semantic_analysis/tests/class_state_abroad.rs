@@ -495,8 +495,9 @@ fn each_block_is_reported_once() {
 
 // ---- cascades (BT-3716) -----------------------------------------------------
 //
-// The AST walker folds a cascade to its first send, so the later messages are
-// judged against the shared receiver explicitly.
+// The parser folds a cascade's first message into its receiver and stores the
+// later ones as bare selectors; `ast_walker::walk_sends` pairs each with the
+// shared receiver, so the lint judges every cascade message (BT-3761).
 
 #[test]
 fn cascaded_later_message_passing_a_writing_block_to_another_class_warns() {
@@ -576,5 +577,50 @@ fn cascades_that_stay_at_home_never_warn() {
     Sealed log; run: [self.m]
 "
     ));
+    assert!(d.is_empty(), "{d:?}");
+}
+
+// ---- one class-variable walker, shared with codegen's capture (BT-3761) -----
+//
+// The lint and codegen's block-creation capture both ask
+// `block_facts::class_var_accesses`, so they agree on what a block reads.
+
+#[test]
+fn write_only_block_is_a_writer_and_not_a_reader() {
+    // Returned: a write-only block reads nothing (codegen binds no capture).
+    let d = only("  class a => [:x | self.n := x]\n");
+    assert!(d.is_empty(), "{d:?}");
+    // Passed to another class's class-side method: reported as a writer.
+    let d = only("  class a => Driver each: [self.n := 1]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("writes class variable 'n'"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn cascade_later_message_reading_a_class_variable_is_a_read() {
+    let d = only("  class a => [:x | x foo; bar: self.n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("reads class variable n of Counter"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn has_field_probe_is_a_read_but_a_cascaded_has_field_is_not() {
+    let d = only("  class a => [self hasField: #n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("reads class variable n of Counter"),
+        "{}",
+        d[0].message
+    );
+    // A cascade dispatches `hasField:` as an ordinary send: no capture, no read.
+    let d = only("  class a => [self hasField: #n; hasField: #m]\n");
     assert!(d.is_empty(), "{d:?}");
 }
