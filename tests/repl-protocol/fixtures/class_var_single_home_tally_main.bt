@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ADR 0130 / BT-3715: CvshTally, driven with CvshBatch (separate file).
+// ADR 0130 / BT-3715: CvshTally, driven with CvshBatch and CvshKeeper
+// (separate files).
 
 Object subclass: CvshTally
   classState: total = 0
@@ -23,6 +24,22 @@ Object subclass: CvshTally
     self.total
 
   class makeBumper => [self add: 1]
+
+  // BT-3760: a block whose only class-variable access is a direct write.
+  class makeWriter => [self.total := 5]
+
+  class writeDirectViaBatch =>
+    self reset
+    @expect class_state_abroad "BT-3760: the direct write runs in CvshBatch's process"
+    CvshBatch each: [self.total := 5]
+    self.total
+
+  class writeDirectViaKeeper =>
+    self reset
+    k := CvshKeeper spawn
+    k keep: [self.total := 5]
+    k run
+    self.total
 
   class makeReader =>
     @expect class_state_abroad "BT-3715: run from the REPL it reads the creation-time value"

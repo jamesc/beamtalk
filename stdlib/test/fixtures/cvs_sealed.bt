@@ -23,6 +23,9 @@ sealed Object subclass: CvsSealed
     @expect class_state_abroad "BT-3712: the returned block reads the captured value outside the class"
     [self.n]
 
+  // BT-3760: a block whose only class-variable access is a direct write.
+  class makeWriter => [self.n := 5]
+
   class run: aBlock => aBlock value
 
   class rowTop =>
@@ -200,6 +203,19 @@ sealed Object subclass: CvsSealed
       a run
       #ok
     ] on: Error do: [:e | e kind]
+
+  class rowSyncDirectWriteOpenDriver =>
+    self reset
+    @expect class_state_abroad "BT-3760: the direct write runs in CvsDriver's process"
+    CvsDriver each: [self.n := 5]
+    self.n
+
+  class rowAsyncDirectWrite =>
+    self reset
+    a := CvsActor spawn
+    a keep: [self.n := 5]
+    a run
+    self.n
 
   class rowOwnNlr =>
     self reset
