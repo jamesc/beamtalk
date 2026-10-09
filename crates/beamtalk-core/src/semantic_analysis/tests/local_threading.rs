@@ -161,19 +161,63 @@ fn section6_shadowing_block_parameter_is_not_the_tier2_local() {
     assert!(diags.is_empty(), "{diags:?}");
 }
 
+/// Each actor §6 exemption is exactly the syntactic shape codegen threads,
+/// and each near miss is rejected. The exempt shapes are the methods of the
+/// compiled fixture `stdlib/test/fixtures/adr0131section6exemptions_actor.bt`,
+/// whose BUnit test (`adr0131section6exemptions_test.bt`) asserts they really
+/// thread the write; this test checks the fixture compiles clean, so a change
+/// to either the exemptions or codegen's recognizers (`detect_tier2_self_send`,
+/// `prescan_tier2_local_vars`/`is_tier2_value_call`,
+/// `inline_block_captured_mutations`) shows up as a failure.
 #[test]
-fn section6_actor_self_send_and_stored_value_compile_unchanged() {
-    // BT-912: an actor instance method can hand a Tier 2 block to a
-    // self-send, call a stored one, or fold it with a collection HOM.
+fn section6_exemptions_match_codegen_shapes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    let fixture = std::fs::read_to_string(root.join("adr0131section6exemptions_actor.bt"))
+        .expect("exemption fixture");
+    let diags = adr0131_diagnostics(&fixture);
+    assert!(diags.is_empty(), "every exempt shape compiles: {diags:?}");
+
+    // The near misses, each probed in an actor instance method on the debug
+    // build (BT-3745): each answers 0 (write dropped) or raises.
     for body in [
-        "r := self ap: [t := t + 1. 1]\n#[r, t]",
-        "b := [t := t + 1]\nb value\nt",
+        // Self-send: stored block argument (detect_tier2_self_send promotes
+        // only a bare block literal or a Tier 2 block *parameter*).
         "b := [t := t + 1]\nself ap: b\nt",
+        "b := [t := t + 1]\nself ap: (b)\nt",
+        // Self-send: parenthesized block argument.
+        "self ap: ([t := t + 1])\nt",
+        // Self-send: write-only block (not a captured mutation).
+        "self ap: [t := 5]\nt",
+        // Self-send: `super`, a cascade, or not at the method's top level.
+        "super ap: [t := t + 1]\nt",
+        "self ap: [t := t + 1]; yourself\nt",
+        "4 > 3 ifTrue: [self ap: [t := t + 1]]\nt",
+        "#(1, 2) do: [:e | self ap: [t := t + e]]\nt",
+        "x := (self ap: [t := t + 1. 2]) + 1\n#[x, t]",
+        // Stored block: folded by a collection HOM.
         "b := [:x | t := t + x]\n#(1, 2) do: b\nt",
+        "b := [:x | t := t + x]\n#(1, 2) collect: b\nt",
+        // Stored block: parenthesized receiver.
+        "b := [t := t + 1]\n(b) value\nt",
+        "b := [:n | t := t + n]\n(b) value: 1; value: 2\nt",
+        // Stored block: `value` not as a method-body statement.
+        "b := [t := t + 1. 7]\nr := b value\n#[r, t]",
+        "b := [:n | t := t + n]\n#[b value: 3, t]",
+        "b := [:n | t := t + n]\nx := 10 + (b value: 1)\n#[x, t]",
+        "b := [t := t + 1]\n#(1) do: [:e | b value]\nt",
+        // Stored block: bound inside a block, or write-only.
+        "#(1) do: [:e | b := [t := t + 1]. b value]\nt",
+        "b := [t := 5]\nb value\nt",
+        // Literal block: parenthesized receiver sent `value`.
+        "([t := t + 1]) value\nt",
     ] {
         let src = in_actor(body);
         let diags = adr0131_diagnostics(&src);
-        assert!(diags.is_empty(), "{body}: {diags:?}");
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+            1,
+            "{body}: {diags:?}"
+        );
     }
 }
 
@@ -467,36 +511,6 @@ fn section6_cascade_messages_are_never_inlined() {
             );
         }
     }
-}
-
-#[test]
-fn section6_actor_self_send_exemption_is_only_for_a_plain_self_send() {
-    // Probed in an actor instance method on the debug build (BT-3745): each
-    // of these drops the write (answers 0) or raises `stateful_block_dispatch`
-    // / `invalid argument`, while the plain `self ap: [t := t + 1]` threads it.
-    for body in [
-        // A cascade message goes through plain dispatch.
-        "self ap: [t := t + 1]; yourself\nt",
-        // A `super` send takes the SuperSend path.
-        "super ap: [t := t + 1]\nt",
-        // Only a bare `[...]` argument is promoted to the Tier 2 self-send.
-        "self ap: ([t := t + 1])\nt",
-    ] {
-        let src = in_actor(body);
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
-            1,
-            "{body}: {diags:?}"
-        );
-    }
-    assert!(adr0131_diagnostics(&in_actor("self ap: [t := t + 1]\nt")).is_empty());
-    // A stored block sent `value` in a cascade does thread
-    // (`tier2stored_block_matrix_actor.bt` `mixedLocalVarCascade:`).
-    assert!(
-        adr0131_diagnostics(&in_actor("b := [:n | t := t + n]\nb value: 1; value: 2\nt"))
-            .is_empty()
-    );
 }
 
 #[test]

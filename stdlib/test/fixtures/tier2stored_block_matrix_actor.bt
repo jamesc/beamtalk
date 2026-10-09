@@ -101,11 +101,9 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // (intrinsics.rs) now unpacks Result for this position — the block's own
   // field/captured-local mutation is deliberately NOT threaded forward from
   // here (documented limitation, same as P3-15 below), only the return
-  // value is computed correctly.
-  localBlockInArgumentPosition: x =>
-    r := 0
-    blk := [:n | r := r + n]
-    10 + (blk value: x)
+  // value is computed correctly. Since BT-3745 that dropped write makes the
+  // shape (`blk := [:n | r := r + n]. 10 + (blk value: x)`) an ADR 0131 §6
+  // compile error, so it is no longer a fixture method.
 
   // P2-12: field reassigned to a DIFFERENT block (setupOnTickDoubling above)
   // between two invocations — confirms runtime discrimination re-reads the

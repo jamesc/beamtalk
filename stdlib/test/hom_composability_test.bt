@@ -15,8 +15,8 @@
 // 2. detect_tier2_self_send: treat identifier Tier 2 block parameters as Tier 2
 //    HOM arguments, enabling state threading through nested HOM delegation chains
 //
-// Stored blocks passed to HOMs (testStoredBlockPassedToCustomHOM) require
-// type-level tracking of block variables (BT-909) and are not yet tested
+// Stored blocks passed to HOMs require type-level tracking of block variables
+// (BT-909); until then they are an ADR 0131 §6 compile error (BT-3745)
 
 TestCase subclass: HomComposabilityTest
 

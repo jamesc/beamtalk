@@ -37,7 +37,8 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, local_threading_construct_blocks, outer_local_writes,
+    OuterLocalWrite, captured_local_mutations, local_threading_construct_blocks,
+    outer_local_writes, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -417,6 +418,22 @@ struct Tier2Local {
     write: OuterLocalWrite,
     /// The index in `Walker::scope` of the frame that binds the local.
     frame: usize,
+    /// Whether codegen promotes the binding to a Tier 2 local
+    /// (`prescan_tier2_local_vars`): see [`Walker::note_tier2_binding`].
+    promotable: bool,
+}
+
+/// Where a send sits relative to the method body, for the actor exemptions:
+/// codegen threads an actor Tier 2 call only at the top level of the method
+/// body (probed, BT-3745), never inside a block or an operand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TopLevel {
+    /// A method-body statement.
+    Statement,
+    /// The value of a method-body `x := ...` or `^...`.
+    Value,
+    /// Anywhere else.
+    None,
 }
 
 /// The walk behind [`check_local_threading`] for one method body: tracks
@@ -437,6 +454,11 @@ struct Walker<'d> {
     tier2_locals: HashMap<EcoString, Tier2Local>,
     /// Tier 2 locals already reported (one diagnostic per binding).
     reported_locals: HashSet<EcoString>,
+    /// For each method-body statement `b := [...]`, whether every later use
+    /// of `b` in the method body is a safe `value` send
+    /// ([`stored_block_var_uses`], shared with codegen's
+    /// `prescan_tier2_local_vars`).
+    safe_stored_uses: HashMap<EcoString, bool>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -463,6 +485,22 @@ impl<'d> Walker<'d> {
                 _ => {}
             });
         }
+        let mut safe_stored_uses = HashMap::new();
+        for (i, stmt) in body.iter().enumerate() {
+            let Expression::Assignment { target, value, .. } = &stmt.expression else {
+                continue;
+            };
+            let (Expression::Identifier(id), Expression::Block(_)) =
+                (target.as_ref(), value.as_ref())
+            else {
+                continue;
+            };
+            let (has_unsafe, has_safe) = body[i + 1..]
+                .iter()
+                .map(|later| stored_block_var_uses(&later.expression, &id.name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            safe_stored_uses.insert(id.name.clone(), has_safe && !has_unsafe);
+        }
         Self {
             context,
             scope: Vec::new(),
@@ -471,6 +509,7 @@ impl<'d> Walker<'d> {
             assign_counts,
             tier2_locals: HashMap::new(),
             reported_locals: HashSet::new(),
+            safe_stored_uses,
             diagnostics,
         }
     }
@@ -501,6 +540,20 @@ impl<'d> Walker<'d> {
 
     fn writes_of(&self, block: &Block) -> Vec<OuterLocalWrite> {
         outer_local_writes(block, &|name| self.is_bound(name))
+    }
+
+    /// Where an expression at `position` sits relative to the method body.
+    fn top_level(&self, position: Position) -> TopLevel {
+        if self.depth > 0 {
+            return TopLevel::None;
+        }
+        match position {
+            Position::Statement => TopLevel::Statement,
+            Position::AssignValue { nested: false } | Position::ReturnValue { nested: false } => {
+                TopLevel::Value
+            }
+            _ => TopLevel::None,
+        }
     }
 
     fn body(&mut self, body: &[ExpressionStatement]) {
@@ -547,7 +600,8 @@ impl<'d> Walker<'d> {
                 Expression::Identifier(id) => {
                     self.operand(value, Position::AssignValue { nested });
                     self.define(&id.name);
-                    self.note_tier2_binding(&id.name, value, expr.span());
+                    let top_statement = self.top_level(position) == TopLevel::Statement;
+                    self.note_tier2_binding(&id.name, value, expr.span(), top_statement);
                 }
                 Expression::FieldAccess { receiver, .. } => {
                     self.expr(receiver, Position::Receiver);
@@ -575,7 +629,8 @@ impl<'d> Walker<'d> {
                 ..
             } => {
                 self.check_construct(expr, position);
-                self.check_send(receiver, selector, arguments, true);
+                let top = self.top_level(position);
+                self.check_send(receiver, selector, arguments, true, top);
                 self.operand(receiver, Position::Receiver);
                 for arg in arguments {
                     self.operand(arg, Position::Argument);
@@ -602,9 +657,10 @@ impl<'d> Walker<'d> {
                     if let Expression::Block(block) = shared.unwrap_parens() {
                         self.report_literal(block, &selector.name());
                     }
-                    self.check_send(shared, selector, arguments, false);
+                    let top = self.top_level(position);
+                    self.check_send(shared, selector, arguments, false, top);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments, false);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false, top);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -674,7 +730,19 @@ impl<'d> Walker<'d> {
     /// `name := value`: remembers `name` as a Tier 2 block-valued local when
     /// `value` is a block literal that writes an outer local and `name` is
     /// assigned nowhere else in the method.
-    fn note_tier2_binding(&mut self, name: &EcoString, value: &Expression, binding: Span) {
+    ///
+    /// The binding is *promotable* (an actor may then send it `value`) only
+    /// in the shape codegen's `prescan_tier2_local_vars` promotes: a
+    /// method-body statement, whose block threads every outer local it writes
+    /// ([`captured_local_mutations`]), with every later use a safe `value`
+    /// send ([`stored_block_var_uses`]).
+    fn note_tier2_binding(
+        &mut self,
+        name: &EcoString,
+        value: &Expression,
+        binding: Span,
+        top_statement: bool,
+    ) {
         let Expression::Block(block) = value else {
             return;
         };
@@ -684,16 +752,22 @@ impl<'d> Walker<'d> {
         let Some(frame) = self.binding_frame(name) else {
             return;
         };
-        if let Some(write) = self.writes_of(block).into_iter().next() {
-            self.tier2_locals.insert(
-                name.clone(),
-                Tier2Local {
-                    binding,
-                    write,
-                    frame,
-                },
-            );
-        }
+        let writes = self.writes_of(block);
+        let Some(write) = writes.first().cloned() else {
+            return;
+        };
+        let promotable = top_statement
+            && self.safe_stored_uses.get(name).copied() == Some(true)
+            && threads_all(block, &writes);
+        self.tier2_locals.insert(
+            name.clone(),
+            Tier2Local {
+                binding,
+                write,
+                frame,
+                promotable,
+            },
+        );
     }
 
     /// The Phase 0 allow-set check for a construct at `position`.
@@ -780,25 +854,34 @@ impl<'d> Walker<'d> {
         selector: &MessageSelector,
         arguments: &[Expression],
         inlined: bool,
+        top: TopLevel,
     ) {
         let sel = selector.name().to_string();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
             // ADR 0041 §Erlang Interop Boundary: lossy by design (warned by codegen).
             return;
         }
-        // Only an actor *self* send carries a `StateAcc` back (BT-912), and
-        // only when it is an ordinary send: a `super` send takes the
-        // `SuperSend` path and a cascade message plain dispatch, neither of
-        // which threads outer locals (probed, BT-3745).
-        let is_self_send = crate::semantic_analysis::block_facts::is_self_reference(receiver);
-        let actor_self_send = inlined && self.context == Actor && is_self_send;
+        // EXEMPTION (actor self-send), the shape codegen's
+        // `detect_tier2_self_send` (dispatch_codegen.rs) promotes: receiver a
+        // bare `self` (not `super`, not parenthesized), an ordinary send (not
+        // a cascade message), at the top level of the method body, with a
+        // bare `[...]` argument whose block threads every outer local it
+        // writes (`captured_mutations_for_block`). Anything else drops the
+        // write or raises (probed, BT-3745). Pinned by
+        // `section6_exemptions_match_codegen_shapes` and the compiled
+        // fixture `adr0131section6exemptions_actor.bt`.
+        let is_self_send = matches!(receiver, Expression::Identifier(id) if id.name == "self");
+        let actor_self_send =
+            inlined && self.context == Actor && is_self_send && top != TopLevel::None;
+        // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
+        // send of a §1 selector (`local_threading_construct_blocks`).
         let construct_send = inlined && is_section1_selector(&sel);
 
-        // A block literal receiver. Only a direct `[...]` receiver of an
-        // inlined send is inlined; a parenthesized one is a block value,
-        // even when sent `value` in an actor method (codegen's Tier 2
-        // `value` paths match only a bare block). A cascade checks its
-        // shared receiver once itself, so `inlined: false` skips it here.
+        // A block literal receiver. EXEMPTION: a bare `[...]` receiver of an
+        // inlined `value`/loop/protected-body send (codegen's
+        // `inline_block_captured_mutations` and the loop and exception
+        // generators match only a bare block). A cascade checks its shared
+        // receiver once itself, so `inlined: false` skips it here.
         if inlined {
             match receiver {
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
@@ -813,13 +896,17 @@ impl<'d> Walker<'d> {
             }
         }
         // Block literal arguments. A parenthesized block argument is a block
-        // value even to an actor self-send (only a bare `[...]` is promoted
-        // to the Tier 2 self-send protocol).
+        // value in every send.
         for arg in arguments {
             match arg {
-                Expression::Block(block) if !construct_send && !actor_self_send => {
-                    self.report_literal(block, &sel);
+                Expression::Block(block) if construct_send => {}
+                Expression::Block(block) if actor_self_send => {
+                    let writes = self.writes_of(block);
+                    if !threads_all(block, &writes) {
+                        self.report_literal(block, &sel);
+                    }
                 }
+                Expression::Block(block) => self.report_literal(block, &sel),
                 Expression::Parenthesized { .. } => {
                     if let Expression::Block(block) = arg.unwrap_parens() {
                         self.report_literal(block, &sel);
@@ -829,26 +916,31 @@ impl<'d> Walker<'d> {
             }
         }
 
-        // Tier 2 block-valued locals.
+        // Tier 2 block-valued locals. EXEMPTION (actor stored block): a bare
+        // identifier receiver of a `value`-family send, as a method-body
+        // statement (cascade or not), for a binding codegen's
+        // `prescan_tier2_local_vars` promotes (see `note_tier2_binding`);
+        // `is_tier2_value_call` and the cascade path match only a bare
+        // identifier. Every other use, including any argument use (a
+        // self-send or a collection fold of a stored block drops the write,
+        // probed), has no return channel.
         if let Expression::Identifier(id) = receiver.unwrap_parens() {
-            // Codegen rebinds a stored block's captured locals at every
-            // `value` send to it, cascade or not
-            // (`tier2stored_block_matrix_actor.bt` `mixedLocalVarCascade:`).
-            let ok = self.context == Actor && is_block_value_selector(selector);
+            let bare = matches!(receiver, Expression::Identifier(_));
+            let promotable = self
+                .tier2_locals
+                .get(&id.name)
+                .is_some_and(|l| l.promotable);
+            let ok = bare
+                && self.context == Actor
+                && promotable
+                && top == TopLevel::Statement
+                && is_block_value_selector(selector);
             if !ok {
                 self.report_local(&id.name, &sel, receiver.span());
             }
         }
-        let fold_callable =
-            crate::state_threading_selectors::opaque_fold_callable_arg(&sel, arguments);
         for arg in arguments {
-            let Expression::Identifier(id) = arg.unwrap_parens() else {
-                continue;
-            };
-            let ok = inlined
-                && self.context == Actor
-                && (is_self_send || fold_callable.is_some_and(|c| std::ptr::eq(c, arg)));
-            if !ok {
+            if let Expression::Identifier(id) = arg.unwrap_parens() {
                 self.report_local(&id.name, &sel, arg.span());
             }
         }
@@ -900,6 +992,15 @@ impl<'d> Walker<'d> {
         .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
         self.diagnostics.push(diagnostic);
     }
+}
+
+/// Whether codegen's Tier 2 block protocol threads back every outer local in
+/// `writes` (each is in [`captured_local_mutations`]).
+fn threads_all(block: &Block, writes: &[OuterLocalWrite]) -> bool {
+    let captured = captured_local_mutations(block);
+    writes
+        .iter()
+        .all(|w| captured.iter().any(|c| c == w.name.as_str()))
 }
 
 /// The ADR 0131 §6 help text.

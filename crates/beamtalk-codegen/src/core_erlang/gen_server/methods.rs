@@ -19,7 +19,7 @@ use beamtalk_cerl_doc::leaf::fname;
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use beamtalk_core::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MapPair,
-    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, WellKnownSelector,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
 };
 use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
@@ -415,216 +415,18 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Normalizes a `Cascade` into its true underlying receiver and the
-    /// full ordered list of messages sent to it.
-    ///
-    /// The parser (`parse_cascade`) folds the cascade's *first* message into
-    /// `Cascade.receiver` as a whole `MessageSend` — e.g. for `blk value: x;
-    /// value: y`, `receiver` is `MessageSend(blk, value:, [x])` and `messages`
-    /// holds only the remaining `value: y`. Every safety/codegen decision needs
-    /// the TRUE receiver (`blk`) and ALL messages sent to it (both `value: x`
-    /// and `value: y`), so this mirrors the same normalization
-    /// `generate_cascade` (expressions.rs) already performs for ordinary
-    /// (non-Tier-2) cascade codegen.
+    /// See [`beamtalk_core::semantic_analysis::block_facts::normalize_cascade`].
     fn normalize_cascade<'a>(
         receiver: &'a Expression,
         messages: &'a [CascadeMessage],
     ) -> (&'a Expression, Vec<(&'a MessageSelector, &'a [Expression])>) {
-        if let Expression::MessageSend {
-            receiver: inner,
-            selector: first_selector,
-            arguments: first_arguments,
-            ..
-        } = receiver
-        {
-            let mut all: Vec<(&MessageSelector, &[Expression])> =
-                Vec::with_capacity(messages.len() + 1);
-            all.push((first_selector, first_arguments.as_slice()));
-            for msg in messages {
-                all.push((&msg.selector, msg.arguments.as_slice()));
-            }
-            (inner.as_ref(), all)
-        } else {
-            let all: Vec<(&MessageSelector, &[Expression])> = messages
-                .iter()
-                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
-                .collect();
-            (receiver, all)
-        }
+        beamtalk_core::semantic_analysis::block_facts::normalize_cascade(receiver, messages)
     }
 
-    /// Returns true if `selector` is a `value`/`value:`/
-    /// `value:value:`/`value:value:value:` send — the "safe" family that lets a
-    /// Tier 2 block value be invoked without escaping to a call site that
-    /// doesn't know to thread state through it.
-    fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
-        selector
-            .well_known()
-            .is_some_and(WellKnownSelector::is_block_value)
-    }
-
-    /// Scans `expr` for references to `var_name`, returning
-    /// `(has_unsafe_use, has_safe_use)`.
-    ///
-    /// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
-    /// `value:value:value:` send. Any other reference — a bare return, an
-    /// argument to another call, a reassignment, ... — is *unsafe*, since it
-    /// would let a Tier 2 block value escape to a call site that doesn't know
-    /// to thread state through it. A variable that's *never* referenced at
-    /// all yields `(false, false)`, which the caller must treat as unsafe
-    /// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
-    ///
-    /// Deliberately conservative: exhaustively matches every `Expression`
-    /// variant so a use hidden inside e.g. a map literal or string
-    /// interpolation is never silently missed. A shadowing block parameter
-    /// with the same name is *not* special-cased — that only makes this
-    /// over-conservative (a missed promotion), never unsafe.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
-    )]
+    /// See [`beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses`],
+    /// shared with the ADR 0131 §6 check.
     fn scan_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
-        match expr {
-            Expression::Identifier(id) => (id.name == var_name, false),
-            Expression::Literal(..)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_)
-            | Expression::Primitive { .. }
-            | Expression::ExpectDirective { .. }
-            | Expression::Error { .. } => (false, false),
-            Expression::Spread { name, .. } => (name.name == var_name, false),
-            Expression::FieldAccess { receiver, .. } => Self::scan_var_uses(receiver, var_name),
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } => {
-                let is_safe_value_send = matches!(
-                    receiver.as_ref(),
-                    Expression::Identifier(id) if id.name == var_name
-                ) && Self::is_safe_value_family_selector(selector);
-                let (mut unsafe_, mut safe) = if is_safe_value_send {
-                    (false, true)
-                } else {
-                    Self::scan_var_uses(receiver, var_name)
-                };
-                for arg in arguments {
-                    let (u, s) = Self::scan_var_uses(arg, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::Block(block) => {
-                // Any reference to var_name inside a nested block literal is
-                // unsafe — see the safety invariant note on
-                // prescan_tier2_local_vars above (a nested block compiles
-                // through a completely different path with no Tier2-tuple
-                // unpacking and no tier2_local_vars reset of its own).
-                let (any_unsafe, any_safe) = block
-                    .body
-                    .iter()
-                    .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
-                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-                (any_unsafe || any_safe, false)
-            }
-            Expression::Assignment { target, value, .. } => {
-                let (u1, s1) = Self::scan_var_uses(target, var_name);
-                let (u2, s2) = Self::scan_var_uses(value, var_name);
-                (u1 || u2, s1 || s2)
-            }
-            Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-                Self::scan_var_uses(value, var_name)
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                // When the cascade's true underlying receiver (see
-                // `normalize_cascade`) *is* var_name itself (e.g. `blk value: x;
-                // value: y`), the generic recursive scan would hit the plain
-                // `Identifier` arm and unconditionally report it unsafe. Mirror the
-                // `MessageSend` arm's `is_safe_value_send` check instead: if EVERY
-                // message sent to that receiver (including the one folded into
-                // `receiver` by the parser) is itself a safe
-                // `value`/`value:`/`value:value:`/`value:value:value:` send, the
-                // whole cascade is as safe as a single safe value send would be.
-                let (underlying_receiver, all_messages) =
-                    Self::normalize_cascade(receiver, messages);
-                let receiver_is_var = matches!(
-                    underlying_receiver,
-                    Expression::Identifier(id) if id.name == var_name
-                );
-                let all_messages_safe_value_sends = receiver_is_var
-                    && !all_messages.is_empty()
-                    && all_messages
-                        .iter()
-                        .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
-                let (mut unsafe_, mut safe) = if all_messages_safe_value_sends {
-                    (false, true)
-                } else {
-                    Self::scan_var_uses(underlying_receiver, var_name)
-                };
-                for (_, args) in &all_messages {
-                    for arg in *args {
-                        let (u, s) = Self::scan_var_uses(arg, var_name);
-                        unsafe_ |= u;
-                        safe |= s;
-                    }
-                }
-                (unsafe_, safe)
-            }
-            Expression::Parenthesized { expression, .. } => {
-                Self::scan_var_uses(expression, var_name)
-            }
-            Expression::Match { value, arms, .. } => {
-                let (mut unsafe_, mut safe) = Self::scan_var_uses(value, var_name);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        let (u, s) = Self::scan_var_uses(guard, var_name);
-                        unsafe_ |= u;
-                        safe |= s;
-                    }
-                    let (u, s) = Self::scan_var_uses(&arm.body, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::MapLiteral { pairs, .. } => pairs
-                .iter()
-                .map(|pair| {
-                    let (u1, s1) = Self::scan_var_uses(&pair.key, var_name);
-                    let (u2, s2) = Self::scan_var_uses(&pair.value, var_name);
-                    (u1 || u2, s1 || s2)
-                })
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-            Expression::ListLiteral { elements, tail, .. } => {
-                let (mut unsafe_, mut safe) = elements
-                    .iter()
-                    .map(|e| Self::scan_var_uses(e, var_name))
-                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-                if let Some(t) = tail {
-                    let (u, s) = Self::scan_var_uses(t, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::ArrayLiteral { elements, .. } => elements
-                .iter()
-                .map(|e| Self::scan_var_uses(e, var_name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-            Expression::StringInterpolation { segments, .. } => segments
-                .iter()
-                .map(|seg| match seg {
-                    beamtalk_core::ast::StringSegment::Interpolation(e) => {
-                        Self::scan_var_uses(e, var_name)
-                    }
-                    beamtalk_core::ast::StringSegment::Literal(_) => (false, false),
-                })
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-        }
+        beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
     /// Classify a body expression for state-threading dispatch.
@@ -2814,7 +2616,9 @@ impl CoreErlangGenerator {
             // binds `arguments` directly to the block's own parameters, which
             // doesn't hold for valueWithArguments: (a single runtime list, not
             // per-parameter positional args). Not a motivating shape here.
-            if Self::is_safe_value_family_selector(selector) {
+            if beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
+                selector,
+            ) {
                 // Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
                 // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
@@ -2847,9 +2651,11 @@ impl CoreErlangGenerator {
         {
             let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
             let all_safe_value_sends = !all_messages.is_empty()
-                && all_messages
-                    .iter()
-                    .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+                && all_messages.iter().all(|(sel, _)| {
+                    beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
+                        sel,
+                    )
+                });
             if all_safe_value_sends {
                 if let Expression::Identifier(id) = underlying_receiver {
                     if self.tier2_block_params.contains(id.name.as_str())

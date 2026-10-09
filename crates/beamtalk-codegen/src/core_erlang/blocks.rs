@@ -79,13 +79,9 @@ impl CoreErlangGenerator {
     fn captured_mutations_from_analysis(
         analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
     ) -> Vec<String> {
-        analysis
-            .local_writes
-            .intersection(&analysis.captured_reads)
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
+        beamtalk_core::semantic_analysis::block_facts::captured_local_mutations_from_analysis(
+            analysis,
+        )
     }
 
     /// Returns captured mutation variable names if `expr` is a
