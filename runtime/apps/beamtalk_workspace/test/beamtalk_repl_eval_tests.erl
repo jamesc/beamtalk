@@ -2532,24 +2532,18 @@ eval_with_self_discards_class_var_writes() ->
     %% literal stays in the module's atom table.
     erlang:put(eval_self_cv_class, 'EvalSelfCvClass'),
     Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
-    Key = {'$bt_class_vars', Tag},
     ClassSelf = #beamtalk_object{class = Tag, class_mod = escc, pid = self()},
     Block = fun() ->
         beamtalk_class_vars:put(ClassSelf, a, 99),
         erlang:error(boom)
     end,
-    erlang:erase(Key),
-    erlang:erase('$bt_class_vars_home'),
-    try
-        beamtalk_class_vars:install(Key, #{a => 1}),
+    Key = beamtalk_class_vars:key_for_tag(Tag),
+    beamtalk_class_vars_test_support:with_home_key(Key, #{a => 1}, fun() ->
         ?assertMatch(
             {error, #beamtalk_error{}}, beamtalk_repl_eval:eval_with_self(Block, "self value")
         ),
         ?assertEqual(1, beamtalk_class_vars:get(ClassSelf, a))
-    after
-        erlang:erase(Key),
-        erlang:erase('$bt_class_vars_home')
-    end.
+    end).
 
 %% BT-3735: a `^` out of a captured block run by `evaluate:` is a `$bt_nlr` throw
 %% aimed at a catch frame further up the caller's stack. `evaluate:` must re-raise
@@ -2559,17 +2553,14 @@ eval_with_self_discards_class_var_writes() ->
 eval_with_self_reraises_nlr_and_keeps_class_var_writes() ->
     erlang:put(eval_self_cv_class, 'EvalSelfNlrClass'),
     Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
-    Key = {'$bt_class_vars', Tag},
     ClassSelf = #beamtalk_object{class = Tag, class_mod = esnc, pid = self()},
     Token = make_ref(),
     Block = fun() ->
         beamtalk_class_vars:put(ClassSelf, a, 99),
         erlang:throw({'$bt_nlr', Token, 1})
     end,
-    erlang:erase(Key),
-    erlang:erase('$bt_class_vars_home'),
-    try
-        beamtalk_class_vars:install(Key, #{a => 1}),
+    Key = beamtalk_class_vars:key_for_tag(Tag),
+    beamtalk_class_vars_test_support:with_home_key(Key, #{a => 1}, fun() ->
         Outcome =
             try
                 {returned, beamtalk_repl_eval:eval_with_self(Block, "self value")}
@@ -2580,10 +2571,7 @@ eval_with_self_reraises_nlr_and_keeps_class_var_writes() ->
         ?assertEqual(99, beamtalk_class_vars:get(ClassSelf, a)),
         %% ... and the `^` propagates instead of becoming `{error, _}`.
         ?assertEqual({thrown, {'$bt_nlr', Token, 1}}, Outcome)
-    after
-        erlang:erase(Key),
-        erlang:erase('$bt_class_vars_home')
-    end.
+    end).
 
 eval_with_self_reraises_actor_nlr() ->
     Token = make_ref(),
