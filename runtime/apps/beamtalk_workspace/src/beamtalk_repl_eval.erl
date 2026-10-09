@@ -912,7 +912,8 @@ eval_not_an_expression_error() ->
 
 %% Load the compiled eval module, run its `eval/1` with the self-binding, and
 %% purge it. Any throw/error/exit is captured into a structured error so the
-%% Inspector never sees a raise.
+%% Inspector never sees a raise, except a `$bt_nlr` throw (a `^` from a captured
+%% block), which is re-raised to its home frame (BT-3735).
 -spec run_self_eval_module(atom(), binary(), map()) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 run_self_eval_module(ModuleName, Binary, Bindings) ->
@@ -926,8 +927,11 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                 %% invocation process (Inspector `evaluate:` called from a class
                 %% method), and a block it runs may write class variables. This
                 %% catch swallows the error, so the writes must be rolled back
-                %% like any other protected region (ADR 0130 §4, BT-3728).
-                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
+                %% like any other protected region (ADR 0130 §4, BT-3728). A `^`
+                %% (`$bt_nlr`) unwinding out of a block run here is re-raised below
+                %% to its home frame; `protect_discard/1` rolls the writes back on
+                %% that exit too, so `evaluate:` never leaks a write (BT-3735).
+                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect_discard(fun() ->
                     apply(ModuleName, eval, [Bindings])
                 end),
                 case maybe_await_future(RawResult) of
@@ -942,6 +946,13 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                         {ok, Value}
                 end
             catch
+                %% BT-3735: a `^` out of a captured block is control flow aimed at
+                %% a catch frame further up the caller's stack, not a failure.
+                %% Re-raise it untouched (either tuple shape). If its home frame
+                %% is already gone, no frame matches and the outermost boundary
+                %% (REPL eval / dispatch) wraps it as a structured error.
+                throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
+                    erlang:raise(throw, Nlr, NlrStack);
                 Class:Reason:Stacktrace ->
                     ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
                     {error, beamtalk_repl_errors:ensure_structured_error(ExObj)}

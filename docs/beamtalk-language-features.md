@@ -2337,7 +2337,7 @@ A wedged, dead, or non-`sys` actor degrades to a single `#status: #unavailable` 
 
 Each `InspectorField` is an immutable `Value` record with `name` (the navigation key), `label`, `value`, `kind`, and `drillable` (`isLeaf` is its negation).
 
-**`evaluate:` is values-only.** On a `#value` cursor, `i evaluate: "self x + self y"` compiles and runs the expression with `self` bound to the inspected value, returning a `Result` — never raising. On an `#actor` cursor it returns `Result error:` with kind `#actor_eval_unsupported` (actor evaluate-in-context is a deferred §7 follow-up). Live updates are **poll-only**: re-issue `refresh`.
+**`evaluate:` is values-only.** On a `#value` cursor, `i evaluate: "self x + self y"` compiles and runs the expression with `self` bound to the inspected value, returning a `Result` — failures are `Result error:`, never a raise. The one exception is a `^` (non-local return) from a block captured elsewhere and run by the expression: it is control flow, not a failure, so `evaluate:` re-raises it to its home method (BT-3735). Class-variable writes the evaluated code made are discarded on that exit, as on an error. If the home method has already returned (a stale `^`), nothing catches it and the enclosing eval/dispatch boundary reports it as a structured error. On an `#actor` cursor it returns `Result error:` with kind `#actor_eval_unsupported` (actor evaluate-in-context is a deferred §7 follow-up). Live updates are **poll-only**: re-issue `refresh`.
 
 ```beamtalk
 i := (Point x: 3 y: 4) inspect
