@@ -34,7 +34,7 @@
 //! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
-//!   table does not thread (a `whileTrue:` condition, `eachWithIndex:` /
+//!   table does not thread (a `whileTrue:` condition, BT-3782; `eachWithIndex:` /
 //!   `do:separatedBy:` outside an actor, `tryDo:` until ADR 0131 Phase 4),
 //!   which crashes or loses the write at runtime today. As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
@@ -808,7 +808,7 @@ sealed typed Value subclass: Foo
         assert!(diags[0].message.contains("`x`"));
     }
 
-    /// Construct positions §6 accepts but the shared table does not thread
+    /// Construct positions §6 accepts but the shared table does not thread (BT-3782, BT-3753)
     /// still warn: in a value-type context a keyword `whileTrue:`/
     /// `whileFalse:` CONDITION block's write crashes at runtime today
     /// ("function expects 1 arguments but was called with 0"), and
