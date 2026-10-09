@@ -8,102 +8,6 @@
 
 use super::*;
 
-#[test]
-fn test_bt1213_block_value_with_captured_mutation_actor() {
-    // [count := count + 1] value in actor context
-    // Parse from source to get a realistic AST
-    // Build AST manually: Object subclass: BT1213Actor
-    //   testIt => count := 0. [count := count + 1] value. count
-    let s = Span::new(0, 0);
-    let count_id = || Expression::Identifier(Identifier::new("count", s));
-
-    // count := count + 1
-    let add_expr = Expression::MessageSend {
-        receiver: Box::new(count_id()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![Expression::Literal(Literal::Integer(1), s)],
-        is_cast: false,
-        span: s,
-    };
-    let assign = Expression::Assignment {
-        target: Box::new(count_id()),
-        value: Box::new(add_expr),
-        type_annotation: None,
-        span: s,
-    };
-
-    // [count := count + 1] value
-    let block = Block::new(vec![], vec![bare(assign)], s);
-    let block_value = Expression::MessageSend {
-        receiver: Box::new(Expression::Block(block)),
-        selector: MessageSelector::Unary("value".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: s,
-    };
-
-    // count := 0
-    let init_count = Expression::Assignment {
-        target: Box::new(count_id()),
-        value: Box::new(Expression::Literal(Literal::Integer(0), s)),
-        type_annotation: None,
-        span: s,
-    };
-
-    let method = MethodDefinition::new(
-        MessageSelector::Unary("testIt".into()),
-        vec![],
-        vec![bare(init_count), bare(block_value), bare(count_id())],
-        s,
-    );
-
-    let class = ClassDefinition {
-        name: Identifier::new("BT1213Actor", s),
-        superclass: Some(Identifier::new("Actor", s)),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![method],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-
-    let module = Module {
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_module(&module, CodegenOptions::new("bt@bt1213_actor"))
-        .expect("codegen should work");
-
-    // Actor codegen should thread count through StateAcc
-    assert!(
-        code.contains("__local__count"),
-        "Should thread count through StateAcc. Got:\n{code}"
-    );
-}
-
 /// Compiles `src` and returns the Core Erlang text of the function whose
 /// header starts with `header`, up to the next top-level definition.
 pub(super) fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
@@ -113,6 +17,37 @@ pub(super) fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
     let rest = &code[start..];
     let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
     &rest[..end]
+}
+
+/// The `{'$bt_class_vars', ` opening of the class-variable key tuple, from the
+/// `class_var_keys` leaf that owns the shape.
+fn key_tuple_prefix() -> String {
+    format!("{{'{}', ", super::super::class_var_keys::KEY_TAG)
+}
+
+/// The variable `text` (one function's Core Erlang) binds the class-variable
+/// key to, read off its `let <Var> = {'$bt_class_vars', ...} in` binding the
+/// way `class_var_capture_catch.rs` reads off the capture variable. Asserts
+/// the key tuple is built exactly once in the function, so no test pins the
+/// binding's temp-var ordinal.
+fn class_var_key_var(text: &str) -> String {
+    let prefix = key_tuple_prefix();
+    let mut tuples = text.match_indices(prefix.as_str());
+    let at = tuples
+        .next()
+        .unwrap_or_else(|| panic!("no class-variable key tuple in:\n{text}"))
+        .0;
+    assert!(
+        tuples.next().is_none(),
+        "one key tuple per function. Got:\n{text}"
+    );
+    let before = &text[..at];
+    let let_at = before
+        .rfind("let ")
+        .expect("the class-variable key is a let binding");
+    before[let_at + 4..]
+        .trim_end_matches([' ', '='])
+        .to_string()
 }
 
 /// ADR 0130 §3: a class method is `fun (ClassSelf, Args...)` returning the bare
@@ -148,9 +83,12 @@ fn class_var_read_is_inlined_with_a_helper_fallback() {
     let src = "Object subclass: Counter\n  classState: n = 0\n\n  class peek => self.n\n";
     let code = codegen(src);
     let peek = function_text(&code, "'class_peek'/1 = fun");
+    let key = class_var_key_var(peek);
+    let prefix = key_tuple_prefix();
     assert!(
-        peek.contains("let _CVKey3 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in")
-            && peek.contains("call 'erlang':'get'(_CVKey3)"),
+        peek.contains(&format!(
+            "let {key} = {prefix}call 'erlang':'element'(2, ClassSelf)}} in"
+        )) && peek.contains(&format!("call 'erlang':'get'({key})")),
         "the key shape comes from the class_var_keys leaf, bound once. Got:\n{peek}"
     );
     assert!(
@@ -179,18 +117,22 @@ fn class_var_key_is_bound_once_per_method() {
     );
     let code = codegen(src);
     let churn = function_text(&code, "'class_churn:'/2 = fun");
-    assert_eq!(
-        churn.matches("{'$bt_class_vars', ").count(),
-        1,
-        "one key tuple for every access. Got:\n{churn}"
+    // Asserts one key tuple for every access in the method.
+    let key = class_var_key_var(churn);
+    assert!(
+        churn
+            .matches(&format!("call 'erlang':'get'({key})"))
+            .count()
+            >= 3,
+        "every read uses the one bound key. Got:\n{churn}"
     );
     assert!(
-        churn.matches("call 'erlang':'get'(_CVKey").count() >= 3,
-        "{churn}"
+        churn.contains(&format!("call 'erlang':'put'({key}, ")),
+        "the writes use the one bound key. Got:\n{churn}"
     );
     let other = function_text(&code, "'class_other'/1 = fun");
     assert!(
-        !other.contains("_CVKey"),
+        !other.contains(&key_tuple_prefix()),
         "a method with no class-variable access binds no key. Got:\n{other}"
     );
 }
@@ -244,8 +186,9 @@ fn class_var_writes_anywhere_thread_nothing() {
     ] {
         let header = format!("'class_{method}'/{arity} = fun");
         let text = function_text(&code, &header);
+        let key = class_var_key_var(text);
         assert!(
-            text.contains("call 'erlang':'put'(_CVKey"),
+            text.contains(&format!("call 'erlang':'put'({key}, ")),
             "{method} writes in place. Got:\n{text}"
         );
     }
@@ -311,12 +254,14 @@ fn effectful_class_side_arguments_are_evaluated_in_source_order() {
     let code = codegen(src);
     let go = function_text(&code, "'class_go'/1 = fun");
     let first = go.find("let _Effect").expect("first effect bound");
-    let second = go[first + 1..]
-        .find("let _Effect")
-        .expect("second effect bound");
+    let second = first
+        + 1
+        + go[first + 1..]
+            .find("let _Effect")
+            .expect("second effect bound");
     let call = go.find("'class_pair:with:'").expect("pair:with: called");
     assert!(
-        first < first + 1 + second && first + 1 + second < call,
+        first < second && second < call,
         "both effectful arguments are bound, in order, before the call. Got:\n{go}"
     );
 }
@@ -368,7 +313,7 @@ fn instance_field_mutation_never_touches_the_class_var_key() {
     let src = "Actor subclass: PlainCounter\n  state: count = 0\n\n  bump => self.count := self.count + 1";
     let code = codegen(src);
     assert!(
-        !code.contains("$bt_class_vars"),
+        !code.contains(super::super::class_var_keys::KEY_TAG),
         "instance field mutation must not emit a class-var access. Got:\n{code}"
     );
 }

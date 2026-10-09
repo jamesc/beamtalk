@@ -29,8 +29,8 @@ use super::erlang_types::ErlangVar;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::well_known::WellKnownSelector;
-use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector};
+use beamtalk_core::ast::{Block, Expression, Identifier};
+use beamtalk_core::semantic_analysis::block_facts::class_var_accesses;
 
 impl CoreErlangGenerator {
     /// `call 'beamtalk_class_vars':'<function>'(ClassSelf, <args>..)`.
@@ -151,8 +151,9 @@ impl CoreErlangGenerator {
     /// THE predicate for "`receiver.field` lowers to a class-variable read":
     /// in a class method, `self.<declared class variable>`. Both the lowering
     /// (`generate_field_access`) and the capture walker
-    /// ([`Self::block_reads_class_var`]) call it, so a block binds a capture
-    /// exactly when something inside it lowers to a read.
+    /// ([`Self::block_reads_class_var`], through `block_facts::class_var_accesses`,
+    /// which applies the same `self` + declared-name test) agree, so a block
+    /// binds a capture exactly when something inside it lowers to a read.
     pub(super) fn is_class_var_field_read(
         &self,
         receiver: &Expression,
@@ -188,8 +189,8 @@ impl CoreErlangGenerator {
 
     /// THE predicate for "`receiver hasField: ...` lowers to
     /// `beamtalk_class_vars:has`": in a class method that is not direct-called,
-    /// a `self` receiver. The `HasField` intrinsic and the capture walker both
-    /// call it.
+    /// a `self` receiver. The `HasField` intrinsic calls it; the capture walker
+    /// ([`Self::block_reads_class_var`]) applies the same rule.
     ///
     /// A direct-called method is excluded because its `ClassSelf` is `nil`,
     /// which `beamtalk_class_vars:has` rejects; its `hasField:` is a constant,
@@ -212,63 +213,21 @@ impl CoreErlangGenerator {
     }
 
     /// Whether `block` (including every nested block literal) reads a class
-    /// variable of the class being compiled: a node for which
-    /// [`Self::is_class_var_field_read`] holds (outside an assignment target),
-    /// or a `hasField:` send for which [`Self::is_class_var_has_field`] holds.
-    /// A write-only block reads nothing and binds no capture ("blocks that read
-    /// no class variable bind nothing").
-    ///
-    /// A `hasField:` that is a *cascade message* is deliberately not counted:
-    /// the cascade lowers every message, the first one included, through
-    /// `beamtalk_message_dispatch:send` and never through the `HasField`
-    /// intrinsic (`beamtalk_class_vars:has`), so nothing in it reads through a
-    /// capture. The AST represents the first message as the cascade's receiver
-    /// send, which the walk visits as an ordinary send, so it is skipped by span;
-    /// the later messages are never visited as sends. That keeps the walker and
-    /// the lowering in agreement.
+    /// variable of the class being compiled, so its creation binds a capture.
+    /// The walk is `beamtalk-core`'s
+    /// [`class_var_accesses`](beamtalk_core::semantic_analysis::block_facts::class_var_accesses),
+    /// the one the `class-state-abroad` lint uses too (BT-3761): a `self.<class
+    /// variable>` read outside an assignment target (exactly the nodes for which
+    /// [`Self::is_class_var_field_read`] holds, the caller having checked
+    /// [`Self::in_class_method`]), or a non-cascade `self hasField:` probe, which
+    /// lowers to `beamtalk_class_vars:has` exactly when
+    /// [`Self::is_class_var_has_field`] holds, i.e. unless the method is
+    /// direct-called. A write-only block reads nothing and binds no capture.
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
-        let is_has_field =
-            |selector: &MessageSelector| selector.well_known() == Some(WellKnownSelector::HasField);
-        let mut assigned_targets: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
-        let mut cascade_firsts: Vec<beamtalk_core::source_analysis::Span> = Vec::new();
-        let mut found = false;
-        for stmt in &block.body {
-            beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                Expression::Assignment { target, .. } => {
-                    if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
-                        if Self::is_self_receiver(receiver) {
-                            assigned_targets.push(target.span());
-                        }
-                    }
-                }
-                Expression::FieldAccess {
-                    receiver, field, ..
-                } => {
-                    if self.is_class_var_field_read(receiver, field)
-                        && !assigned_targets.contains(&e.span())
-                    {
-                        found = true;
-                    }
-                }
-                Expression::Cascade { receiver, .. } => {
-                    if matches!(receiver.as_ref(), Expression::MessageSend { .. }) {
-                        cascade_firsts.push(receiver.span());
-                    }
-                }
-                Expression::MessageSend {
-                    receiver, selector, ..
-                } => {
-                    if is_has_field(selector)
-                        && self.is_class_var_has_field(receiver)
-                        && !cascade_firsts.contains(&e.span())
-                    {
-                        found = true;
-                    }
-                }
-                _ => {}
-            });
-        }
-        found
+        let accesses = class_var_accesses(block, self.class_var_names());
+        !accesses.reads.is_empty()
+            || (!accesses.has_field_probes.is_empty()
+                && !self.current_class_method_is_direct_called())
     }
 
     /// Runs `build_fun` (which generates the `fun` of block literal `block`) inside
