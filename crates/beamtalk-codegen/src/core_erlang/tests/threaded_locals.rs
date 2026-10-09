@@ -110,7 +110,7 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
 #[test]
 fn a_nested_construct_not_threaded_today_is_in_names_but_not_lowered() {
     // ADR 0131 §1: the closure covers every nested producer, but today's
-    // lowering does not thread a `tryDo:` block, so it packs nothing.
+    // lowering does not thread a `tryDo:` block yet (BT-3743), so it packs nothing.
     let generator = make_generator(CodeGenContext::ValueType, &["t"]);
     let set = threaded(&generator, "#(1) do: [:x | Result tryDo: [t := 1]]").expect("set");
     assert_eq!(set.names, vec!["t"]);
