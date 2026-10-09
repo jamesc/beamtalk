@@ -240,8 +240,8 @@ pub(crate) enum Position {
     /// is whether the construct writes a local bound outside its innermost
     /// enclosing block (as opposed to only locals of that block). `deep` is
     /// whether it is nested in two blocks or more. `stateful` is whether the
-    /// outermost block of a method sends to `self` or `super` or writes a
-    /// field ([`touches_state`]): codegen then threads the block's loops with
+    /// outermost block of a method sends to `self` or writes a field
+    /// ([`touches_state`]): codegen then threads the block's loops with
     /// the method's state, which threads some outer locals in class and
     /// value-type methods and loses more of them in actor methods (probed,
     /// BT-3753). `direct` is whether an enclosing block
@@ -920,7 +920,8 @@ impl<'d> Walker<'d> {
 
     fn block(&mut self, block: &Block, container: Container) {
         if self.depth == 0 {
-            self.outer_stateful = self.context != Repl && touches_state(block);
+            self.outer_stateful =
+                self.context != Repl && touches_state(block, self.context == Class);
         }
         let direct = rebinds_outer_local(block, &|name| self.is_bound(name));
         self.direct_blocks.push(direct);
@@ -1438,28 +1439,18 @@ fn rebinds_outer_local(block: &Block, is_outer: &dyn Fn(&str) -> bool) -> bool {
     })
 }
 
-/// Whether `block` (at any depth) sends to `self` or `super`, or assigns a
-/// field (`self.x := ...`).
-fn touches_state(block: &Block) -> bool {
-    let mut found = false;
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-            Expression::MessageSend { receiver, .. } | Expression::Cascade { receiver, .. } => {
-                if matches!(receiver.unwrap_parens(), Expression::Super(_))
-                    || matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
-                {
-                    found = true;
-                }
-            }
-            Expression::Assignment { target, .. }
-                if matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
-            {
-                found = true;
-            }
-            _ => {}
-        });
-    }
-    found
+/// Whether `block`'s statements touch the method's state: a `self` send or a
+/// `self.x := ...` write, through the blocks codegen inlines. This is the
+/// shared [`crate::semantic_analysis::facts::StateEffects`] fact codegen's
+/// state threading reads.
+fn touches_state(block: &Block, in_class_method: bool) -> bool {
+    block.body.iter().any(|stmt| {
+        crate::semantic_analysis::facts::compute_state_effects_for_expr(
+            &stmt.expression,
+            in_class_method,
+        )
+        .any()
+    })
 }
 
 /// Whether codegen's Tier 2 block protocol threads back every outer local in
