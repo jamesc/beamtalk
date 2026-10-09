@@ -111,6 +111,7 @@ error: it passes through so the `^` reaches its home method.
 """.
 -spec encode_with_errors(atom(), fun(() -> binary())) -> binary().
 encode_with_errors(Selector, Encode) ->
+    %% bt-catcher-audit: not-applicable-reraises - every clause re-raises or raises type_error
     try
         Encode()
     catch

@@ -895,6 +895,8 @@ a generic catch-all — so a crashing extension body becomes a structured
     | {error, {raised, atom(), term(), list()}}.
 apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
     %% ADR 0130 §3: class-side extension funs are `fun(Args, ClassSelf)`.
+    %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised by the self-send path or
+    %% reverted by run_with_class_vars
     try Fun(Args, ClassSelf) of
         Result ->
             {ok, Result}
@@ -1072,6 +1074,8 @@ from inside the fun body (`undef_in_body`); any other error becomes `{raised,…
 -spec apply_class_method_fun(fun(), #beamtalk_object{}, list(), class_name(), selector()) ->
     class_method_outcome().
 apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
+    %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised by the self-send path or
+    %% reverted by run_with_class_vars
     try apply(Fun, [ClassSelf | Args]) of
         Raw ->
             {ok, Raw}
@@ -1127,6 +1131,8 @@ apply_compiled_class_method(
     FunName = class_method_fun_name(Selector),
     %% ADR 0130 §3: `class_<sel>(ClassSelf, Args...)`; class variables live in
     %% the process dictionary home installed by the invocation entry point.
+    %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised by the self-send path or
+    %% reverted by run_with_class_vars
     try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
         Raw ->
             {ok, Raw}
@@ -1499,6 +1505,8 @@ Only attempts recovery once to avoid infinite loops.
 """.
 -spec class_send_with_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
 class_send_with_recovery(ClassPid, Selector, Action) ->
+    %% bt-catcher-audit: not-applicable-other-process - Action is a gen_server call to the class
+    %% process
     try
         Action(ClassPid)
     catch
@@ -1518,6 +1526,8 @@ handle_class_crash_recovery(ClassPid, Selector, Action) ->
                     %% Retry with the restarted class process. Wrap in try/catch
                     %% so that if the restarted process crashes again immediately,
                     %% the caller gets a clean error instead of a raw noproc exit.
+                    %% bt-catcher-audit: not-applicable-other-process - Action is a gen_server
+                    %% call to the class process
                     try
                         Action(NewPid)
                     catch

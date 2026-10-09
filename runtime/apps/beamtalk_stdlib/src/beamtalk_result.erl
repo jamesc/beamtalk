@@ -217,6 +217,7 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
     %% ADR 0130 §4: a catch boundary around a Beamtalk block. `protect/1` restores
     %% the class-variable map on an error before we wrap it (writes made before
     %% entering the block are kept; `^` passes through untouched).
+    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
     try beamtalk_class_vars:protect(Block) of
         Value ->
             from_tagged_tuple({ok, Value})

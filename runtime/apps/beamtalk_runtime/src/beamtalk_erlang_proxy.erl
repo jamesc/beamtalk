@@ -245,6 +245,8 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     %% class-variable writes the failed first attempt made must not survive into
     %% it (ADR 0130 §4, BT-3728), so remember the pre-call state.
     Snap = beamtalk_class_vars:snapshot(),
+    %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg retry
+    %% (BT-3728)
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
@@ -287,6 +289,8 @@ maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
     case CoercedArgs =/= Args of
         true ->
             beamtalk_class_vars:restore(Snap),
+            %% bt-catcher-audit: converted - restores the pre-call snapshot before retrying; the
+            %% retry re-raises
             try
                 coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs))
             catch
@@ -446,6 +450,7 @@ Returns {ok, [{Function, Arity}]} or {error, not_loaded}.
 """.
 -spec get_exports(atom()) -> {ok, [{atom(), non_neg_integer()}]} | {error, not_loaded}.
 get_exports(Module) ->
+    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try
         {ok, Module:module_info(exports)}
     catch

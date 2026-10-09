@@ -610,6 +610,8 @@ do_eval_trace(Expression, State) ->
                         end,
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
+                        %% bt-catcher-audit: not-applicable-other-process - traced eval runs in
+                        %% the session eval worker, no home entry
                         try
                             {RawSteps, UpdatedBindings} = apply(ModuleName, eval, [
                                 BindingsWithRegistry
@@ -924,6 +926,8 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
     purge_eval_module(ModuleName),
     case code:load_binary(ModuleName, "", Binary) of
         {module, ModuleName} ->
+            %% bt-catcher-audit: converted - the eval runs under protect/1, which restores on
+            %% error (BT-3728)
             try
                 %% The evaluated source runs in this process, which may be a class
                 %% invocation process (Inspector `evaluate:` called from a class
@@ -1607,6 +1611,8 @@ Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failu
 maybe_register_protocol_class(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
+            %% only
             try ModuleName:register_class() of
                 {error, RegReason} ->
                     ?LOG_ERROR(

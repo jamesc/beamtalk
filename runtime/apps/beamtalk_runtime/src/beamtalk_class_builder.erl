@@ -796,6 +796,8 @@ Safe to call if the callback module is not running.
 notify_class_loaded(ClassName) ->
     case application:get_env(beamtalk_runtime, class_load_callback) of
         {ok, Mod} ->
+            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
+            %% Beamtalk block
             try
                 Mod:on_class_loaded(ClassName)
             catch

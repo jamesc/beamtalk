@@ -345,6 +345,7 @@ Used for fire-and-forget operations (enable, disable, clear).
 """.
 -spec call_trace_store(fun(() -> term())) -> ok.
 call_trace_store(Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a beamtalk_trace_store gen_server call
     try
         Fun(),
         ok
@@ -359,6 +360,7 @@ Used for query operations where we need a meaningful fallback.
 """.
 -spec call_trace_store_default(fun(() -> T), T) -> T when T :: term().
 call_trace_store_default(Fun, Default) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a beamtalk_trace_store gen_server query
     try
         Fun()
     catch
