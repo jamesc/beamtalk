@@ -11,6 +11,7 @@ use super::super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
@@ -212,7 +213,7 @@ impl CoreErlangGenerator {
     /// unwrap element 1 into `val_var`, thread element 2 into `new_state`
     /// via `maps:put`, then rebind any OTHER outer local `source_expr`'s own
     /// block mutated. The rebind is a no-op for a Tier 2 call —
-    /// `get_control_flow_threaded_vars` only matches the control-flow
+    /// `threaded_locals_of` only matches the control-flow
     /// selectors `control_flow_has_mutations` gates the other case on, never
     /// a bare `value`/`value:` call — so folding both callers through this
     /// one helper is structurally identical for the pre-existing Tier 2
@@ -265,7 +266,10 @@ impl CoreErlangGenerator {
             leaf::var(tuple_state_var),
             ") in ",
         ]];
-        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(source_expr) {
+        if let Some(threaded_vars) = self
+            .threaded_locals_of(source_expr)
+            .and_then(ThreadedLocals::into_lowered)
+        {
             docs.extend(self.rebind_threaded_vars_from_state(&threaded_vars, new_state));
         }
         Document::Vec(docs)

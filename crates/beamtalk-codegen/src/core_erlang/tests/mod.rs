@@ -174,6 +174,8 @@ mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
 mod supervisor;
+mod threaded_locals;
+mod threaded_locals_agreement;
 mod trait_flattening;
 mod verifier_surfacing;
 mod while_condition_class_method;
