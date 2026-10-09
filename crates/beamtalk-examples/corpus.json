@@ -42776,6 +42776,24 @@
       "explanation": "Greeter value class for incremental load-project testing (BT-1685)"
     },
     {
+      "id": "tests-repl-protocol-fixtures-inherited-counter-test",
+      "title": "InheritedCounterTest",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "CounterTest",
+        "InheritedCounterTest",
+        "extends",
+        "helper",
+        "inherit",
+        "inheritance",
+        "inherited_counter_test",
+        "object",
+        "subclassing"
+      ],
+      "source": "// InheritedCounterTest — a TestCase subclass with no test method of its own\n// (BT-3768): runAll and run: run the test methods it inherits from CounterTest.\n\nCounterTest subclass: InheritedCounterTest\n\n  helper => nil",
+      "explanation": "InheritedCounterTest — a TestCase subclass with no test method of its own (BT-3768): runAll and run: run the test methods it inherits from CounterTest."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-lifecycle-test",
       "title": "LifecycleTest",
       "category": "repl-protocol-fixtures",
