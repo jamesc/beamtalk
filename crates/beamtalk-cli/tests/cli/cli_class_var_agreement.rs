@@ -32,19 +32,27 @@
 //! Before compiling anything, [`preflight`] asserts the runtime exports
 //! `beamtalk_class_vars:snapshot/0` and the stdlib `TestCase` class loads, so
 //! a missing or stale `runtime/` build fails with one line naming
-//! `just build-stdlib` (a plain `cargo test` does not build the stdlib). A
-//! batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] distinct programs (every
-//! environment rule needs that many) is reported as probably a broken
-//! environment, not as N wrong answers, and is not bisected, when its output
-//! contains `Undefined function`, `setUp failed` or `abi_mismatch` and either
-//! no test produced a result line (the runner crashed after load) or every
-//! test failed; or when every program and spelling failed with the same
-//! message. Anything else (a marker in only some tests, or any smaller batch)
-//! is a program's failure, since the preflight already passed, and is
-//! reported and bisected like any other. A real codegen bug can still look like an environment failure, so
-//! that report carries every `(index, seed, size)` pair in the batch, the
-//! marker's (or first failing) program's detail and source, and any failures
-//! already recorded.
+//! `just build-stdlib` (a plain `cargo test` does not build the stdlib).
+//!
+//! A batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] distinct programs is
+//! suspected of a broken environment when either no test produced a result
+//! line (the runner crashed after load) and its output contains
+//! `Undefined function`, `setUp failed` or `abi_mismatch`, or every test
+//! failed and either every failure message carries the same one of those
+//! markers or every program and spelling failed with the same message. A
+//! suspicion is only a guess: before reporting it, the harness re-runs one
+//! program of the batch alone. A broken runtime or stdlib fails every subset
+//! the same way, so only when that re-run shows the same kind of environment
+//! failure is the batch reported as probably a broken environment (not as N
+//! wrong answers, and not bisected). Otherwise the guess is dropped and the
+//! batch is reported and bisected like any other, so one program's codegen
+//! bug (say a one-class ABI stamp bug hitting `abi_mismatch` at load) is
+//! isolated rather than hiding the batch. The confirmation costs one extra
+//! `beamtalk test` run, paid only on the environment path. Anything else (a
+//! marker in only some tests, or any smaller batch) is a program's failure,
+//! since the preflight already passed. The environment report still carries
+//! every `(index, seed, size)` pair in the batch, the marker's (or first
+//! failing) program's detail and source, and any failures already recorded.
 //!
 //! # Budget (BT-3767)
 //!
@@ -70,11 +78,13 @@ use std::sync::OnceLock;
 /// `CV_CORPUS_CASES` (see the module doc's budget section).
 const DEFAULT_CASES: usize = 16;
 
-/// Output fragments that mean the environment (a stale or missing
+/// Output fragments that suggest the environment (a stale or missing
 /// `runtime/` / stdlib build), not the generated program, is at fault, in a
 /// batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] programs where either no
-/// test produced a result line (a runner crash after load) or every test
-/// failed (see [`environment_cause`]).
+/// test produced a result line (a runner crash after load: anywhere in the
+/// output) or every test failed (then in every failure message); see
+/// [`environment_cause`]. A re-run confirms the guess before it is reported
+/// ([`environment_confirmed`]).
 const ENVIRONMENT_MARKERS: [(&str, &str); 3] = [
     (
         "Undefined function",
@@ -237,14 +247,12 @@ enum Batch {
     Tests(Vec<String>, String),
     /// Did not compile, crashed before any result line, or failed in a way
     /// [`environment_cause`] attributes to the environment. `environment` is
-    /// then [`environment_headline`] (in a batch of at least
-    /// [`MIN_ENVIRONMENT_PROGRAMS`] programs: an [`ENVIRONMENT_MARKERS`] entry
-    /// with no result lines or with every test failing, or one message
-    /// everywhere); such a batch is reported, never bisected.
+    /// then that suspected cause, which [`check`] confirms by a re-run before
+    /// reporting it (unconfirmed, the batch is classified again without it).
     /// `None` is a compile failure or crash, bisected to its programs.
     Broken {
         text: String,
-        environment: Option<String>,
+        environment: Option<EnvCause>,
     },
 }
 
@@ -257,7 +265,13 @@ impl Batch {
     }
 }
 
-fn run_package(pkg: &Package) -> Batch {
+/// The raw result of one `beamtalk test` run.
+struct Run {
+    success: bool,
+    text: String,
+}
+
+fn run_package(pkg: &Package) -> Run {
     let dir = tempfile::tempdir().expect("tempdir");
     write_package(dir.path(), pkg);
     let out = cli_common::beamtalk()
@@ -270,19 +284,30 @@ fn run_package(pkg: &Package) -> Batch {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    Run {
+        success: out.status.success(),
+        text,
+    }
+}
+
+/// Classifies a run of `pkg`. `environment_min` is the fewest distinct
+/// programs [`environment_cause`] may suspect the environment in, or `None`
+/// to never suspect it (a guess the re-run did not confirm).
+fn classify(pkg: &Package, run: &Run, environment_min: Option<usize>) -> Batch {
+    let text = run.text.clone();
     // An `internal:` diagnostic is a verifier failure even when the compile
     // went on to succeed (a release build degrades the verifier to a warning
     // that the CLI build path prints, ADR 0111 Addendum 17, BT-3724).
     if text.contains("internal:") {
         return Batch::broken(text);
     }
-    if out.status.success() {
+    if run.success {
         return Batch::Pass;
     }
-    if let Some(cause) = environment_cause(pkg, &text) {
+    if let Some(cause) = environment_min.and_then(|min| environment_cause(pkg, &text, min)) {
         return Batch::Broken {
             text,
-            environment: Some(environment_headline(&cause)),
+            environment: Some(cause),
         };
     }
     let failed: Vec<String> = pkg
@@ -298,27 +323,50 @@ fn run_package(pkg: &Package) -> Batch {
     }
 }
 
+/// The kind of environment failure a batch is suspected of; a re-run
+/// confirms the suspicion only when it shows the same kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EnvKind {
+    /// An [`ENVIRONMENT_MARKERS`] entry (its marker text).
+    Marker(&'static str),
+    /// Every program and spelling failed with this one message.
+    SameMessage(String),
+}
+
+/// A suspected environment failure: its kind, and a one-line description
+/// for the headline.
+#[derive(Debug, PartialEq, Eq)]
+struct EnvCause {
+    kind: EnvKind,
+    detail: String,
+}
+
 /// Why `text` (a failed run of `pkg`) looks like a broken environment rather
 /// than a wrong program, or `None` (BT-3767). The preflight has already ruled
 /// out a stale runtime, so this is deliberately narrow; one codegen bug must
-/// never hide the rest of the batch. A batch of fewer than
-/// [`MIN_ENVIRONMENT_PROGRAMS`] distinct programs is never environment (it
-/// falls through to `Batch::Tests` or bisection, which blame its programs).
-/// In a larger batch:
+/// never hide the rest of the batch. A batch of fewer than `min_programs`
+/// distinct programs ([`MIN_ENVIRONMENT_PROGRAMS`] for a first guess) is never
+/// environment (it falls through to `Batch::Tests` or bisection, which blame
+/// its programs). In a larger batch:
 ///
 /// - No test produced a result line (the runner crashed after load) and the
 ///   output contains an [`ENVIRONMENT_MARKERS`] entry: environment.
 /// - Some tests failed and some did not: never environment (reported and
 ///   bisected like any other failure).
-/// - Every test failed: environment when the output contains a marker, or
-///   when every program and spelling failed with the same message (generated
-///   programs expect different answers, so identical messages across that
-///   many are unlikely to be one bug).
-fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
+/// - Every test failed: environment when every failure message carries the
+///   same marker (a stale runtime fails every test the same way; a marker in
+///   only some messages is those programs' bug), or when every program and
+///   spelling failed with the same message (generated programs expect
+///   different answers, so identical messages across that many are unlikely
+///   to be one bug).
+///
+/// This is a suspicion: [`check`] confirms it by a re-run
+/// ([`environment_confirmed`]) before reporting it.
+fn environment_cause(pkg: &Package, text: &str, min_programs: usize) -> Option<EnvCause> {
     let mut programs: Vec<usize> = pkg.test_names.iter().map(|(i, _, _)| *i).collect();
     programs.sort_unstable();
     programs.dedup();
-    if programs.len() < MIN_ENVIRONMENT_PROGRAMS {
+    if programs.len() < min_programs {
         return None;
     }
     let reported: Vec<Option<&str>> = pkg
@@ -326,21 +374,42 @@ fn environment_cause(pkg: &Package, text: &str) -> Option<String> {
         .iter()
         .map(|(_, _, name)| failure_message(text, name))
         .collect();
-    let messages: Vec<&str> = if reported.iter().all(Option::is_none) {
-        Vec::new()
-    } else {
-        reported.into_iter().collect::<Option<_>>()?
+    let marker = |(marker, cause): &(&'static str, &str), line: &str| EnvCause {
+        kind: EnvKind::Marker(marker),
+        detail: format!("{cause} (`{}`)", line.trim()),
     };
-    if let Some((marker, cause)) = ENVIRONMENT_MARKERS.iter().find(|(m, _)| text.contains(m)) {
-        let line = text.lines().find(|l| l.contains(marker)).unwrap_or(marker);
-        return Some(format!("{cause} (`{}`)", line.trim()));
+    if reported.iter().all(Option::is_none) {
+        // Crashed before any result line: a marker anywhere in the output.
+        let found = ENVIRONMENT_MARKERS.iter().find(|(m, _)| text.contains(m))?;
+        let line = text
+            .lines()
+            .find(|l| l.contains(found.0))
+            .unwrap_or(found.0);
+        return Some(marker(found, line));
     }
-    match messages.as_slice() {
-        [first, rest @ ..] if rest.iter().all(|m| m == first) => Some(format!(
-            "every program and spelling failed with the same message (`{first}`)"
-        )),
-        _ => None,
+    let messages: Vec<&str> = reported.into_iter().collect::<Option<_>>()?;
+    let first = *messages.first()?;
+    if let Some(found) = ENVIRONMENT_MARKERS
+        .iter()
+        .find(|(m, _)| messages.iter().all(|msg| msg.contains(m)))
+    {
+        return Some(marker(found, first));
     }
+    messages.iter().all(|m| *m == first).then(|| EnvCause {
+        kind: EnvKind::SameMessage(first.to_string()),
+        detail: format!("every program and spelling failed with the same message (`{first}`)"),
+    })
+}
+
+/// Does `rerun` (a run of `probe`, one program of the suspect batch, alone)
+/// confirm the suspected environment failure `first`? A broken runtime or
+/// stdlib fails every subset of a batch the same way; a codegen bug in one
+/// program does not, so only the same [`EnvKind`] confirms (BT-3767).
+fn environment_confirmed(first: &EnvCause, probe: &Package, rerun: &Run) -> bool {
+    matches!(
+        classify(probe, rerun, Some(1)),
+        Batch::Broken { environment: Some(c), .. } if c.kind == first.kind
+    )
 }
 
 /// The test runner's own failure message for test method `name`: the rest of
@@ -491,7 +560,40 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
             failure,
         });
     };
-    match run_package(&pkg) {
+    let run = run_package(&pkg);
+    let batch = match classify(&pkg, &run, Some(MIN_ENVIRONMENT_PROGRAMS)) {
+        // Suspected environment: confirm by re-running one program alone
+        // (the last; a broken environment fails every program, so any one
+        // will do) before reporting it. Unconfirmed, classify the batch
+        // again without the guess, so its programs are isolated.
+        Batch::Broken {
+            environment: Some(cause),
+            ..
+        } => {
+            let probe = cases[cases.len() - 1];
+            let probe_pkg = render_package(&[(probe.index, probe.program.clone())]);
+            if environment_confirmed(&cause, &probe_pkg, &run_package(&probe_pkg)) {
+                // Not (probably) a program's fault: no bisection; the report
+                // leads with the cause, then every repro pair, the marker's
+                // (or first failing) program, and any failures already
+                // recorded.
+                let headline = format!(
+                    "{} Confirmed by re-running program {} (seed {}, size {}) alone.",
+                    environment_headline(&cause.detail),
+                    probe.index,
+                    probe.seed,
+                    probe.size
+                );
+                panic!(
+                    "{}",
+                    environment_report(&headline, &run.text, &pkg, cases, failed)
+                );
+            }
+            classify(&pkg, &run, None)
+        }
+        batch => batch,
+    };
+    match batch {
         Batch::Pass => {}
         Batch::Tests(names, text) => {
             for (index, spelling, name) in &pkg.test_names {
@@ -502,20 +604,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 }
             }
         }
-        // Not (probably) a program's fault: no bisection; the report leads
-        // with the cause, then every repro pair, the marker's (or first
-        // failing) program, and any failures already recorded.
-        Batch::Broken {
-            text,
-            environment: Some(headline),
-        } => panic!(
-            "{}",
-            environment_report(&headline, &text, &pkg, cases, failed)
-        ),
-        Batch::Broken {
-            text,
-            environment: None,
-        } => {
+        Batch::Broken { text, .. } => {
             // The compiler names the fixture it stopped at: blame that
             // program, drop it, and run the rest (a compile-only failure is
             // quick, so this is far cheaper than bisecting).
@@ -668,6 +757,21 @@ fn line(name: &str, msg: &str) -> String {
     format!("  FAIL {TEST_CLASS} {name}: {msg}\n")
 }
 
+/// Runner output in which every test of `pkg` failed with `msg`.
+fn all_fail(pkg: &Package, msg: &str) -> String {
+    pkg.test_names
+        .iter()
+        .map(|(_, _, n)| line(n, msg))
+        .collect()
+}
+
+/// A first guess, at the threshold the harness uses for a whole batch.
+fn suspect(pkg: &Package, text: &str) -> Option<EnvCause> {
+    environment_cause(pkg, text, MIN_ENVIRONMENT_PROGRAMS)
+}
+
+const STALE: &str = "setUp failed: Undefined function: bt@stdlib@test_case:new/0";
+
 /// BT-3767: the harness reads failures off the test runner's own
 /// `FAIL <class> <method>: <message>` result lines, and classifies an
 /// environment failure as a broken batch, not as wrong answers. No BEAM.
@@ -681,7 +785,7 @@ fn class_var_agreement_classifies_runner_output() {
     let one = format!("Running tests...\n{}", line(names[0], "expected 3, got 4"));
     assert_eq!(failure_message(&one, names[0]), Some("expected 3, got 4"));
     assert_eq!(failure_message(&one, names[1]), None);
-    assert_eq!(environment_cause(&pkg, &one), None);
+    assert_eq!(suspect(&pkg, &one), None);
 
     // Free text naming a test is not a result line.
     let prose = format!("note: {} failed to FAIL", names[0]);
@@ -690,7 +794,7 @@ fn class_var_agreement_classifies_runner_output() {
     // Every program and spelling failing with the same message, across
     // `MIN_ENVIRONMENT_PROGRAMS` programs.
     let same: String = names.iter().map(|n| line(n, "boom")).collect();
-    assert!(environment_cause(&pkg, &same).is_some_and(|c| c.contains("same message")));
+    assert!(suspect(&pkg, &same).is_some_and(|c| c.detail.contains("same message")));
     // ... but below the threshold it may be one codegen bug: not classified.
     let small = package_of(&cases[..MIN_ENVIRONMENT_PROGRAMS - 1]);
     let small_same: String = small
@@ -698,31 +802,31 @@ fn class_var_agreement_classifies_runner_output() {
         .iter()
         .map(|(_, _, n)| line(n, "boom"))
         .collect();
-    assert_eq!(environment_cause(&small, &small_same), None);
+    assert_eq!(suspect(&small, &small_same), None);
     // ... but different messages are wrong answers.
     let differ: String = names
         .iter()
         .enumerate()
         .map(|(i, n)| line(n, &format!("expected {i}")))
         .collect();
-    assert_eq!(environment_cause(&pkg, &differ), None);
+    assert_eq!(suspect(&pkg, &differ), None);
 
     // A marker in one program of a mixed batch is that program's failure
     // (the preflight passed): not an environment failure, so it is reported
     // and bisected like any other.
     let one_marker = line(names[0], "Undefined function: beamtalk_x:y/0");
-    assert_eq!(environment_cause(&pkg, &one_marker), None);
+    assert_eq!(suspect(&pkg, &one_marker), None);
 
     // A runner crash after load: a marker and no result line at all, in a
     // `MIN_ENVIRONMENT_PROGRAMS`-program batch, is an environment failure.
     let crash = "Running tests...\nerror: abi_mismatch: module compiled for ABI 3\n";
-    assert!(environment_cause(&pkg, crash).is_some_and(|c| c.contains("ABI")));
+    assert!(suspect(&pkg, crash).is_some_and(|c| c.detail.contains("ABI")));
     // ... but a 1-program batch (a bisection sub-batch) is that program's
     // load-time failure: not classified, so the offender search blames it.
     let tiny = package_of(&cases[..1]);
-    assert_eq!(environment_cause(&tiny, crash), None);
+    assert_eq!(suspect(&tiny, crash), None);
     // ... but no marker and no result line is a crash, bisected as usual.
-    assert_eq!(environment_cause(&pkg, "Running tests...\nboom\n"), None);
+    assert_eq!(suspect(&pkg, "Running tests...\nboom\n"), None);
 
     // The marker in every spelling of a 1-program batch may be one codegen
     // bug: not classified (`Batch::Tests` reports each message).
@@ -731,25 +835,35 @@ fn class_var_agreement_classifies_runner_output() {
         .iter()
         .map(|(_, _, n)| line(n, "Undefined function: beamtalk_x:y/0"))
         .collect();
-    assert_eq!(environment_cause(&tiny, &tiny_marker), None);
+    assert_eq!(suspect(&tiny, &tiny_marker), None);
+
+    // Every test failed, but only program 2's messages carry a marker: the
+    // marker is that program's bug, not the environment's.
+    let late_marker: String = pkg
+        .test_names
+        .iter()
+        .map(|(i, _, n)| {
+            if *i == 2 {
+                line(n, "abi_mismatch: expected 3, runtime 2")
+            } else {
+                line(n, &format!("expected {i}, got 0"))
+            }
+        })
+        .collect();
+    assert_eq!(suspect(&pkg, &late_marker), None);
 
     // A stale stdlib: the marker in every test of a
     // `MIN_ENVIRONMENT_PROGRAMS`-program batch is an environment failure.
-    let stale: String = names
-        .iter()
-        .map(|n| {
-            line(
-                n,
-                "setUp failed: Undefined function: bt@stdlib@test_case:new/0",
-            )
-        })
-        .collect();
-    let cause = environment_cause(&pkg, &stale).expect("environment");
+    let stale = all_fail(&pkg, STALE);
+    let cause = suspect(&pkg, &stale).expect("environment");
+    assert_eq!(cause.kind, EnvKind::Marker("Undefined function"));
     assert!(
-        cause.contains("missing from the runtime or stdlib build"),
-        "{cause}"
+        cause
+            .detail
+            .contains("missing from the runtime or stdlib build"),
+        "{cause:?}"
     );
-    let headline = environment_headline(&cause);
+    let headline = environment_headline(&cause.detail);
     assert!(headline.contains("just build-stdlib"), "{headline}");
     assert!(headline.contains("preflight passed"), "{headline}");
     assert!(headline.contains("codegen bug"), "{headline}");
@@ -761,17 +875,8 @@ fn class_var_agreement_classifies_runner_output() {
 fn class_var_agreement_classifies_runner_output_report() {
     let cases = fixture_cases();
     let pkg = package_of(&cases);
-    let stale: String = pkg
-        .test_names
-        .iter()
-        .map(|(_, _, n)| {
-            line(
-                n,
-                "setUp failed: Undefined function: bt@stdlib@test_case:new/0",
-            )
-        })
-        .collect();
-    let headline = environment_headline(&environment_cause(&pkg, &stale).expect("environment"));
+    let stale = all_fail(&pkg, STALE);
+    let headline = environment_headline(&suspect(&pkg, &stale).expect("environment").detail);
 
     // The environment report carries every repro pair, the marker program's
     // detail and the failures earlier batches recorded, not only the tail.
@@ -799,7 +904,7 @@ fn class_var_agreement_classifies_runner_output_report() {
     assert!(report.contains("expected "), "{report}");
 
     // The report names the program whose result line has the marker, not the
-    // first FAIL line in test order.
+    // first FAIL line in test order (whether or not the batch was classified).
     let marked = 2;
     let late_marker: String = pkg
         .test_names
@@ -812,14 +917,7 @@ fn class_var_agreement_classifies_runner_output_report() {
             }
         })
         .collect();
-    let cause = environment_cause(&pkg, &late_marker).expect("environment");
-    let report = environment_report(
-        &environment_headline(&cause),
-        &late_marker,
-        &pkg,
-        &refs,
-        &[],
-    );
+    let report = environment_report("headline", &late_marker, &pkg, &refs, &[]);
     assert!(
         report.contains(&format!(
             "environment-marker program {marked} (seed {}, size 1)",
@@ -827,4 +925,71 @@ fn class_var_agreement_classifies_runner_output_report() {
         )),
         "{report}"
     );
+}
+
+/// BT-3767: a suspected environment failure is reported only when re-running
+/// one program of the batch alone fails the same way; otherwise the batch is
+/// classified again without the guess and bisected. No BEAM.
+#[test]
+fn class_var_agreement_classifies_runner_output_confirm() {
+    let cases = fixture_cases();
+    let pkg = package_of(&cases);
+    let probe = package_of(&cases[cases.len() - 1..]);
+    let failed_run = |text: String| Run {
+        success: false,
+        text,
+    };
+
+    // A stale stdlib fails the lone program the same way: confirmed.
+    let stale = suspect(&pkg, &all_fail(&pkg, STALE)).expect("environment");
+    assert!(environment_confirmed(
+        &stale,
+        &probe,
+        &failed_run(all_fail(&probe, STALE))
+    ));
+    // The lone program passes, answers wrongly, or hits a different marker:
+    // one program's bug, not the environment. Not confirmed.
+    let passed = Run {
+        success: true,
+        text: String::new(),
+    };
+    assert!(!environment_confirmed(&stale, &probe, &passed));
+    assert!(!environment_confirmed(
+        &stale,
+        &probe,
+        &failed_run(all_fail(&probe, "expected 3, got 4"))
+    ));
+    assert!(!environment_confirmed(
+        &stale,
+        &probe,
+        &failed_run(all_fail(&probe, "abi_mismatch: stamp 2"))
+    ));
+
+    // A runner crash after load (no result lines) confirmed by the same crash
+    // alone; a one-class ABI stamp bug is not (the lone program runs).
+    let crash = "Running tests...\nerror: abi_mismatch: module compiled for ABI 3\n";
+    let crashed = suspect(&pkg, crash).expect("environment");
+    assert!(environment_confirmed(
+        &crashed,
+        &probe,
+        &failed_run(crash.to_string())
+    ));
+    assert!(!environment_confirmed(
+        &crashed,
+        &probe,
+        &failed_run(all_fail(&probe, "expected 3, got 4"))
+    ));
+
+    // One message everywhere: confirmed only by the same message.
+    let same = suspect(&pkg, &all_fail(&pkg, "boom")).expect("environment");
+    assert!(environment_confirmed(
+        &same,
+        &probe,
+        &failed_run(all_fail(&probe, "boom"))
+    ));
+    assert!(!environment_confirmed(
+        &same,
+        &probe,
+        &failed_run(all_fail(&probe, "bang"))
+    ));
 }
