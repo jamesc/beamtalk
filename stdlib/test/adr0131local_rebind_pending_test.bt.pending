@@ -165,3 +165,72 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testVtReturnInjectValue =>
     self assert: ((Adr0131LocalRebindValuePending new) vtReturnInject) equals: 3
+
+  // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
+  // error today), with their ADR Expected answers.
+
+  testStArmDoClass =>
+    self assert: (Adr0131LocalRebindClassPending stArmDo: true) equals: 3
+
+  testStArmDoValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stArmDo: true) equals: 3
+
+  testStArmWhileClass =>
+    self assert: (Adr0131LocalRebindClassPending stArmWhile: true) equals: 2
+
+  testStArmWhileValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stArmWhile: true) equals: 2
+
+  testStArmWhileActor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) stArmWhile: true) equals: 2
+
+  testStArmInjectClass =>
+    self assert: (Adr0131LocalRebindClassPending stArmInject: true) equals: 3
+
+  testStArmInjectValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stArmInject: true) equals: 3
+
+  testStProtectedDoClass =>
+    self assert: (Adr0131LocalRebindClassPending stProtectedDo) equals: 3
+
+  testStProtectedDoValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stProtectedDo) equals: 3
+
+  testStProtectedDoActor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) stProtectedDo) equals: 3
+
+  testStEachWithIndexClass =>
+    self assert: (Adr0131LocalRebindClassPending stEachWithIndex) equals: 3
+
+  testStEachWithIndexValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stEachWithIndex) equals: 3
+
+  testStDoSeparatedByClass =>
+    self assert: (Adr0131LocalRebindClassPending stDoSeparatedBy) equals: 13
+
+  testStDoSeparatedByValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stDoSeparatedBy) equals: 13
+
+  testStKeysAndValuesDoClass =>
+    self assert: (Adr0131LocalRebindClassPending stKeysAndValuesDo) equals: 3
+
+  testStKeysAndValuesDoValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stKeysAndValuesDo) equals: 3
+
+  testStBlockValueClass =>
+    self assert: (Adr0131LocalRebindClassPending stBlockValue) equals: 1
+
+  testStLoopArmClass =>
+    self assert: (Adr0131LocalRebindClassPending stLoopArm) equals: 5
+
+  testStLoopArmValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stLoopArm) equals: 5
+
+  testStDetectIfNoneClass =>
+    self assert: (Adr0131LocalRebindClassPending stDetectIfNone) equals: 1
+
+  testStDetectIfNoneValue =>
+    self assert: ((Adr0131LocalRebindValuePending new) stDetectIfNone) equals: 1
+
+  testStDetectIfNoneActor =>
+    self assert: ((Adr0131LocalRebindActorPending spawn) stDetectIfNone) equals: 1

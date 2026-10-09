@@ -520,6 +520,8 @@ distinct from a module compiled before the ABI existed.
 read_meta_detailed(Module) when is_atom(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 Meta when is_map(Meta) -> {ok, Meta};
                 Other -> {invalid, {not_a_map, Other}}
@@ -538,6 +540,8 @@ read_meta_detailed(_) ->
 merge_ancestor_map(StartSuper, ReadOwnMapFun, AccSoFar) ->
     StepFun = fun({CurrentClass, Acc}, _Depth) ->
         OwnMap =
+            %% bt-catcher-audit: not-applicable-no-block - ReadOwnMapFun is a metadata read, not a
+            %% Beamtalk block
             try
                 ReadOwnMapFun(CurrentClass)
             catch
@@ -673,6 +677,8 @@ foldl(Fun, Acc0) ->
         undefined ->
             Acc0;
         _ ->
+            %% bt-catcher-audit: not-applicable-no-block - internal Erlang ets:foldl fun, not a
+            %% Beamtalk block
             try
                 ets:foldl(
                     fun
@@ -701,6 +707,8 @@ foldl_modules(Fun, Acc0) ->
         undefined ->
             Acc0;
         _ ->
+            %% bt-catcher-audit: not-applicable-no-block - internal Erlang ets:foldl fun, not a
+            %% Beamtalk block
             try
                 ets:foldl(
                     fun

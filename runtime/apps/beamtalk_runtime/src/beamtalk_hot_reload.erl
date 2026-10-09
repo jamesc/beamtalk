@@ -239,6 +239,8 @@ reconcile step degrades the user fields independently — with a
 -spec seed_internal_keys(atom(), atom(), [atom()], map()) -> map().
 seed_internal_keys(ClassName, Module, InternalKeys, FallbackKeys) ->
     case
+        %% bt-catcher-audit: not-applicable-no-block - default-state init/1, no caller-supplied
+        %% block
         try
             Module:init(#{'__skip_initialize__' => true})
         catch

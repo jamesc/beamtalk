@@ -91,3 +91,10 @@ Value subclass: Adr0131LocalRebindValue
         t := t + 1
         a + x
       ]
+
+  // BT-3753: `[...] value` as a statement answers right in a value-type
+  // method (unlike a class method, where it is a Phase 0 compile error).
+  stBlockValue =>
+    t := 0
+    [t := t + 1] value
+    t

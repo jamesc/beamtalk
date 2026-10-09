@@ -783,7 +783,7 @@ bench:
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
@@ -829,6 +829,23 @@ lint-nlr-tuple-matches:
 [windows]
 lint-nlr-tuple-matches:
     @echo "lint-nlr-tuple-matches: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-3769, ADR 0130 §4): every runtime/stdlib `try ... catch` (or old-style
+# `catch`) whose body applies a fun or a dynamic module call must run it under
+# `beamtalk_class_vars:protect/1` or carry a `%% bt-catcher-audit: <disposition> -
+# <reason>` marker (vocabulary: docs/development/class-var-catcher-audit.md).
+# Parses with epp_dodger/erl_syntax. The self-test first proves the lint fails on
+# the fixtures in scripts/ci/fixtures/lint-class-var-catchers/ (an unmarked
+# `Block()` under a catch, stale and invalid markers). Unix-only like the other
+# repo-wide lints; Linux CI covers it.
+[unix]
+lint-class-var-catchers:
+    @escript scripts/ci/lint-class-var-catchers.escript --self-test
+    @escript scripts/ci/lint-class-var-catchers.escript
+
+[windows]
+lint-class-var-catchers:
+    @echo "lint-class-var-catchers: skipped on Windows (covered by Linux CI)"
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders

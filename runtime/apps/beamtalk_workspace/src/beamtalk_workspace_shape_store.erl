@@ -289,6 +289,8 @@ mirrors `beamtalk_workspace_signature_store:seed_from_meta/3`.
 """.
 -spec read_own_meta(binary()) -> {ok, atom(), map()} | undefined.
 read_own_meta(ClassNameBin) ->
+    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal getter, no
+    %% block
     try
         ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),
@@ -482,6 +484,8 @@ degrades on; anything else escapes to the outer catch-all.
 ancestor_own_field_map(ClassAtom, MetaKey) ->
     case beamtalk_class_metadata:lookup_module(ClassAtom) of
         {ok, Module} ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 Meta when is_map(Meta) -> maps:get(MetaKey, Meta, #{});
                 _ -> #{}

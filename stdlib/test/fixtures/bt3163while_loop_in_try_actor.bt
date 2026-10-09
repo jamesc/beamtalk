@@ -15,10 +15,14 @@
 Actor subclass: BT3163WhileLoopInTryActor
   state: count = 0
 
+  // The loop runs on a local of the try body: a loop there that writes the
+  // parameter (an outer local) loses the write today, which ADR 0131 Phase 0
+  // rejects (BT-3753).
   runUnsafe: startFlag =>
     [
       self.count := self.count + 1
-      [startFlag] whileTrue: [startFlag := false]
+      flag := startFlag
+      [flag] whileTrue: [flag := false]
     ] ensure: [nil]
 
   getCount => self.count

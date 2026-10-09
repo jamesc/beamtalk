@@ -124,7 +124,9 @@ jobs:
         # retired injected-singleton names (see scripts/ci/lint-removed-facade-names.sh) out.
         # lint-nlr-tuple-matches (BT-3758) also no-ops on Windows; it rejects hand-rolled
         # `{'$bt_nlr', ...}` patterns in runtime sources (use the ?IS_NLR guard instead).
-        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches test-grammar
+        # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
+        # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
+        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
