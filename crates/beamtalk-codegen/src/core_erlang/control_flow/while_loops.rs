@@ -53,6 +53,25 @@ type HybridFieldExtraction = (
 );
 
 impl CoreErlangGenerator {
+    /// Whether a `whileTrue:`/`whileFalse:` with a literal `body` block is
+    /// lowered by the stateful (`{Result, StateAcc}`) generator: the body
+    /// has writes or a nested list op's cross-scope write, or the
+    /// `condition` has a state effect. The loop generators and the
+    /// value-type result-unpacking gate (`is_while_with_vt_local_threading`)
+    /// both read this, so a loop that produces the tuple is always unpacked
+    /// (BT-3746: a condition-only write used to produce a tuple nobody
+    /// unpacked).
+    pub(in crate::core_erlang) fn while_loop_threads(
+        &self,
+        condition: &Expression,
+        body_block: &beamtalk_core::ast::Block,
+    ) -> bool {
+        let analysis = block_analysis::analyze_block(body_block);
+        self.needs_mutation_threading(&analysis)
+            || self.body_has_list_op_cross_scope_mutations(body_block)
+            || super::condition_has_state_effects(self, condition)
+    }
+
     pub(in crate::core_erlang) fn generate_while_true(
         &mut self,
         condition: &Expression,
@@ -69,26 +88,17 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // Include local_writes only in REPL mode
-            // Also check for nested list ops with cross-scope mutations
-            let analysis = block_analysis::analyze_block(body_block);
             // ADR 0118 phase 3: a condition-only self-send/field
             // write (`whileTrue: [nil]` with a mutating CONDITION) must also
-            // route here — `needs_mutation_threading`/
-            // `body_has_list_op_cross_scope_mutations` only look at the BODY,
-            // so a trivial body previously fell through to
-            // `generate_while_true_simple`, which compiles the condition via
-            // `generate_expression` → `generate_block` → `generate_block_stateful`
-            // (a real closure boundary that must CLOSE its own state chain
-            // into a `{Result, State}` tuple) instead of the loop's own
-            // frame — the exact shape that panics the verifier or crashes at
-            // runtime (see the `bt3414_*_inside_while_true_condition_panics_verifier`
+            // route here — the stateful lowering keeps the condition in the
+            // loop's own frame. The simple lowering compiles the condition
+            // via `generate_expression` → `generate_block` →
+            // `generate_block_stateful` (a real closure boundary that must
+            // CLOSE its own state chain into a `{Result, State}` tuple) —
+            // the exact shape that panics the verifier or crashes at runtime
+            // (see the `bt3414_*_inside_while_true_condition_panics_verifier`
             // tests, `tests/gen_server.rs`).
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(self, condition)
-            {
+            if self.while_loop_threads(condition, body_block) {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
         }
@@ -129,16 +139,9 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // Include local_writes only in REPL mode
-            // Also check for nested list ops with cross-scope mutations
-            let analysis = block_analysis::analyze_block(body_block);
             // ADR 0118 phase 3: see the analogous comment in
             // `generate_while_true`.
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(self, condition)
-            {
+            if self.while_loop_threads(condition, body_block) {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
         }
