@@ -152,7 +152,7 @@ fn bt3777_class_methods_computed_value_lowers_in_enclosing_method_context() {
     let code = generate_module(&module, CodegenOptions::new("bt3777_computed_value"))
         .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        code.contains("fun (ClassSelf, ClassVars"),
+        code.contains("'answer' => fun (ClassSelf"),
         "the literal-block entry must still lower as a class-method fun. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3777_computed_value", &code);
