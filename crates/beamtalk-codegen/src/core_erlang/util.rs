@@ -1040,6 +1040,12 @@ impl CoreErlangGenerator {
         let Expression::Identifier(id) = child else {
             return false;
         };
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::SkipSiblingSnapshot)
+        {
+            return false;
+        }
         later.iter().any(|sibling| {
             self.subexpr_needs_prelude(sibling)
                 && self

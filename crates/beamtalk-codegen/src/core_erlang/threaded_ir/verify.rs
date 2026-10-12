@@ -946,12 +946,11 @@ pub(in crate::core_erlang) struct SequencedSibling<'a> {
 /// `sequence_children`, which reports the result via
 /// [`CoreErlangGenerator::report_threaded_ir_verify_errors`].
 ///
-/// **Cannot fire in production yet:** no producer emits a
-/// [`ThreadedStmt::LocalRebind`] until ADR 0131 Phase 2 (BT-3749)'s
-/// `local_threading_producer`, so today every sibling prelude is
-/// rebind-free and this check is exercised only by hand-built IR
-/// (`threaded_ir/tests/local_rebind.rs`). Phase 2 must add a corpus test
-/// proving it fires on a real compile.
+/// ADR 0131 Phase 2 (BT-3749)'s `local_threading_producer` is the first
+/// production source of a sibling `LocalRebind`; besides the hand-built IR
+/// of `threaded_ir/tests/local_rebind.rs`, `tests/local_rebind_verifier_corpus.rs`
+/// shows this firing on a real compile once `sequence_children`'s snapshot
+/// is disabled.
 pub(in crate::core_erlang) fn verify_sibling_reads(
     siblings: &[SequencedSibling<'_>],
 ) -> Vec<VerifyError> {

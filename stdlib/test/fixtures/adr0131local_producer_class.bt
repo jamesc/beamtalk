@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3749 (ADR 0131 Phase 2): loops and folds as local-threading producers,
+// class-method column. Each method writes the outer local `t` inside a loop
+// or fold that sits in an operand position of a method-body statement (a
+// receiver, an argument, a binary operand, a literal element, a `^` value,
+// an assignment's whole value) and answers what it read back. The value-type
+// and actor columns are adr0131local_producer_value.bt and
+// adr0131local_producer_actor.bt; the expected answers are in
+// stdlib/test/adr0131local_producer_test.bt.
+
+Object subclass: Adr0131LocalProducerClass
+
+  // A fold as a binary operand, after a read of `t` (ADR 0131 §1a: the left
+  // operand reads `t` before the fold rebinds it).
+  class leftReadThenFold =>
+    t := 0
+    r := t + (#(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ])
+    #[r, t]
+
+  // A counted loop as an element of a literal array, before a read of `t`.
+  class loopInLiteral =>
+    t := 0
+    #[1 to: 3 do: [:i | t := t + i], t]
+
+  // A fold as a binary operand of a `^` value, read again after it.
+  class returnFoldPlusLocal =>
+    t := 0
+    ^(#(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 1
+      ]) + t
+
+  // A `whileTrue:` threading two locals, as an element of a `^` literal.
+  class whileInReturnedLiteral =>
+    t := 0
+    s := 0
+    ^#[[s < 3]
+      whileTrue: [
+        s := s + 1
+        t := t + s
+      ], t]
+
+  // A fold as a keyword argument.
+  class foldAsArgument =>
+    t := 0
+    r := 0
+      max: (#(1, 2)
+        count: [:x |
+          t := t + 1
+          true
+        ])
+    #[r, t]
+
+  // A fold in a plain statement's argument.
+  class foldInStatement =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x]) size printString
+    t
+
+  // The assignment target is the local the fold writes: the assigned value
+  // wins.
+  class assignToThreadedLocal =>
+    t := 0
+    t := (#(1, 2) collect: [:x | t := t + x]) size
+    t
+
+  // Two producers in one expression, in source order.
+  class twoFolds =>
+    t := 0
+    r := (#(1, 2) collect: [:x |
+      t := t + x
+    ]) size + (#(3) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  // A fold as the receiver of the method's last expression.
+  class foldInLastExpression =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x]) size
+
+  // `detect:ifNone:` whose search and handler both write `t`.
+  class detectHandlerWritesSameLocal =>
+    t := 0
+    r := (#(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 5
+      ]
+      ifNone: [
+        t := t + 10
+        0
+      ]) + 1
+    #[r, t]
+
+  // A loop with a non-literal bound.
+  class loopToParameter: n =>
+    t := 0
+    r := (1 to: n do: [:i | t := t + i]) isNil
+    #[r, t]
+
+  // A fold threading two locals.
+  class foldTwoLocals =>
+    t := 0
+    u := 0
+    r := (#(1, 2, 3)
+      inject: 0
+      into: [:a :x |
+        t := t + x
+        u := u + 1
+        a + x
+      ]) * 2
+    #[r, t, u]

@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3749 (ADR 0131 Phase 2): a loop or fold whose block writes an outer
+// local is a local-threading producer in any operand position of a
+// method-body statement, in every method context. Each test runs one shape
+// (fixtures/adr0131local_producer_{class,value,actor}.bt) in all three
+// contexts and asserts the answer Smalltalk semantics give: the writes are
+// visible to everything evaluated after the construct, in source order.
+
+TestCase subclass: Adr0131LocalProducerTest
+
+  answersOf: selector =>
+    #[Adr0131LocalProducerClass perform: selector, (Adr0131LocalProducerValue new) perform: selector, (Adr0131LocalProducerActor spawn) perform: selector]
+
+  assertAll: selector equal: expected =>
+    self assert: (self answersOf: selector) equals: #[expected, expected, expected]
+
+  testLeftReadThenFold => self assertAll: #leftReadThenFold equal: #[3, 2]
+
+  testLoopInLiteral => self assertAll: #loopInLiteral equal: #[nil, 6]
+
+  testReturnFoldPlusLocal => self assertAll: #returnFoldPlusLocal equal: 4
+
+  testWhileInReturnedLiteral =>
+    self assertAll: #whileInReturnedLiteral equal: #[nil, 6]
+
+  testFoldAsArgument => self assertAll: #foldAsArgument equal: #[2, 2]
+
+  testFoldInStatement => self assertAll: #foldInStatement equal: 3
+
+  testAssignToThreadedLocal => self assertAll: #assignToThreadedLocal equal: 2
+
+  testTwoFolds => self assertAll: #twoFolds equal: #[3, 6]
+
+  testFoldInLastExpression => self assertAll: #foldInLastExpression equal: 2
+
+  testDetectHandlerWritesSameLocal =>
+    self assertAll: #detectHandlerWritesSameLocal equal: #[1, 12]
+
+  testLoopToParameter =>
+    self assert: #[Adr0131LocalProducerClass loopToParameter: 3, (Adr0131LocalProducerValue new) loopToParameter: 3, (Adr0131LocalProducerActor spawn) loopToParameter: 3] equals: #[#[true, 6], #[true, 6], #[true, 6]]
+
+  testFoldTwoLocals => self assertAll: #foldTwoLocals equal: #[12, 6, 3]

@@ -77,6 +77,80 @@ use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
+/// ADR 0131 Phase 2 (BT-3748 review): test-only fault injection into the
+/// local-threading producer and the §1a sequencing rule, so each ADR 0131 §4
+/// verifier check can be shown to fire on a real compile rather than only on
+/// hand-built IR (`tests/local_rebind_verifier_corpus.rs`).
+#[cfg(test)]
+pub(super) mod fault {
+    use std::cell::Cell;
+
+    /// One deliberately broken lowering.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(in crate::core_erlang) enum LocalRebindFault {
+        /// `sequence_children` reads a plain-variable sibling in place even
+        /// though a later sibling rebinds it (`LocalReadAfterSiblingRebind`).
+        SkipSiblingSnapshot,
+        /// The producer omits its last `LocalRebind` (`ThreadedLocalDropped`).
+        DropRebind,
+        /// The producer lowers a `LocalRebind` as a map `Put` at the method
+        /// root, which threads nothing (`LocalRebindModeMismatch`).
+        WrongLowering,
+        /// The producer records a frame other than the one enclosing it
+        /// (`LocalRebindFrameMismatch`).
+        WrongFrame,
+    }
+
+    thread_local! {
+        static ACTIVE: Cell<Option<LocalRebindFault>> = const { Cell::new(None) };
+        static PRODUCERS: std::cell::RefCell<Option<Vec<(beamtalk_core::source_analysis::Span, Vec<String>)>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Records a producer lowering of the construct at `span` threading
+    /// `locals`, when [`recording_producers`] is collecting.
+    pub(in crate::core_erlang) fn record_producer(
+        span: beamtalk_core::source_analysis::Span,
+        locals: &[String],
+    ) {
+        PRODUCERS.with(|p| {
+            if let Some(records) = p.borrow_mut().as_mut() {
+                records.push((span, locals.to_vec()));
+            }
+        });
+    }
+
+    /// Runs `body`, returning its result and every local-threading producer
+    /// lowering it performed (the construct's span and threaded locals).
+    pub(in crate::core_erlang) fn recording_producers<T>(
+        body: impl FnOnce() -> T,
+    ) -> (T, Vec<(beamtalk_core::source_analysis::Span, Vec<String>)>) {
+        PRODUCERS.with(|p| *p.borrow_mut() = Some(Vec::new()));
+        let result = body();
+        let records = PRODUCERS.with(|p| p.borrow_mut().take()).unwrap_or_default();
+        (result, records)
+    }
+
+    /// The fault active on this thread, if any.
+    pub(in crate::core_erlang) fn active() -> Option<LocalRebindFault> {
+        ACTIVE.with(Cell::get)
+    }
+
+    /// Runs `body` with `fault` active, clearing it afterwards even if
+    /// `body` panics.
+    pub(in crate::core_erlang) fn with<T>(fault: LocalRebindFault, body: impl FnOnce() -> T) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                ACTIVE.with(|c| c.set(None));
+            }
+        }
+        ACTIVE.with(|c| c.set(Some(fault)));
+        let _reset = Reset;
+        body()
+    }
+}
+
 /// What a local-threading producer does with its construct's threaded
 /// locals once the construct tuple is bound (ADR 0131 §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -689,6 +763,8 @@ impl CoreErlangGenerator {
         let Some(locals) = self.construct_tuple_locals(inner) else {
             return Ok(None);
         };
+        #[cfg(test)]
+        fault::record_producer(inner.span(), &locals);
         let children = Self::sequenced_send_children(inner).unwrap_or_default();
         let (mut prelude, scope) = self.sequence_children(&children, frame)?;
         let (stmts, value) =
@@ -791,6 +867,8 @@ impl CoreErlangGenerator {
                 for slot in &slots {
                     self.bind_var(&slot.local, &slot.value_var);
                 }
+                #[cfg(test)]
+                let prelude = Self::inject_local_rebind_fault(prelude);
                 prelude
             }
             ProducerTail::Discard => {
@@ -809,6 +887,40 @@ impl CoreErlangGenerator {
             prelude.push(ThreadedStmt::Statement(docvec![rebind, " "], span));
         }
         Ok((prelude, ValueRef::Doc(element(1, &carrier))))
+    }
+
+    /// Applies the active [`fault::LocalRebindFault`] (test-only) to a
+    /// producer's `Rebind` prelude.
+    #[cfg(test)]
+    fn inject_local_rebind_fault(mut prelude: Vec<ThreadedStmt>) -> Vec<ThreadedStmt> {
+        use fault::LocalRebindFault;
+        let last_rebind = prelude
+            .iter()
+            .rposition(|stmt| matches!(stmt, ThreadedStmt::LocalRebind { .. }));
+        match (fault::active(), last_rebind) {
+            (Some(LocalRebindFault::DropRebind), Some(i)) => {
+                prelude.remove(i);
+            }
+            (Some(LocalRebindFault::WrongLowering), Some(i)) => {
+                if let ThreadedStmt::LocalRebind {
+                    local, lowering, ..
+                } = &mut prelude[i]
+                {
+                    *lowering = RebindLowering::MapPut {
+                        key: Self::local_state_key(local),
+                        source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                        target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                    };
+                }
+            }
+            (Some(LocalRebindFault::WrongFrame), Some(i)) => {
+                if let ThreadedStmt::LocalRebind { frame, .. } = &mut prelude[i] {
+                    *frame = FrameId::new(u32::MAX);
+                }
+            }
+            _ => {}
+        }
+        prelude
     }
 
     /// Renders a producer prelude a value-type method body splices as
