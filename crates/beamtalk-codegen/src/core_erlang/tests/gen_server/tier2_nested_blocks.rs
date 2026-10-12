@@ -132,6 +132,48 @@ fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
     );
 }
 
+#[test]
+fn bt3777_class_methods_computed_value_lowers_in_enclosing_method_context() {
+    // BT-3777: a computed (non-block) `classMethods:` value is an ordinary
+    // expression the *enclosing* method evaluates, so it must lower in that
+    // method's context. Previously the builder class-method context was
+    // entered around the whole map, so the computed value's `self h0: e`
+    // lowered as a builder class self-send referencing `ClassSelf` — unbound
+    // in the enclosing actor method (`erlc`: unbound variable 'ClassSelf').
+    // The literal-block entry alongside it must still become a class-method
+    // fun binding `ClassSelf`.
+    let src = "Actor subclass: P\n  state: n = 0\n  h0: x -> Integer => 3\n  probe => Object classBuilder name: #PB; superclass: Object; classMethods: #{#k => (#(1) collect: [:e | self h0: e. e]), #answer => [:self | self k]}; register\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "Reproducer must parse cleanly. Got diagnostics: {diags:?}"
+    );
+    let code = generate_module(&module, CodegenOptions::new("bt3777_computed_value"))
+        .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        code.contains("'answer' => fun (ClassSelf"),
+        "the literal-block entry must still lower as a class-method fun. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3777_computed_value", &code);
+}
+
+#[test]
+fn bt3777_add_class_method_computed_body_lowers_in_enclosing_method_context() {
+    // BT-3777: the `addClassMethod:body:` counterpart — a non-literal-block
+    // `body:` argument is an ordinary argument of the enclosing method.
+    let src = "Actor subclass: P\n  state: n = 0\n  h0: x -> Integer => 3\n  probe => Object classBuilder name: #PB; superclass: Object; addClassMethod: #k body: (#(1) collect: [:e | self h0: e. e]); register\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "Reproducer must parse cleanly. Got diagnostics: {diags:?}"
+    );
+    let code = generate_module(&module, CodegenOptions::new("bt3777_computed_body"))
+        .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3777_computed_body", &code);
+}
+
 /// BT-1213: an inline Tier 2 `[...] value` in an actor method threads a
 /// captured local it mutates through `StateAcc`.
 #[test]
