@@ -291,6 +291,7 @@ deny_list_parity_test() ->
     %% filtered from `default`.
     InfraNames = [
         beamtalk_runtime_sup,
+        beamtalk_ets_heir,
         beamtalk_xref,
         beamtalk_stdlib,
         beamtalk_object_instances,

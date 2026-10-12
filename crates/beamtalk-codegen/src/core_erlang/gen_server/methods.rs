@@ -2091,11 +2091,11 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("~{}~"));
         }
 
-        // Establish the shared class-method context for every fun in the map,
-        // saving/restoring any enclosing class context so a builder cascade
-        // inside another class's method (or at the REPL top level) is unaffected.
-        let saved = self.enter_builder_class_method_context(class_name, class_var_names);
-
+        // BT-3777: the builder class-method context is entered per literal-block
+        // value only (inside `class_method_map_value_doc`). Keys and computed
+        // values are ordinary expressions evaluated by the *enclosing* method,
+        // so they lower in its context — `self` there is the enclosing
+        // receiver, not the builder class's unbound `ClassSelf`.
         let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
         let mut result: Result<()> = Ok(());
         for (i, pair) in pairs.iter().enumerate() {
@@ -2109,7 +2109,12 @@ impl CoreErlangGenerator {
                     break;
                 }
             };
-            let val_doc = match self.class_method_map_value_doc(&pair.key, &pair.value) {
+            let val_doc = match self.class_method_map_value_doc(
+                &pair.key,
+                &pair.value,
+                class_name,
+                class_var_names,
+            ) {
                 Ok(d) => d,
                 Err(e) => {
                     result = Err(e);
@@ -2122,7 +2127,6 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str(" }~"));
 
-        self.exit_builder_class_method_context(saved);
         result?;
         Ok(Document::Vec(parts))
     }
@@ -2131,9 +2135,10 @@ impl CoreErlangGenerator {
     /// `addClassMethod: #sel body: [block]` setter into a class-method fun,
     /// mirroring how a `classMethods:` map value is lowered. The `key` is the
     /// selector-symbol argument (used to validate the block's parameter count).
-    /// Enters/exits the builder class-method context around the single value so
-    /// `self.cvar` access and self/`super` sends lower correctly, exactly as the
-    /// map path does for each entry.
+    /// The builder class-method context is entered around the class-method fun
+    /// only, exactly as the map path does for each literal-block entry. (A
+    /// non-block `body:` argument never reaches here — the cascade lowers it as
+    /// an ordinary argument in the enclosing method's context.)
     pub(in crate::core_erlang) fn generate_class_method_single_arg(
         &mut self,
         key: &Expression,
@@ -2142,10 +2147,7 @@ impl CoreErlangGenerator {
         class_var_names: &[String],
     ) -> Result<Document<'static>> {
         let value = Expression::Block(block.clone());
-        let saved = self.enter_builder_class_method_context(class_name, class_var_names);
-        let result = self.class_method_map_value_doc(key, &value);
-        self.exit_builder_class_method_context(saved);
-        result
+        self.class_method_map_value_doc(key, &value, class_name, class_var_names)
     }
 
     /// Lowers a single `classMethods:` map value: a class-method fun for a literal
@@ -2159,10 +2161,18 @@ impl CoreErlangGenerator {
     /// method was first called. A computed (non-block) value cannot have its
     /// arity checked at compile time, so it still falls through here and is
     /// validated at registration time (`beamtalk_class_builder:validate_class_method_arities/2`).
+    ///
+    /// Only the class-method fun is lowered inside the builder class-method
+    /// context (entered and exited here, saving/restoring any enclosing class
+    /// context). A computed value is an ordinary expression evaluated by the
+    /// enclosing method, so it lowers in that method's context (BT-3777) — a
+    /// `self` send in it targets the enclosing receiver, not `ClassSelf`.
     fn class_method_map_value_doc(
         &mut self,
         key: &Expression,
         value: &Expression,
+        class_name: &str,
+        class_var_names: &[String],
     ) -> Result<Document<'static>> {
         if let Expression::Literal(Literal::Symbol(sym), _) = key {
             if let Some(selector) = super::super::class_builder_source::selector_from_symbol(sym) {
@@ -2171,7 +2181,11 @@ impl CoreErlangGenerator {
                     // selector slot.
                     let expected = selector.arity() + 1;
                     if block.parameters.len() == expected {
-                        return self.generate_class_method_fun_from_block(&selector, block);
+                        let saved =
+                            self.enter_builder_class_method_context(class_name, class_var_names);
+                        let result = self.generate_class_method_fun_from_block(&selector, block);
+                        self.exit_builder_class_method_context(saved);
+                        return result;
                     }
                     return Err(CodeGenError::BlockArityError {
                         selector: format!("classMethods: {sym}"),

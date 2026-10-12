@@ -1925,8 +1925,11 @@ impl CoreErlangGenerator {
     /// 2. Build a wrapper comparator that reads state, runs the block body
     ///    (a [`BodyKind::FoldlSort`] fold body), writes updated state back,
     ///    returns boolean result
-    /// 3. Call `lists:sort/2` with the wrapper
-    /// 4. Read final state from process dictionary
+    /// 3. Call `lists:sort/2` with the wrapper, inside a `try` whose catch arm
+    ///    erases the key before re-raising (BT-3779: a comparator `^` or
+    ///    exception must not leak the per-call key)
+    /// 4. Read final state from process dictionary and erase the key
+    ///    (`erlang:erase/1` does both)
     ///
     /// This approach is necessary because `lists:sort` controls comparison order
     /// and the comparator must return a plain boolean — we can't use foldl.
@@ -2014,20 +2017,44 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         let sorted_var = self.fresh_temp_var("SortedList");
+        let sort_result_var = self.fresh_temp_var("SortResult");
+        let type_var = self.fresh_temp_var("SortType");
+        let error_var = self.fresh_temp_var("SortError");
+        let stack_var = self.fresh_temp_var("SortStack");
         let state_out = self.fresh_temp_var("StOut");
 
+        // BT-3779: the per-call key must be erased on every exit path out of
+        // `lists:sort`. A `^` in the comparator throws `$bt_nlr` (and any
+        // other exception propagates) straight through `lists:sort`, so the
+        // key is erased in a catch-all arm that then re-raises the original
+        // class/reason/stacktrace unchanged via `raw_raise` — the NLR term
+        // (which already carries the comparator's state) is untouched. On the
+        // normal path `erlang:erase/1` both reads the final state and removes
+        // the key.
         docs.push(docvec![
             " in let ",
             leaf::var(sorted_var.clone()),
-            " = call 'lists':'sort'(",
+            " = try call 'lists':'sort'(",
             leaf::var(wrapper_var),
             ", ",
             leaf::var(safe_list_var),
-            ") in let ",
-            leaf::var(state_out.clone()),
-            " = call 'erlang':'get'(",
+            ") of <",
+            leaf::var(sort_result_var.clone()),
+            "> -> ",
+            leaf::var(sort_result_var),
+            " catch <",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(error_var.clone()),
+            ", ",
+            leaf::var(stack_var.clone()),
+            "> -> let _ = call 'erlang':'erase'(",
             state_key_doc.clone(),
-            ") in let _ = call 'erlang':'erase'(",
+            ") in ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+            " in let ",
+            leaf::var(state_out.clone()),
+            " = call 'erlang':'erase'(",
             state_key_doc,
             ") in ",
             plan.generate_extract_suffix_doc(&state_out, self),

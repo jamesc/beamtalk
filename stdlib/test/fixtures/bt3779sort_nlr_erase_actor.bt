@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3779: a stateful sort: comparator threads its state through a per-call
+// process-dictionary key. Every exit out of the sort (normal return, ^, or
+// an exception) must erase that key, or a long-lived actor leaks one entry
+// per aborted sort.
+
+Actor subclass: Bt3779SortNlrEraseActor
+  state: n = 0
+
+  /// Number of entries in this actor's process dictionary.
+  pdictSize => (Erlang erlang get) size
+
+  /// Comparator writes state, then returns non-locally with 0 on its first
+  /// comparison.
+  nlrSort =>
+    #(3, 1, 2)
+      sort: [:a :b |
+        self.n := self.n + 1
+        ^0
+      ]
+    1
+
+  /// Comparator completes normally; answers the sorted list.
+  normalSort =>
+    #(3, 1, 2)
+      sort: [:a :b |
+        self.n := self.n + 1
+        a < b
+      ]
+
+  /// Comparator raises; the error is caught outside the sort.
+  raisingSort =>
+    [
+      #(3, 1, 2)
+        sort: [:a :b |
+          self.n := self.n + 1
+          Error signal: "boom"
+        ]
+    ] on: Error do: [:e | #caught]
+
+  count => self.n

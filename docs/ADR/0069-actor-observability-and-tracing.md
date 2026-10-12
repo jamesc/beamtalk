@@ -397,7 +397,7 @@ This approach reduces implementation effort (3 tools vs 10), avoids API surface 
 - **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
 - **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
 - **Actor death**: Stats and traces for dead actors are **retained** for post-mortem analysis. This is essential for the test workflow where actors spawn, run, and die before results are queried.
-- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables (created with `{heir, SupervisorPid, HeirData}`) and counter references (stored in `persistent_term`). On gen_server crash: ETS ownership transfers to the supervisor via the `heir` mechanism, counters survive in `persistent_term`. The restarted gen_server inherits the existing tables — **no data loss on process crash**. Only a full VM crash (SIGKILL, OOM) loses data.
+- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables (created with `{heir, HeirPid, undefined}`, where `HeirPid` is the `beamtalk_ets_heir` process) and counter references (stored in `persistent_term`). On gen_server crash: ETS ownership transfers to `beamtalk_ets_heir` via the `heir` mechanism, counters survive in `persistent_term`. The restarted gen_server takes its tables back from the heir (`beamtalk_ets_heir:reclaim/1`) — **no data loss on process crash**. Only a full VM crash (SIGKILL, OOM) loses data.
 
 ### Future: Block-Scoped Profiling
 

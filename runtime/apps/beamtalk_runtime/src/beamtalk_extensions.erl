@@ -108,14 +108,14 @@ Creates three tables:
 
 This should be called once during application startup.
 
-All three tables carry `beamtalk_class_registry:heir_option/0` (the
-runtime supervisor, once it is alive) so an owner crash hands the tables off
+All three tables carry `beamtalk_ets_heir:heir_option/0` (the
+`beamtalk_ets_heir` process, once it is alive) so an owner crash hands the tables off
 instead of destroying every registered extension — the same survival pattern
 `beamtalk_class_metadata`/`beamtalk_class_registry` already use.
 """.
 -spec init() -> ok.
 init() ->
-    HeirOpts = beamtalk_class_registry:heir_option(),
+    HeirOpts = beamtalk_ets_heir:heir_option(),
 
     %% Create main registry table
     case ets:info(?EXTENSIONS_TABLE) of

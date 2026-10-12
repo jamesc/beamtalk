@@ -39,9 +39,10 @@ absence of the others.
 * `{read_concurrency, true}` — the hierarchy/module/methods reads are on hot
   dispatch and supervisor-init paths.
 * Heir: created at app start by `beamtalk_runtime_app:start/2` (the
-  long-lived app-master process owns it), then `start/2` re-runs `ensure_*` once
-  the supervisor is alive so `beamtalk_runtime_sup` is set as `{heir, ...}`. The
-  table therefore survives both a class-process crash and an app-master swap.
+  long-lived app-master process owns it), then `start/2` calls
+  `beamtalk_ets_heir:adopt_owned_tables/0` once the heir is alive so it is set
+  as `{heir, ...}`. The table therefore survives both a class-process crash
+  and an app-master swap.
 
 ## Reverse subclass index
 
@@ -214,13 +215,13 @@ ensure_table(Table, Opts) ->
     case ets:info(Table) of
         undefined ->
             try
-                ets:new(Table, Opts ++ beamtalk_class_registry:heir_option()),
+                ets:new(Table, Opts ++ beamtalk_ets_heir:heir_option()),
                 ok
             catch
                 error:badarg -> ok
             end;
         _ ->
-            beamtalk_class_registry:maybe_set_heir(Table),
+            beamtalk_ets_heir:maybe_set_heir(Table),
             ok
     end.
 
