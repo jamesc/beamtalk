@@ -1384,9 +1384,8 @@ pub fn operand_producer_writes(
     let mut packed: Vec<&Block> = Vec::with_capacity(2);
     if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
         if let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() {
-            match receiver.as_ref() {
-                Expression::Block(cond) => packed.push(cond),
-                _ => return None,
+            if let Expression::Block(cond) = receiver.as_ref() {
+                packed.push(cond);
             }
         }
     }

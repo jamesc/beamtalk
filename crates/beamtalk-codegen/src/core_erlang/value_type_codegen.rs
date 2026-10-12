@@ -1004,60 +1004,16 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Emits a last-position threading construct (loop or foldl
-    /// list-op yielding a `{value, StateAcc}` tuple) as an open let chain that binds the
-    /// logical value (element 1) to a fresh result var, returning that var name.
-    ///
-    /// The threaded locals don't escape in last position, so element 2 (the `StateAcc`) is
-    /// discarded. Used both by [`Self::emit_vt_last_expr`] (value-type bodies wrap the result
-    /// in `{Result, Self{N}}` when NLR is active) and by the class-method body generator
-    /// (which returns it bare).
-    ///
-    /// ADR 0122 Decision 3: when `expr` is a Letrec-shaped loop
-    /// (`whileTrue:`/`whileFalse:`/`to:do:`/`to:by:do:`/`timesRepeat:`) that
-    /// threads a value-type `Self` mutation through its own recursive tail
-    /// call, ALSO extracts `Self` from element 3 and rebinds it via
-    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] — without this, a
-    /// `self.field :=`-mutating loop in last/return position would compile
-    /// and run, but the method's own returned `Self` (and the `{Result,
-    /// Self{N}}` NLR tuple) would carry the pre-loop snapshot instead of the
-    /// loop's.
-    pub(in crate::core_erlang) fn emit_vt_threaded_tuple_unwrap_to_var(
-        &mut self,
-        expr: &Expression,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<String> {
-        let families = self.vt_loop_threaded_families(expr);
-        let span = expr.span();
-        let tuple_var = self.fresh_temp_var("ThreadedResult");
-        let result_var = self.fresh_temp_var("ThreadedValue");
-        let loop_doc = self.expression_doc(expr)?;
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            loop_doc,
-            " in\n    let ",
-            leaf::var(result_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in\n",
-        ]);
-        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-        }
-        Ok(result_var)
-    }
-
     /// ADR 0122 Decision 3: the ONE place a construct's trailing family slot
     /// at element 3 of its `{Value, StateAcc, Self}` result tuple
     /// is extracted and rebound — shared by every construct whose extra
     /// slot sits at that same position: the value-type/class-method Letrec
     /// loop's three extraction sites
-    /// ([`Self::emit_vt_threaded_tuple_unwrap_to_var`]'s last-position
-    /// unwrap, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
+    /// (the local-threading producer's construct tuple —
+    /// `lower_local_threading_construct`, ADR 0131 — in last, `^` and
+    /// assignment-RHS position, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
     /// open chain, [`Self::emit_vt_threaded_local_assignment`]'s
-    /// assignment-RHS threading) AND `on:do:`/`ensure:`'s own three mirror
+    /// assignment-RHS threading inside a conditional branch) AND `on:do:`/`ensure:`'s own three mirror
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
     /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
@@ -1096,9 +1052,9 @@ impl CoreErlangGenerator {
 
     /// Lowers a last/return-position `on:do:`/`ensure:` into its logical
     /// result var: binds the construct's own `{Result, StateAcc[, Family]}`
-    /// tuple and extracts element 1. The family mirror of
-    /// [`Self::emit_vt_threaded_tuple_unwrap_to_var`] for the
-    /// exception-construct family. Threaded outer locals (element 2) do not
+    /// tuple and extracts element 1. The exception-construct mirror of the
+    /// loop/fold local-threading producer's last-position lowering
+    /// (`lower_local_threading_construct`, ADR 0131). Threaded outer locals (element 2) do not
     /// escape in last position, unlike
     /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction,
     /// and are discarded here. When the construct also threads the `SelfVt`
@@ -2073,6 +2029,14 @@ impl CoreErlangGenerator {
     /// this, the target would be bound to the raw `{value, StateAcc}` tuple and the threaded
     /// locals would keep their pre-construct values.
     ///
+    /// ADR 0131 Phase 2 (BT-3749): at the method root this is the
+    /// local-threading producer's job (`lower_root_statement_with_producer`);
+    /// the remaining callers are statements inside a conditional branch
+    /// (`build_vt_conditional_branch_value_parts`,
+    /// `build_vt_conditional_value_and_mutations_parts` and the open-branch
+    /// builder), branch-arm frames that ADR 0131 Phase 3 (`BranchArm`)
+    /// lowers, deleting this.
+    ///
     /// Returns the Core Erlang variable bound to the assignment target.
     pub(in crate::core_erlang) fn emit_vt_threaded_local_assignment(
         &mut self,
@@ -2082,8 +2046,8 @@ impl CoreErlangGenerator {
     ) -> Result<String> {
         // ADR 0122 Decision 3: which extra trailing slot `value` carries as an
         // explicit 3rd tuple element, when it is a Letrec-shaped construct
-        // (while/counted loop) — see the analogous comment on
-        // `emit_vt_threaded_tuple_unwrap_to_var`. Always empty for a `Foldl*`
+        // (while/counted loop) — see `vt_loop_threaded_families`.
+        // Always empty for a `Foldl*`
         // construct (`vt_loop_threaded_families`'s own doc comment).
         let families = self.vt_loop_threaded_families(value);
         let span = value.span();

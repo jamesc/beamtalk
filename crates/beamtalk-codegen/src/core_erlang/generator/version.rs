@@ -14,7 +14,7 @@ use crate::core_erlang::util;
 
 /// Renders a `VersionPrefix::State` counter value, honoring loop context —
 /// the single shared implementation behind `current_state_var`/
-/// `next_state_var`/`peek_next_state_var` (this impl block) and
+/// `next_state_var` (this impl block) and
 /// `threaded_ir::RenderCtx::resolve_prefix` (ADR 0111 §Addendum, "Renderer
 /// design sketch": "prefix rendering is a function of (counter, loop
 /// context), decided at Document-construction time, not stored in the
@@ -107,16 +107,6 @@ impl CoreErlangGenerator {
     /// Gets the current state version.
     pub(in crate::core_erlang) fn state_version(&self) -> usize {
         self.state_threading.version()
-    }
-
-    /// Returns the name of the next state variable without advancing the
-    /// version counter.  Context-aware: uses `StateAcc*` in loop bodies.
-    pub(in crate::core_erlang) fn peek_next_state_var(&self) -> String {
-        render_state_prefix(
-            self.loop_mode.in_hybrid_loop,
-            self.in_loop_body,
-            self.state_threading.version() + 1,
-        )
     }
 
     /// Sets the state version.

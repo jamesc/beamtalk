@@ -337,9 +337,8 @@ impl LoopCounter {
 /// cannot be named. [`Self::current_var`] only renders the version already
 /// reached; a caller that needs to name the version *the next
 /// [`Self::next_var`] call would* reach, without advancing the counter,
-/// renders `self.0 + 1` directly (`mod.rs`'s `peek_next_state_var`, via
-/// `render_state_prefix`) rather than through a dedicated `VersionCounter`
-/// method.
+/// renders `self.0 + 1` directly (via `render_state_prefix`) rather than
+/// through a dedicated `VersionCounter` method.
 ///
 /// **Emitter-facing accessors render through [`VersionedVar`]**: every
 /// method here goes through [`VersionedVar::new`] + [`VersionedVar::render_name`]

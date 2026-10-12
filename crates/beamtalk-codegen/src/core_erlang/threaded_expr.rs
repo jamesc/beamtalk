@@ -205,8 +205,25 @@ impl CoreErlangGenerator {
     ) -> Result<Option<ThreadedExpr>> {
         let expr = expr.unwrap_parens();
         let mut parts: Vec<Document<'static>> = Vec::new();
-        let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
-            self.emit_vt_threaded_tuple_unwrap_to_var(expr, &mut parts)?
+        let result_var = if let Some(locals) = self.construct_tuple_locals(expr) {
+            // ADR 0131 §2 (Phase 2): a loop or fold is a local-threading
+            // producer; as the method root's last expression it discards its
+            // locals with an explicit `DiscardLocals`.
+            let (prelude, value) =
+                self.lower_local_threading_construct(expr, &locals, ProducerTail::Discard)?;
+            let prelude_doc = self.verified_root_prelude_doc(&prelude, expr.span());
+            let value_doc = self.threaded_value_doc(&value);
+            let result_var = self.fresh_temp_var("ThreadedValue");
+            parts.push(docvec![
+                "    ",
+                prelude_doc,
+                "let ",
+                leaf::var(result_var.clone()),
+                " = ",
+                value_doc,
+                " in\n",
+            ]);
+            result_var
         } else if self.is_conditional_with_vt_local_threading(expr) {
             match self.emit_vt_conditional_case_to_var(expr, &mut parts)? {
                 Some(result_var) => result_var,
@@ -366,18 +383,22 @@ impl CoreErlangGenerator {
         Ok(true)
     }
 
-    /// Emits a local assignment whose RHS is a threading construct, binding the target
-    /// to the construct's logical value (tuple element 1) and rebinding any threaded
-    /// sibling outer-locals from element 2 — so both the assigned value and the
-    /// mutations are visible to subsequent statements, rather than the target being
-    /// bound to the raw `{value, StateAcc}` tuple.
+    /// Emits a local assignment whose RHS is a read+write conditional or an
+    /// `on:do:`/`ensure:`, binding the target to the construct's logical value
+    /// (tuple element 1) and rebinding any threaded sibling outer-locals from
+    /// element 2 — so both the assigned value and the mutations are visible to
+    /// subsequent statements, rather than the target being bound to the raw
+    /// tuple.
     ///
     /// Returns the Core Erlang variable bound to the assignment target, or `None` (without
-    /// mutating `body_parts`) when the RHS is not a threading construct, so the caller
-    /// falls back to its generic local-binding path. Handles both the loop / foldl
-    /// list-op RHS (`emit_vt_threaded_local_assignment`) and the read+write conditional
-    /// RHS (`emit_vt_conditional_assign_rhs`). The conditional
-    /// RHS is peeled of redundant parentheses first.
+    /// mutating `body_parts`) when the RHS is not such a construct, so the caller
+    /// falls back to its generic local-binding path. The RHS is peeled of
+    /// redundant parentheses first.
+    ///
+    /// ADR 0131 Phase 2 (BT-3749): a loop or fold RHS no longer reaches
+    /// here — it is a local-threading producer
+    /// (`lower_root_statement_with_producer`). Phase 3 makes the conditional
+    /// and exception families producers too and deletes this function.
     ///
     /// Shared by the value-type instance-method body sequencer and the class-method
     /// non-last local-var binder, which previously re-derived this branch independently.
@@ -389,11 +410,6 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<Option<String>> {
-        if self.expr_yields_vt_threaded_tuple(value) {
-            return Ok(Some(
-                self.emit_vt_threaded_local_assignment(var_name, value, body_parts)?,
-            ));
-        }
         let rhs = value.unwrap_parens();
         if self.is_conditional_with_vt_local_threading(rhs) {
             return Ok(Some(
@@ -410,21 +426,24 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// Actor-boundary assign-RHS transform —
-    /// `var := <control-flow-with-mutations>`.
+    /// Actor-boundary assign-RHS transform for an inline-threaded conditional
+    /// (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`, the
+    /// nil-conditional family, `match:`) —
+    /// `var := <conditional-with-mutations>`.
     ///
-    /// The RHS lowers to a `{Value, NewState}` tuple whose element 2 **is** the `gen_server`
-    /// `State` map. Binds the target to element 1, rebinds the state version to element 2
-    /// through a real [`ThreadedStmt::Bind`], and rebinds any `__local__`-threaded sibling
-    /// outer-locals from the new state so both the assigned value and the mutations are
-    /// visible to subsequent statements.
+    /// The caller (`gen_server/methods.rs`'s `LocalAssignControlFlow` arm)
+    /// already called `thread_ahead(value, ..)`, which splices the
+    /// conditional producer's real prelude (its `State` `Bind`) and
+    /// registers its already-unwrapped value, so `expression_doc` returns
+    /// that value directly. This binds the target to it and rebinds the
+    /// `__local__`-threaded sibling outer-locals from the new state.
     ///
-    /// ADR 0111 Addendum 4: this NEVER declines — see
-    /// [`Self::emit_actor_threaded_last_stmts`]'s doc comment for the
-    /// single-classification-pass rationale (the caller is the already-classified
-    /// `BodyExprKind::LocalAssignControlFlow` arm; the deleted
-    /// `control_flow_has_mutations` recheck here is what `RoutingMismatch`
-    /// existed to compare against).
+    /// ADR 0131 Phase 2 (BT-3749): every other actor
+    /// `var := <control-flow-with-mutations>` — a loop, fold, `do:` or
+    /// `on:do:`/`ensure:`, whose `{Value, NewState}` tuple this used to
+    /// unpack on a raw-tuple path — is a local-threading producer
+    /// (`threaded_construct_value`), so that path is gone. Phase 3 makes the
+    /// conditional family a local-threading producer too and deletes this.
     pub(super) fn emit_actor_threaded_assign_rhs_stmts(
         &mut self,
         var_name: &str,
@@ -432,66 +451,29 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let span = value.span();
+        if !self.inline_control_flow_needs_threading(value.unwrap_parens()) {
+            return Err(CodeGenError::Internal(
+                "emit_actor_threaded_assign_rhs_stmts: a non-conditional construct must be \
+                 lowered by threaded_construct_value"
+                    .to_string(),
+            ));
+        }
         let core_var = self
             .lookup_var(var_name)
             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-
-        // ADR 0118 phase 4: see `emit_actor_threaded_last_stmts`'s
-        // matching check — this function's own caller
-        // (`gen_server/methods.rs`'s `LocalAssignControlFlow` arm) already
-        // called `thread_ahead(value, ..)` immediately before this, which
-        // now splices an inline-threaded control-flow RHS's real prelude
-        // and registers its already-unwrapped value. `expression_doc` below
-        // then returns that value directly — no `element/2` unwrap needed.
-        if self.inline_control_flow_needs_threading(value.unwrap_parens()) {
-            let value_doc = self.expression_doc(value)?;
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(core_var.clone()),
-                    " = ",
-                    value_doc,
-                    " in "
-                ],
-                span,
-            ));
-            self.bind_var(var_name, &core_var);
-            let new_state = self.current_state_var();
-            self.push_threaded_var_rebinds(value, var_name, &new_state, span, stmts);
-            return Ok(());
-        }
-
-        let tuple_var = self.fresh_temp_var("Tuple");
-        let source_version = self.state_version();
-        let new_state = self.peek_next_state_var();
-        let value_str = self.expression_doc(value)?;
+        let value_doc = self.expression_doc(value)?;
         stmts.push(ThreadedStmt::Statement(
             docvec![
                 "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                value_str,
-                " in let ",
                 leaf::var(core_var.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(tuple_var.clone()),
-                ") in ",
+                " = ",
+                value_doc,
+                " in "
             ],
             span,
         ));
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        stmts.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, FrameId::ROOT),
-            source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
-                ")",
-            ])),
-            span,
-        });
         self.bind_var(var_name, &core_var);
+        let new_state = self.current_state_var();
         self.push_threaded_var_rebinds(value, var_name, &new_state, span, stmts);
         Ok(())
     }
@@ -499,10 +481,10 @@ impl CoreErlangGenerator {
     /// Rebinds every outer local `value`'s construct threads (via
     /// [`CoreErlangGenerator::threaded_locals_of`]) from
     /// `new_state`, except `var_name` itself (the assignment target — see
-    /// the inline comment at the call site for why). Shared by
-    /// [`Self::emit_actor_threaded_assign_rhs_stmts`]'s two paths (already-
-    /// spliced inline-control-flow producer, and the raw-tuple fallback for
-    /// loops/list-ops) so the rebind logic is written once.
+    /// the inline comment at the call site for why). Used by
+    /// [`Self::emit_actor_threaded_assign_rhs_stmts`] after an
+    /// already-spliced inline-control-flow producer, which threads `State`
+    /// but not the locals (ADR 0131 Phase 3).
     fn push_threaded_var_rebinds(
         &mut self,
         value: &Expression,
@@ -633,31 +615,36 @@ impl CoreErlangGenerator {
         {
             return None;
         }
-        let locals = self.construct_tuple_locals(inner)?;
-        (!locals.is_empty()).then_some(locals)
+        beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner)?;
+        self.construct_tuple_locals(inner)?;
+        let set = self.threaded_locals_of(inner)?;
+        (set.lowered == set.names).then_some(set.lowered)
     }
 
-    /// The outer locals the loop or fold `expr` (paren-unwrapped) packs
-    /// into its construct tuple, when it compiles to one in this context —
-    /// possibly empty (a value-type loop that threads only `Self`) — or
-    /// `None` when it does not, or when its tuple would not carry every local
-    /// its blocks write.
+    /// The outer locals the threading construct `expr` (paren-unwrapped)
+    /// packs into the construct tuple it compiles to in this context —
+    /// possibly none (a value-type loop that threads only `Self`, an actor
+    /// fold that threads only `State`) — or `None` when it does not compile
+    /// to one. In a class or value-type method that is a loop or fold
+    /// (`expr_yields_vt_threaded_tuple`); in an actor instance method, any
+    /// control-flow construct with mutations that is not inlined as a
+    /// conditional (`control_flow_has_mutations` without
+    /// `inline_control_flow_needs_threading`: loops, folds, `do:`,
+    /// `on:do:`/`ensure:`), whose element 2 is the next `State`.
     pub(super) fn construct_tuple_locals(&self, expr: &Expression) -> Option<Vec<String>> {
-        beamtalk_core::semantic_analysis::block_facts::producer_body_block(expr)?;
         let yields_tuple =
             if self.in_class_method() || self.context == super::CodeGenContext::ValueType {
                 self.expr_yields_vt_threaded_tuple(expr)
             } else {
-                self.in_actor_instance_context() && self.control_flow_has_mutations(expr)
+                self.in_actor_instance_context()
+                    && self.control_flow_has_mutations(expr)
+                    && !self.inline_control_flow_needs_threading(expr)
             };
-        if !yields_tuple {
-            return None;
-        }
-        match self.threaded_locals_of(expr) {
-            None => Some(Vec::new()),
-            Some(set) if set.lowered == set.names => Some(set.lowered),
-            Some(_) => None,
-        }
+        yields_tuple.then(|| {
+            self.threaded_locals_of(expr)
+                .map(|set| set.lowered)
+                .unwrap_or_default()
+        })
     }
 
     /// ADR 0131 §1 (Phase 2): the local-threading producer for a loop or
@@ -750,7 +737,7 @@ impl CoreErlangGenerator {
         };
         let source_version = self.state_version();
         let doc = self.expression_doc(expr)?;
-        let carrier = self.fresh_temp_var("Threaded");
+        let carrier = self.fresh_temp_var("ThreadedResult");
         let element = |k: i64, carrier: &str| {
             docvec![
                 "call 'erlang':'element'(",
