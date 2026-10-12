@@ -39,6 +39,8 @@ heir_test_() ->
                 fun adopt_owned_tables_sets_heir/0},
             {"ensure_table/2 creates, then reclaims after the owner dies",
                 fun ensure_table_creates_then_reclaims/0},
+            {"ensure_table/2 on a caller-owned table does not call the heir",
+                fun ensure_table_owned_skips_heir_call/0},
             {"trace store crash: tables survive and are reclaimed by the new store",
                 fun trace_store_reclaims_after_crash/0},
             {"announcements crash: tables survive and are reclaimed by the new bus",
@@ -146,6 +148,20 @@ adopt_owned_tables_sets_heir() ->
         ?assert(false)
     end,
     delete_test_table().
+
+ensure_table_owned_skips_heir_call() ->
+    HeirPid = whereis(beamtalk_ets_heir),
+    ?TABLE = ets:new(?TABLE, [named_table, public, set]),
+    ok = sys:suspend(HeirPid),
+    try
+        %% A suspended heir cannot answer reclaim/1; the owner check must
+        %% short-circuit before any gen_server:call, else this exits on timeout.
+        ?assertEqual(ok, beamtalk_ets_heir:ensure_table(?TABLE, [named_table, public, set])),
+        ?assertEqual(self(), ets:info(?TABLE, owner))
+    after
+        ok = sys:resume(HeirPid),
+        ets:delete(?TABLE)
+    end.
 
 ensure_table_creates_then_reclaims() ->
     HeirPid = whereis(beamtalk_ets_heir),

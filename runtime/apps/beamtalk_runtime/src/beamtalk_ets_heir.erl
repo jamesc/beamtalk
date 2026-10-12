@@ -28,8 +28,10 @@ two things are lost: every table it currently holds (inherited from a crashed
 owner and not yet reclaimed) is destroyed, and the boot tables owned by the
 app master (class registry, metadata, extensions, protocol tables) lose their
 heir permanently, because `adopt_owned_tables/0` runs once at app start and
-`maybe_set_heir/1` is a no-op for any caller that does not own the table.
-Recovery is a runtime restart.
+`maybe_set_heir/1` is a no-op for any caller that does not own the table. The
+tables of live restartable owners (trace store, announcements bus) are in the
+same position until those owners next restart, so the crash that triggers that
+restart loses their data. Recovery is a runtime restart.
 
 The shared helpers — `heir_option/0`, `maybe_set_heir/1` and
 `ensure_table/2` — are the one place the runtime decides a table's heir.
@@ -179,7 +181,13 @@ ensure_table(Name, Opts) ->
             _ = ets:new(Name, Opts ++ heir_option()),
             ok;
         _Tid ->
-            _ = reclaim(Name),
+            %% Skip the round-trip to the heir when this process already owns
+            %% the table (e.g. a hot code upgrade on a live owner).
+            _ =
+                case ets:info(Name, owner) =:= self() of
+                    true -> ok;
+                    false -> reclaim(Name)
+                end,
             maybe_set_heir(Name)
     end.
 
