@@ -251,7 +251,14 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates the `safe_dispatch/3` function with error isolation.
+    /// Generates the `safe_dispatch/4` (caller supplies `Self`) and `safe_dispatch/3`
+    /// (derives `Self`) functions with error isolation.
+    ///
+    /// BT-3692: an open actor's self-send already has `Self` in scope, so it calls
+    /// `safe_dispatch/4` and skips the `beamtalk_actor:make_self/1` rebuild (about
+    /// 45% of the send). `safe_dispatch/3` stays for the `gen_server` entry points
+    /// (`handle_call`/`handle_cast`/`handle_info`/`init`), which only have `State`;
+    /// it builds `Self` and delegates, so the try/catch lives in one place.
     ///
     /// Errors in method dispatch are caught and returned
     /// to the caller rather than crashing the actor instance.
@@ -293,6 +300,9 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     ///     let Self = call 'beamtalk_actor':'make_self'(State) in
+    ///     apply 'safe_dispatch'/4(Selector, Args, Self, State)
+    ///
+    /// 'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->
     ///     try call 'module':'dispatch'(Selector, Args, Self, State)
     ///     of Result -> Result
     ///     catch <Type, Error, Stacktrace> ->
@@ -318,6 +328,15 @@ impl CoreErlangGenerator {
                     line(),
                     // Construct Self object reference using beamtalk_actor:make_self/1
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    line(),
+                    "apply 'safe_dispatch'/4 (Selector, Args, Self, State)",
+                ]
+            ),
+            "\n\n",
+            "'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->",
+            nest(
+                INDENT,
+                docvec![
                     line(),
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
                     docvec![

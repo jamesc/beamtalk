@@ -24,7 +24,10 @@ use beamtalk_core::file_walker::FileWalker;
 /// path; on failure (e.g. the path does not yet exist on disk) it returns a
 /// clone of the input unchanged.  Callers that need the error should call
 /// `std::fs::canonicalize` directly.
-fn try_canonicalize(path: &Path) -> PathBuf {
+///
+/// Both the CLI and the MCP server use this helper to produce consistent
+/// normalized keys for path-based deduplication in their lint pipelines.
+pub fn try_canonicalize(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 

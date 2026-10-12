@@ -57,7 +57,6 @@ and join the `beamtalk_classes` pg group for enumeration.
     set_class_var/3,
     has_class_var/2,
     clear_class_var/2,
-    class_var_uninitialized_error/2,
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
@@ -156,6 +155,16 @@ before any class registers.
 """.
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
+    %% ADR 0130 Phase 3: refuse a compiled module with a different
+    %% `class_var_abi` before any process is started (see
+    %% `beamtalk_class_var_abi:check_class_info_abi/2`).
+    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
+        ok -> do_start(ClassName, ClassInfo);
+        {error, _} = Refused -> Refused
+    end.
+
+-spec do_start(class_name(), map()) -> {ok, pid()} | {error, term()}.
+do_start(ClassName, ClassInfo) ->
     Result =
         case whereis(beamtalk_class_sup) of
             undefined ->
@@ -259,14 +268,31 @@ rename(OldName, NewName) ->
             end
     end.
 
--doc "Update an existing class process with new metadata after redefinition.".
+-doc """
+Update an existing class process with new metadata after redefinition.
+
+The hot-reload path of the ADR 0130 `class_var_abi` gate: a module whose
+`class_var_abi` differs from the running runtime's is refused with a structured
+`abi_mismatch` and the class keeps its current definition.
+
+The gate is atomic only for a caller that has not loaded the new code yet
+(a module's `-on_load` hook). It does **not** roll back: a caller such as
+`beamtalk_class_builder` or `beamtalk_bootstrap_stub` that has already loaded
+the new module code before calling this keeps that code loaded when the gate
+refuses, though the class process keeps its previous metadata.
+""".
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            {error, {class_not_found, ClassName}};
-        Pid ->
-            gen_server:call(Pid, {update_class, ClassInfo})
+    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
+        ok ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    {error, {class_not_found, ClassName}};
+                Pid ->
+                    gen_server:call(Pid, {update_class, ClassInfo})
+            end;
+        {error, _} = Refused ->
+            Refused
     end.
 
 -doc "Set a class variable on a class by name.".
@@ -466,9 +492,12 @@ class_send(ClassPid, Selector, Args) ->
 Execute a class method in the caller's process.
 
 Resolves the target module from the class object, then calls
-Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
-object's gen_server. The caller takes responsibility for knowing the
-method does not mutate class state (nil is passed for ClassSelf).
+Module:class_<Selector>(Receiver, Args...) directly — bypassing the class
+object's gen_server. The receiver class object is passed as `ClassSelf` and the
+call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
+class-variable reads see the snapshot (the ETS mirror as of the last completed
+invocation), writes raise `class_state_read_only`, and when called from inside
+the class's own method mid-invocation the live map is read and written.
 
 Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
@@ -481,16 +510,11 @@ local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
         true ->
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
             code:ensure_loaded(Module),
-            case erlang:function_exported(Module, FunName, length(Args) + 2) of
+            case erlang:function_exported(Module, FunName, length(Args) + 1) of
                 true ->
-                    case erlang:apply(Module, FunName, [nil, #{} | Args]) of
-                        {class_var_result, Value, _NewClassVars} ->
-                            %% Discard class var mutations — local_call does not
-                            %% update the class object's state.
-                            Value;
-                        Result ->
-                            Result
-                    end;
+                    beamtalk_class_vars:with_snapshot(Receiver, fun() ->
+                        erlang:apply(Module, FunName, [Receiver | Args])
+                    end);
                 false ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -609,6 +633,8 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     Fun = ResolveFun(ModuleName),
                     case erlang:function_exported(ModuleName, Fun, 1) of
                         true ->
+                            %% bt-catcher-audit: not-applicable-no-block - generated
+                            %% selector-table probe, no user code
                             try
                                 ModuleName:Fun(Selector)
                             catch
@@ -642,8 +668,8 @@ put_method(ClassPid, Selector, Fun, Source) ->
 Install or replace a class-side method with a runtime fun (ADR 0084).
 
 Class-side mirror of `put_method/4`. The fun follows the compiled class-method
-calling convention exactly: `fun(ClassSelf, ClassVars, A1..An) -> Result |
-{class_var_result, Result, NewClassVars}`, arity `n + 2`. The fun is stored in
+calling convention exactly (ADR 0130 §3): `fun(ClassSelf, A1..An) -> Result`,
+arity `n + 1`; class variables are accessed through `beamtalk_class_vars`. The fun is stored in
 the class gen_server `class_methods` map (the source of truth) and mirrored into
 the metadata retrieval store so subclasses can dispatch it without a gen_server
 hop. A runtime fun shadows any compiled method of the same selector.
@@ -655,7 +681,28 @@ put_class_method(ClassPid, Selector, Fun) ->
 -doc "Install or replace a class-side method with a runtime fun and source.".
 -spec put_class_method(pid(), selector(), fun(), binary()) -> ok.
 put_class_method(ClassPid, Selector, Fun, Source) ->
+    ok = validate_class_method_fun_arity(ClassPid, Selector, Fun),
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
+
+-doc """
+ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
+`selector_arity + 1`. Any other arity is refused here with the structured error
+`beamtalk_class_builder:validate_class_method_arities/2` produces (the same rule
+`ClassBuilder register` applies), instead of a raw `badarity` at call time.
+""".
+-spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
+validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
+    case beamtalk_class_builder:class_method_fun_arity(Selector, Fun) of
+        ok ->
+            ok;
+        {error, {Expected, Actual}} ->
+            %% The class name is only needed for the error, so it is resolved on mismatch.
+            beamtalk_error:raise(
+                beamtalk_class_builder:class_method_arity_error(
+                    class_name(ClassPid), Selector, Expected, Actual
+                )
+            )
+    end.
 
 -doc "Get instance variable names.".
 -spec instance_variables(pid()) -> [atom()].
@@ -1024,6 +1071,7 @@ exits/errors propagate.
 """.
 -spec safe_xref(fun(() -> ok)) -> ok.
 safe_xref(Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a gen_server call to beamtalk_xref
     try Fun() of
         ok -> ok
     catch
@@ -1346,6 +1394,8 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             NewModule = NewState#class_state.module,
             case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
                 true ->
+                    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
+                    %% literal getter, no block
                     try NewModule:'__beamtalk_meta'() of
                         Meta when is_map(Meta) ->
                             %% This `update_class` path is hit by ordinary
@@ -1525,11 +1575,13 @@ handle_call(
         true ->
             case maps:find(Name, ClassVars) of
                 {ok, nil} ->
-                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State};
+                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
+                        State};
                 {ok, Value} ->
                     {reply, Value, State};
                 error ->
-                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State}
+                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
+                        State}
             end;
         false ->
             {reply, maps:get(Name, ClassVars, nil), State}
@@ -1679,39 +1731,14 @@ notify_compiler_server_register(ClassName, Meta) ->
 True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
 `ClassName` or an ancestor — the class-side counterpart to
 `beamtalk_reflection`'s `declared_late/2`, via
-`beamtalk_behaviour_intrinsics:classAllClassVarKindsByName/1` (B5a's
+`beamtalk_class_metadata:class_var_kinds/1` (B5a's
 flattened class-variable kind metadata). Keyed on *declared* late so a
 typo'd class variable name keeps today's plain `nil`.
 """.
 -spec class_var_declared_late(class_name(), atom()) -> boolean().
 class_var_declared_late(ClassName, Name) ->
-    Kinds = beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(ClassName),
+    Kinds = beamtalk_class_metadata:class_var_kinds(ClassName),
     maps:get(Name, Kinds, eager) =:= late.
-
--doc """
-Builds (but does not raise) the `uninitialized_state_error` for an
-unassigned declared-`late` class variable read via `get_class_var` (ADR 0124
-§1/§4i/B4) — the class-side counterpart to `beamtalk_reflection`'s
-`raise_uninitialized_state/2`, which DOES raise directly because it runs on
-the actor's already-`try`-wrapped `dispatch/4` path (`beamtalk_actor.erl`).
-`get_class_var`'s `handle_call` clause has no such wrapper, so this only
-constructs the error value for that clause to reply with as `{error, Error}`
-(see its own comment) rather than raising in the class gen_server's own
-process. No declared-type metadata is available for class variables the
-way `beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1` supplies for
-instance fields (`__beamtalk_meta/0` carries no `class_field_types` key), so
-the hint names the variable without a `(:: Type)` suffix.
-""".
--spec class_var_uninitialized_error(class_name(), atom()) -> #beamtalk_error{}.
-class_var_uninitialized_error(ClassName, Name) ->
-    Hint = iolist_to_binary(
-        io_lib:format(
-            "~s class variable '~s' is declared `late` and has not been assigned yet",
-            [ClassName, Name]
-        )
-    ),
-    Error0 = beamtalk_error:new(uninitialized_state_error, ClassName, 'fieldAt:'),
-    beamtalk_error:with_hint(Error0, Hint).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
@@ -2007,10 +2034,10 @@ find_inherited_class_method(Selector, SuperName) ->
     end.
 
 -doc """
-Check whether `class_new:/3` is exported anywhere in the superclass chain.
+Check whether `class_new:/2` is exported anywhere in the superclass chain.
 
 Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
-a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
+a module exporting `class_new:'/2` is found, `false` if none is found in the chain.
 This correctly supports inherited `class new:` constructors: a subclass that does
 not override `class new:` will still route through the parent's implementation.
 
@@ -2027,7 +2054,7 @@ has_class_new_in_chain(ClassName, Module) ->
 has_class_new_in_chain(_ClassName, _Module, Depth) when Depth > 50 ->
     false;
 has_class_new_in_chain(ClassName, Module, Depth) ->
-    case erlang:function_exported(Module, 'class_new:', 3) of
+    case erlang:function_exported(Module, 'class_new:', 2) of
         true ->
             true;
         false ->
@@ -2072,6 +2099,8 @@ ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
 read_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 M when is_map(M) -> M;
                 _ -> #{}

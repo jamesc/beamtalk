@@ -2,4 +2,5 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-No semantic errors
+Semantic errors (1):
+  - `do:` writes outer local `count`, but as a statement inside a loop in an actor method the write is not threaded back yet (BT-3743)

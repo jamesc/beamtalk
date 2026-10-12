@@ -98,7 +98,9 @@ Object subclass: SsoBlocksBase
   class tick -> Integer => 0
 
   // A block run inside another class's process (ADR 0109).
-  class viaForeign -> Integer => SsoBlocksDriver each: [self tick]
+  class viaForeign -> Integer =>
+    @expect class_state_abroad "BT-3712: SsoBlocksSub overrides tick to write a class variable"
+    SsoBlocksDriver each: [self tick]
 
   // Statically bound sends whose callee's own `self foo:` late-binds.
   class wrapper -> Integer => self foo: 1

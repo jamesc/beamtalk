@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3766: ADR 0130 Phase 0 gate 4 with the restore arm taken. A class-side
+// `on:do:` in a loop whose protected block always raises, run inside an
+// invocation of a class with class variables, so `snapshot/0` answers the live
+// `{Key, Map}` and every iteration runs `restore/1` in the catch arm.
+// `SsbOnDoRaiseObject` is the same loop outside any invocation (`snapshot/0`
+// answers `none`, so `restore/1` does nothing).
+
+Object subclass: SsbOnDoRaiseClass
+  classState: hits = 0
+
+  class loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | [Error signal: "x"] on: Error do: [:e | 0]]
+    n

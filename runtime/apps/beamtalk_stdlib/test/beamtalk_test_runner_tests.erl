@@ -783,6 +783,86 @@ live_execution_test_() ->
     end}.
 
 %%% ============================================================================
+%%% Inherited test methods and abstract test cases (BT-3768)
+%%%
+%%% An abstract TestCase subclass holds the test* methods; a concrete subclass
+%%% with no test* method of its own inherits and runs them. The abstract class
+%%% itself is never run.
+%%% ============================================================================
+
+-define(INH_ABSTRACT, 'BtTestRunnerInhAbstractTest').
+-define(INH_CONCRETE, 'BtTestRunnerInhConcreteTest').
+-define(INH_MODULE, bt_test_runner_inh_mod).
+
+inherited_setup() ->
+    beamtalk_test_boot:boot_real_stdlib('TestCase'),
+    Src =
+        "-module(bt_test_runner_inh_mod).\n"
+        "-export([new/0, dispatch/3]).\n"
+        "new() -> #{'$beamtalk_class' => 'BtTestRunnerInhConcreteTest'}.\n"
+        "dispatch(setUp, _, Self) -> Self#{ready => true};\n"
+        "dispatch(testInherited, _, #{ready := true} = Self) -> Self;\n"
+        "dispatch(helper, _, Self) -> Self.\n",
+    {ok, Tokens, _} = erl_scan:string(Src),
+    Forms = [
+        begin
+            {ok, Form} = erl_parse:parse_form(Ts),
+            Form
+        end
+     || Ts <- split_token_forms(Tokens)
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt_test_runner_inh_mod.erl", Bin),
+    start_inh_class(?INH_ABSTRACT, 'TestCase', true, #{
+        setUp => #{arity => 0}, testInherited => #{arity => 0}
+    }),
+    start_inh_class(?INH_CONCRETE, ?INH_ABSTRACT, false, #{helper => #{arity => 0}}),
+    ok.
+
+inherited_teardown(_) ->
+    stop_synth_class(?INH_CONCRETE),
+    stop_synth_class(?INH_ABSTRACT),
+    code:purge(?INH_MODULE),
+    code:delete(?INH_MODULE),
+    ok.
+
+start_inh_class(Name, Superclass, IsAbstract, Methods) ->
+    Info = #{
+        name => Name,
+        module => ?INH_MODULE,
+        superclass => Superclass,
+        is_abstract => IsAbstract,
+        instance_methods => Methods,
+        instance_variables => []
+    },
+    case beamtalk_object_class:start_link(Name, Info) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
+
+inherited_tests_test_() ->
+    {setup, fun inherited_setup/0, fun inherited_teardown/1, fun(_) ->
+        [
+            {"find_test_classes leaves out an abstract TestCase subclass", fun() ->
+                Classes = beamtalk_test_case:find_test_classes(),
+                ?assertNot(lists:member(?INH_ABSTRACT, Classes)),
+                ?assert(lists:member(?INH_CONCRETE, Classes))
+            end},
+            {"test_class_selectors includes inherited selectors, not TestCase's", fun() ->
+                ?assertEqual(
+                    [helper, setUp, testInherited],
+                    beamtalk_test_case:test_class_selectors(?INH_CONCRETE)
+                )
+            end},
+            {"run_class_by_name runs an inherited test with the inherited setUp", fun() ->
+                R = beamtalk_test_runner:run_class_by_name(?INH_CONCRETE),
+                ?assertEqual(1, maps:get(total, R)),
+                ?assertEqual(1, maps:get(passed, R))
+            end}
+        ]
+    end}.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

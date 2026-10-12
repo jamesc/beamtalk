@@ -90,10 +90,11 @@ That patch has now grown into a parallel, unverified sub-system:
   self-send is recorded as `HoistAction::Dropped`, compiled through the
   discarding path, and a warning is emitted. The mutation is still lost.
 - **A second, older mechanism for the same problem** in class-method
-  context. A class-method self-send threads `ClassVars` via an "open
-  let-chain": `generate_expression` emits `let ClassVarsN = … in` with no
-  body and records the result variable in `last_open_scope_result`;
-  consumers must notice and close the scope (`expression_doc_with_open_scope`,
+  context (*superseded by ADR 0130: class variables are no longer
+  threaded, so this open let-chain no longer exists*). A class-method
+  self-send threads `ClassVars` via an "open let-chain":
+  `generate_expression` emits `let ClassVarsN = … in` with no body and
+  records the result variable in `last_open_scope_result`; consumers must notice and close the scope (`expression_doc_with_open_scope`,
   `closed_expression_doc`, `capture_subexpr_sequence`,
   `split_subexpr_for_preamble`, `hoist_subexpr_splits`, `bind_args_to_temps`,
   `hoist_open_scope_receiver`/`_argument` — 8 producers/helpers, ~80
@@ -185,7 +186,9 @@ Concretely:
 ```rust
 /// The result of compiling one expression in a state-threading context.
 /// `prelude` runs first, in source evaluation order, and may advance any
-/// versioned prefix (`State`, `ClassVars`, `Self`); `value` is then a pure
+/// versioned prefix (`State`, `Self`; the `ClassVars` prefix named in this
+/// ADR was superseded by ADR 0130 — class variables are no longer threaded);
+/// `value` is then a pure
 /// reference to the expression's result.
 #[must_use = "a ThreadedValue's prelude carries state Binds; splice it or close it"]
 pub(super) struct ThreadedValue {

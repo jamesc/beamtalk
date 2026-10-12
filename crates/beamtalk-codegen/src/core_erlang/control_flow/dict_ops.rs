@@ -154,11 +154,6 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
-        // tuple, unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, "StateAcc");
         docs.push(docvec![
             "let ",
             leaf::var(dict_var.clone()),
@@ -173,9 +168,8 @@ impl CoreErlangGenerator {
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var("StateAcc"),
             ") -> ",
-            cv_prelude,
         ]);
 
         self.push_scope();
@@ -188,13 +182,11 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![plan.foldl_call_doc(
-            self,
+        let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
             &lambda_var,
             leaf::var(init_state),
             &values_var,
             &fold_result,
-            body.span,
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
@@ -364,11 +356,6 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
-        // tuple, unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, "StateAcc");
         docs.push(docvec![
             "let ",
             leaf::var(dict_var.clone()),
@@ -383,9 +370,8 @@ impl CoreErlangGenerator {
             " = fun (",
             leaf::var(pair_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var("StateAcc"),
             ") -> ",
-            cv_prelude,
             "let ",
             leaf::var(key_var.clone()),
             " = call 'erlang':'element'(1, ",
@@ -410,13 +396,11 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![plan.foldl_call_doc(
-            self,
+        let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
             &lambda_var,
             leaf::var(init_state),
             &pairs_var,
             &fold_result,
-            body.span,
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 

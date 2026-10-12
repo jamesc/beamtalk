@@ -18,3 +18,14 @@ sealed Object subclass: DirectDispatchStateless
 
   // Calls the block in whichever process runs the method.
   class sealed callBlock: aBlock :: Block => aBlock value
+
+  // BT-3701 / ADR 0130 §2: a direct-called method has `ClassSelf = nil` and no
+  // class variables, so a `hasField:` presence test is `false`, never an error
+  // — directly, and inside a block that is created but never run.
+  class sealed hasMissingField => self hasField: #x
+
+  class sealed hasMissingFieldInBlock => [self hasField: #x] value
+
+  class sealed unusedBlockWithHasField =>
+    _unused := [self hasField: #x]
+    7

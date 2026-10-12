@@ -22,6 +22,19 @@ pub(crate) fn build_warning_terms(warnings: &[String]) -> Vec<Term> {
     warnings.iter().map(|w| binary(w)).collect()
 }
 
+/// Appends the `ThreadedIr` verifier diagnostics (`internal: ...`, ADR 0111
+/// amendment, BT-3724) to a response's warning messages. The only codegen
+/// warnings the compiler port forwards; they are warnings, so the compile
+/// still succeeds.
+pub(crate) fn with_verifier_warnings(
+    warnings: &[String],
+    verifier_diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
+) -> Vec<String> {
+    let mut all = warnings.to_vec();
+    all.extend(verifier_diagnostics.iter().map(|d| d.message.to_string()));
+    all
+}
+
 /// Build ETF class terms from `(name, superclass)` pairs.
 pub(crate) fn build_class_terms(classes: &[(String, String)]) -> Vec<Term> {
     classes

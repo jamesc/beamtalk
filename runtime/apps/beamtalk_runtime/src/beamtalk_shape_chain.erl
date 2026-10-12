@@ -88,6 +88,8 @@ run_steps(Migrations, From, To, Fields, Invoke) ->
 
 -spec apply_step(atom(), map(), invoke_fun()) -> {ok, map()} | {error, term()}.
 apply_step(Selector, Fields, Invoke) ->
+    %% bt-catcher-audit: not-applicable-reraises - migrateFromVN: errors become {error,_}; callers
+    %% re-raise or run in an actor
     try Invoke(Selector, Fields) of
         NewFields when is_map(NewFields) ->
             {ok, NewFields};

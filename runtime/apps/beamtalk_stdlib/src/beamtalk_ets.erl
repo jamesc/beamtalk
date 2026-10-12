@@ -242,11 +242,11 @@ insert(_Self, _Key, _Value) ->
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
-    try
-        case ets:lookup(TableName, Key) of
-            [{_K, Value} | _] -> Value;
-            [] -> Block()
-        end
+    %% Only the lookup is protected: a `try ... of` body is outside the catch, so a
+    %% `badarg` raised by the user's Block is not misreported as a stale table.
+    try ets:lookup(TableName, Key) of
+        [{_K, Value} | _] -> Value;
+        [] -> Block()
     catch
         error:badarg -> stale_table_error('lookupIfAbsent:key:block:', TableName)
     end;

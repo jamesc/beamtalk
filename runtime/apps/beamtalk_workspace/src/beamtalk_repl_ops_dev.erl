@@ -229,6 +229,7 @@ handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
                         case code:get_object_code(Module) of
                             {Module, _Binary, _Filename} ->
                                 %% Module is already loaded; safe to get exports.
+                                %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
                                 try Module:module_info(exports) of
                                     Exports ->
                                         Filtered = [
@@ -1912,6 +1913,8 @@ collect_methods_with_fun(ClassName, _Depth, Fun) ->
                 {found, AccMap};
             ClassPid ->
                 LocalMethods =
+                    %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
+                    %% over ClassPid
                     try
                         Fun(ClassPid)
                     catch
@@ -2087,6 +2090,8 @@ Returns the meta map or #{} if unavailable.
 read_class_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 M when is_map(M) -> M;
                 _ -> #{}

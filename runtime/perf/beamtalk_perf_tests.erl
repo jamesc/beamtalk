@@ -1036,14 +1036,14 @@ method_bench(Fun) ->
 %%====================================================================
 
 %% Quantifies the cost introduced by routing inherited class-method
-%% self-sends through beamtalk_class_dispatch:class_self_dispatch/4.
+%% self-sends through beamtalk_class_dispatch:class_self_dispatch/3.
 %%
 %% Two codegen paths compared:
 %%   1. Direct-apply (baseline): what codegen emits for a *local* class
 %%      method self-send — a single `call '<mod>':'class_<sel>'(
-%%      ClassSelf, ClassVars, Args...)`. This is also the terminal step
+%%      ClassSelf, Args...)`. This is also the terminal step
 %%      of the helper, so the delta isolates the helper's setup work.
-%%   2. class_self_dispatch/4: the path used for *inherited*
+%%   2. class_self_dispatch/3: the path used for *inherited*
 %%      class-method self-sends. Walks the superclass chain via ETS +
 %%      two gen_server:calls per level (one for get_local_class_methods,
 %%      one for module_name), constructs ClassSelf, then applies.
@@ -1077,11 +1077,10 @@ bench_class_self_dispatch() ->
 run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName) ->
     %% Construct the same ClassSelf the helper would build on the inherited
     %% path — `class_mod` is the defining module (Collection), which matches
-    %% the helper at beamtalk_class_dispatch:class_self_dispatch/4 and the
+    %% the helper at beamtalk_class_dispatch:class_self_dispatch/3 and the
     %% gen_server path at invoke_class_method/7.
     Tag = beamtalk_class_registry:class_object_tag(ChildClass),
     ClassSelf = #beamtalk_object{class = Tag, class_mod = ParentMod, pid = self()},
-    ClassVars = #{},
     %% Collection>>class withAll: takes a list and builds an instance.
     %% Empty list is the cheapest argument — keeps the benchmark focused
     %% on dispatch cost rather than constructor work.
@@ -1091,18 +1090,18 @@ run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName) ->
     %% stdlib method body depends on class-var state we didn't set up, or
     %% the child isn't wired into the hierarchy yet), log a SKIP with the
     %% reason and bail — the benchmark is descriptive, not a correctness gate.
-    case probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) of
+    case probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) of
         ok ->
             run_class_self_dispatch_measure(
-                ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args
+                ChildClass, Selector, ParentMod, FunName, ClassSelf, Args
             );
         {skip, Why} ->
             io:format(standard_error, "PERF: class_self_dispatch SKIP (~s)~n", [Why])
     end.
 
-probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) ->
+probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
     DirectOk =
-        try erlang:apply(ParentMod, FunName, [ClassSelf, ClassVars | Args]) of
+        try erlang:apply(ParentMod, FunName, [ClassSelf | Args]) of
             _ -> ok
         catch
             C1:E1 ->
@@ -1111,7 +1110,7 @@ probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars,
         end,
     case DirectOk of
         ok ->
-            try beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, ClassVars, Args) of
+            try beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, Args) of
                 _ -> ok
             catch
                 C2:E2 ->
@@ -1122,15 +1121,15 @@ probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars,
             SkipDirect
     end.
 
-run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassSelf, ClassVars, Args) ->
+run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
     %% Direct apply (simulates local class-method self-send terminal step).
     DirectNs = method_bench(fun() ->
-        erlang:apply(ParentMod, FunName, [ClassSelf, ClassVars | Args])
+        erlang:apply(ParentMod, FunName, [ClassSelf | Args])
     end),
 
     %% Via helper (simulates the inherited self-dispatch path).
     HelperNs = method_bench(fun() ->
-        beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, ClassVars, Args)
+        beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, Args)
     end),
 
     report_ns("class_self_dispatch/direct_apply", DirectNs, ?METHOD_ITERATIONS),

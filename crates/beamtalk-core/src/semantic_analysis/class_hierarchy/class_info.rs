@@ -310,11 +310,36 @@ pub struct InitializeAssignsSummary {
     pub has_dynamic_writer: bool,
 }
 
+/// Selectors that depend on `gen_server` process state and must NOT be called
+/// directly: supervisor constructors (`startLink` family) and the
+/// `basicNew`/`basicNewWith` constructors (`new`/`new:`), which read
+/// `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
+const DIRECT_CALL_EXCLUDED_SELECTORS: &[&str] = &["startLink", "startLink:", "new", "new:"];
+
 impl ClassInfo {
     /// Returns `true` if this class can be subclassed.
     #[must_use]
     pub fn can_be_subclassed(&self) -> bool {
         !self.is_sealed
+    }
+
+    /// Whether a send of the class-side method `method` (one of this class's
+    /// own `class_methods`) is direct-called in the caller's process instead of
+    /// running in the class's `gen_server` (ADR 0129 Phase 0b). The one rule
+    /// codegen's direct-call table and the `class-state-abroad` lint share:
+    ///
+    /// 1. the class is `sealed` (every method is visible at compile time);
+    /// 2. the class has no class variables (no state to mutate);
+    /// 3. the selector is not a process-state constructor (`new`, `new:`,
+    ///    `startLink`, `startLink:`);
+    /// 4. the method is `class sealed`: a non-sealed class method may use
+    ///    `self` (the class object) for factory patterns or delegation.
+    #[must_use]
+    pub fn is_direct_call_eligible(&self, method: &MethodInfo) -> bool {
+        self.is_sealed
+            && self.class_variables.is_empty()
+            && !DIRECT_CALL_EXCLUDED_SELECTORS.contains(&method.selector.as_str())
+            && method.is_sealed
     }
 
     /// Build a `ClassInfo` from a parsed `ClassDefinition` AST node.

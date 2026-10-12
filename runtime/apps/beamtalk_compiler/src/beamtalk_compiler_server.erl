@@ -1355,6 +1355,8 @@ recover_from_beam_modules() ->
                 false ->
                     Acc;
                 true ->
+                    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
+                    %% literal getter, no block
                     try Module:'__beamtalk_meta'() of
                         Meta when is_map(Meta) ->
                             ClassName = maps:get(class, Meta, undefined),

@@ -185,3 +185,65 @@ peer_nodedown_clears_skew_entry_test_() ->
             ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer))
         end
     end}.
+
+%%====================================================================
+%% terminate/2 — both branches
+%%====================================================================
+
+%% Covers terminate/2 lines 213-215, 218: the normal supervised-start case
+%% where beamtalk_announcements is up and class_loaded_sub holds a real ref.
+terminate_with_subscription_ref_unsubscribes_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        fun() ->
+            State = sys:get_state(beamtalk_node_monitor),
+            ClassLoadedSub = element(3, State),
+            ?assertNotEqual(undefined, ClassLoadedSub),
+            Pid = whereis(beamtalk_node_monitor),
+            Ref = erlang:monitor(process, Pid),
+            ok = gen_server:stop(beamtalk_node_monitor),
+            receive
+                {'DOWN', Ref, process, Pid, normal} -> ok
+            after 2000 ->
+                error(down_timeout)
+            end,
+            ok = wait_for_restart(beamtalk_node_monitor, 2000),
+            ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
+        end
+    end}.
+
+%% Covers terminate/2 line 216: class_loaded_sub = undefined (gen_server
+%% stopped when beamtalk_announcements was not running at init time).
+terminate_without_subscription_ref_is_noop_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        fun() ->
+            sys:replace_state(beamtalk_node_monitor, fun(S) -> setelement(3, S, undefined) end),
+            Pid = whereis(beamtalk_node_monitor),
+            Ref = erlang:monitor(process, Pid),
+            ok = gen_server:stop(beamtalk_node_monitor),
+            receive
+                {'DOWN', Ref, process, Pid, normal} -> ok
+            after 2000 ->
+                error(down_timeout)
+            end,
+            ok = wait_for_restart(beamtalk_node_monitor, 2000),
+            ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
+        end
+    end}.
+
+wait_for_restart(Name, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    wait_for_restart_loop(Name, Deadline).
+
+wait_for_restart_loop(Name, Deadline) ->
+    case whereis(Name) of
+        Pid when is_pid(Pid) ->
+            ok;
+        undefined ->
+            case Deadline - erlang:monotonic_time(millisecond) of
+                R when R > 0 ->
+                    timer:sleep(10),
+                    wait_for_restart_loop(Name, Deadline);
+                _ ->
+                    {error, restart_timeout}
+            end
+    end.

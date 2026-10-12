@@ -38,5 +38,11 @@ dispatch(asJson, [], #{mode := mutual_a}) ->
     #{<<"partner">> => new(mutual_b)};
 dispatch(asJson, [], #{mode := mutual_b}) ->
     #{<<"partner">> => new(mutual_a)};
+dispatch(asJson, [], #{mode := nlr}) ->
+    %% A `^` out of the hook: a non-local-return throw (3-tuple shape).
+    throw({'$bt_nlr', nlr_token, nlr_value});
+dispatch(asJson, [], #{mode := nlr_actor}) ->
+    %% The actor-shaped non-local-return throw (4-tuple shape).
+    throw({'$bt_nlr', nlr_token, nlr_value, nlr_state});
 dispatch(asJson, [], #{mode := plain}) ->
     #{<<"kind">> => <<"fixture">>, <<"ok">> => true}.

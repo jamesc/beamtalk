@@ -77,7 +77,7 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
-            let arity = m.selector.arity() + 2; // +2 for ClassSelf + ClassVars
+            let arity = m.selector.arity() + 1; // +1 for ClassSelf
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",
@@ -178,7 +178,7 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
-            let arity = m.selector.arity() + 2;
+            let arity = m.selector.arity() + 1;
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",

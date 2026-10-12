@@ -1,15 +1,18 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Object System Context
+
 -module(beamtalk_class_vars_tests).
 -moduledoc "EUnit tests for beamtalk_class_vars (ADR 0130 Phase 2).".
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
--define(HOME, '$bt_class_vars_home').
 -define(C, 'ClassVarsTestClass').
--define(KEY, {'$bt_class_vars', 'ClassVarsTestClass'}).
+-define(KEY, beamtalk_class_vars:key_for_tag('ClassVarsTestClass class')).
+-define(OTHER_KEY, beamtalk_class_vars:key_for_tag('OtherClass class')).
+-define(HOME_KEY(), beamtalk_class_vars_test_support:home_key()).
 
 %%% Helpers
 
@@ -17,10 +20,8 @@ self_obj() ->
     #beamtalk_object{class = 'ClassVarsTestClass class', class_mod = cvtc, pid = self()}.
 
 clean() ->
-    erlang:erase(?KEY),
-    erlang:erase({'$bt_class_vars', 'OtherClass'}),
-    erlang:erase(?HOME),
-    ok.
+    beamtalk_class_vars_test_support:clean(?KEY),
+    beamtalk_class_vars_test_support:clean(?OTHER_KEY).
 
 with_clean(Fun) ->
     clean(),
@@ -32,15 +33,15 @@ with_clean(Fun) ->
 
 %% Run Fun with declared class variables `x`, `late` (and `a`) mocked for ?C.
 with_declared(Fun) ->
-    meck:new(beamtalk_behaviour_intrinsics, [passthrough, no_link]),
-    meck:expect(beamtalk_behaviour_intrinsics, classAllClassVarKindsByName, fun
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds, fun
         (?C) -> #{x => eager, a => eager, late => late};
         (_) -> #{}
     end),
     try
         with_clean(Fun)
     after
-        meck:unload(beamtalk_behaviour_intrinsics)
+        meck:unload(beamtalk_class_metadata)
     end.
 
 raised_error(Fun) ->
@@ -84,17 +85,20 @@ stop_fake_class(Pid) ->
 
 %%% key / install / uninstall / assert_absent
 
+%% The one conformance test that pins the literal key shape (ADR 0130 §1);
+%% every other test builds keys through `key/1` / `key_for_tag/1`.
 key_test() ->
-    ?assertEqual(?KEY, beamtalk_class_vars:key(?C)).
+    ?assertEqual({'$bt_class_vars', 'ClassVarsTestClass class'}, beamtalk_class_vars:key(?C)),
+    ?assertEqual(beamtalk_class_vars:key(?C), ?KEY).
 
 install_uninstall_test() ->
     with_clean(fun() ->
         ok = beamtalk_class_vars:install(?KEY, #{a => 1}),
         ?assertEqual(#{a => 1}, erlang:get(?KEY)),
-        ?assertEqual(?KEY, erlang:get(?HOME)),
+        ?assertEqual(?KEY, ?HOME_KEY()),
         ok = beamtalk_class_vars:uninstall(?KEY),
         ?assertEqual(undefined, erlang:get(?KEY)),
-        ?assertEqual(undefined, erlang:get(?HOME))
+        ?assertEqual(undefined, ?HOME_KEY())
     end).
 
 assert_absent_ok_test() ->
@@ -109,11 +113,13 @@ assert_absent_rejects_key_test() ->
     end).
 
 assert_absent_rejects_home_test() ->
+    %% Another class's live home counts: ?KEY itself is absent.
     with_clean(fun() ->
-        erlang:put(?HOME, {'$bt_class_vars', 'OtherClass'}),
-        ?assertEqual(
-            internal_error, raised_kind(fun() -> beamtalk_class_vars:assert_absent(?KEY) end)
-        )
+        beamtalk_class_vars_test_support:with_home_key(?OTHER_KEY, #{}, fun() ->
+            ?assertEqual(
+                internal_error, raised_kind(fun() -> beamtalk_class_vars:assert_absent(?KEY) end)
+            )
+        end)
     end).
 
 %%% get / get_late / put / clear / has
@@ -243,6 +249,20 @@ non_class_receiver_test() ->
             internal_error, raised_kind(fun() -> beamtalk_class_vars:put(Instance, a, 2) end)
         ),
         ?assertEqual(#{a => 1}, erlang:get(?KEY)),
+        %% Every other helper rejects an instance receiver too.
+        lists:foreach(
+            fun(Fun) -> ?assertEqual(internal_error, raised_kind(Fun)) end,
+            [
+                fun() -> beamtalk_class_vars:get(Instance, a) end,
+                fun() -> beamtalk_class_vars:has(Instance, a) end,
+                fun() -> beamtalk_class_vars:clear(Instance, a) end,
+                fun() -> beamtalk_class_vars:capture(Instance, none) end
+            ]
+        ),
+        ?assertEqual(#{a => 1}, erlang:get(?KEY)),
+        %% Documented exception: a capture fallback form given a capture map
+        %% answers from that map without validating the receiver.
+        ?assertEqual(1, beamtalk_class_vars:get(Instance, a, #{a => 1})),
         %% Unknown base atom: structured error, not badarg.
         Unknown = #beamtalk_object{
             class = 'NoSuchClassAtomBT3706Xq class', class_mod = cvtc, pid = self()
@@ -373,7 +393,7 @@ with_snapshot_reads_mirror_by_name_test() ->
             end),
             ?assertEqual({10, true, #{n => 10}}, Result),
             ?assertEqual(undefined, erlang:get(?KEY)),
-            ?assertEqual(undefined, erlang:get(?HOME))
+            ?assertEqual(undefined, ?HOME_KEY())
         after
             stop_fake_class(Pid)
         end
@@ -409,12 +429,43 @@ with_snapshot_write_raises_test() ->
     end).
 
 with_snapshot_no_live_class_test() ->
+    %% Liveness is checked lazily at the first mirror read, not on region entry.
     with_clean(fun() ->
         E = raised_error(fun() ->
-            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> ok end)
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                beamtalk_class_vars:get(self_obj(), x)
+            end)
         end),
         ?assertMatch(#beamtalk_error{kind = class_state_unreachable}, E),
         ?assertEqual(undefined, erlang:get(?KEY))
+    end).
+
+with_snapshot_never_reads_succeeds_without_live_class_test() ->
+    with_clean(fun() ->
+        ?assertEqual(
+            done,
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() -> done end)
+        ),
+        ?assertEqual(undefined, erlang:get(?KEY))
+    end).
+
+mirror_read_without_snapshot_row_unreachable_test() ->
+    %% A registered class process with no snapshot row (a restart that has not
+    %% yet recorded) is "unreachable", while an empty-map row reads normally.
+    with_clean(fun() ->
+        Pid = start_fake_class(#{}),
+        try
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                ?assertEqual(false, beamtalk_class_vars:has(self_obj(), n)),
+                beamtalk_class_registry:forget_class_state_snapshot(Pid),
+                ?assertEqual(
+                    class_state_unreachable,
+                    raised_kind(fun() -> beamtalk_class_vars:has(self_obj(), n) end)
+                )
+            end)
+        after
+            catch stop_fake_class(Pid)
+        end
     end).
 
 mirror_read_with_dead_class_unreachable_test() ->
@@ -478,21 +529,20 @@ with_snapshot_leaves_outer_live_key_alone_test() ->
             beamtalk_class_vars:put(self_obj(), a, 2)
         end),
         ?assertEqual(#{a => 2}, erlang:get(?KEY)),
-        ?assertEqual(?KEY, erlang:get(?HOME))
+        ?assertEqual(?KEY, ?HOME_KEY())
     end).
 
 with_snapshot_never_touches_home_test() ->
     with_clean(fun() ->
         Pid = start_fake_class(#{n => 1}),
         try
-            OtherKey = {'$bt_class_vars', 'OtherClass'},
-            erlang:put(?HOME, OtherKey),
-            erlang:put(OtherKey, #{z => 1}),
-            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
-                ?assertEqual(OtherKey, erlang:get(?HOME))
-            end),
-            ?assertEqual(OtherKey, erlang:get(?HOME)),
-            ?assertEqual(#{z => 1}, erlang:get(OtherKey))
+            beamtalk_class_vars_test_support:with_home_key(?OTHER_KEY, #{z => 1}, fun(OtherKey) ->
+                beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                    ?assertEqual(OtherKey, ?HOME_KEY())
+                end),
+                ?assertEqual(OtherKey, ?HOME_KEY()),
+                ?assertEqual(#{z => 1}, erlang:get(OtherKey))
+            end)
         after
             stop_fake_class(Pid)
         end

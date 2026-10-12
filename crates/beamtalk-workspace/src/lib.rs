@@ -21,6 +21,11 @@ use sha2::{Digest, Sha256};
 /// deregistration polling, registration lookup.
 pub mod epmd;
 
+/// Cross-platform process-liveness primitives: `is_process_alive` and
+/// `proc_start_time`. Shared leaf for `beamtalk-cli` and
+/// `beamtalk-desktop-broker` (see module doc).
+pub mod pid_liveness;
+
 /// Returns the Cargo workspace root for the calling crate: two levels up from
 /// [`CARGO_MANIFEST_DIR`](std::env::var), which cargo sets to the manifest
 /// directory of the crate being compiled or tested.

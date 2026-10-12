@@ -53,6 +53,26 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     generate_module_with_warnings(module, options).map(|m| m.code)
 }
 
+/// Generates Core Erlang for a module, returning the code and only the
+/// `ThreadedIr` verifier diagnostics (ADR 0111 amendment, BT-3724).
+///
+/// The production entry point for drivers that must surface a codegen-internal
+/// invariant violation to the user without also surfacing every other codegen
+/// warning ([`GeneratedModule::into_code_and_verifier_diagnostics`]). The
+/// diagnostics are warnings: generation still succeeds with the generator's
+/// (unverified) output.
+///
+/// # Errors
+///
+/// Same as [`generate_module_with_warnings`].
+pub fn generate_module_surfacing_verifier(
+    module: &Module,
+    options: CodegenOptions,
+) -> Result<(String, Vec<beamtalk_core::source_analysis::Diagnostic>)> {
+    generate_module_with_warnings(module, options)
+        .map(GeneratedModule::into_code_and_verifier_diagnostics)
+}
+
 /// Generates Core Erlang for a module, returning the code and any diagnostic warnings.
 ///
 /// Like [`generate_module`] but also returns warnings emitted during generation.
@@ -85,7 +105,6 @@ pub fn generate_module_with_warnings(
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
-    generator.override_class_var_probe(options.class_var_probe);
 
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
@@ -298,6 +317,8 @@ pub fn generate_module_with_warnings(
         generator.generate_value_type_module(module)?
     };
 
+    generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
+
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,
@@ -378,11 +399,10 @@ impl CoreErlangGenerator {
     /// Computes the set of sealed classes whose class methods are eligible
     /// for direct calls (bypassing `gen_server` dispatch).
     ///
-    /// A class method is eligible when all four conditions hold:
-    /// 1. The class is sealed (all methods visible at compile time)
-    /// 2. The class has no class variables (no state to mutate)
-    /// 3. The method is a class method (not instance-side)
-    /// 4. The selector is not a supervisor constructor (`startLink`, `startLink:`)
+    /// Eligibility is `ClassInfo::is_direct_call_eligible` in `beamtalk-core`
+    /// (sealed class, no class variables, not `new`/`new:`/`startLink`/
+    /// `startLink:`, `class sealed` method); the class must also have class
+    /// methods.
     ///
     /// Returns a mapping from class name to `DirectCallClassInfo` with the module
     /// name and set of eligible selectors.
@@ -390,26 +410,10 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
         generator: &CoreErlangGenerator,
     ) -> std::collections::HashMap<String, DirectCallClassInfo> {
-        // Selectors that depend on gen_server process state and must NOT be
-        // called directly: supervisor constructors (`startLink` family) and
-        // `basicNew`/`basicNewWith` constructors (`new`/`new:`) which read
-        // `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
-        let excluded_selectors: std::collections::HashSet<&str> =
-            ["startLink", "startLink:", "new", "new:"]
-                .into_iter()
-                .collect();
         let mut result = std::collections::HashMap::new();
 
         for (class_name, class_info) in hierarchy.classes() {
-            // Gate 1: Class must be sealed
-            if !class_info.is_sealed {
-                continue;
-            }
-            // Gate 2: Class must have no class variables
-            if !class_info.class_variables.is_empty() {
-                continue;
-            }
-            // Gate 3: Class must have class methods
+            // Gate: class must have class methods
             //
             // ADR 0119 Context: this is the only place that
             // iterates *every* hierarchy class unconditionally, including
@@ -431,14 +435,10 @@ impl CoreErlangGenerator {
 
             let mut selectors = std::collections::HashSet::new();
             for method in &class_info.class_methods {
-                // Gate 4: Skip selectors that depend on gen_server process state
-                if excluded_selectors.contains(method.selector.as_str()) {
-                    continue;
-                }
-                // Gate 5: Only optimize `class sealed` methods (is_sealed=true).
-                // Non-sealed class methods may reference `self` (the class object)
-                // for factory patterns or delegation, which would break with nil ClassSelf.
-                if !method.is_sealed {
+                // Sealed class, no class variables, not a process-state
+                // constructor, `class sealed` method: the single rule shared
+                // with the `class-state-abroad` lint.
+                if !class_info.is_direct_call_eligible(method) {
                     continue;
                 }
                 selectors.insert(method.selector.to_string());

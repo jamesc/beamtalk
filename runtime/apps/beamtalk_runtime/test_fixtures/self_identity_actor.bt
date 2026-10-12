@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SelfIdentityActor - an open (non-sealed) actor whose methods return `self`,
+// so beamtalk_actor_safe_dispatch_tests can assert which `Self` a dispatched
+// method observes (BT-3692 follow-up: cross-process Self identity through
+// safe_dispatch/4).
+
+Actor subclass: SelfIdentityActor
+  state: value = 0
+
+  whoAmI => self
+
+  // Open self-send: lowers to ClassMod:safe_dispatch/4 with the in-scope Self.
+  viaSelfSend => self whoAmI

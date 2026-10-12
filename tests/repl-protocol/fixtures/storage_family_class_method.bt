@@ -8,12 +8,12 @@
 //
 // `to:do:`/`whileTrue:`/`ifTrue:ifFalse:` accept a BARE, top-level
 // `self.runs := ...` write — `loop_body_threads_class_vars`'s Letrec gate.
-// `do:`/`collect:` (Foldl-shaped) and `on:do:`/`ensure:` only ever thread a
-// `ClassVars` mutation via a same-class SELF-SEND (`self bump`); a bare
-// direct write in either position is a compile-time rejection (see
-// storage_family_class_method_foldl_reject.bt /
-// storage_family_class_method_ensure_reject.bt) — ADR 0122 / BT-3506's own
-// decision, mirrored consistently across both construct families.
+// `do:`/`collect:` (Foldl-shaped) and `on:do:`/`ensure:` used to thread a
+// `ClassVars` mutation only via a same-class SELF-SEND (`self bump`); a bare
+// direct write in either position was a compile-time rejection (ADR 0122 /
+// BT-3506). ADR 0130 removed the rejections (a class-variable write is an
+// in-place `put`): see storage_family_class_method_foldl_direct_write.bt /
+// storage_family_class_method_ensure_direct_write.bt.
 
 Object subclass: StorageFamilyClassMethod
   classState: runs = 0

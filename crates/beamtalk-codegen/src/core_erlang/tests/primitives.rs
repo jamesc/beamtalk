@@ -214,9 +214,13 @@ fn test_generate_primitive_on_do_structural_fallback() {
     let rendered = doc.to_pretty_string();
     assert!(
         rendered.starts_with(
-            "case call 'erlang':'is_function'(Self, 0) of <'true'> when 'true' -> try apply Self ()"
+            "case call 'erlang':'is_function'(Self, 0) of <'true'> when 'true' -> let ExClassSnap = call 'beamtalk_class_vars':'snapshot'() in try apply Self ()"
         ),
-        "expected a Self Tier 1 check wrapping a try/catch, got: {rendered}"
+        "expected a Self Tier 1 check wrapping a snapshotted try/catch, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("do call 'beamtalk_class_vars':'restore'(ExClassSnap) let "),
+        "expected the non-NLR catch arm to begin with the class-variable restore, got: {rendered}"
     );
     assert!(
         rendered.contains("'beamtalk_exception_handler':'ensure_wrapped'"),

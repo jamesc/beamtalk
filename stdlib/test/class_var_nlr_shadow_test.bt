@@ -139,20 +139,19 @@ TestCase subclass: ClassVarNlrShadowTest
   // The repro from BT-3039: ShadowCrossClassOwner hands CollectionDriver a
   // block containing a mutating self-send (`self bump`) plus the `^` that
   // escapes CollectionDriver's frame. `self bump` runs physically inside
-  // CollectionDriver's class process (ADR 0109), so before the class-keyed
-  // fix its shadow write clobbered CollectionDriver's own — corrupting
-  // CollectionDriver's persisted class vars with ShadowCrossClassOwner's map
-  // (a later `CollectionDriver runCount` would raise on the missing `runs`
-  // key). CollectionDriver's own mutation must survive uncorrupted.
+  // CollectionDriver's class process (ADR 0109), away from ShadowCrossClassOwner's
+  // home. ADR 0110's shadow relay used to carry that write home; under ADR 0130 §5
+  // (Migration Path) a write away from home raises class_state_unreachable instead,
+  // so the call fails and neither class's state changes: the error escaping
+  // CollectionDriver's `countedRun:over:` invocation reverts its own `runs` increment
+  // (the invocation boundary), and ShadowCrossClassOwner's invocation is discarded too.
+  // CollectionDriver's persisted class vars are never corrupted by the foreign write.
   testCrossClassMutationDoesNotCorruptForeignProcessShadow =>
-    self assert: (ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)) equals: 1
-    self assert: CollectionDriver runCount equals: 1
-    // The `^` belongs to ShadowCrossClassOwner's own frame (it lexically
-    // contains the block), so its own mutation is carried out via the
-    // ordinary matching-token NLR catch (BT-3022/ADR 0041) — not the shadow
-    // at all. Both classes' own state end up correct simultaneously: P's via
-    // the normal NLR value, C's via the class-keyed shadow read.
-    self assert: ShadowCrossClassOwner bumpCount equals: 1
+    self should: [
+      ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)
+    ] raise: #class_state_unreachable
+    self assert: CollectionDriver runCount equals: 0
+    self assert: ShadowCrossClassOwner bumpCount equals: 0
 
 // A builder cascade with a *mutating* classMethods: block written inside a
 // block literal is rejected at compile time today (BT-2792 stored-closure

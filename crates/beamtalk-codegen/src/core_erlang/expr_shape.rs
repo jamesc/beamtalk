@@ -11,8 +11,7 @@
 //! assignment, a self-send that dispatches, a Character-typed receiver, and
 //! so on. None of these are dispatch-specific; they previously lived in
 //! `dispatch_codegen.rs` only because dispatch was the first (and widest)
-//! caller — `is_class_var_assignment` alone has call sites in 8 other
-//! modules. "Module X sits below Y in the dependency graph" is not a reason
+//! caller. "Module X sits below Y in the dependency graph" is not a reason
 //! to duplicate a classifier rather than extract it (CLAUDE.md).
 //!
 //! Each predicate is a plain function over `&Expression` (plus [`ShapeCtx`]
@@ -48,13 +47,6 @@ pub(super) struct ShapeCtx<'a> {
     /// (`lookup_var("self").is_some()`) — a shadowed `self` (e.g. a REPL
     /// binding) is not the receiver [`is_self_field_at_put`] means.
     pub(super) self_var_bound: bool,
-    /// [`CoreErlangGenerator::block_depth`] — 0 at a class method's own top
-    /// frame (`lower_class_method_body`'s reset, `gen_server/methods.rs`),
-    /// `>= 1` once compilation has entered a block literal (`blocks.rs`'s
-    /// `block_depth += 1`/`-= 1` pair). [`is_self_clear_field_class_var`]
-    /// uses this the same way `generate_class_var_field_assignment`'s own
-    /// `shadow_write = self.block_depth == 0` gate does.
-    pub(super) block_depth: usize,
 }
 
 impl CoreErlangGenerator {
@@ -67,7 +59,6 @@ impl CoreErlangGenerator {
             class_method_selectors: self.class_method_selectors(),
             class_name: self.class_name(),
             self_var_bound: self.lookup_var("self").is_some(),
-            block_depth: self.block_depth,
         }
     }
 }
@@ -192,8 +183,8 @@ pub(super) fn is_self_field_access(expr: &Expression) -> bool {
     false
 }
 
-/// Checks if an expression is a class variable assignment (`self.classVar := value`).
-pub(super) fn is_class_var_assignment(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+/// The syntactic shape `self.classVar := value` in a class method.
+fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method {
         return false;
     }
@@ -215,18 +206,13 @@ pub(super) fn is_class_var_assignment(ctx: &ShapeCtx<'_>, expr: &Expression) -> 
 /// foo` from inside `ClassName`'s own class method dispatches exactly
 /// like `self foo` — `try_handle_class_reference` routes both through
 /// [`CoreErlangGenerator::generate_class_method_self_send`] identically).
-/// These need special scoping in class method bodies because they may
-/// update `ClassVars` via `let ClassVarsN = ... in` which must not be
-/// wrapped.
 ///
 /// ADR 0118 phase 5b: without the `ClassReference` shape here,
 /// `subexpr_needs_prelude` is blind to it — a locally-declared
-/// same-class-name self-send nested as a cascade/message argument
-/// (`w add: … value: (CascadeNestedKeywordArg noop: 1)`) would compile
-/// as an opaque, self-contained value instead of a real prelude, so the
-/// `ClassVarsN` it introduces would never become visible to a LATER sibling
-/// argument that also needs it (see `bt3406_cascade_nested_keyword_arg`).
-pub(super) fn is_class_method_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+/// same-class-name self-send nested as a cascade/message argument would
+/// compile as an opaque, self-contained value instead of an ordered
+/// prelude (see `bt3406_cascade_nested_keyword_arg`).
+fn class_method_self_send_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method || ctx.class_method_selectors.is_empty() {
         return false;
     }
@@ -279,7 +265,7 @@ pub(super) fn is_super_message_send(expr: &Expression) -> bool {
 ///
 /// BT-3581: also excludes a class method's own self-sends
 /// (`ctx.in_class_method`) — a same-class self-send there routes through
-/// `class_<selector>(ClassSelf, ClassVars, …)`
+/// `class_<selector>(ClassSelf, …)`
 /// ([`CoreErlangGenerator::generate_class_method_self_send`]), never
 /// `safe_dispatch` (which reads/threads the actor's own `State` — a
 /// parameter that does not exist in a class method, and which would dispatch
@@ -478,9 +464,8 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
 /// context (ADR 0124 §1/B4) — the arity-1 write counterpart to
 /// [`is_self_field_at_put`], recognized identically (same receiver/context/
 /// self-binding guard) but for `WellKnownSelector::ClearField`. Excludes a
-/// class method (`ctx.in_class_method`): a `classState:` slot lives in
-/// `ClassVars`, not `State`, and is handled separately by
-/// [`is_self_clear_field_class_var`].
+/// class method (`ctx.in_class_method`): a `classState:` slot lives in the
+/// class process (ADR 0130), not `State`.
 pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
         return false;
@@ -505,90 +490,24 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
     false
 }
 
-/// Checks if an expression is `self clearField: #name` inside a **class
-/// method**, where `#name` is a literal Symbol naming a declared class
-/// variable (ADR 0124 §4i) — the `MessageSend` counterpart to
-/// [`is_class_var_assignment`]'s `self.x := v` `Assignment` shape. A literal
-/// Symbol argument is required because the mutation lowers to a `ThreadedIr`
-/// `Bind` whose `maps:remove` target field is a static Core Erlang atom,
-/// exactly the constraint `is_class_var_assignment`'s AST-derived field name
-/// already carries. A dynamic-name `clearField:` (or one naming an unknown
-/// class variable) falls through to generic dispatch instead of this
-/// producer path.
+/// A class-side expression with an in-place class-variable effect whose
+/// evaluation order against its siblings must be pinned (ADR 0130): a
+/// class-variable write or a same-class self-send, in a class method.
 ///
-/// `ctx.block_depth == 0` (the method's own top frame) is also required —
-/// unlike `is_class_var_assignment`/`is_class_method_self_send`, which a
-/// loop/conditional body's own per-statement classifier (`control_flow::body`,
-/// `control_flow::conditionals`) separately re-checks against that
-/// construct's actual `threading_families` before accepting the shape, this
-/// predicate's callers (`class_method_prelude_producer` and every
-/// `is_class_var_assignment(..) || is_self_clear_field_class_var(..) || ..`
-/// site) splice a real `Bind` unconditionally wherever it matches. `self
-/// clearField:` is deliberately excluded from `is_family_mutation`'s
-/// `ClassVars` arm (see that match arm's own comment) — no loop/conditional
-/// construct ever allocates a `ClassVars` slot for it — so recognizing this
-/// shape at `block_depth > 0` would splice a `Bind` whose result has nowhere
-/// to go: the mutation is silently dropped, and — inside a `whileTrue:`
-/// loop specifically — the loop's own local-variable threading is *also*
-/// broken by the same unaccounted-for prelude (`thread_ahead`'s unconditional
-/// `threaded_expression` call), an infinite loop, not just a lost write.
-/// Gating here, once, protects every current and future call site uniformly
-/// instead of auditing each one's own threading-family check; any nested
-/// position instead falls through to `try_generate_object_reflection`'s
-/// `ClearField` arm, whose `in_class_method()` check raises a clear
-/// `UnsupportedFeature` compile error (mirroring the `FieldAssignmentInUnsupportedBlock`/
-/// `ClassMethodSelfSendInThreadedLoopBody` diagnostics a plain `self.x := v`/
-/// self-send gets in the same position).
-pub(super) fn is_self_clear_field_class_var(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if !ctx.in_class_method || ctx.block_depth != 0 {
-        return false;
-    }
-    if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        ..
-    } = expr
-    {
-        if let Expression::Identifier(id) = receiver.as_ref() {
-            if id.name == "self"
-                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
-                && arguments.len() == 1
-            {
-                if let Expression::Literal(Literal::Symbol(name), _) = arguments[0].unwrap_parens()
-                {
-                    return ctx.class_var_names.contains(name.as_str());
-                }
-            }
-        }
-    }
-    false
-}
-
-/// The literal Symbol field name `self clearField: #name` names, given
-/// [`is_self_clear_field_class_var`] already matched `expr` — the shared
-/// extraction every call site that matched the predicate uses instead of
-/// re-deriving the same `unwrap_parens`/pattern-match (CLAUDE.md
-/// no-duplicate-implementations rule).
-pub(super) fn self_clear_field_class_var_name(expr: &Expression) -> Option<&str> {
-    let Expression::MessageSend { arguments, .. } = expr else {
-        return None;
-    };
-    match arguments.first()?.unwrap_parens() {
-        Expression::Literal(Literal::Symbol(name), _) => Some(name.as_str()),
-        _ => None,
-    }
+/// Nothing is threaded (a write is a `put`, a send rebinds nothing), but
+/// Core Erlang leaves the evaluation order of call arguments and tuple/list
+/// elements unspecified, and a class variable is now shared mutable state: an
+/// argument that writes it, or sends a message that may, must run in source
+/// order relative to the arguments around it. `subexpr_needs_prelude` and
+/// `class_method_prelude_producer` hoist these into ordered `let`s.
+pub(super) fn is_class_side_effect(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    class_var_assignment_shape(ctx, expr) || class_method_self_send_shape(ctx, expr)
 }
 
 impl CoreErlangGenerator {
-    /// See [`is_class_var_assignment`].
-    pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
-        is_class_var_assignment(&self.shape_ctx(), expr)
-    }
-
-    /// See [`is_class_method_self_send`].
-    pub(super) fn is_class_method_self_send(&self, expr: &Expression) -> bool {
-        is_class_method_self_send(&self.shape_ctx(), expr)
+    /// See [`is_class_side_effect`].
+    pub(super) fn is_class_side_effect(&self, expr: &Expression) -> bool {
+        is_class_side_effect(&self.shape_ctx(), expr)
     }
 
     /// See [`is_actor_self_send`].
@@ -611,23 +530,31 @@ impl CoreErlangGenerator {
         is_self_clear_field(&self.shape_ctx(), expr)
     }
 
-    /// See [`is_self_clear_field_class_var`].
-    pub(super) fn is_self_clear_field_class_var(&self, expr: &Expression) -> bool {
-        is_self_clear_field_class_var(&self.shape_ctx(), expr)
+    /// See [`is_field_assignment`]. ADR 0130 §3: `false` in a class method,
+    /// where `self.x := v` writes a class variable through a plain expression
+    /// (`generate_field_assignment`) and is never a state-threaded producer.
+    pub(super) fn is_field_assignment(&self, expr: &Expression) -> bool {
+        !self.in_class_method() && is_field_assignment(expr)
     }
 
-    /// See [`is_field_assignment`].
-    pub(super) fn is_field_assignment(expr: &Expression) -> bool {
-        is_field_assignment(expr)
-    }
-
-    /// See [`field_assignment_name`].
-    pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
+    /// See [`field_assignment_name`]; `None` in a class method (see
+    /// [`Self::is_field_assignment`]).
+    pub(super) fn field_assignment_name<'e>(&self, expr: &'e Expression) -> Option<&'e str> {
+        if self.in_class_method() {
+            return None;
+        }
         field_assignment_name(expr)
     }
 
-    /// See [`local_assign_field_write`].
-    pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> {
+    /// See [`local_assign_field_write`]; `None` in a class method (see
+    /// [`Self::is_field_assignment`]).
+    pub(super) fn local_assign_field_write<'e>(
+        &self,
+        rhs: &'e Expression,
+    ) -> Option<&'e Expression> {
+        if self.in_class_method() {
+            return None;
+        }
         local_assign_field_write(rhs)
     }
 

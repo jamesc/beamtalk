@@ -16,7 +16,7 @@ use crate::diagnostics::{filter_error_diagnostics, partition_diagnostics};
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_method_diagnostic_response, compile_method_ok_response, diagnostic_error_response,
-    error_response, format_codegen_error, method_signature_terms,
+    error_response, format_codegen_error, method_signature_terms, with_verifier_warnings,
 };
 
 use super::inline_definitions::derive_class_module_name;
@@ -267,8 +267,11 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         // `analysis` was computed on `merged_module` with no
         // mutation since — always safe to hand off.
         .with_analysis(analysis);
-    match beamtalk_codegen::core_erlang::generate_module(&merged_module, codegen_options) {
-        Ok(code) => compile_method_ok_response(
+    match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(
+        &merged_module,
+        codegen_options,
+    ) {
+        Ok((code, verifier_diagnostics)) => compile_method_ok_response(
             &code,
             &module_name,
             &classes,
@@ -278,7 +281,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             &merged_class_source,
             &patched_return_type,
             &patched_param_types,
-            &warning_msgs,
+            &with_verifier_warnings(&warning_msgs, &verifier_diagnostics),
             &referenced_aliases,
         ),
         // Codegen spans are now relative to the re-parsed merged module, so the

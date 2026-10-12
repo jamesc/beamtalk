@@ -423,9 +423,9 @@ test_extension_error_propagation() ->
 %% extension, which runs inline in the caller's own process — the throw is a
 %% control-flow signal aimed at a catch further up this *same* call stack,
 %% not a crash to report. Mirrors
-%% beamtalk_class_dispatch_tests:test_invoke_nlr_relay_no_shadow/0 (the
+%% beamtalk_class_dispatch_tests:test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes/0 (the
 %% class-side sibling), using the same tagged tuple shape
-%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/2 throws.
+%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/1 throws.
 test_extension_nlr_passthrough() ->
     ok = beamtalk_extensions:init(),
 
@@ -455,7 +455,7 @@ test_extension_nlr_passthrough() ->
 %% method failure. Mirrors
 %% beamtalk_class_dispatch_tests:test_invoke_script_exit_passthrough/0 (the
 %% class-side sibling), using the same tagged tuple shape
-%% beamtalk_class_dispatch_test_helper:class_testScriptExit/2 throws.
+%% beamtalk_class_dispatch_test_helper:class_testScriptExit/1 throws.
 test_extension_script_exit_passthrough() ->
     ok = beamtalk_extensions:init(),
 

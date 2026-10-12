@@ -5,7 +5,6 @@
 //! `takeWhile:`, `dropWhile:`, `partition:`, `groupBy:`, and `sort:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::threaded_ir::ThreadedStmt;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use super::OpaqueFoldOp;
@@ -44,8 +43,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:filter + erlang:length
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -197,20 +194,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let CountAcc = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
@@ -232,13 +223,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{0, ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(count_result.clone()),
@@ -283,8 +272,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:flatmap
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -451,20 +438,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
@@ -488,13 +469,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{[], ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(rev_list.clone()),
@@ -573,13 +552,6 @@ impl CoreErlangGenerator {
         // Generate the foldl fun: for literal blocks, compile body with swapped
         // parameter order; for non-literal, use runtime arg-swap wrapper.
         let foldl_fun_doc = if let Expression::Block(body_block) = body {
-            // this pure-block fast path calls `generate_block_body`
-            // directly below, bypassing `generate_block`'s own self-send
-            // check — so it needs the same guard here. See
-            // `check_no_unsafe_class_method_self_sends`'s doc comment.
-            let analysis = crate::core_erlang::block_analysis::analyze_block(body_block);
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
-
             // Literal block: compile directly with foldl parameter order (Elem, Acc).
             // Block params: [0] = acc, [1] = elem (Beamtalk convention)
             // Foldl fun params: (Elem, Acc) (Erlang convention)
@@ -594,16 +566,18 @@ impl CoreErlangGenerator {
             let acc_var = Self::to_core_erlang_var(acc_param);
             let elem_var = Self::to_core_erlang_var(elem_param);
 
-            self.push_scope();
-            // Bind in swapped order: foldl's first param is Elem, second is Acc
-            if let Some(param) = body_block.parameters.get(1) {
-                self.bind_var(&param.name, &elem_var);
-            }
-            if let Some(param) = body_block.parameters.first() {
-                self.bind_var(&param.name, &acc_var);
-            }
-            let body_doc = self.generate_block_body(body_block)?;
-            self.pop_scope();
+            // A closed `fun`: its body's state-version bumps (BT-3737: a
+            // conditional with a block-local write) must not leak out.
+            let body_doc = self.with_closed_fun_scope(|this| {
+                // Bind in swapped order: foldl's first param is Elem, second is Acc
+                if let Some(param) = body_block.parameters.get(1) {
+                    this.bind_var(&param.name, &elem_var);
+                }
+                if let Some(param) = body_block.parameters.first() {
+                    this.bind_var(&param.name, &acc_var);
+                }
+                this.generate_block_body(body_block)
+            })?;
 
             // fun (Elem, Acc) -> <body>
             docvec![
@@ -779,11 +753,6 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(init_var.clone()),
@@ -792,9 +761,8 @@ impl CoreErlangGenerator {
             " in let ",
             leaf::var(lambda_var.clone()),
             " = fun (Item, ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let Acc = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
@@ -820,13 +788,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{", leaf::var(init_var), ", ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &result_var,
-                body.span,
+                &result_var
             ),
             "let ",
             leaf::var(acc_out.clone()),
@@ -873,8 +839,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:takewhile
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1035,20 +999,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StillTaking = call 'erlang':'element'(2, ",
@@ -1080,13 +1038,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{[], 'true', ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(rev_list.clone()),
@@ -1135,8 +1091,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:dropwhile
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1294,20 +1248,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StillDropping = call 'erlang':'element'(2, ",
@@ -1339,13 +1287,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{[], 'true', ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(rev_list.clone()),
@@ -1393,8 +1339,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:partition
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1586,20 +1530,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let MatchList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let NoMatchList = call 'erlang':'element'(2, ",
@@ -1634,13 +1572,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{[], [], ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(rev_match.clone()),
@@ -1703,8 +1639,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:group_by
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1862,20 +1796,14 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
-        // when this class-method body threads ClassVars, the fold
-        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
-        // unwrapped by `cv_prelude` immediately below — see
-        // `ThreadingPlan::class_var_fun_param`'s doc comment.
-        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(fun_param),
+            leaf::var(acc_state_var.clone()),
             ") -> ",
-            cv_prelude,
             "let GroupMap = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
@@ -1905,13 +1833,11 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
-            plan.foldl_call_doc(
-                self,
+            ThreadingPlan::foldl_call_doc(
                 &lambda_var,
                 docvec!["{~{}~, ", leaf::var(init_state), "}"],
                 &safe_list_var,
-                &fold_result,
-                body.span,
+                &fold_result
             ),
             "let ",
             leaf::var(raw_map.clone()),
@@ -1961,8 +1887,6 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:sort_with
-        // see `check_bare_list_op_block_self_sends`'s doc comment.
-        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1998,23 +1922,27 @@ impl CoreErlangGenerator {
     ///    (a fresh `erlang:make_ref/0`, not a fixed atom — nested/recursive
     ///    calls to the same call site each get their own key, so they can't stomp
     ///    each other's state).
-    /// 2. Build a wrapper comparator that reads state, calls the block body,
-    ///    writes updated state back, returns boolean result
-    /// 3. Call `lists:sort/2` with the wrapper
-    /// 4. Read final state from process dictionary
+    /// 2. Build a wrapper comparator that reads state, runs the block body
+    ///    (a [`BodyKind::FoldlSort`] fold body), writes updated state back,
+    ///    returns boolean result
+    /// 3. Call `lists:sort/2` with the wrapper, inside a `try` whose catch arm
+    ///    erases the key before re-raising (BT-3779: a comparator `^` or
+    ///    exception must not leak the per-call key)
+    /// 4. Read final state from process dictionary and erase the key
+    ///    (`erlang:erase/1` does both)
     ///
     /// This approach is necessary because `lists:sort` controls comparison order
     /// and the comparator must return a plain boolean — we can't use foldl.
     ///
-    /// Always uses the map-accumulator path because `generate_field_assignment_open`
-    /// produces `maps:put` calls on `StateAcc` which requires a map-based state.
-    #[allow(clippy::too_many_lines)]
+    /// Always uses the map-accumulator path (the plan is built without a
+    /// tuple accumulator): the state crossing the process dictionary is the
+    /// `StateAcc` map.
     pub(in crate::core_erlang) fn generate_list_sort_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
+        let plan = ThreadingPlan::new(self, body, None);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -2045,7 +1973,7 @@ impl CoreErlangGenerator {
         ));
         docs.push(docvec![
             "let ",
-            leaf::var(state_key_var),
+            leaf::var(state_key_var.clone()),
             " = call 'erlang':'make_ref'() in let _ = call 'erlang':'put'(",
             state_key_doc.clone(),
             ", ",
@@ -2061,11 +1989,16 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        // Save state version before generating lambda body — the field assignments
-        // inside the lambda advance the version counter, but the outer scope should
-        // not see those advancements (state is managed via process dictionary).
-        let saved_state_version = self.state_version();
-
+        // BT-3771: the comparator is a closed `fun` whose own entry state is
+        // the `StateAcc` it just read from the process dictionary, so its
+        // body lowers like every other fold body: through
+        // `generate_foldl_loop_body` (one verified `Threaded` node, inside
+        // `with_branch_context`, so the body starts from `StateAcc` and the
+        // enclosing scope's `State`/`StateAcc` version is restored on exit).
+        // Hand-lowered against the enclosing version instead, a write here
+        // read the enclosing `State{N}` rather than `StateAcc` (dropping the
+        // previous comparisons' writes), and a nested loop's `StateAcc{N}`
+        // references were left unbound.
         self.push_scope();
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, &var_a);
@@ -2073,106 +2006,55 @@ impl CoreErlangGenerator {
         if let Some(param) = body.parameters.get(1) {
             self.bind_var(&param.name, &var_b);
         }
-        docs.extend(plan.generate_unpack_at_iteration_start(self));
-
-        // Generate block body manually (can't use generate_threaded_loop_body for sort)
-        let filtered_body = super::super::super::util::collect_body_exprs(&body.body);
-
-        for (i, expr) in filtered_body.iter().enumerate() {
-            let is_last = i == filtered_body.len() - 1;
-
-            if Self::is_field_assignment(expr) {
-                let (doc, _) = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-                if is_last {
-                    let current = self.current_state_var();
-                    docs.push(docvec![
-                        "let _ = call 'erlang':'put'(",
-                        state_key_doc.clone(),
-                        ", ",
-                        leaf::var(current),
-                        ") in 'true'",
-                    ]);
-                }
-            } else if Self::is_local_var_assignment(expr) {
-                let (assign_doc, _) = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-                if is_last {
-                    let current = self.current_state_var();
-                    docs.push(docvec![
-                        "let _ = call 'erlang':'put'(",
-                        state_key_doc.clone(),
-                        ", ",
-                        leaf::var(current),
-                        ") in 'true'",
-                    ]);
-                }
-            } else if is_last {
-                let pred_result = self.fresh_temp_var("SortPred");
-                let expr_code = self.generate_expression(expr)?;
-                let current = self.current_state_var();
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(pred_result.clone()),
-                    " = ",
-                    expr_code,
-                    " in let _ = call 'erlang':'put'(",
-                    state_key_doc.clone(),
-                    ", ",
-                    leaf::var(current),
-                    ") in ",
-                    leaf::var(pred_result),
-                ]);
-            } else {
-                // ADR 0118 phase 4: a non-last, non-assignment
-                // statement in the comparator body — e.g. a bare `self
-                // bumpCount` before the trailing `a < b` — has no state
-                // threading of its own here; thread any nested (or bare)
-                // actor self-send ahead via `thread_ahead` and put the
-                // result back into the process-dict key so it survives past
-                // this comparator invocation, the same way the field/local
-                // assignment arms above do via their own `current`/`put`
-                // pair.
-                let frame = self.current_frame();
-                let mut prelude: Vec<ThreadedStmt> = Vec::new();
-                let scope = self.thread_ahead(expr, &mut prelude, frame)?;
-                let doc = self.generate_expression(expr)?;
-                self.finish_precompiled_scope(scope)?;
-                if !prelude.is_empty() {
-                    docs.push(self.threaded_prelude_doc(&prelude));
-                    let current = self.current_state_var();
-                    docs.push(docvec![
-                        "let _ = call 'erlang':'put'(",
-                        state_key_doc.clone(),
-                        ", ",
-                        leaf::var(current),
-                        ") in ",
-                    ]);
-                }
-                docs.push(docvec!["let _ = ", doc, " in "]);
-            }
-        }
-
+        let (body_doc, _) = self.generate_foldl_loop_body(
+            body,
+            &plan,
+            &BodyKind::FoldlSort { state_key_var },
+            "StateAcc",
+            0,
+        )?;
+        docs.push(body_doc);
         self.pop_scope();
 
-        // Restore state version — the lambda's state mutations are isolated in process dict.
-        self.set_state_version(saved_state_version);
-
         let sorted_var = self.fresh_temp_var("SortedList");
+        let sort_result_var = self.fresh_temp_var("SortResult");
+        let type_var = self.fresh_temp_var("SortType");
+        let error_var = self.fresh_temp_var("SortError");
+        let stack_var = self.fresh_temp_var("SortStack");
         let state_out = self.fresh_temp_var("StOut");
 
+        // BT-3779: the per-call key must be erased on every exit path out of
+        // `lists:sort`. A `^` in the comparator throws `$bt_nlr` (and any
+        // other exception propagates) straight through `lists:sort`, so the
+        // key is erased in a catch-all arm that then re-raises the original
+        // class/reason/stacktrace unchanged via `raw_raise` — the NLR term
+        // (which already carries the comparator's state) is untouched. On the
+        // normal path `erlang:erase/1` both reads the final state and removes
+        // the key.
         docs.push(docvec![
             " in let ",
             leaf::var(sorted_var.clone()),
-            " = call 'lists':'sort'(",
+            " = try call 'lists':'sort'(",
             leaf::var(wrapper_var),
             ", ",
             leaf::var(safe_list_var),
-            ") in let ",
-            leaf::var(state_out.clone()),
-            " = call 'erlang':'get'(",
+            ") of <",
+            leaf::var(sort_result_var.clone()),
+            "> -> ",
+            leaf::var(sort_result_var),
+            " catch <",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(error_var.clone()),
+            ", ",
+            leaf::var(stack_var.clone()),
+            "> -> let _ = call 'erlang':'erase'(",
             state_key_doc.clone(),
-            ") in let _ = call 'erlang':'erase'(",
+            ") in ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+            " in let ",
+            leaf::var(state_out.clone()),
+            " = call 'erlang':'erase'(",
             state_key_doc,
             ") in ",
             plan.generate_extract_suffix_doc(&state_out, self),

@@ -163,35 +163,6 @@
 %% its own literal (CLAUDE.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
-%% @doc ADR 0110 class-var shadow write-through process-dictionary key atom
-%% (ADR 0111 Phase D).
-%%
-%% Single source of truth for the `'$bt_class_vars_shadow'` atom shared by
-%% `beamtalk_class_dispatch:invoke_class_method/7` (reads it back on the
-%% `{nlr_relay, ...}` path and erases it in `after` on every path) and this
-%% module's own EUnit conformance tests
-%% (`runtime/apps/beamtalk_runtime/test/beamtalk_class_dispatch_tests.erl`).
-%%
-%% The Rust codegen side (`crates/beamtalk-core/src/codegen/core_erlang/
-%% expressions.rs::generate_field_assignment`) cannot `-include` this file —
-%% it emits the identical atom as literal Core Erlang text
-%% (`leaf::atom("$bt_class_vars_shadow")`) into every compiled class method
-%% that mutates a class var. Per CLAUDE.md's cross-Rust/Erlang-boundary rule
-%% ("needs a shared conformance fixture or code generation, not a comment"),
-%% `crates/beamtalk-core/src/codegen/core_erlang/tests/class_var_shadow_contract.rs`
-%% reads *this exact file* at test time and asserts the atom text it emits
-%% appears in it verbatim — so the two sides cannot drift silently: change
-%% the atom here without updating the codegen literal (or vice versa) and
-%% that Rust test fails.
--define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
-
-%% BT-3675: process-dictionary key of the per-scope class-variable commit map
-%% (`#{ScopeToken => ClassVars}`). Compiled code never names it: it calls
-%% `beamtalk_class_dispatch:class_var_scope_commit/3`, `class_var_scope_read/3`
-%% and `class_var_scope_take/3`, and the outermost dispatch
-%% (`invoke_class_method/7`, `invoke_class_extension/7`) erases it in `after`.
--define(BT_CLASS_VARS_COMMIT_KEY_ATOM, '$bt_class_vars_commit').
-
 %% @doc Process-dictionary key marking
 %% "this process is currently executing a `withClassMethod:` child's factory
 %% method on behalf of `beamtalk_supervisor:start_child_via_class_method/4`,
@@ -220,11 +191,13 @@
 %% by `beamtalk_result:'tryDo:'/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension
-%% invocation, `tryDo:`) must relay rather than report them. Single source
-%% of truth for the shape check, shared by `beamtalk_class_dispatch.erl`,
-%% `beamtalk_dispatch.erl`, and `beamtalk_result.erl` — per CLAUDE.md's
-%% no-duplicate-implementation rule, a future NLR shape change only needs to
-%% land here.
+%% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
+%% relay rather than report them. Single source of truth for the shape check
+%% across the runtime and stdlib apps — per CLAUDE.md's no-duplicate-
+%% implementation rule, a future NLR shape change only needs to land here.
+%% `just lint-nlr-tuple-matches` (scripts/ci/lint-nlr-tuple-matches.sh)
+%% rejects hand-rolled `{'$bt_nlr', ...}` patterns elsewhere in runtime
+%% sources.
 -define(IS_NLR(T),
     (is_tuple(T) andalso
         (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso

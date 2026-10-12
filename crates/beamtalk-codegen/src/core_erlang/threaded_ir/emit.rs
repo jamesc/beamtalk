@@ -8,8 +8,9 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, FrameId, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter,
+    NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, TryRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -81,10 +82,9 @@ impl<'g> RenderCtx<'g> {
                 self.generator.in_loop_body,
                 var.version,
             ),
-            VersionPrefix::ClassVars
-            | VersionPrefix::SelfVt
-            | VersionPrefix::Local(_)
-            | VersionPrefix::Gensym(_) => var.render_name(),
+            VersionPrefix::SelfVt | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => {
+                var.render_name()
+            }
         }
     }
 
@@ -179,15 +179,14 @@ pub(in crate::core_erlang) fn render(
                 target,
                 source,
                 op,
-                shadow_write,
                 span: _,
-            } => docs.push(render_bind(target, source, op, *shadow_write, ctx)),
+            } => docs.push(render_bind(target, source, op, ctx)),
             ThreadedStmt::Threaded {
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 body,
                 produces,
+                threads: _,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
             ThreadedStmt::NlrCatch {
@@ -208,7 +207,7 @@ pub(in crate::core_erlang) fn render(
                 fn_name,
                 mode,
                 frame,
-                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
+                threads: _,
                 counter,
                 condition,
                 condition_value,
@@ -236,9 +235,279 @@ pub(in crate::core_erlang) fn render(
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
             ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
+            ThreadedStmt::OnDoCatch {
+                vars,
+                entry,
+                try_region,
+                clauses,
+                ..
+            } => docs.push(render_on_do_catch(vars, *entry, try_region, clauses)),
+            ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
+                "let ",
+                leaf::var(carrier.clone()),
+                " = ",
+                doc.clone(),
+                " in ",
+            ]),
+            ThreadedStmt::LocalRebind {
+                carrier,
+                slot,
+                value_var,
+                state_first,
+                lowering,
+                ..
+            } => docs.push(render_local_rebind(
+                carrier,
+                slot,
+                value_var,
+                state_first.as_ref(),
+                lowering,
+                ctx,
+            )),
+            // ADR 0131 §2: the method root's one legitimate drop. The
+            // consumer reads `element(1, carrier)` itself; nothing to bind.
+            ThreadedStmt::DiscardLocals { .. } => {}
+            // ADR 0131 §2: frame nodes. Each `LocalRebind` in `body` already
+            // carries the lowering its enclosing frame chose, so a frame
+            // renders straight-line like any other sequence (an `NlrCatch`
+            // inside still consumes the rest of `body` as its try-body).
+            ThreadedStmt::MethodBody { body, .. } | ThreadedStmt::BranchArm { body, .. } => {
+                docs.push(render(body, ctx));
+            }
         }
     }
     Document::Vec(docs)
+}
+
+/// ADR 0131 §2's `<read>`: `maps:get(Key, element(2, CF))` for a
+/// [`CarrierSlot::Key`] — or `maps:get(Key, StateN)` when `state_first`
+/// names the `State` version the family `Bind` already extracted from the
+/// carrier (actor instance frames) — and `element(k, CF)` for a
+/// [`CarrierSlot::Pos`].
+fn render_carrier_read(
+    carrier: &str,
+    slot: &CarrierSlot,
+    state_first: Option<&VersionedVar>,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let element = |k: usize| {
+        docvec![
+            "call 'erlang':'element'(",
+            leaf::int_lit(i64::try_from(k).unwrap_or(i64::MAX)),
+            ", ",
+            leaf::var(carrier.to_string()),
+            ")",
+        ]
+    };
+    match slot {
+        CarrierSlot::Key(key) => {
+            let map = match state_first {
+                Some(state) => leaf::var(ctx.resolve_prefix(state)),
+                None => element(2),
+            };
+            docvec![
+                "call 'maps':'get'(",
+                leaf::atom(key.clone()),
+                ", ",
+                map,
+                ")"
+            ]
+        }
+        CarrierSlot::Pos(k) => element(*k),
+    }
+}
+
+/// Renders one [`ThreadedStmt::LocalRebind`] per its recorded
+/// [`RebindLowering`] — the ADR 0131 §2 table cell its enclosing frame chose
+/// ([`super::ir::RebindShape::for_frame`]):
+/// - [`RebindLowering::Let`] (every non-member; a non-REPL `MethodBody`):
+///   `let V = <read> in`;
+/// - [`RebindLowering::LoopParam`] (`DirectParams`/`Hybrid`/`TupleAcc`
+///   member): the `Gensym` `Bind` `let V = <read> in`, whose identity
+///   [`final_loop_arg_identities`] carries into the loop's recursive call;
+/// - [`RebindLowering::MapPut`] (`StateAcc` loop/handler, `BranchArm`, REPL
+///   `MethodBody` member): `let V = <read> in` then the `Put` `Bind`
+///   `let StateN+1 = maps:put(Key, V, StateN) in`.
+///
+/// Every version step goes through [`render_bind`], so a rebind and an
+/// ordinary mutation of the same shape can never differ in bytes.
+fn render_local_rebind(
+    carrier: &str,
+    slot: &CarrierSlot,
+    value_var: &str,
+    state_first: Option<&VersionedVar>,
+    lowering: &RebindLowering,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let read = render_carrier_read(carrier, slot, state_first, ctx);
+    let plain_let = |read: Document<'static>| {
+        docvec![
+            "let ",
+            leaf::var(value_var.to_string()),
+            " = ",
+            read,
+            " in "
+        ]
+    };
+    match lowering {
+        RebindLowering::Let => plain_let(read),
+        RebindLowering::LoopParam { source, target } => {
+            render_bind(target, source, &BindOp::Direct(ValueRef::Doc(read)), ctx)
+        }
+        RebindLowering::MapPut {
+            key,
+            source,
+            target,
+        } => docvec![
+            plain_let(read),
+            render_bind(
+                target,
+                source,
+                &BindOp::Put {
+                    field: key.clone(),
+                    value: ValueRef::Var(value_var.to_string()),
+                },
+                ctx,
+            ),
+        ],
+    }
+}
+
+/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`], both halves of the
+/// catch boundary as one unit: the entry snapshot `let`, then the
+/// [`TryRegion`] (`try <body> of R -> R`), then the catch clause
+/// (`catch <Type, Error, Stack> -> case {Type, Error} of ...`), complete down
+/// to the closing `end end`: the exception-class filter's handler arm, its
+/// `<'false'>` re-raise arm and its exhaustive fallback are steps of the node
+/// ([`CatchStep::FilterHandler`], [`CatchStep::FilterMiss`]).
+///
+/// Clause order is the node's: both `$bt_nlr` pass-through arms re-raise
+/// untouched; the non-NLR arm runs its steps in order, the class-variable
+/// restore first (ADR 0130 §4), so every exception that is not a `^` discards
+/// the protected region's writes before the filter runs.
+fn render_on_do_catch(
+    vars: &OnDoCatchVars,
+    entry: Option<CatchEntry>,
+    try_region: &TryRegion,
+    clauses: &[CatchClause],
+) -> Document<'static> {
+    let raise = || {
+        CoreErlangGenerator::emit_raw_raise(
+            vars.type_var.clone(),
+            vars.error_var.clone(),
+            vars.stack_var.clone(),
+        )
+    };
+    let entry_doc = match entry {
+        Some(CatchEntry::ClassVarSnapshot) => {
+            CoreErlangGenerator::class_var_snapshot_let_doc(&vars.snapshot_var)
+        }
+        None => Document::Nil,
+    };
+    let mut docs: Vec<Document<'static>> = vec![docvec![
+        entry_doc,
+        "try ",
+        try_region.body.clone(),
+        "of ",
+        leaf::var(try_region.result_var.clone()),
+        " -> ",
+        leaf::var(try_region.result_var.clone()),
+        " ",
+        "catch <",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        ", ",
+        leaf::var(vars.stack_var.clone()),
+        "> -> case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of ",
+    ]];
+    for clause in clauses {
+        match clause {
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple4) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var.clone()),
+                ", ",
+                leaf::var(vars.nlr_state_var.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple3) => docs.push(docvec![
+                "<{'throw', {'$bt_nlr', ",
+                leaf::var(vars.nlr_tok_var2.clone()),
+                ", ",
+                leaf::var(vars.nlr_val_var2.clone()),
+                "}}> when 'true' -> ",
+                raise(),
+                " ",
+            ]),
+            CatchClause::NonNlr { steps } => {
+                docs.push(docvec![
+                    "<",
+                    leaf::var(vars.other_pair_var.clone()),
+                    "> when 'true' -> "
+                ]);
+                for step in steps {
+                    docs.push(render_catch_step(vars, step));
+                }
+            }
+        }
+    }
+    Document::Vec(docs)
+}
+
+fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
+    match step {
+        CatchStep::ClassVarRestore { snapshot } => {
+            CoreErlangGenerator::class_var_restore_doc(snapshot)
+        }
+        CatchStep::WrapException => docvec![
+            "let ",
+            leaf::var(vars.built_stack_var.clone()),
+            " = primop 'build_stacktrace'(",
+            leaf::var(vars.stack_var.clone()),
+            ") in ",
+            "let ",
+            leaf::var(vars.ex_obj_var.clone()),
+            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
+            leaf::var(vars.type_var.clone()),
+            ", ",
+            leaf::var(vars.error_var.clone()),
+            ", ",
+            leaf::var(vars.built_stack_var.clone()),
+            ") in ",
+        ],
+        CatchStep::ClassFilter => docvec![
+            "let ",
+            leaf::var(vars.match_var.clone()),
+            " = call 'beamtalk_exception_handler':'matches_class'(",
+            leaf::var(vars.ex_class_var.clone()),
+            ", ",
+            leaf::var(vars.ex_obj_var.clone()),
+            ") in ",
+            "case ",
+            leaf::var(vars.match_var.clone()),
+            " of ",
+            "<'true'> when 'true' -> ",
+        ],
+        CatchStep::FilterHandler(handler) => handler.clone(),
+        CatchStep::FilterMiss => docvec![
+            " <'false'> when 'true' -> ",
+            CoreErlangGenerator::emit_raw_raise(
+                vars.type_var.clone(),
+                vars.error_var.clone(),
+                vars.stack_var.clone(),
+            ),
+            CoreErlangGenerator::case_clause_fallback_doc(vars.filter_fallback_var.clone()),
+            " end end",
+        ],
+    }
 }
 
 /// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real
@@ -578,6 +847,12 @@ fn final_loop_arg_identities(
                 ThreadedStmt::Bind { source, target, .. } if *source == current => {
                     Some(target.clone())
                 }
+                // ADR 0131 §2: a member rebind of a `DirectParams`/`Hybrid`/
+                // `TupleAcc` frame joins the chain exactly like a `Bind`.
+                ThreadedStmt::LocalRebind {
+                    lowering: RebindLowering::LoopParam { source, target },
+                    ..
+                } if *source == current => Some(target.clone()),
                 _ => None,
             }) {
                 current = next;
@@ -687,68 +962,22 @@ fn render_bind(
     target: &VersionedVar,
     source: &VersionedVar,
     op: &BindOp,
-    shadow_write: bool,
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put {
-            field,
-            value,
-            class_tag,
-        } => {
-            let put_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'put'(",
-                leaf::atom(field.clone()),
-                ", ",
-                render_value(value, ctx),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    put_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                put_doc
-            }
-        }
-        BindOp::Remove { field, class_tag } => {
-            let remove_doc = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = call 'maps':'remove'(",
-                leaf::atom(field.clone()),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
-            if shadow_write {
-                docvec![
-                    remove_doc,
-                    "let _ = call 'erlang':'put'({",
-                    leaf::atom("$bt_class_vars_shadow"),
-                    ", call 'erlang':'element'(2, ",
-                    render_value(class_tag, ctx),
-                    ")}, ",
-                    leaf::var(target_name),
-                    ") in ",
-                ]
-            } else {
-                remove_doc
-            }
-        }
+        BindOp::Put { field, value } => docvec![
+            "let ",
+            leaf::var(target_name),
+            " = call 'maps':'put'(",
+            leaf::atom(field.clone()),
+            ", ",
+            render_value(value, ctx),
+            ", ",
+            leaf::var(source_name),
+            ") in ",
+        ],
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),

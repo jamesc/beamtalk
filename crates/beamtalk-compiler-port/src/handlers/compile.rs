@@ -14,6 +14,7 @@ use crate::diagnostics::{DiagInfo, filter_error_diagnostics, partition_diagnosti
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_ok_response, diagnostic_error_response, error_response, format_codegen_error,
+    with_verifier_warnings,
 };
 
 use super::inline_definitions::{derive_class_module_name, handle_inline_protocol_definition};
@@ -242,12 +243,15 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }
-    match beamtalk_codegen::core_erlang::generate_module(&module, codegen_options) {
-        Ok(code) => compile_ok_response(
+    match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(
+        &module,
+        codegen_options,
+    ) {
+        Ok((code, verifier_diagnostics)) => compile_ok_response(
             &code,
             &module_name,
             &classes,
-            &warning_msgs,
+            &with_verifier_warnings(&warning_msgs, &verifier_diagnostics),
             &referenced_aliases,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),

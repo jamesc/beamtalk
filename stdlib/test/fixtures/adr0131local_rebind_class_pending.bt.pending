@@ -1,0 +1,258 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3744 (ADR 0131 Phase 0a): the class-method probe shapes that do not
+// compile today (see adr0131local_rebind_class.bt for the rest). Inert: the
+// runner discovers only `.bt`. The phase that makes these compile drops the
+// `.pending` suffix (and from adr0131local_rebind_pending_test.bt.pending).
+//
+//   o3, o12: erlc `unbound variable 'State'` in `class_*` (ADR 0131 §3)
+//   s2: ThreadedIr verifier panic (verify.rs)
+//   o1, o2, o4-o10, o13, s1, s7, s9, seq: ADR 0131 Phase 0 compile errors
+//     (BT-3745: the allow-set error, or §6 for s1's `at:ifAbsent:` block)
+//
+// Every method here is rejected by an ADR 0131 diagnostic today (and o3, o12,
+// s2 are now rejected before codegen too); `adr0131_probe_matrix_pins` in
+// beamtalk-core checks that.
+
+Object subclass: Adr0131LocalRebindClassPending
+  classState: n = 0
+
+  class o3 =>
+    t := 0
+    r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
+    #[r, t]
+
+  class o12: c =>
+    t := 0
+    self.n := (c ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
+    #[self.n, t]
+
+  class s2 =>
+    t := 0
+    r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
+    #[r, t]
+
+  class o1 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+    #[r, t]
+
+  class o2 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] ensure: [t := t + 1]) + 1
+    #[r, t]
+
+  class o4 =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  class o5 =>
+    t := 0
+    self.n := [
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]
+    #[self.n, t]
+
+  class o6: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^#[([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]), t]
+      ]
+    #[0, t]
+
+  class o7: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+      7
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  class o8: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  // o9: o1's operand as the method's last expression.
+  class o9 =>
+    t := 0
+    ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+
+  // o10: o1's operand as a `^` value inside an arm.
+  class o10: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    0
+
+  class o13: c =>
+    t := 0
+    self.n := c
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]
+    #[self.n, t]
+
+  class s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  class s7 =>
+    t := 0
+    r := nil
+      ifNil: [
+        t := t + 1
+        1
+      ]
+    #[r, t]
+
+  class s9 =>
+    t := 0
+    r := (#(1, 2)
+      reject: [:x |
+        t := t + 1
+        false
+      ]) size
+    #[r, t]
+
+  class seq =>
+    t := 0
+    r := t + ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  // BT-3748 review: the §1a shape with the threading construct nested inside
+  // the right operand (an argument of a send, the receiver of a binary send)
+  // rather than the operand itself. Source order reads `t` first: #[1, 1].
+  class seqArg: flag =>
+    t := 0
+    r := t + (0 max: (flag ifTrue: [t := t + 1. 1] ifFalse: [0]))
+    #[r, t]
+
+  class seqRecv: flag =>
+    t := 0
+    r := t + ((flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0)
+    #[r, t]
+
+  // BT-3753: statement-position shapes that answered wrong, raised or failed
+  // to compile before; each is an ADR 0131 Phase 0 compile error now.
+
+  // A `do:` in a conditional arm.
+  class stArmDo: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  // A loop in a conditional arm.
+  class stArmWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  // `inject:into:` in a conditional arm.
+  class stArmInject: c =>
+    t := 0
+    c ifTrue: [
+      #(1, 2) inject: 0 into: [:a :e |
+        t := t + e
+        a + e
+      ]
+    ]
+    t
+
+  // A `do:` in an `on:do:` body.
+  class stProtectedDo =>
+    t := 0
+    [
+      #(1, 2) do: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  // `eachWithIndex:` as a statement.
+  class stEachWithIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:x :i | t := t + x]
+    t
+
+  // `do:separatedBy:` as a statement.
+  class stDoSeparatedBy =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
+    t
+
+  // `keysAndValuesDo:` as a statement.
+  class stKeysAndValuesDo =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  // `[...] value` as a statement.
+  class stBlockValue =>
+    t := 0
+    [t := t + 1] value
+    t
+
+  // A conditional in a `whileTrue:` body (erlc `unbound variable` before).
+  class stLoopArm =>
+    t := 0
+    i := 0
+    [i < 2] whileTrue: [
+      i := i + 1
+      i > 1 ifTrue: [t := t + 5]
+    ]
+    t
+
+  // `detect:ifNone:` whose handler writes, as a statement.
+  class stDetectIfNone =>
+    t := 0
+    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+    t

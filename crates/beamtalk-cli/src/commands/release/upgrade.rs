@@ -49,6 +49,11 @@ struct ShapeEntry {
     version: u32,
     fields: BTreeMap<String, Option<String>>,
     migrations: BTreeMap<String, String>,
+    /// ADR 0130 `class_var_abi` of the class's module. `None` when absent or
+    /// `null`: a `shapes.json` written before this field existed, or a module
+    /// compiled before ADR 0130.
+    #[serde(default)]
+    class_var_abi: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -355,6 +360,12 @@ fn render_report(
     let mut migration_findings = Vec::new();
     let mut unbumped_findings = Vec::new();
     let mut removed_findings = Vec::new();
+    let mut abi_findings = Vec::new();
+    // Classes whose stored ABI is absent (pre-ABI `shapes.json`) and whose
+    // current ABI is present, grouped by the current value. This is the one
+    // expected crossing for every existing project, so it is reported once per
+    // current ABI value rather than once per class (see below).
+    let mut unstamped_by_abi: BTreeMap<u32, usize> = BTreeMap::new();
 
     for (class, old_entry) in &prev.shapes {
         match new.shapes.get(class) {
@@ -366,6 +377,19 @@ fn render_report(
                 });
             }
             Some(new_entry) => {
+                if let (None, Some(current)) = (old_entry.class_var_abi, new_entry.class_var_abi) {
+                    *unstamped_by_abi.entry(current).or_default() += 1;
+                } else if new_entry.class_var_abi != old_entry.class_var_abi {
+                    abi_findings.push(Finding {
+                        class: class.clone(),
+                        detail: format!(
+                            "class_var_abi {} → {}",
+                            describe_abi(old_entry.class_var_abi),
+                            describe_abi(new_entry.class_var_abi)
+                        ),
+                        severity: Severity::Warning,
+                    });
+                }
                 if new_entry.version > old_entry.version {
                     let has_migration = new_entry
                         .migrations
@@ -420,16 +444,32 @@ fn render_report(
     migration_findings.sort_by(|a, b| a.class.cmp(&b.class));
     unbumped_findings.sort_by(|a, b| a.class.cmp(&b.class));
     removed_findings.sort_by(|a, b| a.class.cmp(&b.class));
+    abi_findings.sort_by(|a, b| a.class.cmp(&b.class));
+    // One aggregated warning per current ABI value: every class of a pre-ABI
+    // release crosses `none → N` together, so per-class lines would only repeat
+    // the same fact (BT-3721 follow-up). Genuine mismatches stay per class.
+    for (current, count) in &unstamped_by_abi {
+        abi_findings.push(Finding {
+            class: format!("{count} {}", if *count == 1 { "class" } else { "classes" }),
+            detail: format!(
+                "class_var_abi none → {current}   previous release predates ADR 0130; \
+                 restart and recompile (no hot upgrade)"
+            ),
+            severity: Severity::Warning,
+        });
+    }
 
     let error_count = migration_findings
         .iter()
         .chain(&unbumped_findings)
+        .chain(&abi_findings)
         .chain(&removed_findings)
         .filter(|f| f.severity == Severity::Error)
         .count();
     let warning_count = migration_findings
         .iter()
         .chain(&unbumped_findings)
+        .chain(&abi_findings)
         .chain(&removed_findings)
         .filter(|f| f.severity == Severity::Warning)
         .count();
@@ -456,6 +496,19 @@ fn render_report(
     if !unbumped_findings.is_empty() {
         out.push_str("\n  Shape changed without a version bump\n");
         for f in &unbumped_findings {
+            let _ = writeln!(
+                out,
+                "    {:<14}{}   {}",
+                f.class,
+                f.detail,
+                f.severity.label()
+            );
+        }
+    }
+
+    if !abi_findings.is_empty() {
+        out.push_str("\n  Class-variable ABI changed (ADR 0130)\n");
+        for f in &abi_findings {
             let _ = writeln!(
                 out,
                 "    {:<14}{}   {}",
@@ -501,6 +554,12 @@ fn render_report(
         text: out,
         has_error: error_count > 0,
     }
+}
+
+/// `class_var_abi` as shown in the report: the number, or `none` for a module
+/// compiled before ADR 0130 (no `class_var_abi` entry).
+fn describe_abi(abi: Option<u32>) -> String {
+    abi.map_or_else(|| "none".to_string(), |n| n.to_string())
 }
 
 /// A human-readable summary of the field-level difference between two
@@ -583,6 +642,7 @@ mod tests {
                                 .iter()
                                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                                 .collect(),
+                            class_var_abi: Some(1),
                         },
                     )
                 })
@@ -626,6 +686,100 @@ mod tests {
         assert!(report.text.contains("field `tier` added"));
         assert!(report.text.contains("warning"));
         assert!(!report.has_error);
+    }
+
+    #[test]
+    fn matching_class_var_abi_is_not_reported() {
+        let prev = doc(&[("Widget", 1, &[], &[])]);
+        let new = doc(&[("Widget", 1, &[], &[])]);
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert!(!report.text.contains("class_var_abi"));
+        assert!(report.text.contains("0 errors, 0 warnings."));
+    }
+
+    #[test]
+    fn differing_class_var_abi_is_reported() {
+        let prev = doc(&[("Widget", 1, &[], &[])]);
+        let mut new = doc(&[("Widget", 1, &[], &[])]);
+        new.shapes.get_mut("Widget").unwrap().class_var_abi = Some(2);
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert!(report.text.contains("Class-variable ABI changed"));
+        assert!(report.text.contains("class_var_abi 1 → 2   warning"));
+        assert!(report.text.contains("0 errors, 1 warning."));
+        assert!(!report.has_error);
+    }
+
+    fn with_prev_abi_none(entries: &[FixtureEntry]) -> ShapesDoc {
+        let mut prev = doc(entries);
+        for e in prev.shapes.values_mut() {
+            e.class_var_abi = None;
+        }
+        prev
+    }
+
+    #[test]
+    fn pre_abi_prev_shapes_report_once_not_per_class() {
+        let entries: &[FixtureEntry] = &[
+            ("Alpha", 1, &[], &[]),
+            ("Beta", 1, &[], &[]),
+            ("Gamma", 1, &[], &[]),
+        ];
+        let prev = with_prev_abi_none(entries);
+        let new = doc(entries);
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert_eq!(report.text.matches("class_var_abi none → 1").count(), 1);
+        assert!(report.text.contains("3 classes"));
+        assert!(!report.text.contains("Alpha"));
+        assert!(report.text.contains("0 errors, 1 warning."));
+        assert!(!report.has_error);
+    }
+
+    #[test]
+    fn pre_abi_single_class_uses_singular() {
+        let entries: &[FixtureEntry] = &[("Widget", 1, &[], &[])];
+        let prev = with_prev_abi_none(entries);
+        let new = doc(entries);
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert!(report.text.contains("1 class "));
+        assert!(report.text.contains("0 errors, 1 warning."));
+    }
+
+    #[test]
+    fn pre_abi_prev_does_not_hide_a_genuine_mismatch() {
+        let prev_entries: &[FixtureEntry] = &[("Old", 1, &[], &[]), ("Other", 1, &[], &[])];
+        let mut prev = with_prev_abi_none(prev_entries);
+        prev.shapes.get_mut("Other").unwrap().class_var_abi = Some(1);
+        let mut new = doc(prev_entries);
+        new.shapes.get_mut("Other").unwrap().class_var_abi = Some(2);
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert!(report.text.contains("1 class "));
+        assert!(report.text.contains("Other"));
+        assert!(report.text.contains("class_var_abi 1 → 2   warning"));
+        assert!(report.text.contains("0 errors, 2 warnings."));
+    }
+
+    #[test]
+    fn both_abi_absent_is_silent() {
+        let entries: &[FixtureEntry] = &[("Widget", 1, &[], &[])];
+        let prev = with_prev_abi_none(entries);
+        let mut new = doc(entries);
+        new.shapes.get_mut("Widget").unwrap().class_var_abi = None;
+        let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
+        assert!(!report.text.contains("class_var_abi"));
+        assert!(report.text.contains("0 errors, 0 warnings."));
+    }
+
+    #[test]
+    fn shapes_json_without_class_var_abi_field_parses() {
+        let doc: ShapesDoc = serde_json::from_str(
+            r#"{"shapes":{"A":{"version":1,"fields":{},"migrations":{}},
+                "B":{"version":1,"fields":{},"migrations":{},"class_var_abi":null},
+                "C":{"version":1,"fields":{},"migrations":{},"class_var_abi":1}}}"#,
+        )
+        .unwrap();
+        assert_eq!(doc.shapes["A"].class_var_abi, None);
+        assert_eq!(doc.shapes["B"].class_var_abi, None);
+        assert_eq!(doc.shapes["C"].class_var_abi, Some(1));
     }
 
     #[test]

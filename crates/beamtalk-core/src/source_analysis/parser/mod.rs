@@ -646,12 +646,30 @@ pub enum DiagnosticCategory {
     /// `DefiniteAssignment`, no `@expect` category suppresses this one by
     /// design — the exemption is the `hasField:` guard, not an annotation.
     UnguardedLateRead,
-    /// Stored-closure class-variable advisory (ADR 0110, BT-3681) — a block
-    /// bound to a local (or passed to a user-defined class-side higher-order
-    /// method) whose body makes a class-side self-send that may write a class
-    /// variable, in a place where that write is not kept. Suppressed by
-    /// `@expect stored_closure`.
-    StoredClosure,
+    /// A block literal that reads or writes a class variable of its home
+    /// class is used where it will run outside an invocation of that class
+    /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
+    /// or returned sees the values captured at creation; a writing block
+    /// carried into another class's class-side method raises
+    /// `class_state_unreachable`. A lint, not a guarantee.
+    ClassStateAbroad,
+    /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
+    /// writes an outer local, or a local bound to one — flows to a send that
+    /// has no way to return the write (anything but a control-flow construct,
+    /// an actor instance self-send or an Erlang FFI argument). An error.
+    Tier2BlockNoReturnChannel,
+    /// ADR 0131 Phase 0 (BT-3745): a local-threading construct whose blocks
+    /// write an outer local sits in a position that does not thread the
+    /// write back yet (not a statement, and not in the allow-set of
+    /// positions that work today). An error that BT-3743 removes.
+    UnmigratedLocalThreading,
+    /// A codegen-internal invariant violation caught by the `ThreadedIr`
+    /// verifier (ADR 0111 amendment, BT-3724). Always a *warning* whose
+    /// message starts with `internal:`: it flags a compiler bug (the emitted
+    /// code may be wrong), never a problem in the user's program, and never
+    /// blocks a build. Not suppressible by `@expect`, not a `[diagnostics]`
+    /// key — the user cannot act on it except by reporting it.
+    InternalVerifier,
 }
 
 /// A secondary note attached to a diagnostic.

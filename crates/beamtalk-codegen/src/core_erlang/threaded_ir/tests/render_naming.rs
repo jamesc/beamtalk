@@ -18,8 +18,8 @@ fn render_name_version_zero_is_bare_prefix() {
 #[test]
 fn render_name_nonzero_version_appends_number() {
     assert_eq!(
-        VersionedVar::new(VersionPrefix::ClassVars, 2, FrameId::ROOT).render_name(),
-        "ClassVars2"
+        VersionedVar::new(VersionPrefix::SelfVt, 2, FrameId::ROOT).render_name(),
+        "Self2"
     );
     assert_eq!(local("Sum", 1, FrameId::ROOT).render_name(), "Sum1");
 }
@@ -27,7 +27,7 @@ fn render_name_nonzero_version_appends_number() {
 // ── VersionCounter ────────────────────────────────────────────────────
 // Pins the same semantics the pre-existing `StateThreading` struct
 // (`state_codegen.rs`) pinned, now against the single shared
-// implementation reused for all three prefixes.
+// implementation reused for every prefix.
 
 #[test]
 fn version_counter_starts_at_zero() {
@@ -67,11 +67,10 @@ fn version_counter_set_version_overwrites_directly() {
 
 #[test]
 fn version_counter_is_reused_identically_across_prefixes() {
-    // Same counter value, three different prefixes — pins that naming is
+    // Same counter value, two different prefixes — pins that naming is
     // purely a function of (prefix, version), never counter identity.
     let mut counter = VersionCounter::new();
     counter.set_version(3);
     assert_eq!(counter.current_var(VersionPrefix::State), "State3");
-    assert_eq!(counter.current_var(VersionPrefix::ClassVars), "ClassVars3");
     assert_eq!(counter.current_var(VersionPrefix::SelfVt), "Self3");
 }

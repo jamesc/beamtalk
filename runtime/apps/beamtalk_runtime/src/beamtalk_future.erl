@@ -403,6 +403,8 @@ notify_waiters(Waiters, State, ValueOrReason) ->
 -doc "Execute a callback in a separate process to avoid blocking".
 execute_callback(Callback, Value) ->
     spawn(fun() ->
+        %% bt-catcher-audit: not-applicable-other-process - callback runs in a fresh spawned
+        %% process, no home entry
         try
             Callback(Value)
         catch

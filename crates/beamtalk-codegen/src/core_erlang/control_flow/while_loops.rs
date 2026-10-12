@@ -53,6 +53,25 @@ type HybridFieldExtraction = (
 );
 
 impl CoreErlangGenerator {
+    /// Whether a `whileTrue:`/`whileFalse:` with a literal `body` block is
+    /// lowered by the stateful (`{Result, StateAcc}`) generator: the body
+    /// has writes or a nested list op's cross-scope write, or the
+    /// `condition` has a state effect. The loop generators and the
+    /// value-type result-unpacking gate (`is_while_with_vt_local_threading`)
+    /// both read this, so a loop that produces the tuple is always unpacked
+    /// (BT-3746: a condition-only write used to produce a tuple nobody
+    /// unpacked).
+    pub(in crate::core_erlang) fn while_loop_threads(
+        &self,
+        condition: &Expression,
+        body_block: &beamtalk_core::ast::Block,
+    ) -> bool {
+        let analysis = block_analysis::analyze_block(body_block);
+        self.needs_mutation_threading(&analysis)
+            || self.body_has_list_op_cross_scope_mutations(body_block)
+            || super::condition_has_state_effects(self, condition)
+    }
+
     pub(in crate::core_erlang) fn generate_while_true(
         &mut self,
         condition: &Expression,
@@ -69,26 +88,17 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // Include local_writes only in REPL mode
-            // Also check for nested list ops with cross-scope mutations
-            let analysis = block_analysis::analyze_block(body_block);
             // ADR 0118 phase 3: a condition-only self-send/field
             // write (`whileTrue: [nil]` with a mutating CONDITION) must also
-            // route here — `needs_mutation_threading`/
-            // `body_has_list_op_cross_scope_mutations` only look at the BODY,
-            // so a trivial body previously fell through to
-            // `generate_while_true_simple`, which compiles the condition via
-            // `generate_expression` → `generate_block` → `generate_block_stateful`
-            // (a real closure boundary that must CLOSE its own state chain
-            // into a `{Result, State}` tuple) instead of the loop's own
-            // frame — the exact shape that panics the verifier or crashes at
-            // runtime (see the `bt3414_*_inside_while_true_condition_panics_verifier`
+            // route here — the stateful lowering keeps the condition in the
+            // loop's own frame. The simple lowering compiles the condition
+            // via `generate_expression` → `generate_block` →
+            // `generate_block_stateful` (a real closure boundary that must
+            // CLOSE its own state chain into a `{Result, State}` tuple) —
+            // the exact shape that panics the verifier or crashes at runtime
+            // (see the `bt3414_*_inside_while_true_condition_panics_verifier`
             // tests, `tests/gen_server.rs`).
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(condition)
-            {
+            if self.while_loop_threads(condition, body_block) {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
         }
@@ -129,16 +139,9 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // Include local_writes only in REPL mode
-            // Also check for nested list ops with cross-scope mutations
-            let analysis = block_analysis::analyze_block(body_block);
             // ADR 0118 phase 3: see the analogous comment in
             // `generate_while_true`.
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || super::condition_has_state_effects(condition)
-            {
+            if self.while_loop_threads(condition, body_block) {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
         }
@@ -253,21 +256,18 @@ impl CoreErlangGenerator {
         // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
         // carries one) — decides whether `CondFun` must return a
         // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
-        let cond_effects = super::condition_has_state_effects(condition);
+        let cond_effects = super::condition_has_state_effects(self, condition);
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
-        // ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3 (BT-3515):
-        // when the body threads a storage-family mutation (`ClassVars` or
-        // value-type `Self`) through the loop's own recursive tail call, the
+        // ADR 0122 Decision 3 (BT-3515): when the body threads a value-type
+        // `Self` mutation through the loop's own recursive tail call, the
         // letrec fun grows an extra, explicit trailing parameter per family
-        // — `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
+        // — `fun (StateAcc, Self)`, never folded into `StateAcc`'s own
         // map. Captured before the body's own lowering runs — see
         // `ThreadingPlan::capture_loop_family_params`'s doc comment. At most
-        // one entry for a Letrec plan (`ClassVars`/`SelfVt` are mutually
-        // exclusive — see `CoreErlangGenerator::loop_body_threads_value_self`'s
-        // doc comment), so the loop's result tuple grows at most one extra
-        // slot.
+        // one entry for a Letrec plan, so the loop's result tuple grows at
+        // most one extra slot.
         let family_params = plan.capture_loop_family_params(self);
 
         // At the start of each loop iteration, read threaded locals from StateAcc.
@@ -290,16 +290,6 @@ impl CoreErlangGenerator {
         // Generate condition inside branch context
         let cond_doc = self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
-                // this condition block bypasses `generate_block`'s own
-                // self-send check by calling `generate_block_body`/
-                // `generate_stateful_while_condition` directly — see
-                // `check_no_unsafe_class_method_self_sends`'s doc comment.
-                let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(
-                    &analysis,
-                    cond_block,
-                    cond_block.span,
-                )?;
                 if cond_effects {
                     this.generate_stateful_while_condition(cond_block)
                 } else {
@@ -391,13 +381,9 @@ impl CoreErlangGenerator {
             "<'false'> when 'true' -> "
         };
         // ADR 0122 Decision 3 (BT-3515): every threaded family's exit-arm
-        // slot now routes through the emission helper — `ClassVars` no
-        // longer stays hand-rolled into `base` the way BT-3512 left it (that
-        // phase only migrated `SelfVt`, since the value-type loop site could
-        // never reach `ClassVars`). Mutual exclusivity
+        // slot routes through the emission helper
         // (`plan.threaded_families()` carries at most one entry for a Letrec
-        // plan) means this is byte-identical to the fully hand-rolled tuple
-        // it replaces.
+        // plan).
         let exit_arm_tuple = {
             let ctx = RenderCtx::new(self);
             append_family_slots(
@@ -423,12 +409,11 @@ impl CoreErlangGenerator {
             produces.push(gensym_seed);
         }
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
             mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
             frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: None,
             condition: condition_stmts,
             condition_value,
@@ -439,7 +424,7 @@ impl CoreErlangGenerator {
             // actually live at the call site for `produces[0]` is whatever
             // `generate_pack_prefix` produced above, never necessarily the
             // generic ambient-context "State" spelling its own derivation
-            // would otherwise fall back to. A trailing `ClassVars` entry
+            // would otherwise fall back to. A trailing family entry
             // (index 1, when present) needs no such override — it is
             // already `Gensym`-seeded above, and `Gensym` renders
             // identically in every context, so leaving this one element
@@ -450,7 +435,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(&errors, "while StateAcc ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
@@ -570,13 +555,6 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
-                // see the analogous check in `generate_while_loop`.
-                let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(
-                    &analysis,
-                    cond_block,
-                    cond_block.span,
-                )?;
                 this.generate_block_body(cond_block)
             } else {
                 this.generate_expression(condition)
@@ -716,12 +694,11 @@ impl CoreErlangGenerator {
             .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame))
             .collect();
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
             mode: ThreadingMode::DirectParams,
             frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: None,
             condition: vec![condition_stmt],
             condition_value,
@@ -732,7 +709,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(
             &errors,
             "while direct-params ConditionalLoop",
@@ -866,12 +843,11 @@ impl CoreErlangGenerator {
                 }))
                 .collect();
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
             mode: ThreadingMode::Hybrid,
             frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: None,
             condition: vec![condition_stmt],
             condition_value,
@@ -889,7 +865,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(&errors, "while hybrid ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
@@ -1028,10 +1004,7 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
             let result = if let Expression::Block(cond_block) = condition {
-                // see the analogous check in `generate_while_loop`.
-                let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block, cond_block.span)
-                    .and_then(|()| this.generate_block_body(cond_block))
+                this.generate_block_body(cond_block)
             } else {
                 this.generate_expression(condition)
             };

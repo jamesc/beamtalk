@@ -22,7 +22,7 @@ Tests cover:
 - root registry — nil, roundtrip, overwrite, clear_root
 - hierarchy walk — static_init/2, dynamic_init/2 via ETS
 - hierarchy depth limit — call_inherited_class_method_direct error
-- start_child_via_class_method/4: valid return, invalid return, class_var_result
+- start_child_via_class_method/4: valid return, invalid return, read-only snapshot reads, write raises class_state_read_only
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return
 - start_child_via_class_method/4 supervisor restart through the REAL compiled
@@ -56,16 +56,18 @@ Tests cover:
 %% Fake class methods used by the hierarchy-walk test.
 %% These are called directly by call_class_method_direct / call_inherited_class_method_direct
 %% when the test populates the module ETS table with this module as the "parent" class module.
--export([class_children/2, class_strategy/2, class_maxRestarts/2, class_restartWindow/2]).
+-export([class_children/1, class_strategy/1, class_maxRestarts/1, class_restartWindow/1]).
 
 %% Fake class methods for start_child_via_class_method tests.
 %% Simulates what a compiled Beamtalk keyword class method does: start a gen_server
 %% and return a {beamtalk_object, ...} tuple.
 -export([
-    'class_create:value:'/4,
-    class_returnInvalid/2,
-    class_returnWrapped/2,
-    class_returnSupervisor/2,
+    'class_create:value:'/3,
+    class_returnInvalid/1,
+    class_returnSupervisor/1,
+    class_writeVar/1,
+    class_readVar/1,
+    class_readThenActor/1,
     start_link_fake_child/0
 ]).
 
@@ -76,24 +78,24 @@ Tests cover:
 %% stand-in — see start_child_via_class_method_real_self_spawn_supervisor_restart_test/0
 %% and start_child_via_class_method_real_self_spawn_as_supervisor_restart_test/0.
 -export([
-    'class_createViaSpawn:value:'/4,
-    'class_createNamedViaSpawn:value:'/4
+    'class_createViaSpawn:value:'/3,
+    'class_createNamedViaSpawn:value:'/3
 ]).
 
 %% Fake class method that self-sends `new`, mirroring the codegen
 %% shape of `self new` inside a compiled class method body.
--export([class_selfNew/2]).
+-export([class_selfNew/1]).
 
 %% Fake class methods for dynamic_init and hierarchy tests.
--export([class_childClass/2]).
+-export([class_childClass/1]).
 
 %% Fake class-method and helper exports for added coverage tests.
 -export([
     childClass/0,
-    'class_initialize:'/3,
-    class_strategy_all/2,
-    class_strategy_rest/2,
-    class_strategy_unknown/2
+    'class_initialize:'/2,
+    class_strategy_all/1,
+    class_strategy_rest/1,
+    class_strategy_unknown/1
 ]).
 
 %% gen_server callbacks for the fake child actor used above.
@@ -211,6 +213,26 @@ start_named_supervisor(Name) ->
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, Pid} = supervisor:start_link({local, Name}, ?MODULE, {SupFlags, []}),
     Pid.
+
+%% Named supervisor with one running worker (BT-3720).
+start_named_supervisor_with_worker(Name, ChildId) ->
+    ChildSpec = #{
+        id => ChildId,
+        start => {?MODULE, start_worker, [self()]},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => []
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, Pid} = supervisor:start_link({local, Name}, ?MODULE, {SupFlags, [ChildSpec]}),
+    Pid.
+
+wait_for_worker() ->
+    receive
+        {worker_ready, WorkerPid} -> {ok, WorkerPid}
+    after 1000 -> error(worker_not_ready)
+    end.
 
 make_supervisor_tuple(ClassName, Module, Pid) ->
     {beamtalk_supervisor, ClassName, Module, Pid}.
@@ -725,7 +747,7 @@ static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     beamtalk_class_metadata:insert('BT1285Child', undefined, undefined, 'BT1285Parent', undefined),
 
     %% Register module for 'BT1285Parent' only — 'BT1285Child' uses a module
-    %% (erlang) that does NOT export class_children/2, forcing the walk upward.
+    %% (erlang) that does NOT export class_children/1, forcing the walk upward.
     beamtalk_class_metadata:insert('BT1285Parent', ?MODULE, undefined, none, undefined),
 
     %% static_init/2 takes (Module, ClassName) where Module is the child's
@@ -734,9 +756,9 @@ static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %% 'BT1285Child' is not registered with whereis so ClassPid = undefined;
     %% that is fine since ClassSelf is only used as a value passed to class methods.
     try
-        Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
-        %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
-        %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
+        Result = static_init_registered(static_init, erlang, 'BT1285Child'),
+        %% The walk found class_children/1, class_strategy/1, class_maxRestarts/1,
+        %% and class_restartWindow/1 in ?MODULE (this test module) via the ETS lookup.
         %% It should succeed with zero children and one_for_one strategy.
         ?assertMatch(
             {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
@@ -765,7 +787,7 @@ dynamic_init_walks_hierarchy_via_ets_test() ->
     %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
     %% class_childClass returns a class object (beamtalk_object record).
     try
-        Result = beamtalk_supervisor:dynamic_init(erlang, 'BT1960DynChild'),
+        Result = static_init_registered(dynamic_init, erlang, 'BT1960DynChild'),
         %% dynamic_init always uses simple_one_for_one strategy.
         %% The child spec should contain a start_link entry for the supervisor child.
         ?assertMatch(
@@ -794,7 +816,7 @@ hierarchy_depth_limit_error_test() ->
     try
         ?assertError(
             {supervisor_init_method_not_found, class_children},
-            beamtalk_supervisor:static_init(erlang, 'BT1960LoopA')
+            static_init_registered(static_init, erlang, 'BT1960LoopA')
         )
     after
         beamtalk_class_metadata:delete('BT1960LoopA'),
@@ -807,11 +829,11 @@ hierarchy_method_not_found_no_parent_test() ->
     beamtalk_class_metadata:new(),
 
     %% 'BT1960Orphan' has no entry in hierarchy table at all.
-    %% The module (erlang) doesn't export class_children/2.
+    %% The module (erlang) doesn't export class_children/1.
     try
         ?assertError(
             {supervisor_init_method_not_found, class_children},
-            beamtalk_supervisor:static_init(erlang, 'BT1960Orphan')
+            static_init_registered(static_init, erlang, 'BT1960Orphan')
         )
     after
         ok
@@ -821,17 +843,18 @@ hierarchy_method_not_found_no_parent_test() ->
 %% Fake class methods for the hierarchy-walk test above
 %%====================================================================
 
-class_children(_ClassSelf, _ClassVars) -> [].
-class_strategy(_ClassSelf, _ClassVars) -> oneForOne.
-class_maxRestarts(_ClassSelf, _ClassVars) -> 3.
-class_restartWindow(_ClassSelf, _ClassVars) -> 5.
+class_children(_ClassSelf) ->
+    [].
+class_strategy(_ClassSelf) -> oneForOne.
+class_maxRestarts(_ClassSelf) -> 3.
+class_restartWindow(_ClassSelf) -> 5.
 
 %% Fake class_childClass for dynamic_init tests.
 %% Returns a class object for a supervisor subclass so build_child_spec takes the
 %% simple path (no message dispatch needed). class_name/1 is called via gen_server,
 %% so we spawn a tiny process that responds to it. The process handles one class_name
 %% call then exits cleanly (build_child_spec only calls it once).
-class_childClass(_ClassSelf, _ClassVars) ->
+class_childClass(_ClassSelf) ->
     FakeClassPid = spawn(fun() ->
         receive
             {'$gen_call', From, class_name} ->
@@ -855,21 +878,30 @@ start_link_fake_child() ->
 
 %% Fake class method: simulates `MyClass create: Name value: Val` which starts
 %% a gen_server and returns a beamtalk_object tuple.
-'class_create:value:'(_ClassSelf, _ClassVars, _Name, _Value) ->
+'class_create:value:'(_ClassSelf, _Name, _Value) ->
     {ok, Pid} = start_link_fake_child(),
     {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
 
 %% Fake class method: returns an invalid (non-actor) value.
-class_returnInvalid(_ClassSelf, _ClassVars) ->
+class_returnInvalid(_ClassSelf) ->
     <<"not an actor tuple">>.
 
-%% Fake class method: returns a class_var_result wrapper around a valid actor.
-class_returnWrapped(_ClassSelf, _ClassVars) ->
+%% ADR 0130 §5: class-variable access from a runtime-owned snapshot region.
+%% Writes raise class_state_read_only; reads see the ETS mirror.
+class_writeVar(ClassSelf) ->
+    beamtalk_class_vars:put(ClassSelf, n, 1).
+
+class_readVar(ClassSelf) ->
+    beamtalk_class_vars:get(ClassSelf, n).
+
+%% Reads a class variable (must see the mirror value), then returns an actor.
+class_readThenActor(ClassSelf) ->
+    7 = beamtalk_class_vars:get(ClassSelf, n),
     {ok, Pid} = start_link_fake_child(),
-    {class_var_result, {beamtalk_object, 'FakeChild', ?MODULE, Pid}, #{some_var => 42}}.
+    {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
 
 %% Fake class method that returns a supervisor tuple instead of an actor.
-class_returnSupervisor(_ClassSelf, _ClassVars) ->
+class_returnSupervisor(_ClassSelf) ->
     {ok, Pid} = start_link_fake_child(),
     {beamtalk_supervisor, 'FakeSupervisorChild', ?MODULE, Pid}.
 
@@ -881,7 +913,7 @@ class_returnSupervisor(_ClassSelf, _ClassVars) ->
 %% delegates to `beamtalk_actor:safe_spawn/2`, the function this PR's fix
 %% touches. Unlike `'class_create:value:'/4` above (a `gen_server:start_link`
 %% stand-in), this exercises the actual production call chain end to end.
-'class_createViaSpawn:value:'(_ClassSelf, _ClassVars, _Name, _Value) ->
+'class_createViaSpawn:value:'(_ClassSelf, _Name, _Value) ->
     beamtalk_class_instantiation:class_self_spawn('BT3243RealSpawnChild', test_class_actor, []).
 
 %% Same idea, but for the named-spawn
@@ -893,7 +925,7 @@ class_returnSupervisor(_ClassSelf, _ClassVars) ->
 %% compiled factory calling `.unwrap` on it before returning — this unwraps
 %% the ok value to hand `start_child_via_class_method/4` the bare actor
 %% object it expects.
-'class_createNamedViaSpawn:value:'(_ClassSelf, _ClassVars, Name, _Value) ->
+'class_createNamedViaSpawn:value:'(_ClassSelf, Name, _Value) ->
     #{'isOk' := true, 'okValue' := Obj} =
         beamtalk_class_instantiation:class_self_spawn_as(
             'BT3243RealNamedSpawnChild', test_class_actor, false, Name
@@ -906,7 +938,7 @@ class_returnSupervisor(_ClassSelf, _ClassVars) ->
 %% `ClassName` taken from `ClassSelf`. Used to prove the abstract-instantiation
 %% guard is enforced when this runs in the supervisor process (via
 %% `start_child_via_class_method/4`), not just in the class's own gen_server.
-class_selfNew(ClassSelf, _ClassVars) ->
+class_selfNew(ClassSelf) ->
     ClassTag = element(2, ClassSelf),
     ClassName = beamtalk_primitive:class_name_from_tag(ClassTag),
     beamtalk_class_instantiation:class_self_new(ClassName, ?MODULE, []).
@@ -978,18 +1010,119 @@ start_child_via_class_method_invalid_return_test() ->
         cleanup_fake_class('BT1875Invalid', FakeClassPid)
     end.
 
-start_child_via_class_method_unwraps_class_var_result_test() ->
-    %% A class method returning {class_var_result, ActorTuple, Vars} is unwrapped.
-    FakeClassPid = setup_fake_class('BT1875Wrapped'),
+%% ADR 0130 §5: the withClassMethod: factory runs in a read-only snapshot
+%% region. Reads see the ETS mirror; a write raises class_state_read_only
+%% instead of being silently discarded.
+start_child_via_class_method_reads_mirror_test() ->
+    FakeClassPid = setup_fake_class('BT3708Read'),
+    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
     try
-        {ok, ChildPid} = beamtalk_supervisor:start_child_via_class_method(
-            'BT1875Wrapped', ?MODULE, class_returnWrapped, []
+        ClassSelf = #beamtalk_object{
+            class = beamtalk_class_registry:class_object_tag('BT3708Read'),
+            class_mod = ?MODULE,
+            pid = FakeClassPid
+        },
+        ?assertEqual(
+            7,
+            beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> class_readVar(ClassSelf) end)
         ),
-        ?assert(is_pid(ChildPid)),
-        ?assert(is_process_alive(ChildPid)),
-        gen_server:stop(ChildPid)
+        %% The factory reads `n` through the mirror and then returns an actor.
+        ?assertMatch(
+            {ok, Pid} when is_pid(Pid),
+            beamtalk_supervisor:start_child_via_class_method(
+                'BT3708Read', ?MODULE, class_readThenActor, []
+            )
+        ),
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Read')))
     after
-        cleanup_fake_class('BT1875Wrapped', FakeClassPid)
+        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
+        cleanup_fake_class('BT3708Read', FakeClassPid)
+    end.
+
+start_child_via_class_method_write_raises_test() ->
+    FakeClassPid = setup_fake_class('BT3708Write'),
+    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
+    try
+        ?assertMatch(
+            #beamtalk_error{kind = class_state_read_only},
+            raised_beamtalk_error(fun() ->
+                beamtalk_supervisor:start_child_via_class_method(
+                    'BT3708Write', ?MODULE, class_writeVar, []
+                )
+            end)
+        ),
+        %% The snapshot is erased even though the method raised.
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Write')))
+    after
+        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
+        cleanup_fake_class('BT3708Write', FakeClassPid)
+    end.
+
+static_init_class_children_write_raises_test() ->
+    FakeClassPid = setup_fake_class('BT3708Children'),
+    %% The fixture's `class children` always writes a class variable. (Loaded
+    %% explicitly: `erlang:function_exported/3` does not trigger a code load.)
+    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
+    beamtalk_class_metadata:insert(
+        'BT3708Children', beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
+    ),
+    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
+    try
+        ?assertMatch(
+            #beamtalk_error{kind = class_state_read_only},
+            raised_beamtalk_error(fun() ->
+                beamtalk_supervisor:static_init(
+                    beamtalk_supervisor_writing_fixture, 'BT3708Children'
+                )
+            end)
+        ),
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Children')))
+    after
+        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
+        cleanup_fake_class('BT3708Children', FakeClassPid)
+    end.
+
+static_init_reads_snapshot_without_write_test() ->
+    FakeClassPid = setup_fake_class('BT3708Static'),
+    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
+    try
+        ?assertMatch(
+            {ok, {#{strategy := one_for_one}, []}},
+            beamtalk_supervisor:static_init(?MODULE, 'BT3708Static')
+        )
+    after
+        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
+        cleanup_fake_class('BT3708Static', FakeClassPid)
+    end.
+
+%% ADR 0130 §5: `static_init/2` and `dynamic_init/2` run their class methods in
+%% `with_snapshot/2`, which resolves the class by name; register a stand-in
+%% class process (as the real class gen_server is while its startLink/1 runs).
+static_init_registered(Init, Module, ClassName) ->
+    FakeClassPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    register(RegName, FakeClassPid),
+    try
+        beamtalk_supervisor:Init(Module, ClassName)
+    after
+        (try
+            unregister(RegName)
+        catch
+            _:_ -> ok
+        end),
+        FakeClassPid ! stop
+    end.
+
+raised_beamtalk_error(Fun) ->
+    try Fun() of
+        Other -> {no_error, Other}
+    catch
+        error:#{error := #beamtalk_error{} = E} -> E;
+        error:#beamtalk_error{} = E -> E
     end.
 
 start_child_via_class_method_cleans_process_dict_test() ->
@@ -1637,17 +1770,17 @@ startChild_arity2_success_test() ->
 %%====================================================================
 
 %% Fake class_initialize: method — records that it was invoked.
-class_initialize(_ClassSelf, _ClassVars, _SupTuple) ->
+class_initialize(_ClassSelf, _SupTuple) ->
     put(bt1980_init_called, true),
     nil.
 
-'class_initialize:'(A, B, C) -> class_initialize(A, B, C).
+'class_initialize:'(A, B) -> class_initialize(A, B).
 
 run_initialize_invokes_class_initialize_test() ->
     %% run_initialize walks the class chain and calls class_initialize:
     %% with the supervisor tuple as an extra arg.
     beamtalk_class_metadata:new(),
-    %% Register a class pointing at this module (exports 'class_initialize:'/3).
+    %% Register a class pointing at this module (exports 'class_initialize:'/2).
     ClassName = 'BT1980InitClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
     FakeClassPid = spawn(fun() ->
@@ -1674,6 +1807,64 @@ run_initialize_invokes_class_initialize_test() ->
         beamtalk_class_metadata:delete(ClassName)
     end.
 
+run_initialize_write_raises_test() ->
+    %% ADR 0130 §5: `initialize:` runs in a read-only snapshot region; a class
+    %% variable write raises instead of being silently discarded.
+    beamtalk_class_metadata:new(),
+    ClassName = 'BT3708InitWrite',
+    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    FakeClassPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        register(RegName, FakeClassPid),
+        beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
+        beamtalk_class_metadata:insert(
+            ClassName, beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
+        ),
+        %% BT-3720: a real, named supervisor with a running child stands in for
+        %% the one `supervise` started before the hook ran.
+        SupName = bt3720_half_started_sup,
+        SupPid = start_named_supervisor_with_worker(SupName, bt3720_child),
+        {ok, WorkerPid} = wait_for_worker(),
+        SupRef = erlang:monitor(process, SupPid),
+        WorkerRef = erlang:monitor(process, WorkerPid),
+        SupTuple = {beamtalk_supervisor, ClassName, beamtalk_supervisor_writing_fixture, SupPid},
+        ?assertMatch(
+            #beamtalk_error{kind = class_state_read_only},
+            raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(SupTuple) end)
+        ),
+        %% The read-only snapshot region erased exactly the key it planted:
+        %% nothing is left under the class's (tag-keyed) key, and no home.
+        ?assertEqual(undefined, get(beamtalk_class_vars:key(ClassName))),
+        ?assertEqual(undefined, beamtalk_class_vars_test_support:home_key()),
+        %% The supervisor is not leaked: process gone, name freed, child stopped.
+        receive
+            {'DOWN', SupRef, process, SupPid, _} -> ok
+        after 2000 -> error(supervisor_leaked)
+        end,
+        receive
+            {'DOWN', WorkerRef, process, WorkerPid, _} -> ok
+        after 2000 -> error(child_orphaned)
+        end,
+        ?assertEqual(undefined, whereis(SupName))
+    after
+        erase(bt1980_init_called),
+        %% A leaked snapshot must not leak into later tests in this process.
+        beamtalk_class_vars_test_support:clean(beamtalk_class_vars:key(ClassName)),
+        (try
+            unregister(RegName)
+        catch
+            _:_ -> ok
+        end),
+        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
+        FakeClassPid ! stop,
+        beamtalk_class_metadata:delete(ClassName)
+    end.
+
 %%====================================================================
 %% to_otp_strategy/1 — all strategy variants
 %%====================================================================
@@ -1688,16 +1879,16 @@ to_otp_strategy_oneForOne_test() ->
     beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none, undefined),
     try
         {ok, {#{strategy := one_for_one}, _}} =
-            beamtalk_supervisor:static_init(erlang, 'BT1980StratOne')
+            static_init_registered(static_init, erlang, 'BT1980StratOne')
     after
         beamtalk_class_metadata:delete('BT1980StratOne'),
         beamtalk_class_metadata:delete('BT1980StratOneParent')
     end.
 
 %% Helper fake class methods with non-default strategies.
-class_strategy_all(_ClassSelf, _ClassVars) -> oneForAll.
-class_strategy_rest(_ClassSelf, _ClassVars) -> restForOne.
-class_strategy_unknown(_ClassSelf, _ClassVars) -> someOtherStrategy.
+class_strategy_all(_ClassSelf) -> oneForAll.
+class_strategy_rest(_ClassSelf) -> restForOne.
+class_strategy_unknown(_ClassSelf) -> someOtherStrategy.
 
 to_otp_strategy_oneForAll_test() ->
     %% oneForAll maps to one_for_all.
@@ -1723,12 +1914,12 @@ apply_to_otp_strategy(BtStrategy) ->
     Parent = list_to_atom(atom_to_list(Name) ++ "_p"),
     beamtalk_class_metadata:insert(Name, undefined, undefined, Parent, undefined),
     %% Install an on-demand parent module with the right class_strategy. We
-    %% compile a tiny module at runtime that exports class_strategy/2 etc.
+    %% compile a tiny module at runtime that exports class_strategy/1 etc.
     ParentMod = compile_strategy_parent(BtStrategy),
     beamtalk_class_metadata:insert(Parent, ParentMod, undefined, none, undefined),
     try
         {ok, {#{strategy := Strategy}, _}} =
-            beamtalk_supervisor:static_init(erlang, Name),
+            static_init_registered(static_init, erlang, Name),
         Strategy
     after
         beamtalk_class_metadata:delete(Name),
@@ -1744,12 +1935,12 @@ compile_strategy_parent(Strategy) ->
     ),
     Src = io_lib:format(
         "-module(~p).~n"
-        "-export([class_children/2, class_strategy/2, "
-        "class_maxRestarts/2, class_restartWindow/2]).~n"
-        "class_children(_A, _B) -> [].~n"
-        "class_strategy(_A, _B) -> ~p.~n"
-        "class_maxRestarts(_A, _B) -> 3.~n"
-        "class_restartWindow(_A, _B) -> 5.~n",
+        "-export([class_children/1, class_strategy/1, "
+        "class_maxRestarts/1, class_restartWindow/1]).~n"
+        "class_children(_A) -> [].~n"
+        "class_strategy(_A) -> ~p.~n"
+        "class_maxRestarts(_A) -> 3.~n"
+        "class_restartWindow(_A) -> 5.~n",
         [ModName, Strategy]
     ),
     {ok, Tokens, _} = erl_scan:string(lists:flatten(Src)),
@@ -2902,3 +3093,199 @@ bt1990_cleanup_class_obj({beamtalk_object, _Class, _Mod, FakeClassPid}) ->
 %% assert only on the OTP translation.
 bt1990_build_from_bt_spec(BtSpec) ->
     [beamtalk_supervisor:spec_to_otp(BtSpec)].
+
+%%====================================================================
+%% BT-3759: concurrent `supervise` while the first caller's initialize: runs
+%%====================================================================
+
+%% Drives the real class_send -> startLink -> dispatch hook path with a real
+%% named supervisor. The first caller's `initialize:` hook blocks on a message
+%% barrier, so the second caller deterministically arrives mid-hook.
+
+concurrent_supervise_initialize_test_() ->
+    {setup, fun setup_class_dispatch_runtime/0, fun teardown_class_dispatch_runtime/1, fun(_) ->
+        [
+            {"initialize: raises: second caller sees the structured error, not a dead pid", fun() ->
+                    concurrent_supervise(fail)
+                end},
+            {"initialize: succeeds: second caller sees a fully initialised supervisor", fun() ->
+                concurrent_supervise(ok)
+            end}
+        ]
+    end}.
+
+concurrent_supervise(HookOutcome) ->
+    ClassName = 'BT3759ConcurrentSupervise',
+    Helper = beamtalk_supervisor_test_helper,
+    Tab = beamtalk_supervisor_test_helper_tab,
+    SupName = bt3759_named_sup,
+    beamtalk_supervisor_test_helper:reset(),
+    beamtalk_supervisor_test_helper:set_mode(named, SupName),
+    ets:insert(Tab, {coordinator, self()}),
+    ClassInfo = #{
+        superclass => none,
+        module => Helper,
+        class_methods => #{supervise => <<>>, 'initialize:' => <<>>},
+        class_state => #{}
+    },
+    {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    Parent = self(),
+    Caller = fun(Tag) ->
+        spawn_link(fun() ->
+            Outcome =
+                try
+                    {returned, beamtalk_class_dispatch:class_send(ClassPid, supervise, [])}
+                catch
+                    Class:Reason -> {raised, Class, Reason}
+                end,
+            Parent ! {Tag, Outcome}
+        end)
+    end,
+    try
+        Caller(first),
+        %% Barrier: the first caller is now inside the initialize: hook.
+        HookPid =
+            receive
+                {init_entered, P} -> P
+            after 5000 -> error(hook_not_entered)
+            end,
+        Caller(second),
+        %% The second caller must be parked behind the hook and must not have
+        %% been handed the supervisor yet.
+        case await_second_caller(5000) of
+            waiting ->
+                ok;
+            {early, Early} ->
+                SupPid0 = whereis(SupName),
+                error(
+                    {second_caller_returned_before_initialize_finished, Early,
+                        {sup_alive, is_pid(SupPid0) andalso is_process_alive(SupPid0)}}
+                )
+        end,
+        SupPid = whereis(SupName),
+        SupRef = erlang:monitor(process, SupPid),
+        HookPid ! {hook, HookOutcome},
+        First =
+            receive
+                {first, F} -> F
+            after 5000 -> error(first_caller_timeout)
+            end,
+        Second =
+            receive
+                {second, S} -> S
+            after 5000 -> error(second_caller_timeout)
+            end,
+        case HookOutcome of
+            fail ->
+                ?assertMatch({raised, _, _}, First),
+                receive
+                    {'DOWN', SupRef, process, SupPid, _} -> ok
+                after 2000 -> error(supervisor_not_stopped)
+                end,
+                {raised, _, SecondReason} = Second,
+                ?assertMatch(
+                    #beamtalk_error{kind = supervisor_start_failed},
+                    unwrap_raised(SecondReason)
+                );
+            ok ->
+                ?assertMatch({returned, _}, First),
+                {returned, SecondResult} = Second,
+                %% The hook had finished before the second caller returned.
+                ?assertEqual([{initialized, true}], ets:lookup(Tab, initialized)),
+                ?assertMatch(
+                    #{okValue := {beamtalk_supervisor, ClassName, Helper, SupPid}},
+                    SecondResult
+                ),
+                ?assert(is_process_alive(SupPid)),
+                erlang:demonitor(SupRef, [flush])
+        end
+    after
+        case whereis(SupName) of
+            undefined ->
+                ok;
+            Live ->
+                try
+                    gen_server:stop(Live)
+                catch
+                    _:_ -> ok
+                end
+        end,
+        catch gen_server:stop(ClassPid, normal, 5000),
+        beamtalk_supervisor_test_helper:reset()
+    end.
+
+%% Polls (yielding, no fixed sleep) until the second caller is parked on the
+%% initializing gate, or it has already returned/raised.
+await_second_caller(TimeoutMs) ->
+    await_second_caller_loop(erlang:monotonic_time(millisecond) + TimeoutMs).
+
+await_second_caller_loop(Deadline) ->
+    receive
+        {second, Early} -> {early, Early}
+    after 0 ->
+        case init_gate_waiters() of
+            [_ | _] ->
+                waiting;
+            [] ->
+                case erlang:monotonic_time(millisecond) >= Deadline of
+                    true ->
+                        error(second_caller_neither_waiting_nor_returned);
+                    false ->
+                        erlang:yield(),
+                        await_second_caller_loop(Deadline)
+                end
+        end
+    end.
+
+init_gate_waiters() ->
+    case ets:info(beamtalk_supervisor_init_gates, id) of
+        undefined -> [];
+        _ -> [W || {_, waiter, _, _} = W <- ets:tab2list(beamtalk_supervisor_init_gates)]
+    end.
+
+unwrap_raised(#{error := #beamtalk_error{} = E}) -> E;
+unwrap_raised(#beamtalk_error{} = E) -> E;
+unwrap_raised(Other) -> Other.
+
+%%% BT-3759 review: an armed gate that nobody claims must not wedge `supervise`.
+
+orphaned_init_gate_is_reclaimed_test() ->
+    beamtalk_supervisor:ensure_init_gate_table(),
+    application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
+    %% A proc_lib process stands in for the never-initialised supervisor so
+    %% that stop_failed_supervisor/1 (proc_lib:stop) can stop it.
+    {ok, Sup} = gen_event:start(),
+    ets:insert(beamtalk_supervisor_init_gates, {Sup, gate}),
+    try
+        SupTuple = {beamtalk_supervisor, 'BT3759Orphan', undefined, Sup},
+        ?assertError(
+            #{error := #beamtalk_error{kind = supervisor_start_failed}},
+            beamtalk_supervisor:await_initialized(SupTuple)
+        ),
+        %% Gate rows are gone, so the next caller is not blocked.
+        ?assertEqual([], ets:lookup(beamtalk_supervisor_init_gates, Sup)),
+        ?assertNot(is_process_alive(Sup)),
+        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple))
+    after
+        application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
+        ets:delete(beamtalk_supervisor_init_gates, Sup),
+        catch exit(Sup, kill)
+    end.
+
+%% BT-3759 review: waiter rows left after the gate was released must neither
+%% block a caller nor get a live, initialised supervisor stopped.
+stray_waiter_rows_do_not_hold_gate_test() ->
+    beamtalk_supervisor:ensure_init_gate_table(),
+    application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
+    {ok, Sup} = gen_event:start(),
+    Stray = {Sup, waiter, self(), make_ref()},
+    ets:insert(beamtalk_supervisor_init_gates, Stray),
+    try
+        SupTuple = {beamtalk_supervisor, 'BT3759Stray', undefined, Sup},
+        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple)),
+        ?assert(is_process_alive(Sup))
+    after
+        application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
+        ets:delete(beamtalk_supervisor_init_gates, Sup),
+        catch gen_event:stop(Sup)
+    end.

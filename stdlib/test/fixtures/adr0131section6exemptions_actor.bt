@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3745 (ADR 0131 §6): the actor-instance-method shapes in which a block
+// that writes an outer local still compiles, because codegen threads the
+// write back. Each method is exactly the syntactic shape a codegen
+// recognizer matches (see the EXEMPTION comments in
+// crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs).
+// adr0131section6exemptions_test.bt asserts each really threads the write;
+// `section6_exemptions_match_codegen_shapes` (beamtalk-core) asserts this
+// file compiles with no §6 error and that each near miss is rejected.
+
+Actor subclass: Adr0131Section6ExemptionsActor
+
+  ap: b => b value
+
+  // A bare block literal to a self-send, as a method-body statement
+  // (`detect_tier2_self_send`).
+  selfSendStatement =>
+    t := 0
+    self ap: [t := t + 1]
+    t
+
+  // ... as the value of a method-body assignment.
+  selfSendAssign =>
+    t := 0
+    r := self
+      ap: [
+        t := t + 1
+        7
+      ]
+    #[r, t]
+
+  // ... as a method-body `^`.
+  selfSendReturn =>
+    t := 0
+    ^self ap: [t := t + 1]
+
+  // A stored block sent `value` as method-body statements
+  // (`prescan_tier2_local_vars`, `is_tier2_value_call`).
+  storedValue =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    b value
+    t
+
+  // ... sent `value:` in a cascade.
+  storedValueCascade =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 1; value: 2
+    t

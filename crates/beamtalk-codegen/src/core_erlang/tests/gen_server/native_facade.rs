@@ -446,8 +446,8 @@ fn test_native_facade_class_methods_exported() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
     assert!(
-        code.contains("'class_connect:'/3"),
-        "Should export class method 'class_connect:'/3. Got:\n{code}"
+        code.contains("'class_connect:'/2"),
+        "Should export class method 'class_connect:'/2. Got:\n{code}"
     );
 }
 
@@ -728,7 +728,7 @@ fn test_bt_2998_native_class_with_own_class_new_keeps_it() {
     let code = super::codegen(src);
     let new_body = extract_core_fn(&code, "'new'/0 = fun").expect("should have new/0");
     assert!(
-        new_body.contains("'class_new'('undefined', 'undefined')"),
+        new_body.contains("'class_new'('undefined')"),
         "new/0 must delegate to the declared class method. Got:\n{new_body}"
     );
     assert!(

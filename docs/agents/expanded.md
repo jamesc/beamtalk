@@ -678,7 +678,7 @@ All Core Erlang codegen MUST use `Document` / `docvec!` API. Never use `format!(
 
 ### State-Threading Codegen — ThreadedIr + Verifier (ADR 0111)
 
-State threading — actor/instance `State`, class-var `ClassVars`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, class-var shadow-writes (ADR 0110), and Tier 2 stateful-block bodies — now lowers through `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`'s `ThreadedIr` type **as the emission input** (the real `Bind`/`Threaded`/`NlrCatch`/`Return` nodes built for a construct's mutation sequence are what `verify()` checks and `render()` turns into the `Document` emitted — not a side-channel fixture checked alongside a separately hand-rolled `Document`), and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3165) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
+State threading — actor/instance `State`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, and Tier 2 stateful-block bodies — now lowers through `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`'s `ThreadedIr` type **as the emission input** (the real `Bind`/`Threaded`/`NlrCatch`/`Return` nodes built for a construct's mutation sequence are what `verify()` checks and `render()` turns into the `Document` emitted — not a side-channel fixture checked alongside a separately hand-rolled `Document`), and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. Class variables are **not** a threading family (ADR 0130): they live in the class process's dictionary and are written in place through `beamtalk_class_vars`, so there is no `ClassVars` slot, shadow write or scope token to thread. The one class-variable construct in `ThreadedIr` is the catch boundary, `ThreadedStmt::OnDoCatch` (`snapshot/0` before the `try`, `restore/1` first in the non-NLR catch arm), checked by `VerifyError::CatchWithoutClassVarRestore`. When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3165) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
 
 #### A state-threading fix is general or it is not a fix
 
@@ -687,15 +687,16 @@ The BT-3666 → BT-3696 chain (late-bound class-side self-sends, 2026-09-30 to
 landed, and the next control-flow shape broke, because each fix added a
 site-specific reconciliation step (a pre-call sync, a post-scope refresh, a
 scope token, a three-way merge) instead of changing what the scope's lowering
-guarantees. When a change touches any state-threading lowering —
+guarantees. ADR 0130 deleted that machinery by moving class variables to a single
+home; the rule still governs the families that remain. When a change touches any state-threading lowering —
 `threaded_ir/`, `generator/version.rs`, `control_flow/*`, `gen_server/methods.rs`,
-`exception_handling.rs`, or the class-var paths of `dispatch_codegen.rs` — the
+`exception_handling.rs`, or the class-variable access and catch-boundary paths (`class_var_access.rs`, `dispatch_codegen.rs`) — the
 PR must show all of the following, and a reviewer should reject it if any is
 missing:
 
 1. **The invariant, stated for every scope kind.** Write, in the PR and in the
    governing ADR's amendment, what the change guarantees about the versioned
-   variable (`State`, `ClassVars`, `Self`) after each of: a top-level
+   variable (`State`, `Self`, and for class variables what an access and a catch boundary guarantee) after each of: a top-level
    statement, a conditional arm, a `Letrec` loop body
    (`whileTrue:`/`timesRepeat:`/`to:do:`), a `Foldl` loop body
    (`do:`/`collect:`/`inject:into:`/…), an `on:do:`/`ensure:` arm, a bare

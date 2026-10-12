@@ -16,7 +16,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
 
 
 'addAndDouble:'/2 = fun (Self, _x1) ->
-    let _seq2 = call 'bt@stdlib@transcript':'class_show:'('nil', ~{}~, _x1) in
+    let _seq2 = call 'bt@stdlib@transcript':'class_show:'('nil', _x1) in
     let _BinLeft3 = _x1 in let _BinRight4 = 2 in case call 'erlang':'is_number'(_BinLeft3) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft3, _BinRight4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '*', [_BinRight4]) <_BinOpNoMatch5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch5}) end
 
 'tripleStep:with:'/3 = fun (Self, _a6, _b7) ->
@@ -136,6 +136,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'initialize_assigns' => [],
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -172,6 +173,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'initialize_assigns' => [],
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

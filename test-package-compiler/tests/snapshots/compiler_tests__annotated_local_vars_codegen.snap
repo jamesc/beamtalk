@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, 'class_eventId:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
+module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'Snapshot', 'Value'}, {'AnnotatedLocalVarDemo', 'Value'}],
      'type' =
@@ -98,7 +98,7 @@ call 'maps':'get'('eventId', Self)
 
 'superclass'/0 = fun () -> 'Value'
 
-'class_eventId:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
+'class_eventId:'/2 = fun (_ClassSelf, SlotArg0) ->
     ~{'$beamtalk_class' => 'Snapshot', 'eventId' => SlotArg0}~
 
 
@@ -139,6 +139,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -186,6 +187,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'simpleAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'parametricAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'generic', 'Result', ['Integer', 'Error']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'unionAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
                 }~
@@ -223,6 +225,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

@@ -295,6 +295,8 @@ activate_module(Module, Opts) ->
                     % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(on_activate, Opts) of
                         {ok, Callback} ->
+                            %% bt-catcher-audit: not-applicable-no-block - Erlang loader callback
+                            %% (on_activate), not a Beamtalk block
                             try
                                 Callback({Module, SourcePath})
                             catch
@@ -514,6 +516,8 @@ load_single_app(AppName) ->
 try_register_class(Module, Domain) ->
     case erlang:function_exported(Module, register_class, 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
+            %% only
             try
                 case Module:register_class() of
                     ok ->

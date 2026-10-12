@@ -420,6 +420,8 @@ init/1, so all spawn paths (including supervised) call it automatically.
 register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
     case application:get_env(beamtalk_runtime, actor_spawn_callback) of
         {ok, CallbackMod} ->
+            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
+            %% Beamtalk block
             try
                 CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
             catch
@@ -907,6 +909,8 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
         Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
+                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
+                %% spawned watcher, no home entry
                 try
                     Block(Reason)
                 catch
@@ -1196,6 +1200,8 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
         Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
+                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
+                %% spawned watcher, no home entry
                 try
                     Block(Reason)
                 catch
@@ -1714,6 +1720,8 @@ not implement it — so `isRemote` never crashes on a well-formed actor.
 -spec is_remote(pid(), fun(() -> term())) -> boolean().
 is_remote(ActorPid, AskNode) ->
     NodeName =
+        %% bt-catcher-audit: not-applicable-other-process - AskNode is a gen_server:call to the
+        %% actor
         try AskNode() of
             #{'$beamtalk_class' := 'Node', name := Name} when is_atom(Name) -> Name;
             _NotANode -> node(ActorPid)
@@ -3100,6 +3108,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
     case maps:find(Selector, Methods) of
         {ok, Fun} when is_function(Fun, 4) ->
             %% New-style method: Fun(Selector, Args, Self, State)
+            %% bt-catcher-audit: not-applicable-other-process - method runs in the actor process,
+            %% no class home entry
             try
                 Fun(Selector, Args, Self, State)
             catch
@@ -3121,6 +3131,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
+            %% bt-catcher-audit: not-applicable-other-process - method runs in the actor process,
+            %% no class home entry
             try
                 Fun(Args, State)
             catch
@@ -3165,6 +3177,8 @@ handle_dnu(Selector, Args, Self, State) ->
 -spec call_dnu_handler(function(), list(), #beamtalk_object{}, map(), 2 | 3) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
+    %% bt-catcher-audit: not-applicable-other-process - DNU handler runs in the actor process, no
+    %% class home entry
     try
         DnuFun(DnuArgs, Self, State)
     catch
@@ -3174,6 +3188,8 @@ call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
             wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason, Stacktrace)
     end;
 call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
+    %% bt-catcher-audit: not-applicable-other-process - DNU handler runs in the actor process, no
+    %% class home entry
     try
         DnuFun(DnuArgs, State)
     catch

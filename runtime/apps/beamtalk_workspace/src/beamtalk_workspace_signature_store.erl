@@ -213,6 +213,8 @@ since an unrecognised failure is more likely a real bug than routine absence.
 """.
 -spec seed_from_meta(binary(), binary(), side()) -> maybe_signature().
 seed_from_meta(ClassName, Selector, Side) ->
+    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal getter, no
+    %% block
     try
         ClassAtom = binary_to_existing_atom(ClassName, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),

@@ -2,13 +2,13 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'class_foo'/2, 'class_bar'/2]
+module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'class_foo'/1, 'class_bar'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'SealedSelfSendClass', 'Object'}],
      'spec' =
-        [{{'class_foo', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}, {'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}],
+        [{{'class_foo', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}],
      'spec' =
-        [{{'class_bar', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}, {'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}]]
+        [{{'class_bar', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}]]
 
 'new'/0 = fun () ->
     ~{'$beamtalk_class' => 'SealedSelfSendClass'}~
@@ -65,11 +65,11 @@ module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, '
 'superclass'/0 = fun () -> 'Object'
 
 
-'class_foo'/2 = fun (ClassSelf, ClassVars) ->
+'class_foo'/1 = fun (ClassSelf) ->
     1
 
-'class_bar'/2 = fun (ClassSelf, ClassVars) ->
-    let _CMR1 = call 'self_send_sealed_class':'class_foo'(ClassSelf, ClassVars) in let _Unwrapped2 = case _CMR1 of <{'class_var_result', _WR3, _}> when 'true' -> _WR3 <_PR4> when 'true' -> _PR4 end in _Unwrapped2
+'class_bar'/1 = fun (ClassSelf) ->
+    let _Effect1 = call 'self_send_sealed_class':'class_foo'(ClassSelf) in _Effect1
 
 'register_class'/0 = fun () ->
     try
@@ -108,6 +108,7 @@ module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, '
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -144,6 +145,7 @@ module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, '
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

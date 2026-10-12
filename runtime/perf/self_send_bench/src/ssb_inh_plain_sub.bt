@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3700: subclass of SsbInhBase that overrides nothing, so a self-send reached
+// through it resolves to the inherited definition.
+
+SsbInhBase subclass: SsbInhPlainSub

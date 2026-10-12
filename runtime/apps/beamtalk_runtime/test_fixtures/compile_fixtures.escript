@@ -130,6 +130,10 @@ main([]) ->
         %% hand-written __methods__ fixture beamtalk_dist_wire_tests.erl's
         %% BT-3601 suite already covers.
         "wire_block_actor",
+        %% BT-3692 follow-up - beamtalk_actor_safe_dispatch_tests: an open
+        %% actor whose methods return `self`, to assert Self identity through
+        %% safe_dispatch/4 across a process boundary.
+        "self_identity_actor",
         %% BT-3602 (ADR 0126 §5.3, Phase 4) - beamtalk_dist_shape_skew_tests'
         %% NodeShapeSkew fixtures: a class version-skewed on the peer via a
         %% delegate-proxy stub (shape_skew_cart), one reloaded the same way

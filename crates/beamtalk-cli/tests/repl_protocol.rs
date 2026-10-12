@@ -278,6 +278,8 @@ struct ProcessManager {
 ///
 /// When `cover` is true, instruments runtime modules with Erlang cover and
 /// polls for a signal file to trigger graceful shutdown with cover export.
+/// The export is written to `<export>.tmp` and renamed into place, so a BEAM
+/// killed mid-export can never leave a truncated file at `<export>` (BT-3785).
 /// The non-cover path delegates to the shared `repl_startup` module
 /// so the E2E startup matches production exactly.
 fn beam_eval_cmd(
@@ -313,8 +315,12 @@ fn beam_eval_cmd(
                  end \
              end, \
              WaitFun(), \
-             case cover:export(\"{export}\") of \
-                 ok -> ok; \
+             case cover:export(\"{export}.tmp\") of \
+                 ok -> \
+                     case file:rename(\"{export}.tmp\", \"{export}\") of \
+                         ok -> ok; \
+                         RenErr -> io:format(standard_error, \"Cover export rename failed: ~p~n\", [RenErr]), halt(1) \
+                     end; \
                  ExpErr -> io:format(standard_error, \"Cover export failed: ~p~n\", [ExpErr]), halt(1) \
              end, \
              cover:stop(), \
@@ -831,8 +837,9 @@ impl ProcessManager {
                 let signal = runtime.join("_build/test/cover/.e2e_stop");
                 eprintln!("E2E: Signaling cover export...");
                 let _ = fs::write(&signal, "stop");
-                // Wait up to 30s for BEAM to export and call init:stop()
-                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                // Wait for BEAM to export and call init:stop(); the export is slow
+                // on a loaded runner, so use the cover-mode timeout (120s).
+                let deadline = std::time::Instant::now() + repl_timeout();
                 let mut clean_exit = false;
                 loop {
                     match child.try_wait() {
@@ -855,8 +862,15 @@ impl ProcessManager {
                 if clean_exit {
                     eprintln!("E2E: Cover data exported.");
                 } else {
+                    // A force-killed BEAM may have died mid-export. The export goes to a
+                    // temp file and is renamed only when complete, so drop the temp file
+                    // and any stale export; the merge step then never sees a partial file.
+                    let export = runtime.join("_build/test/cover/e2e.coverdata");
+                    let _ = fs::remove_file(export.with_extension("coverdata.tmp"));
+                    let _ = fs::remove_file(&export);
                     eprintln!(
-                        "E2E: Warning - cover data may be incomplete (BEAM was force-killed)."
+                        "E2E: Warning - BEAM was force-killed before cover export finished; \
+                         discarded the partial E2E coverdata."
                     );
                 }
             } else {

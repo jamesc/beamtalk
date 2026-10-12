@@ -11,10 +11,6 @@
 //! - [`primitives`] — primitive selector and intrinsic codegen
 //! - [`branch_context`] — `with_branch_context`'s per-prefix
 //!   save/reset/restore discipline (state/`class_vars`/self)
-//! - [`class_var_shadow_contract`] — ADR 0111 Phase D: the
-//!   cross-boundary ADR 0110 shadow-write key conformance fixture, asserted
-//!   against `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` and the
-//!   `beamtalk_class_dispatch_tests.erl` `EUnit` suite
 //! - [`late_reconcile_conformance`] — ADR 0124 §8/B9 (BT-3556): the
 //!   cross-boundary `late`-slot reconcile decision-table fixture, asserted
 //!   against `beamtalk_shape_migration_tests.erl`
@@ -166,9 +162,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
 
 mod analysis_handoff;
 mod branch_context;
-mod class_var_probe;
-mod class_var_scope_tokens;
-mod class_var_shadow_contract;
+mod closed_fun_state_version;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;
@@ -179,5 +173,10 @@ mod nlr;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod sibling_snapshot;
 mod supervisor;
+mod threaded_locals;
+mod threaded_locals_agreement;
 mod trait_flattening;
+mod verifier_surfacing;
+mod while_condition_class_method;

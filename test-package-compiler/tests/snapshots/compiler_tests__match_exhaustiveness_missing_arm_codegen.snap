@@ -128,6 +128,7 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -164,6 +165,7 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

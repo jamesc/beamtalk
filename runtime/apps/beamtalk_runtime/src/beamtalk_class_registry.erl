@@ -40,14 +40,13 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_module_table/0,
     ensure_methods_table/0,
     ensure_class_warnings_table/0,
-    heir_option/0,
-    maybe_set_heir/1,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     drain_class_warnings_by_qualified_names/1,
     extract_package_from_module/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
+    clear_pending_load_errors_by_names/1,
     validate_class_update/3,
     is_stdlib_module/1,
     class_name_for_module/1,
@@ -79,6 +78,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
     class_state_snapshot/1,
+    class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1
 ]).
 
@@ -301,7 +301,7 @@ ensure_class_warnings_table() ->
                         public,
                         named_table,
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -309,7 +309,7 @@ ensure_class_warnings_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_warnings),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_warnings),
             ok
     end.
 
@@ -442,6 +442,30 @@ drain_pending_load_errors_by_names(ClassNames) ->
                 fun(ClassName) ->
                     [{CN, Err} || {CN, Err} <- ets:take(beamtalk_pending_load_errors, ClassName)]
                 end,
+                ClassNames
+            )
+    end.
+
+-doc """
+Discard any pending load errors for the given class names (BT-3773).
+Called by every loader immediately before its own `code:load_binary/3`, so the
+drain that follows a failed load only sees errors parked by that attempt, assuming
+no other process loads the same class at the same time (the clear, load and drain
+sequence is not atomic across concurrent loaders; the worst case is a degraded
+error detail, never half-applied state).
+Paths that trigger the same `-on_load` gate but never drain
+(`beamtalk_module_activation`, code-server autoload) otherwise leave an entry
+behind that a later, unrelated failure of the same class would be blamed on.
+Covers every parked kind (`abi_mismatch`, `stdlib_shadowing`).
+""".
+-spec clear_pending_load_errors_by_names([atom()]) -> ok.
+clear_pending_load_errors_by_names(ClassNames) ->
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined ->
+            ok;
+        _ ->
+            lists:foreach(
+                fun(ClassName) -> ets:delete(beamtalk_pending_load_errors, ClassName) end,
                 ClassNames
             )
     end.
@@ -592,7 +616,7 @@ ensure_pending_errors_table() ->
                         public,
                         named_table,
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -600,68 +624,8 @@ ensure_pending_errors_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_pending_load_errors),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_pending_load_errors),
             ok
-    end.
-
-%%====================================================================
-%% ETS Ownership Helpers
-%%====================================================================
-
--doc """
-Return an ETS heir option for table survival across process crashes.
-
-ETS tables created by a transient process (e.g. a class gen_server)
-are destroyed when that process dies.  Using `{heir, Pid, Data}` hands the
-table to a long-lived process instead of deleting it.
-
-We pick the runtime supervisor (`beamtalk_runtime_sup`) if it is alive.
-If the supervisor is not yet running (early bootstrap, tests), we omit
-the heir option — the table will be owned by the caller and recreated
-if needed via the existing ensure_* idempotent guards.
-""".
--spec heir_option() -> [tuple()].
-heir_option() ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined -> [];
-        Pid -> [{heir, Pid, undefined}]
-    end.
-
--doc """
-Retroactively set the heir on an existing table if one is not set.
-
-Tables created early in boot (from `beamtalk_runtime_app:start/2`)
-run before the supervisor is alive, so `heir_option/0` returns `[]`.
-Subsequent `ensure_*` calls (e.g., from `beamtalk_object_class:init/1`)
-invoke this to set the heir once the supervisor is available.
-Only the table owner can call `ets:setopts/2`, so we guard on ownership.
-""".
--spec maybe_set_heir(atom()) -> ok.
-maybe_set_heir(Table) ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined ->
-            ok;
-        SupPid ->
-            case ets:info(Table, heir) of
-                SupPid ->
-                    %% Already set correctly.
-                    ok;
-                _ ->
-                    %% Only the owner can change heir. If we're not the owner,
-                    %% skip silently — the owner will set it on their next ensure call.
-                    case ets:info(Table, owner) of
-                        Owner when Owner =:= self() ->
-                            try
-                                ets:setopts(Table, {heir, SupPid, undefined})
-                            catch
-                                %% Heir PID died between whereis and setopts (TOCTOU).
-                                error:badarg -> ok
-                            end,
-                            ok;
-                        _ ->
-                            ok
-                    end
-            end
     end.
 
 %%====================================================================
@@ -798,7 +762,7 @@ ensure_pid_table() ->
                         public,
                         named_table,
                         {read_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -806,7 +770,7 @@ ensure_pid_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_pids),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_pids),
             ok
     end.
 
@@ -870,7 +834,7 @@ ensure_class_state_table() ->
                         public,
                         named_table,
                         {read_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -878,7 +842,7 @@ ensure_class_state_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_state_snapshot),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_state_snapshot),
             ok
     end.
 
@@ -905,16 +869,30 @@ Never messages `Pid` — safe to call from inside another process's `init/1`
 even when `Pid` itself is blocked waiting on that very call to return.
 """.
 -spec class_state_snapshot(pid() | undefined) -> map().
-class_state_snapshot(undefined) ->
-    #{};
 class_state_snapshot(Pid) ->
+    case class_state_snapshot_lookup(Pid) of
+        {ok, ClassVars} -> ClassVars;
+        not_found -> #{}
+    end.
+
+-doc """
+Like `class_state_snapshot/1`, but tells "no row for this pid" (`not_found`:
+the table is absent, or a restarted class process is registered but has not yet
+recorded its snapshot) apart from "the row is an empty map" (`{ok, #{}}`).
+`beamtalk_class_vars` mirror reads use it to raise `class_state_unreachable`
+for the former instead of reading an empty map.
+""".
+-spec class_state_snapshot_lookup(pid() | undefined) -> {ok, map()} | not_found.
+class_state_snapshot_lookup(undefined) ->
+    not_found;
+class_state_snapshot_lookup(Pid) ->
     case ets:info(beamtalk_class_state_snapshot) of
         undefined ->
-            #{};
+            not_found;
         _ ->
             case ets:lookup(beamtalk_class_state_snapshot, Pid) of
-                [{_, ClassVars}] -> ClassVars;
-                [] -> #{}
+                [{_, ClassVars}] -> {ok, ClassVars};
+                [] -> not_found
             end
     end.
 
@@ -979,7 +957,7 @@ ensure_loaded_classes_table() ->
                         named_table,
                         {read_concurrency, true},
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -987,7 +965,7 @@ ensure_loaded_classes_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_loaded_classes),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_loaded_classes),
             ok
     end.
 
@@ -1120,7 +1098,7 @@ ensure_backing_module_index_table() ->
                         named_table,
                         {read_concurrency, true},
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -1128,7 +1106,7 @@ ensure_backing_module_index_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_backing_module_index),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_backing_module_index),
             ok
     end.
 
@@ -1260,6 +1238,8 @@ restart_class(ClassName) ->
             Meta =
                 case erlang:function_exported(Module, '__beamtalk_meta', 0) of
                     true ->
+                        %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
+                        %% literal getter, no block
                         try Module:'__beamtalk_meta'() of
                             M when is_map(M) -> M;
                             _ -> #{}

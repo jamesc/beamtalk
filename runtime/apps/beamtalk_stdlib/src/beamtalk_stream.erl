@@ -496,6 +496,8 @@ Uses catch to handle double-close and missing finalizer gracefully.
 """.
 -spec call_finalizer(t()) -> ok.
 call_finalizer(#{finalizer := Finalizer}) when is_function(Finalizer, 0) ->
+    %% bt-catcher-audit: not-applicable-no-block - the only finalizer is fun() -> file:close(Fd)
+    %% end
     try
         Finalizer()
     catch

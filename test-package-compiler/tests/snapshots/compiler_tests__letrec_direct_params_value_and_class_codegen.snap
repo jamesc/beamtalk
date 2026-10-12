@@ -144,6 +144,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -191,6 +192,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'countDownFrom:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
                 }~
@@ -228,6 +230,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

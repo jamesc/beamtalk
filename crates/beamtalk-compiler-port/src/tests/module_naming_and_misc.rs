@@ -402,3 +402,22 @@ fn standalone_method_definition_reports_dynamic_when_unannotated() {
         Some(&Term::from(List::from(Vec::<Term>::new())))
     );
 }
+
+/// BT-3724 (ADR 0111 amendment): the verifier's `internal:` diagnostics are
+/// the only codegen output appended to a response's warning messages.
+#[test]
+fn with_verifier_warnings_appends_internal_messages() {
+    use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+
+    let verifier = Diagnostic::warning("internal: x: [Foo]", Span::new(0, 1))
+        .with_category(DiagnosticCategory::InternalVerifier);
+    let all = crate::respond::with_verifier_warnings(&["existing".to_string()], &[verifier]);
+    assert_eq!(
+        all,
+        vec!["existing".to_string(), "internal: x: [Foo]".to_string()]
+    );
+    assert_eq!(
+        crate::respond::with_verifier_warnings(&["existing".to_string()], &[]),
+        vec!["existing".to_string()]
+    );
+}

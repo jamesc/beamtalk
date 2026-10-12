@@ -13,9 +13,11 @@
 
 use std::collections::HashMap;
 
-use super::super::{CoreErlangGenerator, NlrBoundary};
+use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RebindFrame,
+    RebindFrameKind, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -47,15 +49,6 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `core_lint` unbound-variable error; the gain is a correct,
     /// centralized, source-attributed diagnosis.)
     ThreadingModeUnpackMismatch { mode: ThreadingMode, at: Span },
-
-    /// The ADR 0110 CONTRACT check — regression-pinning, not counterfactual
-    /// detection (see ADR §Verifier honesty). A class-var `Bind` at frame
-    /// depth 0 (method top frame) inside a method whose body can relay a
-    /// foreign NLR (a `NlrCatch` with `boundary: ClassMethod { has_class_vars:
-    /// true }` present) MUST have `shadow_write: true`. Fires if a future
-    /// emission path forgets the shadow write ADR 0110's fix depends on, or
-    /// if a new mutation site is added without it.
-    ShadowWriteMissing { mutated: VersionedVar, at: Span },
 
     /// Invariant class 1: a [`ThreadedStmt::TupleAccUnpack`] node
     /// (the flat positional-unpack accumulator discipline) appeared outside
@@ -90,9 +83,9 @@ pub(in crate::core_erlang) enum VerifyError {
     /// variable to reference — `TupleAcc` mode is unconditionally
     /// unavailable there, and this fires if a future change to
     /// `select_tuple_acc`'s guard ordering ever lets `use_tuple_acc` become
-    /// `true` in a `ValueType` context. Regression-pinning, like
-    /// `ShadowWriteMissing` (see ADR §Verifier honesty) — `select_tuple_acc`'s
-    /// own early-return already makes this unreachable today.
+    /// `true` in a `ValueType` context. Regression-pinning (see ADR
+    /// §Verifier honesty) — `select_tuple_acc`'s own early-return already
+    /// makes this unreachable today.
     ///
     /// `#[cfg(test)]`: this variant's sole constructor
     /// ([`verify_tuple_acc_value_type_exclusion`]) is itself test-only —
@@ -132,20 +125,195 @@ pub(in crate::core_erlang) enum VerifyError {
     /// closure body — to surface a user-facing diagnostic built from this
     /// error rather than from a second predicate.
     ///
-    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`], which has
-    /// no production caller yet — see [`CloseContext`].
+    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`].
     ///
-    /// The "genuine boundary such as a Tier 1 closure body" case
-    /// above is exactly the class-method self-send-in-a-bare-block scenario
-    /// `check_no_unsafe_class_method_self_sends` (`expressions.rs`) already
-    /// diagnoses from a separate, pre-flight static predicate — replacing
-    /// that diagnostic with this variant (surfaced via `close()`
-    /// at `close_threaded_value_doc`, `util.rs`) is blocked on a
-    /// real signal-propagation gap, not a small wiring change. See that
-    /// predicate's own doc comment for the full finding; still no
-    /// production caller.
+    /// No production caller yet — see [`CloseContext`].
     #[allow(dead_code)]
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
+
+    /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch
+    /// boundary, and its [`ThreadedStmt::OnDoCatch`] node does not honour the
+    /// obligation — the entry `let Snap = beamtalk_class_vars:snapshot() in`
+    /// is missing, the non-NLR clause does not begin with
+    /// `beamtalk_class_vars:restore(Snap)`, or it is missing, or the two
+    /// `$bt_nlr` pass-through clauses (3-tuple and actor 4-tuple) are not both
+    /// ordered before it. A wrong restore is wrong-value Core Erlang, not an
+    /// unbound variable: an error keeps the writes made inside the protected
+    /// region, or a `^` throw discards writes it must keep. See
+    /// [`CatchRestoreDefect`].
+    ///
+    /// **What it guards:** today one builder (`on_do_catch_boundary`) makes
+    /// every node, verifies it as a one-element IR and renders it at once, so
+    /// a well-formed builder cannot trip this. The check exists for a second
+    /// constructor, or an edit to that builder, that drops either half; the
+    /// `catch_boundary.rs` tests build such nodes directly.
+    CatchWithoutClassVarRestore {
+        defect: CatchRestoreDefect,
+        at: Span,
+    },
+
+    /// A compiled `on:do:`'s [`ThreadedStmt::OnDoCatch`] opens the exception
+    /// class filter ([`CatchStep::ClassFilter`]) but does not close it with
+    /// its handler arm followed by [`CatchStep::FilterMiss`], the `'false'`
+    /// re-raise and the exhaustive wildcard clause. A filter `case` with no
+    /// wildcard is not provably exhaustive to the Core Erlang compiler, and
+    /// when the `on:do:` sits inside another protected region `erlc` rejects
+    /// the module with `ambiguous_catch_try_state` (BT-3718). Every `on:do:`
+    /// in any nesting position closes its filter, so the check is per node.
+    CatchFilterNotClosed { at: Span },
+
+    /// BT-3725 (the verifier backing for the BT-3694 fix): a
+    /// [`ScopeKind::ClassMethod`] scope opens a `StateAcc` loop that carries no
+    /// threaded local, or threads the actor `State` / value-type `Self` family.
+    /// A class method has no `State` parameter and threads no family at all
+    /// (ADR 0130 §3: a class-variable write is an in-place `put` into the class
+    /// process and a self-send rebinds nothing), so the only thing a
+    /// class-method `StateAcc` loop may carry is a map of threaded *locals*,
+    /// seeded from a fresh `maps:new()`. A `StateAcc` loop with no locals can
+    /// only be seeded from the ambient actor `State` — unbound in a class
+    /// method, which `erlc` rejects as `unbound variable 'State'` (BT-3694).
+    /// See [`ClassMethodDefect`].
+    ///
+    /// ADR 0131 §3/§4 extends the rule to [`ScopeKind::ValueType`]: a
+    /// value-type method has no `State` parameter either, so a method-level
+    /// `State` version is the same unbound-`State` bug there (o3/o12/s2 in
+    /// value-type methods). Its own `SelfVt` family is legitimate.
+    ActorStateInClassMethod { defect: ClassMethodDefect, at: Span },
+
+    /// ADR 0131 §4: a [`ThreadedStmt::ConstructTuple`] whose `threads` lists
+    /// `local` is not followed, in the same frame, by a
+    /// [`ThreadedStmt::LocalRebind`] for `local` before the frame ends or
+    /// before anything other than a family `Bind` (a `Direct` step of the
+    /// `State`/`SelfVt` family: the extraction that legitimately reads the
+    /// carrier first; its value is an opaque `Doc`, so which carrier it reads
+    /// is not checked) or a
+    /// [`ThreadedStmt::DiscardLocals`] at a `MethodBody` frame — so the
+    /// construct's write to `local` is lost (o4, o7, o8, s2, s9, actor
+    /// o3/o12). The opaque statement that follows may be the consumer's read
+    /// of `element(1, carrier)`; the verifier cannot see inside a
+    /// `Statement`, so it treats every one as a potential carrier read.
+    ///
+    /// Also reported for a `LocalRebind` of `carrier` that its construct's
+    /// `threads` does not list (or with no construct of that carrier
+    /// open): the transitive-closure gap of ADR 0131 §1, where a frame
+    /// rebinds `t` while the construct that carries it out omits `t`.
+    /// Applied at every nesting level. A `^` thrown from inside the construct
+    /// skips its rebinds by design; this is defined on the fall-through path.
+    ThreadedLocalDropped {
+        local: String,
+        carrier: String,
+        at: Span,
+    },
+
+    /// ADR 0131 §4: a [`ThreadedStmt::LocalRebind`] lowered to a shape
+    /// ([`RebindLowering::shape`](super::ir::RebindLowering::shape),
+    /// `lowered_as`) that ADR 0131 §2's table
+    /// ([`RebindShape::for_frame`]) does not allow for its enclosing frame's
+    /// mode and the local's membership in that frame's `threads`: a plain
+    /// `let` for a member of a `StateAcc` frame (the write never reaches the
+    /// map the frame threads out), a `Put` for a non-member (a stray
+    /// `__local__` key, persisted into an actor's `gen_server` `State` —
+    /// the BT-2717 class), a `Gensym` chain entry for a local that is not a
+    /// loop parameter. The enclosing frame is read off the node that
+    /// actually encloses the rebind ([`RebindFrame::of`]), exactly as the
+    /// lowering reads it.
+    LocalRebindModeMismatch {
+        frame: FrameId,
+        mode: RebindFrameKind,
+        member: bool,
+        lowered_as: RebindShape,
+        at: Span,
+    },
+
+    /// ADR 0131 §2: a [`ThreadedStmt::LocalRebind`]'s recorded `frame` is not
+    /// the frame of the node that encloses it — the rebind was lowered
+    /// against one frame's mode and spliced into another, so its shape (and
+    /// any `LoopParam`/`MapPut` version step) belongs to the wrong frame.
+    LocalRebindFrameMismatch {
+        local: String,
+        recorded: FrameId,
+        enclosing: FrameId,
+        at: Span,
+    },
+
+    /// ADR 0131 §1a: sibling `at` of a sequenced send reads outer local
+    /// `local` in place — compiled by its parent after every sibling's
+    /// prelude has been spliced, so by `local`'s post-rebind identity —
+    /// while a [`ThreadedStmt::LocalRebind`] for `local` sits in a *later*
+    /// sibling's prelude. Source order (and Pharo) says the earlier sibling
+    /// reads the value before the rebind: `t + ([t := t + 1. 1] on: Error
+    /// do: [:e | 0])` is `0 + 1`. The fix is `sequence_children`'s snapshot
+    /// of such a sibling to a `Tmp`; see [`verify_sibling_reads`].
+    LocalReadAfterSiblingRebind { local: String, at: Span },
+}
+
+/// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
+/// scope may thread (the per-scope-kind invariant [`verify_in_scope`]
+/// enforces, BT-3725).
+///
+/// (`State` inside a threading frame is the `StateAcc` map's version,
+/// legitimate in a class method — see `VerifyWalk::check_class_method_family`.)
+///
+/// | scope         | method-level `State` | `SelfVt` family      | `StateAcc` loop with no locals |
+/// |---------------|----------------------|----------------------|--------------------------------|
+/// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
+/// | `ValueType`   | forbidden            | not constrained here | not constrained here           |
+/// | `Instance`    | not constrained here | not constrained here | not constrained here           |
+///
+/// **What enforces it:** exactly the entry points that take a `ScopeKind` —
+/// [`verify_in_scope`], `verify_body_with_opaque_version_gaps` and
+/// `verify_simple_bind` — which every production lowering site reaches via
+/// `CoreErlangGenerator::threaded_scope` / `verify_threaded_ir`. Bare
+/// [`verify`] is `Instance`-scoped and enforces nothing here; it is used only
+/// by tests and test-local wrappers.
+///
+/// `Instance` (actor instance, REPL and every non-method fixture) is
+/// deliberately unconstrained by this check: which of `State`/`SelfVt` is
+/// eligible there is decided by `CoreErlangGenerator::eligible_families`
+/// (ADR 0122), not re-derived here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ScopeKind {
+    /// A class-side method body (`CoreErlangGenerator::in_class_method`).
+    ClassMethod,
+    /// ADR 0131 §3: a value-type instance method body
+    /// (`CodeGenContext::ValueType`, not a class method). Threads `SelfVt`
+    /// when it writes a field, never the actor `State` family.
+    ValueType,
+    /// Any other scope.
+    Instance,
+}
+
+/// What is wrong with a class-method scope
+/// ([`VerifyError::ActorStateInClassMethod`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ClassMethodDefect {
+    /// A `StateAcc` loop whose fallback reason is
+    /// [`StateAccFallbackReason::NoThreadedLocals`]: it carries nothing, so its
+    /// seed is the ambient actor `State` — unbound in a class method.
+    StateAccLoopWithoutLocals,
+    /// A versioned `Bind` / `Return` of the actor `State` family produced at
+    /// method level (outside every threading frame, where `State` is not the
+    /// `StateAcc` map), or of `SelfVt` anywhere: a class method threads no
+    /// family.
+    FamilyVersion(VersionPrefix),
+}
+
+/// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
+/// ([`VerifyError::CatchWithoutClassVarRestore`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchRestoreDefect {
+    /// The entry half is missing: no `let Snap = beamtalk_class_vars:snapshot()
+    /// in` before the `try`, so the restore reads an unbound variable.
+    NoSnapshotEntry,
+    /// There is no non-NLR clause at all.
+    NoNonNlrClause,
+    /// The non-NLR clause does not begin with the class-variable restore.
+    RestoreNotFirst,
+    /// The restore reads a variable other than the node's snapshot variable.
+    RestoreReadsWrongSnapshot,
+    /// An NLR pass-through shape is missing before the non-NLR clause (it is
+    /// absent, or ordered after it): a `^` of that shape would be restored.
+    NlrArmNotBeforeRestore(NlrThrowShape),
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -156,9 +324,23 @@ pub(in crate::core_erlang) enum VerifyError {
 /// result as a hard failure; release callers must degrade a non-empty result
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
 /// (No call site does either yet — see module docs §Status.)
+///
+/// `Instance`-scoped, so it enforces no per-[`ScopeKind`] invariant; no
+/// production code calls it (they use [`verify_in_scope`]), hence test-only.
+#[cfg(test)]
 pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
-    let has_class_vars_nlr = contains_class_var_nlr_catch(ir);
+    verify_in_scope(ir, ScopeKind::Instance)
+}
 
+/// [`verify`] for IR lowered in `scope`: additionally enforces the
+/// per-[`ScopeKind`] family invariant ([`VerifyError::ActorStateInClassMethod`]).
+/// Every production caller reaches this with `CoreErlangGenerator::threaded_scope`
+/// — via `CoreErlangGenerator::verify_threaded_ir`, or by passing
+/// `threaded_scope()` to `verify_body_with_opaque_version_gaps` / `verify_simple_bind`.
+pub(in crate::core_erlang) fn verify_in_scope(
+    ir: &[ThreadedStmt],
+    scope: ScopeKind,
+) -> Vec<VerifyError> {
     let mut producers: HashMap<VersionedVar, usize> = HashMap::new();
     let mut consumers: HashMap<VersionedVar, usize> = HashMap::new();
     collect_producer_consumer_counts(ir, &mut producers, &mut consumers);
@@ -195,43 +377,15 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
 
     let mut walk = VerifyWalk {
         producers: &producers,
-        has_class_vars_nlr,
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
-        shadow_write_eligible_stack: vec![true],
+        rebind_frames: Vec::new(),
+        scope,
         errors: &mut errors,
     };
     walk.walk(ir);
 
     errors
-}
-
-/// Recursively scans `ir` for an `NlrCatch` whose boundary is
-/// `ClassMethod { has_class_vars: true }` — the precondition for
-/// [`VerifyError::ShadowWriteMissing`].
-fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
-    ir.iter().any(|stmt| match stmt {
-        ThreadedStmt::NlrCatch { boundary, .. } => {
-            matches!(
-                boundary,
-                NlrBoundary::ClassMethod {
-                    has_class_vars: true
-                }
-            )
-        }
-        ThreadedStmt::Threaded { body, .. } => contains_class_var_nlr_catch(body),
-        // ADR 0118 phase 3: `condition` scans too — a class-var
-        // NLR catch nested there is exactly as relevant to `ShadowWriteMissing`
-        // as one nested in `body`, even though no real lowering produces one
-        // (a while condition has no NLR boundary of its own).
-        ThreadedStmt::ConditionalLoop {
-            condition, body, ..
-        } => contains_class_var_nlr_catch(condition) || contains_class_var_nlr_catch(body),
-        ThreadedStmt::Bind { .. }
-        | ThreadedStmt::Return(..)
-        | ThreadedStmt::TupleAccUnpack { .. }
-        | ThreadedStmt::Statement(..) => false,
-    })
 }
 
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
@@ -249,7 +403,11 @@ fn collect_producer_consumer_counts(
                 *producers.entry(target.clone()).or_insert(0) += 1;
                 *consumers.entry(source.clone()).or_insert(0) += 1;
             }
-            ThreadedStmt::Threaded { body, .. } => {
+            // ADR 0131 §2: the `MethodBody`/`BranchArm` frame nodes scope
+            // their body exactly like a `Threaded` node does.
+            ThreadedStmt::Threaded { body, .. }
+            | ThreadedStmt::MethodBody { body, .. }
+            | ThreadedStmt::BranchArm { body, .. } => {
                 collect_producer_consumer_counts(body, producers, consumers);
             }
             // ADR 0118 phase 3: `condition`'s own Binds are
@@ -271,38 +429,181 @@ fn collect_producer_consumer_counts(
                     *producers.entry(target.clone()).or_insert(0) += 1;
                 }
             }
+            // ADR 0131 §2: a `LoopParam`/`MapPut` rebind is one version step,
+            // counted like a `Bind`'s.
+            ThreadedStmt::LocalRebind { lowering, .. } => {
+                if let Some((source, target)) = lowering.version_step() {
+                    *producers.entry(target.clone()).or_insert(0) += 1;
+                    *consumers.entry(source.clone()).or_insert(0) += 1;
+                }
+            }
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Return(..)
-            | ThreadedStmt::Statement(..) => {}
+            | ThreadedStmt::Statement(..)
+            | ThreadedStmt::OnDoCatch { .. }
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
 }
 
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
-/// [`VerifyError::UnboundVersion`], [`VerifyError::ThreadingModeUnpackMismatch`],
-/// and [`VerifyError::ShadowWriteMissing`] (`NonLinearVersion` is fully
-/// determined by the first pass's counts and checked before this walk runs).
+/// [`VerifyError::UnboundVersion`] and [`VerifyError::ThreadingModeUnpackMismatch`]
+/// (`NonLinearVersion` is fully determined by the first pass's counts and
+/// checked before this walk runs).
 struct VerifyWalk<'a> {
     producers: &'a HashMap<VersionedVar, usize>,
-    has_class_vars_nlr: bool,
     frame_stack: Vec<FrameId>,
     mode_stack: Vec<ThreadingMode>,
-    /// ADR 0111 Addendum 9, Question 1: parallel to `frame_stack`, seeded
-    /// `[true]` (a method's own top level is always shadow-write-eligible),
-    /// pushed/popped in lockstep in the `Threaded | ConditionalLoop` arm of
-    /// `walk_stmt`, AND-combined with the parent's current top for
-    /// defense-in-depth on hand-built fixtures (correct lowering never needs
-    /// the AND — a nested node's own `block_depth`-derived flag already
-    /// encodes total nesting depth). `ShadowWriteMissing`'s gate reads this
-    /// stack's top instead of `target.frame == FrameId::ROOT`.
-    shadow_write_eligible_stack: Vec<bool>,
+    /// ADR 0131 §2: the frame nodes enclosing the current statement
+    /// ([`RebindFrame::of`] each `MethodBody`/`BranchArm`/`Threaded`/
+    /// `ConditionalLoop`), innermost last. Empty means the implicit non-REPL
+    /// method root ([`RebindFrame::implicit_root`]).
+    rebind_frames: Vec<RebindFrame>,
+    scope: ScopeKind,
     errors: &'a mut Vec<VerifyError>,
 }
 
 impl VerifyWalk<'_> {
     fn walk(&mut self, stmts: &[ThreadedStmt]) {
+        self.check_construct_rebinds(stmts);
         for stmt in stmts {
             self.walk_stmt(stmt);
+        }
+    }
+
+    /// The frame node enclosing the statement being walked.
+    fn enclosing_frame(&self) -> RebindFrame {
+        self.rebind_frames
+            .last()
+            .cloned()
+            .unwrap_or_else(RebindFrame::implicit_root)
+    }
+
+    /// Walks a frame node's children with `node` pushed as the enclosing
+    /// [`RebindFrame`].
+    fn in_frame(&mut self, node: &ThreadedStmt, f: impl FnOnce(&mut Self)) {
+        let frame = RebindFrame::of(node);
+        let pushed = frame.is_some();
+        if let Some(frame) = frame {
+            self.rebind_frames.push(frame);
+        }
+        f(self);
+        if pushed {
+            self.rebind_frames.pop();
+        }
+    }
+
+    /// [`VerifyError::ThreadedLocalDropped`] over one frame's straight-line
+    /// statement list (called by [`Self::walk`] for every list, so at every
+    /// nesting level). A construct's prelude is `ConstructTuple`, its family
+    /// `Bind`s, then one `LocalRebind` per threaded local
+    /// (`build_local_threading_prelude`); anything else before every listed
+    /// local is rebound closes the construct and drops the rest. A
+    /// `DiscardLocals` of the open carrier drops them legitimately only at a
+    /// `MethodBody` frame.
+    fn check_construct_rebinds(&mut self, stmts: &[ThreadedStmt]) {
+        /// The construct whose rebinds are still being read.
+        struct Open<'s> {
+            carrier: &'s str,
+            threads: &'s [String],
+            pending: Vec<&'s str>,
+            at: Span,
+        }
+        fn close(open: &mut Option<Open<'_>>, dropped: &mut Vec<VerifyError>) {
+            if let Some(o) = open.take() {
+                dropped.extend(o.pending.into_iter().map(|local| {
+                    VerifyError::ThreadedLocalDropped {
+                        local: local.to_string(),
+                        carrier: o.carrier.to_string(),
+                        at: o.at,
+                    }
+                }));
+            }
+        }
+        let discard_ok = self.enclosing_frame().kind == RebindFrameKind::MethodBody;
+        let mut open: Option<Open<'_>> = None;
+        let mut dropped: Vec<VerifyError> = Vec::new();
+        for stmt in stmts {
+            match stmt {
+                ThreadedStmt::ConstructTuple {
+                    carrier,
+                    threads,
+                    span,
+                    ..
+                } => {
+                    close(&mut open, &mut dropped);
+                    open = Some(Open {
+                        carrier,
+                        threads,
+                        pending: threads.iter().map(String::as_str).collect(),
+                        at: *span,
+                    });
+                }
+                ThreadedStmt::LocalRebind {
+                    local,
+                    carrier,
+                    span,
+                    ..
+                } => match open.as_mut() {
+                    Some(o) if o.carrier == carrier && o.threads.contains(local) => {
+                        o.pending.retain(|p| p != local);
+                    }
+                    _ => dropped.push(VerifyError::ThreadedLocalDropped {
+                        local: local.clone(),
+                        carrier: carrier.clone(),
+                        at: *span,
+                    }),
+                },
+                // A family extraction reads the carrier ahead of the rebinds:
+                // a `Direct` step of the `State`/`SelfVt` family
+                // (`extract_family_slots`). Its value is an opaque `Doc`, so
+                // which carrier it reads is not checked.
+                ThreadedStmt::Bind {
+                    target,
+                    op: BindOp::Direct(_),
+                    ..
+                } if open.is_some()
+                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) => {}
+                ThreadedStmt::DiscardLocals { carrier, .. }
+                    if discard_ok && open.as_ref().is_some_and(|o| o.carrier == carrier) =>
+                {
+                    open = None;
+                }
+                _ => close(&mut open, &mut dropped),
+            }
+        }
+        close(&mut open, &mut dropped);
+        self.errors.extend(dropped);
+    }
+
+    /// [`VerifyError::LocalRebindFrameMismatch`] and
+    /// [`VerifyError::LocalRebindModeMismatch`] for one rebind, against the
+    /// node that encloses it.
+    fn check_rebind_lowering(
+        &mut self,
+        local: &str,
+        frame: FrameId,
+        lowered_as: RebindShape,
+        at: Span,
+    ) {
+        let enclosing = self.enclosing_frame();
+        if frame != enclosing.frame {
+            self.errors.push(VerifyError::LocalRebindFrameMismatch {
+                local: local.to_string(),
+                recorded: frame,
+                enclosing: enclosing.frame,
+                at,
+            });
+        }
+        if enclosing.shape_for(local) != lowered_as {
+            self.errors.push(VerifyError::LocalRebindModeMismatch {
+                frame: enclosing.frame,
+                member: enclosing.threads_local(local),
+                mode: enclosing.kind,
+                lowered_as,
+                at,
+            });
         }
     }
 
@@ -324,6 +625,53 @@ impl VerifyWalk<'_> {
         }
     }
 
+    /// [`VerifyError::ActorStateInClassMethod`]: a `State`/`SelfVt` versioned
+    /// var in a [`ScopeKind::ClassMethod`] scope that denotes a *family*.
+    ///
+    /// The `State` prefix is overloaded: inside a threading frame (a loop,
+    /// fold or branch/handler arm — any `Threaded`/`ConditionalLoop` node, so
+    /// `mode_stack` is non-empty) it is the `StateAcc` map's version, which
+    /// carries threaded locals in a class method and is legitimate there (the
+    /// class-method corpus lowers `State1`, … in such frames). Only a `State`
+    /// version produced at method level (empty `mode_stack`) is the actor
+    /// `State` family. `SelfVt` is never a `StateAcc` map, so it is flagged
+    /// everywhere. Version 0 is a frame's entry parameter, never produced.
+    ///
+    /// In a [`ScopeKind::ValueType`] scope only the method-level `State`
+    /// family is flagged: `SelfVt` is the value type's own family.
+    fn check_class_method_family(&mut self, var: &VersionedVar, at: Span) {
+        if self.scope == ScopeKind::Instance || var.version == 0 {
+            return;
+        }
+        let is_family = match var.prefix {
+            VersionPrefix::State => self.mode_stack.is_empty(),
+            VersionPrefix::SelfVt => self.scope == ScopeKind::ClassMethod,
+            VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
+        };
+        if is_family {
+            self.errors.push(VerifyError::ActorStateInClassMethod {
+                defect: ClassMethodDefect::FamilyVersion(var.prefix.clone()),
+                at,
+            });
+        }
+    }
+
+    /// [`VerifyError::ActorStateInClassMethod`]: a loop/fold node whose mode is
+    /// a locals-less `StateAcc` in a [`ScopeKind::ClassMethod`] scope.
+    fn check_class_method_mode(&mut self, mode: &ThreadingMode, at: Span) {
+        if self.scope == ScopeKind::ClassMethod
+            && matches!(
+                mode,
+                ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals)
+            )
+        {
+            self.errors.push(VerifyError::ActorStateInClassMethod {
+                defect: ClassMethodDefect::StateAccLoopWithoutLocals,
+                at,
+            });
+        }
+    }
+
     #[allow(clippy::too_many_lines)] // ADR 0118 phase 3 (BT-3419) split the Threaded/ConditionalLoop arm in two
     fn walk_stmt(&mut self, stmt: &ThreadedStmt) {
         match stmt {
@@ -331,22 +679,16 @@ impl VerifyWalk<'_> {
                 target,
                 source,
                 op,
-                shadow_write,
                 span,
             } => {
                 self.check_use(source, *span);
+                self.check_class_method_family(target, *span);
                 match op {
                     BindOp::Put { value, .. } | BindOp::Direct(value) => {
                         if let ValueRef::Version(v) = value {
                             self.check_use(v, *span);
                         }
                     }
-                    // `Remove` carries no `value` (a `maps:remove` has
-                    // nothing to write) — `class_tag` is never check_use'd
-                    // for `Put` either (it is always a bare `ClassSelf`/
-                    // `nil` literal, never a versioned value), so `Remove`
-                    // is symmetrically inert here.
-                    BindOp::Remove { .. } => {}
                     BindOp::Unpack { .. } => {
                         if let Some(mode) = self.mode_stack.last()
                             && !matches!(mode, ThreadingMode::StateAcc(_))
@@ -358,70 +700,37 @@ impl VerifyWalk<'_> {
                         }
                     }
                 }
-                // ADR 0118 phase 5a: `BindOp::Put` only — a
-                // `BindOp::Direct` rebind (`emit_class_var_result_unwrap`'s
-                // inherited-self-dispatch/loop-construct rebind,
-                // `rebind_class_vars_from_doc`) is never itself a
-                // shadow-write producer regardless of `shadow_write`'s
-                // value (its own doc comments: the underlying mutation was
-                // already shadow-written by the callee's own `Put` under
-                // the identical `ClassSelf`-tagged key) — `render_bind`'s
-                // `BindOp::Put` arm is the only place the ADR 0110 shadow
-                // write is even constructed, so `shadow_write` is inert for
-                // `Direct`. `construct_and_verify_class_var_bind`'s own
-                // isolated check exempts `Direct` via a fixture-only
-                // wrapping trick (never part of the returned `Bind` node —
-                // see its `needs_wrap`), which a same-class self-send's
-                // real `Bind`, spliced directly into a jointly-verified
-                // body, does not go through — so this joint check must
-                // exclude `Direct` explicitly, matching that exemption.
-                if matches!(target.prefix, VersionPrefix::ClassVars)
-                    && matches!(op, BindOp::Put { .. } | BindOp::Remove { .. })
-                    && *self.shadow_write_eligible_stack.last().unwrap()
-                    && !*shadow_write
-                    && self.has_class_vars_nlr
-                {
-                    self.errors.push(VerifyError::ShadowWriteMissing {
-                        mutated: target.clone(),
-                        at: *span,
-                    });
-                }
             }
             ThreadedStmt::Threaded {
                 mode,
                 frame,
-                shadow_write_eligible,
                 body,
                 produces,
-                span: _,
+                span,
+                ..
             } => {
-                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
-                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
-                // with the parent's current top.
+                self.check_class_method_mode(mode, *span);
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.shadow_write_eligible_stack.push(
-                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
-                );
-                self.walk(body);
+                self.in_frame(stmt, |this| this.walk(body));
                 for v in produces {
                     self.check_use(v, Span::default());
+                    self.check_class_method_family(v, *span);
                 }
-                self.shadow_write_eligible_stack.pop();
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
             ThreadedStmt::ConditionalLoop {
                 mode,
                 frame,
-                shadow_write_eligible,
                 condition,
                 condition_value,
                 body,
                 produces,
-                span: _,
+                span,
                 ..
             } => {
+                self.check_class_method_mode(mode, *span);
                 // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
                 // `ConditionalLoop` verifies almost exactly like `Threaded`
                 // — push frame/mode once, walk `condition` THEN `body` (both
@@ -432,24 +741,19 @@ impl VerifyWalk<'_> {
                 // (or caller-supplied, non-threading) fields `verify()` does
                 // not, and is not meant to, inspect — see the variant's doc
                 // comment.
-                //
-                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
-                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
-                // with the parent's current top.
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
-                self.shadow_write_eligible_stack.push(
-                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
-                );
-                self.walk(condition);
-                if let ValueRef::Version(v) = condition_value {
-                    self.check_use(v, Span::default());
-                }
-                self.walk(body);
+                self.in_frame(stmt, |this| {
+                    this.walk(condition);
+                    if let ValueRef::Version(v) = condition_value {
+                        this.check_use(v, Span::default());
+                    }
+                    this.walk(body);
+                });
                 for v in produces {
                     self.check_use(v, Span::default());
+                    self.check_class_method_family(v, *span);
                 }
-                self.shadow_write_eligible_stack.pop();
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
@@ -457,9 +761,71 @@ impl VerifyWalk<'_> {
             // treats the rest of the slice as its body); a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
-            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
+            //
+            // ADR 0131: a `ConstructTuple`/`DiscardLocals` is checked with
+            // its siblings, by `check_construct_rebinds` (`ThreadedLocalDropped`).
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Statement(..)
+            | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::DiscardLocals { .. } => {}
+            // ADR 0131 §2/§4: a rebind's version step is checked exactly like
+            // the `Bind` it renders as, and its frame and shape against the
+            // node that encloses it.
+            ThreadedStmt::LocalRebind {
+                local,
+                frame,
+                state_first,
+                lowering,
+                span,
+                ..
+            } => {
+                if let Some(state) = state_first {
+                    self.check_use(state, *span);
+                }
+                if let Some((source, target)) = lowering.version_step() {
+                    self.check_use(source, *span);
+                    self.check_class_method_family(target, *span);
+                }
+                self.check_rebind_lowering(local, *frame, lowering.shape(), *span);
+            }
+            // The method's root frame: method level, so no mode is pushed (a
+            // `State` version here is the actor family, exactly as for the
+            // top-level slice).
+            ThreadedStmt::MethodBody { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.in_frame(stmt, |this| this.walk(body));
+                self.frame_stack.pop();
+            }
+            // A branch arm threads through its seeded `StateAcc` — the same
+            // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
+            // records for an arm today.
+            ThreadedStmt::BranchArm { frame, body, .. } => {
+                self.frame_stack.push(*frame);
+                self.mode_stack
+                    .push(ThreadingMode::StateAcc(StateAccFallbackReason::None));
+                self.in_frame(stmt, |this| this.walk(body));
+                self.mode_stack.pop();
+                self.frame_stack.pop();
+            }
+            ThreadedStmt::OnDoCatch {
+                vars,
+                entry,
+                clauses,
+                span,
+                ..
+            } => {
+                if let Some(defect) = check_catch_restore(vars, *entry, clauses) {
+                    self.errors
+                        .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
+                }
+                if !catch_filter_closed(clauses) {
+                    self.errors
+                        .push(VerifyError::CatchFilterNotClosed { at: *span });
+                }
+            }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
+                self.check_class_method_family(state, *span);
                 if let ValueRef::Version(v) = value {
                     self.check_use(v, *span);
                 }
@@ -499,7 +865,138 @@ impl VerifyWalk<'_> {
     }
 }
 
+/// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:
+/// the first defect found, or `None` when the entry binds the snapshot, the
+/// non-NLR clause begins with the restore of that same snapshot and both NLR
+/// pass-through shapes are ordered before it.
+fn check_catch_restore(
+    vars: &OnDoCatchVars,
+    entry: Option<CatchEntry>,
+    clauses: &[CatchClause],
+) -> Option<CatchRestoreDefect> {
+    match entry {
+        Some(CatchEntry::ClassVarSnapshot) => {}
+        None => return Some(CatchRestoreDefect::NoSnapshotEntry),
+    }
+    let Some(non_nlr_at) = clauses
+        .iter()
+        .position(|c| matches!(c, CatchClause::NonNlr { .. }))
+    else {
+        return Some(CatchRestoreDefect::NoNonNlrClause);
+    };
+    for shape in [NlrThrowShape::Tuple3, NlrThrowShape::Tuple4] {
+        let before = clauses[..non_nlr_at]
+            .iter()
+            .any(|c| matches!(c, CatchClause::NlrPassThrough(s) if *s == shape));
+        if !before {
+            return Some(CatchRestoreDefect::NlrArmNotBeforeRestore(shape));
+        }
+    }
+    let CatchClause::NonNlr { steps } = &clauses[non_nlr_at] else {
+        return Some(CatchRestoreDefect::NoNonNlrClause);
+    };
+    match steps.first() {
+        Some(CatchStep::ClassVarRestore { snapshot }) if *snapshot == vars.snapshot_var => None,
+        Some(CatchStep::ClassVarRestore { .. }) => {
+            Some(CatchRestoreDefect::RestoreReadsWrongSnapshot)
+        }
+        _ => Some(CatchRestoreDefect::RestoreNotFirst),
+    }
+}
+
+/// Whether the non-NLR clause of a [`ThreadedStmt::OnDoCatch`] closes the class
+/// filter it opens: `ClassFilter`, then `FilterHandler`, then `FilterMiss`, the
+/// last three steps in that order. A node with no non-NLR clause has no filter
+/// to close (the restore check reports that).
+fn catch_filter_closed(clauses: &[CatchClause]) -> bool {
+    clauses.iter().all(|clause| match clause {
+        CatchClause::NlrPassThrough(_) => true,
+        CatchClause::NonNlr { steps } => matches!(
+            steps.as_slice(),
+            [
+                ..,
+                CatchStep::ClassFilter,
+                CatchStep::FilterHandler(_),
+                CatchStep::FilterMiss
+            ]
+        ),
+    })
+}
+
+/// One child of a sequenced send, as `sequence_children` splices it (ADR
+/// 0131 §1a): the input to [`verify_sibling_reads`].
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct SequencedSibling<'a> {
+    /// The outer local this child reads *in place*: a plain-variable child
+    /// the sequencing rule left for its parent to compile, which therefore
+    /// reads the local after every sibling's prelude has run. `None` for a
+    /// child compiled ahead (its value, or its `Tmp` snapshot, is fixed
+    /// before any later sibling's prelude).
+    pub(in crate::core_erlang) reads_in_place: Option<&'a str>,
+    /// The prelude this child contributed, in splice order.
+    pub(in crate::core_erlang) prelude: &'a [ThreadedStmt],
+    pub(in crate::core_erlang) span: Span,
+}
+
+/// [`VerifyError::LocalReadAfterSiblingRebind`] (ADR 0131 §1a): reports every
+/// sibling that reads local `x` in place while a later sibling's prelude
+/// holds a top-level [`ThreadedStmt::LocalRebind`] for `x`. A rebind nested
+/// inside a frame node of that prelude belongs to the inner frame and does
+/// not change the binding the parent reads. Reached in production through
+/// `sequence_children`, which reports the result via
+/// [`CoreErlangGenerator::report_threaded_ir_verify_errors`].
+///
+/// **Cannot fire in production yet:** no producer emits a
+/// [`ThreadedStmt::LocalRebind`] until ADR 0131 Phase 2 (BT-3749)'s
+/// `local_threading_producer`, so today every sibling prelude is
+/// rebind-free and this check is exercised only by hand-built IR
+/// (`threaded_ir/tests/local_rebind.rs`). Phase 2 must add a corpus test
+/// proving it fires on a real compile.
+pub(in crate::core_erlang) fn verify_sibling_reads(
+    siblings: &[SequencedSibling<'_>],
+) -> Vec<VerifyError> {
+    let mut errors = Vec::new();
+    for (i, sibling) in siblings.iter().enumerate() {
+        let Some(local) = sibling.reads_in_place else {
+            continue;
+        };
+        let rebound_later = siblings[i + 1..].iter().any(|later| {
+            later.prelude.iter().any(
+                |stmt| matches!(stmt, ThreadedStmt::LocalRebind { local: l, .. } if l == local),
+            )
+        });
+        if rebound_later {
+            errors.push(VerifyError::LocalReadAfterSiblingRebind {
+                local: local.to_string(),
+                at: sibling.span,
+            });
+        }
+    }
+    errors
+}
+
 impl CoreErlangGenerator {
+    /// The [`ScopeKind`] the generator is currently lowering — the one place
+    /// that maps generator state to the verifier's scope (BT-3725).
+    pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {
+        if self.in_class_method() {
+            ScopeKind::ClassMethod
+        } else if self.context == CodeGenContext::ValueType {
+            ScopeKind::ValueType
+        } else {
+            ScopeKind::Instance
+        }
+    }
+
+    /// [`verify_in_scope`] with the current [`Self::threaded_scope`] — what
+    /// every production lowering site calls instead of bare [`verify`].
+    pub(in crate::core_erlang) fn verify_threaded_ir(
+        &self,
+        ir: &[ThreadedStmt],
+    ) -> Vec<VerifyError> {
+        verify_in_scope(ir, self.threaded_scope())
+    }
+
     /// Shared failure-reporting path for every `ThreadedIr` production
     /// invariant check (ADR 0111 §The verifier / CLAUDE.md's "never panic
     /// on user input" rule): hard-fails in debug/CI via `debug_assert!`,
@@ -532,9 +1029,52 @@ impl CoreErlangGenerator {
             false,
             "ThreadedIr verify found a {invariant_label}: {errors:?}"
         );
-        self.add_codegen_warning(
-            Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
-                .with_category(DiagnosticCategory::Type),
-        );
+        self.add_codegen_warning(verify_errors_to_diagnostic(errors, invariant_label, span));
     }
+
+    /// Records one synthetic verifier finding through the release-mode path
+    /// (the warning, without [`Self::report_threaded_ir_verify_errors`]'s
+    /// debug-build hard failure). Backs
+    /// [`CodegenOptions::with_injected_verifier_violation`], the test hook
+    /// that lets driver-level tests prove an `internal:` diagnostic surfaces
+    /// without a release build or a real codegen bug.
+    ///
+    /// `pub` (hidden) so `beamtalk-repl`'s REPL assembler, which drives its
+    /// own generator rather than `generate_module_with_warnings`, can honor
+    /// the same hook (BT-3778).
+    #[doc(hidden)]
+    pub fn inject_synthetic_verifier_violation(&mut self, enabled: bool, span: Span) {
+        if !enabled {
+            return;
+        }
+        let errors = [VerifyError::ThreadingModeUnpackMismatch {
+            mode: ThreadingMode::DirectParams,
+            at: span,
+        }];
+        self.add_codegen_warning(verify_errors_to_diagnostic(
+            &errors,
+            "injected verifier violation (test hook)",
+            span,
+        ));
+    }
+}
+
+/// Builds the release-mode diagnostic for a `ThreadedIr` verifier finding
+/// (ADR 0111 amendment, BT-3724): a **warning** (never an error, so it can
+/// not fail a build that would otherwise produce usable code) whose message
+/// starts with `internal:` and whose category is
+/// [`DiagnosticCategory::InternalVerifier`], so drivers can forward exactly
+/// these and nothing else out of `GeneratedModule::warnings`.
+///
+/// Independent of `cfg(debug_assertions)` so a unit test can assert it
+/// without a release build; [`CoreErlangGenerator::report_threaded_ir_verify_errors`]
+/// is its only production caller.
+#[must_use]
+pub(in crate::core_erlang) fn verify_errors_to_diagnostic(
+    errors: &[VerifyError],
+    invariant_label: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::warning(format!("internal: {invariant_label}: {errors:?}"), span)
+        .with_category(DiagnosticCategory::InternalVerifier)
 }

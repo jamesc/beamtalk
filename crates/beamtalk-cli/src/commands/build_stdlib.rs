@@ -187,6 +187,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
     generate_erlang_builtins_hrl(&class_metadata)?;
+    generate_class_vars_keys_hrl()?;
 
     println!("Built {} stdlib modules", source_files.len());
 
@@ -1535,6 +1536,10 @@ const GENERATED_BUILTINS_PATH: &str =
 const GENERATED_BUILTINS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl";
 
+/// Default path for the generated class-variable key-shape header (ADR 0130).
+const GENERATED_CLASS_VARS_KEYS_HRL_PATH: &str =
+    "runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl";
+
 /// Write generated `content` to `dest`, but only if it differs from what's
 /// already there — skips touching the file (and downstream recompilation)
 /// when a stdlib build produces byte-identical output.
@@ -1724,6 +1729,18 @@ fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_HRL_PATH);
     write_generated_file_if_changed(&dest, &code)
+}
+
+/// Generate `beamtalk_class_vars_keys.hrl` from codegen's `class_var_keys` leaf
+/// (ADR 0130 §2): the class-variable process-dictionary key shape the inlined
+/// reads and writes codegen emits and `beamtalk_class_vars.erl` must agree on,
+/// rendered from one Rust source instead of copied (CLAUDE.md shared-fixture rule).
+fn generate_class_vars_keys_hrl() -> Result<()> {
+    let dest = Utf8PathBuf::from(GENERATED_CLASS_VARS_KEYS_HRL_PATH);
+    write_generated_file_if_changed(
+        &dest,
+        &beamtalk_codegen::core_erlang::class_var_keys::erlang_header(),
+    )
 }
 
 /// Generate a single class entry for `generated_builtin_classes()`.

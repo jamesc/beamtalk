@@ -132,6 +132,7 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
       'initialize_assigns' => [],
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -168,6 +169,7 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
       'initialize_assigns' => [],
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

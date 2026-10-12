@@ -25,6 +25,14 @@ miette.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# why: pid_liveness::is_process_alive uses kill(2) on Unix
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# why: pid_liveness uses OpenProcess/GetExitCodeProcess/GetProcessTimes on Windows
+windows-sys.workspace = true
+
 [dev-dependencies]
 sha2.workspace = true
 # why: parse the shared Rust/Erlang conformance fixture (tests/beamtalk_root_dir_conformance.rs)

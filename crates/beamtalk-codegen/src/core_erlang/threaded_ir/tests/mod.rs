@@ -7,16 +7,21 @@
 //! - [`render_naming`] — `VersionedVar`/`FrameId` naming and `VersionCounter`
 //!   basics
 //! - [`verify_walk`] — `verify()`'s clean/silent case, `UnboundVersion`,
-//!   `NonLinearVersion`, `ThreadingModeUnpackMismatch`, and
-//!   `ShadowWriteMissing` (ADR 0110 contract)
+//!   `NonLinearVersion`, and `ThreadingModeUnpackMismatch`
 //! - [`lower_and_render_shim`] — the `lower_and_render` test shim's coverage
 //!   of `render()`'s `BindOp`/`ThreadedStmt` variants
 //! - [`tuple_acc`] — ADR 0111 Phase C `TupleAcc` unpack invariants
-//! - [`class_var_bind`] — `construct_and_verify_class_var_bind` and
-//!   `verify_simple_bind` (ADR 0110 contract), and
-//!   `verify_body_with_opaque_version_gaps`
+//! - [`simple_bind`] — `verify_simple_bind` and
+//!   `verify_body_with_opaque_version_gaps`, and `verify_simple_bind`'s
+//!   per-scope invariant
 //! - [`dual_run`] — the dual-run byte-parity harness
+//! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
+//! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
+//! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
+//!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
+//!   `BranchArm` nodes
+//! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
 
@@ -28,8 +33,8 @@ fn local(name: &str, version: usize, frame: FrameId) -> VersionedVar {
     VersionedVar::new(VersionPrefix::Local(name.to_string()), version, frame)
 }
 
-fn class_var(version: usize, frame: FrameId) -> VersionedVar {
-    VersionedVar::new(VersionPrefix::ClassVars, version, frame)
+fn self_var(version: usize, frame: FrameId) -> VersionedVar {
+    VersionedVar::new(VersionPrefix::SelfVt, version, frame)
 }
 
 /// A stable skeleton-fidelity test shim signature: delegates to [`render`]
@@ -46,10 +51,14 @@ fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
     render(ir, &mut ctx)
 }
 
-mod class_var_bind;
+mod catch_boundary;
+mod class_method_scope;
 mod close_and_value;
 mod dual_run;
+mod local_rebind;
 mod lower_and_render_shim;
 mod render_naming;
+mod simple_bind;
 mod tuple_acc;
+mod verifier_diagnostic;
 mod verify_walk;

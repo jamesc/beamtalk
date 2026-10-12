@@ -131,10 +131,10 @@ fn test_field_assignment_closed_value_type_threads_self() {
 }
 
 #[test]
-fn test_field_assignment_closed_class_var_threads_class_vars_with_shadow_write() {
-    // BT-412/ADR 0110: a class-method field write threads `ClassVars{N}` and
-    // carries the shadow write (`erlang:put/2` under `$bt_class_vars_shadow`)
-    // that lets a foreign NLR relay observe the mutation.
+fn test_field_assignment_closed_class_var_is_an_in_place_put_answering_the_value() {
+    // ADR 0130 §2: a class-method field write is a `put` into the class
+    // process's dictionary that answers the assigned value; no `ClassVars{N}`
+    // rebinding and no shadow write.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_in_class_method(true);
     generator.class_var_names_mut().insert("total".to_string());
@@ -144,15 +144,20 @@ fn test_field_assignment_closed_class_var_threads_class_vars_with_shadow_write()
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("let ClassVars1 = call 'maps':'put'('total', _Val1, ClassVars) in"),
-        "class-var write should thread ClassVars. Got: {output}"
+        output.starts_with("let _CVVal1 = 42 in case call 'erlang':'get'({'$bt_class_vars', "),
+        "the value is evaluated first, then the class key is probed. Got: {output}"
     );
     assert!(
-        output.contains("'$bt_class_vars_shadow'"),
-        "class-var write should carry ADR 0110's shadow write. Got: {output}"
+        output.contains("call 'erlang':'put'({'$bt_class_vars', ")
+            && output.contains("call 'maps':'put'('total', _CVVal1, "),
+        "class-var write should put the new map back in place. Got: {output}"
     );
     assert!(
-        !output.contains("State"),
-        "class-var write must never reference State. Got: {output}"
+        output.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal1)"),
+        "a miss falls back to the runtime helper. Got: {output}"
+    );
+    assert!(
+        !output.contains("ClassVars") && !output.contains("State"),
+        "class-var write must never reference ClassVars or State. Got: {output}"
     );
 }

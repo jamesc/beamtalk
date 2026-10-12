@@ -94,8 +94,8 @@ typed Actor subclass: ClassBuilder
   /// Set all class-side methods at once (ADR 0084, BT-2267).
   ///
   /// Each value is a class-method block whose body the compiler lowers with
-  /// the class-method calling convention (`fun(ClassSelf, ClassVars, ...)`),
-  /// so class-variable mutations thread correctly and `super`/`self` resolve.
+  /// the class-method calling convention (`fun(ClassSelf, ...)`), so
+  /// class-variable reads and writes happen in place and `super`/`self` resolve.
   /// The runtime installs them as runtime class-method funs (BT-2266).
   ///
   /// ## Examples
@@ -282,9 +282,9 @@ typed Actor subclass: ClassBuilder
   /// The incremental counterpart of `classMethods:`. It writes the same
   /// `classMethods` map, so a class can gain class methods one at a time before
   /// `register`. In a `classBuilder … register` cascade the compiler lowers the
-  /// block with the class-method calling convention (`fun(ClassSelf, ClassVars,
-  /// …)`) so class-variable mutations thread and `super`/`self` resolve, just
-  /// like a `classMethods:` map value.
+  /// block with the class-method calling convention (`fun(ClassSelf, …)`) so
+  /// class-variable reads and writes happen in place and `super`/`self` resolve,
+  /// just like a `classMethods:` map value.
   ///
   /// ## Examples
   /// ```beamtalk

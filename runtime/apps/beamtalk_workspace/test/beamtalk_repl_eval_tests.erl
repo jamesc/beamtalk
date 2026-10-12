@@ -1995,6 +1995,14 @@ eval_success_test_() ->
         {"eval_with_self evaluates an expression with self bound", fun eval_with_self_success/0},
         {"eval_with_self wraps a compile error", fun eval_with_self_compile_error/0},
         {"eval_with_self wraps a runtime exception", fun eval_with_self_runtime_exception/0},
+        {"eval_with_self discards class-variable writes made before a caught error",
+            fun eval_with_self_discards_class_var_writes/0},
+        {"eval_with_self re-raises a $bt_nlr throw and keeps class-variable writes made before it",
+            fun eval_with_self_reraises_nlr_and_keeps_class_var_writes/0},
+        {"eval_with_self re-raises a 4-tuple (actor) $bt_nlr throw",
+            fun eval_with_self_reraises_actor_nlr/0},
+        {"a stale $bt_nlr re-raised by eval_with_self surfaces as a structured error",
+            fun eval_with_self_stale_nlr_is_structured_error_at_boundary/0},
         %% precheck_method/4 (ADR 0105 Phase 3 precheck).
         {"precheck_method refuses a stdlib class", fun precheck_method_stdlib_refused/0},
         {"precheck_method delegates for a non-stdlib class", fun precheck_method_delegates/0},
@@ -2511,6 +2519,83 @@ eval_with_self_compile_error() ->
 
 eval_with_self_runtime_exception() ->
     Result = beamtalk_repl_eval:eval_with_self(42, "self zork"),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% BT-3728: `evaluate:` runs in the caller's process, which may hold a live
+%% class-variable home entry. A block that writes a class variable and then raises
+%% must have its write discarded when the eval catches the error.
+eval_with_self_discards_class_var_writes() ->
+    %% beamtalk_class_vars resolves a class tag to its name with an existing-atom
+    %% lookup, so the base atom must really exist in the loaded module. The
+    %% compiler folds `atom_to_list`/`binary_to_atom` of a literal and drops the
+    %% base atom; a process-dictionary round trip cannot be folded, so the
+    %% literal stays in the module's atom table.
+    erlang:put(eval_self_cv_class, 'EvalSelfCvClass'),
+    Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
+    ClassSelf = #beamtalk_object{class = Tag, class_mod = escc, pid = self()},
+    Block = fun() ->
+        beamtalk_class_vars:put(ClassSelf, a, 99),
+        erlang:error(boom)
+    end,
+    Key = beamtalk_class_vars:key_for_tag(Tag),
+    beamtalk_class_vars_test_support:with_home_key(Key, #{a => 1}, fun() ->
+        ?assertMatch(
+            {error, #beamtalk_error{}}, beamtalk_repl_eval:eval_with_self(Block, "self value")
+        ),
+        ?assertEqual(1, beamtalk_class_vars:get(ClassSelf, a))
+    end).
+
+%% BT-3735: a `^` out of a captured block run by `evaluate:` is a `$bt_nlr` throw
+%% aimed at a catch frame further up the caller's stack. `evaluate:` must re-raise
+%% it (not swallow it into `{error, _}`). A `^` is not a failure, so the
+%% class-variable writes the block made before it are KEPT (ADR 0130 §4: a `^`
+%% passing through a protected region keeps the writes made before it).
+eval_with_self_reraises_nlr_and_keeps_class_var_writes() ->
+    erlang:put(eval_self_cv_class, 'EvalSelfNlrClass'),
+    Tag = list_to_atom(atom_to_list(erlang:erase(eval_self_cv_class)) ++ " class"),
+    ClassSelf = #beamtalk_object{class = Tag, class_mod = esnc, pid = self()},
+    Token = make_ref(),
+    Block = fun() ->
+        beamtalk_class_vars:put(ClassSelf, a, 99),
+        erlang:throw({'$bt_nlr', Token, 1})
+    end,
+    Key = beamtalk_class_vars:key_for_tag(Tag),
+    beamtalk_class_vars_test_support:with_home_key(Key, #{a => 1}, fun() ->
+        Outcome =
+            try
+                {returned, beamtalk_repl_eval:eval_with_self(Block, "self value")}
+            catch
+                throw:Thrown -> {thrown, Thrown}
+            end,
+        %% The write made before the `^` survives (it is not an error exit) ...
+        ?assertEqual(99, beamtalk_class_vars:get(ClassSelf, a)),
+        %% ... and the `^` propagates instead of becoming `{error, _}`.
+        ?assertEqual({thrown, {'$bt_nlr', Token, 1}}, Outcome)
+    end).
+
+eval_with_self_reraises_actor_nlr() ->
+    Token = make_ref(),
+    State = #{n => 1},
+    Block = fun() -> erlang:throw({'$bt_nlr', Token, 7, State}) end,
+    ?assertThrow(
+        {'$bt_nlr', Token, 7, State}, beamtalk_repl_eval:eval_with_self(Block, "self value")
+    ).
+
+%% A stale NLR (home frame already gone) matches no catch frame. `evaluate:`
+%% cannot tell (tokens are opaque), so it re-raises; the outermost boundary
+%% (REPL eval / dispatch) wraps it through `ensure_wrapped/3` into a structured
+%% error rather than letting a bare throw escape.
+eval_with_self_stale_nlr_is_structured_error_at_boundary() ->
+    Stale = {'$bt_nlr', make_ref(), 1},
+    Block = fun() -> erlang:throw(Stale) end,
+    Result =
+        try
+            beamtalk_repl_eval:eval_with_self(Block, "self value")
+        catch
+            Class:Reason:Stacktrace ->
+                ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
+                {error, beamtalk_repl_errors:ensure_structured_error(ExObj)}
+        end,
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 %%====================================================================

@@ -131,6 +131,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'initialize_assigns' => [],
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -167,6 +168,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'initialize_assigns' => [],
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

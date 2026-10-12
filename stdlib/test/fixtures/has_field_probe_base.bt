@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3701 / ADR 0130 §2: `self hasField:` in an inheritable class method runs
+// with the *receiver* class as `ClassSelf`, so a parent without class
+// variables still answers for a subclass that declares one. Only a
+// direct-called method (sealed class, `class sealed` method) has no
+// `ClassSelf`; see direct_dispatch_stateless.bt.
+
+Object subclass: HasFieldProbeBase
+
+  class probe => self hasField: #n
+
+  class probeInBlock => [self hasField: #n] value

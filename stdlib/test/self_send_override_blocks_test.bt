@@ -65,12 +65,14 @@ TestCase subclass: SelfSendOverrideBlocksTest
     SsoBlocksSub ensureMatch: 1
     self assert: SsoBlocksSub subHits equals: 1
 
-  // A block passed to another class's method runs in that class's process; a
-  // write there must not leak stale state into the next external call.
+  // A block passed to another class's method runs in that class's process,
+  // away from its home: a write there raises class_state_unreachable (ADR 0130
+  // §5, Migration Path) and leaves no stale state for the next external call.
   testForeignProcessBlockDoesNotLeak =>
-    self assert: SsoBlocksSub viaForeign equals: 1
-    SsoBlocksSub resetSubHits
-    self assert: SsoBlocksSub viaForeign equals: 1
+    self should: [SsoBlocksSub viaForeign] raise: #class_state_unreachable
+    self assert: SsoBlocksSub subHits equals: 0
+    self should: [SsoBlocksSub viaForeign] raise: #class_state_unreachable
+    self assert: SsoBlocksSub subHits equals: 0
 
   testOwnClassWrapperInBlock =>
     SsoBlocksSub viaOwnClassBlock
@@ -269,83 +271,73 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testSealedMixedDirectWriteArm =>
     self assert: (SsoScopeSealed mixedArm: 1) equals: 12
 
-  // Known limit (ADR 0110, BT-3675): a closure stored in a local and invoked
-  // by a LATER statement exports into the scope of the statement that built
-  // it, which was already refreshed, so its class-variable writes are not
-  // kept. These pin the actual behaviour (and that it compiles and runs).
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
-  testStoredClosureInvokedLaterLosesWrite =>
+  // ADR 0130 §1/§5 (BT-3713): a closure stored in a local and invoked by a
+  // LATER statement writes the one live class variable, so every write is kept.
+  // (ADR 0110's BT-3675/BT-3681 limit, which dropped these writes, is gone.)
+  testStoredClosureInvokedLaterKeepsWrite =>
     SsoStaleSub deferred
-    self assert: SsoStaleSub hits equals: 0
-
-  // Known limit BT-3688 (compile-time warning): a stored closure handed to a
-  // collection HOM by name loses its write too; the correct answer would be 1.
-  testStoredClosurePassedToCollectionHomLosesWrite =>
-    SsoStaleSub deferredViaDo
-    self assert: SsoStaleSub hits equals: 0
-
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
-  testStoredClosureInvokedLaterInArmLosesWrite =>
-    SsoStaleSub deferredInArm
-    self assert: SsoStaleSub hits equals: 0
-
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 2.
-  testStoredClosureInvokedTwiceLosesWrites =>
-    SsoStaleSub deferredTwice
-    self assert: SsoStaleSub hits equals: 0
-
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 2.
-  testStoredClosureThenWritingSendKeepsOnlyTheSend =>
-    SsoStaleSub deferredThenSend
     self assert: SsoStaleSub hits equals: 1
 
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  // BT-3688: a stored closure handed to a collection HOM by name keeps its write.
+  testStoredClosurePassedToCollectionHomKeepsWrite =>
+    SsoStaleSub deferredViaDo
+    self assert: SsoStaleSub hits equals: 1
+
+  testStoredClosureInvokedLaterInArmKeepsWrite =>
+    SsoStaleSub deferredInArm
+    self assert: SsoStaleSub hits equals: 1
+
+  testStoredClosureInvokedTwiceKeepsWrites =>
+    SsoStaleSub deferredTwice
+    self assert: SsoStaleSub hits equals: 2
+
+  // The closure's write and the writing send are both kept.
+  testStoredClosureThenWritingSendKeepsBoth =>
+    SsoStaleSub deferredThenSend
+    self assert: SsoStaleSub hits equals: 2
+
   testStoredClosureWithStatementsCompilesAndRuns =>
     SsoStaleSub deferredWithStatements
-    self assert: SsoStaleSub hits equals: 0
+    self assert: SsoStaleSub hits equals: 1
 
-  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
-  // class-side higher-order method does not keep its class-variable write (the
-  // callee returns the ClassVars it was given), but the callee's own write is
-  // kept, with and without a block that writes.
-  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
-  testBlockPassedToClassSideHomLosesBlockWrite =>
+  // BT-3682 (ADR 0130 §5): a block literal passed to a user-defined class-side
+  // higher-order method of the same class runs at home, so its write is kept,
+  // with and without the callee's own write.
+  testBlockPassedToClassSideHomKeepsBlockWrite =>
     SsoStaleSub viaSection
-    self assert: SsoStaleSub hits equals: 0
+    self assert: SsoStaleSub hits equals: 1
 
-  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
-  testBlockPassedToClassSideHomThenSendLosesBlockWrite =>
+  testBlockPassedToClassSideHomThenSendKeepsBlockWrite =>
     SsoStaleSub viaSectionThenSend
-    self assert: SsoStaleSub hits equals: 0
+    self assert: SsoStaleSub hits equals: 1
 
   testClassSideHomKeepsItsOwnWriteWithNonWritingBlock =>
     SsoStaleSub viaTimedNoWrite
     self assert: SsoStaleSub hits equals: 1
 
+  // `viaTimedWriting` passes `[self foo]` to the same class's class-side HOM
+  // `timed:`, so the block runs at home (ADR 0130 §5): the HOM's own write (1)
+  // and the block's `foo` write (2) are both kept. (Settled against the ADR in
+  // BT-3713; the earlier expectation of 1 was the dropped block write.)
   testClassSideHomKeepsItsOwnWriteWithWritingBlock =>
     SsoStaleSub viaTimedWriting
+    self assert: SsoStaleSub hits equals: 2
+
+  // A closure calling the class's own mutating selector keeps its write too.
+  testStoredClosureOwnMutatingSelectorKeepsWrite =>
+    SsoStaleSub storedBump
     self assert: SsoStaleSub hits equals: 1
 
-  // The stored-closure limit is not limited to subclass overrides: a closure
-  // calling the class's own mutating selector loses its write too.
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
-  testStoredClosureOwnMutatingSelectorLosesWrite =>
-    SsoStaleSub storedBump
-    self assert: SsoStaleSub hits equals: 0
+  // A stored closure reads and writes the live variable: the caught raise
+  // discards the write made inside its protected region (ADR 0130 §4), so the
+  // later call bumps from 0 to 1; and a bump in between is seen (1, 2, then 3).
+  testStoredClosureReadsLiveValueAfterCaughtRaise =>
+    self assert: SsoStaleSub staleAfterRaise equals: 1
 
-  // Known limit (ADR 0110, BT-3681): a stored closure can also read a stale or
-  // reverted value. Correct answers would be 1 and 3; these pin the actual ones.
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
-  testStoredClosureReadsRevertedValueAfterCaughtRaise =>
-    self assert: SsoStaleSub staleAfterRaise equals: 2
+  testStoredClosureReadsLiveValueAfterBump =>
+    self assert: SsoStaleSub staleAfterBump equals: 3
 
-  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 3.
-  testStoredClosureReadsOlderValueAfterBump =>
-    self assert: SsoStaleSub staleAfterBump equals: 2
-
-  // Same limit inside a loop body (BT-3682 covers both positions). The correct
-  // answer would be 1; this pins the actual one.
-  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
-  testBlockPassedToClassSideHomInLoopBody =>
+  // BT-3682: the same HOM shape inside a loop body keeps the block's write.
+  testBlockPassedToClassSideHomInLoopBodyKeepsWrite =>
     SsoStaleSub viaSectionInLoop
-    self assert: SsoStaleSub hits equals: 0
+    self assert: SsoStaleSub hits equals: 1

@@ -261,17 +261,10 @@ impl CoreErlangGenerator {
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
     /// ADR 0118 phase 5b: each argument is compiled via
-    /// [`Self::threaded_expression_doc`], which closes any `ClassVars`
-    /// prelude inline (a same-class self-send/class-var-assignment
-    /// argument, e.g. `self classMethod: x`, no longer needs a dedicated
-    /// open/close dance — `close`-style rendering always produces a valid,
-    /// self-contained `Document`). `class_var_version` is rolled back
-    /// after each argument, matching this helper's pre-existing contract:
-    /// safe only where a class-var mutation performed by a sub-expression
-    /// argument does not need to stay visible afterward (actor-context
-    /// dispatch sites). For class-method-context dispatch sites where the
-    /// mutation must stay visible, use [`Self::thread_args`] instead and
-    /// splice the returned prelude.
+    /// [`Self::threaded_expression_doc`], which closes any prelude inline
+    /// (`close`-style rendering always produces a valid, self-contained
+    /// `Document`). For class-method-context dispatch sites, use
+    /// [`Self::thread_args`] instead and splice the returned prelude.
     pub(super) fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],
@@ -282,7 +275,6 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            let saved_cv = self.class_var_version();
             // ADR 0118 phase 5b: see `subexpr_needs_prelude`'s doc
             // comment — an already-precompiled arg is read back via
             // `expression_doc`, never re-threaded.
@@ -291,7 +283,6 @@ impl CoreErlangGenerator {
             } else {
                 self.threaded_expression_doc(arg, frame)?
             };
-            self.set_class_var_version(saved_cv);
             parts.push(doc);
         }
         Ok(Document::Vec(parts))

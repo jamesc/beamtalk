@@ -145,6 +145,8 @@ logged and never fail the spawn (the actor is already tracked by the registry).
 run_spawn_hook(ActorPid, ClassName) ->
     case application:get_env(beamtalk_runtime, actor_spawned_hook) of
         {ok, {Mod, Fun}} ->
+            %% bt-catcher-audit: not-applicable-no-block - workspace Erlang spawn hook, not a
+            %% Beamtalk block
             try
                 Mod:Fun(ActorPid, ClassName),
                 ok

@@ -13,8 +13,8 @@
 //! - [`extensions`] — same-module and cross-module (foreign) class
 //!   extension codegen
 //! - [`state_threading_loops`] — state threading through loop constructs
-//! - [`class_var_shadow_writes`] — ADR 0110 class-variable shadow-write
-//!   codegen and its nested-loop compile-error cases
+//! - [`class_var_access`] — ADR 0130 class-variable access lowering (inlined
+//!   reads/writes, helper calls, the no-`ClassVars` class-method convention)
 //! - [`native_facade`] — `native:`-backed class facade codegen
 //! - [`protocol_and_xref_metadata`] — protocol-only modules and
 //!   `methodXref`/`stateVarXref` metadata
@@ -91,7 +91,8 @@ mod actor_init_and_field_validation;
 mod actor_trap_exit_on_terminate;
 mod class_kind_and_value_accessors;
 mod class_registration;
-mod class_var_shadow_writes;
+mod class_var_access;
+mod class_var_capture_catch;
 mod dispatch_and_lifecycle;
 mod extensions;
 mod late_field_read;

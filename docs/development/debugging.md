@@ -158,7 +158,7 @@ expected to produce the same wording for the same malformed input.
 
 ### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 
-State threading — actor/instance `State`, class-var `ClassVars`, value-type
+State threading — actor/instance `State`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
 independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir/`
@@ -179,8 +179,15 @@ shared `report_threaded_ir_verify_errors` helper (`control_flow/mod.rs`,
 `pub(super)`) — a `debug_assert!` in debug/CI builds (hard failure, `just
 verify-threaded-ir` runs the whole `stdlib/test/*.bt` +
 `stdlib/bootstrap-test/*.btscript` corpus through this path specifically to
-catch it) and an `internal:` error diagnostic in release builds (compile
-still succeeds; the diagnostic is the only signal). This is diagnosis
+catch it) and an `internal:` **warning** in release builds (category
+`InternalVerifier`; the compile still succeeds, and it never fails a build,
+even under `--warnings-as-errors`; ADR 0111 Addendum 17, BT-3724). The CLI
+build path prints it with the file's other diagnostics; the compiler port
+(REPL/MCP load and eval) appends it to the response `warnings`. Only these
+diagnostics are forwarded out of codegen; other codegen warnings are still
+dropped. To test the release path without a release build, use
+`CodegenOptions::with_injected_verifier_violation()` (a hidden test hook) or
+assert `verify_errors_to_diagnostic` directly. This is diagnosis
 *earlier and more precisely attributed* than `core_lint` above — most of
 these invariants would otherwise surface, if at all, as a `core_lint`
 unbound-variable or badarg error one layer further from the Beamtalk source
@@ -195,12 +202,17 @@ where to start reading:
 | `UnboundVersion` | A versioned var (e.g. `State2`) was referenced with no producing `Bind` in its frame or an ancestor frame on the frame stack. | Whatever emission path built the `ThreadedIr` fragment around the failing construct — it referenced a version it never bound. Live against real per-arm/per-method IR everywhere, including `exception_handling.rs`'s `on:do:`/`ensure:` arms as of BT-3165. |
 | `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. Live everywhere `UnboundVersion` is. |
 | `ThreadingModeUnpackMismatch` | An optimized `ThreadingMode` (a mode chosen specifically because it needs no `StateAcc` unpack) contains an unpack `Bind` anyway. | `while_loops.rs` / `counted_loops.rs`'s mode-selection logic — `ThreadingPlan::generate_unpack_at_iteration_start`'s `if !use_direct_params && !use_hybrid_params` guard (`control_flow/mod.rs`) is what makes this invariant hold structurally; BT-3154 deleted the per-call-site `check_loop_unpack_invariant`/`verify_loop_unpack_invariant` wrapper that used to check it explicitly, since `verify()`'s general `ThreadingModeUnpackMismatch` check was redundant with that guard. |
-| `ShadowWriteMissing` | A class-var `Bind` at a shadow-write-eligible point (per the enclosing `Threaded`/`ConditionalLoop` nodes' `shadow_write_eligible` stack — ADR 0111 Addendum 9, not `FrameId` as of BT-3167) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. As of BT-3164, `verify_body_with_opaque_version_gaps` backfills both `State`- and `ClassVars`-prefix gaps (`backfill_opaque_version_gap`), and `gen_server/methods.rs::lower_class_method_body` promotes a class method's own last-statement `self.classVar := value` to a real `Bind` — the shape that first lets this variant see a real class-var `Bind` jointly with a real class-method `NlrCatch` over the method's actual emitted IR, not just the isolated synthetic-marker fixture `construct_and_verify_class_var_bind` has always checked. |
 | `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`, via `control_flow::body::generate_foldl_loop_body` (ADR 0111 Addendum 15) — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
 | `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. Regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_direct_params`'s own guard; no production constructor). | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
 | `StateEffectEscapesExpression` | A `ThreadedValue` (ADR 0118) whose prelude carries a versioned `Bind` for `prefix` was `close()`d — rendered as nested `let`s around its value — in a context that cannot thread that prefix (`CloseContext::Opaque`), so the state effect the expression performed (a nested actor self-send's `NewState`, say) is scoped away and lost to everything after it: the "silent drop" class of bug as a verifier finding. | The consumer that called `close()` — it should *splice* the prelude into its own frame's IR instead (`stmts.extend(tv.prelude)`, as every `lower_body_exprs_with_reply` arm does since BT-3415), or, at a genuine boundary (a Tier 1 closure body, an FFI argument, a block passed to a class method, spec/doc codegen), surface a user-facing diagnostic built from this error. Constructed only by `ThreadedValue::close`; every ADR 0118 phase (1a-4, plus 5a/5b/6's `ClassVars` consolidation) has landed, so every expression-position consumer now splices its prelude — `close()` itself still has no production caller as of this writing (`expression_doc` deliberately stays a plain forwarder per ADR 0118 §Decision 5: it is reached only by genuinely un-migrated, self-contained-`Document` boundaries, not by any position this table's matrix rows cover). Wiring `close()`'s `StateEffectEscapesExpression` into a user-facing diagnostic at one of those genuine boundaries (`check_no_unsafe_class_method_self_sends`) is tracked separately as a follow-up (BT-3430), not part of this migration. |
+| `CatchWithoutClassVarRestore` | A compiled `on:do:`'s catch boundary (`ThreadedStmt::OnDoCatch`, ADR 0130 §4) is missing one of its two halves: the node has no entry `let Snap = beamtalk_class_vars:snapshot() in` before its `try` (`NoSnapshotEntry`), the non-NLR clause does not begin with `beamtalk_class_vars:restore(Snap)` (or restores some other snapshot, or there is no non-NLR clause), or the two `$bt_nlr` pass-through clauses (the actor 4-tuple and the 3-tuple) are not both ordered before it. The carried `CatchRestoreDefect` names which. A wrong restore is wrong-value Core Erlang, not an unbound variable: an error keeps the writes made inside the protected region, or a `^` throw discards writes it must keep. **What it guards:** the node renders `let Snap = ... in try ... of ... catch ...` as one unit, and its one builder verifies it as a one-element IR and renders it at once, so the check cannot fire from today's builder. It exists for a second `OnDoCatch` constructor (or an edit to the builder) that drops a half; the `catch_boundary.rs` tests build such nodes directly. | `exception_handling.rs`'s `on_do_catch_boundary`, the single builder of every compiled `on:do:` catch boundary (class-side, instance-side, value-type, direct-called and the generic `onDo` fallback alike), called by `generate_on_do`, `generate_on_do_with_mutations` and `generate_on_do_tier1_try` with only the protected expression, the `of` variable and the handler. Fix the boundary in `on_do_catch_boundary` or the node's lowering (`render_on_do_catch`), never at a call site. `ensure:` is not a boundary and builds no such node. |
+| `ActorStateInClassMethod` | A class-method scope (`ScopeKind::ClassMethod`, from `CoreErlangGenerator::in_class_method`) opens a `StateAcc` loop whose fallback reason is `NoThreadedLocals` (it carries nothing, so its seed can only be the ambient actor `State` — unbound in a class method, BT-3694), or produces a method-level `State` version or a `SelfVt` version anywhere (`ClassMethodDefect::FamilyVersion`; `State` inside a threading frame is the `StateAcc` map's version, which carries threaded locals and is legitimate). A class method threads no family (ADR 0130 §3), so a class-method `StateAcc` loop may only carry threaded locals, seeded from a fresh `maps:new()`. Per scope kind: `ClassMethod` forbids both families and the locals-less loop; `ValueType` (a value-type instance method, `CodeGenContext::ValueType`; ADR 0131 §3) forbids a method-level `State` version, since a value type has no `State` parameter either (o3/o12/s2 in value-type methods), and allows its own `SelfVt`; `Instance` (actor/REPL) is not constrained by this check (`eligible_families` owns that, ADR 0122). BT-3725. | The mode-selection predicate that routed the construct into a `StateAcc` shape in a class method (e.g. `condition_has_state_effects` in `control_flow/plan.rs`), or the family-threading code that produced the `State`/`SelfVt` `Bind`. Fix it there, never by guarding at the loop's call site. Every production lowering site verifies through a scope-aware entry point (`CoreErlangGenerator::verify_threaded_ir`, or `verify_body_with_opaque_version_gaps` / `verify_simple_bind` given `threaded_scope()`) rather than bare `verify()`, which is `Instance`-scoped and enforces nothing here. |
+| `ThreadedLocalDropped` | ADR 0131 §4: a `ConstructTuple` whose `threads` lists `local` is not followed, in the same frame's statement list, by a `LocalRebind` for `local` before the list ends or before anything other than a family `Bind` (a `Direct` step of the `State`/`SelfVt` family: the extraction that reads the carrier first; its value is an opaque `Doc`, so which carrier it reads is not checked) or a `DiscardLocals` at a `MethodBody` frame — the construct's write to `local` is lost (o4, o7, o8, s2, s9). Also reported for a `LocalRebind` its carrier's construct does not list (or with no open construct for that carrier): the §1 transitive-closure gap, where a frame rebinds `t` while the construct carrying it out omits `t`. Checked over every statement list, so at every nesting level. A `Statement` between the tuple and its rebinds counts as a carrier read (the verifier cannot see inside it). | The producer's prelude (`build_local_threading_prelude`: tuple, family binds, one rebind per threaded local, contiguous), or the consumer that spliced something between them or dropped the rebinds. A construct in last position of a loop body or branch arm must still rebind; only a `MethodBody` frame may `DiscardLocals`. If the construct's `threads` is short, the fix is in `threaded_locals_of`'s closure, not the rebind. |
+| `LocalRebindModeMismatch` | ADR 0131 §4: a `LocalRebind`'s lowered shape (`RebindLowering::shape()`: `Let`, `LoopParam`, `MapPut`) is not the cell ADR 0131 §2's table (`RebindShape::for_frame`) gives its enclosing frame's mode and the local's membership in that frame's `threads`: a plain `let` for a member of a `StateAcc` frame (the write never reaches the map the frame threads out), a `Put` for a non-member (a stray `__local__` key, persisted into an actor's `gen_server` `State`, the BT-2717 class), a `Gensym` chain entry for a non-parameter. The enclosing frame is read off the node that encloses the rebind (`RebindFrame::of` over `MethodBody`/`BranchArm`/`Threaded`/`ConditionalLoop`, each recording its own `threads`); a slice with no frame node is the implicit non-REPL method root. | The producer's `lower` callback passed to `build_local_rebind`, which must answer the shape it is asked for, or the loop/arm node whose `threads` does not list a local it threads. |
+| `LocalRebindFrameMismatch` | ADR 0131 §2: a `LocalRebind`'s recorded `frame` is not the frame of the node that actually encloses it: it was lowered against one frame and spliced into another. | The consumer that spliced the prelude into a different frame than the one it passed to the producer (`RebindFrame`). |
+| `LocalReadAfterSiblingRebind` | ADR 0131 §1a: a sibling of a sequenced send reads outer local `local` in place (a plain-variable child left for the parent to compile, so after every sibling's prelude) while a later sibling's prelude holds a top-level `LocalRebind` for `local` — the read sees the post-rebind value, against source order (`t + ([t := t + 1. 1] on: …)` must be `0 + 1`). Reported by `verify_sibling_reads`, called from `sequence_children`. **Cannot fire in production until ADR 0131 Phase 2 (BT-3749)**: no producer emits a `LocalRebind` yet, so it is exercised only by hand-built IR; Phase 2 must add a corpus test proving it fires. | `sequence_children`'s §1a exemption test (`snapshot_before_sibling_rebind`): a plain variable that a later sibling threads through any construct reachable inside it (`reachable_threaded_locals`: core's `expression_threaded_writes` plus `threaded_locals_of`) must be snapshot to a `Tmp` before that sibling's prelude. If the set disagrees with the rebinds the producer emitted, fix the set there. |
 
 `RoutingMismatch` (BT-3135's structural replacement for the two
 `gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
@@ -211,53 +223,6 @@ the shared Actor `threaded_expr.rs` emitter (`emit_actor_threaded_last_stmts`/
 second, independently-computed recheck left to disagree with the first, so
 the mismatch this variant caught is unrepresentable by construction.
 
-**`ClassVars` threading through loop/fold bodies (BT-3155 epic: BT-3166-BT-3170).**
-`ShadowWriteMissing`'s frame model above (BT-3167) is what let two more
-`ThreadedIr` node kinds start producing real class-var `Bind`s instead of
-rejecting them at compile time: `ConditionalLoop` (BT-3168, `whileTrue:`/
-`timesRepeat:`/`to:do:`/`to:by:do:` — `Letrec` bodies) now threads
-`ClassVars` as an extra fun parameter through the loop's own recursive tail
-call, gated by the same `shadow_write_eligible` the loop node carries; the
-`Foldl*` accumulator (BT-3169, `do:`/`collect:`/`select:`/`inject:into:`/
-list-op and dict-op bodies) becomes a `{ClassVars, StateAcc}` 2-tuple
-whenever a body threads `ClassVars`, so `EarlyExitGateSlotMismatch`'s
-`gate_slots` count stays untouched by `ClassVars`'s presence — modeled as
-an orthogonal bool, not an extra gate slot (see ADR 0111 Addendum 9,
-Question 6). Neither migration added a new `VerifyError` variant — both
-route through the existing `UnboundVersion`/`NonLinearVersion`/
-`ShadowWriteMissing` checks against the now-real `Bind`s these node kinds
-produce, the same "no net-new detection, just a wider real-IR surface"
-pattern BT-3164's class-method-body pipeline established. The one shape
-still rejected at compile time is a loop/fold body whose only mutation is
-the class-var write/self-send itself, with no other local mutation to
-trigger state threading in the first place — see `docs/beamtalk-language-features.md`'s
-"Passing Blocks Through Class Methods" section for the user-facing version
-of that boundary, and ADR 0111 Addendum 9 for the full six-question design
-this migration implements.
-
-**Per-family loop-entry/`Foldl` peak state (ADR 0122 Decision 5, BT-3518).**
-`LoopMode` (`control_flow/loop_mode.rs`) carries two small maps, both keyed
-by `VersionPrefix` rather than hardcoded to `ClassVars`, that back the
-threading above: `threading_families` — the storage families the innermost
-Letrec loop body is threading through its own recursive tail call right
-now, reset to empty on every `enter_branch_context` entry and restored on
-exit by `BranchContextGuard` (the same reset-on-entry discipline as
-`state_version`) — and `foldl_peak_versions` — the peak version each family
-reached *inside* a `Foldl*` body's own `with_branch_context` scope, a
-one-shot value `ThreadingPlan::foldl_call_doc` reads back *after* that
-scope's guard has already restored the live counter, so it is deliberately
-NOT part of the branch-guard reset/restore cycle (folding it in would erase
-it before its one reader ever runs). Both replace what used to be three
-`ClassVars`-only fields (`loop_threads_class_vars`, `last_loop_class_var`,
-`last_foldl_class_var_peak`) — `last_loop_class_var` had no reader left
-once BT-3515 moved the loop's own recursive-tail-call argument onto
-`ThreadingPlan::capture_loop_family_params`/`family_slots::append_family_slots`,
-so it was deleted rather than folded in. `SelfVt` never actually populates
-either surviving map in practice (a value-type method has no same-class
-self-send, and a `Foldl*` accumulator has no `SelfVt` slot), but both stay
-keyed by `VersionPrefix` generically per ADR 0122's "one list, one helper"
-goal rather than reverting to a `ClassVars`-only shape.
-
 **ADR 0122 close-out: one detector, one list, one helper (BT-3519).** ADR
 0122 unified the six hand-written sites that each separately answered "does
 this body mutate storage family X, and how do I carry it out" —
@@ -267,8 +232,8 @@ conditional sites, `conditionals.rs`'s Actor conditional,
 accumulator — into three shared pieces, all in `control_flow/`:
 
 - **One type, `ThreadedFamilies`** (`analysis.rs`) — an ordered
-  `Vec<VersionPrefix>` in canonical slot order (`State`, then `ClassVars`,
-  then `SelfVt`; ADR 0122 Decision 2), constructed only via
+  `Vec<VersionPrefix>` in canonical slot order (`State`, then `SelfVt`;
+  ADR 0122 Decision 2; the `ClassVars` family was removed by ADR 0130), constructed only via
   `ThreadedFamilies::from_matches` so no call site can hand-assemble one out
   of order.
 - **One emission helper, `family_slots.rs`** — `append_family_slots`/
@@ -284,27 +249,26 @@ accumulator — into three shared pieces, all in `control_flow/`:
   call site — this is exactly the "ask about the ones in front of you"
   mistake ADR 0122's own "Why the gaps keep happening" section names as the
   root cause of BT-3489 and BT-3506); `match_lowering.rs`'s
-  `MATCH_ARM_FAMILIES` (`[State, ClassVars]`, `SelfVt` excluded) is the
+  `MATCH_ARM_FAMILIES` (`[State]`, `SelfVt` excluded) is the
   clearest example of a site declaring a narrower capability than
   `eligible_families` would allow, with the exclusion checked against the
   shared detector rather than hand-matched. A family a site does not declare
   is *meant* to be rejected through the construct's own existing diagnostic
-  (`ClassVarAssignmentInThreadedBody`, `FieldAssignmentInUnsupportedBlock`,
+  (`FieldAssignmentInUnsupportedBlock`,
   `ValueSelfFieldAssignmentInMatchArm`) — detection and carry-capability stay
   deliberately separate questions (ADR 0122 Decision 1). That pairing is
-  verified present for the loop sites; it is **not yet wired up for two
-  shapes found auditing this close-out** — a `ClassVars` mutation nested
-  inside a conditional inside `on:do:`/`ensure:`, and a `SelfVt` mutation
-  nested inside a value-type conditional's own `ifTrue:`/`ifFalse:` block —
-  both missed by the narrow detector with no rejection to catch the miss,
-  so the mutation is silently dropped instead. Tracked as
+  verified present for the loop sites; it is **not yet wired up for one
+  shape found auditing this close-out**, a `SelfVt` mutation nested inside
+  a value-type conditional's own `ifTrue:`/`ifFalse:` block, missed by the
+  narrow detector with no rejection to catch the miss, so the mutation is
+  silently dropped instead (the audit's `ClassVars` half no longer applies:
+  ADR 0130 removed the family). Tracked as
   [BT-3522](https://linear.app/beamtalk/issue/BT-3522).
 
 What ADR 0122 did **not** collapse into one recursive walk, on purpose: each
 site's own "does THIS body's TOP-LEVEL statements mutate family X" predicate
-(`CoreErlangGenerator::loop_body_threads_class_vars`/
-`loop_body_threads_value_self`, `ThreadingPlan::threads_class_vars`/
-`threads_value_self`, `exception_handling.rs`'s
+(`CoreErlangGenerator::loop_body_threads_value_self`,
+`ThreadingPlan::threads_value_self`, `exception_handling.rs`'s
 `block_top_level_mutates_family`) stays narrower than the fully recursive
 `body_threaded_families` (`analysis.rs`) the ADR's Decision 1 describes as
 the eventual end state. The narrow predicates are the *actual carrying
@@ -315,8 +279,7 @@ deliberately not wired into live emission: a construct can only thread a
 mutation its own tail-call/tuple shape has a slot for, and that slot only
 ever comes from a BARE top-level statement (a mutation nested inside the
 body's own conditional/loop keeps its own, more narrowly-scoped version
-chain — see `find_class_var_mutating_stmt`'s doc comment for the
-`class_var_sub_expr.bt` regression this scoping prevents). Widening a live
+chain). Widening a live
 site's own detector to the recursive walk would change which programs
 compile and how — exactly the kind of diff `just core-diff` (below) exists
 to catch — so it stayed out of scope; `body_threaded_families` carries
@@ -429,49 +392,25 @@ scaffolding these two call sites were the last production users of — are
 deleted; `NonLinearVersion`/`UnboundVersion` are live checks for `on:do:`/
 `ensure:` arms now, same as everywhere else in this table.
 
-**The class-method body pipeline (BT-3164, closing the gap BT-3148 left
-open).** `gen_server/methods.rs`'s class-method body generator
-(`generate_class_method_body`, pre-dating `BodyExprKind`/
-`classify_body_expr` entirely) is now `lower_class_method_body`, returning
-a real `Vec<ThreadedStmt>` instead of a hand-rolled `Document` — mirroring
-BT-3148's own `is_last`-only precedent for the Actor pipeline's
-`BodyExprKind::FieldAssignment`: only a class method's own direct
-`self.classVar := value` in the body's *last* position is promoted to a
-real `Bind` (`lower_class_method_last_class_var_bind`); every other
-position, and any class-var rebind hidden inside the shared
-`emit_class_var_result_unwrap` helper (the class-method analogue of the
-Actor pipeline's `generate_self_dispatch_open`), stays an opaque
-`Statement`. Both class-method NLR call sites
-(`generate_class_method_functions`, `generate_class_method_fun_from_block`
-— the latter migrated off the now-deleted `wrap_class_method_body_with_nlr_catch`
-Document-wrap by this issue) mint the token before lowering and prepend a
-real `NlrCatch`, then verify the whole body in one
-`verify_and_render_body_stmts` call — the same "method-level `verify()`"
-shape BT-3148 established for Actor bodies, now also covering class
-methods. This is what first lets `ShadowWriteMissing` see a real
-class-var `Bind` jointly with a real class-method `NlrCatch` (the ADR 0110
-joint-visibility gap ADR 0111 Addendum 6 left open); the pre-existing
-isolated, synthetic-marker check `construct_and_verify_class_var_bind`
-still runs too, since it is the only one of the two that fires for a
-method with no literal `^` at all (the ADR 0110 `CollectionDriver
-countedRun:over:` repro shape). The other 5 `wrap_body_with_nlr_catch`-family
-call sites this issue's task list named were audited: `generate_class_method_fun_from_block`
-(above) shares the same pipeline and was migrated; the 3 Actor-flavored
-call sites (`actor_codegen.rs`, `gen_server/dispatch.rs`,
-`gen_server/extensions.rs`) don't carry the `ClassVars`
-`ShadowWriteMissing` gap this issue closes and are tracked separately
-(BT-3171); `gen_server/extensions.rs`'s value-type NLR site
-(`wrap_value_type_body_with_nlr_catch`) is a structurally different,
-already-inline mechanism, not applicable.
+**The class-method body pipeline (BT-3164, simplified by ADR 0130).** A
+class method's body is still lowered to a real `Vec<ThreadedStmt>` and
+verified in one method-level `verify()` call together with its `NlrCatch`,
+but class variables no longer appear in it: ADR 0130 deleted the `ClassVars`
+family, the shadow-write flag on `Bind`, `ShadowWriteMissing`, the
+`class_var_result` unwrap helpers and the isolated shadow-write check, so a
+class-variable access is an ordinary call into `beamtalk_class_vars` (a
+`put`/`get` in the class process) and needs no `Bind`. The one class-variable
+node left is the catch boundary: `ThreadedStmt::OnDoCatch` (see
+`CatchWithoutClassVarRestore` above).
 
 **Corpus `.core` diff harness (BT-3509, ADR 0122 Phase 0).** The verifier
 above catches a *malformed* `ThreadedIr` graph — an unbound version, a
-missing shadow write, a slot-count mismatch — via `debug_assert!` under
+a slot-count mismatch — via `debug_assert!` under
 `just verify-threaded-ir`. It does **not** catch a *well-formed* graph that
 renders to different Core Erlang than before: a changed tuple shape or slot
 order still passes every `VerifyError` check while silently changing
 generated code. ADR 0122's `ThreadedFamilies` unification (unifying how
-`State`/`ClassVars`/`SelfVt` thread through loops, conditionals,
+`State`/`SelfVt` (and, before ADR 0130, `ClassVars`) thread through loops, conditionals,
 `on:do:`/`ensure:`, and Foldl bodies) is exactly the kind of refactor where
 that gap matters: every migration in that epic is meant to be
 byte-identical except its own documented, reviewed exception. `just
@@ -546,8 +485,6 @@ These are off by default (too noisy for normal use) and gated behind environment
 |---|---|
 | `BEAMTALK_CODEGEN_DIAGNOSTICS=1` | Enable all codegen diagnostics (info-level hints) |
 | `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level (requires `BEAMTALK_CODEGEN_DIAGNOSTICS=1`) |
-| `BEAMTALK_CLASS_VAR_PROBE=1` | Class-variable census probe (ADR 0130 Phase 0); see below. Changes generated code, so leave it unset for normal builds |
-| `BEAMTALK_CLASS_VAR_PROBE_LOG=<file>` | Runtime side of the probe: append the probe's log events to `<file>` |
 
 ```bash
 # See all codegen decisions
@@ -556,40 +493,6 @@ BEAMTALK_CODEGEN_DIAGNOSTICS=1 beamtalk build myfile.bt
 # Highlight StateAcc fallbacks as warnings
 BEAMTALK_CODEGEN_DIAGNOSTICS=1 BEAMTALK_WARN_STATEACC=1 beamtalk build myfile.bt
 ```
-
-### Class-variable probe
-
-`BEAMTALK_CLASS_VAR_PROBE=1` (ADR 0130 Phase 0, BT-3703) makes the compiler
-emit a `beamtalk_class_var_probe:report/6` call before every class-variable
-read or write in class methods. The runtime logs one OTP logger event with
-`domain => [beamtalk, probe]` per access that is inside a non-inlined block
-(the runtime cannot see those otherwise) or made away from the home class
-process. Each event carries `class`, `selector`, `kind` (`read`/`write`),
-`field`, `in_block`, `at_home` (`self()` is the home pid), `home_live` (the
-home process is inside a class-method invocation) and `shape` (`home`,
-`carried_sync`: home is blocked in the call that carried the block away, or
-`abroad`). With the flag unset nothing references the probe and the generated
-`.core` is byte-identical (`just core-diff`).
-
-```bash
-# Census over the BUnit suite; the events land in the file named below
-cd stdlib
-BEAMTALK_CLASS_VAR_PROBE=1 BEAMTALK_CLASS_VAR_PROBE_LOG=probe.log \
-    cargo run --bin beamtalk --quiet -- test --quiet
-```
-
-Run only the suites that execute code (`test-bunit`, `test-stdlib`,
-`test-repl-protocol`) with the flag on, not `cargo test`: the flag changes
-generated code, so codegen snapshot tests would fail. Recompile the Erlang
-runtime (`just build-erlang`) first so `beamtalk_class_var_probe` is loadable.
-Side effects of a census run: the probe sets the VM-wide
-`erlang:system_flag(backtrace_depth, 128)` once (not restored) and, when
-`BEAMTALK_CLASS_VAR_PROBE_LOG` is set, lowers the primary logger level to
-`notice` while capping every other handler at `warning`, so do not compare a
-census run's output against golden output. The probe does not see `hasField:`
-on class variables (the compiler's `maps:is_key` fast path). The static counterpart, escaping closures that read a class variable, is the
-`beamtalk_core::class_var_census` test
-(`cargo test -p beamtalk-core --lib census_over -- --nocapture`).
 
 ### Diagnostic Categories
 

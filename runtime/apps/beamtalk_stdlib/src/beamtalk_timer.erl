@@ -68,6 +68,8 @@ The delay is Integer milliseconds or a Duration.
                 From ! {Ref, canceled},
                 ok
         after Ms ->
+            %% bt-catcher-audit: not-applicable-other-process - block runs in the spawn_link'd
+            %% timer process
             try
                 Block()
             catch
@@ -200,6 +202,8 @@ repeat_loop(Ms, Block) ->
             From ! {Ref, canceled},
             ok
     after Ms ->
+        %% bt-catcher-audit: not-applicable-other-process - block runs in the spawn_link'd timer
+        %% process
         (try
             Block()
         catch

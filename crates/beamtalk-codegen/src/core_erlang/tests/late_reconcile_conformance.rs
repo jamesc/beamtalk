@@ -24,7 +24,7 @@
 //! `runtime/apps/beamtalk_runtime/test_fixtures/` (never a hand-copied
 //! snippet — the same "read the real fixture" precedent
 //! `sendability.rs::tests::runtime_field_tier_kind_mapping_matches_compile_time_base_tier`
-//! and `class_var_shadow_contract.rs` both already use). This test asserts
+//! already uses). This test asserts
 //! that each row's fixture actually compiles to the declared `kind`/
 //! `has_default`/`is_typed` meta — the inputs `reconcile_declared/7`
 //! reads. The Erlang side asserts the *outcome* half of each row (the
@@ -38,8 +38,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Returns the repository root (`CARGO_MANIFEST_DIR/../..`), mirroring the
-/// `repo_root` helper in `source_analysis::method_span_corpus_tests` and
-/// `class_var_shadow_contract.rs`.
+/// `repo_root` helper in `source_analysis::method_span_corpus_tests`.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

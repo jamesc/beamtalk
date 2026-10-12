@@ -367,6 +367,20 @@ impl ClassHierarchy {
             }
         }
     }
+    /// Whether a send of the class-side `selector` to `class_name` is
+    /// direct-called in the caller's process (see
+    /// [`ClassInfo::is_direct_call_eligible`]). A method inherited from an
+    /// ancestor is not in the class's own table, so it is not eligible.
+    #[must_use]
+    pub fn is_direct_call_eligible(&self, class_name: &str, selector: &str) -> bool {
+        self.get_class(class_name).is_some_and(|class| {
+            class
+                .class_methods
+                .iter()
+                .any(|m| m.selector == selector && class.is_direct_call_eligible(m))
+        })
+    }
+
     /// Look up a class by name.
     #[must_use]
     pub fn get_class(&self, name: &str) -> Option<&ClassInfo> {

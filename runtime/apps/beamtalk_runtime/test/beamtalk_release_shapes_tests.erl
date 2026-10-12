@@ -34,13 +34,31 @@ extract_shapes_finds_both_fixture_classes_test() ->
     ?assert(maps:is_key(<<"ReleaseShapesRoot">>, Shapes)),
     ?assert(maps:is_key(<<"ReleaseShapesLeaf">>, Shapes)).
 
+extract_shapes_returns_error_when_a_collection_is_in_progress_test() ->
+    %% A leftover collector must surface as {error, _}, not a badarg crash,
+    %% and must not be consumed or deleted by the failing call.
+    Table = ets:new(beamtalk_abi_refusals, [named_table, public, set]),
+    try
+        ?assertMatch(
+            {error, {extraction_failed, {error, abi_collection_in_progress}}},
+            beamtalk_release_shapes:extract_shapes([], [fixtures_dir()])
+        ),
+        ?assertNotEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
+        ?assertEqual([], ets:tab2list(Table))
+    after
+        ets:delete(Table)
+    end.
+
 extract_shapes_root_entry_has_default_version_and_own_field_test() ->
     Dir = fixtures_dir(),
     {ok, Shapes} = beamtalk_release_shapes:extract_shapes([], [Dir]),
     RootEntry = maps:get(<<"ReleaseShapesRoot">>, Shapes),
     ?assertEqual(1, maps:get(version, RootEntry)),
     ?assertEqual(#{<<"label">> => <<"String">>}, maps:get(fields, RootEntry)),
-    ?assertEqual(#{}, maps:get(migrations, RootEntry)).
+    ?assertEqual(#{}, maps:get(migrations, RootEntry)),
+    %% BT-3721: the module's class_var_abi rides along so `--upgrade-from`
+    %% can diff it.
+    ?assertEqual(beamtalk_class_var_abi:abi(), maps:get(class_var_abi, RootEntry)).
 
 extract_shapes_leaf_entry_has_declared_version_and_flattened_fields_test() ->
     Dir = fixtures_dir(),
@@ -120,6 +138,7 @@ write_shapes_json_writes_a_parseable_manifest_test() ->
         ShapesJson = maps:get(<<"shapes">>, Decoded),
         LeafJson = maps:get(<<"ReleaseShapesLeaf">>, ShapesJson),
         ?assertEqual(2, maps:get(<<"version">>, LeafJson)),
+        ?assertEqual(beamtalk_class_var_abi:abi(), maps:get(<<"class_var_abi">>, LeafJson)),
         ?assertEqual(
             #{<<"qty">> => <<"Integer">>, <<"label">> => <<"String">>},
             maps:get(<<"fields">>, LeafJson)

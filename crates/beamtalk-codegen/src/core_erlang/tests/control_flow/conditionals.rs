@@ -250,11 +250,11 @@ fn test_local_assign_field_write_at_flat_top_level_threads_state() {
 
 #[test]
 fn test_pure_class_method_self_send_mints_no_class_vars_rebind() {
-    // ADR 0129 (BT-3632): a callee that provably never writes a class variable
-    // hands back the caller's own `ClassVars`, so a same-class self-send to it
-    // rebinds nothing — in a conditional arm, a fold body, or at the top level.
-    // Such a send used to mint `ClassVarsN` versions that a conditional arm's
-    // own ThreadedIr frame never produced (`NonLinearVersion`/`UnboundVersion`).
+    // ADR 0129 (BT-3632) / ADR 0130 §3: a same-class self-send rebinds
+    // nothing — in a conditional arm, a fold body, or at the top level. A send
+    // used to mint `ClassVarsN` versions that a conditional arm's own
+    // ThreadedIr frame never produced (`NonLinearVersion`/`UnboundVersion`);
+    // class variables are not threaded any more.
     let src = concat!(
         "sealed Object subclass: StatelessFacade\n",
         "  class sealed step: n :: Integer -> Integer => n + 1\n\n",

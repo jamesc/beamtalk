@@ -17,16 +17,35 @@
 //!    release build's degraded form of the same failure -- ADR 0130 Open
 //!    Question 2, "verifier visibility in release builds": the property
 //!    treats either as a failure);
-//! 3. the Core Erlang is structurally valid.
+//! 3. the Core Erlang is structurally valid;
+//! 4. every compiled `on:do:` is a class-variable catch boundary (ADR 0130
+//!    §4, BT-3711): a `snapshot/0` immediately before its `try`, and in its
+//!    catch the two `$bt_nlr` pass-through arms, then
+//!    `restore/1` as the first statement of the non-NLR arm. The in-process
+//!    `ThreadedIr` verifier (`CatchWithoutClassVarRestore`) already checks the
+//!    node; this re-checks the emitted text of every generated program, so a
+//!    renderer that dropped the order would fail here too.
 //!
 //! The execution half (compile with `erlc`, run on a BEAM, compare the three
 //! spellings with the reference interpretation) is
 //! `beamtalk-cli/tests/cli/cli_class_var_agreement.rs`; it needs the runtime,
 //! this one does not.
 //!
-//! Two properties share one body: the shapes that pass today are a normal
-//! test; the full shape set is `#[ignore]`d until ADR 0130 Phase 3 (BT-3713)
-//! makes every shape compile and flips it.
+//! The codegen property draws [`Shapes::all()`], `local_touch` included
+//! (BT-3767): `local_touch`'s failures (BT-3738) show only when the program is
+//! executed, and in-process codegen passes for it, so only the BEAM property
+//! leaves it out.
+//!
+//! # Budget (BT-3767)
+//!
+//! `all_shapes_pass_verified_codegen` runs [`DEFAULT_CODEGEN_CASES`] cases in a
+//! plain `cargo test` (every `just test-rust`, on three OSes per PR); setting
+//! `PROPTEST_CASES` overrides it. `just test-class-var-corpus` runs the full
+//! 512 cases and the nightly `class-var-corpus` job (`fuzz.yml`) 2048.
+//! `programs_interpret_and_render_deterministically` never compiles anything
+//! and keeps the shared 512-case default. Measured on a Linux dev container
+//! (debug build, this file's tests run in parallel): with 512 codegen cases
+//! the file took about 25 s, with 64 about 3 s.
 //!
 //! Only the open and sealed spellings are checked here: the override
 //! spelling is two classes in two files, and a class method's lowering
@@ -38,7 +57,8 @@ use beamtalk_core::test_helpers::class_var_program::{
     Program, Shapes, Spelling, corpus_cases_from_env, corpus_shapes_from_env, normalize_cause,
 };
 use beamtalk_core::test_helpers::test_support::{
-    arb_class_program, core_erlang_structural_issues, draw_class_programs, proptest_config_default,
+    arb_class_program, core_erlang_structural_issues, draw_class_programs, proptest_config_cases,
+    proptest_config_default,
 };
 use proptest::prelude::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -77,13 +97,72 @@ fn check_source(name: &str, source: &str) -> Result<(), String> {
                 return Err(format!("verifier diagnostic surfaced: {}", w.message));
             }
             let issues = core_erlang_structural_issues(&out.code);
-            if issues.is_empty() {
-                Ok(())
-            } else {
-                Err(format!("invalid Core Erlang: {}", issues.join("; ")))
+            if !issues.is_empty() {
+                return Err(format!("invalid Core Erlang: {}", issues.join("; ")));
+            }
+            catch_boundary_issues(&out.code)
+                .map_or(Ok(()), |issue| Err(format!("catch boundary: {issue}")))
+        }
+    }
+}
+
+/// ADR 0130 §4: the first violation of the `on:do:` catch-boundary order in
+/// `code`, or `None`. Each compiled `on:do:` catch is anchored by its
+/// `build_stacktrace` wrap (only `on:do:` emits it).
+fn catch_boundary_issues(code: &str) -> Option<String> {
+    let anchors: Vec<usize> = code
+        .match_indices("primop 'build_stacktrace'(")
+        .map(|(i, _)| i)
+        .collect();
+    let snapshots = code
+        .matches("call 'beamtalk_class_vars':'snapshot'() in try")
+        .count();
+    if snapshots != anchors.len() {
+        return Some(format!(
+            "{} on:do: catches but {snapshots} snapshots before a try",
+            anchors.len()
+        ));
+    }
+    for anchor in anchors {
+        let Some(catch_at) = code[..anchor].rfind("catch <") else {
+            return Some("an on:do: wrap with no preceding catch".to_string());
+        };
+        let region = &code[catch_at..anchor];
+        let nlr_arms: Vec<usize> = region
+            .match_indices("{'$bt_nlr', ")
+            .map(|(i, _)| i)
+            .collect();
+        let restore = region.find("do call 'beamtalk_class_vars':'restore'(");
+        match (nlr_arms.as_slice(), restore) {
+            ([_, second], Some(restore)) if *second < restore => {}
+            _ => {
+                return Some(format!(
+                    "the restore is not first after both NLR arms: {region}"
+                ));
             }
         }
     }
+    None
+}
+
+#[test]
+fn catch_boundary_check_reports_malformed_text() {
+    let ok = "let S = call 'beamtalk_class_vars':'snapshot'() in try X catch <T, E, K> -> \
+        case {T, E} of <{'throw', {'$bt_nlr', A, B, C}}> when 'true' -> r \
+        <{'throw', {'$bt_nlr', A, B}}> when 'true' -> r \
+        <O> when 'true' -> do call 'beamtalk_class_vars':'restore'(S) \
+        let U = primop 'build_stacktrace'(K) in U";
+    assert_eq!(catch_boundary_issues(ok), None);
+    // A wrap with no catch before it must be reported, not read as clean.
+    let no_catch = "let S = call 'beamtalk_class_vars':'snapshot'() in try X \
+        let U = primop 'build_stacktrace'(K) in U";
+    assert!(catch_boundary_issues(no_catch).is_some_and(|m| m.contains("no preceding catch")));
+    // Restore ordered before the second NLR arm.
+    let restore_first = ok.replace("<{'throw', {'$bt_nlr', A, B}}> when 'true' -> r <O>", "<O>");
+    assert!(catch_boundary_issues(&restore_first).is_some());
+    // No snapshot before the try.
+    let no_snapshot = ok.replace("let S = call 'beamtalk_class_vars':'snapshot'() in ", "");
+    assert!(catch_boundary_issues(&no_snapshot).is_some());
 }
 
 fn check_program(index: usize, program: &Program) -> Result<(), String> {
@@ -115,14 +194,43 @@ proptest! {
         }
     }
 
-    /// The shapes whose programs compile today through debug codegen with the
-    /// verifier on: no panic, no `internal:` diagnostic, valid Core Erlang.
+}
+
+/// Cases `all_shapes_pass_verified_codegen` runs in a plain `cargo test`;
+/// see the module doc's budget section.
+const DEFAULT_CODEGEN_CASES: u32 = 64;
+
+proptest! {
+    #![proptest_config(proptest_config_cases(DEFAULT_CODEGEN_CASES))]
+
+    /// Every shape, `local_touch` included (BT-3767), compiles through debug
+    /// codegen with the verifier on: no panic, no `internal:` diagnostic,
+    /// valid Core Erlang, every `on:do:` a class-variable catch boundary.
     #[test]
-    fn supported_shapes_pass_verified_codegen(
-        (seed, size, program) in arb_class_program(Shapes::SUPPORTED_TODAY)
+    fn all_shapes_pass_verified_codegen(
+        (seed, size, program) in arb_class_program(Shapes::all())
     ) {
         if let Err(e) = check_program(0, &program) {
             return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
+        }
+    }
+}
+
+/// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen`
+/// (now `all_shapes_pass_verified_codegen`) in CI (an inlined `inject:into:`
+/// fold fun leaked its state version into the enclosing `StateAcc` loop).
+/// Explicit seeds, so no `.proptest-regressions` file is needed.
+#[test]
+fn bt_3737_ci_seeds_pass_verified_codegen() {
+    use beamtalk_core::test_helpers::class_var_program::gen_program;
+    for seed in [
+        4_288_439_136_652_914_866_u64,
+        12_525_934_088_575_929_805,
+        15_420_763_691_539_516_991,
+    ] {
+        let program = gen_program(seed, 3, Shapes::ENABLED);
+        if let Err(e) = check_program(0, &program) {
+            panic!("seed {seed}: {e}");
         }
     }
 }
@@ -164,21 +272,5 @@ fn measure_failure_rate() {
     println!("shapes {shapes:?}: {failed} of {cases} programs fail verified codegen");
     for (c, n) in by_cause {
         println!("  {n:>4} x {c}");
-    }
-}
-
-proptest! {
-    #![proptest_config(proptest_config_default())]
-
-    /// Every shape. Red on `main` (the failure rate and the shapes are in the
-    /// BT-3705 PR): ADR 0130 Phase 3 (BT-3713) removes the `#[ignore]`.
-    #[test]
-    #[ignore = "red on main until ADR 0130 Phase 3 (BT-3713) flips it"]
-    fn all_shapes_pass_verified_codegen(
-        (seed, size, program) in arb_class_program(Shapes::all())
-    ) {
-        if let Err(e) = check_program(0, &program) {
-            return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
-        }
     }
 }

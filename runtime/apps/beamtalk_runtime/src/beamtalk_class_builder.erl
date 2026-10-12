@@ -41,7 +41,12 @@ timeout. The builder is single-use: create, configure, register, done.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([register/1]).
+-export([
+    register/1,
+    validate_class_method_arities/2,
+    class_method_arity_error/4,
+    class_method_fun_arity/2
+]).
 
 %% Selector-shape helpers, shared with the workspace app via
 %% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.
@@ -144,40 +149,49 @@ register(BuilderState) when is_map(BuilderState) ->
 -doc "Attempt to start or update the class gen_server.".
 -spec do_register(atom(), map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
 do_register(ClassName, ClassInfo) ->
+    case start_or_update(ClassName, ClassInfo) of
+        {ok, Pid} ->
+            notify_class_loaded(ClassName),
+            {ok, Pid};
+        {error, _Phase, #beamtalk_error{kind = abi_mismatch} = Refused} ->
+            %% ADR 0130 `class_var_abi` gate (registration or hot reload):
+            %% already structured (it names the module and says to recompile);
+            %% do not bury it in an internal_error.
+            {error, Refused};
+        {error, Phase, Reason} ->
+            ?LOG_WARNING("ClassBuilder register failed", #{
+                class => ClassName,
+                phase => Phase,
+                reason => Reason,
+                module => ?MODULE,
+                domain => [beamtalk, runtime]
+            }),
+            Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
+            Error = beamtalk_error:with_hint(
+                Error1,
+                iolist_to_binary(io_lib:format("~s failed: ~p", [Phase, Reason]))
+            ),
+            {error, Error}
+    end.
+
+%% Start the class gen_server, or update it in place when it already exists
+%% (hot reload). A failure is tagged with the step that failed.
+-spec start_or_update(atom(), map()) ->
+    {ok, pid()} | {error, start | update_class, term()}.
+start_or_update(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
         {ok, Pid} ->
             ?LOG_DEBUG("Registered class via ClassBuilder", #{
                 class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
             }),
-            notify_class_loaded(ClassName),
             {ok, Pid};
         {error, {already_started, _}} ->
-            %% Hot reload path: class already exists, update its metadata.
             case beamtalk_object_class:update_class(ClassName, ClassInfo) of
-                {ok, _IVars} ->
-                    notify_class_loaded(ClassName),
-                    {ok, beamtalk_class_registry:whereis_class(ClassName)};
-                {error, Reason} ->
-                    ?LOG_WARNING("ClassBuilder update_class failed", #{
-                        class => ClassName,
-                        reason => Reason,
-                        module => ?MODULE,
-                        domain => [beamtalk, runtime]
-                    }),
-                    Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
-                    Error = beamtalk_error:with_hint(
-                        Error1,
-                        iolist_to_binary(io_lib:format("update_class failed: ~p", [Reason]))
-                    ),
-                    {error, Error}
+                {ok, _IVars} -> {ok, beamtalk_class_registry:whereis_class(ClassName)};
+                {error, Reason} -> {error, update_class, Reason}
             end;
         {error, Reason} ->
-            Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
-            Error = beamtalk_error:with_hint(
-                Error1,
-                iolist_to_binary(io_lib:format("start failed: ~p", [Reason]))
-            ),
-            {error, Error}
+            {error, start, Reason}
     end.
 
 -doc """
@@ -560,9 +574,9 @@ source_map_to_xref(_NotMap, _ClassSide, _Installed) ->
 -doc """
 Validate the arity of every class-method fun in a classMethods: spec.
 
-A class-method fun is dispatched as `apply(Fun, [ClassSelf, ClassVars | Args])`
-(`beamtalk_class_dispatch:apply_class_method_fun/6`), so a fun for `Selector`
-must have arity `selector_arity(Selector) + 2`. The compiler enforces this for
+A class-method fun is dispatched as `apply(Fun, [ClassSelf | Args])`
+(`beamtalk_class_dispatch:apply_class_method_fun/5`), so a fun for `Selector`
+must have arity `selector_arity(Selector) + 1`. The compiler enforces this for
 classMethods: *block* literals at compile time (a wrong-arity block is a
 CodeGenError). A *computed* (non-block) fun, however, only has its arity known
 at runtime: without this check it installs successfully and crashes with an
@@ -581,11 +595,9 @@ validate_class_method_arities(ClassName, ClassMethodSpecs) when is_map(ClassMeth
                 %% Already found a mismatch; keep the first one.
                 Acc;
             (Selector, Fun, ok) when is_atom(Selector), is_function(Fun) ->
-                {arity, Arity} = erlang:fun_info(Fun, arity),
-                Expected = selector_arity(Selector) + 2,
-                case Arity =:= Expected of
-                    true -> ok;
-                    false -> {error, {Selector, Expected, Arity}}
+                case class_method_fun_arity(Selector, Fun) of
+                    ok -> ok;
+                    {error, {Expected, Actual}} -> {error, {Selector, Expected, Actual}}
                 end;
             (_Selector, _Other, ok) ->
                 ok
@@ -603,10 +615,28 @@ validate_class_method_arities(_ClassName, _Other) ->
     ok.
 
 -doc """
+The single class-method arity rule: a fun for `Selector` must have arity
+`selector_arity(Selector) + 1`. Returns `ok` on a match, or
+`{error, {Expected, Actual}}` (dispatch arities) on a mismatch. A non-atom
+`Selector` is not checked and returns `ok`, matching how
+`validate_class_method_arities/2` skips non-atom keys.
+""".
+-spec class_method_fun_arity(term(), fun()) -> ok | {error, {non_neg_integer(), non_neg_integer()}}.
+class_method_fun_arity(Selector, Fun) when is_atom(Selector), is_function(Fun) ->
+    {arity, Actual} = erlang:fun_info(Fun, arity),
+    Expected = selector_arity(Selector) + 1,
+    case Actual =:= Expected of
+        true -> ok;
+        false -> {error, {Expected, Actual}}
+    end;
+class_method_fun_arity(_Selector, _Fun) ->
+    ok.
+
+-doc """
 Build the structured #beamtalk_error{} for a wrong-arity class-method fun.
 
-The reported arities are the dispatch arities (`selector_arity + 2`: the leading
-ClassSelf and ClassVars plus one per selector argument). The hint frames the
+The reported arities are the dispatch arities (`selector_arity + 1`: the leading
+ClassSelf plus one per selector argument). The hint frames the
 expected shape in Beamtalk block terms (`:self` plus one parameter per selector
 argument) so the message is actionable whether the user supplied a wrong-arity
 block or a computed fun.
@@ -614,19 +644,26 @@ block or a computed fun.
 -spec class_method_arity_error(atom(), atom(), non_neg_integer(), non_neg_integer()) ->
     #beamtalk_error{}.
 class_method_arity_error(ClassName, Selector, Expected, Actual) ->
-    BlockParams = Expected - 1,
+    BlockParams = Expected,
     Error1 = beamtalk_error:new(arity_mismatch, ClassName, Selector),
-    beamtalk_error:with_hint(
-        Error1,
-        iolist_to_binary(
-            io_lib:format(
-                "classMethods: ~p must take ~b argument(s) (ClassSelf, ClassVars plus one per "
-                "selector slot), got ~b. A class-method block takes `self` plus one parameter "
-                "per selector argument, so it needs ~b parameter(s).",
-                [Selector, Expected, Actual, BlockParams]
-            )
-        )
-    ).
+    Base = io_lib:format(
+        "classMethods: ~p must take ~b argument(s) (ClassSelf plus one per "
+        "selector slot), got ~b. A class-method block takes `self` plus one parameter "
+        "per selector argument, so it needs ~b parameter(s).",
+        [Selector, Expected, Actual, BlockParams]
+    ),
+    %% One more than expected is the pre-ADR-0130 `fun(ClassSelf, ClassVars, Args...)`.
+    Extra =
+        case Actual =:= Expected + 1 of
+            true ->
+                " This looks like the pre-ADR-0130 shape fun(ClassSelf, ClassVars, Args...); "
+                "class methods no longer take or return class variables, so drop the "
+                "ClassVars parameter and return the bare result.";
+            false ->
+                ""
+        end,
+    Error2 = beamtalk_error:with_details(Error1, #{expected => Expected, actual => Actual}),
+    beamtalk_error:with_hint(Error2, iolist_to_binary([Base, Extra])).
 
 -doc """
 Count the selector arity of a class-method selector atom.
@@ -643,7 +680,7 @@ interior colon without a trailing one (e.g. `'at:put'`). Such selectors are not
 valid keyword selectors, so counting their interior colons would yield a
 misleading expected arity and a spurious `arity_mismatch`. A malformed
 selector is treated as unary (arity 0) here; the matching computed-fun arity is
-then `0 + 2`, the same shape the dispatcher uses for a unary selector.
+then `0 + 1`, the same shape the dispatcher uses for a unary selector.
 """.
 -spec selector_arity(atom()) -> non_neg_integer().
 selector_arity(Selector) when is_atom(Selector) ->
@@ -780,6 +817,8 @@ Safe to call if the callback module is not running.
 notify_class_loaded(ClassName) ->
     case application:get_env(beamtalk_runtime, class_load_callback) of
         {ok, Mod} ->
+            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
+            %% Beamtalk block
             try
                 Mod:on_class_loaded(ClassName)
             catch
@@ -858,28 +897,28 @@ is_keyword_selector_test() ->
 %%% --- validate_class_method_arities/2 ---
 
 validate_class_method_arities_keyword_ok_test() ->
-    %% A keyword selector 'at:put:' (arity 2) dispatches with arity 2 + 2 = 4.
-    Specs = #{'at:put:' => fun(_ClassSelf, _ClassVars, _A, _B) -> ok end},
+    %% A keyword selector 'at:put:' (arity 2) dispatches with arity 2 + 1 = 3.
+    Specs = #{'at:put:' => fun(_ClassSelf, _A, _B) -> ok end},
     ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
 
 validate_class_method_arities_unary_ok_test() ->
-    %% A unary selector 'answer' (arity 0) dispatches with arity 0 + 2 = 2.
-    Specs = #{answer => fun(_ClassSelf, _ClassVars) -> 42 end},
+    %% A unary selector 'answer' (arity 0) dispatches with arity 0 + 1 = 1.
+    Specs = #{answer => fun(_ClassSelf) -> 42 end},
     ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
 
 validate_class_method_arities_keyword_mismatch_test() ->
     %% Wrong-arity keyword fun is rejected with a structured arity_mismatch.
-    Specs = #{'at:put:' => fun(_ClassSelf, _ClassVars, _A) -> ok end},
+    Specs = #{'at:put:' => fun(_ClassSelf, _A) -> ok end},
     {error, Err} = validate_class_method_arities('Demo', Specs),
     ?assertEqual(arity_mismatch, Err#beamtalk_error.kind),
     ?assertEqual('Demo', Err#beamtalk_error.class).
 
 validate_class_method_arities_malformed_no_false_mismatch_test() ->
     %% A malformed selector 'at:put' is treated as unary (arity 0),
-    %% so a fun with arity 0 + 2 = 2 validates cleanly instead of being
+    %% so a fun with arity 0 + 1 = 1 validates cleanly instead of being
     %% rejected with a misleading arity_mismatch from counting the interior
-    %% colon (which would expect 1 + 2 = 3).
-    Specs = #{'at:put' => fun(_ClassSelf, _ClassVars) -> ok end},
+    %% colon (which would expect 1 + 1 = 2).
+    Specs = #{'at:put' => fun(_ClassSelf) -> ok end},
     ?assertEqual(ok, validate_class_method_arities('Demo', Specs)).
 
 -endif.

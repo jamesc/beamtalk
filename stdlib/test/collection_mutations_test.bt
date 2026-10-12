@@ -67,10 +67,8 @@ TestCase subclass: CollectionMutationsTest
     self assert: (self.counter gapCount: #(1, 2, 3)) equals: 2
     self assert: self.counter getTotal equals: 6
 
-  // BT-2703: regression guard — in a value type these selectors with a mutating
-  // block must not crash with `badarity`. The captured-local write is lost here
-  // (pre-existing, out-of-scope value-type behaviour), so the result is the initial 0.
-  testValueTypeEnumerationDoesNotCrash =>
-    vt := EnumerationValueType new
-    self assert: (vt eachWithIndexSum: #(10, 20, 30)) equals: 0
-    self assert: (vt doSeparatedBySum: #(1, 2, 3)) equals: 0
+// BT-2703's value-type regression guard (eachWithIndex:/do:separatedBy: with a
+// mutating block must not crash with `badarity`) pinned a lost write: the
+// result was the initial 0. Since BT-3753 those shapes are ADR 0131 Phase 0
+// compile errors, pinned by `stEachWithIndex`/`stDoSeparatedBy` in
+// fixtures/adr0131local_rebind_value_pending.bt.pending.

@@ -10,7 +10,7 @@
 //! its warnings-carrying result.
 
 use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
-use beamtalk_core::source_analysis::Diagnostic;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 /// Options for Core Erlang code generation.
@@ -78,9 +78,9 @@ pub struct CodegenOptions {
     /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
     /// `Some(true/false)` = override the env var (used by tests).
     pub(in crate::core_erlang) codegen_diagnostics: Option<bool>,
-    /// ADR 0130 Phase 0: override for the class-variable census probe.
-    /// `None` = read from `BEAMTALK_CLASS_VAR_PROBE` env var at generator creation.
-    pub(in crate::core_erlang) class_var_probe: Option<bool>,
+    /// Test hook: record a synthetic `ThreadedIr` verifier finding after
+    /// generation (see [`Self::with_injected_verifier_violation`]).
+    pub(in crate::core_erlang) inject_verifier_violation: bool,
     /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION` to bake into `__beamtalk_meta`.
     /// Set by the CLI via [`CodegenOptions::with_provenance`]; absent for REPL/tests.
     pub(in crate::core_erlang) beamtalk_version: Option<String>,
@@ -126,7 +126,7 @@ impl CodegenOptions {
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
             codegen_diagnostics: None,
-            class_var_probe: None,
+            inject_verifier_violation: false,
             beamtalk_version: None,
             otp_release: None,
             native_type_registry: None,
@@ -175,12 +175,25 @@ impl CodegenOptions {
         self
     }
 
-    /// Explicitly enable or disable the ADR 0130 class-variable census probe,
-    /// overriding the `BEAMTALK_CLASS_VAR_PROBE` env var.
+    /// Test hook (BT-3724): after generation, record one synthetic
+    /// `ThreadedIr` verifier finding through the release-mode path (the
+    /// warning, without the debug-build hard failure), so a driver-level test
+    /// can prove an `internal:` diagnostic surfaces and the build still
+    /// succeeds without a release build or a real codegen bug.
+    #[doc(hidden)]
     #[must_use]
-    pub fn with_class_var_probe(mut self, enabled: bool) -> Self {
-        self.class_var_probe = Some(enabled);
+    pub fn with_injected_verifier_violation(mut self) -> Self {
+        self.inject_verifier_violation = true;
         self
+    }
+
+    /// Whether the [`Self::with_injected_verifier_violation`] test hook is
+    /// set. Lets drivers that do not go through `generate_module_with_warnings`
+    /// (the REPL expression path, BT-3778) honor the same hook.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn injects_verifier_violation(&self) -> bool {
+        self.inject_verifier_violation
     }
 
     /// Sets the class module index for resolving cross-file class references.
@@ -339,4 +352,21 @@ pub struct GeneratedModule {
     ///   inside the block will be silently dropped since Erlang cannot propagate
     ///   the updated `StateAcc` back to the Beamtalk caller.
     pub warnings: Vec<Diagnostic>,
+}
+
+impl GeneratedModule {
+    /// Splits into the generated code and only the `ThreadedIr` verifier
+    /// diagnostics ([`DiagnosticCategory::InternalVerifier`], ADR 0111
+    /// amendment, BT-3724) — every other codegen warning is dropped, exactly
+    /// as [`generate_module`] always did. The single filter both the CLI build
+    /// path and the compiler-port handlers use.
+    #[must_use]
+    pub fn into_code_and_verifier_diagnostics(self) -> (String, Vec<Diagnostic>) {
+        let verifier = self
+            .warnings
+            .into_iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::InternalVerifier))
+            .collect();
+        (self.code, verifier)
+    }
 }

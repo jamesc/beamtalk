@@ -377,6 +377,7 @@ render_type_result_or_not_found(_Module, _NameBin, {error, _}) ->
 -doc "Format a bare exports list for modules without specs.".
 -spec format_exports_list(module()) -> binary().
 format_exports_list(Module) ->
+    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Module:module_info(exports) of
         Exports ->
             %% Filter out module_info/0,1
@@ -406,6 +407,7 @@ bare exports list when no EEP-48 docs are available.
 """.
 -spec format_eep48_signatures_or_exports(module()) -> binary().
 format_eep48_signatures_or_exports(Module) ->
+    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Module:module_info(exports) of
         Exports ->
             Filtered = [{F, A} || {F, A} <- Exports, F =/= module_info],
@@ -606,6 +608,7 @@ format_param_name(Name) -> Name.
 -doc "Find all arities for a function exported by a module.".
 -spec find_function_arities(module(), atom()) -> [non_neg_integer()].
 find_function_arities(Module, Function) ->
+    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Module:module_info(exports) of
         Exports ->
             Arities = [A || {F, A} <- Exports, F =:= Function],

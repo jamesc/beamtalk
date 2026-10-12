@@ -81,7 +81,7 @@ is NOT in the dispatch path):
   eliminates both.
 
 - **Crash-survivable tables.** Both ETS tables are created with
-  `{heir, SupervisorPid, ...}` so they survive a bus crash (the
+  `beamtalk_ets_heir` as heir so they survive a bus crash (the
   `beamtalk_trace_store` pattern). On restart the gen_server re-arms monitors
   from the surviving rows and eagerly prunes any *local* subscriber that died
   during the crash→restart gap via `subscriber_alive/1`; a remote
@@ -1058,11 +1058,10 @@ init([]) ->
     %% the scope exists before any subscriber tries to join a group.
     ensure_pg_scope(),
 
-    %% Heir is the supervisor so both tables survive a bus crash (the
-    %% beamtalk_trace_store pattern); on restart we re-arm monitors from the
-    %% inherited rows.
-    SupPid = find_supervisor(),
-    ensure_tables(SupPid),
+    %% Heir is `beamtalk_ets_heir` so both tables survive a bus crash (the
+    %% beamtalk_trace_store pattern); on restart we reclaim them and re-arm
+    %% monitors from the surviving rows.
+    ensure_tables(),
 
     %% Re-arm monitors for subscriptions that survived a crash via heir;
     %% prune any subscriber that died during the crash→restart gap.
@@ -1113,14 +1112,14 @@ handle_info({'DOWN', _MonRef, process, Pid, _Reason}, State) ->
     NewState = prune_subscriber(Pid, State),
     {noreply, NewState};
 handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
-    %% Inherited a table back from the supervisor heir after a crash/restart.
-    ?LOG_INFO(#{event => announcements_table_inherited, table => TableName}),
+    %% `beamtalk_ets_heir` handed a table back during init (ensure_tables/0).
+    ?LOG_DEBUG(#{event => announcements_table_reclaimed, table => TableName}),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    %% Tables are heir'd to the supervisor and survive; monitors die with this
+    %% Tables are heir'd to `beamtalk_ets_heir` and survive; monitors die with this
     %% process. The restarted bus re-arms from the surviving rows.
     ok.
 
@@ -1157,52 +1156,20 @@ ensure_pg_scope() ->
     end,
     ok.
 
--doc "Find the supervisor pid for the ETS heir option (self if not supervised).".
--spec find_supervisor() -> pid().
-find_supervisor() ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined -> self();
-        Pid -> Pid
-    end.
-
 -doc """
-Create both ETS tables if they do not already exist (they may already exist,
-inherited from the supervisor heir after a crash). The primary table is a `set`
+Create both ETS tables, or reclaim them from `beamtalk_ets_heir` when they
+survived a bus crash. The primary table is a `set`
 keyed by `SubRef`; the by-class index is an `ordered_set` keyed by
 `{AnnouncementClass, SubRef}`. Both are `public` so caller-side `announce/2`
-reads work regardless of which process currently owns the table after an
-inheritance, and both carry `{read_concurrency, true}` for the concurrent
-dispatch reads.
+reads work regardless of which process currently owns the table, and both
+carry `{read_concurrency, true}` for the concurrent dispatch reads.
 """.
--spec ensure_tables(pid()) -> ok.
-ensure_tables(SupPid) ->
-    ensure_table(?SUBS_TABLE, [
-        named_table,
-        public,
-        set,
-        {read_concurrency, true},
-        {heir, SupPid, ?SUBS_TABLE}
-    ]),
-    ensure_table(?BY_CLASS_TABLE, [
-        named_table,
-        public,
-        ordered_set,
-        {read_concurrency, true},
-        {heir, SupPid, ?BY_CLASS_TABLE}
-    ]),
+-spec ensure_tables() -> ok.
+ensure_tables() ->
+    Opts = [named_table, public, {read_concurrency, true}],
+    ok = beamtalk_ets_heir:ensure_table(?SUBS_TABLE, [set | Opts]),
+    ok = beamtalk_ets_heir:ensure_table(?BY_CLASS_TABLE, [ordered_set | Opts]),
     ok.
-
--spec ensure_table(atom(), [term()]) -> ok.
-ensure_table(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            _ = ets:new(Name, Opts),
-            ok;
-        _Tid ->
-            %% Inherited via heir after a crash — public table, reads/writes
-            %% work regardless of ownership; the data is preserved.
-            ok
-    end.
 
 -doc """
 Re-arm one monitor per distinct subscriber pid found in the surviving primary

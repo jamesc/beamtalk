@@ -47,8 +47,7 @@ pub(in crate::core_erlang) enum MethodBoundary {
     /// the `Self{N}` snapshot version counter instead of the `State` one.
     ValueType,
     /// Class-side methods (`generate_class_method_functions`): resets the
-    /// `State`, `ClassVars` and class-var-mutated-tracking counters, binds
-    /// `self` to `ClassSelf` in the fresh scope, and marks
+    /// `State` counter, binds `self` to `ClassSelf` in the fresh scope, and marks
     /// `in_class_method` for the guarded region — all undone together on
     /// drop.
     ClassMethod,
@@ -90,10 +89,6 @@ impl<'a> MethodFrame<'a> {
             MethodBoundary::ValueType => generator.reset_self_version(),
             MethodBoundary::ClassMethod => {
                 generator.reset_state_version();
-                generator.set_class_var_version(0);
-                generator.set_class_var_mutated(false);
-                // BT-3675: a method starts with no open class-variable scopes.
-                let _ = generator.take_class_var_scopes();
             }
         }
         generator.push_scope();

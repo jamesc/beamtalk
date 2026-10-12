@@ -1,7 +1,9 @@
 # ADR 0110: Class-Variable Shadow Write-Through for Foreign NLR Relay
 
 ## Status
-Implemented (2026-08-03)
+Superseded by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06); was Implemented (2026-08-03)
+
+> **Superseded by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06).** Class variables now live in one place, the class process's dictionary, for the duration of a class-method invocation, so there is no shadow to write through and no relay to read it on. The shadow key, the `nlr_relay` shadow read, the per-scope commit map and the `class_var_result` return protocol were deleted. A `^` through a foreign process keeps the writes made before it because those writes were `put` into the one home, not because a shadow carried them. Everything below, including the amendments and the "known limit" paragraphs, is kept as history and no longer describes the code.
 
 ## Implementation Tracking
 

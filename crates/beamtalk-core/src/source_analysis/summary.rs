@@ -193,7 +193,10 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::FileClassNameMismatch => "FileClassNameMismatch",
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
-        DiagnosticCategory::StoredClosure => "StoredClosure",
+        DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
+        DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
+        DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
+        DiagnosticCategory::InternalVerifier => "InternalVerifier",
     }
 }
 
@@ -413,7 +416,16 @@ mod tests {
             ),
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
             (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
-            (DiagnosticCategory::StoredClosure, "StoredClosure"),
+            (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
+            (
+                DiagnosticCategory::Tier2BlockNoReturnChannel,
+                "Tier2BlockNoReturnChannel",
+            ),
+            (
+                DiagnosticCategory::UnmigratedLocalThreading,
+                "UnmigratedLocalThreading",
+            ),
+            (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);

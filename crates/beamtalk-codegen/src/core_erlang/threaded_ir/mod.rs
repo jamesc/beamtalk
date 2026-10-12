@@ -36,8 +36,10 @@
 //! - [`verify`] — the checker: `VerifyError`, `verify`.
 //! - [`emit`] — the emitter: `render`, `RenderCtx`.
 //! - [`build`] — builders that construct-and-verify or construct-and-render
-//!   fixtures: `build_tuple_acc_unpack`, `construct_and_verify_class_var_bind`,
-//!   `verify_body_with_opaque_version_gaps`, `verify_simple_bind`.
+//!   fixtures: `build_tuple_acc_unpack`,
+//!   `verify_body_with_opaque_version_gaps`, `verify_simple_bind`, and ADR
+//!   0131's local-rebind prelude constructors (`build_local_threading_prelude`,
+//!   `build_local_rebind`, `build_method_body`, `build_branch_arm`, …).
 //!
 //! Every item re-exported below keeps the path it had before this split
 //! (`threaded_ir::X`) — see each submodule's own doc comment for what it
@@ -50,16 +52,13 @@
 //! - Versions are linear within one [`ir::FrameId`]; sibling branch/handler
 //!   arms get distinct frames so independently-minted versions never
 //!   collide.
-//! - A class-var `Bind` at a shadow-write-eligible point, in a method whose
-//!   body can relay a foreign NLR, must set `shadow_write` (the ADR 0110
-//!   contract).
 //! - A body with version steps hidden inside a shared multi-module helper is
 //!   verified after `build::backfill_opaque_version_gap` closes those gaps.
 //!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
-//! selection, shadow-write emission, and NLR relay boundaries. Everything
+//! selection, and NLR relay boundaries. Everything
 //! else in codegen stays AST-directed and unaffected — see ADR 0111
 //! §Decision / §Constraints for the full narrow-scope rationale.
 
@@ -69,15 +68,28 @@ mod ir;
 mod verify;
 
 pub(super) use build::{
-    backfill_opaque_version_gaps, build_tuple_acc_unpack, construct_and_verify_class_var_bind,
-    verify_body_with_opaque_version_gaps, verify_simple_bind,
+    backfill_opaque_version_gaps, build_tuple_acc_unpack, verify_body_with_opaque_version_gaps,
+    verify_simple_bind,
+};
+// ADR 0131 Phase 1b: the local-rebind prelude nodes' builders and types.
+// Test-only until Phase 2's `local_threading_producer` (the first production
+// caller) imports them — `#[cfg(test)]` for the same reason as
+// `AccParam`/`CloseContext` below.
+#[cfg(test)]
+pub(super) use build::{
+    ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
+    build_local_rebind, build_local_threading_prelude, build_method_body,
 };
 pub(super) use emit::{RenderCtx, render, render_value};
+// ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::{
-    BindOp, FrameId, LoopCounter, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
+    ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
-pub(super) use verify::verify;
+#[cfg(test)]
+pub(super) use ir::{CarrierSlot, RebindFrame, RebindFrameKind, RebindLowering, RebindShape};
+pub(super) use verify::{SequencedSibling, verify_sibling_reads};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s
@@ -91,7 +103,9 @@ pub(super) use verify::verify;
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
-pub(super) use verify::VerifyError;
+pub(super) use verify::{
+    CatchRestoreDefect, ClassMethodDefect, ScopeKind, VerifyError, verify, verify_in_scope,
+};
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

@@ -555,6 +555,25 @@ pub fn analyse(module: &Module) -> AnalysisResult {
     analyse_full(module, AnalysisContext::default())
 }
 
+/// ADR 0131 (BT-3754): only the outer-local threading compile errors for
+/// `module` — §6 ([`DiagnosticCategory::Tier2BlockNoReturnChannel`]) and the
+/// Phase 0 allow-set ([`DiagnosticCategory::UnmigratedLocalThreading`]) —
+/// exactly as [`analyse_full`] reports them, against `hierarchy` and with no
+/// REPL-known variables.
+///
+/// For `beamtalk-lint`'s `dead_assignment` pass, which must not warn about
+/// a write these errors already reject: it asks this function rather than
+/// keeping a second copy of their exemption rules.
+///
+/// [`DiagnosticCategory::Tier2BlockNoReturnChannel`]: crate::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel
+/// [`DiagnosticCategory::UnmigratedLocalThreading`]: crate::source_analysis::DiagnosticCategory::UnmigratedLocalThreading
+#[must_use]
+pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    validators::check_local_threading(module, hierarchy, &[], &mut diagnostics);
+    diagnostics
+}
+
 /// Perform semantic analysis on a module with a fully-populated
 /// [`AnalysisContext`] — the single entry point that replaces the former
 /// `analyse_with_*` wrapper family — REPL known-vars, compiler
@@ -1002,12 +1021,15 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
-    // BT-3681 (ADR 0110): a stored closure invoked by a later statement, or a
-    // block passed to a user-defined class-side HOM, whose class-side self-send
-    // class-variable write is not kept.
-    validators::check_stored_closure_class_var_writes(
+    // ADR 0130 §5 (BT-3712): a block that touches its home class's variables
+    // where it runs outside an invocation of that class.
+    validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
+    // ADR 0131 §6 and Phase 0 (BT-3745): outer-local writes that no
+    // construct threads back are compile errors, not silent wrong answers.
+    validators::check_local_threading(
         module,
         &result.class_hierarchy,
+        known_vars,
         &mut result.diagnostics,
     );
     validators::check_value_slot_assignment(

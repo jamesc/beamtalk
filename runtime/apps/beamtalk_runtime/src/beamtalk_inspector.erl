@@ -1058,6 +1058,10 @@ eval_value(Self, Source) ->
     catch
         error:undef ->
             {error, eval_unavailable_error()};
+        %% BT-3735: a `^` from a captured block is control flow for a catch
+        %% frame further up the caller's stack; pass it through.
+        throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
+            erlang:raise(throw, Nlr, NlrStack);
         Class:Reason ->
             ?LOG_DEBUG("inspector value evaluate failed", #{
                 error_class => Class,

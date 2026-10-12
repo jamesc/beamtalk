@@ -700,3 +700,227 @@ handle_response_diagnostic_non_binary_message_test() ->
     {error, [Diag]} = beamtalk_compiler_port:handle_response(Response),
     ?assert(is_binary(maps:get(message, Diag))),
     ?assertEqual(3, maps:get(line, Diag)).
+
+%%% ---------------------------------------------------------------
+%%% state_fixture/0 — a class with a state field and default value
+%%% ---------------------------------------------------------------
+
+state_fixture() ->
+    <<
+        "Object subclass: Counter\n"
+        "  state: count :: Integer = 0\n"
+        "\n"
+        "  increment =>\n"
+        "    self.count := self.count + 1\n"
+        "\n"
+        "  class new => self basicNew\n"
+    >>.
+
+%%% ---------------------------------------------------------------
+%%% find_announce_sites_in_source/2 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+find_announce_sites_in_source_test() ->
+    with_port(fun(Port) ->
+        {ok, Sites} = beamtalk_compiler_port:find_announce_sites_in_source(
+            Port, <<"self.announcer announce: SomeEvent">>
+        ),
+        ?assert(is_list(Sites))
+    end).
+
+find_announce_sites_in_source_invalid_source_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_announce_sites_in_source(fake_port, not_a_binary),
+    ?assert(
+        binary:match(maps:get(message, Diag), <<"source must be a binary">>) =/= nomatch
+    ).
+
+find_announce_sites_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_announce_sites_in_source(Port, <<"src">>)
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% resolve_class_span/3 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+resolve_class_span_test() ->
+    with_port(fun(Port) ->
+        Result = beamtalk_compiler_port:resolve_class_span(
+            Port, state_fixture(), <<"Counter">>
+        ),
+        ?assertMatch({ok, #{start := _, 'end' := _}, _}, Result)
+    end).
+
+resolve_class_span_invalid_args_test() ->
+    Result = beamtalk_compiler_port:resolve_class_span(fake_port, not_a_binary, <<"C">>),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+resolve_class_span_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:resolve_class_span(Port, state_fixture(), <<"Counter">>)
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% find_selector_send_spans/4 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+find_selector_send_spans_test() ->
+    with_port(fun(Port) ->
+        {ok, Groups} = beamtalk_compiler_port:find_selector_send_spans(
+            Port, <<"self.count := self.count + 1">>, <<"count">>, <<"total">>
+        ),
+        ?assert(is_list(Groups))
+    end).
+
+find_selector_send_spans_invalid_args_test() ->
+    Result = beamtalk_compiler_port:find_selector_send_spans(fake_port, not_a_binary, sel, sel),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+find_selector_send_spans_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:find_selector_send_spans(
+                Port, <<"self increment">>, <<"increment">>, <<"run">>
+            )
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% find_definition_selector_spans/6 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+find_definition_selector_spans_test() ->
+    with_port(fun(Port) ->
+        Result = beamtalk_compiler_port:find_definition_selector_spans(
+            Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, <<"run">>, instance
+        ),
+        ?assertMatch({ok, [_ | _]}, Result)
+    end).
+
+find_definition_selector_spans_invalid_args_test() ->
+    Result = beamtalk_compiler_port:find_definition_selector_spans(
+        fake_port, not_a_binary, <<"C">>, <<"m">>, <<"n">>, instance
+    ),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+find_definition_selector_spans_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:find_definition_selector_spans(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, <<"run">>, instance
+            )
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% categorize_methods/3 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+categorize_methods_test() ->
+    with_port(fun(Port) ->
+        {ok, Categories} = beamtalk_compiler_port:categorize_methods(
+            Port, span_fixture(), <<"SpanCounter">>
+        ),
+        ?assert(is_list(Categories))
+    end).
+
+categorize_methods_invalid_args_test() ->
+    Result = beamtalk_compiler_port:categorize_methods(fake_port, not_a_binary, <<"C">>),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+categorize_methods_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:categorize_methods(Port, span_fixture(), <<"SpanCounter">>)
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% class_state_field_defaults/3 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+class_state_field_defaults_test() ->
+    with_port(fun(Port) ->
+        {ok, Defaults} = beamtalk_compiler_port:class_state_field_defaults(
+            Port, state_fixture(), <<"Counter">>
+        ),
+        ?assert(is_map(Defaults))
+    end).
+
+class_state_field_defaults_invalid_args_test() ->
+    Result = beamtalk_compiler_port:class_state_field_defaults(fake_port, not_a_binary, <<"C">>),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+class_state_field_defaults_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:class_state_field_defaults(
+                Port, state_fixture(), <<"Counter">>
+            )
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% build_class_module_index_in_source/4 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+build_class_module_index_in_source_test() ->
+    with_port(fun(Port) ->
+        Result = beamtalk_compiler_port:build_class_module_index_in_source(
+            Port, span_fixture(), <<"lib/span_counter.bt">>, <<"myapp">>
+        ),
+        ?assertMatch({ok, _, _}, Result)
+    end).
+
+build_class_module_index_in_source_invalid_args_test() ->
+    Result = beamtalk_compiler_port:build_class_module_index_in_source(
+        fake_port, not_a_binary, <<"path">>, <<"pkg">>
+    ),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+build_class_module_index_in_source_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:build_class_module_index_in_source(
+                Port, span_fixture(), <<"lib/span_counter.bt">>, <<"myapp">>
+            )
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% reindent_method_source/3 — live port, guard-fail, closed port
+%%% ---------------------------------------------------------------
+
+reindent_method_source_test() ->
+    with_port(fun(Port) ->
+        {ok, Reindented} = beamtalk_compiler_port:reindent_method_source(
+            Port, <<"increment =>\n  self.value := self.value + 1">>, <<"  ">>
+        ),
+        ?assert(is_binary(Reindented))
+    end).
+
+reindent_method_source_invalid_args_test() ->
+    Result = beamtalk_compiler_port:reindent_method_source(fake_port, not_a_binary, <<"  ">>),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+reindent_method_source_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:reindent_method_source(
+                Port, <<"increment => ok">>, <<"  ">>
+            )
+        )
+    end).

@@ -286,7 +286,7 @@ impl CoreErlangGenerator {
     /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
     /// node — `produces` is `[State@0]` plus one entry per family in
     /// `plan.threaded_families()` (at its own live version, since
-    /// `class_var_version`/`self_version` never reset across
+    /// `self_version` never resets across
     /// `with_branch_context` — see `ThreadingPlan::capture_loop_family_params`);
     /// `counter` carries `frame`'s own gensym'd index name plus its
     /// initial/next expressions (ADR 0111 Addendum 2 Gap 1).
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
         // ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3 (BT-3515):
         // see `ThreadingPlan::capture_loop_family_params`'s doc comment —
         // captured before the body's own lowering runs, at most one entry
-        // for a Letrec plan (`ClassVars`/`SelfVt` mutually exclusive).
+        // for a Letrec plan.
         let family_params = plan.capture_loop_family_params(self);
 
         self.push_scope();
@@ -341,13 +341,9 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // ADR 0122 Decision 3 (BT-3515): every threaded family's exit-arm
-        // slot now routes through the emission helper — `ClassVars` no
-        // longer stays hand-rolled into `base` the way BT-3512 left it (that
-        // phase only migrated `SelfVt`, since the value-type loop site could
-        // never reach `ClassVars`). Mutual exclusivity
+        // slot routes through the emission helper
         // (`plan.threaded_families()` carries at most one entry for a Letrec
-        // plan) means this is byte-identical to the fully hand-rolled tuple
-        // it replaces.
+        // plan).
         let exit_arm_tuple = {
             let ctx = RenderCtx::new(self);
             append_family_slots(
@@ -380,7 +376,7 @@ impl CoreErlangGenerator {
         // actually live at the call site for `produces[0]` is whatever
         // `generate_pack_prefix` produced above, never necessarily the
         // generic ambient-context "State" spelling its own derivation would
-        // otherwise fall back to. A trailing `ClassVars` `produces` entry
+        // otherwise fall back to. A trailing family `produces` entry
         // (index 1, when present) needs no such override — it is already
         // `Gensym`-seeded above, and `Gensym` renders identically in every
         // context, so leaving `outer_args` one element short here
@@ -388,12 +384,11 @@ impl CoreErlangGenerator {
         // derivation `render_loop_skeleton` uses for every other entry.
         let outer_args = vec![leaf::var(init_state)];
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
             mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
             frame: ir_frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
             condition,
             condition_value,
@@ -404,7 +399,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(
             &errors,
             "counted StateAcc ConditionalLoop",
@@ -507,12 +502,11 @@ impl CoreErlangGenerator {
             .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, ir_frame))
             .collect();
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
             mode: ThreadingMode::DirectParams,
             frame: ir_frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
             condition: vec![condition_stmt],
             condition_value,
@@ -523,7 +517,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(
             &errors,
             "counted direct-params ConditionalLoop",
@@ -633,12 +627,11 @@ impl CoreErlangGenerator {
                 }))
                 .collect();
 
-        let shadow_write_eligible = self.block_depth == 0;
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
             mode: ThreadingMode::Hybrid,
             frame: ir_frame,
-            shadow_write_eligible,
+            threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
             condition: vec![condition_stmt],
             condition_value,
@@ -656,7 +649,7 @@ impl CoreErlangGenerator {
             exit_arm,
             span: body.span,
         }];
-        let errors = threaded_ir::verify(&ir);
+        let errors = self.verify_threaded_ir(&ir);
         self.report_threaded_ir_verify_errors(&errors, "counted hybrid ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);

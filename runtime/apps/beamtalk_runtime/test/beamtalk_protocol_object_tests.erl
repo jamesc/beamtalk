@@ -230,14 +230,14 @@ protocol_name_from_class_self_test_() ->
                 BadObj = #beamtalk_object{class = 'NoSuffix', class_mod = test, pid = self()},
                 ?assertError(
                     {invalid_protocol_class_tag, 'NoSuffix'},
-                    beamtalk_protocol_object:class_requiredMethods(BadObj, #{})
+                    beamtalk_protocol_object:class_requiredMethods(BadObj)
                 )
             end},
             {"short tag raises error", fun() ->
                 BadObj = #beamtalk_object{class = 'ab', class_mod = test, pid = self()},
                 ?assertError(
                     {invalid_protocol_class_tag, 'ab'},
-                    beamtalk_protocol_object:class_requiredMethods(BadObj, #{})
+                    beamtalk_protocol_object:class_requiredMethods(BadObj)
                 )
             end},
             {"valid tag dispatches correctly", fun() ->
@@ -253,7 +253,7 @@ protocol_name_from_class_self_test_() ->
                 ClassSelf = #beamtalk_object{
                     class = 'TestProto1 class', class_mod = beamtalk_protocol_object, pid = self()
                 },
-                Result = beamtalk_protocol_object:class_requiredMethods(ClassSelf, #{}),
+                Result = beamtalk_protocol_object:class_requiredMethods(ClassSelf),
                 ?assert(lists:member('foo', Result))
             end},
             {"conformingClasses dispatch with valid tag", fun() ->
@@ -268,7 +268,7 @@ protocol_name_from_class_self_test_() ->
                 ClassSelf = #beamtalk_object{
                     class = 'TestProto1 class', class_mod = beamtalk_protocol_object, pid = self()
                 },
-                Result = beamtalk_protocol_object:class_conformingClasses(ClassSelf, #{}),
+                Result = beamtalk_protocol_object:class_conformingClasses(ClassSelf),
                 ?assert(is_list(Result)),
                 ?assert(lists:all(fun(O) -> is_record(O, beamtalk_object) end, Result))
             end}

@@ -463,6 +463,8 @@ safe_value_new_defaults(_Class, Module) ->
 
 -spec safe_actor_init_defaults(atom(), atom()) -> map().
 safe_actor_init_defaults(Class, Module) ->
+    %% bt-catcher-audit: not-applicable-other-process - actor init/1 field defaults, not a
+    %% class-method region
     try Module:init(#{'__skip_initialize__' => true}) of
         {ok, Map} when is_map(Map) ->
             Map;
@@ -969,6 +971,8 @@ tolerant-degrade convention `beamtalk_object_class:read_meta/1` and
 read_meta(Module) ->
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
         true ->
+            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
+            %% getter, no block
             try Module:'__beamtalk_meta'() of
                 M when is_map(M) -> M;
                 _ -> #{}

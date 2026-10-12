@@ -38,7 +38,9 @@ they have no place in a project's shapes.json.
 publicly: given a *registered, loaded* class, it returns the shapes.json
 entry ADR 0125 §3.4 specifies — `shape_version` (default `1`), the
 **flattened** field-type map (ancestors merged in, closer wins), and the
-`shape_migrations` table. It is deliberately usable from either side of the
+`shape_migrations` table, plus the module's `class_var_abi` (ADR 0130; `null`
+when absent) so `beamtalk release --upgrade-from` can flag an ABI change at
+build time. It is deliberately usable from either side of the
 build/live divide:
 
 - Here, against a scratch node that just loaded a release's beams.
@@ -81,7 +83,10 @@ structured log lines) — no new JSON-encoding dependency.
 -type shape_entry() :: #{
     version := pos_integer(),
     fields := #{binary() => binary() | null},
-    migrations := #{binary() => binary()}
+    migrations := #{binary() => binary()},
+    %% ADR 0130: the module's `class_var_abi`; `null` when the meta has no
+    %% such key (a module compiled before ADR 0130).
+    class_var_abi := pos_integer() | null
 }.
 -export_type([shape_entry/0]).
 
@@ -99,7 +104,14 @@ entry per class found under `EmitLibDirs` only.
 
 Returns `{error, {stdlib_start_failed, Reason}}` if `beamtalk_stdlib` (and
 so, transitively, `beamtalk_runtime`) cannot be started — nothing can be
-extracted without the class-registration machinery it provides. A module
+extracted without the class-registration machinery it provides.
+
+Returns `{error, {abi_mismatch, Messages}}` if any module under `EmitLibDirs`
+was compiled for a different `class_var_abi` than this runtime accepts
+(ADR 0130, `beamtalk_class_var_abi:check_class_info_abi/2`): the release must be
+rebuilt from a recompiled package, so this is a hard failure of the
+preflight, not a skipped shape. Messages are `beamtalk_error:format/1` text
+naming each module. Any other module
 that fails to *load or register* (a partial/stale build, a genuinely broken
 class) is not fatal to the whole extraction: it is logged and skipped,
 mirroring `beamtalk_module_activation:activate_modules/2`'s own
@@ -120,19 +132,41 @@ extract_shapes(RuntimeLibDirs, EmitLibDirs) ->
                     fun beamtalk_module_activation:find_bt_modules_in_dir/1, EmitLibDirs
                 )
             ),
-            {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
-                EmitModules, #{}
-            ),
-            lists:foreach(
-                fun({Module, Reason}) ->
-                    ?LOG_WARNING(
-                        "beamtalk_release_shapes: module failed to activate, skipping its shape",
-                        #{module => Module, reason => Reason, domain => [beamtalk, runtime]}
+            %% ADR 0130 `class_var_abi` gate, the release-preflight half
+            %% (ADR 0125 §2.3): registration refuses a module compiled for a
+            %% different class-variable calling convention inside its `-on_load`
+            %% hook, and the code server does not return why. Collect the
+            %% refusals the gate records while the modules activate and fail the
+            %% extraction (so `beamtalk release` fails) instead of skipping the
+            %% module's shape like any other activation failure.
+            try
+                beamtalk_class_var_abi:collect_abi_refusals(fun() ->
+                    {ok, ActivationErrors} = beamtalk_module_activation:activate_modules(
+                        EmitModules, #{}
+                    ),
+                    lists:foreach(
+                        fun({Module, Reason}) ->
+                            ?LOG_WARNING(
+                                "beamtalk_release_shapes: module failed to activate, skipping its shape",
+                                #{
+                                    module => Module,
+                                    reason => Reason,
+                                    domain => [beamtalk, runtime]
+                                }
+                            )
+                        end,
+                        ActivationErrors
                     )
-                end,
-                ActivationErrors
-            ),
-            {ok, build_shapes_map(EmitModules)};
+                end)
+            of
+                {_, []} ->
+                    {ok, build_shapes_map(EmitModules)};
+                {_, Refused} ->
+                    {error, {abi_mismatch, [beamtalk_error:format(E) || {_M, E} <- Refused]}}
+            catch
+                Class:Err ->
+                    {error, {extraction_failed, {Class, Err}}}
+            end;
         {error, Reason} ->
             {error, {stdlib_start_failed, Reason}}
     end.
@@ -158,7 +192,8 @@ class_shape_entry(ClassAtom) ->
             #{
                 version => maps:get(shape_version, Meta, 1),
                 fields => normalize_fields(FlattenedFieldTypes),
-                migrations => normalize_migrations(Migrations)
+                migrations => normalize_migrations(Migrations),
+                class_var_abi => maps:get(class_var_abi, Meta, null)
             };
         not_found ->
             undefined

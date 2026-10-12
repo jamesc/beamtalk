@@ -112,16 +112,29 @@ rem runs erl as an ordinary line of *this* already-running script — no
 rem second cmd.exe re-parses it, so there's nothing for that quoting
 rem hazard to bite. `io:put_chars` (rather than `io:format`'s `"~s"`)
 rem also keeps the `-eval` argument itself free of embedded quotes.
-rem `%RANDOM%` three times over (each expansion redraws, 0-32767) rather
-rem than once: a single draw is only 15 bits, which two `launcher.cmd`
-rem invocations started close together (e.g. a health check calling
-rem `ping` while another calls `stop`) can collide on in `%TEMP%`, letting
-rem one process's `del`/`erl.exe` remove or truncate the file out from
-rem under the other's `set /p` read.
-set "OTP_PROBE=%TEMP%\beamtalk_otp_probe_%RANDOM%%RANDOM%%RANDOM%.tmp"
+rem The probe file lives in a directory this invocation creates itself with
+rem `mkdir`, which is atomic and fails if the path already exists. Naming a
+rem bare `%TEMP%` file from `%RANDOM%` is NOT collision-free: cmd.exe seeds
+rem `%RANDOM%` from the clock when the process starts, so several launcher
+rem invocations started in the same instant (parallel tests, a health check
+rem next to a `stop`) draw the *same* sequence and pick the same filename;
+rem the second one's `>file` redirect then hits a sharing violation ("The
+rem process cannot access the file because it is being used by another
+rem process.") and the probe silently yields nothing (BT-3697). With `mkdir`
+rem as the arbiter a loser simply redraws and takes a different directory.
+rem (Delayed `!RANDOM!` so each retry actually redraws.) If no directory can
+rem be made, skip the check rather than block boot, as for a missing probe.
+set "OTP_PROBE_DIR="
+for /l %%N in (1,1,50) do if not defined OTP_PROBE_DIR (
+    set "OTP_TRY=%TEMP%\beamtalk_otp_probe_!RANDOM!!RANDOM!!RANDOM!"
+    mkdir "!OTP_TRY!" >nul 2>&1 && set "OTP_PROBE_DIR=!OTP_TRY!"
+)
+if not defined OTP_PROBE_DIR exit /b 0
+set "OTP_PROBE=%OTP_PROBE_DIR%\probe.tmp"
 "%ERL%" -noshell -eval "io:put_chars(erlang:system_info(otp_release)), halt()." >"%OTP_PROBE%" 2>nul
 if exist "%OTP_PROBE%" set /p HOST_MAJOR=<"%OTP_PROBE%"
 del "%OTP_PROBE%" >nul 2>&1
+rmdir "%OTP_PROBE_DIR%" >nul 2>&1
 if not defined HOST_MAJOR exit /b 0
 if %HOST_MAJOR% LSS %REQ_MIN% goto :otp_window_fail
 if %HOST_MAJOR% GTR %REQ_MAX% goto :otp_window_fail
@@ -197,8 +210,7 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 call :node_sname
-rem `%RANDOM%` three times over, same reasoning as `:check_otp_window`'s
-rem `OTP_PROBE` comment above: a single 15-bit draw collides often enough
+rem `%RANDOM%` three times over: a single 15-bit draw collides often enough
 rem under parallel test/CI invocations that two `stop`/`ping`/`rpc`
 rem client nodes have registered the same `-sname` with the shared,
 rem loopback-bound epmd, which erl.exe then refuses outright ("the name

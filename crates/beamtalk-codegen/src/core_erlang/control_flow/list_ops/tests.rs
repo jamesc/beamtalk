@@ -106,7 +106,7 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
     let code = codegen(src);
     // Y (CoreErlang name for y) must appear inside the nested fun's argument list
     assert!(
-        code.contains("'use:', [Y]"),
+        code.contains("let _SDArgs") && code.contains("= [Y] in"),
         "Y should be captured by nested block. Got:\n{code}"
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
@@ -464,6 +464,42 @@ fn test_sort_with_mutation_compiles() {
     assert!(
         code.contains("'erlang':'make_ref'"),
         "sort: should use a fresh per-invocation process dictionary key (BT-2948). Got:\n{code}"
+    );
+}
+
+/// BT-3779: a `^` (or any exception) out of the comparator must not skip
+/// erasing the per-call process-dictionary key — `lists:sort` runs inside a
+/// `try` whose catch arm erases the key and re-raises unchanged.
+#[test]
+fn test_sort_with_mutation_erases_key_on_every_exit() {
+    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items sort: [:a :b | a > 2 ifTrue: [^0]. self.n := self.n + 1. a < b]\n";
+    let code = codegen(src);
+    let sort_at = code
+        .find("'lists':'sort'(")
+        .expect("sort: with mutation should use lists:sort");
+    let before = &code[..sort_at];
+    assert!(
+        before.trim_end().ends_with("try call"),
+        "lists:sort must be the body of a try. Got:\n{code}"
+    );
+    let after = &code[sort_at..];
+    let catch_at = after
+        .find(" catch <")
+        .expect("lists:sort try must have a catch arm");
+    let catch_arm = &after[catch_at..];
+    let erase_at = catch_arm
+        .find("call 'erlang':'erase'(")
+        .expect("catch arm must erase the per-call key");
+    let raise_at = catch_arm
+        .find("primop 'raw_raise'(")
+        .expect("catch arm must re-raise via raw_raise");
+    assert!(
+        erase_at < raise_at,
+        "key must be erased before re-raising. Got:\n{code}"
+    );
+    assert!(
+        catch_arm[raise_at..].contains("call 'erlang':'erase'("),
+        "normal path must also erase the key. Got:\n{code}"
     );
 }
 
@@ -1396,9 +1432,8 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     // ADR 0128 / BT-3583 (review-flagged on PR #4030): a CLASS method
     // forwarding a non-literal callable to `do:` must NOT route through the
     // fold rewrite (`generate_simple_list_op_threaded_fold`) — a class
-    // method compiles to `class_<selector>(ClassSelf, ClassVars, Args...)`,
-    // which has no `State`/`StateAcc` parameter at all (class-side
-    // threading goes through `ClassVars`), so the fold's `State`-seeded
+    // method compiles to `class_<selector>(ClassSelf, Args...)`, which has
+    // no `State`/`StateAcc` parameter at all, so the fold's `State`-seeded
     // accumulator would reference an unbound variable. Must keep emitting
     // the pre-existing plain-value wrapper, exactly like the ValueType
     // sibling case just below.

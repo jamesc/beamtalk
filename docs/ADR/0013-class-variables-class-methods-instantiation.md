@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-15)
 
+> **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06), §1 storage.** The class gen_server state (`#class_state{class_variables}`) remains the durable store between invocations, but *during* a class-method invocation the map lives in the class process's dictionary under `{'$bt_class_vars', ClassTag}`, installed on entry and written back as the new gen_server state on exit (`invoke_class_method/7`, `invoke_class_extension/7`). Class methods no longer take or return the map. An access compiles to a call into `beamtalk_class_vars` (or its inlined form), not to a `gen_server:call`; a write is a `put`, and an error that escapes the invocation discards the invocation's writes. A block running outside its home invocation reads the values captured when it was created and raises `class_state_unreachable` on a write. Not inherited, per-class ownership and the Phase 5 instance-side access are unchanged.
+
 ## Context
 
 ADR 0005 committed to "full Smalltalk metaclass model as the target" with classes as first-class objects backed by gen_server processes. Phase 1 (implemented) provides a fixed protocol (`methods`, `superclass`, `new`/`spawn`) via `beamtalk_object_class.erl`. Phase 2 requires extending this to support class variables, class-side methods, and the `new`/`initialize` instantiation chain.

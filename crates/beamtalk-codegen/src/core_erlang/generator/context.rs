@@ -82,36 +82,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// current class (BT-3666): they cannot be overridden, so a class-side
     /// self-send to one stays a direct call even in an open class.
     pub sealed_class_method_selectors: std::collections::HashSet<String>,
-    /// Selector names of class methods (in the current class) that are
-    /// known or suspected to mutate a class variable, directly or transitively
-    /// — see `block_analysis::compute_class_var_mutating_selectors`. Used to
-    /// let a self-send to a provably pure class method compile inside a bare,
-    /// unthreaded block (`select:`/`collect:`/`do:`/etc.) while rejecting one
-    /// that may mutate class state there, where the `Letrec`-only guard
-    /// doesn't reach.
-    pub class_var_mutating_selectors: std::collections::HashSet<String>,
-    /// State version counter for class variable threading.
-    ///
-    /// Not `pub` (unlike this struct's other fields) — [`VersionCounter`] is
-    /// `pub(super)` within `threaded_ir`, narrower than `ClassContext`'s own
-    /// `pub(super)` (= `pub(in crate)`); all access stays inside
-    /// `mod.rs` via the `class_var_version()`/`set_class_var_version()`
-    /// accessor methods, exactly as before.
-    pub(in crate::core_erlang) class_var_version: VersionCounter,
-    /// Whether class variables were mutated in the current method.
-    pub class_var_mutated: bool,
-    /// Open per-scope class-variable tokens, innermost last (BT-3675). Pushed
-    /// by `CoreErlangGenerator::class_var_scope_mark` at an opaque scope that
-    /// cannot thread a `ClassVars` rebind out, popped by the matching refresh.
-    /// A class-side send generated while one is open commits its returned
-    /// `ClassVars` under the innermost token.
-    pub(in crate::core_erlang) class_var_scope_tokens:
-        Vec<crate::core_erlang::generator::version::ClassVarScopeToken>,
-    /// Counter naming scope tokens (`_CVTok{N}`). Deliberately NOT the shared
-    /// temp-variable counter: a scope that turns out to need no token must
-    /// leave the numbering of every other generated variable untouched, so
-    /// code outside a confined scope stays byte-identical.
-    pub(in crate::core_erlang) class_var_scope_counter: usize,
     /// Class → compiled module resolution authority for this generation unit
     /// (ADR 0119).
     ///
@@ -157,14 +127,11 @@ pub(in crate::core_erlang) struct SavedClassMethodCtx {
     in_class_method: bool,
     class_var_names: std::collections::HashSet<String>,
     class_method_selectors: std::collections::HashSet<String>,
-    class_var_mutating_selectors: std::collections::HashSet<String>,
-    class_var_version: usize,
-    class_var_mutated: bool,
     class_slot_constructor_selector: Option<String>,
     builder_class_method_class: Option<String>,
-    // unlike `class_var_version` above, the instance-`State` version
+    // the instance-`State` version
     // counter lives outside `ClassContext` (it's shared by every class, not
-    // per-class-context), so nothing captured it here even though
+    // per-class-context), so nothing else captures it even though
     // `generate_class_method_fun_from_block` unconditionally resets it. A
     // builder cascade nested inside an enclosing method's own field-assignment
     // value (e.g. `self.x := Object classBuilder … addClassMethod:body: […]; register`)
@@ -193,11 +160,6 @@ impl ClassContext {
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
             sealed_class_method_selectors: std::collections::HashSet::new(),
-            class_var_mutating_selectors: std::collections::HashSet::new(),
-            class_var_version: VersionCounter::new(),
-            class_var_mutated: false,
-            class_var_scope_tokens: Vec::new(),
-            class_var_scope_counter: 0,
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,
@@ -253,13 +215,6 @@ impl CoreErlangGenerator {
     /// (from the cascade's `classVars:` keys), and the builder class name used
     /// for runtime self/`super` dispatch. Safe whether or not an enclosing class
     /// is being compiled — a context created here is dropped on exit.
-    ///
-    /// `class_var_version`'s save-reset-restore here rides the same
-    /// unified `VersionCounter` mechanism as [`BranchContextGuard`] — a
-    /// distinct *reset* policy (this is a fresh method context, not a branch:
-    /// the counter resets to 0 here, whereas `with_branch_context` restores
-    /// without resetting), but through the identical counter implementation
-    /// and accessor methods (`class_var_version`/`set_class_var_version`).
     pub(in crate::core_erlang) fn enter_builder_class_method_context(
         &mut self,
         class_name: &str,
@@ -270,9 +225,6 @@ impl CoreErlangGenerator {
             in_class_method: self.in_class_method(),
             class_var_names: self.class_var_names().clone(),
             class_method_selectors: self.class_method_selectors().clone(),
-            class_var_mutating_selectors: self.class_var_mutating_selectors().clone(),
-            class_var_version: self.class_var_version(),
-            class_var_mutated: self.class_var_mutated(),
             class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
             builder_class_method_class: self.builder_class_method_class(),
             state_version: self.state_version(),
@@ -284,22 +236,8 @@ impl CoreErlangGenerator {
         // class_method_selectors is intentionally left empty: in builder mode
         // `generate_class_method_self_send` routes EVERY self-send through
         // `class_self_dispatch_local` (the fun has no `class_<sel>` export) before
-        // it ever consults this set, so it is not needed for dispatch. Class-var
-        // threading across such self-sends rides on the open scope that
-        // `emit_class_var_result_unwrap` always produces, not on this set.
+        // it ever consults this set, so it is not needed for dispatch.
         self.class_method_selectors_mut().clear();
-        // also cleared, for the same reason plus one more — an empty
-        // `class_method_selectors` already makes `generate_block`'s bare-block
-        // self-send check treat every self-send here as unresolvable (so
-        // conservatively unsafe) regardless of this set's contents, since a
-        // programmatic `ClassBuilder` cascade has no static `ClassDefinition`
-        // to run `compute_class_var_mutating_selectors` over in the first
-        // place. Clearing just avoids leaking the enclosing class's own
-        // mutating-selector set into an unrelated builder class's selector
-        // namespace.
-        self.class_var_mutating_selectors_mut().clear();
-        self.set_class_var_version(0);
-        self.set_class_var_mutated(false);
         self.set_class_slot_constructor_selector(None);
         self.set_builder_class_method_class(Some(class_name.to_string()));
         saved
@@ -315,9 +253,6 @@ impl CoreErlangGenerator {
             self.set_in_class_method(saved.in_class_method);
             *self.class_var_names_mut() = saved.class_var_names;
             *self.class_method_selectors_mut() = saved.class_method_selectors;
-            *self.class_var_mutating_selectors_mut() = saved.class_var_mutating_selectors;
-            self.set_class_var_version(saved.class_var_version);
-            self.set_class_var_mutated(saved.class_var_mutated);
             self.set_class_slot_constructor_selector(saved.class_slot_constructor_selector);
             self.set_builder_class_method_class(saved.builder_class_method_class);
         } else {

@@ -201,18 +201,21 @@ TestCase subclass: VtThreadingConstructsTest
     self assert: (self branchNestedAssign: true) equals: 6
 
   // collect: as the branch's own value: the branch yields the reconstructed Array
-  // (element 1), not the raw {value, StateAcc} tuple.
+  // (element 1), not the raw {value, StateAcc} tuple. The collect: threads a
+  // local of the branch: one that writes the method-level `hits` loses the
+  // write today, which ADR 0131 Phase 0 rejects (BT-3753).
   branchValueCollect: flag =>
     hits := 0
     flag
       ifTrue: [
         hits := hits + 1
+        n := 0
         #[1, 2, 3]
           collect: [:i |
-            hits := hits + 1
-            i * 2
+            n := n + 1
+            i * n
           ]
       ]
 
   testBranchValuePositionThreading =>
-    self assert: (self branchValueCollect: true) equals: #[2, 4, 6]
+    self assert: (self branchValueCollect: true) equals: #[1, 4, 9]

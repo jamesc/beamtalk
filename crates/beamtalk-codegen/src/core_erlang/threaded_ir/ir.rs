@@ -25,6 +25,7 @@
 //! are now full-fidelity, not render-only skeletons.
 
 use super::super::NlrBoundary;
+use super::super::erlang_types::ErlangVar;
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
 
@@ -138,20 +139,19 @@ impl FrameId {
 
 // ─── VersionedVar ───────────────────────────────────────────────────────────
 
-/// One of the three (formerly independent) version counters, unified in
-/// NAMING AND IDENTITY ONLY — plus [`VersionPrefix::Local`] (see module docs
-/// §Deviations). Per-prefix scope discipline (state: reset+restore per
-/// branch; `class_vars`: restore-only, mutated-flag sticky; self: reset+
-/// restore, closing the prior "neither" landmine — see
-/// `with_branch_context`'s doc comment in `mod.rs`) remains explicit
-/// per-prefix policy, enforced by the generator's `BranchContextGuard`; this
-/// type only unifies the *shape*.
+/// One of the version counters, unified in NAMING AND IDENTITY ONLY — plus
+/// [`VersionPrefix::Local`] (see module docs §Deviations). Per-prefix scope
+/// discipline (state: reset+restore per branch; self: reset+restore, closing
+/// the prior "neither" landmine — see `with_branch_context`'s doc comment in
+/// `mod.rs`) remains explicit per-prefix policy, enforced by the generator's
+/// `BranchContextGuard`; this type only unifies the *shape*. Class variables
+/// have no prefix: they live in the class process (ADR 0130), so no class
+/// method threads them.
 ///
-/// `State`/`ClassVars`/`SelfVt` get their first production call
+/// `State`/`SelfVt` get their first production call
 /// site here — [`VersionCounter`] is the single implementation behind
-/// `CoreErlangGenerator`'s three (formerly independently implemented)
-/// counters (`StateThreading`, `ClassContext::class_var_version`,
-/// `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
+/// `CoreErlangGenerator`'s two (formerly independently implemented)
+/// counters (`StateThreading` and `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
 /// `Put`/`Unpack`/`NlrCatch`/`Return` remain unit-test-only until a
 /// control-flow generator migrates onto the full `ThreadedIr`/`verify()`
 /// pipeline (later issues — this issue is naming/identity unification only,
@@ -169,8 +169,6 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// choice is a function of generator context and stays outside the IR,
     /// decided at Document-construction time).
     State,
-    /// Class variables (`ClassVars`, `ClassVars1`, … — ADR 0110's mechanism).
-    ClassVars,
     /// Value-type fields (`Self`, `Self1`, …).
     SelfVt,
     /// A directly-named loop-threaded local (`Sum`, `Count`, …) as produced
@@ -198,71 +196,6 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// [`ThreadedStmt::ConditionalLoop`]'s doc comment for the full
     /// ordering contract.
     Gensym(String),
-}
-
-impl VersionPrefix {
-    /// ADR 0122 Decision 4: whether a mutation to this family must be
-    /// visible to a foreign NLR relay via ADR 0110's process-dictionary
-    /// shadow write (the [`super::verify::VerifyError::ShadowWriteMissing`]
-    /// CONTRACT check, `verify.rs:372-375`). `ClassVars` only — `State`/
-    /// `SelfVt` mutations have no process-dictionary side channel to keep in
-    /// sync; a foreign NLR relay reads THEIR final value straight off the
-    /// thrown NLR tuple/the method's own return, never off a shadow.
-    ///
-    /// Called from [`Self::extraction_bind_op`], which BT-3513 gave a real
-    /// production caller (`family_slots::extract_family_slots`, via
-    /// `value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) —
-    /// previously only [`Self::extraction_bind_op`]'s own unit tests reached
-    /// it (ADR 0122, BT-3511: the emission helper only, no site migrated
-    /// yet).
-    pub(in crate::core_erlang) fn requires_shadow_write(&self) -> bool {
-        matches!(self, Self::ClassVars)
-    }
-
-    /// ADR 0122 Decision 3/4: the `(BindOp, shadow_write)` pair a
-    /// construct's own trailing-tuple-slot EXTRACTION `Bind` for this family
-    /// must carry (`control_flow::family_slots::extract_family_slots`) — a
-    /// method here, not a `match` in that helper, so a future fourth family
-    /// cannot grow its own extraction shape without every existing caller of
-    /// the helper picking it up for free (Decision 4: "capability is data").
-    ///
-    /// ALWAYS [`BindOp::Direct`] — never [`BindOp::Put`]: `value` (the
-    /// tuple-element read the caller already built, e.g. `call
-    /// 'erlang':'element'(3, Tuple)`) holds this family's ENTIRE
-    /// post-construct value — the whole `StateAcc`/`ClassVars`/`Self` map —
-    /// not one field of it. `BindOp::Put`'s `maps:put(field, value, source)`
-    /// shape inserts a SINGLE key's value into `source`; applied here it
-    /// would nest the whole new map under one field of the OLD map instead
-    /// of replacing it — wrong for every family, not just this one. Every
-    /// existing hand-rolled extraction site already only ever does a plain
-    /// whole-value rebind this way: `rebind_class_vars_from_doc`,
-    /// `rebind_value_self_from_doc` (`dispatch_codegen.rs`), and
-    /// `rebind_vt_conditional_mutations`'s `let NewCv = element(N, Result)
-    /// in` (`value_type_codegen.rs`) — none of them constructs a `Put` at a
-    /// merge/extraction point, only ever at the ORIGINAL field-write site
-    /// inside the branch that mutated the family in the first place.
-    ///
-    /// `shadow_write` is [`Self::requires_shadow_write`] — `true` only for
-    /// `ClassVars`. Inert on the `Direct` bind this always constructs today:
-    /// `verify()`'s `ShadowWriteMissing` check only ever inspects a
-    /// `BindOp::Put` (see `verify.rs:372-375`), and the mutation this Bind
-    /// merges was already shadow-written, under ADR 0110, by the BRANCH's
-    /// own `Put`-shaped field-write bind — a merge-point rebind is never
-    /// itself a shadow-write producer (see `rebind_class_vars_from_doc`'s own
-    /// doc comment). Set here anyway so `ClassVars`' real ADR 0110 obligation
-    /// lives on the TYPE rather than as a literal a future `Put`-shaped
-    /// extraction consumer would have to remember to flip — exactly the
-    /// unwritten-rule failure mode ADR 0122 exists to remove (§"Why the gaps
-    /// keep happening").
-    ///
-    /// Called from `control_flow::family_slots::extract_family_slots`, which
-    /// BT-3513 gave a real production caller
-    /// (`value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) — ADR
-    /// 0122, BT-3511 introduced this as the emission helper only, with no
-    /// site migrated yet.
-    pub(in crate::core_erlang) fn extraction_bind_op(&self, value: ValueRef) -> (BindOp, bool) {
-        (BindOp::Direct(value), self.requires_shadow_write())
-    }
 }
 
 /// A version-identified Core Erlang variable, scoped to the frame that
@@ -293,7 +226,7 @@ impl VersionedVar {
         }
     }
 
-    /// Renders this variable's Core Erlang name (e.g. `State2`, `ClassVars1`,
+    /// Renders this variable's Core Erlang name (e.g. `State2`, `Self1`,
     /// `Sum`). Delegates to [`super::super::util::versioned_var`], the single
     /// canonical `prefix{version}` namer (never `format!()` for Core
     /// Erlang fragments). `Local` names are passed through
@@ -310,9 +243,6 @@ impl VersionedVar {
     pub(in crate::core_erlang) fn render_name(&self) -> String {
         match &self.prefix {
             VersionPrefix::State => super::super::util::versioned_var("State", self.version),
-            VersionPrefix::ClassVars => {
-                super::super::util::versioned_var("ClassVars", self.version)
-            }
             VersionPrefix::SelfVt => super::super::util::versioned_var("Self", self.version),
             VersionPrefix::Local(name) => {
                 let core_name = super::super::CoreErlangGenerator::to_core_erlang_var(name);
@@ -397,10 +327,9 @@ impl LoopCounter {
 
 // ─── VersionCounter ───────────────────────────────────────────────
 
-/// The single counter implementation behind `CoreErlangGenerator`'s three
+/// The single counter implementation behind `CoreErlangGenerator`'s
 /// (formerly independently implemented) version counters — the earlier
-/// `StateThreading` struct (`state_codegen.rs`), `ClassContext`'s raw
-/// `class_var_version: usize` arithmetic, and `ValueTypeContext`'s raw
+/// `StateThreading` struct (`state_codegen.rs`) and `ValueTypeContext`'s raw
 /// `self_version: usize` arithmetic. One implementation, reused per prefix.
 ///
 /// **Constructor-only production**: [`Self::next_var`] is the only way to
@@ -587,23 +516,8 @@ pub(in crate::core_erlang) enum ValueRef {
 /// now (the Phase A0 prototype only exercises `Direct`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum BindOp {
-    /// A field/class-var mutation: `call 'maps':'put'(field, value, source)`.
-    /// `class_tag` is the dynamic class-identity value the shadow write (when
-    /// `shadow_write` is set) is keyed on — ADR 0110's amendment:
-    /// `{'$bt_class_vars_shadow', element(2, class_tag)}`, never a bare atom,
-    /// so two classes relaying through the same process don't clobber each
-    /// other's shadow (see `generate_field_assignment`, `expressions.rs:576-588`).
-    Put {
-        field: String,
-        value: ValueRef,
-        class_tag: ValueRef,
-    },
-    /// A field/class-var un-assign (ADR 0124 §1/B4): `call
-    /// 'maps':'remove'(field, source)`. `clearField:`'s counterpart to
-    /// [`Self::Put`] — same shadow-write semantics (`class_tag`, rendered
-    /// identically), but two-arity `maps:remove` in place of three-arity
-    /// `maps:put`, since there is no value being written.
-    Remove { field: String, class_tag: ValueRef },
+    /// A field mutation: `call 'maps':'put'(field, value, source)`.
+    Put { field: String, value: ValueRef },
     /// Unpacks a threaded local from the incoming `StateAcc` map at
     /// loop-iteration start (`generate_unpack_at_iteration_start`) — legal
     /// only inside a [`ThreadingMode::StateAcc`] body; see
@@ -628,38 +542,35 @@ pub(in crate::core_erlang) enum BindOp {
 /// One statement of the lowered IR. See [`VersionPrefix`]'s doc comment for
 /// why `NlrCatch`/`Return` are test-only for now (the Phase A0 prototype only
 /// exercises `Threaded`/`Bind`).
+// `ConditionalLoop` is far larger than every other node (it carries the whole
+// loop skeleton); boxing it would ripple through every lowering and test
+// fixture for an IR built once per loop statement.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ThreadedStmt {
     /// A mutation: binds a fresh version from a prior one in the same frame.
-    /// `shadow_write` records whether this `Bind` also emits the ADR 0110
-    /// process-dictionary shadow write — modeling the side channel explicitly
-    /// is what makes [`VerifyError::ShadowWriteMissing`] possible.
     Bind {
         target: VersionedVar,
         source: VersionedVar,
         op: BindOp,
-        shadow_write: bool,
         span: Span,
     },
 
     /// A loop or mutation-carrying conditional, with its mode already
     /// resolved. `produces` lists the versions the body makes available to
     /// its enclosing frame once the construct completes.
-    ///
-    /// `shadow_write_eligible` (ADR 0111 Addendum 9, Question 1): whether a
-    /// class-var mutation inside `body` is eligible for the ADR 0110
-    /// shadow write / [`VerifyError::ShadowWriteMissing`] check — read fresh
-    /// from `self.block_depth == 0` at construction time (independently
-    /// re-derived, never reused from a caller's `shadow_write` value; see
-    /// [`construct_and_verify_class_var_bind`]'s doc comment). Orthogonal to
-    /// `frame`: `frame` scopes version-linearity, `shadow_write_eligible`
-    /// scopes shadow-write eligibility — they only coincided at
-    /// `FrameId::ROOT` historically because no non-ROOT frame ever carried a
-    /// legitimate class-var mutation before loop/fold bodies did.
     Threaded {
         mode: ThreadingMode,
         frame: FrameId,
-        shadow_write_eligible: bool,
+        /// ADR 0131 §2: the outer locals this frame threads itself (a fold's
+        /// `ThreadingPlan::threaded_locals`) — the membership half of a nested
+        /// [`LocalRebind`](Self::LocalRebind)'s lowering key, read off this
+        /// node by [`RebindFrame::of`] for the lowering and the verifier
+        /// alike. Empty for a frame that threads no outer local (and, until
+        /// ADR 0131 Phase 3 replaces them with [`BranchArm`](Self::BranchArm),
+        /// for the branch-arm wrappers `verify_and_render_branch_arm` builds).
+        /// Rendering ignores it.
+        threads: Vec<String>,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
         span: Span,
@@ -742,10 +653,10 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         fn_name: String,
         mode: ThreadingMode,
         frame: FrameId,
-        /// See [`ThreadedStmt::Threaded`]'s field of the same name (ADR
-        /// 0111 Addendum 9, Question 1) — identical meaning and
-        /// construction discipline, on the loop-shaped variant.
-        shadow_write_eligible: bool,
+        /// ADR 0131 §2: the outer locals this loop threads
+        /// (`ThreadingPlan::threaded_locals`), exactly as
+        /// [`Threaded`](Self::Threaded)'s `threads`. Rendering ignores it.
+        threads: Vec<String>,
         /// Present only for counted loops (`to:do:`/`to:by:do:`/
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
@@ -842,7 +753,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// counterpart of [`ValueRef::Doc`]'s value-level opacity (ADR 0111
     /// Addendum 3), built by the SAME codegen call production already runs at
     /// this point (`expression_doc`, `generate_self_dispatch_open`, the
-    /// `{'reply', ...}`/`{'class_var_result', ...}` epilogue builders, …).
+    /// `{'reply', ...}` epilogue builders, …).
     /// Legal in any straight-line sequence rendered by [`render`]'s top-level
     /// loop (a `gen_server` method body, an [`NlrCatch`](Self::NlrCatch)
     /// try-body). A `Statement`'s `Document` must carry its own correct
@@ -864,14 +775,439 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// opacity) and `exit_arm` (a named, deliberate limitation); a
     /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
+
+    /// ADR 0130 §4: a compiled `on:do:`'s class-variable catch boundary, both
+    /// halves as one unit: the `entry` snapshot `let` bound before the `try`,
+    /// the protected region ([`TryRegion`]: `try <body> of <result_var> ->
+    /// <result_var>`), and the catch at which an error discards the
+    /// class-variable writes made inside that region. `clauses` is the outer
+    /// `case {Type, Error}` of the catch in emission order: the two `$bt_nlr`
+    /// pass-through arms and the non-NLR arm whose first step is the
+    /// class-variable restore. [`verify`](super::verify::verify) reports
+    /// [`VerifyError::CatchWithoutClassVarRestore`] unless `entry` binds the
+    /// snapshot, the non-NLR arm begins with the restore of that snapshot and
+    /// both NLR arms precede it, so a `^` crosses the catch without touching
+    /// the map and every other exception restores before anything else runs.
+    /// Built by `exception_handling.rs`'s `on_do_catch_boundary`, the single
+    /// owner of every compiled `on:do:` catch boundary (class-side,
+    /// instance-side, direct-called or not).
+    ///
+    /// The region's body is opaque here: a state-threading body is verified by
+    /// its own frames when it is built (`push_exception_arm`), not by this node.
+    OnDoCatch {
+        vars: Box<OnDoCatchVars>,
+        /// The entry half, rendered before the `try`. The builder always sets
+        /// it; `None` exists so `verify()` rejects a node that forgets the
+        /// snapshot instead of `erlc` failing on an unbound variable.
+        entry: Option<CatchEntry>,
+        try_region: TryRegion,
+        clauses: Vec<CatchClause>,
+        span: Span,
+    },
+
+    /// ADR 0131 §1: a local-threading producer's construct tuple, bound to
+    /// `carrier` (`let <carrier> = <doc> in`). Replaces the opaque
+    /// [`Statement`](Self::Statement) a construct's `{Value, StateAcc}` (or
+    /// flat `{Value, L1, …, Ln}`) tuple bind used to be: `threads` names the
+    /// outer locals the tuple carries, so the verifier (ADR 0131 §4,
+    /// `ThreadedLocalDropped`) can require one [`LocalRebind`](Self::LocalRebind)
+    /// per entry — or a [`DiscardLocals`](Self::DiscardLocals) at a
+    /// [`MethodBody`](Self::MethodBody) frame — before the frame ends. `doc`
+    /// is the construct's own AST-directed tuple expression, opaque like a
+    /// `Statement`'s.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2's `local_threading_producer`
+    /// is the first.
+    #[allow(dead_code)]
+    ConstructTuple {
+        carrier: String,
+        doc: Document<'static>,
+        threads: Vec<String>,
+        span: Span,
+    },
+
+    /// ADR 0131 §2: the outer local `local` takes the value its construct
+    /// threaded out, read from `carrier` at `slot`. How the new value is
+    /// bound is decided by the enclosing frame's recorded mode and the
+    /// local's membership in that frame's threaded set — never by the
+    /// producer — and recorded in `lowering` (see [`RebindLowering`], and
+    /// [`RebindShape::for_frame`] for the §2 table, the one function that
+    /// applies it). `frame` is the enclosing frame's identity; the verifier
+    /// checks it against the node that actually encloses the rebind
+    /// ([`VerifyError::LocalRebindFrameMismatch`](super::verify::VerifyError::LocalRebindFrameMismatch)),
+    /// and `lowering`'s shape against that node's §2 cell
+    /// ([`VerifyError::LocalRebindModeMismatch`](super::verify::VerifyError::LocalRebindModeMismatch)).
+    ///
+    /// `value_var` is the Core Erlang name the read value is bound to,
+    /// minted at lowering time (ADR 0111 Addendum 2 Gap 2: never at render
+    /// time); the producer `bind_var`s `local` to it so later AST-directed
+    /// code reads the new value.
+    ///
+    /// `state_first` is set in an actor instance frame, where the carrier's
+    /// `StateAcc` slot is also the `State` family's next version: ADR 0122's
+    /// `extract_family_slots` `Bind` comes first and this rebind's
+    /// [`CarrierSlot::Key`] read then goes through that new `State` version
+    /// rather than `element(2, carrier)`, so one carrier read feeds both.
+    ///
+    /// A `^` thrown inside the construct skips its rebinds (ADR 0131 §2,
+    /// "Non-local return"); the NLR 4-tuple carries the state the method's
+    /// catch needs.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 is the first.
+    #[allow(dead_code)]
+    LocalRebind {
+        local: String,
+        carrier: String,
+        slot: CarrierSlot,
+        frame: FrameId,
+        value_var: String,
+        state_first: Option<VersionedVar>,
+        lowering: RebindLowering,
+        span: Span,
+    },
+
+    /// ADR 0131 §2, "Last position does not discard, except at the method
+    /// root": the one legitimate drop of a construct's threaded locals — a
+    /// [`MethodBody`](Self::MethodBody) frame's last expression, whose
+    /// rebinds nothing can observe. Explicit so the verifier sees the
+    /// choice. Renders nothing; the consumer reads `element(1, carrier)`.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 (`lower_threaded_last`)
+    /// is the first.
+    #[allow(dead_code)]
+    DiscardLocals { carrier: String, span: Span },
+
+    /// ADR 0131 §2: a method's root frame, as a node rather than a side
+    /// table, so a [`LocalRebind`](Self::LocalRebind) in it reads its mode
+    /// and `threads` structurally. `threads` is empty except in the REPL,
+    /// where it is the bindings map's keys (the `MethodBody (REPL)` row of
+    /// the §2 table). Renders `body` straight-line.
+    ///
+    /// No production caller yet: ADR 0131 Phase 2 is the first.
+    #[allow(dead_code)]
+    MethodBody {
+        frame: FrameId,
+        threads: Vec<String>,
+        body: Vec<ThreadedStmt>,
+    },
+
+    /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
+    /// the set the arm's closer packs into its seeded `StateAcc`'s
+    /// `__local__` keys (`seed_conditional_locals`'s set). Renders `body`
+    /// straight-line.
+    ///
+    /// No production caller yet: ADR 0131 Phase 3 is the first.
+    #[allow(dead_code)]
+    BranchArm {
+        frame: FrameId,
+        threads: Vec<String>,
+        body: Vec<ThreadedStmt>,
+    },
+}
+
+// ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────
+//
+// No production caller yet: ADR 0131 Phase 2 (`local_threading_producer`) is
+// the first, as `CloseContext` landed ahead of its consumers in ADR 0118
+// phase 1a — hence the `#[allow(dead_code)]`s below.
+
+/// Where a [`ThreadedStmt::LocalRebind`] reads its local's new value from
+/// the construct tuple (ADR 0131 §2's `<read>`). The construct reports which,
+/// because the construct built the tuple.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum CarrierSlot {
+    /// A `StateAcc`-carrying construct (`{Value, StateAcc}`): the local is the
+    /// map key (`__local__t`, or the bare name in the REPL) —
+    /// `maps:get(Key, element(2, CF))`.
+    Key(String),
+    /// A flat-tuple construct (`{Value, L1, …, Ln}`): the local is the
+    /// 1-based tuple position — `element(k, CF)`.
+    Pos(usize),
+}
+
+/// The enclosing frame kind of a [`ThreadedStmt::LocalRebind`] — the
+/// "frame mode" half of ADR 0131 §2's lowering key. Read off the enclosing
+/// node: a [`ThreadedStmt::MethodBody`], a [`ThreadedStmt::BranchArm`], or a
+/// loop/fold ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`])'s
+/// recorded [`ThreadingMode`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindFrameKind {
+    MethodBody,
+    BranchArm,
+    Loop(ThreadingMode),
+}
+
+/// The shape ADR 0131 §2's table assigns a [`ThreadedStmt::LocalRebind`]
+/// for one (frame kind × membership) cell — [`RebindLowering`] without its
+/// lowering-time names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindShape {
+    /// `let V = <read> in` + `bind_var(t, V)`.
+    Let,
+    /// A `Gensym` `Bind` joining the loop's `final_loop_arg_identities` chain.
+    LoopParam,
+    /// A `Put` into the frame's `StateAcc`/bindings map.
+    MapPut,
+}
+
+#[allow(dead_code)]
+impl RebindShape {
+    /// ADR 0131 §2's table, the one place it is written down:
+    ///
+    /// | Enclosing frame | `local` ∈ `threads` | `local` ∉ `threads` |
+    /// |---|---|---|
+    /// | `MethodBody` (non-REPL: `threads` empty) | n/a | `Let` |
+    /// | `MethodBody` (REPL) | `MapPut` (bindings map) | n/a |
+    /// | `StateAcc(_)` loop / handler body | `MapPut` (`__local__t`) | `Let` |
+    /// | `DirectParams` / `Hybrid` / `TupleAcc(g)` | `LoopParam` | `Let` |
+    /// | `BranchArm` | `MapPut` (the arm's seeded `StateAcc`) | `Let` |
+    ///
+    /// A non-member is never forced into the frame's parameter list or map:
+    /// in an actor a stray `__local__` key would persist into the
+    /// `gen_server` `State` (the BT-2717 class of bug).
+    pub(in crate::core_erlang) fn for_frame(kind: &RebindFrameKind, member: bool) -> Self {
+        if !member {
+            return Self::Let;
+        }
+        match kind {
+            RebindFrameKind::MethodBody
+            | RebindFrameKind::BranchArm
+            | RebindFrameKind::Loop(ThreadingMode::StateAcc(_)) => Self::MapPut,
+            RebindFrameKind::Loop(
+                ThreadingMode::DirectParams | ThreadingMode::Hybrid | ThreadingMode::TupleAcc(_),
+            ) => Self::LoopParam,
+        }
+    }
+}
+
+/// The enclosing frame a [`ThreadedStmt::LocalRebind`] is lowered by: its
+/// identity, its kind/mode (the frame-mode half of ADR 0131 §2's lowering
+/// key) and its threaded set (the membership half). Read off the enclosing
+/// node by [`Self::of`] — by a producer's lowering
+/// (`build::build_local_rebind`) and by the verifier
+/// (`VerifyError::LocalRebindModeMismatch`) alike, so the two can never
+/// disagree about which cell of the table applies. A rebind's lowering is
+/// never looked up in a side table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct RebindFrame {
+    pub(in crate::core_erlang) frame: FrameId,
+    pub(in crate::core_erlang) kind: RebindFrameKind,
+    pub(in crate::core_erlang) threads: Vec<String>,
+}
+
+impl RebindFrame {
+    /// Reads the frame off its node: a [`ThreadedStmt::MethodBody`] or
+    /// [`ThreadedStmt::BranchArm`], or a loop/fold
+    /// ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`]) with
+    /// its recorded [`ThreadingMode`]. Each records its own `threads`. `None`
+    /// for a node that is not a frame.
+    pub(in crate::core_erlang) fn of(node: &ThreadedStmt) -> Option<Self> {
+        let (frame, kind, threads) = match node {
+            ThreadedStmt::MethodBody { frame, threads, .. } => {
+                (*frame, RebindFrameKind::MethodBody, threads)
+            }
+            ThreadedStmt::BranchArm { frame, threads, .. } => {
+                (*frame, RebindFrameKind::BranchArm, threads)
+            }
+            ThreadedStmt::Threaded {
+                mode,
+                frame,
+                threads,
+                ..
+            }
+            | ThreadedStmt::ConditionalLoop {
+                mode,
+                frame,
+                threads,
+                ..
+            } => (*frame, RebindFrameKind::Loop(mode.clone()), threads),
+            _ => return None,
+        };
+        Some(Self {
+            frame,
+            kind,
+            threads: threads.clone(),
+        })
+    }
+
+    /// The frame a slice with no enclosing frame node is verified in: the
+    /// implicit non-REPL method root ([`FrameId::ROOT`], threading nothing).
+    /// A REPL root threads its bindings and must be an explicit
+    /// [`ThreadedStmt::MethodBody`].
+    pub(in crate::core_erlang) fn implicit_root() -> Self {
+        Self {
+            frame: FrameId::ROOT,
+            kind: RebindFrameKind::MethodBody,
+            threads: Vec::new(),
+        }
+    }
+
+    /// Whether `local` is one of this frame's own threaded locals.
+    pub(in crate::core_erlang) fn threads_local(&self, local: &str) -> bool {
+        self.threads.iter().any(|t| t == local)
+    }
+
+    /// ADR 0131 §2's table cell for `local` in this frame.
+    pub(in crate::core_erlang) fn shape_for(&self, local: &str) -> RebindShape {
+        RebindShape::for_frame(&self.kind, self.threads_local(local))
+    }
+}
+
+/// How one [`ThreadedStmt::LocalRebind`] is bound: its [`RebindShape`] plus
+/// the lowering-time names that shape needs. Chosen at lowering time from
+/// the enclosing frame (`build::build_local_rebind`, which applies
+/// [`RebindShape::for_frame`]); the verifier's
+/// `LocalRebindModeMismatch` re-derives the shape from the enclosing node
+/// ([`RebindFrame::shape_for`]) and compares (this is its `lowered_as`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(in crate::core_erlang) enum RebindLowering {
+    /// `let V = <read> in` — a plain, unthreaded binding.
+    Let,
+    /// `let Target = <read> in`, where `target` is
+    /// `Gensym(value_var)`: one step of the loop's per-local identity chain
+    /// from `source` (the local's identity before this rebind). A
+    /// `ConditionalLoop`'s `final_loop_arg_identities` follows it into the
+    /// recursive call exactly as it follows a `Bind`; a `TupleAcc` fold's
+    /// closing tuple picks it up through the producer's `bind_var(local,
+    /// value_var)`.
+    LoopParam {
+        source: VersionedVar,
+        target: VersionedVar,
+    },
+    /// `let V = <read> in let Target = maps:put(Key, V, Source) in` — one
+    /// `State`-prefix version step of the frame's map (a `StateAcc` loop's,
+    /// a branch arm's seeded `StateAcc`, or the REPL bindings map).
+    MapPut {
+        key: String,
+        source: VersionedVar,
+        target: VersionedVar,
+    },
+}
+
+#[allow(dead_code)]
+impl RebindLowering {
+    /// The [`RebindShape`] this lowering realizes.
+    pub(in crate::core_erlang) fn shape(&self) -> RebindShape {
+        match self {
+            Self::Let => RebindShape::Let,
+            Self::LoopParam { .. } => RebindShape::LoopParam,
+            Self::MapPut { .. } => RebindShape::MapPut,
+        }
+    }
+
+    /// The version step this lowering performs, if any (`source`, `target`)
+    /// — counted by the verifier exactly like a `Bind`'s.
+    pub(in crate::core_erlang) fn version_step(&self) -> Option<(&VersionedVar, &VersionedVar)> {
+        match self {
+            Self::Let => None,
+            Self::LoopParam { source, target } | Self::MapPut { source, target, .. } => {
+                Some((source, target))
+            }
+        }
+    }
+}
+
+/// The Core Erlang variable names an [`ThreadedStmt::OnDoCatch`] clause binds
+/// (no anonymous `_` exists in Core Erlang, so each pattern variable is
+/// unique), plus the `snapshot` variable its [`CatchEntry`] binds before the
+/// `try`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct OnDoCatchVars {
+    pub type_var: String,
+    pub error_var: String,
+    pub stack_var: String,
+    pub nlr_tok_var: String,
+    pub nlr_val_var: String,
+    pub nlr_state_var: String,
+    pub nlr_tok_var2: String,
+    pub nlr_val_var2: String,
+    pub other_pair_var: String,
+    pub built_stack_var: String,
+    pub ex_obj_var: String,
+    pub match_var: String,
+    pub ex_class_var: String,
+    /// The `let Snap = beamtalk_class_vars:snapshot() in` variable the
+    /// [`CatchEntry::ClassVarSnapshot`] binds and the restore step reads.
+    /// Typed, so the verifier compares the two structurally.
+    pub snapshot_var: ErlangVar,
+    /// The pattern variable of the exhaustive fallback clause that closes the
+    /// class filter's `case` ([`CatchStep::FilterMiss`]).
+    pub filter_fallback_var: String,
+}
+
+/// The two `$bt_nlr` throw shapes a compiled catch passes through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrThrowShape {
+    /// The actor-shaped `{'$bt_nlr', Tok, Val, State}`.
+    Tuple4,
+    /// The plain `{'$bt_nlr', Tok, Val}`.
+    Tuple3,
+}
+
+/// The entry half of an [`ThreadedStmt::OnDoCatch`], rendered before its `try`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchEntry {
+    /// `let Snap = call 'beamtalk_class_vars':'snapshot'() in`, binding the
+    /// node's [`OnDoCatchVars::snapshot_var`].
+    ClassVarSnapshot,
+}
+
+/// The protected region of an [`ThreadedStmt::OnDoCatch`]: `try <body> of
+/// <result_var> -> <result_var>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct TryRegion {
+    /// The protected expression, rendered after `try ` and before `of`; it
+    /// carries its own trailing whitespace.
+    pub body: Document<'static>,
+    /// The `of` clause variable the `try` returns unchanged.
+    pub result_var: String,
+}
+
+/// One clause of an [`ThreadedStmt::OnDoCatch`]'s outer `case`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchClause {
+    /// A `^` in flight: re-raised untouched, never restored.
+    NlrPassThrough(NlrThrowShape),
+    /// Every other exception, in step order.
+    NonNlr { steps: Vec<CatchStep> },
+}
+
+/// One step of the non-NLR catch clause, in emission order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CatchStep {
+    /// `do beamtalk_class_vars:restore(Snap)` — must come first.
+    ClassVarRestore { snapshot: ErlangVar },
+    /// Wrap the raw `{Type, Error, Stack}` as an exception object.
+    WrapException,
+    /// `matches_class` and the opening of its `'true'` arm. Must be followed
+    /// by [`CatchStep::FilterHandler`] and closed by [`CatchStep::FilterMiss`].
+    ClassFilter,
+    /// The body of the filter's `'true'` arm: the handler application.
+    FilterHandler(Document<'static>),
+    /// The rest of the filter's `case`: the `'false'` arm that re-raises a
+    /// class the filter declines, then a wildcard clause that raises
+    /// `case_clause`, then the closing `end end`.
+    ///
+    /// The wildcard is what makes the `case` exhaustive *to the Core Erlang
+    /// compiler*, which cannot prove a `matches_class/2` answer is a boolean.
+    /// Without it an `on:do:` nested in another protected region (a `try` body
+    /// the compiler already holds open) fails `erlc` with
+    /// `ambiguous_catch_try_state`; see `case_clause_fallback`. The node owns
+    /// the clause so every compiled `on:do:` has it by construction, and
+    /// [`VerifyError::CatchFilterNotClosed`] rejects a node that lacks it.
+    FilterMiss,
 }
 
 // ─── ThreadedValue (ADR 0118, Decision 1) ────────────────────────
 
 /// The result of compiling one expression in a state-threading context
 /// (ADR 0118 §Decision 1). `prelude` runs first, in source evaluation
-/// order, and may advance a versioned prefix (`State` today; `ClassVars`/
-/// `Self` in later phases); `value` is then a pure reference to the
+/// order, and may advance a versioned prefix (`State` today; `Self` in later
+/// phases); `value` is then a pure reference to the
 /// expression's result — a temp, a literal, or an opaque `Document` that
 /// reads only from variables the prelude (or the enclosing frame) already
 /// bound.
@@ -912,18 +1248,6 @@ pub(in crate::core_erlang) struct ThreadedValue {
 /// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
 /// see that function's doc comment for why not sooner). Same status as
 /// [`ValueRef::Version`]'s constructor.
-///
-/// An investigation into `Opaque` for exactly the class-method self-send case
-/// this variant's own doc names ("a block passed to a class method"):
-/// `close_threaded_value_doc` (`util.rs`) is the real, already-shipping
-/// choke point every ambient (non-`threaded_expression`) class-method
-/// self-send's `ThreadedValue` closes through, and it renders prelude-then-
-/// value unconditionally rather than calling `close()` — see its own doc
-/// comment for why threading a correct `Opaque`-vs-not signal into it is
-/// blocked on the same receiver-class-identity ambiguity
-/// `check_no_unsafe_class_method_self_sends`'s doc comment (`expressions.rs`)
-/// describes for its own call sites, not on anything specific to `close()`
-/// or this enum.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CloseContext {

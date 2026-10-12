@@ -902,6 +902,8 @@ ErrorStyle controls error wrapping:
 """.
 -spec wrap_compiler_errors(fun(() -> term()), direct | wrapped) -> term().
 wrap_compiler_errors(Fun, ErrorStyle) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is compiler port/registry work, no Beamtalk
+    %% block
     try
         Fun()
     catch

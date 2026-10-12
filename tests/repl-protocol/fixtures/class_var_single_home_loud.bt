@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0130 / BT-3715: subclass of CvshCounter; loaded after it.
+
+CvshCounter subclass: CvshLoudCounter
+  classState: n = 0
+
+  class hook => self bump

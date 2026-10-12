@@ -149,3 +149,4 @@ mod span_resolution;
 mod type_alias_declarations;
 mod type_aliases;
 mod type_string_wire_fidelity;
+mod verifier_warnings;

@@ -13,7 +13,7 @@
 //! - [`branch_guard`] — [`BranchContextGuard`](branch_guard::BranchContextGuard)
 //!   and the `with_branch_context`/`enter_branch_context` pair
 //! - [`accessors`] — small field getters/setters and context-default wrappers
-//! - [`version`] — `State{N}`/`ClassVars{N}`/`Self{N}` version-counter helpers
+//! - [`version`] — `State{N}`/`Self{N}` version-counter helpers
 
 pub(in crate::core_erlang) mod accessors;
 pub(in crate::core_erlang) mod branch_guard;
@@ -105,7 +105,7 @@ pub struct CoreErlangGenerator {
     /// Variable binding and scope management.
     pub(in crate::core_erlang) var_context: VariableContext,
     /// State threading for field assignments. `VersionCounter` is the
-    /// single implementation shared with `ClassContext::class_var_version` and
+    /// single implementation shared with
     /// `ValueTypeContext::self_version` (formerly `StateThreading`).
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
@@ -132,11 +132,11 @@ pub struct CoreErlangGenerator {
     /// directly after such a sibling closes yields that now-closed
     /// sibling's frame instead of the enclosing scope's own frame (BT-3623).
     /// `enter_branch_context` saves/sets/restores this field the same way it
-    /// does `state_version`/`class_var_version`/`self_version`; `0` means
+    /// does `state_version`/`self_version`; `0` means
     /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
     pub(in crate::core_erlang) active_branch_frame: u32,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
-    /// mode flags, `ClassVars`-threading side channels, pre-extracted field
+    /// mode flags, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
     /// grouped into one `control_flow`-owned value. See [`LoopMode`].
     pub(in crate::core_erlang) loop_mode: LoopMode,
@@ -151,6 +151,20 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// ADR 0130 §5: the Core Erlang variable holding the class-variable
+    /// capture of the innermost enclosing block literal that reads a class
+    /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
+    /// `None` at method level and inside blocks that read none. While `Some`,
+    /// every class-variable read's miss path lowers to the 3-arity
+    /// captured-fallback helper with this variable.
+    pub(in crate::core_erlang) class_var_capture: Option<String>,
+    /// BT-3719: the per-method class-variable key binding. While a
+    /// class-method body is being lowered (`class_method_body_doc`) the `CVKey`
+    /// variable is minted lazily at the first inlined class-variable access and
+    /// bound once around the body, so every access reuses it instead of
+    /// rebuilding `{'$bt_class_vars', element(2, ClassSelf)}`. Outside a
+    /// class-method body an access inlines the key.
+    pub(in crate::core_erlang) class_var_key_scope: super::class_var_keys::KeyScope,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Source identity of each provision-bearing protocol (ADR 0127 §3);
@@ -264,12 +278,6 @@ pub struct CoreErlangGenerator {
     /// When true, emits `Diagnostic::hint` for calling convention choices, dynamic dispatch
     /// fallbacks, non-local returns, and other codegen decisions.
     pub(in crate::core_erlang) codegen_diagnostics_enabled: bool,
-    /// ADR 0130 Phase 0 census probe (`BEAMTALK_CLASS_VAR_PROBE=1`): when true,
-    /// every class-variable read or write is preceded by a
-    /// `beamtalk_class_var_probe:report/6` call, with `in_block` (inside a
-    /// non-inlined block, `block_depth > 0`) as its last argument. Off by
-    /// default; when off, generated code is byte-identical.
-    pub(in crate::core_erlang) class_var_probe_enabled: bool,
     /// Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
     pub(in crate::core_erlang) warn_stateacc: bool,
     /// Selector name of the method currently being compiled.
@@ -371,6 +379,8 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            class_var_capture: None,
+            class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
             primitive_bindings: PrimitiveBindingTable::new(),
@@ -386,8 +396,6 @@ impl CoreErlangGenerator {
             codegen_warnings: Vec::new(),
             semantic_facts: beamtalk_core::semantic_analysis::SemanticFacts::default(),
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
-                .is_ok_and(|v| v == "1"),
-            class_var_probe_enabled: std::env::var("BEAMTALK_CLASS_VAR_PROBE")
                 .is_ok_and(|v| v == "1"),
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,

@@ -419,6 +419,24 @@ lookupIfAbsent_absent_test() ->
         ?assertEqual(99, Result)
     end).
 
+lookupIfAbsent_block_badarg_is_not_reported_as_stale_table_test() ->
+    %% BT-3739: a badarg raised by the user's Block is the Block's own error.
+    with_table(bt_ets_test_lookup_default_block_badarg, fun(Table) ->
+        ?assertError(
+            badarg,
+            beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end)
+        )
+    end).
+
+lookupIfAbsent_stale_table_still_reported_test() ->
+    %% BT-3739: a table that no longer exists is still a stale-table error.
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_lookup_default_stale, set),
+    ets:delete(bt_ets_test_lookup_default_stale),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+        beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)
+    ).
+
 lookupIfAbsent_type_error_not_block_test() ->
     with_table(bt_ets_test_lookup_default_type, fun(Table) ->
         ?assertError(

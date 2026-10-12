@@ -844,6 +844,8 @@ guarantee boundary the issue asked for.
 
 ## Class-side self-send cost (BT-3666 / BT-3669 / BT-3675, measured in BT-3676)
 
+> **Historical.** The per-scope token, commit, export and `class_var_scope_*` helpers measured below were deleted by [ADR 0130](../ADR/0130-class-variables-live-in-the-class-process.md) (class variables now live in the class process). The harness section still describes the current method; for the current numbers see [ADR 0130 Phase 0](#adr-0130-phase-0-single-home-class-variables-perf-spike-and-gates-bt-3702), in particular its final gate summary.
+
 ### Harness
 
 `runtime/perf/self_send_bench` is a small Beamtalk package whose `SsbMain run`
@@ -1004,9 +1006,42 @@ A runtime-only change to `make_self` (read `__class_mod__` once, a `class_and_mo
 61 vs 77 ns when called inline in the microbenchmark but gave no difference through the generated code
 (122 vs 121 ns debug, 9 rounds), because the helper call and its tuple cost what the second lookup saved. It was
 not kept. The real saving is for the call site to pass the `Self` it already has (a `safe_dispatch/4`, ~50 ns
-or ~40% of the open actor send, getting it to about the sealed actor's cost), which touches every actor
-module's generated exports and the gen_server entry points, so it is left as a follow-up rather than done
-here. The +25% over the baseline (99 vs 122-125) is the BT-3666 late binding and is intentional.
+or ~40% of the open actor send, getting it to about the sealed actor's cost); that was done in BT-3692
+(below). The +25% over the baseline (99 vs 122-125) was the BT-3666 late binding and is intentional.
+
+##### BT-3692: `safe_dispatch/4` (caller passes `Self`)
+
+Every actor module now exports `safe_dispatch/4 (Selector, Args, Self, State)`, which holds the try/catch.
+`safe_dispatch/3` (used by `handle_call`/`handle_cast`/`handle_info`/`init`, which only have `State`) builds
+`Self` with `make_self/1` and delegates to `/4`. The open self-send call site passes its in-scope `Self`:
+
+```erlang
+let _SDArgs = [Args] in
+let _ClassMod = call 'maps':'get'('__class_mod__', State, 'module') in
+  case call 'erlang':'function_exported'(_ClassMod, 'safe_dispatch', 4) of
+    <'true'>  -> call _ClassMod:'safe_dispatch'('sel', _SDArgs, Self, State)
+    <_>       -> call _ClassMod:'safe_dispatch'('sel', _SDArgs, State)
+  end
+```
+
+The `'false'` arm is for a receiver module compiled by an older compiler (no `/4`), for example a stale package
+beam subclassing a recompiled class during a hot reload or release upgrade: it falls back to `/3` instead of
+raising `undef`. The `/3` entry stays exported for exactly this reason.
+
+Method: `runtime/perf/self_send_bench`, `beamtalk run SsbMain run`, debug CLI, 7 interleaved rounds
+(before, after, before, after, ...), each side compiled once with its own compiler. "before" is `fcacac843`
+(origin/main), "after" is this change. ns/op, medians with min-max. **The machine was shared and noisy** (the
+"before" open case ranged 158-557 ns within one side), so only the paired ratios mean anything, not the
+absolute values (which are also higher than the idle-VM figures above).
+
+| case | before | after | after/before |
+|---|---|---|---|
+| actor self-send, open | 183 [158-557] | 75 [68-198] | 0.41 |
+| actor self-send, inherited override (open) | 166 [135-190] | 69 [65-119] | 0.42 |
+| actor self-send, sealed (unchanged code, control) | 132 [111-318] | 130 [123-235] | 0.98 |
+
+The sealed case is untouched by this change and is the control: it is equal on both sides, so the open-case drop
+is not a machine-state artifact. After the change the open send is at or below the sealed actor's cost.
 
 #### `NestedImprovementRatio >= 1.5`
 
@@ -1132,7 +1167,7 @@ for class-variable access anyway, Phase 3 may inline the pair too; the 3 ns it s
 
 - The cost of the invocation boundary itself (`assert_absent/1` + `install/2` on entry, read-back and `erase` in
   `after` of `invoke_class_method/7`), which is Phase 2 and was assumed small next to the `gen_server` round trip.
-- The restore arm taken (an error crossing a catch): only the pass-through path was measured.
+- The restore arm taken (an error crossing a catch): only the pass-through path was measured here; measured later, under load, in "BT-3766" below.
 - `Result tryDo:` and `protect/1`; the subclass-receiver walk after the change (`class_self_send_inherited_override`,
   not hand-lowered); the actor open self-send (BT-3692); the release profile of the CLI (the generated code is the
   same either way).
@@ -1147,3 +1182,250 @@ new cases print, kept as a reference for the Phase 3 re-run, not as gate evidenc
 |---|---|---|
 | `class_var_10r_3w_loop` | 203 | 282, 294 |
 | `instance_on_do_loop` | 2500 | 2434, 2468, 2618 |
+
+### Phase 3 re-measure of gate 4 with the real lowering (BT-3711)
+
+Only gate 4 was re-measured here (the other gates belong to BT-3709's lowering). The compiler now emits
+`let Snap = beamtalk_class_vars:snapshot() in` before every `on:do:`'s `try` and `do
+beamtalk_class_vars:restore(Snap)` as the first statement of the non-NLR catch arm, as helper calls (gate 4 chose
+helpers). Case: `SsbOnDoObject run:` (`runtime/perf/self_send_bench`, `[i + 1] on: Error do: [:e | 0]` in a
+`1 to: n do:` loop, outside any class invocation, so `snapshot/0` answers `none`).
+
+Method: the bench package was built with the BT-3711 compiler; its `ssb_on_do_object.core` is the "instrumented"
+side, and the "today" side is the same `.core` with exactly the two inserted expressions removed. That is what
+`origin/adr-0130` emits for this module: the corpus `.core` diff of the whole stdlib + test corpus against
+`origin/adr-0130` is, after removing the snapshot, restore and capture insertions and renumbering temporaries,
+empty. Both sides were compiled with `erlc +from_core` under different module names and timed in one `erl`
+process (runtime and stdlib applications started), 200,000 iterations after 1,000 warmup, 15 interleaved rounds
+(plain, instrumented, plain, ...) per run, three runs. 4-core VM, load average under 1 at the start of each run.
+
+| run | today (plain) | BT-3711 (snapshot + restore arm) | delta |
+|---|---|---|---|
+| 1 | 2300 [2208-2544] | 2330 [2155-2632] | +1.3% |
+| 2 | 2400 [2140-2982] | 2338 [2181-3221] | -2.6% |
+| 3 | 2327 [2120-2853] | 2329 [2200-2661] | +0.1% |
+
+Medians in ns/op with min-max. **Gate 4 passes**: within 10% (and within the noise of the run-to-run spread).
+Not measured here: the restore arm taken (an error crossing a catch), and the end-to-end `SsbMain` run through
+`beamtalk run`.
+
+### Phase 3 re-measure of gates 1 to 4 on the integration branch (BT-3713)
+
+All four gates, with the real lowering, through `runtime/perf/self_send_bench` as in "Harness" above
+(`beamtalk run SsbMain run`, 200,000 iterations per case after 1,000 warmup). Three sides, each built from its
+own checkout with its own compiler, stdlib and bench package and run in turn (baseline, main, branch, baseline,
+...), 9 interleaved rounds, medians with min-max, after one discarded warm-up run per side:
+
+- **baseline**: `f12484e06` (the parent of BT-3666; the bench package copied in from the branch).
+- **main**: `3fe282c76`, `origin/main`, the "today" of gates 3 and 4 (threaded class variables, BT-3690).
+- **branch**: this PR, `adr-0130` plus BT-3713 (single-home class variables, the real lowering).
+
+Machine: 4 cores, nothing else running (checked with `ps` before and after; no builds, no other agent). The
+1-minute load average at the start of each round was 1.31 to 1.57, which is the benchmark's own BEAM
+schedulers: the `beamtalk run` of the previous round. The Rust CLI of the baseline and main sides was built with
+`CARGO_PROFILE_DEV_DEBUG=0` to save disk, the branch with the default dev profile; the generated code and the
+runtime beams do not depend on either. Harness: a throwaway script that alternates the three binaries (not
+checked in; the method above is the recipe).
+
+| case (ns/op, median [min-max], n = 9) | baseline `f12484e06` | main `3fe282c76` | branch |
+|---|---|---|---|
+| class self-send, open class (top level) | 120 [114-157] | 223 [213-318] | 199 [193-230] |
+| class self-send, open class in an `ifTrue:` arm | 168 [160-247] | 330 [293-361] | 260 [240-279] |
+| class self-send, sealed class | 121 [113-152] | 124 [115-133] | 119 [116-135] |
+| class-variable loop, 10 reads + 3 writes | 171 [164-208] | 285 [275-394] | 582 [566-1819] |
+| instance-side `on:do:` loop (no invocation) | 2399 [2266-2723] | 2267 [2179-3078] | 2313 [2191-2553] |
+| class self-send, inherited override (walk) | 128 [126-170] | 1627 [1539-1925] | 1908 [1745-2434] |
+| actor self-send, open | 104 [93-222] | 132 [122-193] | 127 [119-197] |
+| actor self-send, sealed | 77 [74-126] | 87 [80-97] | 86 [80-162] |
+| actor self-send, inherited override | 87 [83-123] | 118 [112-150] | 117 [112-161] |
+
+#### Gate 1: open self-send, `median_after <= 1.15 * baseline + guard`
+
+`guard`, re-measured on this branch (loop-subtracted `beamtalk_class_dispatch:class_self_direct_ok/4` on a
+registered open class, 2,000,000 iterations, 9 rounds): **75 ns** [71-83].
+
+| case | bound | branch | verdict |
+|---|---|---|---|
+| top level | 1.15 x 120 + 75 = 213 | 199 [193-230] | **passes** (main: 223, which would have failed) |
+| in an `ifTrue:` arm | 1.15 x 168 + 75 = 268 | 260 [240-279] | **passes**, by 8 ns (the arm's max, 279, is above the bound) |
+
+The token, scope read, export and commit that main paid per send are gone: the branch is 24 ns (top level) and
+70 ns (arm) below main. What is left over the baseline is the guard (75 ns) plus noise; BT-3700 owns it.
+
+#### Gate 2: sealed self-send
+
+119 [116-135] against 121 [113-152] on the baseline and 124 [115-133] on main: **no regression**.
+
+#### Gate 3: ten reads and three writes per iteration, `median_after <= 2 * median_today`
+
+Branch 582 [566-1819] against main 285 [275-394]: **2.04x, the gate fails by 12 ns (2%)**. Seven of the nine
+rounds are in 566-644; two rounds hit scheduler or GC outliers (1819, 1042), which the median ignores. The
+paired per-round ratio branch/main has median 2.11. The access is already the inlined form the ADR's fallback
+asks for (`erlang:get/1` plus `maps:find/2` for a read, `erlang:get/1`, `maps:put/3` and `erlang:put/2` for a
+write, helper call only on a miss; ADR 0130 §2, BT-3709), so the fallback is used up. **Handled as the ADR
+prescribes: the number is recorded and accepted, not used to reopen the decision.** Why it is above the spike's
+183 ns: the spike hardcoded the key as a literal tuple, which the compiler stores once. The real lowering
+builds `{'$bt_class_vars', element(2, ClassSelf)}` on every access (13 times per iteration), because the key
+depends on the receiver's class tag. A cheap follow-up that is not done here: bind the key once per method (a
+`let`) and reuse it for every access in the method, which removes 13 tuple builds and `element/2` calls per
+iteration. Until then a class method that touches class variables in a hot loop is about twice as expensive as it
+was on main, and about 3.4x the baseline (which had no class-variable threading to pay for at all: its 171 ns is
+a lexical `maps:get`).
+
+#### Gate 4: `snapshot/0` + restore arm around an instance-side `on:do:`, within 10%
+
+Branch 2313 [2191-2553] against main 2267 [2179-3078]: **+2.0%, passes**. (The real lowering, end to end
+through `beamtalk run`; the BT-3711 measurement, which timed the instrumented and plain `.core` of the same
+module in one process, gave +1.3%, -2.6%, +0.1%.)
+
+#### Other observations (not gates)
+
+- `class_self_send_inherited_override`, the late-bound hierarchy walk (`class_self_send/4`), is 1908 ns on the
+  branch, 1627 on main and 128 on the baseline: roughly 13x the baseline already on main, and 17% above main
+  now. No gate covers it (ADR 0130 leaves the late-binding guard and the walk to BT-3700); recorded here so the
+  17% is not lost.
+- Actor self-sends are unchanged by this ADR and within noise of main.
+
+#### Final gate summary (ADR 0130 Phase 4, BT-3714)
+
+The numbers above are the final ones; nothing was re-run for the docs sweep.
+
+| gate | bound | result (median) | verdict |
+|---|---|---|---|
+| 1. open self-send, top level | 213 ns | 199 ns | passes |
+| 1. open self-send, in an `ifTrue:` arm | 268 ns | 260 ns | passes (by 8 ns) |
+| 2. sealed self-send | no regression | 119 ns vs 121 ns baseline | passes |
+| 3. 10 reads + 3 writes per iteration | `2 * 285 = 570` ns | **582 ns** | **fails by 12 ns (2%); accepted** |
+| 4. `snapshot/0` + restore around `on:do:` | within 10% of main | +2.0% | passes |
+
+Gate 3 was accepted rather than used to reopen the single-home decision, as the ADR prescribes. The follow-up is [BT-3719](https://linear.app/beamtalk/issue/BT-3719): bind the class-variable key once per method instead of at each inlined access, then re-run gate 3 (target at or under 570 ns) and re-measure the late-bound hierarchy walk (`class_self_send_inherited_override`, 1908 ns, +17% over main), recovering or explaining it. Until then a class method that touches class variables in a hot loop costs about twice what it did on `main` before ADR 0130.
+
+#### Key bound once per method (BT-3719)
+
+The compiler now binds the class key once per class-method body, at the first inlined access, as
+`let _CVKeyN = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in <body>`, and every inlined read and
+write in the body (loop bodies and blocks included) reuses `_CVKeyN`. A method with no class-variable access binds
+nothing. It is one lowering point shared by compiled class methods, `ClassBuilder` funs and class-side extension
+funs (`class_method_body_doc`), emitted through `class_var_keys::key_binding_doc` (`Document` + `leaf::*`).
+No state-threading scope is involved (class variables are written in place), so there is no `ThreadedIr` node to
+change; `just verify-threaded-ir` and `just test-class-var-corpus` pass.
+
+Method: `SsbMain run` through `beamtalk run`, two compilers built from the same checkout (before = `origin/main`
+`fbeac1c39`, after = this change), the bench package rebuilt from scratch with each, 7 interleaved rounds
+(before, after, before, ...), medians with min-max, ns/op. This was a shared, loaded 4-core VM, so the absolute
+numbers are about 1.8x those of the BT-3713 table above (before: 1026 here against 582 there); only the
+paired before/after ratio is meaningful.
+
+| case (ns/op, median [min-max], n = 7) | before | after | ratio |
+|---|---|---|---|
+| class-variable loop, 10 reads + 3 writes | 1026 [917-1149] | 723 [710-819] | 0.70 |
+| class self-send, inherited override (walk) | 2497 [2142-2677] | 2448 [2197-2685] | 0.98 (noise) |
+
+**Gate 3.** The loop is 30% cheaper (every round of "after" is below every round of "before" but one). Applied to
+the BT-3713 figure, 582 ns x 0.70 is about 410 ns, under the 570 ns budget (2 x 285 ns on main); the ratio is
+the measured quantity, the 410 ns is a projection, not a re-run on the idle machine of the BT-3713 table.
+The remaining gap to the spike's 183 ns is the `element/2` plus tuple build per method entry and the
+`erlang:get/1` per access, which a per-access `ClassSelf`-derived key cannot avoid.
+
+**Late-bound hierarchy walk.** Not recovered by this change, and not expected to be: `class_self_send_inherited_override`
+touches no class variable, so the key binding does not appear in it (0.98, inside the run-to-run spread of
+2142-2677). The +17% over main recorded under BT-3713 comes from the runtime path around the walk
+(`class_self_send/4` plus the single-home invocation boundary), not from the inlined access lowering. It is
+accepted here, and its owner is BT-3700 (late-binding guard and walk), as ADR 0130 already assigns.
+
+## BT-3766: class-variable access helpers and class self-send tag derivation
+
+Two runtime costs removed, plus the two measurements BT-3719 left open.
+
+- `beamtalk_class_vars` access helpers (`get`, `get_late`, `put`, `clear`, `has`, `capture`) now check the receiver
+  with the record match only (`class_tag/1`) and key by the metaclass tag. The class name (`tag_to_name/1`:
+  `atom_to_binary`, slicing, `binary_to_existing_atom`) is derived only inside the error paths, a read-only mirror
+  read, and the declared-set check of a read that misses. Error text is unchanged.
+- `beamtalk_class_dispatch:class_self_send/3`, `class_self_dispatch/3` and `class_self_dispatch_local/3` derive the
+  metaclass tag once and pass it to `check_class_self_extension/5` (it was three `list_to_atom` per send). The 4-arity
+  `ReceiverTag` forms keep two derivations because the receiver tag can differ from the class's own tag there
+  (ClassBuilder `super` path, subclass receiver).
+- `ssb_class_var_class.bt` no longer carries the local `acc` write or its stale comment (the loop body now touches
+  only class variables).
+- New `SsbMain` cases `class_on_do_raise_loop` (`SsbOnDoRaiseClass`, class-side `on:do:` whose protected block always
+  raises, run inside a class invocation, so every iteration takes the restore arm with a live snapshot) and
+  `instance_on_do_raise_loop` (`SsbOnDoRaiseObject`, same loop outside any invocation, so `restore/1` gets `none`).
+  2,000 iterations each, since a raise costs about 1000x a send.
+
+### Method and caveat: this was NOT an idle machine
+
+Method as in "Harness" above: `beamtalk run SsbMain run` (debug CLI), 7 interleaved rounds (before, after, before,
+...), medians with min-max, ns/op. "before" is `origin/main` `c82080e56`'s `beamtalk_class_vars` and
+`beamtalk_class_dispatch` beams, "after" is this change's, swapped into the same runtime `ebin` between runs; the
+compiler, stdlib and the (new) bench package are identical on both sides. A first warm-up run was discarded.
+
+**Load: 4-core shared container, load average 12.1 / 6.1 / 2.4 (1/5/15 min) when the runs started and 9.95 / 7.5 /
+3.4 when they finished. It was loaded throughout (load 10-12 on 4 cores), not idle**, so run-to-run spread is
+wide (min-max often 1.5-2x) and only large effects would show. The acceptance criterion asks for an idle re-run;
+that is filed as a follow-up under BT-3757 (BT-3789) and the figures below must not be read as idle numbers.
+
+| case (ns/op, median [min-max], n = 7) | before | after | ratio |
+|---|---|---|---|
+| gate 3: class-variable loop, 10 reads + 3 writes | 963 [790-2115] | 981 [819-1670] | 1.02 (noise) |
+| gate 1: class self-send, open | 215 [156-297] | 176 [155-382] | 0.82 (noise) |
+| class self-send, open, in `ifTrue:` arm | 285 [211-344] | 279 [210-431] | 0.98 |
+| class self-send, sealed | 149 [132-196] | 186 [133-357] | 1.25 (noise; direct-call path, untouched code) |
+| class self-send, inherited override (walk) | 2614 [2264-3461] | 2565 [2174-3482] | 0.98 |
+| class self-send, inherited plain | 3593 [2792-4239] | 3713 [2662-4884] | 1.03 |
+| gate 4, instance `on:do:` no raise | 3314 [2881-5166] | 3105 [2862-3748] | 0.94 |
+| gate 4, restore arm taken: class-side raise loop | 131418 [98956-188039] | 125957 [115262-163467] | 0.96 |
+| gate 4, raise loop outside a class invocation (`restore/1` gets `none`) | 138589 [90847-216808] | 130114 [94576-183241] | 0.94 |
+
+**Gate 3.** No measurable change (1.02, well inside the spread). That is expected: the compiler inlines class
+variable accesses as `erlang:get(_CVKeyN)` (BT-3719), so the loop never calls the helpers whose class-name
+derivation this change removes. The change helps the paths that do call them (FFI class methods, `capture/2`, block
+writes that are not inlined), which no `SsbMain` case exercises, so no speed-up is claimed. The BT-3719 figure
+(0.70 ratio, projected 410 ns) is therefore still a projection on the BT-3713 idle machine, now with a loaded
+re-run (963 ns here, loaded) that does not contradict it but cannot confirm the 570 ns budget either.
+
+**Gate 4, restore arm taken (first measurement).** The class-side loop that runs `restore/1` with a live snapshot
+costs 125957 ns/iteration against 130114 ns for the same raise loop with a `none` snapshot (ratio 0.97 after,
+0.95 before): the restore arm is not visible against the cost of the raise itself, which dominates by about 1000x.
+Under load the restore cost is not detectable: the min-max ranges overlap heavily, so this is not a bound on it; an idle run would tighten it.
+
+## BT-3700: one derived flag for the class-side self-send guard
+
+`class_self_direct_ok/4` for a defining-class receiver used to cost three `persistent_term` reads (the
+`extension` flag, the `runtime_fun` flag, readiness), two of them tuple keys. It now reads one key: a derived
+"direct call is safe" flag keyed by the bare class-object tag atom (`'Foo class'`), installed lazily by the
+first send that finds the class ready and unshadowed, and erased by `beamtalk_class_shadow_flags:set/2`
+(either kind) under a per-tag lock before the shadow becomes visible. Design and the single-writer argument:
+`beamtalk_class_shadow_flags` moduledoc.
+
+### Method
+
+`runtime/perf/self_send_bench`, `beamtalk run SsbMain run` (debug CLI), 7 rounds interleaved (old, new, old,
+new, ...), medians in ns/op with min-max. The Rust compiler and generated code are identical on both sides;
+the only difference is the two changed runtime beams (`beamtalk_class_shadow_flags`,
+`beamtalk_class_dispatch`), swapped in place between runs, so the pairs differ in nothing else. The machine is
+shared; only the paired ratios mean anything. Bench gained `class_self_send_inherited_plain` (a subclass that
+overrides nothing).
+
+| case | before (origin/main) | after BT-3700 |
+|---|---|---|
+| class self-send, open (defining class) | 227 [217-290] | 163 [150-182] |
+| class self-send, open, in an `ifTrue:` arm | 292 [274-374] | 233 [204-322] |
+| class self-send, sealed | 133 [128-186] | 139 [133-149] |
+| subclass receiver, override present (walk) | 2191 [2050-2422] | 2231 [2169-2424] |
+| subclass receiver, no override (walk) | 2798 [2543-2936] | 2723 [2629-3333] |
+
+The guard in isolation (`erl` loop over `class_self_direct_ok/4`, loop overhead of ~8 ns not subtracted, same
+shared machine): about 120-200 ns before, 42-53 ns after (a bare `persistent_term:get/2` of the same key is
+37-48 ns in that shell, so the floor of any `persistent_term` scheme is the read itself). A tuple key costs
+~47 ns against ~17 ns for an atom key in a quiet shell, which is why the derived key is the bare tag atom.
+
+### Not done: the subclass-receiver short-circuit
+
+The issue's second half (skip the hierarchy walk for a subclass receiver when nothing between it and the
+defining class overrides the selector) is not implemented. An experiment (resolution cached in the process
+dictionary, no invalidation, extension check and hierarchy walk skipped entirely) took the subclass-receiver
+send from ~2.2 us to ~1.1-1.3 us. The rest is `apply_class_method_in_context/6` (runtime-fun lookup,
+`try`/classification, `ClassSelf` build, `receiver_tag/1` atom concatenation) and the unwrap, so
+"within 2x of the direct call" (~270 ns) needs a new call shape for the inherited case, not a flag, and a
+resolution cache would need a hierarchy-wide epoch bumped by every class-metadata write. That is a separate
+design; the numbers above are its starting point.

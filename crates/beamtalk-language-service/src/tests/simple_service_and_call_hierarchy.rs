@@ -21,6 +21,36 @@ fn simple_language_service_update_and_diagnostics() {
     assert!(!diagnostics.is_empty());
 }
 
+/// BT-3745 (ADR 0131): both outer-local threading errors are semantic
+/// diagnostics, so the language service reports them as you type, as
+/// structured errors with their own category.
+#[test]
+fn simple_language_service_reports_adr0131_local_threading_errors() {
+    use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
+
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("src/CvA.bt");
+    service.update_file(
+        file.clone(),
+        "Object subclass: CvA\n  class ap: b => b value\n\n  class s6 =>\n    t := 0\n    \
+         r := CvA ap: [t := t + 1. 1]\n    #[r, t]\n\n  class o4 =>\n    t := 0\n    \
+         r := (#(1, 2) collect: [:x | t := t + x]) size\n    #[r, t]\n"
+            .to_string(),
+    );
+    let diagnostics = service.diagnostics(&file);
+    for category in [
+        DiagnosticCategory::Tier2BlockNoReturnChannel,
+        DiagnosticCategory::UnmigratedLocalThreading,
+    ] {
+        let found: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.category == Some(category))
+            .collect();
+        assert_eq!(found.len(), 1, "{category:?}: {diagnostics:?}");
+        assert_eq!(found[0].severity, Severity::Error);
+    }
+}
+
 #[test]
 fn simple_language_service_completions() {
     let mut service = SimpleLanguageService::new();

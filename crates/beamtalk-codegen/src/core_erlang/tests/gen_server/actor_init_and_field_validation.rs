@@ -679,7 +679,7 @@ fn test_bt_2720_native_object_class_delegate_omits_self() {
             && code.contains("], {'Stream', 'from:'})"),
         "class from: should lower to native_call('beamtalk_stream', 'from', [Start], {{'Stream', 'from:'}}). Got:\n{code}"
     );
-    // The class-side arg list must omit ClassSelf / ClassVars (class methods
+    // The class-side arg list must omit ClassSelf (class methods
     // are not instances).
     assert!(
         !code.contains("'native_call'('beamtalk_stream', 'from', [ClassSelf"),

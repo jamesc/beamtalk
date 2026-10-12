@@ -210,14 +210,14 @@ impl CoreErlangGenerator {
     ///
     /// For direct `Value subclass:` classes, builds a flat map:
     /// ```erlang
-    /// 'class_x:y:'/4 = fun (ClassSelf, ClassVars, X, Y) ->
+    /// 'class_x:y:'/3 = fun (ClassSelf, X, Y) ->
     ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
     /// ```
     ///
     /// For sub-subclasses, delegates to `new:` so inherited fields
     /// from the parent are included:
     /// ```erlang
-    /// 'class_y:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
+    /// 'class_y:'/2 = fun (_ClassSelf, SlotArg0) ->
     ///     call 'child':'new'(~{'y' => SlotArg0}~)
     /// ```
     pub(in crate::core_erlang) fn generate_keyword_constructor_fn(
@@ -227,7 +227,7 @@ impl CoreErlangGenerator {
         is_sub_subclass: bool,
         module_name: &str,
     ) -> Document<'static> {
-        let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
+        let arity = slots.len() + 1; // _ClassSelf + N slot args
 
         // Pre-compute slot argument names once; write! instead of format! per codegen rules.
         let slot_arg_names: Vec<String> = (0..slots.len())
@@ -238,7 +238,7 @@ impl CoreErlangGenerator {
             })
             .collect();
 
-        // Extra slot parameters appended after "_ClassSelf, _ClassVars": ", SlotArg0", ...
+        // Extra slot parameters appended after "_ClassSelf": ", SlotArg0", ...
         let slot_param_docs: Vec<Document<'static>> = slot_arg_names
             .iter()
             .flat_map(|name| [Document::Str(", "), leaf::var(name.clone())])
@@ -265,7 +265,7 @@ impl CoreErlangGenerator {
 
             return docvec![
                 leaf::fname(safe_fn_name, arity),
-                " = fun (_ClassSelf, _ClassVars",
+                " = fun (_ClassSelf",
                 concat(slot_param_docs),
                 ") ->\n",
                 "    call ",
@@ -293,7 +293,7 @@ impl CoreErlangGenerator {
 
         docvec![
             leaf::fname(safe_fn_name, arity),
-            " = fun (_ClassSelf, _ClassVars",
+            " = fun (_ClassSelf",
             concat(slot_param_docs),
             ") ->\n",
             "    ~{",

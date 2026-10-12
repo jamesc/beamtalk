@@ -20,9 +20,12 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, var};
-use beamtalk_codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use beamtalk_codegen::core_erlang::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
+};
 use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+use beamtalk_core::source_analysis::Diagnostic;
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -90,7 +93,8 @@ pub fn generate_repl_expressions_with_index(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    generate_repl_expressions_impl(expressions, module_name, class_module_index, None)
+    generate_repl_expressions_impl(expressions, module_name, class_module_index, None, false)
+        .map(|m| m.code)
 }
 
 /// Like [`generate_repl_expressions_with_index`] but also computes direct-call
@@ -116,7 +120,9 @@ pub fn generate_repl_expressions_with_hierarchy(
         module_name,
         class_module_index,
         Some(hierarchy),
+        false,
     )
+    .map(|m| m.code)
 }
 
 #[allow(clippy::implicit_hasher)]
@@ -125,7 +131,8 @@ fn generate_repl_expressions_impl(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
-) -> Result<String> {
+    inject_verifier_violation: bool,
+) -> Result<GeneratedModule> {
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
@@ -139,7 +146,44 @@ fn generate_repl_expressions_impl(
     }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi(expressions)?;
-    Ok(doc.to_pretty_string())
+    let code = doc.to_pretty_string();
+    generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
+    Ok(GeneratedModule {
+        code,
+        warnings: generator.take_codegen_warnings(),
+    })
+}
+
+/// Like [`generate_repl_expressions_with_hierarchy`] /
+/// [`generate_repl_expressions_with_index`] (`hierarchy` is `None` for the
+/// latter) but also returns the `ThreadedIr` verifier diagnostics (ADR 0111
+/// Addendum 17, BT-3778) — only those, through the same
+/// [`GeneratedModule::into_code_and_verifier_diagnostics`] filter the module
+/// compile path uses; every other codegen warning is dropped. The diagnostics
+/// are warnings: generation still succeeds with the generator's output.
+///
+/// `inject_verifier_violation` is the
+/// `CodegenOptions::with_injected_verifier_violation` test hook.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn generate_repl_expressions_surfacing_verifier(
+    expressions: &[Expression],
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: Option<&ClassHierarchy>,
+    inject_verifier_violation: bool,
+) -> Result<(String, Vec<Diagnostic>)> {
+    generate_repl_expressions_impl(
+        expressions,
+        module_name,
+        class_module_index,
+        hierarchy,
+        inject_verifier_violation,
+    )
+    .map(GeneratedModule::into_code_and_verifier_diagnostics)
 }
 
 /// Generates Core Erlang for trace mode eval.
@@ -167,7 +211,9 @@ pub fn generate_repl_expressions_traced(
         module_name,
         class_module_index,
         None,
+        false,
     )
+    .map(|m| m.code)
 }
 
 /// Like [`generate_repl_expressions_traced`] but also computes direct-call
@@ -190,7 +236,34 @@ pub fn generate_repl_expressions_traced_with_hierarchy(
         module_name,
         class_module_index,
         Some(hierarchy),
+        false,
     )
+    .map(|m| m.code)
+}
+
+/// Trace-mode counterpart of [`generate_repl_expressions_surfacing_verifier`].
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn generate_repl_expressions_traced_surfacing_verifier(
+    expressions: &[Expression],
+    source: &str,
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: Option<&ClassHierarchy>,
+    inject_verifier_violation: bool,
+) -> Result<(String, Vec<Diagnostic>)> {
+    generate_repl_expressions_traced_impl(
+        expressions,
+        source,
+        module_name,
+        class_module_index,
+        hierarchy,
+        inject_verifier_violation,
+    )
+    .map(GeneratedModule::into_code_and_verifier_diagnostics)
 }
 
 #[allow(clippy::implicit_hasher)]
@@ -200,7 +273,8 @@ fn generate_repl_expressions_traced_impl(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
-) -> Result<String> {
+    inject_verifier_violation: bool,
+) -> Result<GeneratedModule> {
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
@@ -224,7 +298,12 @@ fn generate_repl_expressions_traced_impl(
     }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi_traced(expressions, &source_texts)?;
-    Ok(doc.to_pretty_string())
+    let code = doc.to_pretty_string();
+    generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
+    Ok(GeneratedModule {
+        code,
+        warnings: generator.take_codegen_warnings(),
+    })
 }
 
 /// Generates Core Erlang for a test expression.
@@ -237,10 +316,29 @@ fn generate_repl_expressions_traced_impl(
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
+    generate_test_expression_surfacing_verifier(expression, module_name).map(|(code, _)| code)
+}
+
+/// Like [`generate_test_expression`] but also returns the `ThreadedIr`
+/// verifier diagnostics (ADR 0111 Addendum 17, BT-3778), filtered by
+/// [`GeneratedModule::into_code_and_verifier_diagnostics`].
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_test_expression_surfacing_verifier(
+    expression: &Expression,
+    module_name: &str,
+) -> Result<(String, Vec<Diagnostic>)> {
     let mut generator = CoreErlangGenerator::new(module_name);
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_test_module(expression)?;
-    Ok(doc.to_pretty_string())
+    let code = doc.to_pretty_string();
+    Ok(GeneratedModule {
+        code,
+        warnings: generator.take_codegen_warnings(),
+    }
+    .into_code_and_verifier_diagnostics())
 }
 
 // ── REPL Assembly ───────────────────────────────────────────────────────

@@ -14,12 +14,13 @@ use super::super::sequencing::PrecompiledScope;
 use super::super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
 };
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use beamtalk_core::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MapPair,
-    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, WellKnownSelector,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
 };
 use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
@@ -415,216 +416,18 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Normalizes a `Cascade` into its true underlying receiver and the
-    /// full ordered list of messages sent to it.
-    ///
-    /// The parser (`parse_cascade`) folds the cascade's *first* message into
-    /// `Cascade.receiver` as a whole `MessageSend` — e.g. for `blk value: x;
-    /// value: y`, `receiver` is `MessageSend(blk, value:, [x])` and `messages`
-    /// holds only the remaining `value: y`. Every safety/codegen decision needs
-    /// the TRUE receiver (`blk`) and ALL messages sent to it (both `value: x`
-    /// and `value: y`), so this mirrors the same normalization
-    /// `generate_cascade` (expressions.rs) already performs for ordinary
-    /// (non-Tier-2) cascade codegen.
+    /// See [`beamtalk_core::semantic_analysis::block_facts::normalize_cascade`].
     fn normalize_cascade<'a>(
         receiver: &'a Expression,
         messages: &'a [CascadeMessage],
     ) -> (&'a Expression, Vec<(&'a MessageSelector, &'a [Expression])>) {
-        if let Expression::MessageSend {
-            receiver: inner,
-            selector: first_selector,
-            arguments: first_arguments,
-            ..
-        } = receiver
-        {
-            let mut all: Vec<(&MessageSelector, &[Expression])> =
-                Vec::with_capacity(messages.len() + 1);
-            all.push((first_selector, first_arguments.as_slice()));
-            for msg in messages {
-                all.push((&msg.selector, msg.arguments.as_slice()));
-            }
-            (inner.as_ref(), all)
-        } else {
-            let all: Vec<(&MessageSelector, &[Expression])> = messages
-                .iter()
-                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
-                .collect();
-            (receiver, all)
-        }
+        beamtalk_core::semantic_analysis::block_facts::normalize_cascade(receiver, messages)
     }
 
-    /// Returns true if `selector` is a `value`/`value:`/
-    /// `value:value:`/`value:value:value:` send — the "safe" family that lets a
-    /// Tier 2 block value be invoked without escaping to a call site that
-    /// doesn't know to thread state through it.
-    fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
-        selector
-            .well_known()
-            .is_some_and(WellKnownSelector::is_block_value)
-    }
-
-    /// Scans `expr` for references to `var_name`, returning
-    /// `(has_unsafe_use, has_safe_use)`.
-    ///
-    /// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
-    /// `value:value:value:` send. Any other reference — a bare return, an
-    /// argument to another call, a reassignment, ... — is *unsafe*, since it
-    /// would let a Tier 2 block value escape to a call site that doesn't know
-    /// to thread state through it. A variable that's *never* referenced at
-    /// all yields `(false, false)`, which the caller must treat as unsafe
-    /// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
-    ///
-    /// Deliberately conservative: exhaustively matches every `Expression`
-    /// variant so a use hidden inside e.g. a map literal or string
-    /// interpolation is never silently missed. A shadowing block parameter
-    /// with the same name is *not* special-cased — that only makes this
-    /// over-conservative (a missed promotion), never unsafe.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
-    )]
+    /// See [`beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses`],
+    /// shared with the ADR 0131 §6 check.
     fn scan_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
-        match expr {
-            Expression::Identifier(id) => (id.name == var_name, false),
-            Expression::Literal(..)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_)
-            | Expression::Primitive { .. }
-            | Expression::ExpectDirective { .. }
-            | Expression::Error { .. } => (false, false),
-            Expression::Spread { name, .. } => (name.name == var_name, false),
-            Expression::FieldAccess { receiver, .. } => Self::scan_var_uses(receiver, var_name),
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } => {
-                let is_safe_value_send = matches!(
-                    receiver.as_ref(),
-                    Expression::Identifier(id) if id.name == var_name
-                ) && Self::is_safe_value_family_selector(selector);
-                let (mut unsafe_, mut safe) = if is_safe_value_send {
-                    (false, true)
-                } else {
-                    Self::scan_var_uses(receiver, var_name)
-                };
-                for arg in arguments {
-                    let (u, s) = Self::scan_var_uses(arg, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::Block(block) => {
-                // Any reference to var_name inside a nested block literal is
-                // unsafe — see the safety invariant note on
-                // prescan_tier2_local_vars above (a nested block compiles
-                // through a completely different path with no Tier2-tuple
-                // unpacking and no tier2_local_vars reset of its own).
-                let (any_unsafe, any_safe) = block
-                    .body
-                    .iter()
-                    .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
-                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-                (any_unsafe || any_safe, false)
-            }
-            Expression::Assignment { target, value, .. } => {
-                let (u1, s1) = Self::scan_var_uses(target, var_name);
-                let (u2, s2) = Self::scan_var_uses(value, var_name);
-                (u1 || u2, s1 || s2)
-            }
-            Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-                Self::scan_var_uses(value, var_name)
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                // When the cascade's true underlying receiver (see
-                // `normalize_cascade`) *is* var_name itself (e.g. `blk value: x;
-                // value: y`), the generic recursive scan would hit the plain
-                // `Identifier` arm and unconditionally report it unsafe. Mirror the
-                // `MessageSend` arm's `is_safe_value_send` check instead: if EVERY
-                // message sent to that receiver (including the one folded into
-                // `receiver` by the parser) is itself a safe
-                // `value`/`value:`/`value:value:`/`value:value:value:` send, the
-                // whole cascade is as safe as a single safe value send would be.
-                let (underlying_receiver, all_messages) =
-                    Self::normalize_cascade(receiver, messages);
-                let receiver_is_var = matches!(
-                    underlying_receiver,
-                    Expression::Identifier(id) if id.name == var_name
-                );
-                let all_messages_safe_value_sends = receiver_is_var
-                    && !all_messages.is_empty()
-                    && all_messages
-                        .iter()
-                        .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
-                let (mut unsafe_, mut safe) = if all_messages_safe_value_sends {
-                    (false, true)
-                } else {
-                    Self::scan_var_uses(underlying_receiver, var_name)
-                };
-                for (_, args) in &all_messages {
-                    for arg in *args {
-                        let (u, s) = Self::scan_var_uses(arg, var_name);
-                        unsafe_ |= u;
-                        safe |= s;
-                    }
-                }
-                (unsafe_, safe)
-            }
-            Expression::Parenthesized { expression, .. } => {
-                Self::scan_var_uses(expression, var_name)
-            }
-            Expression::Match { value, arms, .. } => {
-                let (mut unsafe_, mut safe) = Self::scan_var_uses(value, var_name);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        let (u, s) = Self::scan_var_uses(guard, var_name);
-                        unsafe_ |= u;
-                        safe |= s;
-                    }
-                    let (u, s) = Self::scan_var_uses(&arm.body, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::MapLiteral { pairs, .. } => pairs
-                .iter()
-                .map(|pair| {
-                    let (u1, s1) = Self::scan_var_uses(&pair.key, var_name);
-                    let (u2, s2) = Self::scan_var_uses(&pair.value, var_name);
-                    (u1 || u2, s1 || s2)
-                })
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-            Expression::ListLiteral { elements, tail, .. } => {
-                let (mut unsafe_, mut safe) = elements
-                    .iter()
-                    .map(|e| Self::scan_var_uses(e, var_name))
-                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-                if let Some(t) = tail {
-                    let (u, s) = Self::scan_var_uses(t, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                (unsafe_, safe)
-            }
-            Expression::ArrayLiteral { elements, .. } => elements
-                .iter()
-                .map(|e| Self::scan_var_uses(e, var_name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-            Expression::StringInterpolation { segments, .. } => segments
-                .iter()
-                .map(|seg| match seg {
-                    beamtalk_core::ast::StringSegment::Interpolation(e) => {
-                        Self::scan_var_uses(e, var_name)
-                    }
-                    beamtalk_core::ast::StringSegment::Literal(_) => (false, false),
-                })
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-        }
+        beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
     /// Classify a body expression for state-threading dispatch.
@@ -657,7 +460,7 @@ impl CoreErlangGenerator {
         }
 
         // self.field := value — sub-classify by RHS for control flow with mutations
-        if Self::is_field_assignment(expr) {
+        if self.is_field_assignment(expr) {
             if let Expression::Assignment { value, .. } = expr {
                 if self.control_flow_has_mutations(value) {
                     return BodyExprKind::FieldAssignmentControlFlow;
@@ -754,7 +557,8 @@ impl CoreErlangGenerator {
         stmts: &[threaded_ir::ThreadedStmt],
         span: Span,
     ) -> Document<'static> {
-        let errors = threaded_ir::verify_body_with_opaque_version_gaps(stmts);
+        let errors =
+            threaded_ir::verify_body_with_opaque_version_gaps(stmts, self.threaded_scope());
         self.report_threaded_ir_verify_errors(
             &errors,
             "gen_server method-body ThreadedIr must be well-formed",
@@ -777,9 +581,7 @@ impl CoreErlangGenerator {
     /// 2. `Bind { target: State(n+1), source: Gensym(CfState), op: Put {
     ///    field, CfVal } }` — the real field mutation, a genuine
     ///    [`threaded_ir::BindOp::Put`] whose `maps:put` rendering is
-    ///    `render_bind`'s (`shadow_write` is `false`: actor `State` writes
-    ///    never carry the ADR 0110 class-var obligation, so `class_tag` is
-    ///    an unused placeholder).
+    ///    `render_bind`'s.
     ///
     /// `prefix_doc` (the `CfTuple`/`CfVal` unpack) precedes the chain as an
     /// opaque `Statement`. Mint order is the caller's responsibility and
@@ -817,7 +619,6 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var.to_string()),
                 ")",
             ])),
-            shadow_write: false,
             span,
         });
         let _ = self.next_state_var();
@@ -828,11 +629,7 @@ impl CoreErlangGenerator {
             op: BindOp::Put {
                 field: field_name.to_string(),
                 value: ValueRef::Var(val_var.to_string()),
-                // Unused placeholder: only rendered when shadow_write is
-                // true, which only class-var Puts ever set (ADR 0110).
-                class_tag: ValueRef::Literal("'nil'"),
             },
-            shadow_write: false,
             span,
         });
     }
@@ -1133,9 +930,7 @@ impl CoreErlangGenerator {
                                         value: threaded_ir::ValueRef::Var(val_var.clone()),
                                         // Unused placeholder — see
                                         // `lower_cf_field_assignment_binds`.
-                                        class_tag: threaded_ir::ValueRef::Literal("'nil'"),
                                     },
-                                    shadow_write: false,
                                     span,
                                 });
                                 stmts.push(ThreadedStmt::Statement(
@@ -1217,9 +1012,7 @@ impl CoreErlangGenerator {
                                     op: threaded_ir::BindOp::Put {
                                         field: field.name.to_string(),
                                         value: threaded_ir::ValueRef::Var(val_var.clone()),
-                                        class_tag: threaded_ir::ValueRef::Literal("'nil'"),
                                     },
-                                    shadow_write: false,
                                     span,
                                 });
                             } else {
@@ -1253,7 +1046,9 @@ impl CoreErlangGenerator {
                             // Extract threaded locals from the control flow state
                             // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
                             let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            if let Some(threaded_vars) = self
+                                .threaded_locals_of(value)
+                                .and_then(ThreadedLocals::into_lowered)
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
@@ -1352,13 +1147,13 @@ impl CoreErlangGenerator {
                                 leaf::var(rhs_state),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         let field_state = self.current_state_var();
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) =
-                            self.get_control_flow_threaded_vars(&arguments[1])
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(&arguments[1])
+                            .and_then(ThreadedLocals::into_lowered)
                         {
                             for var in &threaded_vars {
                                 let tv_core = self
@@ -1435,13 +1230,15 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         let new_state = self.current_state_var();
                         // Extract threaded locals
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(value)
+                            .and_then(ThreadedLocals::into_lowered)
+                        {
                             for var in &threaded_vars {
                                 let tv_core = self
                                     .lookup_var(var)
@@ -1522,7 +1319,6 @@ impl CoreErlangGenerator {
                                         ")",
                                     ],
                                 )),
-                                shadow_write: false,
                                 span,
                             });
                         }
@@ -1674,7 +1470,7 @@ impl CoreErlangGenerator {
                             // (`pure_reply_doc`, not the assigned value) when
                             // this is the body's last statement — only the
                             // RHS lowering differs.
-                            if let Some(field_write) = Self::local_assign_field_write(value) {
+                            if let Some(field_write) = self.local_assign_field_write(value) {
                                 let field_val_var = self.lower_field_assignment_bind(
                                     field_write,
                                     threaded_ir::FrameId::ROOT,
@@ -1812,7 +1608,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         let new_state = self.current_state_var();
@@ -1932,7 +1727,6 @@ impl CoreErlangGenerator {
                                         ")",
                                     ],
                                 )),
-                                shadow_write: false,
                                 span,
                             });
                         }
@@ -1940,7 +1734,10 @@ impl CoreErlangGenerator {
 
                         // Extract threaded locals from the updated state
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+                        if let Some(threaded_vars) = self
+                            .threaded_locals_of(expr)
+                            .and_then(ThreadedLocals::into_lowered)
+                        {
                             for var in &threaded_vars {
                                 let core_var = self
                                     .lookup_var(var)
@@ -2177,17 +1974,6 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
-        // Populate the class-var-mutating selector set (transitive
-        // closure over same-class self-sends) — see
-        // `compute_class_var_mutating_selectors`'s doc comment. Depends on
-        // `class_var_names` above, so must run after it; independent of
-        // `class_method_selectors` above (recomputes its own local view).
-        *self.class_var_mutating_selectors_mut() =
-            crate::core_erlang::block_analysis::compute_class_var_mutating_selectors(
-                class,
-                self.class_var_names(),
-            );
-
         // Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
         // class-side constructor instead of falling through to the instance-side getter.
@@ -2204,8 +1990,9 @@ impl CoreErlangGenerator {
             }
 
             let selector_name = method.selector.name();
-            // +2 for ClassSelf and ClassVars parameters
-            let arity = method.selector.arity() + 2;
+            // +1 for the ClassSelf parameter (ADR 0130 §3: class variables
+            // are neither passed in nor returned)
+            let arity = method.selector.arity() + 1;
 
             let (mut frame, param_vars) = MethodFrame::enter(
                 self,
@@ -2250,56 +2037,10 @@ impl CoreErlangGenerator {
                     &method.selector,
                     &param_vars,
                 )
-            } else if method.body.is_empty() {
-                frame.set_current_nlr_token(None);
-                // Empty class method body returns self (ClassSelf)
-                docvec!["ClassSelf"]
             } else {
-                // Capture the result so `frame`'s `Drop` (pop scope, clear
-                // `in_class_method`, restore the selector) runs before the
-                // `?` below propagates an error, same as on the success path.
-                // BT-3666: in a non-sealed class a late-bound `self foo` may reach a
-                // subclass override that declares class variables this class does
-                // not, so bodies are lowered as if class vars may be present; the
-                // `{class_var_result, ..}` wrap still only happens when a rebind
-                // actually occurred (`class_var_mutated`).
-                let has_class_vars = !class.class_variables.is_empty() || !frame.is_class_sealed();
-                let body_stmts_result = frame.lower_class_method_body(method, has_class_vars);
-                frame.set_current_nlr_token(None);
-                let mut body_stmts = body_stmts_result?;
-                // Use class_var_mutated (not just whether class vars are declared)
-                // to preserve the {class_var_result, ...} contract. The normal path only wraps
-                // in class_var_result when class vars were actually mutated; the NLR path must
-                // match. class_var_mutated is set by lower_class_method_body when it sees a
-                // class var assignment.
-                let returns_class_var_result = frame.class_var_mutated();
-                // (ADR 0111 Addendum 4 task 2, closed out
-                // for class methods separately): the token was already minted
-                // above, before `lower_class_method_body` ran (production's real
-                // mint order). `lower_class_method_body` returns a
-                // real `Vec<ThreadedStmt>` (a real class-var `Bind` when the
-                // body's last statement mutates one — see
-                // `lower_class_method_last_class_var_bind`'s doc comment) rather
-                // than one opaque `Statement` wrapping an already-rendered
-                // `Document` — prepending a real `NlrCatch` here and verifying
-                // the whole sequence in one `verify_and_render_body_stmts` call
-                // is what lets `VerifyError::ShadowWriteMissing` see a real
-                // class-var `Bind` jointly with this real `NlrCatch` for the
-                // first time (ADR 0111 Addendum 6's closing note).
-                if let Some(ref token_var) = nlr_token_var {
-                    body_stmts.insert(
-                        0,
-                        threaded_ir::ThreadedStmt::NlrCatch {
-                            boundary: super::super::NlrBoundary::ClassMethod {
-                                has_class_vars: returns_class_var_result,
-                            },
-                            token: threaded_ir::TokenId::new(token_var.clone()),
-                            frame: threaded_ir::FrameId::ROOT,
-                            span: method.span,
-                        },
-                    );
-                }
-                frame.verify_and_render_body_stmts(&body_stmts, method.span)
+                // `frame`'s `Drop` (pop scope, clear `in_class_method`, restore
+                // the selector) runs on the `?` error path as on success.
+                frame.class_method_body_doc(method, nlr_token_var.as_deref())?
             };
 
             // Build function header with params (Document pieces, not format! —
@@ -2307,7 +2048,7 @@ impl CoreErlangGenerator {
             let doc = docvec![
                 "\n",
                 fname(safe_class_method_fn_name(&selector_name), arity),
-                " = fun (ClassSelf, ClassVars",
+                " = fun (ClassSelf",
                 Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
@@ -2330,15 +2071,15 @@ impl CoreErlangGenerator {
     /// literals — into a Core Erlang map whose values are class-method funs.
     ///
     /// Each `#selector => [:self ... | body]` entry becomes
-    /// `'selector' => fun (ClassSelf, ClassVars, A1..An) -> ... end`, matching the
+    /// `'selector' => fun (ClassSelf, A1..An) -> ... end`, matching the
     /// compiled `class_<sel>` calling convention so the runtime's fun-dispatch
     /// path installs and invokes it identically. Non-block values, or
     /// blocks whose shape does not match the selector, fall through to ordinary
     /// expression lowering (a computed fun the user supplied).
     ///
     /// `class_var_names` are the keys of the cascade's `classVars:` map; they make
-    /// `self.cvar` reads/writes lower as class-variable access (threaded through
-    /// `{class_var_result, …}`). `class_name` keys the runtime self/`super`
+    /// `self.cvar` reads/writes lower as class-variable access (in place, in
+    /// the class process — ADR 0130). `class_name` keys the runtime self/`super`
     /// dispatch the funs emit (they have no module export to call).
     pub(in crate::core_erlang) fn generate_class_methods_map_arg(
         &mut self,
@@ -2480,10 +2221,10 @@ impl CoreErlangGenerator {
 
     /// Emits an anonymous class-method fun from a builder block literal.
     ///
-    /// `fun (ClassSelf, ClassVars, P1..Pn) -> body` where the block's first
+    /// `fun (ClassSelf, P1..Pn) -> body` where the block's first
     /// parameter (the receiver) binds to `ClassSelf`, the remaining parameters to
     /// `P1..Pn`, and the body is lowered with the class-method machinery
-    /// (`{class_var_result, …}` wrapping; self/`super` routed to runtime dispatch
+    /// (self/`super` routed to runtime dispatch
     /// because there is no `class_<sel>` export). Assumes the caller has already
     /// entered the builder class-method context.
     fn generate_class_method_fun_from_block(
@@ -2496,20 +2237,17 @@ impl CoreErlangGenerator {
         // Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
         self.reset_state_version();
-        self.set_class_var_version(0);
-        self.set_class_var_mutated(false);
-        // BT-3675: the fun is a separate method body; the enclosing method's
-        // open class-variable scopes are not its scopes.
-        let saved_scopes = self.take_class_var_scopes();
-        // ADR 0110: the fun body executes at runtime as a class
-        // method's own top frame, even when the builder cascade lexically sits
-        // inside a block (`block_depth > 0` at the cascade's position). Reset
-        // `block_depth` so `generate_field_assignment`'s shadow-write gate
-        // (`block_depth == 0`) uniformly means "the method's own top frame"
-        // across compiled methods and ClassBuilder funs alike; restored on
-        // every exit path below.
+        // The fun body executes at runtime as a class method's own top frame,
+        // even when the builder cascade lexically sits inside a block
+        // (`block_depth > 0` at the cascade's position). Reset `block_depth`
+        // so the body is generated as a top frame, as a compiled class
+        // method's is; restored on every exit path below.
         let saved_block_depth = self.block_depth;
         self.block_depth = 0;
+        // Likewise the fun is a method's own top frame (home by construction),
+        // not a block literal: it takes no enclosing block's class-variable
+        // capture (ADR 0130 §5).
+        let saved_class_var_capture = self.class_var_capture.take();
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -2549,59 +2287,65 @@ impl CoreErlangGenerator {
             None
         };
 
-        // BT-3666: a ClassBuilder class is never sealed, so its self-sends are
-        // late-bound and an override may write class vars; always lower the
-        // body as if class vars may be present. (Not `is_class_sealed()`: that
-        // reads the flag of the *enclosing* class, which the builder cascade
-        // does not reset.)
-        let has_class_vars = true;
-        let body_doc: Document<'static> = if method.body.is_empty() {
-            self.set_current_nlr_token(None);
-            docvec!["ClassSelf"]
-        } else {
-            let mut body_stmts = match self.lower_class_method_body(&method, has_class_vars) {
-                Ok(stmts) => stmts,
+        let body_doc: Document<'static> =
+            match self.class_method_body_doc(&method, nlr_token_var.as_deref()) {
+                Ok(doc) => doc,
                 Err(e) => {
-                    self.set_current_nlr_token(None);
                     self.block_depth = saved_block_depth;
-                    self.restore_class_var_scopes(saved_scopes);
+                    self.class_var_capture = saved_class_var_capture;
                     self.pop_scope();
                     return Err(e);
                 }
             };
-            self.set_current_nlr_token(None);
-            let returns_class_var_result = self.class_var_mutated();
-            // Same real-`NlrCatch`-prepend pattern as
-            // `generate_class_method_functions` — see that call site's
-            // comment for why this replaces the old
-            // `wrap_class_method_body_with_nlr_catch` Document-wrap.
-            if let Some(ref token_var) = nlr_token_var {
-                body_stmts.insert(
-                    0,
-                    threaded_ir::ThreadedStmt::NlrCatch {
-                        boundary: super::super::NlrBoundary::ClassMethod {
-                            has_class_vars: returns_class_var_result,
-                        },
-                        token: threaded_ir::TokenId::new(token_var.clone()),
-                        frame: threaded_ir::FrameId::ROOT,
-                        span: method.span,
-                    },
-                );
-            }
-            self.verify_and_render_body_stmts(&body_stmts, method.span)
-        };
 
         let doc = docvec![
-            "fun (ClassSelf, ClassVars",
+            "fun (ClassSelf",
             Self::class_method_params_suffix_doc(&param_vars),
             ") ->",
             nest(INDENT, docvec![line(), body_doc]),
         ];
 
         self.block_depth = saved_block_depth;
-        self.restore_class_var_scopes(saved_scopes);
+        self.class_var_capture = saved_class_var_capture;
         self.pop_scope();
         Ok(doc)
+    }
+
+    /// The body of a class-side method, shared by compiled class methods, `ClassBuilder`
+    /// funs and class-side extension funs (ADR 0130 §3): the bare result, with a
+    /// real `NlrCatch` prepended when `nlr_token_var` is set (the token was minted
+    /// and installed by the caller before this runs, production's real mint
+    /// order) and the whole sequence verified and rendered once. Class variables
+    /// are read and written in place, so nothing is wrapped or returned beside
+    /// the result. An empty body returns `ClassSelf`. Clears the current NLR
+    /// token on every path.
+    pub(in crate::core_erlang) fn class_method_body_doc(
+        &mut self,
+        method: &MethodDefinition,
+        nlr_token_var: Option<&str>,
+    ) -> Result<Document<'static>> {
+        if method.body.is_empty() {
+            self.set_current_nlr_token(None);
+            return Ok(docvec!["ClassSelf"]);
+        }
+        // BT-3719: the class key is bound once around the whole body.
+        self.with_class_var_key_binding(|this| {
+            let body_stmts_result = this.lower_class_method_body(method);
+            this.set_current_nlr_token(None);
+            let mut body_stmts = body_stmts_result?;
+            if let Some(token_var) = nlr_token_var {
+                body_stmts.insert(
+                    0,
+                    threaded_ir::ThreadedStmt::NlrCatch {
+                        boundary: super::super::NlrBoundary::ClassMethod,
+                        token: threaded_ir::TokenId::new(token_var.to_string()),
+                        frame: threaded_ir::FrameId::ROOT,
+                        span: method.span,
+                    },
+                );
+            }
+            Ok(this.verify_and_render_body_stmts(&body_stmts, method.span))
+        })
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
@@ -2622,44 +2366,15 @@ impl CoreErlangGenerator {
     /// the class-method body pipeline the Actor-pipeline migration explicitly
     /// left as a hand-written `Document` builder).
     ///
-    /// Unlike instance methods, class methods have no `State` threading —
-    /// the only version-mutating construct a class method's own body can
-    /// directly produce is a class-var write (`self.classVar := value`, ADR
-    /// 0110's `ClassVars` counter). Every other body statement — local-var
-    /// bindings, destructuring, `^`-returns, class-method self-sends (whose
-    /// own class-var rebind, if any, is produced by the shared
-    /// `emit_class_var_result_unwrap` helper and stays opaque here — the
-    /// same "mutation hidden inside a shared multi-module helper" treatment
-    /// given to `generate_self_dispatch_open` et al. in the Actor
-    /// pipeline) — is an opaque [`threaded_ir::ThreadedStmt::Statement`]
-    /// built by the SAME `generate_class_method_*` codegen calls production
-    /// used before this migration (byte-identity: only the container
-    /// changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
-    ///
-    /// The ONE case promoted to a real [`threaded_ir::ThreadedStmt::Bind`]
-    /// is a class method's own direct `self.classVar := value` when it is
-    /// the body's *last* statement (implicit return) — mirroring exactly
-    /// how the Actor pipeline only promotes
-    /// `BodyExprKind::FieldAssignment` to a real `Bind` in its `is_last`
-    /// arm (`lower_body_exprs_with_reply`), leaving every other position's
-    /// field mutation inside a shared helper's opaque `Statement`. This is
-    /// the ADR 0110 joint-visibility case this issue exists to close: once
-    /// the caller (`generate_class_method_functions`/
-    /// `generate_class_method_fun_from_block`) prepends a real `NlrCatch`,
-    /// this `Bind` and that `NlrCatch` are visible to the SAME `verify()`
-    /// call for the first time — see `lower_class_method_last_class_var_bind`'s
-    /// own doc comment for why the pre-existing isolated
-    /// `construct_and_verify_class_var_bind` check stays alongside the new
-    /// joint one rather than being replaced by it.
-    ///
-    /// When a class-var write happened anywhere in the body
-    /// (`class_var_mutated()`), the caller wraps the final result in
-    /// `{class_var_result, Result, ClassVarsN}` — unchanged, decided after
-    /// this function returns, exactly as before.
+    /// Class methods have no state threading at all: class variables are
+    /// read and written in place in the class process (ADR 0130 §3), so no
+    /// body statement produces a version `Bind`. Every body statement —
+    /// local-var bindings, destructuring, `^`-returns, class-method
+    /// self-sends — is an opaque [`threaded_ir::ThreadedStmt::Statement`]
+    /// built by the `generate_class_method_*` codegen calls below.
     fn lower_class_method_body(
         &mut self,
         method: &MethodDefinition,
-        has_class_vars: bool,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
         use threaded_ir::ThreadedStmt;
 
@@ -2673,35 +2388,14 @@ impl CoreErlangGenerator {
             let span = expr.span();
 
             if let Expression::Return { value, .. } = expr {
-                let doc = self.generate_class_method_return(value, has_class_vars)?;
+                let doc = self.generate_class_method_return(value)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
                 return Ok(stmts);
             }
 
-            if is_last && has_class_vars && self.is_class_var_assignment(expr) {
-                self.lower_class_method_last_class_var_bind(&mut stmts, expr, span)?;
-            } else if is_last && has_class_vars && self.is_self_clear_field_class_var(expr) {
-                self.lower_class_method_last_class_var_clear(&mut stmts, expr, span)?;
-            } else if is_last {
-                let doc = self.generate_class_method_last_expr(expr, has_class_vars)?;
+            if is_last {
+                let doc = self.generate_class_method_last_expr(expr)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
-            } else if self.is_class_var_assignment(expr)
-                || self.is_self_clear_field_class_var(expr)
-                || self.is_class_method_self_send(expr)
-            {
-                // ADR 0118 phase 5a: splice the real `ClassVars`
-                // prelude instead of wrapping one opaque `Statement` around
-                // an already-rendered open-Document (`generate_class_method_non_last_expr`'s
-                // old branch for this same condition) — every non-last
-                // class-var mutation is now a genuine, verified `Bind` in
-                // this body's own IR, closing the ADR 0111 Addendum 6 gap
-                // `verify_body_with_opaque_version_gaps`'s `ClassVars`
-                // backfill used to paper over for class methods. The
-                // statement's own value is discarded (matching the old
-                // behaviour: nothing here ever referenced it), so only the
-                // prelude is spliced.
-                let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-                stmts.extend(tv.prelude);
             } else {
                 let doc = self.generate_class_method_non_last_expr(expr)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
@@ -2710,248 +2404,40 @@ impl CoreErlangGenerator {
         Ok(stmts)
     }
 
-    /// Constructs the real `ThreadedStmt::Bind` for a class
-    /// method's own `self.classVar := value` when it is the body's last
-    /// statement — the shape `lower_class_method_body` promotes out of the
-    /// generic `generate_class_method_last_expr_with_class_vars` path.
-    /// Delegates the actual `Bind` construction to the shared
-    /// [`Self::lower_class_var_field_assignment_bind`] (`expressions.rs`;
-    /// same struct, `impl` block in a different file — the identical
-    /// sequence `expressions.rs::generate_class_var_field_assignment`
-    /// builds for every OTHER position, not hand-rolled a second time here,
-    /// CLAUDE.md's no-duplicate-implementations rule), but — unlike that
-    /// call site, which still renders its `Bind` immediately and keeps it
-    /// inside an opaque `Statement` — pushes the returned `Bind` into
-    /// `stmts` as a real IR node, so the method's real `NlrCatch`
-    /// (prepended by the caller after this function returns) and this
-    /// `Bind` are both visible to the single `verify_and_render_body_stmts`
-    /// call over the whole body, closing the ADR 0110 joint-visibility gap
-    /// ADR 0111 Addendum 6 left open for class methods.
-    ///
-    /// The isolated, synthetic-marker `ShadowWriteMissing` check the shared
-    /// helper runs internally is deliberately still reported (not dropped
-    /// in favor of the new joint check): it is the ONLY check that still
-    /// fires for a method with no literal `^` at all (`needs_nlr: false`,
-    /// so no real `NlrCatch` in the body at all) — the exact ADR 0110
-    /// `CollectionDriver countedRun:over:` repro shape (the mutation must
-    /// still be shadow-written even though this specific method never
-    /// mints a local NLR catch, because the relay can happen one layer out
-    /// via a caller-supplied block) — so dropping it would regress
-    /// coverage the joint check cannot replace. The two checks are
-    /// complementary, not redundant: the isolated one always assumes the
-    /// worst case; the joint one is precise when a real `NlrCatch` is
-    /// actually present.
-    fn lower_class_method_last_class_var_bind(
-        &mut self,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-        expr: &Expression,
-        span: Span,
-    ) -> Result<()> {
-        let (field_name, value) = match expr {
-            Expression::Assignment { target, value, .. } => match target.as_ref() {
-                Expression::FieldAccess { field, .. } => (field.name.to_string(), value.as_ref()),
-                _ => unreachable!(
-                    "is_class_var_assignment guarantees an Assignment with a FieldAccess target"
-                ),
-            },
-            _ => unreachable!("is_class_var_assignment guarantees an Assignment"),
-        };
-
-        let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
-            &field_name,
-            value,
-            threaded_ir::FrameId::ROOT,
-        )?;
-
-        let final_cv = self.current_class_var();
-        stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));
-        stmts.push(bind);
-        stmts.push(threaded_ir::ThreadedStmt::Statement(
-            docvec![
-                "{'class_var_result', ",
-                leaf::var(val_var),
-                ", ",
-                leaf::var(final_cv),
-                "}",
-            ],
-            span,
-        ));
-        Ok(())
-    }
-
-    /// Class-side `self clearField: #classVar` counterpart to
-    /// [`Self::lower_class_method_last_class_var_bind`] immediately above —
-    /// same joint-visibility promotion (a real top-level `Bind`, not an
-    /// opaque `Statement`), via the parallel shared helper
-    /// [`Self::lower_class_var_field_clear_bind`] (`expressions.rs`) rather
-    /// than hand-rolling the `BindOp::Remove` sequence a second time
-    /// (CLAUDE.md's no-duplicate-implementations rule).
-    fn lower_class_method_last_class_var_clear(
-        &mut self,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-        expr: &Expression,
-        span: Span,
-    ) -> Result<()> {
-        let field_name = crate::core_erlang::expr_shape::self_clear_field_class_var_name(expr)
-            .expect("is_self_clear_field_class_var guarantees a literal Symbol argument")
-            .to_string();
-
-        let (preamble_doc, bind, val_var) =
-            self.lower_class_var_field_clear_bind(&field_name, span, threaded_ir::FrameId::ROOT)?;
-
-        let final_cv = self.current_class_var();
-        stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));
-        stmts.push(bind);
-        stmts.push(threaded_ir::ThreadedStmt::Statement(
-            docvec![
-                "{'class_var_result', ",
-                leaf::var(val_var),
-                ", ",
-                leaf::var(final_cv),
-                "}",
-            ],
-            span,
-        ));
-        Ok(())
-    }
-
     /// Generates code for an explicit `^` return in a class method.
-    fn generate_class_method_return(
-        &mut self,
-        value: &Expression,
-        has_class_vars: bool,
-    ) -> Result<Document<'static>> {
+    fn generate_class_method_return(&mut self, value: &Expression) -> Result<Document<'static>> {
         // An explicit `^` return of a value-type threading construct
         // (counted/while loop, foldl list-op, or read+write conditional) must
         // unwrap the construct's logical value rather than leak the raw
         // `{value, StateAcc}` tuple (or crash dispatching a read+write
         // conditional's stateful block at the wrong arity). This mirrors the
-        // implicit last-expression path (`generate_class_method_last_expr`);
-        // the shared helper applies the `{class_var_result, …}` wrapping based on
-        // `class_var_mutated()`, identical to the wrapping below — so it is
-        // correct for both the class-vars and no-class-vars cases.
+        // implicit last-expression path (`generate_class_method_last_expr`).
         if let Some(doc) = self.try_generate_class_method_threaded_last(
             value,
             super::super::threaded_expr::ThreadingPosition::Return,
         )? {
             return Ok(doc);
         }
-        // ADR 0118 phase 5b: mirrors
-        // `generate_class_method_last_expr_with_class_vars` — when `value`
-        // is itself a recognized producer (a class-var assignment, or a
-        // *locally declared* class-method self-send per
-        // `is_class_method_self_send`'s `class_method_selectors()` check),
-        // `threaded_expression` gives it a real prelude whose rebound
-        // `ClassVarsN` stays lexically visible here, so `current_class_var()`
-        // below is safe to read directly. Otherwise `value` may still
-        // dispatch a class-var-mutating self-send that the compile below
-        // reaches opaquely and closes (e.g. inherited dispatch,
-        // deliberately excluded by that same check) — closing loses the
-        // mutated name's LEXICAL visibility, but not the mutation itself,
-        // so `refresh_class_var_after_opaque_scope` recovers the live value
-        // via the per-scope class-variable commit (BT-3675) instead of relying on lexical scope.
-        if has_class_vars {
-            if self.is_class_var_assignment(value)
-                || self.is_self_clear_field_class_var(value)
-                || self.is_class_method_self_send(value)
-            {
-                let result_var = self.fresh_temp_var("Ret");
-                let frame = self.current_frame();
-                let tv = self.threaded_expression(value, frame)?;
-                let preamble = self.threaded_prelude_doc(&tv.prelude);
-                let value_doc = self.threaded_value_doc(&tv.value);
-                if self.class_var_mutated() {
-                    let final_cv = self.current_class_var();
-                    Ok(docvec![
-                        preamble,
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = ",
-                        value_doc,
-                        " in {'class_var_result', ",
-                        leaf::var(result_var),
-                        ", ",
-                        leaf::var(final_cv),
-                        "}",
-                    ])
-                } else {
-                    Ok(docvec![
-                        preamble,
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = ",
-                        value_doc,
-                        " in ",
-                        leaf::var(result_var),
-                    ])
-                }
-            } else {
-                let result_var = self.fresh_temp_var("Ret");
-                let cv_version_before = self.class_var_scope_mark();
-                let expr_doc = self.expression_doc(value)?;
-                let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-                let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
-                if self.class_var_mutated() {
-                    let final_cv = self.current_class_var();
-                    Ok(docvec![
-                        scope_prefix,
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = ",
-                        expr_doc,
-                        " in ",
-                        refresh.unwrap_or(Document::Nil),
-                        "{'class_var_result', ",
-                        leaf::var(result_var),
-                        ", ",
-                        leaf::var(final_cv),
-                        "}",
-                    ])
-                } else {
-                    Ok(docvec![
-                        scope_prefix,
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = ",
-                        expr_doc,
-                        " in ",
-                        leaf::var(result_var),
-                    ])
-                }
-            }
-        } else {
-            // ADR 0118 phase 5b: same treatment for the
-            // no-class-vars path — no `class_var_mutated()`/`current_class_var()`
-            // read follows, so the prelude and value simply concatenate.
-            let frame = self.current_frame();
-            self.threaded_expression_doc(value, frame)
-        }
+        // ADR 0118 phase 5b: the prelude and value simply concatenate.
+        let frame = self.current_frame();
+        self.threaded_expression_doc(value, frame)
     }
 
     /// Generates code for the last expression in a class method body.
-    fn generate_class_method_last_expr(
-        &mut self,
-        expr: &Expression,
-        has_class_vars: bool,
-    ) -> Result<Document<'static>> {
+    fn generate_class_method_last_expr(&mut self, expr: &Expression) -> Result<Document<'static>> {
         // A last-position threading construct (counted/while loop or foldl list-op
         // yielding a `{value, StateAcc}` tuple) or a read+write conditional must unwrap the
         // construct's logical value rather than leak the raw tuple (or crash on the 0-arg
-        // stateful-block dispatch). Handled here because the `{class_var_result, ...}` wrapping
-        // is identical whether or not the class declares class vars — threading constructs
-        // mutate *locals*, not class vars, so the wrapping is driven solely by whether an
-        // earlier statement mutated a class var (`class_var_mutated()`).
+        // stateful-block dispatch).
         if let Some(doc) = self.try_generate_class_method_threaded_last(
             expr,
             super::super::threaded_expr::ThreadingPosition::Last,
         )? {
             return Ok(doc);
         }
-        if has_class_vars {
-            self.generate_class_method_last_expr_with_class_vars(expr)
-        } else {
-            self.generate_class_method_last_expr_no_class_vars(expr)
-        }
+        // ADR 0118 phase 5b: the prelude and value simply concatenate.
+        let frame = self.current_frame();
+        self.threaded_expression_doc(expr, frame)
     }
 
     /// Handles a class method's last expression when it is a value-type threading
@@ -2961,8 +2447,7 @@ impl CoreErlangGenerator {
     /// last-expression paths.
     ///
     /// Both shapes produce a logical value bound to a fresh result var (via the shared
-    /// value-type primitives), which is then wrapped in `{class_var_result, Result, ClassVarsN}`
-    /// when an earlier statement mutated a class var, or returned bare otherwise.
+    /// value-type primitives), which is returned bare.
     fn try_generate_class_method_threaded_last(
         &mut self,
         expr: &Expression,
@@ -2986,134 +2471,8 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Last expression with class vars: may need `{class_var_result, ...}` wrapping.
-    fn generate_class_method_last_expr_with_class_vars(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<Document<'static>> {
-        let frame = self.current_frame();
-        if self.is_class_var_assignment(expr)
-            || self.is_self_clear_field_class_var(expr)
-            || self.is_class_method_self_send(expr)
-        {
-            // ADR 0118 phase 5b: `expr` is itself a producer at
-            // its own top level, so `threaded_expression` always gives it a
-            // real value (never the do:-in-direct-params-loop `'nil'` case
-            // — a class-var assignment/self-send never produces that).
-            // `final_cv` is read AFTER threading so it reflects the rebind.
-            let tv = self.threaded_expression(expr, frame)?;
-            let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
-            let value_doc = self.threaded_value_doc(&tv.value);
-            let final_cv = self.current_class_var();
-            Ok(docvec![
-                prelude_doc,
-                "{'class_var_result', ",
-                value_doc,
-                ", ",
-                leaf::var(final_cv),
-                "}",
-            ])
-        } else {
-            // `expr` is not ITSELF a recognized producer at this level, but
-            // may still dispatch one that the compile below reaches
-            // opaquely and closes (e.g. a same-class self-send NOT declared
-            // locally — inherited dispatch — which
-            // `is_class_method_self_send`'s `class_method_selectors()`
-            // check deliberately excludes, per its own doc comment, since
-            // `try_handle_class_method_self_send`'s real reach is any
-            // `self`-receiver send regardless of selector). Closing loses
-            // the mutated `ClassVarsN` name's LEXICAL visibility, but not
-            // the mutation itself — `refresh_class_var_after_opaque_scope`
-            // recovers the live value via the per-scope class-variable commit (BT-3675) rather
-            // than relying on lexical scope, so this is robust to whatever
-            // depth/shape the opaque compile below reaches.
-            let result_var = self.fresh_temp_var("Ret");
-            let cv_version_before = self.class_var_scope_mark();
-            let expr_doc = self.expression_doc(expr)?;
-            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-            let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
-            if self.class_var_mutated() {
-                let final_cv = self.current_class_var();
-                Ok(docvec![
-                    scope_prefix,
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in ",
-                    refresh.unwrap_or(Document::Nil),
-                    "{'class_var_result', ",
-                    leaf::var(result_var),
-                    ", ",
-                    leaf::var(final_cv),
-                    "}",
-                ])
-            } else {
-                Ok(docvec![
-                    scope_prefix,
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in ",
-                    leaf::var(result_var),
-                ])
-            }
-        }
-    }
-
-    /// Last expression without class vars: simpler wrapping.
-    fn generate_class_method_last_expr_no_class_vars(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<Document<'static>> {
-        // ADR 0118 phase 5b: no `class_var_result` wrapping and no
-        // later read of `current_class_var()` follows either branch below,
-        // so both the bare self-send case and the general case
-        // collapse to the same plain threaded compile.
-        let frame = self.current_frame();
-        self.threaded_expression_doc(expr, frame)
-    }
-
     /// Generates code for a non-last expression in a class method body.
-    ///
-    /// ADR 0118 phase 5a: a class-var assignment or class-method
-    /// self-send is intercepted one level up, in `lower_class_method_body`,
-    /// which splices its real `ClassVars` prelude directly instead of
-    /// calling this function — so this function's own callers never reach
-    /// it with either of those shapes any more.
     fn generate_class_method_non_last_expr(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<Document<'static>> {
-        self.generate_class_method_non_last_expr_inner(expr)
-    }
-
-    /// BT-3675: runs `generate` — one of the value-type threading constructs of
-    /// [`Self::generate_class_method_non_last_expr_inner`] (a loop, list-op,
-    /// conditional or `on:do:`/`ensure:` over captured locals) — as a scope
-    /// with its own class-variable token. The construct compiles its nested
-    /// scopes without carrying a `ClassVars` rebind out, so a class-side
-    /// self-send in one of them (whose callee a subclass may override with a
-    /// class-variable write) commits its returned class variables under the
-    /// token once the callee returned normally; the refresh right after the
-    /// statement carries them to the next statement (and the method's final
-    /// `class_var_result`).
-    fn with_class_var_scope(
-        &mut self,
-        generate: impl FnOnce(&mut Self) -> Result<Document<'static>>,
-    ) -> Result<Document<'static>> {
-        let mark = self.class_var_scope_mark();
-        let doc = generate(self)?;
-        let scope_prefix = self.class_var_scope_prefix(mark);
-        Ok(match self.refresh_class_var_after_opaque_scope(mark) {
-            Some(refresh) => docvec![scope_prefix, doc, refresh],
-            None => doc,
-        })
-    }
-
-    /// See [`Self::generate_class_method_non_last_expr`].
-    fn generate_class_method_non_last_expr_inner(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
@@ -3124,15 +2483,15 @@ impl CoreErlangGenerator {
             Ok(Document::Vec(binding_docs))
         } else if self.is_do_with_vt_local_threading(expr) {
             // Non-last `do:` loop that mutates captured outer locals.
-            self.with_class_var_scope(|g| g.generate_value_type_do_open(expr))
+            self.generate_value_type_do_open(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
             // Non-last counted loop (to:do:/to:by:do:/timesRepeat:) that
             // mutates captured outer locals. Extracts the threaded locals from the
             // `{'nil', StateAcc}` tuple so subsequent statements see the updates.
-            self.with_class_var_scope(|g| g.generate_vt_counted_loop_open(expr))
+            self.generate_vt_counted_loop_open(expr)
         } else if self.is_while_with_vt_local_threading(expr) {
             // Non-last whileTrue:/whileFalse: that mutates captured outer locals.
-            self.with_class_var_scope(|g| g.generate_vt_while_open(expr))
+            self.generate_vt_while_open(expr)
         } else if self.is_foldl_list_op_with_vt_local_threading(expr) {
             // Non-last collect:/select:/reject:/inject:into: that mutates captured
             // outer locals. Extracts the threaded locals from the `{value, StateAcc}` tuple
@@ -3140,39 +2499,19 @@ impl CoreErlangGenerator {
             self.generate_vt_foldl_list_op_open(expr)
         } else if self.is_conditional_with_vt_local_threading(expr) {
             // Non-last conditional that mutates captured outer locals.
-            self.with_class_var_scope(|g| g.generate_vt_conditional_open(expr))
+            self.generate_vt_conditional_open(expr)
         } else if self.is_exception_construct_with_vt_local_threading(expr) {
             // Non-last on:do:/ensure: that mutates captured outer
             // locals. Extracts the threaded locals from the returned
             // `{Result, StateAcc}` tuple, same idiom as the loop/conditional
             // arms above.
-            self.with_class_var_scope(|g| g.generate_vt_exception_construct_open(expr))
+            self.generate_vt_exception_construct_open(expr)
         } else {
-            // `expr` may dispatch a class-method self-send (locally
-            // declared or inherited) that rebinds `ClassVarsN`
-            // opaquely, closed by the time this call returns —
-            // `refresh_class_var_after_opaque_scope` recovers the live
-            // value via the per-scope class-variable commit (BT-3675) (rather than relying on
-            // lexical scope) so the NEXT statement in this same body — which
-            // reads `current_class_var()` when it builds its own call —
-            // sees it regardless of nesting depth. Bind the result to the
-            // seq temp so subsequent code can sequence after it.
+            // Bind the result to the seq temp so subsequent code can
+            // sequence after it.
             let tmp_var = self.fresh_temp_var("seq");
-            let cv_version_before = self.class_var_scope_mark();
             let expr_doc = self.expression_doc(expr)?;
-            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-            let refresh = self
-                .refresh_class_var_after_opaque_scope(cv_version_before)
-                .unwrap_or(Document::Nil);
-            Ok(docvec![
-                scope_prefix,
-                "let ",
-                leaf::var(tmp_var),
-                " = ",
-                expr_doc,
-                " in ",
-                refresh,
-            ])
+            Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_doc, " in ",])
         }
     }
 
@@ -3190,48 +2529,19 @@ impl CoreErlangGenerator {
                 // target to the raw tuple. Shared with the value-type instance-method
                 // body sequencer via `emit_threaded_assign_rhs`.
                 let mut parts: Vec<Document<'static>> = Vec::new();
-                // BT-3675: the threaded RHS is its own class-variable scope.
-                let scope = self.class_var_scope_mark();
                 if self
                     .emit_threaded_assign_rhs(&id.name, value, &mut parts)?
                     .is_some()
                 {
-                    let scope_prefix = self.class_var_scope_prefix(scope);
-                    let refresh = self.refresh_class_var_after_opaque_scope(scope);
-                    parts.insert(0, scope_prefix);
-                    parts.extend(refresh);
                     return Ok(Document::Vec(parts));
                 }
-                let _ = self.close_class_var_scope(scope);
                 let var_name = &id.name;
                 let core_var = self
                     .lookup_var(var_name)
                     .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                // Captured before generating `value` — a
-                // class-method self-send inside it (locally declared or
-                // inherited — `is_class_method_self_send`'s
-                // `class_method_selectors()` check only recognizes the
-                // former) may rebind `ClassVarsN` opaquely, closed by the
-                // time this call returns; `refresh_class_var_after_opaque_scope`
-                // recovers the live value via the per-scope class-variable commit (BT-3675)
-                // rather than relying on lexical scope, so this is robust
-                // to whatever depth/shape the compile below reaches.
-                let cv_version_before = self.class_var_scope_mark();
                 let val_doc = self.expression_doc(value)?;
                 self.bind_var(var_name, &core_var);
-                let scope_prefix = self.class_var_scope_prefix(cv_version_before);
-                let refresh = self
-                    .refresh_class_var_after_opaque_scope(cv_version_before)
-                    .unwrap_or(Document::Nil);
-                return Ok(docvec![
-                    scope_prefix,
-                    "let ",
-                    leaf::var(core_var),
-                    " = ",
-                    val_doc,
-                    " in ",
-                    refresh,
-                ]);
+                return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);
             }
         }
         Ok(Document::Nil)
@@ -3328,7 +2638,9 @@ impl CoreErlangGenerator {
             // binds `arguments` directly to the block's own parameters, which
             // doesn't hold for valueWithArguments: (a single runtime list, not
             // per-parameter positional args). Not a motivating shape here.
-            if Self::is_safe_value_family_selector(selector) {
+            if beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
+                selector,
+            ) {
                 // Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
                 // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
@@ -3361,9 +2673,11 @@ impl CoreErlangGenerator {
         {
             let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
             let all_safe_value_sends = !all_messages.is_empty()
-                && all_messages
-                    .iter()
-                    .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+                && all_messages.iter().all(|(sel, _)| {
+                    beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
+                        sel,
+                    )
+                });
             if all_safe_value_sends {
                 if let Expression::Identifier(id) = underlying_receiver {
                     if self.tier2_block_params.contains(id.name.as_str())
@@ -3686,7 +3000,7 @@ impl CoreErlangGenerator {
         // "does this loop's own condition need threading" there — cannot
         // disagree.
         if matches!(sel_str.as_str(), "whileTrue:" | "whileFalse:")
-            && super::super::control_flow::condition_has_state_effects(receiver)
+            && super::super::control_flow::condition_has_state_effects(self, receiver)
         {
             return true;
         }
@@ -3704,7 +3018,7 @@ impl CoreErlangGenerator {
                 // this, `[nested-loop] ensure: [...]`/`on:do:` would be
                 // classified as pure here even though the nested loop's own
                 // cross-scope collector (this call site's sibling,
-                // `compute_threaded_locals_for_loop`) correctly detects the
+                // `loop_threaded_locals`) correctly detects the
                 // mutation — the same "two decision points disagree" shape as
                 // the do:/collect: self-classification gap this issue fixes.
                 if self.block_arg_needs_threading(block) {

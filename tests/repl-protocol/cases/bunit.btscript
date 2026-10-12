@@ -19,6 +19,7 @@
 // Load Counter actor first, then CounterTest (depends on Counter)
 // @load tests/repl-protocol/fixtures/counter.bt
 // @load tests/repl-protocol/fixtures/counter_test.bt
+// @load tests/repl-protocol/fixtures/inherited_counter_test.bt
 // @load tests/repl-protocol/fixtures/failing_test.bt
 // @load tests/repl-protocol/fixtures/empty_test.bt
 // @load tests/repl-protocol/fixtures/lifecycle_test.bt
@@ -69,6 +70,15 @@ LifecycleTest run: #testFirst
 
 CounterTest run: #nonExistentTest
 // => Method 'nonExistentTest' not found in CounterTest
+
+// === Inherited test methods (BT-3768) ===
+
+// InheritedCounterTest defines no test method; it runs CounterTest's two
+InheritedCounterTest runAll
+// => 2 tests, 2 passed (_)
+
+InheritedCounterTest run: #testIncrement
+// => 1 tests, 1 passed (_)
 
 // === Edge case: no test methods ===
 

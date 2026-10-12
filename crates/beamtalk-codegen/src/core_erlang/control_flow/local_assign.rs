@@ -11,6 +11,7 @@ use super::super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
@@ -79,7 +80,7 @@ impl CoreErlangGenerator {
         // `lower_local_var_assignment_bind` (via the caller,
         // `lower_letrec_local_var_assignment`), which has its own BT-3493
         // fix for exactly this shape.
-        if Self::local_assign_field_write(value).is_some() {
+        if self.local_assign_field_write(value).is_some() {
             return Ok(None);
         }
         let core_var = self
@@ -162,7 +163,7 @@ impl CoreErlangGenerator {
         // to the field write's own returned value, exactly as `:=`'s "the
         // whole assignment evaluates to the assigned value" semantics
         // require.
-        if let Some(field_write) = Self::local_assign_field_write(value) {
+        if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_letrec_field_assignment(field_write, frame, span, stmts)?;
             let new_var = self.fresh_temp_var(&canonical);
@@ -171,7 +172,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(field_val_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -189,7 +189,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(result_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -201,7 +200,6 @@ impl CoreErlangGenerator {
             target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
             source,
             op: BindOp::Direct(ValueRef::Doc(value_code)),
-            shadow_write: false,
             span,
         });
         Ok(())
@@ -215,7 +213,7 @@ impl CoreErlangGenerator {
     /// unwrap element 1 into `val_var`, thread element 2 into `new_state`
     /// via `maps:put`, then rebind any OTHER outer local `source_expr`'s own
     /// block mutated. The rebind is a no-op for a Tier 2 call —
-    /// `get_control_flow_threaded_vars` only matches the control-flow
+    /// `threaded_locals_of` only matches the control-flow
     /// selectors `control_flow_has_mutations` gates the other case on, never
     /// a bare `value`/`value:` call — so folding both callers through this
     /// one helper is structurally identical for the pre-existing Tier 2
@@ -268,7 +266,10 @@ impl CoreErlangGenerator {
             leaf::var(tuple_state_var),
             ") in ",
         ]];
-        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(source_expr) {
+        if let Some(threaded_vars) = self
+            .threaded_locals_of(source_expr)
+            .and_then(ThreadedLocals::into_lowered)
+        {
             docs.extend(self.rebind_threaded_vars_from_state(&threaded_vars, new_state));
         }
         Document::Vec(docs)

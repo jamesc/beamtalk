@@ -1244,6 +1244,10 @@ loader_integration_test_() ->
             {"protocol reload rollback merges ambient protocol sources", fun() ->
                 t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj)
             end},
+            {"protocol reload fan-out rolls back on a bare structured abi_mismatch (BT-3773)",
+                fun() ->
+                    t_protocol_reload_fanout_bare_structured_error(Proj)
+                end},
             {"reload_method_definition existing method span", fun() ->
                 t_reload_method_definition_existing(Proj)
             end},
@@ -1798,6 +1802,56 @@ t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
         %% map), leaving Multi stuck on its NEW `foo`.
         FooAfter = stored_method_source(MultiAtom, foo),
         ?assertEqual(FooBefore, FooAfter)
+    after
+        meck:unload(beamtalk_repl_loader)
+    end.
+
+%% BT-3773: `install_reload_result/2` now returns a bare `#beamtalk_error{}`
+%% (e.g. `abi_mismatch`) as the failure reason, where it used to return
+%% `{load_error, _}`. The protocol fan-out's rollback and its structured
+%% wrapper error must handle that shape: the reload fails with a
+%% `runtime_error` naming the abi_mismatch message, and the already-installed
+%% protocol module is rolled back to its previous source.
+t_protocol_reload_fanout_bare_structured_error(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    PName = "Bt3773FoP" ++ N,
+    UName = "Bt3773FoUser" ++ N,
+    UFile = UName ++ ".bt",
+    PPath = write_bt(
+        Proj,
+        PName ++ ".bt",
+        list_to_binary("Protocol define: " ++ PName ++ "\n  foo -> String => \"old\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(PPath, State0),
+    UPath = write_bt(
+        Proj,
+        UFile,
+        list_to_binary("Value subclass: " ++ UName ++ "\n  uses: " ++ PName ++ "\n")
+    ),
+    {ok, _, _State2} = beamtalk_repl_loader:handle_load(UPath, State1),
+    UAtom = list_to_atom(UName),
+    FooBefore = stored_method_source(UAtom, foo),
+    ?assert(binary:match(FooBefore, <<"old">>) =/= nomatch),
+    AbiError = beamtalk_error:with_hint(
+        beamtalk_error:new(abi_mismatch, UAtom), <<"Recompile with the current compiler.">>
+    ),
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        case filename:basename(LoadPath) of
+            UFile -> {error, AbiError};
+            _ -> meck:passthrough([Compiled, LoadPath])
+        end
+    end),
+    try
+        ok = file:write_file(
+            PPath, "Protocol define: " ++ PName ++ "\n  foo -> String => \"new\"\n"
+        ),
+        Result = beamtalk_repl_loader:reload_class_file(PPath),
+        ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
+        {error, #beamtalk_error{message = Msg}} = Result,
+        ?assert(binary:match(Msg, <<"abi_mismatch">>) =/= nomatch),
+        ?assertEqual(FooBefore, stored_method_source(UAtom, foo))
     after
         meck:unload(beamtalk_repl_loader)
     end.
