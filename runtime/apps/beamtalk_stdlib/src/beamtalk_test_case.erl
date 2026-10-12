@@ -28,6 +28,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
     run_single_structured/2,
     find_test_classes/0,
     test_class_selectors/1,
+    class_test_plan/1,
     spawn_test_execution/6,
     %% Exported for beamtalk_test_runner
     run_test_method/4,
@@ -215,67 +216,42 @@ execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
     end.
 
 -doc """
-Run all test methods (BIF fallback path).
+Run all test methods of a class, outside the class process (BIF fallback
+path). Tests are the class's own and inherited `test*` selectors, from
+`class_test_plan/1`.
 WARNING: May deadlock if called from within a class gen_server handle_call.
 Prefer execute_tests/5 which receives gen_server state directly and avoids
 any gen_server:call back to the class process.
 """.
 -spec run_all(atom()) -> binary().
 run_all(ClassName) ->
-    Module = resolve_module(ClassName),
-    TestMethods = discover_test_methods_from_module(Module),
-    case TestMethods of
-        [] ->
+    case run_class_tests(ClassName, all) of
+        no_tests ->
             iolist_to_binary(
                 io_lib:format(
                     "No test methods found in ~s", [ClassName]
                 )
             );
-        _ ->
-            StartTime = erlang:monotonic_time(millisecond),
-            Results = run_suite_lifecycle(
-                ClassName,
-                Module,
-                none,
-                TestMethods,
-                fun(SuiteFixture) ->
-                    [
-                        run_test_method(ClassName, Module, Method, none, SuiteFixture)
-                     || Method <- TestMethods
-                    ]
-                end
-            ),
-            EndTime = erlang:monotonic_time(millisecond),
-            Duration = (EndTime - StartTime) / 1000.0,
+        {Results, Duration} ->
             format_results(Results, Duration)
     end.
 
 -doc """
-Run a single test method (BIF fallback path).
+Run a single test method (BIF fallback path), with the class's own and
+inherited setUp/tearDown and setUpOnce/tearDownOnce.
 WARNING: May deadlock if called from within a class gen_server handle_call.
 """.
 -spec run_single(atom(), atom()) -> binary().
 run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
-    Module = resolve_module(ClassName),
-    StartTime = erlang:monotonic_time(millisecond),
-    Results = run_suite_lifecycle(
-        ClassName,
-        Module,
-        none,
-        [TestMethodName],
-        fun(SuiteFixture) ->
-            [run_test_method(ClassName, Module, TestMethodName, none, SuiteFixture)]
-        end
-    ),
-    EndTime = erlang:monotonic_time(millisecond),
-    Duration = (EndTime - StartTime) / 1000.0,
+    {Results, Duration} = run_class_tests(ClassName, TestMethodName),
     format_results(Results, Duration).
 
 -doc """
 Run all tests for a class and return structured results.
 
 Returns a map with per-test results suitable for JSON encoding.
-Uses the BIF fallback path (safe outside gen_server).
+Uses the BIF fallback path (safe outside gen_server); tests come from
+`class_test_plan/1`, so inherited ones are included.
 """.
 -spec run_all_structured(atom()) ->
     #{
@@ -296,35 +272,10 @@ Uses the BIF fallback path (safe outside gen_server).
         ]
     }.
 run_all_structured(ClassName) ->
-    Module = resolve_module(ClassName),
-    TestMethods = discover_test_methods_from_module(Module),
-    case TestMethods of
-        [] ->
-            #{
-                class => ClassName,
-                total => 0,
-                passed => 0,
-                failed => 0,
-                skipped => 0,
-                duration => 0.0,
-                tests => []
-            };
-        _ ->
-            StartTime = erlang:monotonic_time(millisecond),
-            Results = run_suite_lifecycle(
-                ClassName,
-                Module,
-                none,
-                TestMethods,
-                fun(SuiteFixture) ->
-                    [
-                        run_test_method(ClassName, Module, Method, none, SuiteFixture)
-                     || Method <- TestMethods
-                    ]
-                end
-            ),
-            EndTime = erlang:monotonic_time(millisecond),
-            Duration = (EndTime - StartTime) / 1000.0,
+    case run_class_tests(ClassName, all) of
+        no_tests ->
+            structure_results(ClassName, [], 0.0);
+        {Results, Duration} ->
             structure_results(ClassName, Results, Duration)
     end.
 
@@ -348,20 +299,69 @@ run_all_structured(ClassName) ->
         ]
     }.
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
-    Module = resolve_module(ClassName),
-    StartTime = erlang:monotonic_time(millisecond),
-    Results = run_suite_lifecycle(
-        ClassName,
-        Module,
-        none,
-        [TestMethodName],
-        fun(SuiteFixture) ->
-            [run_test_method(ClassName, Module, TestMethodName, none, SuiteFixture)]
-        end
-    ),
-    EndTime = erlang:monotonic_time(millisecond),
-    Duration = (EndTime - StartTime) / 1000.0,
+    {Results, Duration} = run_class_tests(ClassName, TestMethodName),
     structure_results(ClassName, Results, Duration).
+
+-doc """
+Shared body of the BIF-fallback entry points: run every test of the class
+(`all`) or one named method, with the suite and per-test lifecycle, and time
+it. Returns `no_tests` when `all` finds no test methods.
+""".
+-spec run_class_tests(atom(), all | atom()) ->
+    no_tests
+    | {[{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()}.
+run_class_tests(ClassName, Which) ->
+    {AllTests, FlatMethods, Module} = class_test_plan(ClassName),
+    TestMethods =
+        case Which of
+            all -> AllTests;
+            MethodName -> [MethodName]
+        end,
+    case TestMethods of
+        [] ->
+            no_tests;
+        _ ->
+            StartTime = erlang:monotonic_time(millisecond),
+            Results = run_suite_lifecycle(
+                ClassName,
+                Module,
+                FlatMethods,
+                TestMethods,
+                fun(SuiteFixture) ->
+                    [
+                        run_test_method(ClassName, Module, Method, FlatMethods, SuiteFixture)
+                     || Method <- TestMethods
+                    ]
+                end
+            ),
+            EndTime = erlang:monotonic_time(millisecond),
+            {Results, (EndTime - StartTime) / 1000.0}
+    end.
+
+-doc """
+The single answer to "which tests does this class have" outside the class
+process (BT-3786): `{TestMethods, FlatMethods, Module}`.
+
+- `FlatMethods` maps every selector from `test_class_selectors/1` (own and
+  inherited below `TestCase`) to `true`, for setUp/tearDown and
+  setUpOnce/tearDownOnce detection.
+- `TestMethods` is the sorted `test*` subset of those selectors.
+- `Module` is the module the class process was compiled with, read with the
+  deadlock-safe `beamtalk_object_class:module_name_safe/1`; for a class that
+  is not registered it falls back to `resolve_module/1`'s naming convention.
+
+Used by `run_all/1`, `run_single/2`, `run_all_structured/1`,
+`run_single_structured/2` and `beamtalk_test_runner`.
+""".
+-spec class_test_plan(atom()) -> {[atom()], map(), atom()}.
+class_test_plan(ClassName) ->
+    FlatMethods = maps:from_keys(test_class_selectors(ClassName), true),
+    Module =
+        case beamtalk_class_registry:whereis_class(ClassName) of
+            undefined -> resolve_module(ClassName);
+            ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
+        end,
+    {discover_test_methods(FlatMethods), FlatMethods, Module}.
 
 -doc """
 Find all loaded, concrete TestCase subclasses.
@@ -702,7 +702,8 @@ extract_error_kind(_) ->
 
 -doc """
 Discover test methods from flattened methods map (no gen_server call).
-FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
+FlatMethods is #{Selector => {DefiningClass, MethodInfo}}; only the keys are
+inspected, so any map keyed by selector (e.g. #{Selector => true}) works too.
 """.
 -spec discover_test_methods(map()) -> [atom()].
 discover_test_methods(FlatMethods) ->
@@ -715,33 +716,6 @@ discover_test_methods(FlatMethods) ->
         end,
         [],
         FlatMethods
-    ),
-    lists:sort(TestMethods).
-
--doc """
-Discover test methods from module exports (BIF fallback path).
-
-Uses `beamtalk_module_activation:safe_module_exports/1` rather than
-`Module:module_info(exports)`. `Module` here is a real Beamtalk-compiled
-`bt@`-prefixed test class, and Beamtalk's Core Erlang codegen compiles
-straight to Core Erlang via `compile:forms(..., [from_core | Opts])`
-(CLAUDE.md), which never runs the abstract-form `sys_pre_expand` compiler
-pass that auto-injects `module_info/0,1` — so a compiled test module never
-has `module_info/1`, and calling it here raised an uncaught `undef` for every
-real test class run through the BIF-fallback path (`run_all/1`,
-`run_single/2`, `run_all_structured/1`).
-""".
--spec discover_test_methods_from_module(atom()) -> [atom()].
-discover_test_methods_from_module(Module) ->
-    Exports = beamtalk_module_activation:safe_module_exports(Module),
-    TestMethods = lists:filtermap(
-        fun({FunName, _Arity}) ->
-            case atom_to_list(FunName) of
-                "test" ++ _ -> {true, FunName};
-                _ -> false
-            end
-        end,
-        Exports
     ),
     lists:sort(TestMethods).
 
@@ -786,12 +760,12 @@ resolve_module(ClassName) ->
 -doc """
 Run a single test method with setUp/tearDown lifecycle.
 
-FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
-When 'none', uses safe_module_exports/1 to check for setUp/tearDown.
+FlatMethods maps the class's own and inherited selectors (see
+`class_test_plan/1`); it is used to check for setUp/tearDown.
 Creates fresh instance, runs lifecycle, returns pass/fail.
 tearDown always runs, even if the test fails.
 """.
--spec run_test_method(atom(), atom(), atom(), map() | none) ->
+-spec run_test_method(atom(), atom(), atom(), map()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(ClassName, Module, MethodName, FlatMethods) ->
     run_test_method(ClassName, Module, MethodName, FlatMethods, nil).
@@ -802,7 +776,7 @@ Run a single test method with setUp/tearDown lifecycle and suite fixture.
 Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
 instance map after setUp, so test methods can access `self.suiteFixture`.
 """.
--spec run_test_method(atom(), atom(), atom(), map() | none, term()) ->
+-spec run_test_method(atom(), atom(), atom(), map(), term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
     %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
@@ -905,20 +879,10 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             {fail, MethodName, SetupMsg}
     end.
 
--doc """
-Check for setUp/tearDown methods, using FlatMethods map or module exports.
-
-The `none` clause reads exports via
-`beamtalk_module_activation:safe_module_exports/1`, not
-`Module:module_info(exports)` — see `discover_test_methods_from_module/1`
-for why the BIF-fallback path can never rely on `module_info/1`.
-""".
--spec check_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
+-doc "Check the FlatMethods map for setUp/tearDown methods.".
+-spec check_lifecycle_methods(atom(), map()) -> {boolean(), boolean()}.
 check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
-    {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)};
-check_lifecycle_methods(Module, none) ->
-    Exports = beamtalk_module_activation:safe_module_exports(Module),
-    {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
+    {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)}.
 
 -doc """
 Return true when setUp's result is a valid instance of the same class.
@@ -965,7 +929,7 @@ If setUpOnce fails, all test methods are failed with "setUpOnce failed: ..." mes
 -spec run_suite_lifecycle(
     atom(),
     atom(),
-    map() | none,
+    map(),
     [atom()],
     fun((term()) -> [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}])
 ) ->
@@ -1002,20 +966,10 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             end
     end.
 
--doc """
-Check for setUpOnce/tearDownOnce methods.
-
-The `none` clause reads exports via
-`beamtalk_module_activation:safe_module_exports/1`, not
-`Module:module_info(exports)` — see `discover_test_methods_from_module/1`
-for why the BIF-fallback path can never rely on `module_info/1`.
-""".
--spec check_suite_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
+-doc "Check the FlatMethods map for setUpOnce/tearDownOnce methods.".
+-spec check_suite_lifecycle_methods(atom(), map()) -> {boolean(), boolean()}.
 check_suite_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
-    {maps:is_key(setUpOnce, FlatMethods), maps:is_key(tearDownOnce, FlatMethods)};
-check_suite_lifecycle_methods(Module, none) ->
-    Exports = beamtalk_module_activation:safe_module_exports(Module),
-    {lists:keymember(setUpOnce, 1, Exports), lists:keymember(tearDownOnce, 1, Exports)}.
+    {maps:is_key(setUpOnce, FlatMethods), maps:is_key(tearDownOnce, FlatMethods)}.
 
 -doc "Run tearDownOnce, swallowing errors to avoid masking test results.".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.

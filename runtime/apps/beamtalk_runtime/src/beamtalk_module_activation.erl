@@ -769,10 +769,8 @@ neither path resolves the module (not loaded and not on the code path,
 or the Exports chunk can't be read), so callers get an honest "no exports
 found" rather than a crash.
 
-Shared by `beamtalk_repl_ops_browse` (native-delegate callers) and
-`beamtalk_test_case` (BIF-fallback test/lifecycle-method discovery)
-so the read-exports-safely rule has one implementation instead of two copies
-that could drift.
+Used by `beamtalk_repl_ops_browse` (native-delegate callers), so the
+read-exports-safely rule has one implementation.
 """.
 -spec safe_module_exports(module()) -> [{atom(), arity()}].
 safe_module_exports(Module) ->

@@ -858,6 +858,30 @@ inherited_tests_test_() ->
                 R = beamtalk_test_runner:run_class_by_name(?INH_CONCRETE),
                 ?assertEqual(1, maps:get(total, R)),
                 ?assertEqual(1, maps:get(passed, R))
+            end},
+            %% BT-3786: the BIF-fallback entry points see inherited tests and
+            %% the inherited setUp (testInherited only passes once setUp ran).
+            {"run_all/1 runs an inherited test with the inherited setUp", fun() ->
+                ?assertMatch(
+                    <<"1 tests, 1 passed", _/binary>>,
+                    beamtalk_test_case:run_all(?INH_CONCRETE)
+                )
+            end},
+            {"run_single/2 runs an inherited test with the inherited setUp", fun() ->
+                ?assertMatch(
+                    <<"1 tests, 1 passed", _/binary>>,
+                    beamtalk_test_case:run_single(?INH_CONCRETE, testInherited)
+                )
+            end},
+            {"run_all_structured/1 runs an inherited test", fun() ->
+                R = beamtalk_test_case:run_all_structured(?INH_CONCRETE),
+                ?assertEqual(1, maps:get(total, R)),
+                ?assertEqual(1, maps:get(passed, R)),
+                ?assertMatch([#{name := testInherited, status := pass}], maps:get(tests, R))
+            end},
+            {"run_single_structured/2 runs an inherited test", fun() ->
+                R = beamtalk_test_case:run_single_structured(?INH_CONCRETE, testInherited),
+                ?assertEqual(1, maps:get(passed, R))
             end}
         ]
     end}.

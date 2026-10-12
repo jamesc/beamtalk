@@ -140,9 +140,11 @@ can't reproduce the bug — this fixture can.
 
 Has `setUp`/`tearDown` and `setUpOnce`/`tearDownOnce` so the regression test
 (`runtime/apps/beamtalk_stdlib/test/beamtalk_test_case_stdlib_tests.erl`)
-exercises `discover_test_methods_from_module/1`,
-`check_lifecycle_methods/2`, and `check_suite_lifecycle_methods/2` — all
-three BT-3251 call sites — not just method discovery. `setUp`/`setUpOnce`
+exercises `check_lifecycle_methods/2` and `check_suite_lifecycle_methods/2`,
+not just method discovery. (Since BT-3786 that path no longer reads module
+exports at all: tests and lifecycle methods come from
+`beamtalk_test_case:class_test_plan/1`, the same class-hierarchy source the
+runner uses, so inherited tests are seen.) `setUp`/`setUpOnce`
 set observable state (a field, a suite fixture map) rather than returning
 `nil`, so both test methods assert on it — a `nil`-returning `setUp` is
 rejected by `is_valid_setUp_result/2` and falls back to the pre-setUp
