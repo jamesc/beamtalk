@@ -85,8 +85,8 @@ const DEFAULT_CASES: usize = 16;
 /// batch of at least [`MIN_ENVIRONMENT_PROGRAMS`] programs where either no
 /// test produced a result line (a runner crash after load: anywhere in the
 /// output) or every test failed (then in every failure message); see
-/// [`environment_cause`]. A re-run confirms the guess before it is reported
-/// ([`environment_confirmed`]).
+/// [`environment_cause`]. Two re-runs confirm the guess before it is
+/// reported ([`environment_confirmed_by`]).
 const ENVIRONMENT_MARKERS: [(&str, &str); 3] = [
     (
         "Undefined function",
@@ -249,8 +249,9 @@ enum Batch {
     Tests(Vec<String>, String),
     /// Did not compile, crashed before any result line, or failed in a way
     /// [`environment_cause`] attributes to the environment. `environment` is
-    /// then that suspected cause, which [`check`] confirms by a re-run before
-    /// reporting it (unconfirmed, the batch is classified again without it).
+    /// then that suspected cause, which [`check`] confirms by two re-runs
+    /// ([`environment_confirmed_by`]) before reporting it (unconfirmed, the
+    /// batch is classified again without it).
     /// `None` is a compile failure or crash, bisected to its programs.
     Broken {
         text: String,
@@ -294,7 +295,7 @@ fn run_package(pkg: &Package) -> Run {
 
 /// Classifies a run of `pkg`. `environment_min` is the fewest distinct
 /// programs [`environment_cause`] may suspect the environment in, or `None`
-/// to never suspect it (a guess the re-run did not confirm).
+/// to never suspect it (a guess the re-runs did not confirm).
 fn classify(pkg: &Package, run: &Run, environment_min: Option<usize>) -> Batch {
     let text = run.text.clone();
     // An `internal:` diagnostic is a verifier failure even when the compile
@@ -362,8 +363,9 @@ struct EnvCause {
 ///   different answers, so identical messages across that many are unlikely
 ///   to be one bug).
 ///
-/// This is a suspicion: [`check`] confirms it by a re-run
-/// ([`environment_confirmed`]) before reporting it.
+/// This is a suspicion: [`check`] confirms it by two re-runs, of two
+/// different programs alone ([`environment_confirmed_by`]), before reporting
+/// it.
 fn environment_cause(pkg: &Package, text: &str, min_programs: usize) -> Option<EnvCause> {
     let mut programs: Vec<usize> = pkg.test_names.iter().map(|(i, _, _)| *i).collect();
     programs.sort_unstable();
@@ -590,10 +592,13 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
             environment: Some(cause),
             ..
         } => {
+            // A suspicion needs `MIN_ENVIRONMENT_PROGRAMS` programs, so the
+            // first and last probes are always two different programs.
+            debug_assert!(cases.len() >= MIN_ENVIRONMENT_PROGRAMS);
             let first_probe = cases[0];
             let last_probe = cases[cases.len() - 1];
             let probes = [first_probe, last_probe].map(run_alone);
-            if cases.len() > 1 && environment_confirmed_by(&cause, &probes) {
+            if environment_confirmed_by(&cause, &probes) {
                 // Not (probably) a program's fault: no bisection; the report
                 // leads with the cause, then every repro pair, the marker's
                 // (or first failing) program, and any failures already
