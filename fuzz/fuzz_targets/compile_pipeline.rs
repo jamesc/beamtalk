@@ -60,7 +60,11 @@ fuzz_target!(|data: &[u8]| {
     // on shapes that analysis rejects up front (e.g. the ADR 0131 Phase 0
     // allow-set errors). Fuzzing codegen past those errors only finds
     // unreachable panics (nightly runs 244-247), so stop here.
-    if analysis.diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    if analysis
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
         return;
     }
 
