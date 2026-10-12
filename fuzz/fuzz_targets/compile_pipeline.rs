@@ -21,7 +21,8 @@
 //! We do not assert anything about `analyse`'s or `generate_module`'s
 //! diagnostics/errors: arbitrary byte soup is expected to fail analysis or
 //! codegen far more often than it succeeds. Only a panic, or a structurally
-//! broken `Ok` output, counts as a fuzzing failure.
+//! broken `Ok` output, counts as a fuzzing failure. Codegen only runs when
+//! analysis reported no errors, as in the real pipeline.
 //!
 //! # Corpus Seeding
 //!
@@ -38,7 +39,7 @@
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis::analyse;
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::test_helpers::test_support::core_erlang_structural_issues;
 use libfuzzer_sys::fuzz_target;
 
@@ -53,6 +54,19 @@ fuzz_target!(|data: &[u8]| {
     // Success = no panic. We don't care whether analysis finds errors — most
     // fuzzer-mutated input will fail semantic checks, and that's fine.
     let analysis = analyse(&module);
+
+    // The real pipeline never runs codegen on a module whose analysis reported
+    // errors, and codegen's `ThreadedIr` verifier `debug_assert!`s (by design)
+    // on shapes that analysis rejects up front (e.g. the ADR 0131 Phase 0
+    // allow-set errors). Fuzzing codegen past those errors only finds
+    // unreachable panics (nightly runs 244-247), so stop here.
+    if analysis
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
+        return;
+    }
 
     let options = CodegenOptions::new("fuzz_compile_pipeline").with_analysis(analysis);
 
