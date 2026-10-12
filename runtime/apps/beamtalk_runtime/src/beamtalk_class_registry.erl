@@ -1236,18 +1236,9 @@ restart_class(ClassName) ->
             %% The BEAM file should still be on disk even after the class process crashed.
             code:ensure_loaded(Module),
             Meta =
-                case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-                    true ->
-                        %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
-                        %% literal getter, no block
-                        try Module:'__beamtalk_meta'() of
-                            M when is_map(M) -> M;
-                            _ -> #{}
-                        catch
-                            _:_ -> #{}
-                        end;
-                    false ->
-                        #{}
+                case beamtalk_class_metadata:read_meta(Module) of
+                    {ok, M} -> M;
+                    not_available -> #{}
                 end,
             ClassInfo = #{
                 module => Module,

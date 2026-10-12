@@ -2088,18 +2088,9 @@ Returns the meta map or #{} if unavailable.
 """.
 -spec read_class_meta(atom()) -> map().
 read_class_meta(Module) ->
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
-            %% getter, no block
-            try Module:'__beamtalk_meta'() of
-                M when is_map(M) -> M;
-                _ -> #{}
-            catch
-                _:_ -> #{}
-            end;
-        false ->
-            #{}
+    case beamtalk_class_metadata:read_meta(Module) of
+        {ok, M} -> M;
+        not_available -> #{}
     end.
 
 %% This list and the LSP's static `add_keyword_completions`
