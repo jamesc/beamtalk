@@ -467,6 +467,42 @@ fn test_sort_with_mutation_compiles() {
     );
 }
 
+/// BT-3779: a `^` (or any exception) out of the comparator must not skip
+/// erasing the per-call process-dictionary key — `lists:sort` runs inside a
+/// `try` whose catch arm erases the key and re-raises unchanged.
+#[test]
+fn test_sort_with_mutation_erases_key_on_every_exit() {
+    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items sort: [:a :b | a > 2 ifTrue: [^0]. self.n := self.n + 1. a < b]\n";
+    let code = codegen(src);
+    let sort_at = code
+        .find("'lists':'sort'(")
+        .expect("sort: with mutation should use lists:sort");
+    let before = &code[..sort_at];
+    assert!(
+        before.trim_end().ends_with("try call"),
+        "lists:sort must be the body of a try. Got:\n{code}"
+    );
+    let after = &code[sort_at..];
+    let catch_at = after
+        .find(" catch <")
+        .expect("lists:sort try must have a catch arm");
+    let catch_arm = &after[catch_at..];
+    let erase_at = catch_arm
+        .find("call 'erlang':'erase'(")
+        .expect("catch arm must erase the per-call key");
+    let raise_at = catch_arm
+        .find("primop 'raw_raise'(")
+        .expect("catch arm must re-raise via raw_raise");
+    assert!(
+        erase_at < raise_at,
+        "key must be erased before re-raising. Got:\n{code}"
+    );
+    assert!(
+        catch_arm[raise_at..].contains("call 'erlang':'erase'("),
+        "normal path must also erase the key. Got:\n{code}"
+    );
+}
+
 #[test]
 fn test_take_while_pure_generates_takewhile() {
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items takeWhile: [:x | x < 10]\n";
