@@ -1348,32 +1348,29 @@ recover_from_beam_modules() ->
             false -> []
         end,
     BuiltinSet = sets:from_list(Builtins),
+    %% Same absent-runtime guard as `all_builtins/0` above: without the
+    %% runtime app there is no shared meta read to call, so nothing is recovered.
+    ReadMeta =
+        case erlang:function_exported(beamtalk_class_metadata, read_meta, 1) of
+            true -> fun beamtalk_class_metadata:read_meta/1;
+            false -> fun(_) -> not_available end
+        end,
     AllModules = code:all_loaded(),
     lists:foldl(
         fun({Module, _Path}, Acc) ->
-            case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-                false ->
-                    Acc;
-                true ->
-                    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
-                    %% literal getter, no block
-                    try Module:'__beamtalk_meta'() of
-                        Meta when is_map(Meta) ->
-                            ClassName = maps:get(class, Meta, undefined),
-                            case
-                                ClassName =/= undefined andalso
-                                    is_atom(ClassName) andalso
-                                    not sets:is_element(ClassName, BuiltinSet)
-                            of
-                                true -> Acc#{ClassName => Meta};
-                                false -> Acc
-                            end;
-                        _ ->
-                            Acc
-                    catch
-                        _:_ ->
-                            Acc
-                    end
+            case ReadMeta(Module) of
+                {ok, Meta} ->
+                    ClassName = maps:get(class, Meta, undefined),
+                    case
+                        ClassName =/= undefined andalso
+                            is_atom(ClassName) andalso
+                            not sets:is_element(ClassName, BuiltinSet)
+                    of
+                        true -> Acc#{ClassName => Meta};
+                        false -> Acc
+                    end;
+                not_available ->
+                    Acc
             end
         end,
         #{},

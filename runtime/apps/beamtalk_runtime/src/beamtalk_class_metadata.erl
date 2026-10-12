@@ -495,11 +495,11 @@ Returns `{ok, Meta}` when `Module` exports `__beamtalk_meta/0` and the call
 returns a map; `not_available` when it is not exported (a ClassBuilder or
 hand-written Erlang class), crashes, or returns a non-map. This is the shared
 guarded meta read for callers that treat every failure as "no metadata"
-(`beamtalk_behaviour_intrinsics:meta_for_module/1`, `class_var_kinds/1`).
-Other modules still carry their own copy of this read (for example
-`beamtalk_object_class:read_meta/1`, `beamtalk_shape_migration:read_meta/1`);
-BT-3781 moves them onto this one. A caller that must tell the failures apart
-uses `read_meta_detailed/1`.
+(`beamtalk_behaviour_intrinsics:meta_for_module/1`, `class_var_kinds/1`, and the
+thin `#{}`-fallback wrappers in `beamtalk_object_class`, `beamtalk_shape_migration`
+and the REPL ops/loader). It is the only place that calls `__beamtalk_meta/0`
+behind an export guard. A caller that must tell the failures apart uses
+`read_meta_detailed/1`.
 """.
 -spec read_meta(atom()) -> {ok, map()} | not_available.
 read_meta(Module) ->

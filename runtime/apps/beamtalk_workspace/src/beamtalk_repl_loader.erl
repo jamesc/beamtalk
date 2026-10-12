@@ -1438,18 +1438,9 @@ publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures) ->
 %% `beamtalk_workspace_shape_store:read_own_meta/1` uses.
 -spec read_installed_shape_version(atom()) -> pos_integer().
 read_installed_shape_version(ModuleName) ->
-    case erlang:function_exported(ModuleName, '__beamtalk_meta', 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
-            %% getter, no block
-            try ModuleName:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> maps:get(shape_version, Meta, 1);
-                _ -> 1
-            catch
-                _:_ -> 1
-            end;
-        false ->
-            1
+    case beamtalk_class_metadata:read_meta(ModuleName) of
+        {ok, Meta} -> maps:get(shape_version, Meta, 1);
+        not_available -> 1
     end.
 
 %% Resolve a class name atom from a class map entry.
@@ -2728,11 +2719,10 @@ pending_reload_findings_locked(ClassNameBin, PrevGen, CoreErlang) ->
 -spec pending_findings_from_temp_module(binary(), beamtalk_shape_diff:generation(), atom()) ->
     [beamtalk_shape_diff:reload_finding()].
 pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom) ->
-    case erlang:function_exported(TempModuleAtom, '__beamtalk_meta', 0) of
-        false ->
+    case beamtalk_class_metadata:read_meta(TempModuleAtom) of
+        not_available ->
             [];
-        true ->
-            Meta = TempModuleAtom:'__beamtalk_meta'(),
+        {ok, Meta} ->
             #{shape := PrevShape, ancestor_shape := AncestorOnlyShape} = PrevGen,
             PendingOwnFieldTypes = maps:get(field_types, Meta, #{}),
             PendingOwnFieldKinds = maps:get(field_kinds, Meta, #{}),
