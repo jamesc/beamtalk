@@ -327,8 +327,11 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 #[must_use]
 pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
-        ("whileTrue:" | "whileFalse:" | "timesRepeat:", 1)
-        | ("collect:" | "select:" | "reject:" | "count:" | "detect:", 1)
+        (
+            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "collect:" | "select:" | "reject:"
+            | "count:" | "detect:",
+            1,
+        )
         | ("detect:ifNone:", 2) => Some(0),
         ("to:do:" | "inject:into:", 2) => Some(1),
         ("to:by:do:", 3) => Some(2),

@@ -2488,49 +2488,44 @@ impl CoreErlangGenerator {
         if !direct && !self.statement_has_local_producer(expr) {
             return Ok(None);
         }
-        let result_var = match assign {
-            Some((var_name, value)) => {
-                let core_var = self
-                    .lookup_var(var_name)
-                    .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                let tv = if direct {
-                    self.threaded_construct_value(value, FrameId::ROOT)?
-                        .ok_or_else(|| {
-                            CodeGenError::Internal(
-                                "construct_tuple_locals accepted a non-construct".to_string(),
-                            )
-                        })?
-                } else {
-                    self.threaded_expression(value, FrameId::ROOT)?
-                };
-                stmts.extend(tv.prelude);
-                let value_doc = self.threaded_value_doc(&tv.value);
-                self.bind_var(var_name, &core_var);
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(core_var.clone()),
-                        " = ",
-                        value_doc,
-                        " in "
-                    ],
-                    span,
-                ));
-                core_var
-            }
-            None => {
-                let tmp_var = self.fresh_temp_var("seq");
-                let tv = self.threaded_expression(expr, FrameId::ROOT)?;
-                stmts.extend(tv.prelude);
-                let value_doc = self.threaded_value_doc(&tv.value);
-                stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(tmp_var.clone()), " = ", value_doc, " in "],
-                    span,
-                ));
-                tmp_var
-            }
+        let Some((var_name, value)) = assign else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let tv = self.threaded_expression(expr, FrameId::ROOT)?;
+            stmts.extend(tv.prelude);
+            let value_doc = self.threaded_value_doc(&tv.value);
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(tmp_var.clone()), " = ", value_doc, " in "],
+                span,
+            ));
+            return Ok(Some(tmp_var));
         };
-        Ok(Some(result_var))
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let tv = if direct {
+            self.threaded_construct_value(value, FrameId::ROOT)?
+                .ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "construct_tuple_locals accepted a non-construct".to_string(),
+                    )
+                })?
+        } else {
+            self.threaded_expression(value, FrameId::ROOT)?
+        };
+        stmts.extend(tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
+        self.bind_var(var_name, &core_var);
+        stmts.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(core_var.clone()),
+                " = ",
+                value_doc,
+                " in "
+            ],
+            span,
+        ));
+        Ok(Some(core_var))
     }
 
     /// Generates code for an explicit `^` return in a class method.

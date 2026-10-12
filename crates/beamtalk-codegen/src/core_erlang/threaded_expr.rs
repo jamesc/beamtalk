@@ -80,10 +80,16 @@ use beamtalk_core::source_analysis::Span;
 /// ADR 0131 Phase 2 (BT-3748 review): test-only fault injection into the
 /// local-threading producer and the §1a sequencing rule, so each ADR 0131 §4
 /// verifier check can be shown to fire on a real compile rather than only on
-/// hand-built IR (`tests/local_rebind_verifier_corpus.rs`).
+/// hand-built IR (`tests/local_rebind_verifier_corpus.rs`), and a recorder of
+/// the producer lowerings a compile performs
+/// (`tests/local_producer_agreement.rs`).
 #[cfg(test)]
 pub(super) mod fault {
-    use std::cell::Cell;
+    use beamtalk_core::source_analysis::Span;
+    use std::cell::{Cell, RefCell};
+
+    /// One producer lowering: the construct's span and its threaded locals.
+    pub(in crate::core_erlang) type ProducerRecord = (Span, Vec<String>);
 
     /// One deliberately broken lowering.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,16 +109,12 @@ pub(super) mod fault {
 
     thread_local! {
         static ACTIVE: Cell<Option<LocalRebindFault>> = const { Cell::new(None) };
-        static PRODUCERS: std::cell::RefCell<Option<Vec<(beamtalk_core::source_analysis::Span, Vec<String>)>>> =
-            const { std::cell::RefCell::new(None) };
+        static PRODUCERS: RefCell<Option<Vec<ProducerRecord>>> = const { RefCell::new(None) };
     }
 
     /// Records a producer lowering of the construct at `span` threading
     /// `locals`, when [`recording_producers`] is collecting.
-    pub(in crate::core_erlang) fn record_producer(
-        span: beamtalk_core::source_analysis::Span,
-        locals: &[String],
-    ) {
+    pub(in crate::core_erlang) fn record_producer(span: Span, locals: &[String]) {
         PRODUCERS.with(|p| {
             if let Some(records) = p.borrow_mut().as_mut() {
                 records.push((span, locals.to_vec()));
@@ -124,7 +126,7 @@ pub(super) mod fault {
     /// lowering it performed (the construct's span and threaded locals).
     pub(in crate::core_erlang) fn recording_producers<T>(
         body: impl FnOnce() -> T,
-    ) -> (T, Vec<(beamtalk_core::source_analysis::Span, Vec<String>)>) {
+    ) -> (T, Vec<ProducerRecord>) {
         PRODUCERS.with(|p| *p.borrow_mut() = Some(Vec::new()));
         let result = body();
         let records = PRODUCERS

@@ -49,13 +49,17 @@ const POSITIONS: &[&str] = &[
 ];
 
 fn sources(construct: &str, position: &str) -> [String; 3] {
-    let body: String = format!(
+    let mut body = String::new();
+    for line in format!(
         "t := 0\nu := 0\ns := 0\n{}",
         position.replace("{c}", construct)
     )
     .lines()
-    .map(|l| format!("    {l}\n"))
-    .collect();
+    {
+        body.push_str("    ");
+        body.push_str(line);
+        body.push('\n');
+    }
     [
         format!("Object subclass: AgreeClass\n  class go =>\n{body}"),
         format!("Value subclass: AgreeValue\n  go =>\n{body}"),
