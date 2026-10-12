@@ -83,14 +83,14 @@ pub(super) use build::{
 pub(super) use build::{build_branch_arm, build_local_rebind, build_method_body};
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
+#[cfg(test)]
+pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
     StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
     ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
-#[cfg(test)]
-pub(super) use ir::RebindFrameKind;
 pub(super) use verify::{SequencedSibling, verify_sibling_reads};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name

@@ -1145,7 +1145,9 @@ impl CoreErlangGenerator {
         body: &[&Expression],
         has_nlr: bool,
     ) -> Result<Vec<Document<'static>>> {
-        self.with_local_producer_sites(body, |this| this.generate_vt_body_exprs_in_sites(body, has_nlr))
+        self.with_local_producer_sites(body, |this| {
+            this.generate_vt_body_exprs_in_sites(body, has_nlr)
+        })
     }
 
     /// [`Self::generate_vt_body_exprs`] once the method body's local-producer
@@ -1192,20 +1194,20 @@ impl CoreErlangGenerator {
                     // ADR 0131 Phase 2: `^<loop or fold>`, or a `^` value
                     // with one at an operand site — the producer's prelude
                     // runs before the value is returned.
-                    let threaded_value = if let Some(locals) =
-                        self.construct_tuple_locals(value.unwrap_parens())
-                    {
-                        Some(self.lower_local_threading_construct(
-                            value.unwrap_parens(),
-                            &locals,
-                            super::threaded_expr::ProducerTail::Discard,
-                        )?)
-                    } else if self.statement_has_local_producer(expr) {
-                        let tv = self.threaded_expression(value, super::threaded_ir::FrameId::ROOT)?;
-                        Some((tv.prelude, tv.value))
-                    } else {
-                        None
-                    };
+                    let threaded_value =
+                        if let Some(locals) = self.construct_tuple_locals(value.unwrap_parens()) {
+                            Some(self.lower_local_threading_construct(
+                                value.unwrap_parens(),
+                                &locals,
+                                super::threaded_expr::ProducerTail::Discard,
+                            )?)
+                        } else if self.statement_has_local_producer(expr) {
+                            let tv =
+                                self.threaded_expression(value, super::threaded_ir::FrameId::ROOT)?;
+                            Some((tv.prelude, tv.value))
+                        } else {
+                            None
+                        };
                     if let Some((prelude, value)) = threaded_value {
                         let prelude_doc = self.verified_root_prelude_doc(&prelude, expr.span());
                         let value_doc = self.threaded_value_doc(&value);
@@ -2241,7 +2243,10 @@ impl CoreErlangGenerator {
     /// result is a [`ThreadedFamilies`], the same type
     /// [`Self::extract_vt_loop_family_slot`] and
     /// `while_loops.rs`/`counted_loops.rs`'s own exit-arm tuple share.
-    pub(in crate::core_erlang) fn vt_loop_threaded_families(&self, expr: &Expression) -> ThreadedFamilies {
+    pub(in crate::core_erlang) fn vt_loop_threaded_families(
+        &self,
+        expr: &Expression,
+    ) -> ThreadedFamilies {
         let expr = expr.unwrap_parens();
         let body = if self.is_while_with_vt_local_threading(expr) {
             match expr {

@@ -2440,7 +2440,8 @@ impl CoreErlangGenerator {
 
                 // ADR 0131 Phase 2: a local-threading producer in this
                 // statement rebinds its locals at the method root.
-                if let Some(result_var) = this.lower_root_statement_with_producer(expr, &mut stmts)?
+                if let Some(result_var) =
+                    this.lower_root_statement_with_producer(expr, &mut stmts)?
                 {
                     if is_last {
                         stmts.push(ThreadedStmt::Statement(leaf::var(result_var), span));
@@ -2482,10 +2483,8 @@ impl CoreErlangGenerator {
             },
             _ => None,
         };
-        let direct = assign.is_some_and(|(_, value)| {
-            self.construct_tuple_locals(value.unwrap_parens())
-                .is_some()
-        });
+        let direct = assign
+            .is_some_and(|(_, value)| self.construct_tuple_locals(value.unwrap_parens()).is_some());
         if !direct && !self.statement_has_local_producer(expr) {
             return Ok(None);
         }
@@ -2508,7 +2507,13 @@ impl CoreErlangGenerator {
                 let value_doc = self.threaded_value_doc(&tv.value);
                 self.bind_var(var_name, &core_var);
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(core_var.clone()), " = ", value_doc, " in "],
+                    docvec![
+                        "let ",
+                        leaf::var(core_var.clone()),
+                        " = ",
+                        value_doc,
+                        " in "
+                    ],
                     span,
                 ));
                 core_var

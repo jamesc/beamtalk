@@ -20,9 +20,7 @@ use beamtalk_core::semantic_analysis::block_facts::{
     operand_producer_writes, sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
-use beamtalk_core::source_analysis::{
-    DiagnosticCategory, Severity, Span, lex_with_eof, parse,
-};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
 use std::collections::HashMap;
 
 const CONSTRUCTS: &[&str] = &[
@@ -51,10 +49,13 @@ const POSITIONS: &[&str] = &[
 ];
 
 fn sources(construct: &str, position: &str) -> [String; 3] {
-    let body: String = format!("t := 0\nu := 0\ns := 0\n{}", position.replace("{c}", construct))
-        .lines()
-        .map(|l| format!("    {l}\n"))
-        .collect();
+    let body: String = format!(
+        "t := 0\nu := 0\ns := 0\n{}",
+        position.replace("{c}", construct)
+    )
+    .lines()
+    .map(|l| format!("    {l}\n"))
+    .collect();
     [
         format!("Object subclass: AgreeClass\n  class go =>\n{body}"),
         format!("Value subclass: AgreeValue\n  go =>\n{body}"),
@@ -71,7 +72,8 @@ fn core_producers(body: &[beamtalk_core::ast::ExpressionStatement]) -> HashMap<S
     for stmt in body {
         for site in sequenced_operand_sites(&stmt.expression) {
             if let Some(writes) = operand_producer_writes(site, &bound) {
-                let mut names: Vec<String> = writes.into_iter().map(|w| w.name.to_string()).collect();
+                let mut names: Vec<String> =
+                    writes.into_iter().map(|w| w.name.to_string()).collect();
                 names.sort();
                 names.dedup();
                 out.insert(Expression::span(site), names);

@@ -11,6 +11,18 @@
 // stdlib/test/adr0131local_producer_test.bt.
 
 Actor subclass: Adr0131LocalProducerActor
+  state: n = 0
+
+  bump: x =>
+    self.n := self.n + x
+    x
+
+  // A fold that threads only `State` (a self-send in its block) as a
+  // message receiver: it writes no outer local, so it has no `LocalRebind`,
+  // but its construct tuple is still unpacked and its `State` threaded.
+  stateOnlyFold =>
+    r := (#(1, 2) collect: [:x | self bump: x]) size
+    #[r, self.n]
 
   // A fold as a binary operand, after a read of `t` (ADR 0131 §1a: the left
   // operand reads `t` before the fold rebinds it).

@@ -42,3 +42,6 @@ TestCase subclass: Adr0131LocalProducerTest
     self assert: #[Adr0131LocalProducerClass loopToParameter: 3, (Adr0131LocalProducerValue new) loopToParameter: 3, (Adr0131LocalProducerActor spawn) loopToParameter: 3] equals: #[#[true, 6], #[true, 6], #[true, 6]]
 
   testFoldTwoLocals => self assertAll: #foldTwoLocals equal: #[12, 6, 3]
+
+  testStateOnlyFoldActor =>
+    self assert: (Adr0131LocalProducerActor spawn) stateOnlyFold equals: #[2, 3]

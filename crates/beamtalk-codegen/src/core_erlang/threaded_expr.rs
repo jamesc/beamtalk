@@ -127,7 +127,9 @@ pub(super) mod fault {
     ) -> (T, Vec<(beamtalk_core::source_analysis::Span, Vec<String>)>) {
         PRODUCERS.with(|p| *p.borrow_mut() = Some(Vec::new()));
         let result = body();
-        let records = PRODUCERS.with(|p| p.borrow_mut().take()).unwrap_or_default();
+        let records = PRODUCERS
+            .with(|p| p.borrow_mut().take())
+            .unwrap_or_default();
         (result, records)
     }
 
@@ -678,7 +680,8 @@ impl CoreErlangGenerator {
     /// body being lowered — a loop or fold (`beamtalk_core`'s
     /// `producer_body_block`) whose construct tuple threads every local its
     /// blocks write (`ThreadedLocals::lowered == names`, the rule
-    /// `operand_producer_writes` applies for the diagnostic) — or `None`.
+    /// `operand_producer_writes` applies for the diagnostic), possibly none
+    /// when it threads only a family (an actor fold's `State`) — or `None`.
     /// Never in the REPL, whose root frame threads its bindings map (a
     /// later phase).
     pub(super) fn local_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
@@ -690,9 +693,15 @@ impl CoreErlangGenerator {
             return None;
         }
         beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner)?;
-        self.construct_tuple_locals(inner)?;
-        let set = self.threaded_locals_of(inner)?;
-        (set.lowered == set.names).then_some(set.lowered)
+        let locals = self.construct_tuple_locals(inner)?;
+        // A construct that writes no outer local still compiles to a tuple
+        // when it threads a family (an actor fold's `State`, a value-type
+        // loop's `Self`): it is a producer with no `LocalRebind`, so its
+        // tuple never leaks into the operand.
+        match self.threaded_locals_of(inner) {
+            None => Some(locals),
+            Some(set) => (set.lowered == set.names).then_some(set.lowered),
+        }
     }
 
     /// The outer locals the threading construct `expr` (paren-unwrapped)
@@ -827,7 +836,11 @@ impl CoreErlangGenerator {
         if actor {
             let _ = self.next_state_var();
             family_binds.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, self.state_version(), FrameId::ROOT),
+                target: VersionedVar::new(
+                    VersionPrefix::State,
+                    self.state_version(),
+                    FrameId::ROOT,
+                ),
                 source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
                 op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
                 span,

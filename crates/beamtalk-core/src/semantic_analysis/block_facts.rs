@@ -1408,14 +1408,17 @@ pub fn operand_producer_writes(
 /// at the method root (ADR 0131 §2's `MethodBody` row).
 ///
 /// From the value of `x := V` or `^V`, or from a statement that is a plain
-/// send: every receiver and non-block argument of a send that is not
-/// itself a local-threading construct, a conditional or a cast (whose
-/// receivers and arguments their own lowerings compile), and every element
-/// of a literal array, list or map. A local-threading construct reached
-/// this way is a site but is not descended into. The statement itself is
-/// not a site (statement positions keep their own lowering), nor is
-/// anything inside a block, a cascade, a field assignment's value, a
-/// destructuring, a `match:` or an interpolation.
+/// send (not a local-threading construct, whose statement lowering compiles
+/// its own operands): every receiver and non-block argument of a send that
+/// is not a conditional, a cast, or a local-threading construct of another
+/// family than a loop or fold (whose receivers and arguments their own
+/// lowerings compile), and every element of a literal array, list or map.
+/// A loop or fold reached this way is a site whose own operands are sites
+/// too (a producer sequences them first; one that threads nothing compiles
+/// them through ordinary expression codegen). The statement itself is not
+/// a site (statement positions keep their own lowering), nor is anything
+/// inside a block, a cascade, a field assignment's value, a destructuring,
+/// a `match:` or an interpolation.
 ///
 /// The Phase 0 allow-set check and codegen's producer both read this, so a
 /// construct the diagnostic accepts in operand position is exactly one the
@@ -1431,7 +1434,13 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
                 is_cast: false,
                 ..
             } => {
-                if local_threading_construct(expr).is_some()
+                let nested_construct = local_threading_construct(expr).is_some_and(|c| {
+                    !matches!(
+                        c.family,
+                        LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                    )
+                });
+                if nested_construct
                     || crate::state_threading_selectors::is_conditional_selector(&selector.name())
                 {
                     return;
@@ -1483,6 +1492,7 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
             site(value, &mut out);
         }
         Expression::Return { value, .. } => site(value, &mut out),
+        other if local_threading_construct(other).is_some() => {}
         other => operands(other, &mut out),
     }
     out
