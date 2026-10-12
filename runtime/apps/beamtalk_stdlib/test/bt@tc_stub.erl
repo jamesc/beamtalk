@@ -14,10 +14,10 @@
 %% Compiled-Beamtalk module contract
 -export([new/0, dispatch/3]).
 
-%% Exported test methods — discovered by discover_test_methods_from_module/1
-%% which scans module_info(exports) for names beginning with "test".
-%% Arity is ignored by the discovery logic; actual execution goes through dispatch/3.
--export([testStubPass/1, testStubFail/1]).
+%% Test methods are not exported: since BT-3786 tests come from the class
+%% hierarchy (beamtalk_test_case:class_test_plan/1), never from module exports,
+%% and this stub is not a registered class. run_single/2 and
+%% run_single_structured/2 still run a named method through dispatch/3.
 
 new() ->
     #{'$beamtalk_class' => 'TcStub'}.
@@ -30,7 +30,3 @@ dispatch(setUp, [], Instance) ->
     Instance;
 dispatch(tearDown, [], _Instance) ->
     nil.
-
-%% Stub implementations (never called — dispatch/3 is used instead).
-testStubPass(_) -> nil.
-testStubFail(_) -> error(intentional_stub_failure).

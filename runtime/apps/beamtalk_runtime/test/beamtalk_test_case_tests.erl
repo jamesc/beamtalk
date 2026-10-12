@@ -204,10 +204,9 @@ execute_tests_with_real_module_test() ->
     ?assertEqual(<<"No test methods found in FakeTest">>, Result).
 
 run_all_with_real_module_test() ->
-    %% Test the BIF fallback path — resolve_module falls back
-    %% to a module that doesn't exist, discover_test_methods_from_module
-    %% will crash calling module_info on it. Verify we get a meaningful result.
-    %% Use a try/catch to handle the expected failure gracefully.
+    %% Test the BIF fallback path for a class that is not registered and
+    %% whose module doesn't exist. Verify we get a meaningful result.
+    %% Use a try/catch to handle a failure gracefully.
     try beamtalk_test_case:run_all('NonExistentTestClass') of
         Result when is_binary(Result) -> ok
     catch
