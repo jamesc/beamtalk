@@ -702,7 +702,8 @@ extract_error_kind(_) ->
 
 -doc """
 Discover test methods from flattened methods map (no gen_server call).
-FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
+FlatMethods is #{Selector => {DefiningClass, MethodInfo}}; only the keys are
+inspected, so any map keyed by selector (e.g. #{Selector => true}) works too.
 """.
 -spec discover_test_methods(map()) -> [atom()].
 discover_test_methods(FlatMethods) ->

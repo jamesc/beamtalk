@@ -464,8 +464,8 @@ run_single_structured_fail_test() ->
 %%% NOT a hand-written .erl stub like bt@tc_stub.erl above.
 %%%
 %%% A hand-written .erl module gets module_info/0,1 auto-injected by the
-%%% ordinary erlc pipeline, so the run_all_with_tests_test() etc. tests above
-%%% never exercised the actual bug: Beamtalk's Core Erlang codegen compiles
+%%% ordinary erlc pipeline, so the bt@tc_stub tests above never exercised
+%%% the actual bug: Beamtalk's Core Erlang codegen compiles
 %%% straight to Core Erlang via compile:forms(..., [from_core | Opts])
 %%% (CLAUDE.md), which never runs the sys_pre_expand pass that injects
 %%% module_info/0,1 — so a genuinely compiled bt@ module has no
