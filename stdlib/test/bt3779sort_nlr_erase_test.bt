@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3779: stateful sort: must erase its per-call process-dictionary key on
+// every exit path (normal return, ^ out of the comparator, exception).
+
+TestCase subclass: Bt3779SortNlrEraseTest
+  field: actor = nil
+
+  setUp => self.actor := Bt3779SortNlrEraseActor spawn
+
+  tearDown => self.actor isNil ifFalse: [self.actor stop]
+
+  testNlrOutOfComparatorLeavesNoEntry =>
+    before := self.actor pdictSize
+    self assert: self.actor nlrSort equals: 0
+    self assert: self.actor nlrSort equals: 0
+    self assert: self.actor nlrSort equals: 0
+    self assert: self.actor pdictSize equals: before
+
+  testNlrStillCarriesComparatorState =>
+    self assert: self.actor nlrSort equals: 0
+    self assert: self.actor count equals: 1
+
+  testNormalSortLeavesNoEntry =>
+    before := self.actor pdictSize
+    self assert: self.actor normalSort equals: #(1, 2, 3)
+    self assert: self.actor normalSort equals: #(1, 2, 3)
+    self assert: self.actor pdictSize equals: before
+
+  testExceptionOutOfComparatorLeavesNoEntry =>
+    before := self.actor pdictSize
+    self assert: self.actor raisingSort equals: #caught
+    self assert: self.actor raisingSort equals: #caught
+    self assert: self.actor pdictSize equals: before
