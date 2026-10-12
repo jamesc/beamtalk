@@ -20,7 +20,8 @@ Storage layout:
 - atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
 - persistent_term toggle: beamtalk_tracing_enabled (true | false)
 
-ETS tables use {heir, SupervisorPid, HeirData} for crash resilience.
+ETS tables name `beamtalk_ets_heir` as heir for crash resilience and are
+reclaimed from it on restart.
 Atomics refs stored in persistent_term survive gen_server crashes.
 
 See also: docs/ADR/0069-actor-observability-and-tracing.md
@@ -420,11 +421,9 @@ handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
 init([]) ->
     beamtalk_logging_config:set_domain(runtime),
 
-    %% Get supervisor pid for heir option
-    SupPid = find_supervisor(),
-
-    %% Create or inherit ETS tables
-    ensure_ets_tables(SupPid),
+    %% Create the ETS tables, or take them back from `beamtalk_ets_heir`
+    %% after a crash/restart.
+    ensure_ets_tables(),
 
     %% Initialise atomics in persistent_term (if not already present from crash recovery)
     ensure_counters(),
@@ -528,7 +527,8 @@ handle_info(sweep_eviction, State) ->
     TimerRef = start_sweep_timer(),
     {noreply, State#state{sweep_timer = TimerRef}};
 handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
-    ?LOG_INFO("Inherited ETS table via heir", #{table => TableName}),
+    %% `beamtalk_ets_heir` handed a table back during init (ensure_ets_tables/0).
+    ?LOG_DEBUG("Reclaimed ETS table from heir", #{table => TableName}),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -543,63 +543,23 @@ terminate(_Reason, State) ->
 
 code_change(OldVsn, State, Extra) ->
     %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
-    ensure_ets_tables(find_supervisor()),
+    ensure_ets_tables(),
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
 %% Internal: ETS table management
 %%====================================================================
 
--doc "Find the supervisor pid for heir option.".
-find_supervisor() ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined -> self();
-        Pid -> Pid
-    end.
-
--doc "Create or verify ETS tables exist.".
-ensure_ets_tables(SupPid) ->
-    ensure_table(?AGG_INDEX, [
-        named_table,
-        public,
-        set,
-        {write_concurrency, true},
-        {read_concurrency, true},
-        {heir, SupPid, ?AGG_INDEX}
-    ]),
-    ensure_table(?AGG_CLASS, [
-        named_table,
-        public,
-        set,
-        {write_concurrency, true},
-        {read_concurrency, true},
-        {heir, SupPid, ?AGG_CLASS}
-    ]),
-    ensure_table(?TRACE_EVENTS, [
-        named_table,
-        public,
-        ordered_set,
-        {write_concurrency, true},
-        {read_concurrency, true},
-        {heir, SupPid, ?TRACE_EVENTS}
-    ]),
-    ok.
-
 -doc """
-Create a table if it doesn't exist.
-If the table already exists (inherited by supervisor via heir after crash),
-it's a public table so reads/writes work regardless of ownership. The data
-is preserved, which is the primary goal of the heir mechanism.
+Create the ETS tables, or reclaim them from `beamtalk_ets_heir` when they
+survived the previous trace store's death (crash resilience, ADR 0069).
 """.
-ensure_table(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            _Name = ets:new(Name, Opts);
-        _Tid ->
-            %% Table already exists (inherited via heir after crash).
-            %% Public table — reads/writes work regardless of owner.
-            ok
-    end.
+ensure_ets_tables() ->
+    Opts = [named_table, public, {write_concurrency, true}, {read_concurrency, true}],
+    ok = beamtalk_ets_heir:ensure_table(?AGG_INDEX, [set | Opts]),
+    ok = beamtalk_ets_heir:ensure_table(?AGG_CLASS, [set | Opts]),
+    ok = beamtalk_ets_heir:ensure_table(?TRACE_EVENTS, [ordered_set | Opts]),
+    ok.
 
 -doc "Ensure atomics ref and slot allocator exist in persistent_term.".
 ensure_counters() ->

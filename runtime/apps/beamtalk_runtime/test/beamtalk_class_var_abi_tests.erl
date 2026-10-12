@@ -36,7 +36,7 @@ setup() ->
     %% process that would otherwise create it on the first parked refusal
     %% (and take it down when that process exits, before the test drains it).
     %% Created without an heir and deleted in teardown, so it is never handed
-    %% to `beamtalk_runtime_sup` (which logs an unexpected 'ETS-TRANSFER').
+    %% to `beamtalk_ets_heir`.
     ensure_pending_errors_table().
 
 ensure_pending_errors_table() ->

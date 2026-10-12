@@ -33,8 +33,20 @@ init([]) ->
     },
 
     ChildSpecs = [
+        %% Heir of every runtime ETS table (BT-3787). MUST be the first child:
+        %% every later child may create a table whose `heir_option/0` names
+        %% it, and beamtalk_runtime_app re-heirs its own boot-time tables to
+        %% it once this supervisor is up.
+        #{
+            id => beamtalk_ets_heir,
+            start => {beamtalk_ets_heir, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_ets_heir]
+        },
         %% Cross-reference index for SystemNavigation queries (ADR 0087).
-        %% MUST be the first non-pg child so its tables exist before any
+        %% MUST be the first child after beamtalk_ets_heir so its tables exist before any
         %% `register_class/0` runs in beamtalk_bootstrap / beamtalk_stdlib.
         #{
             id => beamtalk_xref,

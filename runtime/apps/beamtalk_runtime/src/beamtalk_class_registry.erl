@@ -40,8 +40,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_module_table/0,
     ensure_methods_table/0,
     ensure_class_warnings_table/0,
-    heir_option/0,
-    maybe_set_heir/1,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     drain_class_warnings_by_qualified_names/1,
@@ -303,7 +301,7 @@ ensure_class_warnings_table() ->
                         public,
                         named_table,
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -311,7 +309,7 @@ ensure_class_warnings_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_warnings),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_warnings),
             ok
     end.
 
@@ -618,7 +616,7 @@ ensure_pending_errors_table() ->
                         public,
                         named_table,
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -626,68 +624,8 @@ ensure_pending_errors_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_pending_load_errors),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_pending_load_errors),
             ok
-    end.
-
-%%====================================================================
-%% ETS Ownership Helpers
-%%====================================================================
-
--doc """
-Return an ETS heir option for table survival across process crashes.
-
-ETS tables created by a transient process (e.g. a class gen_server)
-are destroyed when that process dies.  Using `{heir, Pid, Data}` hands the
-table to a long-lived process instead of deleting it.
-
-We pick the runtime supervisor (`beamtalk_runtime_sup`) if it is alive.
-If the supervisor is not yet running (early bootstrap, tests), we omit
-the heir option — the table will be owned by the caller and recreated
-if needed via the existing ensure_* idempotent guards.
-""".
--spec heir_option() -> [tuple()].
-heir_option() ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined -> [];
-        Pid -> [{heir, Pid, undefined}]
-    end.
-
--doc """
-Retroactively set the heir on an existing table if one is not set.
-
-Tables created early in boot (from `beamtalk_runtime_app:start/2`)
-run before the supervisor is alive, so `heir_option/0` returns `[]`.
-Subsequent `ensure_*` calls (e.g., from `beamtalk_object_class:init/1`)
-invoke this to set the heir once the supervisor is available.
-Only the table owner can call `ets:setopts/2`, so we guard on ownership.
-""".
--spec maybe_set_heir(atom()) -> ok.
-maybe_set_heir(Table) ->
-    case whereis(beamtalk_runtime_sup) of
-        undefined ->
-            ok;
-        SupPid ->
-            case ets:info(Table, heir) of
-                SupPid ->
-                    %% Already set correctly.
-                    ok;
-                _ ->
-                    %% Only the owner can change heir. If we're not the owner,
-                    %% skip silently — the owner will set it on their next ensure call.
-                    case ets:info(Table, owner) of
-                        Owner when Owner =:= self() ->
-                            try
-                                ets:setopts(Table, {heir, SupPid, undefined})
-                            catch
-                                %% Heir PID died between whereis and setopts (TOCTOU).
-                                error:badarg -> ok
-                            end,
-                            ok;
-                        _ ->
-                            ok
-                    end
-            end
     end.
 
 %%====================================================================
@@ -824,7 +762,7 @@ ensure_pid_table() ->
                         public,
                         named_table,
                         {read_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -832,7 +770,7 @@ ensure_pid_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_pids),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_pids),
             ok
     end.
 
@@ -896,7 +834,7 @@ ensure_class_state_table() ->
                         public,
                         named_table,
                         {read_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -904,7 +842,7 @@ ensure_class_state_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_class_state_snapshot),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_state_snapshot),
             ok
     end.
 
@@ -1019,7 +957,7 @@ ensure_loaded_classes_table() ->
                         named_table,
                         {read_concurrency, true},
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -1027,7 +965,7 @@ ensure_loaded_classes_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_loaded_classes),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_loaded_classes),
             ok
     end.
 
@@ -1160,7 +1098,7 @@ ensure_backing_module_index_table() ->
                         named_table,
                         {read_concurrency, true},
                         {write_concurrency, true}
-                        | heir_option()
+                        | beamtalk_ets_heir:heir_option()
                     ]
                 ),
                 ok
@@ -1168,7 +1106,7 @@ ensure_backing_module_index_table() ->
                 error:badarg -> ok
             end;
         _ ->
-            maybe_set_heir(beamtalk_backing_module_index),
+            beamtalk_ets_heir:maybe_set_heir(beamtalk_backing_module_index),
             ok
     end.
 

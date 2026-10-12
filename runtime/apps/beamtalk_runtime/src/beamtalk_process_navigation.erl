@@ -632,6 +632,7 @@ infra_deny_list() ->
         [
             %% Runtime top supervisor and its workers (ADR 0092 §6).
             beamtalk_runtime_sup,
+            beamtalk_ets_heir,
             beamtalk_xref,
             beamtalk_bootstrap,
             beamtalk_stdlib,
