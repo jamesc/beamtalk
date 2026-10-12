@@ -733,7 +733,20 @@ impl CoreErlangGenerator {
             // Classify the inner value to handle super/tier2/dispatch returns.
             if is_early_return && supports_early_return {
                 if let Expression::Return { value, .. } = expr {
-                    let value_kind = self.classify_body_expr(value);
+                    let mut value_kind = self.classify_body_expr(value);
+                    // ADR 0131 Phase 2: a `^` value that is a local-threading
+                    // producer, or holds one at an operand site, is lowered
+                    // through `threaded_expression` (the generic arm below),
+                    // which splices the producer's prelude; the dedicated arms
+                    // compile their value with plain `expression_doc` and would
+                    // leak the construct tuple.
+                    if matches!(
+                        value_kind,
+                        BodyExprKind::ControlFlowWithMutations | BodyExprKind::Pure
+                    ) && self.statement_has_local_producer(expr)
+                    {
+                        value_kind = BodyExprKind::Pure;
+                    }
                     match value_kind {
                         BodyExprKind::SuperSend => {
                             let expr_str = self.expression_doc(value)?;

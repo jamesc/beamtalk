@@ -287,8 +287,12 @@ impl CoreErlangGenerator {
             // ADR 0131 §2 (Phase 2): a loop or fold is a local-threading
             // producer; as the method root's last expression it discards its
             // locals with an explicit `DiscardLocals`.
-            let (prelude, value) =
-                self.lower_local_threading_construct(expr, &locals, ProducerTail::Discard)?;
+            let (prelude, value) = self.lower_local_threading_construct(
+                expr,
+                &locals,
+                ProducerTail::Discard,
+                FrameId::ROOT,
+            )?;
             let prelude_doc = self.verified_root_prelude_doc(&prelude, expr.span());
             let value_doc = self.threaded_value_doc(&value);
             let result_var = self.fresh_temp_var("ThreadedValue");
@@ -774,14 +778,8 @@ impl CoreErlangGenerator {
         let Some(locals) = self.construct_tuple_locals(inner) else {
             return Ok(None);
         };
-        #[cfg(test)]
-        fault::record_producer(inner.span(), &locals);
-        let children = Self::sequenced_send_children(inner).unwrap_or_default();
-        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
-        let (stmts, value) =
-            self.lower_local_threading_construct(inner, &locals, ProducerTail::Rebind)?;
-        self.finish_precompiled_scope(scope)?;
-        prelude.extend(stmts);
+        let (prelude, value) =
+            self.lower_local_threading_construct(inner, &locals, ProducerTail::Rebind, frame)?;
         Ok(Some(ThreadedValue { prelude, value }))
     }
 
@@ -810,6 +808,29 @@ impl CoreErlangGenerator {
     /// rebind reads through it (`state_first`). In a value-type method a
     /// Letrec loop that threads `Self` carries it at element 3, rebound last.
     pub(super) fn lower_local_threading_construct(
+        &mut self,
+        expr: &Expression,
+        locals: &[String],
+        tail: ProducerTail,
+        frame: FrameId,
+    ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
+        #[cfg(test)]
+        fault::record_producer(expr.span(), locals);
+        // The construct's own receiver and non-block arguments evaluate
+        // before it packs its locals (ADR 0118 §Decision 3): they are
+        // sequenced here, for every tail, so `Rebind` and `Discard` cannot
+        // diverge on a producer nested in an operand.
+        let children = Self::sequenced_send_children(expr).unwrap_or_default();
+        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+        let (stmts, value) = self.lower_construct_tuple(expr, locals, tail)?;
+        self.finish_precompiled_scope(scope)?;
+        prelude.extend(stmts);
+        Ok((prelude, value))
+    }
+
+    /// The construct-tuple half of [`Self::lower_local_threading_construct`],
+    /// once its operands are sequenced.
+    fn lower_construct_tuple(
         &mut self,
         expr: &Expression,
         locals: &[String],

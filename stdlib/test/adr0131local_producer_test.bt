@@ -45,3 +45,8 @@ TestCase subclass: Adr0131LocalProducerTest
 
   testStateOnlyFoldActor =>
     self assert: (Adr0131LocalProducerActor spawn) stateOnlyFold equals: #[2, 3]
+
+  testReturnedFoldOfFold => self assertAll: #returnedFoldOfFold equal: 234
+
+  testAssignedFoldOfFold =>
+    self assertAll: #assignedFoldOfFold equal: #[4, 3, 2]

@@ -117,3 +117,27 @@ Value subclass: Adr0131LocalProducerValue
         a + x
       ]) * 2
     #[r, t, u]
+
+  // BT-3749 review: a producer in the receiver of another producer, in `^`
+  // position (the method root's discarding tail).
+  returnedFoldOfFold =>
+    t := 0
+    u := 0
+    ^((#(1, 2) collect: [:x | t := t + x])
+      inject: 0
+      into: [:a :x |
+        u := u + 1
+        a + x
+      ]) + (t * 10) + (u * 100)
+
+  // The same, as the whole value of an assignment (the rebinding tail).
+  assignedFoldOfFold =>
+    t := 0
+    u := 0
+    r := (#(1, 2) collect: [:x | t := t + x])
+      inject: 0
+      into: [:a :x |
+        u := u + 1
+        a + x
+      ]
+    #[r, t, u]

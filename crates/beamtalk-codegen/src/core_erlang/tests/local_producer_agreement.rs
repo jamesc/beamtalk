@@ -36,6 +36,10 @@ const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [u := 1. 0]",
     "#(1, 2) do: [:x | t := t + x]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
+    "#(1, 2) select: [:x | t := t + 1. true]",
+    "#(1, 2) detect: [:x | t := t + 1. x > 1]",
+    "[s < 2] whileFalse: [s := s + 1. t := t + 1]",
+    "1 to: 5 by: 2 do: [:i | t := t + i]",
 ];
 
 const POSITIONS: &[&str] = &[
@@ -46,6 +50,17 @@ const POSITIONS: &[&str] = &[
     "r := 0 max: ({c})\n#[r, t]",
     "Transcript show: ({c}) printString\nt",
     "^({c}) printString",
+    // A producer in the receiver of another producer, in `^` (the
+    // `Discard` tail) and in an assignment (the `Rebind` tail) position.
+    "^({c}) inject: 0 into: [:a :x | u := u + 1. a + x]",
+    "r := ({c}) inject: 0 into: [:a :x | u := u + 1. a + x]\n#[r, t, u]",
+    // Sends whose statement lowering does not sequence its operands: the
+    // sites stop there, so these stay Phase 0 errors (skipped below) or
+    // compile with no producer.
+    "r := super respondsTo: ({c}) printString\nr",
+    "^super respondsTo: ({c}) printString",
+    "self error: ({c}) printString\nt",
+    "r := self perform: #size with: ({c})\nr",
 ];
 
 fn sources(construct: &str, position: &str) -> [String; 3] {
@@ -110,6 +125,7 @@ fn every_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                     continue;
                 }
                 let class = &module.classes[0];
+                // A program the checks accept must compile.
                 let method = class.methods.iter().chain(&class.class_methods).next();
                 let expected = core_producers(&method.expect("one method").body);
                 let (generated, records) = recording_producers(|| {

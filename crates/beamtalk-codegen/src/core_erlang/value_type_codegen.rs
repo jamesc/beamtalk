@@ -1200,6 +1200,7 @@ impl CoreErlangGenerator {
                                 value.unwrap_parens(),
                                 &locals,
                                 super::threaded_expr::ProducerTail::Discard,
+                                super::threaded_ir::FrameId::ROOT,
                             )?)
                         } else if self.statement_has_local_producer(expr) {
                             let tv =
@@ -2274,26 +2275,17 @@ impl CoreErlangGenerator {
     /// Returns the body block of a counted loop message send
     /// (`timesRepeat:`, `to:do:`, `to:by:do:`), or `None` if `expr` is not one.
     fn counted_loop_body_block(expr: &Expression) -> Option<&Block> {
-        let Expression::MessageSend {
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        let body_arg = match sel.as_str() {
-            "timesRepeat:" if arguments.len() == 1 => &arguments[0],
-            "to:do:" if arguments.len() == 2 => &arguments[1],
-            "to:by:do:" if arguments.len() == 3 => &arguments[2],
-            _ => return None,
-        };
-        if let Expression::Block(body) = body_arg {
-            Some(body)
-        } else {
-            None
-        }
+        let (selector, body) = Self::producer_body(expr)?;
+        beamtalk_core::state_threading_selectors::is_counted_loop_selector(&selector)
+            .then_some(body)
+    }
+
+    /// The selector and literal body block of a loop or fold in
+    /// `beamtalk_core`'s one body-index table
+    /// (`state_threading_selectors::producer_body_arg_index`), shared with the
+    /// Phase 0 check and the local-threading producer.
+    fn producer_body(expr: &Expression) -> Option<(String, &Block)> {
+        beamtalk_core::semantic_analysis::block_facts::producer_body_block(expr)
     }
 
     /// Generates a non-last counted loop (`to:do:`/`to:by:do:`/`timesRepeat:`)
@@ -2352,28 +2344,10 @@ impl CoreErlangGenerator {
     /// result (state in element 2) when their body threads captured outer locals, so the
     /// same open-let extraction applies uniformly.
     fn foldl_list_op_body_block(expr: &Expression) -> Option<&Block> {
-        let Expression::MessageSend {
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        let body_arg = match sel.as_str() {
-            "collect:" | "select:" | "reject:" | "count:" | "detect:" if arguments.len() == 1 => {
-                &arguments[0]
-            }
-            "inject:into:" if arguments.len() == 2 => &arguments[1],
-            "detect:ifNone:" if arguments.len() == 2 => &arguments[0],
-            _ => return None,
-        };
-        if let Expression::Block(body) = body_arg {
-            Some(body)
-        } else {
-            None
-        }
+        let (selector, body) = Self::producer_body(expr)?;
+        (!matches!(selector.as_str(), "whileTrue:" | "whileFalse:")
+            && !beamtalk_core::state_threading_selectors::is_counted_loop_selector(&selector))
+        .then_some(body)
     }
 
     /// Generates a non-last foldl list-op (`collect:`/`select:`/`reject:`/

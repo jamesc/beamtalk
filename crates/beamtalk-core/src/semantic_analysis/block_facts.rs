@@ -1423,6 +1423,10 @@ pub fn operand_producer_writes(
 /// The Phase 0 allow-set check and codegen's producer both read this, so a
 /// construct the diagnostic accepts in operand position is exactly one the
 /// producer lowers.
+///
+/// A send whose statement lowering compiles its operands itself, without
+/// sequencing them ([`operands_not_sequenced`]), is a site but its operands
+/// are not: a producer there would leak its construct tuple.
 #[must_use]
 pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     fn operands<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
@@ -1442,6 +1446,7 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
                 });
                 if nested_construct
                     || crate::state_threading_selectors::is_conditional_selector(&selector.name())
+                    || operands_not_sequenced(receiver, selector, arguments)
                 {
                     return;
                 }
@@ -1496,6 +1501,38 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
         other => operands(other, &mut out),
     }
     out
+}
+
+/// ADR 0131 Phase 2 (BT-3749): whether the send `receiver selector: arguments`
+/// is lowered by a path that compiles its operands directly instead of
+/// sequencing them through `threaded_expression`, so a local-threading
+/// producer among them would leak its raw `{Value, State}` tuple and drop the
+/// write. Those are the actor body lowerings of a `super` send, an `error:`
+/// send, `self fieldAt:put:` / `self clearField:`, a block `value` send to a
+/// local (a possible Tier 2 call) and a self-send carrying a block argument (a
+/// possible Tier 2 self-send). Applied in every context, so the diagnostic does
+/// not depend on which method kind it sits in.
+#[must_use]
+fn operands_not_sequenced(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    use crate::ast::WellKnownSelector;
+    let is_self = matches!(receiver, Expression::Identifier(id) if id.name == "self");
+    matches!(receiver, Expression::Super(_))
+        || matches!(
+            selector.well_known(),
+            Some(WellKnownSelector::Error)
+                if arguments.len() == 1
+        )
+        || (is_self
+            && matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::FieldAtPut | WellKnownSelector::ClearField)
+            ))
+        || (selector.is_block_invocation() && matches!(receiver, Expression::Identifier(_)))
+        || (is_self && arguments.iter().any(|a| matches!(a, Expression::Block(_))))
 }
 
 fn walk_construct_blocks(

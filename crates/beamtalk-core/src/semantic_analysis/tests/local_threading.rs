@@ -901,3 +901,28 @@ fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
         }
     }
 }
+
+/// BT-3749 review: a statement whose actor lowering compiles its operands
+/// without sequencing them (`super`, `error:`, `fieldAt:put:`, a stored-block
+/// `value:` call, a self-send with a block argument) must not make a fold in
+/// its operands a producer site: the fold's construct tuple would leak and
+/// the write be dropped. They stay Phase 0 errors in every context.
+#[test]
+fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
+    let fold = "(#(1, 2) collect: [:x | t := t + x])";
+    for body in [
+        format!("r := super respondsTo: {fold} printString\nr"),
+        format!("^super respondsTo: {fold} printString"),
+        format!("self error: {fold} printString\nt"),
+        format!("b := [:x | x]\nr := b value: {fold}\nr"),
+        format!("r := self pick: [1] with: {fold}\nr"),
+    ] {
+        for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
