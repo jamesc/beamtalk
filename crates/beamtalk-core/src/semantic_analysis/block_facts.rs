@@ -1508,8 +1508,9 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 /// sequencing them through `threaded_expression`, so a local-threading
 /// producer among them would leak its raw `{Value, State}` tuple and drop the
 /// write. Those are the actor body lowerings of a `super` send, an `error:`
-/// send, `self fieldAt:put:` / `self clearField:`, a block `value` send to a
-/// local (a possible Tier 2 call) and a self-send carrying a block argument (a
+/// send, `self fieldAt:put:` / `self clearField:`, a block `value`-family send
+/// (`value:`, `valueWithArguments:`; a possible Tier 2 call on a local or a
+/// `self.field`) and a self-send carrying a block argument (a
 /// possible Tier 2 self-send). Applied in every context, so the diagnostic does
 /// not depend on which method kind it sits in.
 #[must_use]
@@ -1531,7 +1532,7 @@ fn operands_not_sequenced(
                 selector.well_known(),
                 Some(WellKnownSelector::FieldAtPut | WellKnownSelector::ClearField)
             ))
-        || (selector.is_block_invocation() && matches!(receiver, Expression::Identifier(_)))
+        || selector.is_block_invocation()
         || (is_self && arguments.iter().any(|a| matches!(a, Expression::Block(_))))
 }
 

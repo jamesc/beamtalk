@@ -61,6 +61,9 @@ const POSITIONS: &[&str] = &[
     "^super respondsTo: ({c}) printString",
     "self error: ({c}) printString\nt",
     "r := self perform: #size with: ({c})\nr",
+    "r := self.blk valueWithArguments: ({c})\nr",
+    "^self.blk valueWithArguments: ({c})",
+    "self.blk valueWithArguments: ({c})\nt",
 ];
 
 fn sources(construct: &str, position: &str) -> [String; 3] {
@@ -78,7 +81,9 @@ fn sources(construct: &str, position: &str) -> [String; 3] {
     [
         format!("Object subclass: AgreeClass\n  class go =>\n{body}"),
         format!("Value subclass: AgreeValue\n  go =>\n{body}"),
-        format!("Actor subclass: AgreeActor\n  state: n = 0\n\n  go =>\n{body}"),
+        format!(
+            "Actor subclass: AgreeActor\n  state: n = 0\n  state: blk = nil\n\n  go =>\n{body}"
+        ),
     ]
 }
 

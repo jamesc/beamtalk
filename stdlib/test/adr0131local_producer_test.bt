@@ -50,3 +50,9 @@ TestCase subclass: Adr0131LocalProducerTest
 
   testAssignedFoldOfFold =>
     self assertAll: #assignedFoldOfFold equal: #[4, 3, 2]
+
+  testParenthesisedLoopStatement =>
+    self assertAll: #parenthesisedLoopStatement equal: 9
+
+  testParenthesisedFoldLast =>
+    self assertAll: #parenthesisedFoldLast equal: #(1, 3)

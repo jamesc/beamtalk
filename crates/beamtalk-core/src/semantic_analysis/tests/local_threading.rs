@@ -916,6 +916,10 @@ fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
         format!("self error: {fold} printString\nt"),
         format!("b := [:x | x]\nr := b value: {fold}\nr"),
         format!("r := self pick: [1] with: {fold}\nr"),
+        format!("r := self.blk valueWithArguments: {fold}\nr"),
+        format!("^self.blk valueWithArguments: {fold}"),
+        format!("self.blk valueWithArguments: {fold}\nt"),
+        format!("r := self.blk value: {fold}\nr"),
     ] {
         for src in [in_class(&body), in_value(&body), in_actor(&body)] {
             let diags = adr0131_diagnostics(&src);

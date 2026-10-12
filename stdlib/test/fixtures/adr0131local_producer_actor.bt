@@ -153,3 +153,15 @@ Actor subclass: Adr0131LocalProducerActor
         a + x
       ]
     #[r, t, u]
+
+  // BT-3749 review: a parenthesised loop / fold statement that writes a local
+  // (the producer recognizer peels the parentheses).
+  parenthesisedLoopStatement =>
+    t := 0
+    (1 to: 3 do: [:i | t := t + i])
+    (#(1, 2) collect: [:x | t := t + x])
+    t
+
+  parenthesisedFoldLast =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x])
