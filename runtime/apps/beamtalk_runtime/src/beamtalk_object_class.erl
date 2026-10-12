@@ -1392,32 +1392,24 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
             %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
             NewModule = NewState#class_state.module,
-            case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
-                true ->
-                    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0
-                    %% literal getter, no block
-                    try NewModule:'__beamtalk_meta'() of
-                        Meta when is_map(Meta) ->
-                            %% This `update_class` path is hit by ordinary
-                            %% stdlib bootstrap too (the metaclass-tower
-                            %% stubs are registered, then `update_class`'d
-                            %% when their compiled `.bt` modules load) — not
-                            %% just live hot-reload — so it needs the same
-                            %% "compiler server may be absent" guard as the
-                            %% on_load registration path above.
-                            notify_compiler_server_register(ClassName, Meta);
-                        _ ->
-                            ok
-                    catch
-                        Kind:Reason:ST ->
-                            ?LOG_DEBUG(
-                                "Failed to read __beamtalk_meta from ~p: ~p:~p",
-                                [NewModule, Kind, Reason],
-                                #{stacktrace => ST, domain => [beamtalk, runtime]}
-                            ),
-                            ok
-                    end;
-                false ->
+            NewMeta = beamtalk_class_metadata:read_meta_detailed(NewModule),
+            case NewMeta of
+                {ok, Meta} ->
+                    %% This `update_class` path is hit by ordinary
+                    %% stdlib bootstrap too (the metaclass-tower
+                    %% stubs are registered, then `update_class`'d
+                    %% when their compiled `.bt` modules load) — not
+                    %% just live hot-reload — so it needs the same
+                    %% "compiler server may be absent" guard as the
+                    %% on_load registration path above.
+                    notify_compiler_server_register(ClassName, Meta);
+                {invalid, Why} ->
+                    ?LOG_DEBUG(
+                        "Failed to read __beamtalk_meta from ~p: ~p",
+                        [NewModule, Why],
+                        #{domain => [beamtalk, runtime]}
+                    );
+                none ->
                     ok
             end,
             %% ADR 0087 Phase 2: Refresh the xref index on class
@@ -1455,14 +1447,9 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% out — found via BT-3593's own fan-out test coverage actually
             %% exercising `users_of/1` end-to-end for the first time.
             UsesForRegistration =
-                case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
-                    true ->
-                        case NewModule:'__beamtalk_meta'() of
-                            #{uses := Uses} -> Uses;
-                            _ -> maps:get(uses, ClassInfo, [])
-                        end;
-                    false ->
-                        maps:get(uses, ClassInfo, [])
+                case NewMeta of
+                    {ok, #{uses := Uses}} -> Uses;
+                    _ -> maps:get(uses, ClassInfo, [])
                 end,
             beamtalk_protocol_registry:register_uses(ClassName, UsesForRegistration),
             %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
@@ -2097,18 +2084,9 @@ ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
 """.
 -spec read_meta(atom()) -> map().
 read_meta(Module) ->
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
-            %% getter, no block
-            try Module:'__beamtalk_meta'() of
-                M when is_map(M) -> M;
-                _ -> #{}
-            catch
-                _:_ -> #{}
-            end;
-        false ->
-            #{}
+    case beamtalk_class_metadata:read_meta(Module) of
+        {ok, M} -> M;
+        not_available -> #{}
     end.
 
 -doc """

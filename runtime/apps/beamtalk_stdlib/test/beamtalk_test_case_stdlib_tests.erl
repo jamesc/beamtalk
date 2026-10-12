@@ -396,17 +396,23 @@ decode_error_timeout_test() ->
 
 %%% ============================================================================
 %%% run_all/1, run_single/2, run_all_structured/1, run_single_structured/2
-%%% BIF-fallback paths (lines 221–360) — require bt@tc_stub on code path
+%%% BIF-fallback paths — require bt@tc_stub on code path
+%%%
+%%% bt@tc_stub and bt@empty_stub are bare modules, not registered classes, so
+%%% class_test_plan/1 finds no tests for them (BT-3786: tests come from the
+%%% class hierarchy, never from module exports). A named method still runs.
+%%% Discovery against registered classes, inherited tests included, is
+%%% covered by bif_fallback_bif_path_test_/0 below and by
+%%% beamtalk_test_runner_tests:inherited_tests_test_/0.
 %%% ============================================================================
 
-run_all_with_tests_test() ->
-    %% resolve_module('TcStub') → 'bt@tc_stub'; discover finds testStubPass + testStubFail
+run_all_unregistered_class_has_no_tests_test() ->
+    %% TcStub's module exports testStubPass/testStubFail, but exports are not
+    %% a test source: the class is not registered, so there are no tests.
     Result = beamtalk_test_case:run_all('TcStub'),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"failed">>)).
+    ?assertEqual(<<"No test methods found in TcStub">>, Result).
 
 run_all_no_test_methods_test() ->
-    %% resolve_module('EmptyStub') → 'bt@empty_stub'; no test* exports → "No test methods"
     Result = beamtalk_test_case:run_all('EmptyStub'),
     ?assert(is_binary(Result)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"No test methods">>)).
@@ -422,7 +428,6 @@ run_single_fail_test() ->
     ?assertNotEqual(nomatch, binary:match(Result, <<"failed">>)).
 
 run_all_structured_no_test_methods_test() ->
-    %% 'bt@empty_stub' has no test* exports → no-test-methods branch (lines 295–307)
     Result = beamtalk_test_case:run_all_structured('EmptyStub'),
     ?assert(is_map(Result)),
     ?assertEqual('EmptyStub', maps:get(class, Result)),
@@ -430,13 +435,11 @@ run_all_structured_no_test_methods_test() ->
     ?assertEqual(0, maps:get(passed, Result)),
     ?assertEqual([], maps:get(tests, Result)).
 
-run_all_structured_with_tests_test() ->
+run_all_structured_unregistered_class_has_no_tests_test() ->
     Result = beamtalk_test_case:run_all_structured('TcStub'),
-    ?assert(is_map(Result)),
     ?assertEqual('TcStub', maps:get(class, Result)),
-    ?assert(is_integer(maps:get(total, Result))),
-    ?assert(maps:get(total, Result) > 0),
-    ?assert(is_list(maps:get(tests, Result))).
+    ?assertEqual(0, maps:get(total, Result)),
+    ?assertEqual([], maps:get(tests, Result)).
 
 run_single_structured_pass_test() ->
     Result = beamtalk_test_case:run_single_structured('TcStub', testStubPass),
@@ -461,16 +464,15 @@ run_single_structured_fail_test() ->
 %%% NOT a hand-written .erl stub like bt@tc_stub.erl above.
 %%%
 %%% A hand-written .erl module gets module_info/0,1 auto-injected by the
-%%% ordinary erlc pipeline, so the run_all_with_tests_test() etc. tests above
-%%% never exercised the actual bug: Beamtalk's Core Erlang codegen compiles
+%%% ordinary erlc pipeline, so the bt@tc_stub tests above never exercised
+%%% the actual bug: Beamtalk's Core Erlang codegen compiles
 %%% straight to Core Erlang via compile:forms(..., [from_core | Opts])
 %%% (CLAUDE.md), which never runs the sys_pre_expand pass that injects
 %%% module_info/0,1 — so a genuinely compiled bt@ module has no
 %%% module_info/1, and Module:module_info(exports) raised an uncaught undef
-%%% for one. discover_test_methods_from_module/1, check_lifecycle_methods/2,
-%%% and check_suite_lifecycle_methods/2 now go through
-%%% beamtalk_module_activation:safe_module_exports/1 instead, which reads
-%%% the compiled Exports chunk directly and never depends on module_info/1.
+%%% for one. Since BT-3786 the BIF-fallback path reads no module exports at
+%%% all: tests and lifecycle methods come from
+%%% beamtalk_test_case:class_test_plan/1, i.e. the class hierarchy.
 %%%
 %%% BifFallbackTestCase's testPasses/testFails inherit assert:equals: from
 %%% the real test_case.bt hierarchy, so the class registry must actually be
@@ -503,9 +505,8 @@ bif_fallback_setup() ->
 bif_fallback_bif_path_test_() ->
     {setup, fun bif_fallback_setup/0, fun(_) -> ok end, [
         {"run_all/1 discovers + runs both test methods without crashing", fun() ->
-            %% resolve_module('BifFallbackTestCase') -> 'bt@bif_fallback_test_case';
-            %% discover_test_methods_from_module/1 finds testPasses + testFails via
-            %% safe_module_exports/1. Pre-fix, this raised an uncaught `undef`.
+            %% class_test_plan/1 finds testPasses + testFails from the
+            %% registered class. Pre-BT-3251, this raised an uncaught `undef`.
             Result = beamtalk_test_case:run_all('BifFallbackTestCase'),
             ?assert(is_binary(Result)),
             %% Use ?assertEqual on mismatch so EUnit shows the full binary on failure.
@@ -531,7 +532,7 @@ bif_fallback_bif_path_test_() ->
             %% Exercises check_lifecycle_methods/2 and
             %% check_suite_lifecycle_methods/2 too (the fixture has
             %% setUp/tearDown and setUpOnce/tearDownOnce), not just
-            %% discover_test_methods_from_module/1.
+            %% test discovery.
             Result = beamtalk_test_case:run_all_structured('BifFallbackTestCase'),
             ?assert(is_map(Result)),
             ?assertEqual('BifFallbackTestCase', maps:get(class, Result)),

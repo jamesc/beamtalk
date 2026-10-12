@@ -1618,18 +1618,9 @@ selected_clause(Clauses, Selector) ->
 %% Non-native / non-Beamtalk modules don't export it → `#{}`.
 -spec native_meta_of(atom()) -> map().
 native_meta_of(ModName) when is_atom(ModName) ->
-    case erlang:function_exported(ModName, '__beamtalk_meta', 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
-            %% getter, no block
-            try ModName:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> Meta;
-                _ -> #{}
-            catch
-                _:_ -> #{}
-            end;
-        false ->
-            #{}
+    case beamtalk_class_metadata:read_meta(ModName) of
+        {ok, Meta} -> Meta;
+        not_available -> #{}
     end.
 
 -spec meta_is_native(map()) -> boolean().
