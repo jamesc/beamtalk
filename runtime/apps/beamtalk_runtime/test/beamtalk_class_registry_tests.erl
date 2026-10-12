@@ -765,11 +765,11 @@ pid_table_survives_owner_death_test_() ->
                 ok
         end,
         fun() ->
-            %% When runtime sup is alive, heir option is set and the table
+            %% When the ETS heir is alive, heir option is set and the table
             %% should survive the creating process dying.
-            case whereis(beamtalk_runtime_sup) of
+            case whereis(beamtalk_ets_heir) of
                 undefined ->
-                    %% Can't test heir behavior without the supervisor.
+                    %% Can't test heir behavior without the heir process.
                     %% Just verify ensure_pid_table is idempotent.
                     beamtalk_class_registry:ensure_pid_table(),
                     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids));
@@ -813,7 +813,7 @@ pid_table_survives_owner_death_test_() ->
                                     after 5000 ->
                                         ?assert(false)
                                     end,
-                                    %% Table should still exist (inherited by supervisor)
+                                    %% Table should still exist (inherited by beamtalk_ets_heir)
                                     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids))
                             after 5000 ->
                                 ?assert(false)
@@ -825,11 +825,9 @@ pid_table_survives_owner_death_test_() ->
             end
         end}.
 
-heir_option_returns_empty_when_no_supervisor_test() ->
-    %% heir_option/0 is private but we can test via ensure_pid_table behavior.
-    %% When no runtime supervisor is running, ensure_pid_table still creates the table.
-    %% We can't easily test the private function directly, but we verify that
-    %% the table creation doesn't crash regardless of supervisor state.
+heir_option_returns_empty_when_no_heir_test() ->
+    %% ensure_pid_table creates the table whether or not `beamtalk_ets_heir`
+    %% is running (`beamtalk_ets_heir_tests` covers heir_option/0 directly).
     beamtalk_class_registry:ensure_pid_table(),
     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids)).
 
@@ -1131,55 +1129,55 @@ bt1982_ensure_pg_started_idempotent_test() ->
     ok = beamtalk_class_registry:ensure_pg_started(),
     ?assert(is_pid(whereis(pg))).
 
-%% maybe_set_heir runs when supervisor is alive; covers the SupPid-alive branch.
-%% If the real supervisor is running (test suite with full app) we use it;
+%% maybe_set_heir runs when the ETS heir is alive; covers the heir-alive branch.
+%% If the real heir is running (test suite with full app) we use it;
 %% otherwise we register a fake pid temporarily.
-bt1982_maybe_set_heir_with_supervisor_test() ->
-    case whereis(beamtalk_runtime_sup) of
-        RealSup when is_pid(RealSup) ->
-            %% Real supervisor running — exercise the branch directly.
+bt1982_maybe_set_heir_with_heir_process_test() ->
+    case whereis(beamtalk_ets_heir) of
+        RealHeir when is_pid(RealHeir) ->
+            %% Real heir running — exercise the branch directly.
             ok = beamtalk_class_registry:ensure_class_warnings_table(),
             ok = beamtalk_class_registry:ensure_class_warnings_table();
         undefined ->
             beamtalk_class_registry:ensure_pg_started(),
-            FakeSupPid = spawn(fun() ->
+            FakeHeirPid = spawn(fun() ->
                 receive
                     stop -> ok
                 end
             end),
             try
-                erlang:register(beamtalk_runtime_sup, FakeSupPid),
+                erlang:register(beamtalk_ets_heir, FakeHeirPid),
                 case ets:info(beamtalk_class_warnings) of
                     undefined -> beamtalk_class_registry:ensure_class_warnings_table();
                     _ -> ok
                 end,
                 ok = beamtalk_class_registry:ensure_class_warnings_table()
             after
-                catch erlang:unregister(beamtalk_runtime_sup),
-                FakeSupPid ! stop
+                catch erlang:unregister(beamtalk_ets_heir),
+                FakeHeirPid ! stop
             end
     end.
 
-%% heir_option with a live supervisor returns a non-empty list. Works whether
-%% or not a real supervisor is registered.
-bt1982_heir_option_with_supervisor_test() ->
-    case whereis(beamtalk_runtime_sup) of
-        RealSup when is_pid(RealSup) ->
+%% heir_option with a live heir process returns a non-empty list. Works whether
+%% or not a real heir is registered.
+bt1982_heir_option_with_heir_process_test() ->
+    case whereis(beamtalk_ets_heir) of
+        RealHeir when is_pid(RealHeir) ->
             beamtalk_class_registry:ensure_pending_errors_table(),
             ?assert(true);
         undefined ->
-            FakeSupPid = spawn(fun() ->
+            FakeHeirPid = spawn(fun() ->
                 receive
                     stop -> ok
                 end
             end),
             try
-                erlang:register(beamtalk_runtime_sup, FakeSupPid),
+                erlang:register(beamtalk_ets_heir, FakeHeirPid),
                 beamtalk_class_registry:ensure_pending_errors_table(),
                 ?assert(true)
             after
-                catch erlang:unregister(beamtalk_runtime_sup),
-                FakeSupPid ! stop
+                catch erlang:unregister(beamtalk_ets_heir),
+                FakeHeirPid ! stop
             end
     end.
 

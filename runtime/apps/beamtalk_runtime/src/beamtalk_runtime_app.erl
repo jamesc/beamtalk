@@ -44,6 +44,11 @@ start(_StartType, _StartArgs) ->
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_loaded_classes_table(),
 
+    %% Create the classState: snapshot table at app startup (BT-3787) rather
+    %% than in the first class gen_server's init/1, so a class-process crash
+    %% never hands it off.
+    beamtalk_class_registry:ensure_class_state_table(),
+
     %% Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
@@ -72,18 +77,12 @@ start(_StartType, _StartArgs) ->
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
         {ok, _} = Ok ->
-            %% Now that the supervisor is alive, retroactively set the
-            %% heir on ETS tables created above (before the supervisor existed).
-            %% This ensures the tables survive even if the application controller
-            %% process is replaced.
-            beamtalk_class_registry:ensure_pid_table(),
-            beamtalk_class_registry:ensure_loaded_classes_table(),
-            beamtalk_class_registry:ensure_class_warnings_table(),
             beamtalk_class_registry:ensure_pending_errors_table(),
-            beamtalk_class_registry:ensure_backing_module_index_table(),
-            %% Same retroactive heir set for the unified class metadata
-            %% table (created at line 31 before the supervisor existed).
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            %% Now that `beamtalk_ets_heir` (the supervisor's first child) is
+            %% alive, retroactively make it the heir of every ETS table created
+            %% above, before it existed. This ensures the tables survive even
+            %% if the application master process is replaced.
+            ok = beamtalk_ets_heir:adopt_owned_tables(),
             %% ADR 0036 Phase 1: Post-bootstrap self-grounding assertion.
             %% Validates that Metaclass class class == Metaclass class holds
             %% after bootstrap. This is a soft assertion (logs on failure, does not crash).
