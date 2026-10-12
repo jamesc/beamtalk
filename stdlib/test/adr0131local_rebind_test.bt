@@ -141,20 +141,16 @@ TestCase subclass: Adr0131LocalRebindTest
 
   // ADR 0131 Phase 2 (BT-3749): a loop or fold in operand position is a
   // local-threading producer in every method context.
-  testO4Class =>
-    self assert: (Adr0131LocalRebindClass o4) equals: #[2, 3]
+  testO4Class => self assert: (Adr0131LocalRebindClass o4) equals: #[2, 3]
 
-  testO4Value =>
-    self assert: ((Adr0131LocalRebindValue new) o4) equals: #[2, 3]
+  testO4Value => self assert: ((Adr0131LocalRebindValue new) o4) equals: #[2, 3]
 
   testO4Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) o4) equals: #[2, 3]
 
-  testS9Class =>
-    self assert: (Adr0131LocalRebindClass s9) equals: #[2, 2]
+  testS9Class => self assert: (Adr0131LocalRebindClass s9) equals: #[2, 2]
 
-  testS9Value =>
-    self assert: ((Adr0131LocalRebindValue new) s9) equals: #[2, 2]
+  testS9Value => self assert: ((Adr0131LocalRebindValue new) s9) equals: #[2, 2]
 
   testS9Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) s9) equals: #[2, 2]
