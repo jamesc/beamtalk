@@ -1073,7 +1073,7 @@ impl CoreErlangGenerator {
     /// [`CoreErlangGenerator::loop_body_threads_value_self`]), so this reads
     /// only `families.as_slice().first()`. Returns `None` when the construct
     /// carries no extra slot at all.
-    fn extract_vt_loop_family_slot(
+    pub(in crate::core_erlang) fn extract_vt_loop_family_slot(
         &mut self,
         tuple_var: &str,
         families: &ThreadedFamilies,
@@ -1189,6 +1189,16 @@ impl CoreErlangGenerator {
         body: &[&Expression],
         has_nlr: bool,
     ) -> Result<Vec<Document<'static>>> {
+        self.with_local_producer_sites(body, |this| this.generate_vt_body_exprs_in_sites(body, has_nlr))
+    }
+
+    /// [`Self::generate_vt_body_exprs`] once the method body's local-producer
+    /// sites are set (ADR 0131 Phase 2).
+    fn generate_vt_body_exprs_in_sites(
+        &mut self,
+        body: &[&Expression],
+        has_nlr: bool,
+    ) -> Result<Vec<Document<'static>>> {
         let mut body_parts: Vec<Document<'static>> = Vec::with_capacity(body.len());
         let body_len = body.len();
 
@@ -1196,10 +1206,70 @@ impl CoreErlangGenerator {
             let kind = self.classify_vt_body_expr(expr);
             let is_last = i == body_len - 1;
 
+            // ADR 0131 Phase 2: a local-threading producer in this statement
+            // rebinds its locals at the method root, so the statement is
+            // lowered through `threaded_expression` with its prelude spliced
+            // (`lower_root_statement_with_producer`, shared with class
+            // methods).
+            if !matches!(kind, VtBodyExprKind::EarlyReturn) {
+                let mut stmts = Vec::new();
+                if let Some(result_var) =
+                    self.lower_root_statement_with_producer(expr, &mut stmts)?
+                {
+                    let doc = self.verified_root_prelude_doc(&stmts, expr.span());
+                    body_parts.push(docvec!["    ", doc, "\n"]);
+                    if is_last {
+                        body_parts.push(self.threading_result_tail(
+                            &result_var,
+                            None,
+                            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                        ));
+                    }
+                    continue;
+                }
+            }
+
             // Early return (^) at the method body level — emit value and stop generating.
             // Note: ^ inside a block is handled via the NLR throw mechanism.
             if matches!(kind, VtBodyExprKind::EarlyReturn) {
                 if let Expression::Return { value, .. } = expr {
+                    // ADR 0131 Phase 2: `^<loop or fold>`, or a `^` value
+                    // with one at an operand site — the producer's prelude
+                    // runs before the value is returned.
+                    let threaded_value = if let Some(locals) =
+                        self.construct_tuple_locals(value.unwrap_parens())
+                    {
+                        Some(self.lower_local_threading_construct(
+                            value.unwrap_parens(),
+                            &locals,
+                            super::threaded_expr::ProducerTail::Discard,
+                        )?)
+                    } else if self.statement_has_local_producer(expr) {
+                        let tv = self.threaded_expression(value, super::threaded_ir::FrameId::ROOT)?;
+                        Some((tv.prelude, tv.value))
+                    } else {
+                        None
+                    };
+                    if let Some((prelude, value)) = threaded_value {
+                        let prelude_doc = self.verified_root_prelude_doc(&prelude, expr.span());
+                        let value_doc = self.threaded_value_doc(&value);
+                        let result_var = self.fresh_temp_var("EarlyResult");
+                        body_parts.push(docvec![
+                            "    ",
+                            prelude_doc,
+                            "let ",
+                            leaf::var(result_var.clone()),
+                            " = ",
+                            value_doc,
+                            " in\n",
+                        ]);
+                        body_parts.push(self.threading_result_tail(
+                            &result_var,
+                            None,
+                            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                        ));
+                        break;
+                    }
                     if has_nlr {
                         // NLR methods return {Result, Self{N}} tuple so
                         // the normal and NLR catch paths produce the same shape.
@@ -2207,7 +2277,7 @@ impl CoreErlangGenerator {
     /// result is a [`ThreadedFamilies`], the same type
     /// [`Self::extract_vt_loop_family_slot`] and
     /// `while_loops.rs`/`counted_loops.rs`'s own exit-arm tuple share.
-    fn vt_loop_threaded_families(&self, expr: &Expression) -> ThreadedFamilies {
+    pub(in crate::core_erlang) fn vt_loop_threaded_families(&self, expr: &Expression) -> ThreadedFamilies {
         let expr = expr.unwrap_parens();
         let body = if self.is_while_with_vt_local_threading(expr) {
             match expr {

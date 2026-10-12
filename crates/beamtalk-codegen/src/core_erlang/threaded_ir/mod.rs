@@ -71,15 +71,16 @@ pub(super) use build::{
     backfill_opaque_version_gaps, build_tuple_acc_unpack, verify_body_with_opaque_version_gaps,
     verify_simple_bind,
 };
-// ADR 0131 Phase 1b: the local-rebind prelude nodes' builders and types.
-// Test-only until Phase 2's `local_threading_producer` (the first production
-// caller) imports them — `#[cfg(test)]` for the same reason as
-// `AccParam`/`CloseContext` below.
-#[cfg(test)]
+// ADR 0131: the local-rebind prelude nodes' builders and types. Phase 2's
+// `local_threading_producer` (BT-3749) is the first production caller of
+// the method-root ones; the frame-node builders stay test-only until the
+// phases that lower inside those frames (`#[cfg(test)]` for the same reason
+// as `AccParam`/`CloseContext` below).
 pub(super) use build::{
-    ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
-    build_local_rebind, build_local_threading_prelude, build_method_body,
+    ThreadedLocalSlot, build_construct_tuple, build_discard_locals, build_local_threading_prelude,
 };
+#[cfg(test)]
+pub(super) use build::{build_branch_arm, build_local_rebind, build_method_body};
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::{
@@ -87,8 +88,9 @@ pub(super) use ir::{
     StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
     ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
+pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 #[cfg(test)]
-pub(super) use ir::{CarrierSlot, RebindFrame, RebindFrameKind, RebindLowering, RebindShape};
+pub(super) use ir::RebindFrameKind;
 pub(super) use verify::{SequencedSibling, verify_sibling_reads};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name

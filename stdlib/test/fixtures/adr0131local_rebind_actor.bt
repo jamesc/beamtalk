@@ -13,7 +13,9 @@
 // Every shape compiled in an actor instance method before BT-3745. Since
 // BT-3745 (ADR 0131 Phase 0b) the ones that crashed or answered wrong (o1-o4,
 // o6-o10, o12, s1, s2, s9, seq) are compile errors and live in
-// adr0131local_rebind_actor_pending.bt.pending, so this module compiles.
+// adr0131local_rebind_actor_pending.bt.pending, so this module compiles. o4
+// and s9 moved back when ADR 0131 Phase 2 (BT-3749) made loops and folds
+// local-threading producers.
 
 Actor subclass: Adr0131LocalRebindActor
   state: n = 0
@@ -150,3 +152,17 @@ Actor subclass: Adr0131LocalRebindActor
     t := 0
     [t := t + 1] value
     t
+
+  o4 =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  s9 =>
+    t := 0
+    r := (#(1, 2)
+      reject: [:x |
+        t := t + 1
+        false
+      ]) size
+    #[r, t]

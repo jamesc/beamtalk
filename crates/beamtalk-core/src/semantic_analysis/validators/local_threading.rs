@@ -46,8 +46,8 @@ use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
-    is_safe_value_family_selector, local_threading_construct, outer_local_writes,
-    stored_block_var_uses,
+    is_safe_value_family_selector, local_threading_construct, operand_producer_writes,
+    outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -809,6 +809,10 @@ struct Walker<'d> {
     /// ([`stored_block_var_uses`], shared with codegen's
     /// `prescan_tier2_local_vars`).
     safe_stored_uses: HashMap<EcoString, bool>,
+    /// The spans of the current method-body statement's
+    /// [`sequenced_operand_sites`]: where a loop or fold is lowered as an
+    /// ADR 0131 local-threading producer (BT-3749).
+    operand_sites: HashSet<Span>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -864,6 +868,7 @@ impl<'d> Walker<'d> {
             tier2_locals: HashMap::new(),
             reported_locals: HashSet::new(),
             safe_stored_uses,
+            operand_sites: HashSet::new(),
             diagnostics,
         }
     }
@@ -915,6 +920,12 @@ impl<'d> Walker<'d> {
         for (i, stmt) in body.iter().enumerate() {
             if let Some(last) = self.last_statements.last_mut() {
                 *last = i + 1 == body.len();
+            }
+            if self.depth == 0 {
+                self.operand_sites = sequenced_operand_sites(&stmt.expression)
+                    .into_iter()
+                    .map(Expression::span)
+                    .collect();
             }
             self.expr(&stmt.expression, Position::Statement);
         }
@@ -1171,6 +1182,16 @@ impl<'d> Walker<'d> {
         let Some(first) = writes.first().cloned() else {
             return;
         };
+        // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
+        // site of a method-body statement is a local-threading producer in
+        // every method context but the REPL, wherever it sits there.
+        if self.depth == 0
+            && self.context != Repl
+            && self.operand_sites.contains(&expr.span())
+            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
+        {
+            return;
+        }
         let handler_writes = selector == "detect:ifNone:"
             && matches!(
                 expr.unwrap_parens(),

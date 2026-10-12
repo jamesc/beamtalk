@@ -1337,6 +1337,158 @@ pub fn expression_threaded_writes(
     walker.writes
 }
 
+/// ADR 0131 Phase 2 (BT-3749): a loop or fold in
+/// [`crate::state_threading_selectors::producer_body_arg_index`]'s table, as
+/// its selector and its literal body block, or `None`.
+#[must_use]
+pub fn producer_body_block(expr: &Expression) -> Option<(String, &Block)> {
+    let Expression::MessageSend {
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+    let index = crate::state_threading_selectors::producer_body_arg_index(&sel, arguments.len())?;
+    match arguments.get(index) {
+        Some(Expression::Block(body)) => Some((sel, body)),
+        _ => None,
+    }
+}
+
+/// ADR 0131 Phase 2 (BT-3749): the threaded set of a loop or fold that
+/// codegen lowers as a local-threading producer in operand position, or
+/// `None` when `expr` is not one.
+///
+/// `expr` qualifies when it is a [`producer_body_block`] send whose
+/// threaded set ([`construct_outer_local_writes`]) is not empty and equals
+/// the set its tuple packs today ([`threaded_today_block_writes`] over the
+/// body block, plus the condition block of `whileTrue:`/`whileFalse:`). A
+/// construct whose set is larger than what it packs (a `detect:ifNone:`
+/// handler write, a write inside a nested lookup or `tryDo:`) would drop
+/// the difference, so it does not qualify.
+///
+/// Read by the Phase 0 allow-set check; codegen's producer applies the same
+/// rule through `threaded_locals_of` (`ThreadedLocals::lowered ==
+/// ThreadedLocals::names`).
+#[must_use]
+pub fn operand_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Option<Vec<OuterLocalWrite>> {
+    let (sel, body) = producer_body_block(expr)?;
+    let construct = local_threading_construct(expr)?;
+    let mut packed: Vec<&Block> = Vec::with_capacity(2);
+    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
+        if let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() {
+            match receiver.as_ref() {
+                Expression::Block(cond) => packed.push(cond),
+                _ => return None,
+            }
+        }
+    }
+    packed.push(body);
+    let names = |writes: &[OuterLocalWrite]| {
+        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.into_iter().map(str::to_string).collect::<Vec<_>>()
+    };
+    let all = construct_outer_local_writes(&construct, bound_outside);
+    let today = threaded_today_block_writes(&packed, bound_outside);
+    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
+}
+
+/// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
+/// statement `stmt` that codegen's sequencing rule (ADR 0118 §Decision 3,
+/// `threaded_expression`) compiles ahead of their parent and splices into
+/// the method body, so a local-threading producer there rebinds its locals
+/// at the method root (ADR 0131 §2's `MethodBody` row).
+///
+/// From the value of `x := V` or `^V`, or from a statement that is a plain
+/// send: every receiver and non-block argument of a send that is not
+/// itself a local-threading construct, a conditional or a cast (whose
+/// receivers and arguments their own lowerings compile), and every element
+/// of a literal array, list or map. A local-threading construct reached
+/// this way is a site but is not descended into. The statement itself is
+/// not a site (statement positions keep their own lowering), nor is
+/// anything inside a block, a cascade, a field assignment's value, a
+/// destructuring, a `match:` or an interpolation.
+///
+/// The Phase 0 allow-set check and codegen's producer both read this, so a
+/// construct the diagnostic accepts in operand position is exactly one the
+/// producer lowers.
+#[must_use]
+pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
+    fn operands<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+        match expr.unwrap_parens() {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                is_cast: false,
+                ..
+            } => {
+                if local_threading_construct(expr).is_some()
+                    || crate::state_threading_selectors::is_conditional_selector(&selector.name())
+                {
+                    return;
+                }
+                if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_none() {
+                    site(receiver, out);
+                }
+                for arg in arguments {
+                    if !matches!(arg, Expression::Block(_)) {
+                        site(arg, out);
+                    }
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for e in elements {
+                    site(e, out);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements {
+                    site(e, out);
+                }
+                if let Some(t) = tail {
+                    site(t, out);
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    site(&pair.key, out);
+                    site(&pair.value, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn site<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+        let inner = expr.unwrap_parens();
+        if matches!(inner, Expression::Block(_)) {
+            return;
+        }
+        out.push(inner);
+        operands(inner, out);
+    }
+    let mut out = Vec::new();
+    match stmt.unwrap_parens() {
+        Expression::Assignment { target, value, .. }
+            if matches!(target.as_ref(), Expression::Identifier(_)) =>
+        {
+            site(value, &mut out);
+        }
+        Expression::Return { value, .. } => site(value, &mut out),
+        other => operands(other, &mut out),
+    }
+    out
+}
+
 fn walk_construct_blocks(
     blocks: &[&Block],
     bound_outside: &dyn Fn(&str) -> bool,

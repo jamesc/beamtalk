@@ -61,14 +61,8 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testO3Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) o3) equals: #[2, 1]
 
-  testO4Class =>
-    self assert: (Adr0131LocalRebindClassPending o4) equals: #[2, 3]
 
-  testO4Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o4) equals: #[2, 3]
 
-  testO4Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o4) equals: #[2, 3]
 
   testO5Class =>
     self assert: (Adr0131LocalRebindClassPending o5) equals: #[1, 1]
@@ -145,14 +139,8 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testS7Value =>
     self assert: ((Adr0131LocalRebindValuePending new) s7) equals: #[1, 1]
 
-  testS9Class =>
-    self assert: (Adr0131LocalRebindClassPending s9) equals: #[2, 2]
 
-  testS9Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) s9) equals: #[2, 2]
 
-  testS9Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) s9) equals: #[2, 2]
 
   testSeqClass =>
     self assert: (Adr0131LocalRebindClassPending seq) equals: #[1, 1]
@@ -181,8 +169,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testSeqRecvActor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) seqRecv: true) equals: #[1, 1]
 
-  testVtReturnInjectValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) vtReturnInject) equals: 3
 
   // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
   // error today), with their ADR Expected answers.

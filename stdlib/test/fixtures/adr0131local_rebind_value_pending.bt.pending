@@ -9,7 +9,7 @@
 // functional update `self withN:`, since a value type cannot write `self.n :=`.
 //
 //   o3, o12, o13, s2: erlc `unbound variable 'State'` (ADR 0131 §3)
-//   o1, o2, o4-o10, s1, s7, s9, seq: ADR 0131 Phase 0 compile errors
+//   o1, o2, o5-o10, s1, s7, seq: ADR 0131 Phase 0 compile errors
 //     (BT-3745: the allow-set error, or §6 for s1's `at:ifAbsent:` block)
 //
 // Every method here is rejected by an ADR 0131 diagnostic today;
@@ -52,11 +52,6 @@ Value subclass: Adr0131LocalRebindValuePending
       t := t + 1
       1
     ] ensure: [t := t + 1]) + 1
-    #[r, t]
-
-  o4 =>
-    t := 0
-    r := (#(1, 2) collect: [:x | t := t + x]) size
     #[r, t]
 
   o5 =>
@@ -148,15 +143,6 @@ Value subclass: Adr0131LocalRebindValuePending
       ]
     #[r, t]
 
-  s9 =>
-    t := 0
-    r := (#(1, 2)
-      reject: [:x |
-        t := t + 1
-        false
-      ]) size
-    #[r, t]
-
   seq =>
     t := 0
     r := t + ([
@@ -177,18 +163,6 @@ Value subclass: Adr0131LocalRebindValuePending
     t := 0
     r := t + ((flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0)
     #[r, t]
-
-  // BT-3745 review: `^` of a list op answers the leaked `{3, StateAcc}`
-  // tuple today (the implicit-last `vtLastInject` answers 3), so it is a
-  // Phase 0 compile error.
-  vtReturnInject =>
-    t := 0
-    ^#(1, 2)
-      inject: 0
-      into: [:a :x |
-        t := t + 1
-        a + x
-      ]
 
   // BT-3753: statement-position shapes that answered wrong, raised or failed
   // to compile before; each is an ADR 0131 Phase 0 compile error now.

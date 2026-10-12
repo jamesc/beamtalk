@@ -7,7 +7,7 @@
 // compile moves it back (and its test from
 // adr0131local_rebind_pending_test.bt.pending).
 //
-//   o1-o4, o6-o10, o12, s2, s9, seq: the ADR 0131 Phase 0 allow-set error
+//   o1-o3, o6-o10, o12, s2, seq: the ADR 0131 Phase 0 allow-set error
 //   s1: ADR 0131 §6 (`at:ifAbsent:` cannot return the block's write)
 //
 // Every method here is rejected by an ADR 0131 diagnostic today;
@@ -40,11 +40,6 @@ Actor subclass: Adr0131LocalRebindActorPending
         t := t + 1
         1
       ]) + 1
-    #[r, t]
-
-  o4 =>
-    t := 0
-    r := (#(1, 2) collect: [:x | t := t + x]) size
     #[r, t]
 
   o6: cond =>
@@ -136,15 +131,6 @@ Actor subclass: Adr0131LocalRebindActorPending
         t := t + 1
         0
       ]
-    #[r, t]
-
-  s9 =>
-    t := 0
-    r := (#(1, 2)
-      reject: [:x |
-        t := t + 1
-        false
-      ]) size
     #[r, t]
 
   seq =>
