@@ -181,8 +181,8 @@ Initialize the protocol registry ETS table.
 Called during application startup (beamtalk_runtime_app:start/2) before
 any compiled modules load their protocol definitions.
 
-Carries `beamtalk_ets_heir:heir_option/0` (the runtime
-supervisor, once it is alive) so an owner crash hands the table off instead
+Carries `beamtalk_ets_heir:heir_option/0` (the `beamtalk_ets_heir`
+process, once it is alive) so an owner crash hands the table off instead
 of destroying every registered protocol.
 
 Also creates the `conforms_to/2` result cache table (see this

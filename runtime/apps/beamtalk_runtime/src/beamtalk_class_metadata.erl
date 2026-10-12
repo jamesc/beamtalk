@@ -41,8 +41,8 @@ absence of the others.
 * Heir: created at app start by `beamtalk_runtime_app:start/2` (the
   long-lived app-master process owns it), then `start/2` calls
   `beamtalk_ets_heir:adopt_owned_tables/0` once the heir is alive so it is set
-  as `{heir, ...}`. The
-  table therefore survives both a class-process crash and an app-master swap.
+  as `{heir, ...}`. The table therefore survives both a class-process crash
+  and an app-master swap.
 
 ## Reverse subclass index
 

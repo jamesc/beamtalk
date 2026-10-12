@@ -23,9 +23,13 @@ a table back to a restarting owner through `reclaim/1`.
 
 Started as the first child of `beamtalk_runtime_sup`, before any child that
 creates a table. It holds no state of its own and does no work beyond owning
-tables, so it has nothing to crash on: if it ever did die, the tables it
-currently owns would go with it (and the tables naming it as heir would lose
-their heir until the next `maybe_set_heir/1`).
+tables, so it has nothing to crash on. If it is killed from outside anyway,
+two things are lost: every table it currently holds (inherited from a crashed
+owner and not yet reclaimed) is destroyed, and the boot tables owned by the
+app master (class registry, metadata, extensions, protocol tables) lose their
+heir permanently, because `adopt_owned_tables/0` runs once at app start and
+`maybe_set_heir/1` is a no-op for any caller that does not own the table.
+Recovery is a runtime restart.
 
 The shared helpers — `heir_option/0`, `maybe_set_heir/1` and
 `ensure_table/2` — are the one place the runtime decides a table's heir.
