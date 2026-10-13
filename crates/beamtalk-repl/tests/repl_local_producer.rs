@@ -205,7 +205,7 @@ fn construct(template: &str, receiver: Option<&str>) -> String {
     }
 }
 
-/// Both generated modules (eval, trace) of `src`, erlc-checked.
+/// Both generated modules (eval, trace) of `src`, erlc-checked when `compile`.
 fn both_outputs(name: &str, src: &str, compile: bool) -> [(&'static str, String); 2] {
     let expressions = statements(src);
     let outputs = [

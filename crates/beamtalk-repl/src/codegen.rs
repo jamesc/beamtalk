@@ -370,17 +370,29 @@ impl<'a> ReplAssembler<'a> {
         stmt: &Expression,
         target: &Expression,
     ) -> Result<(Document<'static>, Document<'static>, bool)> {
+        self.repl_expression_parts(stmt, target)
+            .map(|(prelude, value, mutated, _)| (prelude, value, mutated))
+    }
+
+    /// [`Self::repl_expression_doc`] plus whether a producer lowered `target`
+    /// (so the prelude may have stepped `State`), as the last element.
+    fn repl_expression_parts(
+        &mut self,
+        stmt: &Expression,
+        target: &Expression,
+    ) -> Result<(Document<'static>, Document<'static>, bool, bool)> {
         if let Some(producer) = self.generator.repl_statement_with_producers(stmt, target)? {
             return Ok((
                 docvec!["    ", producer.prelude, "\n"],
                 producer.value,
                 producer.mutated,
+                true,
             ));
         }
         let (doc, mutated) = self
             .generator
             .expression_doc_with_repl_mutation_tracking(target)?;
-        Ok((Document::Nil, doc, mutated))
+        Ok((Document::Nil, doc, mutated, false))
     }
 
     /// [`Self::repl_expression_doc`] for the value of an identifier
@@ -400,14 +412,15 @@ impl<'a> ReplAssembler<'a> {
         value: &Expression,
     ) -> Result<(Document<'static>, String, Document<'static>)> {
         let state_before = self.generator.current_state_var();
-        let (prelude, value_doc, mutated) = self.repl_expression_doc(stmt, value)?;
+        let (prelude, value_doc, mutated, has_producer) =
+            self.repl_expression_parts(stmt, value)?;
         if !mutated {
             // With a producer, its prelude may have stepped `State` (read
             // after it); with none, it is the version before compiling.
-            let state = if matches!(prelude, Document::Nil) {
-                state_before
-            } else {
+            let state = if has_producer {
                 self.generator.current_state_var()
+            } else {
+                state_before
             };
             return Ok((prelude, state, value_doc));
         }

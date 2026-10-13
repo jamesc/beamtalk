@@ -615,9 +615,10 @@ reports the same message at the same span. No operation is surface-specific.
   used to bind `r` to a raw `{Value, Bindings}` tuple and lose the write to `u`.
   It now answers the value and keeps the write, exactly as the single-statement
   form already did (maintainer-approved REPL output change). One helper
-  (`repl_assignment_value` in `beamtalk-repl`) compiles an assignment's value
-  for all four assembler paths (single, multi, trace single, trace multi), so
-  REPL eval, the MCP `eval` trace and the repl-protocol suite agree; no other
+  (`repl_assignment_value` in `beamtalk-repl`) compiles a multi-statement
+  assignment's value for the eval and trace assemblers alike (the
+  single-statement paths already unpacked it), so REPL eval, the MCP `eval`
+  trace and the repl-protocol suite agree; no other
   surface compiles REPL input, and no REPL display changes for an input that
   answered correctly.
 - The REPL sees only the current input: a stored block bound in one input and
