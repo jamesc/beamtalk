@@ -333,28 +333,7 @@ impl ThreadedValue {
     ) -> (Document<'static>, Vec<VerifyError>) {
         let errors = match context {
             CloseContext::ThreadsState => Vec::new(),
-            CloseContext::Opaque => self
-                .prelude
-                .iter()
-                .filter_map(|stmt| match stmt {
-                    ThreadedStmt::Bind { target, span, .. } => {
-                        Some(VerifyError::StateEffectEscapesExpression {
-                            prefix: target.prefix.clone(),
-                            at: *span,
-                        })
-                    }
-                    // ADR 0131 §4: a `LocalRebind` closed in an opaque
-                    // context is a dropped local write — nothing outside
-                    // the closed document sees the new value.
-                    ThreadedStmt::LocalRebind { local, span, .. } => {
-                        Some(VerifyError::StateEffectEscapesExpression {
-                            prefix: VersionPrefix::Local(local.clone()),
-                            at: *span,
-                        })
-                    }
-                    _ => None,
-                })
-                .collect(),
+            CloseContext::Opaque => opaque_escapes(&self.prelude, true),
         };
         let prelude_doc = render(&self.prelude, ctx);
         let value_doc = render_value(&self.value, ctx);
@@ -365,6 +344,38 @@ impl ThreadedValue {
         };
         (doc, errors)
     }
+}
+
+/// The [`VerifyError::StateEffectEscapesExpression`]s for the top-level
+/// effects of `prelude` that a standalone-rendered `Document` scopes away:
+/// every versioned [`ThreadedStmt::Bind`], and (when `include_locals`) every
+/// [`ThreadedStmt::LocalRebind`] (ADR 0131 §4, reported under
+/// [`VersionPrefix::Local`] — a dropped local write). Shared by
+/// [`ThreadedValue::close`] and by every non-`close` site that renders a
+/// prelude it knows nothing can thread (BT-3802: the closed cascade), so the
+/// "what escapes" rule has one definition.
+pub(in crate::core_erlang) fn opaque_escapes(
+    prelude: &[ThreadedStmt],
+    include_locals: bool,
+) -> Vec<VerifyError> {
+    prelude
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ThreadedStmt::Bind { target, span, .. } => {
+                Some(VerifyError::StateEffectEscapesExpression {
+                    prefix: target.prefix.clone(),
+                    at: *span,
+                })
+            }
+            ThreadedStmt::LocalRebind { local, span, .. } if include_locals => {
+                Some(VerifyError::StateEffectEscapesExpression {
+                    prefix: VersionPrefix::Local(local.clone()),
+                    at: *span,
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// ADR 0131 §4: the [`VerifyError::StateEffectEscapesExpression`]s for the
