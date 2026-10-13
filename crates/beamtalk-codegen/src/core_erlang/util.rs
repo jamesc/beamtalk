@@ -358,7 +358,9 @@ impl CoreErlangGenerator {
         // it is a producer: its `Bind` must land in the caller's statement
         // sequence. Compiled as a plain sub-expression it was a closed
         // document that scoped the rebind away (`unbound variable 'State1'`).
-        if self.is_field_assignment_producer(inner) {
+        // (`is_field_assignment` is `false` in a class method, where the write
+        // is an in-place class-variable `put`, ADR 0130 §2.)
+        if self.is_field_assignment(inner) {
             let mut prelude = Vec::new();
             let val_var = self.lower_field_assignment_bind(inner, frame, span, &mut prelude)?;
             return Ok(ThreadedValue {
@@ -674,16 +676,6 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
     }
 
-    /// BT-3803: `true` if `expr` (already paren-unwrapped) is a field
-    /// assignment that threads actor `State` / value-type `Self` — the
-    /// producer [`Self::threaded_expression`] compiles through
-    /// [`Self::lower_field_assignment_bind`]. `false` in a class method, where
-    /// the write is an in-place class-variable `put` (ADR 0130 §2, see
-    /// [`Self::is_field_assignment`]).
-    fn is_field_assignment_producer(&self, expr: &Expression) -> bool {
-        self.is_field_assignment(expr)
-    }
-
     /// ADR 0130: compiles `expr` (already paren-unwrapped) through the
     /// class-method-context producer when it is, at its own top level, a
     /// class-variable write or a same-class class-method self-send
@@ -868,7 +860,7 @@ impl CoreErlangGenerator {
             return true;
         }
         // BT-3803: mirrors `threaded_expression`'s field-assignment producer.
-        if self.is_field_assignment_producer(inner) {
+        if self.is_field_assignment(inner) {
             return true;
         }
         if let Some(children) = Self::sequenced_send_children(inner) {

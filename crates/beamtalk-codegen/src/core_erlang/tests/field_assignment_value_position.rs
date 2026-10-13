@@ -105,15 +105,86 @@ const SHAPES: &[(&str, &str)] = &[
         "do_block_body",
         "    #(1, 2) do: [:e | STMT].\n    self.n\n",
     ),
+    (
+        "on_do_protected",
+        "    [STMT] on: Error do: [:e | 0].\n    self.n\n",
+    ),
+    (
+        "on_do_handler",
+        "    [1] on: Error do: [:e | STMT].\n    self.n\n",
+    ),
+    (
+        "ensure_body",
+        "    [STMT] ensure: [self.m := 1].\n    self.n\n",
+    ),
+    ("ensure_cleanup", "    [1] ensure: [STMT].\n    self.n\n"),
+    ("to_do_body", "    1 to: 2 do: [:i | STMT].\n    self.n\n"),
+    (
+        "times_repeat_body",
+        "    2 timesRepeat: [STMT].\n    self.n\n",
+    ),
+    (
+        "inject_into_body",
+        "    #(1, 2) inject: 0 into: [:a :e | STMT. a].\n    self.n\n",
+    ),
+    (
+        "collect_body",
+        "    #(1, 2) collect: [:e | STMT].\n    self.n\n",
+    ),
+    ("block_value", "    [STMT] value.\n    self.n\n"),
+    ("block_value_arg", "    [:x | STMT] value: 3.\n    self.n\n"),
 ];
 
+/// Whole-method programs for the mixed-family hybrid loops (a field written in the loop
+/// body both directly and as a nested operand, so the loop extracts both as fun
+/// parameters), where the assignment is the loop body's own statement shape rather than an
+/// operand of a templated position.
+const HYBRID_LOOP_METHODS: &[(&str, &str)] = &[
+    (
+        "while_nested_rhs",
+        "    i := 0.\n    [i < 3] whileTrue: [self.m := (self.n := i). i := i + 1].\n    self.n\n",
+    ),
+    (
+        "while_nested_rhs_then_read",
+        "    i := 0.\n    [i < 3] whileTrue: [self.m := (self.n := i). self.m := self.n + 1. i := i + 1].\n    self.m\n",
+    ),
+    (
+        "while_operand_of_binary_rhs",
+        "    i := 0.\n    [i < 3] whileTrue: [self.m := 1 + (self.n := i). i := i + 1].\n    self.n\n",
+    ),
+    (
+        "to_do_nested_rhs",
+        "    1 to: 3 do: [:i | self.m := (self.n := i)].\n    self.n\n",
+    ),
+    (
+        "times_repeat_nested_rhs",
+        "    2 timesRepeat: [self.m := (self.n := self.n + 1)].\n    self.n\n",
+    ),
+    (
+        "do_nested_rhs",
+        "    #(1, 2) do: [:e | self.m := (self.n := e)].\n    self.n\n",
+    ),
+    (
+        "inject_nested_rhs",
+        "    #(1, 2) inject: 0 into: [:a :e | self.m := (self.n := e). a].\n    self.n\n",
+    ),
+];
+
+/// The fold-body shapes (`do:`, `inject:into:`, `collect:`).
+const FOLD_BODY_SHAPES: &[&str] = &["do_block_body", "inject_into_body", "collect_body"];
+
 /// Positions where a self-send consumes the field assignment as an operand, inside a
-/// `do:` fold body. They are skipped there because the fold-body self-send path does not
+/// fold body. They are skipped there because the fold-body self-send path does not
 /// sequence its operands at all, independent of field assignments: `#(1, 2) do: [:e | self
 /// take: (self bump) with: (self bump)]` fails `erlc` with the same `unbound variable
 /// 'StateAcc1'` without any field assignment, and a single operand's rebind is dropped
-/// silently. Tracked as its own issue; every other shape (including `whileTrue:` loop
-/// bodies) is covered.
+/// silently (BT-3809). Every other shape (`whileTrue:`/`to:do:`/`timesRepeat:` bodies,
+/// `on:do:`, `ensure:`, inline `value`/`value:` blocks, hybrid loops) is covered.
+///
+/// Not covered by this corpus: value-type methods (a value type cannot write `self.n :=`,
+/// ADR 0042, so no field assignment reaches value position there) and class methods (a
+/// class-variable write is an in-place `put`, ADR 0130 §2, which threads nothing). The REPL
+/// has no `self` field to write.
 const FOLD_BODY_SELF_SEND_OPERANDS: &[&str] = &[
     "self_send_arg",
     "two_keyword_args",
@@ -135,7 +206,7 @@ fn field_assignment_value_position_corpus() {
             .iter()
             .enumerate()
             .filter(|(_, (position_name, _))| {
-                !(*shape_name == "do_block_body"
+                !(FOLD_BODY_SHAPES.contains(shape_name)
                     && FOLD_BODY_SELF_SEND_OPERANDS.contains(position_name))
             })
             .map(|(i, (position_name, position))| {
@@ -157,6 +228,12 @@ fn field_assignment_value_position_corpus() {
             if !passes(&single) {
                 failures.push(format!("{shape_name} / {position_name}:\n{single}"));
             }
+        }
+    }
+    for (name, body) in HYBRID_LOOP_METHODS {
+        let src = format!("{HEADER}\n  probe =>\n{body}");
+        if !passes(&src) {
+            failures.push(format!("hybrid_loop / {name}:\n{src}"));
         }
     }
     assert!(
