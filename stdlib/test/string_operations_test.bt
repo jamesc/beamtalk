@@ -74,12 +74,15 @@ TestCase subclass: StringOperationsTest
     // BT-2888: the collect: stateful_block_dispatch guard also
     // applies to String, since the guard is keyed on selector name, not
     // receiver class.
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulBlock := [:ch |
       count := count + 1
       ch uppercase
     ]
-    self should: [
-      "hi" perform: #collect: withArguments: #(statefulBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        "hi" perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch

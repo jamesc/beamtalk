@@ -21,11 +21,12 @@ Actor subclass: NonLiteralCallableActor
   // Mutations are silently dropped at the Erlang boundary (expected),
   // but the call must not crash with badarity. Folding the stored block
   // directly (`#(1, 2, 3) do: blk`) is an ADR 0131 §6 compile error since
-  // BT-3745, so the block is laundered through a list to reach the runtime
-  // wrapper.
+  // BT-3745, so the block is laundered through an Erlang tuple (a collection
+  // *literal* holding it, `#(blk) first`, is an ADR 0131 §6 error since
+  // BT-3756) to reach the runtime wrapper.
   doWithTier2Block =>
     total := 0
     blk := [:x | total := total + x]
-    laundered := #(blk) first
+    laundered := Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: blk)
     #(1, 2, 3) do: laundered
     "done"

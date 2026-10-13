@@ -85,12 +85,15 @@ TestCase subclass: ArrayTest
     // guard also applies to Array, since the guard is keyed on selector
     // name, not receiver class. (Array has no reject: primitive, so that
     // selector isn't guarded here.)
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
-    self should: [
-      #[1, 2, 3] perform: #do: withArguments: #(statefulDoBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #[1, 2, 3] perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -98,9 +101,11 @@ TestCase subclass: ArrayTest
       count := count + 1
       x * 2
     ]
-    self should: [
-      #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #[1, 2, 3] perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -108,9 +113,11 @@ TestCase subclass: ArrayTest
       count := count + 1
       x > 1
     ]
-    self should: [
-      #[1, 2, 3] perform: #select: withArguments: #(statefulSelectBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #[1, 2, 3] perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -118,9 +125,17 @@ TestCase subclass: ArrayTest
       count := count + 1
       acc + x
     ]
-    self should: [
-      #[1, 2, 3] perform: #inject:into: withArguments: #(0, statefulInjectBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #[1, 2, 3]
+          perform: #inject:into:
+          withArguments: (Erlang erlang
+            tuple_to_list: (Erlang erlang
+              setelement: 1
+              of: (Erlang erlang make_tuple: 2 init: statefulInjectBlock)
+              value: 0))
+      ]
+      raise: #stateful_block_dispatch
 
   testPrintString =>
     self assert: #[1, 2, 3] printString equals: "#[1, 2, 3]"

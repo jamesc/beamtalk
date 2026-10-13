@@ -221,8 +221,11 @@ impl Ctx<'_> {
     }
 
     /// `items do: [:e | ... x := name value: e ...]` as a method-body
-    /// statement, where `x` is bound before the loop and no other statement of
-    /// the body mentions `name`.
+    /// statement, where `x` is bound before the loop. Each loop-body statement
+    /// that mentions `name` must be such an `x := name value: ...` assignment
+    /// (`x` neither `name` nor a loop parameter); statements that do not
+    /// mention `name` are unconstrained. The caller ([`Self::statement_ok`])
+    /// checks the method's other statements separately.
     fn is_stateful_do_loop(&self, index: usize, statement: &Expression) -> bool {
         let Expression::MessageSend {
             receiver,

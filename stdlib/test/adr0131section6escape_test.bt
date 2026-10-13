@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3756 (ADR 0131 §6): a block that writes no local of the enclosing method
+// still works when it escapes the method (returned, stored in a field, placed
+// in a collection literal). Only a block that writes an outer local is a
+// compile error there (Rust tests, `ESCAPE_SHAPES`).
+
+TestCase subclass: Adr0131Section6EscapeTest
+
+  testActorPure =>
+    self assert: (Adr0131Section6EscapeActor spawn returnedPure value: 1) equals: 2
+
+  testActorOwnLocal =>
+    self assert: (Adr0131Section6EscapeActor spawn returnedOwnLocal value: 3) equals: 7
+
+  testActorReadOnly =>
+    self assert: (Adr0131Section6EscapeActor spawn returnedReadOnly value: 1) equals: 11
+
+  testActorStoredFieldWriter =>
+    a := Adr0131Section6EscapeActor spawn
+    a storedFieldWriter
+    a runStored
+    a runStored
+    self assert: a count equals: 2
+
+  testClassPure =>
+    self assert: (Adr0131Section6EscapeClass returnedPure value: 1) equals: 2
+
+  testClassOwnLocal =>
+    self assert: (Adr0131Section6EscapeClass returnedOwnLocal value: 3) equals: 7
+
+  testClassReadOnly =>
+    self assert: (Adr0131Section6EscapeClass returnedReadOnly value: 1) equals: 11
+
+  testClassLiteral =>
+    self assert: (Adr0131Section6EscapeClass literalOfPure last value: 4) equals: 8
+
+  testValuePure =>
+    self assert: (Adr0131Section6EscapeValue new returnedPure value: 1) equals: 2
+
+  testValueOwnLocal =>
+    self assert: (Adr0131Section6EscapeValue new returnedOwnLocal value: 3) equals: 7
+
+  testValueReadOnly =>
+    self assert: (Adr0131Section6EscapeValue new returnedReadOnly value: 1) equals: 11
+
+  testValueLiteral =>
+    self assert: (Adr0131Section6EscapeValue new literalOfPure first value: 4) equals: 5
