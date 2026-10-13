@@ -310,6 +310,42 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
         .is_some_and(|callable| !matches!(callable.unwrap_parens(), Expression::Block(_)))
 }
 
+/// ADR 0131 Phase 2 (BT-3749): the loops and folds whose `{Value, StateAcc}`
+/// result codegen unwraps as a local-threading producer (`whileTrue:`/
+/// `whileFalse:`, the counted loops, and the value-returning folds). Returns
+/// the 0-based index of the body block argument of a send of `sel` with
+/// `arity` arguments, or `None` for any other selector or arity.
+///
+/// The body block is the one whose outer-local writes the construct packs
+/// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
+/// `detect:ifNone:`'s `ifNone:` handler is not a body: a write there is not
+/// packed (ADR 0131 phase 2's lookup work, BT-3749 follow-up).
+///
+/// The one table: codegen's `counted_loop_body_block`/`foldl_list_op_body_block`
+/// and the Phase 0 allow-set check (`semantic_analysis/validators/local_threading.rs`)
+/// both read it, so the producer and the diagnostic accept the same sends.
+#[must_use]
+pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
+    match (sel, arity) {
+        (
+            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "collect:" | "select:" | "reject:"
+            | "count:" | "detect:",
+            1,
+        )
+        | ("detect:ifNone:", 2) => Some(0),
+        ("to:do:" | "inject:into:", 2) => Some(1),
+        ("to:by:do:", 3) => Some(2),
+        _ => None,
+    }
+}
+
+/// Whether `sel` is a counted loop in [`producer_body_arg_index`]'s table
+/// (`timesRepeat:`, `to:do:`, `to:by:do:`).
+#[must_use]
+pub fn is_counted_loop_selector(sel: &str) -> bool {
+    matches!(sel, "timesRepeat:" | "to:do:" | "to:by:do:")
+}
+
 /// ADR 0131 §1: the block-taking lookup selectors — a send that runs one of
 /// its block literal arguments only when a key (or element) is missing or
 /// present. Returns the 0-based indices of those block arguments, empty for

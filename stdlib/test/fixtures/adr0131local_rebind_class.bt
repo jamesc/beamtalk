@@ -12,9 +12,11 @@
 //
 // The shapes that do not compile in a class method today are in
 // adr0131local_rebind_class_pending.bt.pending, so this module compiles: o3,
-// o12 and s2 (codegen failures before BT-3745), and o1, o2, o4-o10, o13, s1,
-// s7, s9 and seq (ADR 0131 Phase 0 compile errors since BT-3745). s4 is a
-// permanent ADR 0131 §6 error and is pinned only in the Rust tests.
+// o12 and s2 (codegen failures before BT-3745), and o1, o2, o5-o10, o13, s1,
+// s7 and seq (ADR 0131 Phase 0 compile errors since BT-3745). o4 and s9 moved
+// here when ADR 0131 Phase 2 (BT-3749) made loops and folds local-threading
+// producers. s4 is a permanent ADR 0131 §6 error and is pinned only in the
+// Rust tests.
 
 Object subclass: Adr0131LocalRebindClass
   classState: n = 0
@@ -78,3 +80,17 @@ Object subclass: Adr0131LocalRebindClass
         1
       ]
     t
+
+  class o4 =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  class s9 =>
+    t := 0
+    r := (#(1, 2)
+      reject: [:x |
+        t := t + 1
+        false
+      ]) size
+    #[r, t]

@@ -298,8 +298,8 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 
 #[test]
 fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
-    // o4.
-    let src = in_class("r := (#(1, 2) collect: [:x | t := t + x]) size\n#[r, t]");
+    // o1.
+    let src = in_class("r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -307,7 +307,7 @@ fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     assert_eq!(d.severity, Severity::Error);
     assert_eq!(
         d.message.as_str(),
-        "`collect:` writes outer local `t`, but as the receiver of a message in a class \
+        "`on:do:` writes outer local `t`, but as the receiver of a message in a class \
          method the write is not threaded back yet (BT-3743)"
     );
     assert!(
@@ -561,23 +561,79 @@ fn section6_destructuring_rebind_is_a_reassignment() {
 }
 
 #[test]
-fn allow_set_value_type_return_of_list_op_differs_from_implicit_last() {
-    // Probed on the debug build (BT-3745): `^#(1, 2) inject: 0 into: [...]`
-    // in a value-type method answers the leaked `{3, StateAcc}` tuple, while
-    // the same construct as the implicit last statement answers 3. The BUnit
-    // pins are `vtLastInject` (adr0131local_rebind_value.bt) and
-    // `vtReturnInject` (adr0131local_rebind_value_pending.bt.pending).
-    let ret = in_value("^#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]");
+fn value_type_return_of_list_op_is_accepted_like_implicit_last() {
+    // BT-3745 probed `^#(1, 2) inject: 0 into: [...]` in a value-type method
+    // answering the leaked `{3, StateAcc}` tuple, and pinned it as a Phase 0
+    // error. ADR 0131 Phase 2 (BT-3749) lowers the `^` value as a
+    // local-threading producer, so it answers 3 like the implicit last
+    // statement. The BUnit pins are `vtLastInject` and `vtReturnInject`
+    // (adr0131local_rebind_value.bt).
+    for body in [
+        "^#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
+        "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
+    ] {
+        let src = in_value(body);
+        assert!(adr0131_diagnostics(&src).is_empty(), "{body}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2 (BT-3749): loops and folds as local-threading producers
+// ---------------------------------------------------------------------------
+
+#[test]
+fn producer_operand_sites_are_accepted_in_every_method_context() {
+    for body in [
+        // o4, s9: a fold as a message receiver.
+        "r := (#(1, 2) collect: [:x | t := t + x]) size\n#[r, t]",
+        "r := (#(1, 2) reject: [:x | t := t + 1. false]) size\n#[r, t]",
+        // A fold as an argument, after a read of `t` (ADR 0131 §1a).
+        "r := t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])\n#[r, t]",
+        // Loops as an element of a literal and as a `^` operand.
+        "r := #[1 to: 3 do: [:i | t := t + i], t]\nr",
+        "^(#(1, 2) detect: [:x | t := t + 1. x > 1]) + t",
+        "s := 0\n^#[[s < 3] whileTrue: [s := s + 1. t := t + s], t]",
+        // A plain statement whose argument is a fold.
+        "#(1) add: (#(1, 2) count: [:x | t := t + 1. true])\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
+    for body in [
+        // Inside a block: the construct's frame is not the method root.
+        "#(1) do: [:z | r := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
+        // A conditional's receiver is threaded by the conditional (Phase 3).
+        "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\nt",
+        // Under a cascade.
+        "(#(1, 2) collect: [:x | t := t + x]) size; yourself\nt",
+        // `detect:ifNone:` whose handler writes a local its search does not:
+        // the construct tuple does not carry `u`.
+        "u := 0\nr := (#(1) detect: [:x | t := t + 1. false] ifNone: [u := 1. 0]) + 1\n#[r, t, u]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len()
+                    + of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+    // The REPL root threads its bindings map (a later phase).
+    let known = ["t"];
+    let diags = adr0131_diagnostics_with("(#(1, 2) collect: [:x | t := t + x]) size\n", &known);
     assert_eq!(
-        of_category(
-            &adr0131_diagnostics(&ret),
-            DiagnosticCategory::UnmigratedLocalThreading
-        )
-        .len(),
-        1
+        of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+        1,
+        "{diags:?}"
     );
-    let last = in_value("#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]");
-    assert!(adr0131_diagnostics(&last).is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +896,35 @@ fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
             assert_eq!(
                 of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
                 1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+/// BT-3749 review: a statement whose actor lowering compiles its operands
+/// without sequencing them (`super`, `error:`, `fieldAt:put:`, a stored-block
+/// `value:` call, a self-send with a block argument) must not make a fold in
+/// its operands a producer site: the fold's construct tuple would leak and
+/// the write be dropped. They stay Phase 0 errors in every context.
+#[test]
+fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
+    let fold = "(#(1, 2) collect: [:x | t := t + x])";
+    for body in [
+        format!("r := super respondsTo: {fold} printString\nr"),
+        format!("^super respondsTo: {fold} printString"),
+        format!("self error: {fold} printString\nt"),
+        format!("b := [:x | x]\nr := b value: {fold}\nr"),
+        format!("r := self pick: [1] with: {fold}\nr"),
+        format!("r := self.blk valueWithArguments: {fold}\nr"),
+        format!("^self.blk valueWithArguments: {fold}"),
+        format!("self.blk valueWithArguments: {fold}\nt"),
+        format!("r := self.blk value: {fold}\nr"),
+    ] {
+        for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
                 "{src}: {diags:?}"
             );
         }

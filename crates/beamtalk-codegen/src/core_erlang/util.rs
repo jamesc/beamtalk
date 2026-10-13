@@ -321,6 +321,14 @@ impl CoreErlangGenerator {
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
+        // ADR 0131 §1 (Phase 2): a loop or fold at a sequenced operand site
+        // of the method body that writes an outer local is a producer: its
+        // construct tuple's threaded locals are rebound in the prelude,
+        // whatever position it sits in (`local_threading_producer`).
+        if let Some(tv) = self.local_threading_producer(inner, frame)? {
+            return Ok(tv);
+        }
+
         // ADR 0118 phase 4: an inline-threaded control-flow
         // construct — `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`,
         // the nil-conditional family, or `match:` — that needs mutation
@@ -704,7 +712,7 @@ impl CoreErlangGenerator {
     /// fallback that previously handled it is gone
     /// (`bt3416_self_send_nested_in_a_cast_sends_
     /// receiver_still_threads`, `tests/gen_server.rs`).
-    fn sequenced_send_children(expr: &Expression) -> Option<Vec<&Expression>> {
+    pub(super) fn sequenced_send_children(expr: &Expression) -> Option<Vec<&Expression>> {
         let Expression::MessageSend {
             receiver,
             selector,
@@ -784,6 +792,11 @@ impl CoreErlangGenerator {
         // failing with "never substituted".
         if self.precompiled_subexprs_contains(inner) {
             return false;
+        }
+        // ADR 0131 Phase 2: mirrors `threaded_expression`'s
+        // `local_threading_producer` branch.
+        if self.local_producer_locals(inner).is_some() {
+            return true;
         }
         // ADR 0118 phase 4: mirrors `threaded_expression`'s new
         // inline-control-flow producer branch — see its doc comment.
@@ -1027,6 +1040,12 @@ impl CoreErlangGenerator {
         let Expression::Identifier(id) = child else {
             return false;
         };
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::SkipSiblingSnapshot)
+        {
+            return false;
+        }
         later.iter().any(|sibling| {
             self.subexpr_needs_prelude(sibling)
                 && self

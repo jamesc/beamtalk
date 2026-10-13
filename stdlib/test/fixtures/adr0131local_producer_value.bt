@@ -1,0 +1,155 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3749 (ADR 0131 Phase 2): loops and folds as local-threading producers,
+// value-type column. Each method writes the outer local `t` inside a loop
+// or fold that sits in an operand position of a method-body statement (a
+// receiver, an argument, a binary operand, a literal element, a `^` value,
+// an assignment's whole value) and answers what it read back. The class-method
+// and actor columns are adr0131local_producer_class.bt and
+// adr0131local_producer_actor.bt; the expected answers are in
+// stdlib/test/adr0131local_producer_test.bt.
+
+Value subclass: Adr0131LocalProducerValue
+
+  // A fold as a binary operand, after a read of `t` (ADR 0131 §1a: the left
+  // operand reads `t` before the fold rebinds it).
+  leftReadThenFold =>
+    t := 0
+    r := t + (#(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ])
+    #[r, t]
+
+  // A counted loop as an element of a literal array, before a read of `t`.
+  loopInLiteral =>
+    t := 0
+    #[1 to: 3 do: [:i | t := t + i], t]
+
+  // A fold as a binary operand of a `^` value, read again after it.
+  returnFoldPlusLocal =>
+    t := 0
+    ^(#(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 1
+      ]) + t
+
+  // A `whileTrue:` threading two locals, as an element of a `^` literal.
+  whileInReturnedLiteral =>
+    t := 0
+    s := 0
+    ^#[[s < 3]
+      whileTrue: [
+        s := s + 1
+        t := t + s
+      ], t]
+
+  // A fold as a keyword argument.
+  foldAsArgument =>
+    t := 0
+    r := 0
+      max: (#(1, 2)
+        count: [:x |
+          t := t + 1
+          true
+        ])
+    #[r, t]
+
+  // A fold in a plain statement's argument.
+  foldInStatement =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x]) size printString
+    t
+
+  // The assignment target is the local the fold writes: the assigned value
+  // wins.
+  assignToThreadedLocal =>
+    t := 0
+    t := (#(1, 2) collect: [:x | t := t + x]) size
+    t
+
+  // Two producers in one expression, in source order.
+  twoFolds =>
+    t := 0
+    r := (#(1, 2) collect: [:x |
+      t := t + x
+    ]) size + (#(3) collect: [:x | t := t + x]) size
+    #[r, t]
+
+  // A fold as the receiver of the method's last expression.
+  foldInLastExpression =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x]) size
+
+  // `detect:ifNone:` whose search and handler both write `t`.
+  detectHandlerWritesSameLocal =>
+    t := 0
+    r := (#(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 5
+      ]
+      ifNone: [
+        t := t + 10
+        0
+      ]) + 1
+    #[r, t]
+
+  // A loop with a non-literal bound.
+  loopToParameter: n =>
+    t := 0
+    r := (1 to: n do: [:i | t := t + i]) isNil
+    #[r, t]
+
+  // A fold threading two locals.
+  foldTwoLocals =>
+    t := 0
+    u := 0
+    r := (#(1, 2, 3)
+      inject: 0
+      into: [:a :x |
+        t := t + x
+        u := u + 1
+        a + x
+      ]) * 2
+    #[r, t, u]
+
+  // BT-3749 review: a producer in the receiver of another producer, in `^`
+  // position (the method root's discarding tail).
+  returnedFoldOfFold =>
+    t := 0
+    u := 0
+    ^((#(1, 2) collect: [:x | t := t + x])
+      inject: 0
+      into: [:a :x |
+        u := u + 1
+        a + x
+      ]) + (t * 10) + (u * 100)
+
+  // The same, as the whole value of an assignment (the rebinding tail).
+  assignedFoldOfFold =>
+    t := 0
+    u := 0
+    r := (#(1, 2) collect: [:x | t := t + x])
+      inject: 0
+      into: [:a :x |
+        u := u + 1
+        a + x
+      ]
+    #[r, t, u]
+
+  // BT-3749 review: a parenthesised loop / fold statement that writes a local
+  // (the producer recognizer peels the parentheses).
+  parenthesisedLoopStatement =>
+    t := 0
+    (1 to: 3 do: [:i | t := t + i])
+    (#(1, 2) collect: [:x | t := t + x])
+    t
+
+  parenthesisedFoldLast =>
+    t := 0
+    (#(1, 2) collect: [:x | t := t + x])

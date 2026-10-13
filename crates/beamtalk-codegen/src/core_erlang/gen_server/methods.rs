@@ -658,11 +658,30 @@ impl CoreErlangGenerator {
     ///
     /// `supports_early_return` controls whether `^ value` expressions are handled.
     /// Method definitions support it; block bodies do not (NLR uses throw/catch).
+    fn lower_body_exprs_with_reply(
+        &mut self,
+        body: &[&Expression],
+        supports_early_return: bool,
+    ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        // ADR 0131 Phase 2: a method body's sequenced operand sites are
+        // where a loop or fold is a local-threading producer. A legacy
+        // workspace block body (`supports_early_return: false`) has none.
+        if supports_early_return {
+            self.with_local_producer_sites(body, |this| {
+                this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+            })
+        } else {
+            self.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+        }
+    }
+
+    /// [`Self::lower_body_exprs_with_reply`] once the local-producer sites
+    /// are set.
     #[expect(
         clippy::too_many_lines,
         reason = "unified handler for all method body expression types with state threading"
     )]
-    fn lower_body_exprs_with_reply(
+    fn lower_body_exprs_with_reply_in_sites(
         &mut self,
         body: &[&Expression],
         supports_early_return: bool,
@@ -714,7 +733,20 @@ impl CoreErlangGenerator {
             // Classify the inner value to handle super/tier2/dispatch returns.
             if is_early_return && supports_early_return {
                 if let Expression::Return { value, .. } = expr {
-                    let value_kind = self.classify_body_expr(value);
+                    let mut value_kind = self.classify_body_expr(value);
+                    // ADR 0131 Phase 2: a `^` value that is a local-threading
+                    // producer, or holds one at an operand site, is lowered
+                    // through `threaded_expression` (the generic arm below),
+                    // which splices the producer's prelude; the dedicated arms
+                    // compile their value with plain `expression_doc` and would
+                    // leak the construct tuple.
+                    if matches!(
+                        value_kind,
+                        BodyExprKind::ControlFlowWithMutations | BodyExprKind::Pure
+                    ) && self.statement_has_local_producer(expr)
+                    {
+                        value_kind = BodyExprKind::Pure;
+                    }
                     match value_kind {
                         BodyExprKind::SuperSend => {
                             let expr_str = self.expression_doc(value)?;
@@ -1341,13 +1373,39 @@ impl CoreErlangGenerator {
                     // with, and `verify_routing_invariant`/`RoutingMismatch` are deleted.
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
-                            // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
-                            // [..]` — the construct's own state-effecting
-                            // operands thread ahead of it.
-                            let rhs_scope =
-                                self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                            self.emit_actor_threaded_assign_rhs_stmts(&id.name, value, &mut stmts)?;
-                            self.finish_precompiled_scope(rhs_scope)?;
+                            // ADR 0131 Phase 2: a loop or fold is a
+                            // local-threading producer — its construct
+                            // tuple, `State` `Bind` and `LocalRebind`s land
+                            // in this body's IR, then the target is bound
+                            // to its logical value.
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            if let Some(tv) =
+                                self.threaded_construct_value(value, threaded_ir::FrameId::ROOT)?
+                            {
+                                stmts.extend(tv.prelude);
+                                let value_str = self.threaded_value_doc(&tv.value);
+                                self.bind_var(var_name, &core_var);
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                                    span,
+                                ));
+                            } else {
+                                // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
+                                // [..]` — the construct's own state-effecting
+                                // operands thread ahead of it.
+                                let rhs_scope = self.thread_ahead(
+                                    value,
+                                    &mut stmts,
+                                    threaded_ir::FrameId::ROOT,
+                                )?;
+                                self.emit_actor_threaded_assign_rhs_stmts(
+                                    var_name, value, &mut stmts,
+                                )?;
+                                self.finish_precompiled_scope(rhs_scope)?;
+                            }
                         }
                     }
                     if is_last {
@@ -2378,30 +2436,109 @@ impl CoreErlangGenerator {
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
         use threaded_ir::ThreadedStmt;
 
-        let mut stmts: Vec<ThreadedStmt> = Vec::new();
-
         // Filter out @expect directives (compile-time only, no runtime representation).
         let body = super::super::util::collect_body_exprs(&method.body);
-        let body_len = body.len();
-        for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body_len - 1;
-            let span = expr.span();
+        self.with_local_producer_sites(&body, |this| {
+            let mut stmts: Vec<ThreadedStmt> = Vec::new();
+            let body_len = body.len();
+            for (i, expr) in body.iter().enumerate() {
+                let is_last = i == body_len - 1;
+                let span = expr.span();
 
-            if let Expression::Return { value, .. } = expr {
-                let doc = self.generate_class_method_return(value)?;
-                stmts.push(ThreadedStmt::Statement(doc, span));
-                return Ok(stmts);
-            }
+                if let Expression::Return { value, .. } = expr {
+                    let doc = this.generate_class_method_return(value)?;
+                    stmts.push(ThreadedStmt::Statement(doc, span));
+                    return Ok(stmts);
+                }
 
-            if is_last {
-                let doc = self.generate_class_method_last_expr(expr)?;
-                stmts.push(ThreadedStmt::Statement(doc, span));
-            } else {
-                let doc = self.generate_class_method_non_last_expr(expr)?;
-                stmts.push(ThreadedStmt::Statement(doc, span));
+                // ADR 0131 Phase 2: a local-threading producer in this
+                // statement rebinds its locals at the method root.
+                if let Some(result_var) =
+                    this.lower_root_statement_with_producer(expr, &mut stmts)?
+                {
+                    if is_last {
+                        stmts.push(ThreadedStmt::Statement(leaf::var(result_var), span));
+                    }
+                    continue;
+                }
+
+                if is_last {
+                    let doc = this.generate_class_method_last_expr(expr)?;
+                    stmts.push(ThreadedStmt::Statement(doc, span));
+                } else {
+                    let doc = this.generate_class_method_non_last_expr(expr)?;
+                    stmts.push(ThreadedStmt::Statement(doc, span));
+                }
             }
+            Ok(stmts)
+        })
+    }
+
+    /// ADR 0131 Phase 2: lowers a method-body statement of a class or
+    /// value-type method that holds a local-threading producer — `x :=
+    /// <loop or fold>`, or any statement with one at a sequenced operand
+    /// site — through [`Self::threaded_expression`], splicing its prelude
+    /// (the construct tuple and the `LocalRebind`s) into `stmts` so the
+    /// rebinds are visible to the statements after it. Returns the variable
+    /// bound to the statement's value, or `Ok(None)`, with nothing pushed,
+    /// for any other statement.
+    pub(in crate::core_erlang) fn lower_root_statement_with_producer(
+        &mut self,
+        expr: &Expression,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<Option<String>> {
+        use threaded_ir::{FrameId, ThreadedStmt};
+        let span = expr.span();
+        let assign = match expr {
+            Expression::Assignment { target, value, .. } => match target.as_ref() {
+                Expression::Identifier(id) => Some((id.name.as_str(), value.as_ref())),
+                _ => None,
+            },
+            _ => None,
+        };
+        let direct = assign
+            .is_some_and(|(_, value)| self.construct_tuple_locals(value.unwrap_parens()).is_some());
+        if !direct && !self.statement_has_local_producer(expr) {
+            return Ok(None);
         }
-        Ok(stmts)
+        let Some((var_name, value)) = assign else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let tv = self.threaded_expression(expr, FrameId::ROOT)?;
+            stmts.extend(tv.prelude);
+            let value_doc = self.threaded_value_doc(&tv.value);
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(tmp_var.clone()), " = ", value_doc, " in "],
+                span,
+            ));
+            return Ok(Some(tmp_var));
+        };
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let tv = if direct {
+            self.threaded_construct_value(value, FrameId::ROOT)?
+                .ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "construct_tuple_locals accepted a non-construct".to_string(),
+                    )
+                })?
+        } else {
+            self.threaded_expression(value, FrameId::ROOT)?
+        };
+        stmts.extend(tv.prelude);
+        let value_doc = self.threaded_value_doc(&tv.value);
+        self.bind_var(var_name, &core_var);
+        stmts.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(core_var.clone()),
+                " = ",
+                value_doc,
+                " in "
+            ],
+            span,
+        ));
+        Ok(Some(core_var))
     }
 
     /// Generates code for an explicit `^` return in a class method.

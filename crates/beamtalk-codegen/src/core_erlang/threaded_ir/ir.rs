@@ -337,9 +337,8 @@ impl LoopCounter {
 /// cannot be named. [`Self::current_var`] only renders the version already
 /// reached; a caller that needs to name the version *the next
 /// [`Self::next_var`] call would* reach, without advancing the counter,
-/// renders `self.0 + 1` directly (`mod.rs`'s `peek_next_state_var`, via
-/// `render_state_prefix`) rather than through a dedicated `VersionCounter`
-/// method.
+/// renders `self.0 + 1` directly (via `render_state_prefix`) rather than
+/// through a dedicated `VersionCounter` method.
 ///
 /// **Emitter-facing accessors render through [`VersionedVar`]**: every
 /// method here goes through [`VersionedVar::new`] + [`VersionedVar::render_name`]
@@ -816,9 +815,8 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// is the construct's own AST-directed tuple expression, opaque like a
     /// `Statement`'s.
     ///
-    /// No production caller yet: ADR 0131 Phase 2's `local_threading_producer`
-    /// is the first.
-    #[allow(dead_code)]
+    /// Built by ADR 0131 Phase 2's local-threading producer
+    /// (`lower_local_threading_construct`, BT-3749).
     ConstructTuple {
         carrier: String,
         doc: Document<'static>,
@@ -853,8 +851,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// "Non-local return"); the NLR 4-tuple carries the state the method's
     /// catch needs.
     ///
-    /// No production caller yet: ADR 0131 Phase 2 is the first.
-    #[allow(dead_code)]
+    /// Built by ADR 0131 Phase 2's local-threading producer at the method
+    /// root (a `Let`); the loop-frame and branch-arm lowerings come with the
+    /// later phases that make producers there.
     LocalRebind {
         local: String,
         carrier: String,
@@ -872,9 +871,8 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// rebinds nothing can observe. Explicit so the verifier sees the
     /// choice. Renders nothing; the consumer reads `element(1, carrier)`.
     ///
-    /// No production caller yet: ADR 0131 Phase 2 (`lower_threaded_last`)
-    /// is the first.
-    #[allow(dead_code)]
+    /// Built by `lower_threaded_last` and a value-type `^` for a loop or fold
+    /// (ADR 0131 Phase 2).
     DiscardLocals { carrier: String, span: Span },
 
     /// ADR 0131 §2: a method's root frame, as a node rather than a side
@@ -883,7 +881,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// where it is the bindings map's keys (the `MethodBody (REPL)` row of
     /// the §2 table). Renders `body` straight-line.
     ///
-    /// No production caller yet: ADR 0131 Phase 2 is the first.
+    /// No production caller yet: the non-REPL method root is the implicit
+    /// frame of the top-level slice (`RebindFrame::implicit_root`); the REPL
+    /// root, which threads its bindings, is the first explicit one.
     #[allow(dead_code)]
     MethodBody {
         frame: FrameId,
@@ -907,9 +907,11 @@ pub(in crate::core_erlang) enum ThreadedStmt {
 
 // ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────
 //
-// No production caller yet: ADR 0131 Phase 2 (`local_threading_producer`) is
-// the first, as `CloseContext` landed ahead of its consumers in ADR 0118
-// phase 1a — hence the `#[allow(dead_code)]`s below.
+// ADR 0131 Phase 2's local-threading producer (BT-3749) is the first
+// production caller. It lowers only at the method root, so the loop-frame
+// and map lowerings (`CarrierSlot::Pos`, `RebindLowering::{LoopParam,
+// MapPut}`) are still built only by tests — hence the `#[allow(dead_code)]`s
+// left below.
 
 /// Where a [`ThreadedStmt::LocalRebind`] reads its local's new value from
 /// the construct tuple (ADR 0131 §2's `<read>`). The construct reports which,
@@ -932,7 +934,6 @@ pub(in crate::core_erlang) enum CarrierSlot {
 /// loop/fold ([`ThreadedStmt::Threaded`]/[`ThreadedStmt::ConditionalLoop`])'s
 /// recorded [`ThreadingMode`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum RebindFrameKind {
     MethodBody,
     BranchArm,
@@ -943,7 +944,6 @@ pub(in crate::core_erlang) enum RebindFrameKind {
 /// for one (frame kind × membership) cell — [`RebindLowering`] without its
 /// lowering-time names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum RebindShape {
     /// `let V = <read> in` + `bind_var(t, V)`.
     Let,
@@ -953,7 +953,6 @@ pub(in crate::core_erlang) enum RebindShape {
     MapPut,
 }
 
-#[allow(dead_code)]
 impl RebindShape {
     /// ADR 0131 §2's table, the one place it is written down:
     ///
@@ -1088,7 +1087,6 @@ pub(in crate::core_erlang) enum RebindLowering {
     },
 }
 
-#[allow(dead_code)]
 impl RebindLowering {
     /// The [`RebindShape`] this lowering realizes.
     pub(in crate::core_erlang) fn shape(&self) -> RebindShape {

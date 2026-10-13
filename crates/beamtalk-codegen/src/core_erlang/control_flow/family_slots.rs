@@ -190,8 +190,7 @@ pub(in crate::core_erlang) fn append_baseline_family_slots(
 /// construct's own append/extract pair can never independently drift on slot
 /// order or count (the append/extract split every hand-rolled call site
 /// already keeps as two separate functions today —
-/// `finish_vt_conditional_branch`/`rebind_vt_conditional_mutations`,
-/// `emit_vt_threaded_tuple_unwrap_to_var`'s inline pair — made structurally
+/// `finish_vt_conditional_branch`/`rebind_vt_conditional_mutations` — made structurally
 /// impossible to desync here instead of merely documented).
 ///
 /// `base_arity` is the count of tuple elements already occupied BEFORE the

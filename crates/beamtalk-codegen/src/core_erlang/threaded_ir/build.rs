@@ -359,15 +359,15 @@ impl ThreadedValue {
 
 // ─── ADR 0131 §1/§2: local-rebind preludes ─────────────────────────────────
 //
-// No production caller yet: ADR 0131 Phase 2's `local_threading_producer`
-// (loops, list-ops, `do:`, lookup selectors) is the first, Phase 3 the
-// conditional/handler arms — mirroring how `CloseContext` landed ahead of its
-// consumers in ADR 0118 phase 1a. Hence the `#[allow(dead_code)]`s below.
+// ADR 0131 Phase 2's local-threading producer (`lower_local_threading_construct`,
+// BT-3749) is the first production caller, at the method root; Phase 3 adds
+// the conditional/handler arms (`build_branch_arm`), and the REPL root the
+// explicit `build_method_body` — hence the `#[allow(dead_code)]`s left on
+// those two.
 
 /// One threaded local of a construct, as its producer reports it: where it
 /// sits in the construct tuple and the lowering-time name its new value
 /// binds to (the producer `bind_var`s `local` to `value_var`).
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct ThreadedLocalSlot {
     pub(in crate::core_erlang) local: String,
@@ -376,7 +376,6 @@ pub(in crate::core_erlang) struct ThreadedLocalSlot {
 }
 
 /// Builds a [`ThreadedStmt::ConstructTuple`]: `let <carrier> = <doc> in`.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_construct_tuple(
     carrier: impl Into<String>,
     doc: Document<'static>,
@@ -397,7 +396,6 @@ pub(in crate::core_erlang) fn build_construct_tuple(
 /// target identities, a `MapPut`'s key and `State` version step — minted
 /// from the live generator by a production caller). A `lower` that answers
 /// a different shape is what `VerifyError::LocalRebindModeMismatch` reports.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_local_rebind(
     enclosing: &RebindFrame,
     carrier: &str,
@@ -429,7 +427,6 @@ pub(in crate::core_erlang) fn build_local_rebind(
 /// from the version it bound (`state_first`) rather than `element(2, CF)`.
 /// With no `State` family `Bind` (class methods, value types, flat tuples)
 /// each rebind reads the carrier directly.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_local_threading_prelude(
     enclosing: &RebindFrame,
     carrier: &str,
@@ -468,7 +465,6 @@ pub(in crate::core_erlang) fn build_local_threading_prelude(
 
 /// Builds a [`ThreadedStmt::DiscardLocals`]: a `MethodBody` frame's last
 /// expression dropping its construct's rebinds (ADR 0131 §2).
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_discard_locals(
     carrier: impl Into<String>,
     span: Span,

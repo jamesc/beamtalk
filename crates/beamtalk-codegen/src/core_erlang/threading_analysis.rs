@@ -415,12 +415,16 @@ impl CoreErlangGenerator {
                 construct.blocks.clone()
             }
             LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
-                "whileTrue:" | "whileFalse:" => {
-                    match (literal(Some(receiver.as_ref())), literal(arguments.first())) {
-                        (Some(cond), Some(body)) => vec![cond, body],
-                        _ => Vec::new(),
-                    }
-                }
+                // The body is packed whether or not the condition is a
+                // literal block (`aBlock whileTrue: [...]`), exactly as the
+                // while generators' `loop_threaded_locals(body, condition)`.
+                "whileTrue:" | "whileFalse:" => match literal(arguments.first()) {
+                    Some(body) => literal(Some(receiver.as_ref()))
+                        .into_iter()
+                        .chain([body])
+                        .collect(),
+                    None => Vec::new(),
+                },
                 "eachWithIndex:" | "do:separatedBy:" => {
                     let arity = if sel == "eachWithIndex:" { 1 } else { 2 };
                     if arguments.len() == arity && self.enumeration_threads_actor_state() {

@@ -225,6 +225,14 @@ pub struct CoreErlangGenerator {
         beamtalk_core::source_analysis::Span,
         sequencing::PrecompiledSubexpr,
     >,
+    /// ADR 0131 Phase 2 (BT-3749): the paren-unwrapped spans of the
+    /// current method body's sequenced operand sites
+    /// (`beamtalk_core`'s `sequenced_operand_sites` over each statement) —
+    /// where a loop or fold is a local-threading producer whose prelude
+    /// the method body splices. Set by the method-body lowerings
+    /// (`with_local_producer_sites`) and empty everywhere else.
+    pub(in crate::core_erlang) local_producer_sites:
+        std::collections::HashSet<beamtalk_core::source_analysis::Span>,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -388,6 +396,7 @@ impl CoreErlangGenerator {
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
+            local_producer_sites: std::collections::HashSet::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),
