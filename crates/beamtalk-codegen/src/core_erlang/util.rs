@@ -348,7 +348,7 @@ impl CoreErlangGenerator {
         // evaluation order against its siblings (see
         // `class_method_prelude_producer`).
         if self.in_class_method() {
-            if let Some(tv) = self.class_method_prelude_producer(inner)? {
+            if let Some(tv) = self.class_method_prelude_producer(inner, frame)? {
                 return Ok(tv);
             }
         }
@@ -669,24 +669,40 @@ impl CoreErlangGenerator {
     /// ever runs, so `self class` or `self isNil` must still reach THOSE
     /// handlers — a selector the class itself declares as a class method can
     /// never collide with one of those reserved well-known names.
+    ///
+    /// ADR 0131 Phase 2d (BT-3795): the value of a class-variable write is a
+    /// sequenced operand site (`sequenced_operand_sites`), so a local-threading
+    /// producer in it (`self.n := (xs collect: [...]) size`) is sequenced
+    /// ahead of the write and its prelude spliced before it. Only a write
+    /// that holds a producer is sequenced, so every other class-variable
+    /// write compiles exactly as before.
     fn class_method_prelude_producer(
         &mut self,
         expr: &Expression,
+        frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         if self.is_class_side_effect(expr) {
+            let (mut prelude, scope) = match expr {
+                Expression::Assignment { value, .. } if self.statement_has_local_producer(expr) => {
+                    self.sequence_children(&[value.as_ref()], frame)?
+                }
+                _ => (Vec::new(), PrecompiledScope::new()),
+            };
             let doc = self.generate_expression(expr)?;
+            self.finish_precompiled_scope(scope)?;
             let result_var = self.fresh_temp_var("Effect");
+            prelude.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    beamtalk_cerl_doc::leaf::var(result_var.clone()),
+                    " = ",
+                    doc,
+                    " in "
+                ],
+                expr.span(),
+            ));
             return Ok(Some(ThreadedValue {
-                prelude: vec![ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        beamtalk_cerl_doc::leaf::var(result_var.clone()),
-                        " = ",
-                        doc,
-                        " in "
-                    ],
-                    expr.span(),
-                )],
+                prelude,
                 value: ValueRef::Var(result_var),
             }));
         }
