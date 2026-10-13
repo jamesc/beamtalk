@@ -612,10 +612,9 @@ const fn deny(
 /// right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Actor], &[DetectIfNone]),
-    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
     deny(None, None, None, None, None, None, &[Repl], &[IfNil]),
-    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr]),
+    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
@@ -1635,8 +1634,10 @@ mod tests {
         for context in [Class, ValueType, Actor, Repl] {
             assert!(is_allowed(Do, Position::Statement, context));
         }
-        // `detect:ifNone:` with a writing handler loses the write as a
-        // statement in an actor method (BT-3753).
-        assert!(!is_allowed(DetectIfNone, Position::Statement, Actor));
+        // `detect:ifNone:` with a writing handler packs the write with its
+        // search block's, as a statement in every method context (BT-3794).
+        for context in [Class, ValueType, Actor] {
+            assert!(is_allowed(DetectIfNone, Position::Statement, context));
+        }
     }
 }

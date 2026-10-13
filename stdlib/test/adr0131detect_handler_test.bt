@@ -1,0 +1,56 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3794 (ADR 0131 Phase 2c): a `detect:ifNone:` whose `ifNone:` handler
+// writes an outer local is a local-threading producer: the fold packs the
+// handler's writes with the search block's, in every operand position and as
+// a statement, in class, value-type and actor methods. Each test runs one
+// shape (fixtures/adr0131detect_handler_{class,value,actor}.bt) in all three
+// contexts and asserts the answer Smalltalk semantics give.
+
+TestCase subclass: Adr0131DetectHandlerTest
+
+  answersOf: selector =>
+    #[Adr0131DetectHandlerClass perform: selector, (Adr0131DetectHandlerValue new) perform: selector, (Adr0131DetectHandlerActor spawn) perform: selector]
+
+  assertAll: selector equal: expected =>
+    self assert: (self answersOf: selector) equals: #[expected, expected, expected]
+
+  testS2 => self assertAll: #s2 equal: #[0, 1]
+
+  testHandlerStatement => self assertAll: #handlerStatement equal: 1
+
+  testHandlerFound => self assertAll: #handlerFound equal: #[2, 0]
+
+  testHandlerWriteOnly => self assertAll: #handlerWriteOnly equal: #[0, 7]
+
+  testHandlerOtherLocal => self assertAll: #handlerOtherLocal equal: #[0, 2, 10]
+
+  testHandlerOtherLocalFound =>
+    self assertAll: #handlerOtherLocalFound equal: #[2, 2, 0]
+
+  testHandlerTwoLocals => self assertAll: #handlerTwoLocals equal: #[0, 1, 2]
+
+  testHandlerReturned => self assertAll: #handlerReturned equal: 6
+
+  testHandlerLeftRead => self assertAll: #handlerLeftRead equal: #[5, 1]
+
+  testHandlerLast => self assertAll: #handlerLast equal: 3
+
+  testHandlerParenthesised => self assertAll: #handlerParenthesised equal: 1
+
+  testHandlerAssignsTarget => self assertAll: #handlerAssignsTarget equal: 9
+
+  testHandlerNilFound => self assertAll: #handlerNilFound equal: #[nil, 0]
+
+  testHandlerEmpty => self assertAll: #handlerEmpty equal: #[5, 1]
+
+  testHandlerTwice => self assertAll: #handlerTwice equal: 11
+
+  testHandlerInArgument => self assertAll: #handlerInArgument equal: #[3, 4]
+
+  testHandlerFieldAndLocalActor =>
+    self assert: (Adr0131DetectHandlerActor spawn) handlerFieldAndLocal equals: #[0, 1, 1]
+
+  testHandlerSelfSendAndLocalActor =>
+    self assert: (Adr0131DetectHandlerActor spawn) handlerSelfSendAndLocal equals: #[0, 1, 3]

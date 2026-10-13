@@ -35,6 +35,13 @@ const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]",
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [t := t + 1. 0]",
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [u := 1. 0]",
+    // BT-3794: a handler that is the only writer (read-write and write-only),
+    // two locals, and a parenthesised handler (a block value: rejected, so
+    // skipped).
+    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
+    "#(1, 2) detect: [:x | x > 1] ifNone: [t := 7. 0]",
+    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. u := u + 1. 0]",
+    "#(1, 2) detect: [:x | x > 5] ifNone: ([t := t + 1. 0])",
     "#(1, 2) do: [:x | t := t + x]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
     "#(1, 2) select: [:x | t := t + 1. true]",

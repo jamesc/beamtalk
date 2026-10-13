@@ -318,8 +318,8 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 ///
 /// The body block is the one whose outer-local writes the construct packs
 /// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
-/// `detect:ifNone:`'s `ifNone:` handler is not a body: a write there is not
-/// packed (ADR 0131 phase 2's lookup work, BT-3749 follow-up).
+/// `detect:ifNone:`'s `ifNone:` handler is not a body; it is the producer's
+/// handler ([`producer_handler_arg_index`]), packed with the body.
 ///
 /// The one table: codegen's `counted_loop_body_block`/`foldl_list_op_body_block`
 /// and the Phase 0 allow-set check (`semantic_analysis/validators/local_threading.rs`)
@@ -335,6 +335,26 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
         | ("detect:ifNone:", 2) => Some(0),
         ("to:do:" | "inject:into:", 2) => Some(1),
         ("to:by:do:", 3) => Some(2),
+        _ => None,
+    }
+}
+
+/// ADR 0131 Phase 2c (BT-3794): the handler block a producer fold packs
+/// besides its body. Returns the 0-based index of the literal handler
+/// argument of a send of `sel` with `arity` arguments (`detect:ifNone:`'s
+/// `ifNone:` block), or `None` for any other selector or arity.
+///
+/// The handler runs once after the fold, in the fold's activation, so a write
+/// in it is threaded exactly like a write in the body: the fold's plan packs
+/// it into the same accumulator and the producer rebinds it. Together with
+/// [`producer_body_arg_index`] this is the one table of the blocks a
+/// producer packs: core's `producer_packed_blocks` reads both, and the Phase 0
+/// allow-set check and codegen (`lowered_construct_blocks`, the fold plans)
+/// read that, so the diagnostic and the lowering accept the same sends.
+#[must_use]
+pub fn producer_handler_arg_index(sel: &str, arity: usize) -> Option<usize> {
+    match (sel, arity) {
+        ("detect:ifNone:", 2) => Some(1),
         _ => None,
     }
 }
