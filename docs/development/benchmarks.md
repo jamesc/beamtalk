@@ -1167,7 +1167,7 @@ for class-variable access anyway, Phase 3 may inline the pair too; the 3 ns it s
 
 - The cost of the invocation boundary itself (`assert_absent/1` + `install/2` on entry, read-back and `erase` in
   `after` of `invoke_class_method/7`), which is Phase 2 and was assumed small next to the `gen_server` round trip.
-- The restore arm taken (an error crossing a catch): only the pass-through path was measured here; measured later, under load, in "BT-3766" below.
+- The restore arm taken (an error crossing a catch): only the pass-through path was measured here; measured later, on an idle machine, in "BT-3766" below.
 - `Result tryDo:` and `protect/1`; the subclass-receiver walk after the change (`class_self_send_inherited_override`,
   not hand-lowered); the actor open self-send (BT-3692); the release profile of the CLI (the generated code is the
   same either way).
@@ -1352,41 +1352,54 @@ Two runtime costs removed, plus the two measurements BT-3719 left open.
   `instance_on_do_raise_loop` (`SsbOnDoRaiseObject`, same loop outside any invocation, so `restore/1` gets `none`).
   2,000 iterations each, since a raise costs about 1000x a send.
 
-### Method and caveat: this was NOT an idle machine
+### Method and load (idle re-run, BT-3789)
 
 Method as in "Harness" above: `beamtalk run SsbMain run` (debug CLI), 7 interleaved rounds (before, after, before,
-...), medians with min-max, ns/op. "before" is `origin/main` `c82080e56`'s `beamtalk_class_vars` and
-`beamtalk_class_dispatch` beams, "after" is this change's, swapped into the same runtime `ebin` between runs; the
-compiler, stdlib and the (new) bench package are identical on both sides. A first warm-up run was discarded.
+...), medians with min-max, ns/op. "before" is `beamtalk_class_vars` and `beamtalk_class_dispatch` from
+`b2d685e3b` (the parent of the BT-3766 commit `aaad58022`), compiled with `erlc` from that commit's sources;
+"after" is the same two modules at `f34eb49b7` (current `main`, which contains BT-3766), copied into the same
+runtime `ebin` between runs. The compiler, stdlib and bench package are identical on both sides (the bench
+reported "All 15 files unchanged" on every run). One warm-up run per side was discarded.
 
-**Load: 4-core shared container, load average 12.1 / 6.1 / 2.4 (1/5/15 min) when the runs started and 9.95 / 7.5 /
-3.4 when they finished. It was loaded throughout (load 10-12 on 4 cores), not idle**, so run-to-run spread is
-wide (min-max often 1.5-2x) and only large effects would show. The acceptance criterion asks for an idle re-run;
-that is filed as a follow-up under BT-3757 (BT-3789) and the figures below must not be read as idle numbers.
+**Load: idle 4-core container, nothing else running; no build or test overlapped the measured rounds.** `uptime`
+load average (1/5/15 min) immediately before the first run: 0.09 / 0.97 / 0.93 (the 5- and 15-minute figures are
+the tail of the preceding build). After the 7 rounds: 0.96 / 1.04 / 0.97. The 1-minute figure rises to about 1.0
+during the runs because the benchmark's own BEAM keeps one core busy, as in the earlier idle runs above. This
+replaces the earlier figures, which were taken at load 10-12 and are no longer reported.
 
 | case (ns/op, median [min-max], n = 7) | before | after | ratio |
 |---|---|---|---|
-| gate 3: class-variable loop, 10 reads + 3 writes | 963 [790-2115] | 981 [819-1670] | 1.02 (noise) |
-| gate 1: class self-send, open | 215 [156-297] | 176 [155-382] | 0.82 (noise) |
-| class self-send, open, in `ifTrue:` arm | 285 [211-344] | 279 [210-431] | 0.98 |
-| class self-send, sealed | 149 [132-196] | 186 [133-357] | 1.25 (noise; direct-call path, untouched code) |
-| class self-send, inherited override (walk) | 2614 [2264-3461] | 2565 [2174-3482] | 0.98 |
-| class self-send, inherited plain | 3593 [2792-4239] | 3713 [2662-4884] | 1.03 |
-| gate 4, instance `on:do:` no raise | 3314 [2881-5166] | 3105 [2862-3748] | 0.94 |
-| gate 4, restore arm taken: class-side raise loop | 131418 [98956-188039] | 125957 [115262-163467] | 0.96 |
-| gate 4, raise loop outside a class invocation (`restore/1` gets `none`) | 138589 [90847-216808] | 130114 [94576-183241] | 0.94 |
+| gate 3: class-variable loop, 10 reads + 3 writes | 845 [788-1078] | 884 [850-1505] | 1.05 |
+| gate 1: class self-send, open | 182 [164-269] | 167 [157-284] | 0.91 |
+| class self-send, open, in `ifTrue:` arm | 239 [204-366] | 218 [211-301] | 0.91 |
+| class self-send, sealed | 139 [128-194] | 136 [127-211] | 0.98 |
+| class self-send, inherited override (walk) | 2219 [2162-2523] | 1695 [1496-2021] | 0.76 |
+| class self-send, inherited plain | 2989 [2662-3192] | 2014 [1868-2324] | 0.67 |
+| gate 4, instance `on:do:` no raise | 2776 [2575-3027] | 2770 [2682-3095] | 1.00 |
+| gate 4, restore arm taken: class-side raise loop | 119637 [99062-145192] | 113434 [101965-174091] | 0.95 |
+| gate 4, raise loop outside a class invocation (`restore/1` gets `none`) | 117499 [101863-165411] | 113975 [99123-153365] | 0.97 |
 
-**Gate 3.** No measurable change (1.02, well inside the spread). That is expected: the compiler inlines class
-variable accesses as `erlang:get(_CVKeyN)` (BT-3719), so the loop never calls the helpers whose class-name
-derivation this change removes. The change helps the paths that do call them (FFI class methods, `capture/2`, block
-writes that are not inlined), which no `SsbMain` case exercises, so no speed-up is claimed. The BT-3719 figure
-(0.70 ratio, projected 410 ns) is therefore still a projection on the BT-3713 idle machine, now with a loaded
-re-run (963 ns here, loaded) that does not contradict it but cannot confirm the 570 ns budget either.
+**Gate 3: not met.** The class-variable loop costs 884 ns after (845 ns before) against the 570 ns budget
+(2 x 285 ns), so it is 55% over budget on an idle machine. BT-3766 itself changes nothing measurable here (1.05, the
+after side's range 850-1505 is wider but its median is within the before range): the compiler inlines class variable
+accesses as `erlang:get(_CVKeyN)` (BT-3719), so the loop never calls the helpers whose class-name derivation this
+change removes. The change helps the paths that do call them (FFI class methods, `capture/2`, block writes that are
+not inlined), which no `SsbMain` case exercises, so no speed-up is claimed. The BT-3719 projection of about 410 ns
+(582 ns x 0.70) is **not confirmed** by this run: the loop is at 845-884 ns, well above both the projection and the
+budget. The figures are not directly comparable with the BT-3713 582 ns baseline (different run, container and
+`main`), and this run did not isolate why they differ, so whether gate 3 regressed since BT-3719 or the BT-3713
+machine was faster is open and needs its own follow-up.
 
-**Gate 4, restore arm taken (first measurement).** The class-side loop that runs `restore/1` with a live snapshot
-costs 125957 ns/iteration against 130114 ns for the same raise loop with a `none` snapshot (ratio 0.97 after,
-0.95 before): the restore arm is not visible against the cost of the raise itself, which dominates by about 1000x.
-Under load the restore cost is not detectable: the min-max ranges overlap heavily, so this is not a bound on it; an idle run would tighten it.
+The inherited-lookup rows (0.76 and 0.67) change by more than their spread. They are reported as measured, but
+BT-3766 only removes tag derivations from the dispatch path, and the "before" modules are those of `b2d685e3b`
+while the rest of the runtime is current `main`, so treat them as an observation, not an attributed gain.
+
+**Gate 4, restore arm taken.** The class-side loop that runs `restore/1` with a live snapshot costs 113434 ns per
+iteration after (119637 before), against 113975 ns after (117499 before) for the same raise loop with a `none`
+snapshot: ratio 1.00 after, 1.02 before. The restore arm is not visible against the cost of the raise itself, which
+dominates by about 1000x, and the min-max ranges (about 100000-175000 ns) overlap completely. The idle run bounds
+the restore cost only to within that spread (roughly +/-10% of a raise, i.e. under about 10 us per restore), not to
+a tight figure.
 
 ## BT-3700: one derived flag for the class-side self-send guard
 
