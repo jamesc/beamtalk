@@ -89,10 +89,11 @@ pub(crate) fn check_class_state_abroad(
         .classes
         .iter()
         .map(|class| {
-            // Own and inherited: a subclass method writing an inherited class
-            // variable is a writer too.
+            // Own declarations only (BT-3762): class variables are per class,
+            // and a subclass method naming an ancestor's variable does not
+            // compile, so it is neither a reader nor a writer here.
             let names: HashSet<String> = hierarchy
-                .class_variable_names(class.name.name.as_str())
+                .own_class_variable_names(class.name.name.as_str())
                 .iter()
                 .map(ToString::to_string)
                 .collect();
@@ -108,7 +109,7 @@ pub(crate) fn check_class_state_abroad(
 
     let mut check = |class_name: &str, body: &[ExpressionStatement]| {
         let class_vars: HashSet<String> = hierarchy
-            .class_variable_names(class_name)
+            .own_class_variable_names(class_name)
             .iter()
             .map(ToString::to_string)
             .collect();

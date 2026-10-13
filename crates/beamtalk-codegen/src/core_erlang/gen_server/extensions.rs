@@ -406,17 +406,21 @@ impl CoreErlangGenerator {
             MethodBoundary::Actor => CodeGenContext::Actor,
             _ => CodeGenContext::ValueType,
         };
-        // The target's declared class variables, so `self.n` in the body is a
+        // The target's own declared class variables, so `self.n` in the body is a
         // class-variable access (the target is foreign: its AST is unavailable).
+        // Own-only (BT-3762): class variables are per class, so an ancestor's
+        // variable is rejected here exactly as in a compiled subclass.
         let class_var_names: std::collections::HashSet<String> = self
             .class_hierarchy
             .as_ref()
-            .map(|h| h.class_variable_names(ext.class_name.name.as_str()))
+            .map(|h| h.own_class_variable_names(ext.class_name.name.as_str()))
             .unwrap_or_default()
             .iter()
             .map(ToString::to_string)
             .collect();
         let prev_class_var_names = std::mem::replace(self.class_var_names_mut(), class_var_names);
+        let prev_extension_target =
+            self.replace_extension_target_class(Some(ext.class_name.name.to_string()));
 
         let (mut frame, param_vars) = MethodFrame::enter(
             self,
@@ -442,6 +446,7 @@ impl CoreErlangGenerator {
         // restores the selector) on the success and error paths alike.
         drop(frame);
         *self.class_var_names_mut() = prev_class_var_names;
+        self.replace_extension_target_class(prev_extension_target);
         self.context = prev_context;
 
         let body_doc = body_result?;

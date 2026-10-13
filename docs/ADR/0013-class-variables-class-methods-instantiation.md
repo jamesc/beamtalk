@@ -68,6 +68,7 @@ Object subclass: TranscriptStream
 - Accessible from both class-side and instance-side methods via `self.varName` on the class side, and a yet-to-be-determined syntax on the instance side.
 - Mutable via `:=` assignment (same as instance state).
 - **Not inherited** by subclasses — each class has its own class variables (class instance variables in Pharo terminology). This matches Pharo's class instance variables, which is what singletons actually need.
+  - *BT-3762 (2026-10-13):* enforced everywhere. A subclass class method that reads or writes a variable declared only on an ancestor is a compile error (compiled classes, class-side extensions, `ClassBuilder` `classMethods:`; the `class-state-abroad` lint uses the same own-only set), and the subclass must redeclare it with its own `classState:`. Inherited methods still use the receiver's variables.
 
 **Storage**: In the class gen_server process state. Access compiles to `gen_server:call(ClassPid, {get_class_var, VarName})` / `gen_server:call(ClassPid, {set_class_var, VarName, Value})`.
 
