@@ -1513,6 +1513,12 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 /// `self.field`) and a self-send carrying a block argument (a
 /// possible Tier 2 self-send). Applied in every context, so the diagnostic does
 /// not depend on which method kind it sits in.
+///
+/// This is a deliberate over-approximation of the actor lowering, not an exact
+/// mirror: every `value`-family send stops the sites, including a literal-block
+/// receiver or the zero-argument `value`, and in class and value-type methods
+/// where nothing would leak. It only adds Phase 0 errors and never miscompiles;
+/// the later phases that sequence these lowerings narrow it.
 #[must_use]
 fn operands_not_sequenced(
     receiver: &Expression,
