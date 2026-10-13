@@ -472,7 +472,18 @@ already records that forwarding such a block to `do:`/`collect:`/`select:`
 in class or value-type context **silently drops the write**, so the value
 case is a wrong answer today, not only a crash. This replaces today's
 runtime `perform:` failure and the native-callee arity crash. The same send
-compiled from an actor instance method keeps working (BT-912).
+compiled from an actor instance method keeps working (BT-912) only when the
+callee hands the block's `StateAcc` back (BT-3755): a `sealed` method of the
+same class that invokes the block directly (`b value` as a statement, an
+assignment or a `^`), as the callable of a collection message (`do:`,
+`inject:into:`, ... ADR 0128), in the body of a `do:` that assigns the
+invocation to a local bound before it, or that passes the block on to another
+such method. An inherited callee, an overridable one, and any other use of the
+block (inside a loop or conditional, as an operand, stored) drop the write or
+raise, so they are the same error until the callee-side `{Result, StateAcc}`
+protocol exists (BT-3742). One predicate,
+`semantic_analysis::tier2_callee::callee_threads_block_param`, decides it for
+both the diagnostic and codegen's class pre-scan.
 
 **Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
 x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy

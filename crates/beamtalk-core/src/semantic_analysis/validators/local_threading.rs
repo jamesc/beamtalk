@@ -23,7 +23,8 @@
 //!   a literal block), an actor instance self-send (BT-912) in the exact
 //!   shape codegen's `detect_tier2_self_send` threads (a bare `self`
 //!   receiver, not a cascade message, at the method body's top level, with a
-//!   bare block argument whose writes are all captured mutations), or an
+//!   bare block argument whose writes are all captured mutations) to a callee
+//!   that threads the block (BT-3755, [`callee_threads_block_param`]), or an
 //!   Erlang FFI argument (ADR 0041 §Erlang Interop Boundary: lossy by design,
 //!   codegen's `generate_erlang_interop_wrapper` warns). In an actor instance
 //!   method a stored block may also be sent a `value`-family message, but
@@ -51,6 +52,7 @@ use crate::semantic_analysis::block_facts::{
     outer_local_writes, producer_body_block, repl_operand_sites, sequenced_operand_sites,
     stored_block_var_uses,
 };
+use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -706,12 +708,29 @@ pub(crate) fn check_local_threading(
     };
     for class in &module.classes {
         let class_name = class.name.name.as_str();
+        let context = instance_context(class_name);
+        let callees = if context == Actor {
+            threading_callees(class)
+        } else {
+            HashSet::new()
+        };
         for method in &class.methods {
-            let context = instance_context(class_name);
-            check_body(context, param_names(method), &method.body, diagnostics);
+            check_body(
+                context,
+                param_names(method),
+                &method.body,
+                &callees,
+                diagnostics,
+            );
         }
         for method in &class.class_methods {
-            check_body(Class, param_names(method), &method.body, diagnostics);
+            check_body(
+                Class,
+                param_names(method),
+                &method.body,
+                &HashSet::new(),
+                diagnostics,
+            );
         }
     }
     for standalone in &module.method_definitions {
@@ -721,11 +740,23 @@ pub(crate) fn check_local_threading(
             instance_context(standalone.class_name.name.as_str())
         };
         let method = &standalone.method;
-        check_body(context, param_names(method), &method.body, diagnostics);
+        check_body(
+            context,
+            param_names(method),
+            &method.body,
+            &HashSet::new(),
+            diagnostics,
+        );
     }
     if !module.expressions.is_empty() {
         let known: Vec<EcoString> = known_vars.iter().map(|v| EcoString::from(*v)).collect();
-        check_body(Repl, known, &module.expressions, diagnostics);
+        check_body(
+            Repl,
+            known,
+            &module.expressions,
+            &HashSet::new(),
+            diagnostics,
+        );
     }
 }
 
@@ -735,11 +766,28 @@ fn check_body(
     context: MethodContext,
     params: Vec<EcoString>,
     body: &[ExpressionStatement],
+    callees: &HashSet<(EcoString, usize)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut walker = Walker::new(context, body, diagnostics);
+    let mut walker = Walker::new(context, body, callees, diagnostics);
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
+}
+
+/// The `(selector, parameter index)` pairs of `class`'s instance methods that
+/// thread a Tier 2 block passed to them ([`callee_threads_block_param`], the
+/// predicate codegen's class pre-scan reads as well).
+fn threading_callees(class: &crate::ast::ClassDefinition) -> HashSet<(EcoString, usize)> {
+    let mut callees = HashSet::new();
+    for method in class.methods.iter().filter(|m| !m.is_class_method) {
+        let selector = method.selector.name();
+        for index in 0..method.parameters.len() {
+            if callee_threads_block_param(class, &selector, index) {
+                callees.insert((selector.clone(), index));
+            }
+        }
+    }
+    callees
 }
 
 fn param_names(method: &crate::ast::MethodDefinition) -> Vec<EcoString> {
@@ -834,6 +882,9 @@ struct Walker<'d> {
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<bool>,
+    /// The actor self-send callees of the enclosing class that thread a Tier 2
+    /// block argument ([`threading_callees`]).
+    callees: &'d HashSet<(EcoString, usize)>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -841,6 +892,7 @@ impl<'d> Walker<'d> {
     fn new(
         context: MethodContext,
         body: &[ExpressionStatement],
+        callees: &'d HashSet<(EcoString, usize)>,
         diagnostics: &'d mut Vec<Diagnostic>,
     ) -> Self {
         let mut assign_counts = HashMap::new();
@@ -892,6 +944,7 @@ impl<'d> Walker<'d> {
             operand_sites: HashSet::new(),
             frame_sites: Vec::new(),
             pending_frame_body: None,
+            callees,
             diagnostics,
         }
     }
@@ -1412,7 +1465,10 @@ impl<'d> Walker<'d> {
         // a cascade message), at the top level of the method body, with a
         // bare `[...]` argument whose block threads every outer local it
         // writes (`captured_mutations_for_block`). Anything else drops the
-        // write or raises (probed, BT-3745). Pinned by
+        // write or raises (probed, BT-3745). The callee must also thread the
+        // block (BT-3755): see `semantic_analysis::tier2_callee`'s module docs
+        // for the exact callee shapes ([`callee_threads_block_param`], the
+        // predicate codegen's class pre-scan reads too). Pinned by
         // `section6_exemptions_match_codegen_shapes` and the compiled
         // fixture `adr0131section6exemptions_actor.bt`.
         let is_self_send = matches!(receiver, Expression::Identifier(id) if id.name == "self");
@@ -1442,13 +1498,20 @@ impl<'d> Walker<'d> {
         }
         // Block literal arguments. A parenthesized block argument is a block
         // value in every send.
-        for arg in arguments {
+        for (index, arg) in arguments.iter().enumerate() {
             match arg {
                 Expression::Block(block) if construct_send => {}
                 Expression::Block(block) if actor_self_send => {
                     let writes = self.writes_of(block);
+                    // BT-3755: the callee must hand the block's `StateAcc`
+                    // back; only then does the write survive.
+                    let callee_threads = self
+                        .callees
+                        .contains(&(EcoString::from(sel.as_str()), index));
                     if !threads_all(block, &writes) {
                         self.report_literal(block, &sel);
+                    } else if !callee_threads {
+                        self.report_literal_with_hint(block, &sel, self_send_help(&sel));
                     }
                 }
                 Expression::Block(block) => self.report_literal(block, &sel),
@@ -1492,6 +1555,15 @@ impl<'d> Walker<'d> {
     }
 
     fn report_literal(&mut self, block: &Block, selector: &str) {
+        let hint = self
+            .writes_of(block)
+            .first()
+            .map(|w| section6_help(&w.name, selector))
+            .unwrap_or_default();
+        self.report_literal_with_hint(block, selector, hint);
+    }
+
+    fn report_literal_with_hint(&mut self, block: &Block, selector: &str, hint: String) {
         let Some(write) = self.writes_of(block).into_iter().next() else {
             return;
         };
@@ -1503,7 +1575,7 @@ impl<'d> Walker<'d> {
                 ),
                 block.span,
             )
-            .with_hint(section6_help(name, selector))
+            .with_hint(hint)
             .with_note(format!("`{name}` is written here"), Some(write.span))
             .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
         );
@@ -1585,6 +1657,17 @@ fn threads_all(block: &Block, writes: &[OuterLocalWrite]) -> bool {
     writes
         .iter()
         .all(|w| captured.iter().any(|c| c == w.name.as_str()))
+}
+
+/// The help text for an actor self-send whose callee does not hand the
+/// block's write back (BT-3755).
+fn self_send_help(selector: &str) -> String {
+    format!(
+        "`{selector}` must be a `sealed` method of this class that only invokes the block \
+         directly (`b value`) as a statement, an assignment or a `^` in its body, or hands it \
+         to a collection message (`do:`, `inject:into:`) or another such method; otherwise \
+         return the new value from the block and assign it"
+    )
 }
 
 /// The ADR 0131 §6 help text.

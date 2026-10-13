@@ -12,7 +12,7 @@ Actor subclass: HomFieldWriteActor
   // User-defined HOM: calls aBlock for each element in #(1, 2, 3, 4, 5).
   // The `last :=` write activates the stateful do: path so that
   // aBlock value: each is called with Tier 2 StateAcc threading.
-  applyAll: aBlock =>
+  sealed applyAll: aBlock =>
     last := nil
     #(1, 2, 3, 4, 5) do: [:each | last := aBlock value: each]
     last

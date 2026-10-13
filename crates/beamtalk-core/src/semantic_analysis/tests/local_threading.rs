@@ -63,7 +63,7 @@ fn in_value(body: &str) -> String {
 
 fn in_actor(body: &str) -> String {
     format!(
-        "Object subclass: CvA\n  class ap: b => b value\n\nActor subclass: Ac\n  state: n = 0\n\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
+        "Object subclass: CvA\n  class ap: b => b value\n\nActor subclass: Ac\n  state: n = 0\n\n  sealed ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
         indent(body)
     )
 }
@@ -219,6 +219,206 @@ fn section6_exemptions_match_codegen_shapes() {
             "{body}: {diags:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// BT-3755: the actor self-send exemption needs a callee that threads the block
+// ---------------------------------------------------------------------------
+
+/// An actor whose `probe` self-sends `ap:` a block writing `t`, with `callee`
+/// (the text of zero or more methods, at class-body indentation) as the
+/// rest of the class and `modifiers` before `Actor subclass:`.
+fn actor_calling(modifiers: &str, callee: &str) -> String {
+    format!(
+        "Actor subclass: Base\n  inherited: b => b value\n\n{modifiers}Actor subclass: Ac\n  state: n = 0\n\n{callee}\n\n  probe =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n"
+    )
+}
+
+fn section6_errors(src: &str) -> usize {
+    of_category(
+        &adr0131_diagnostics(src),
+        DiagnosticCategory::Tier2BlockNoReturnChannel,
+    )
+    .len()
+}
+
+/// The callee shapes the exemption keeps: a `sealed` same-class method (or a
+/// method of a `sealed` class) whose every use of the parameter is a direct
+/// `value` send as a body statement, assignment right-hand side or `^` value.
+/// These are the methods of `adr0131section6exemptions_actor.bt`, whose
+/// `BUnit` test asserts they thread the write at runtime.
+#[test]
+fn section6_actor_self_send_to_a_threading_callee_is_exempt() {
+    for callee in [
+        "  sealed ap: b => b value",
+        "  sealed ap: b => b value: 5",
+        "  sealed ap: b => ^b value",
+        "  sealed ap: b =>\n    r := b value\n    r",
+        "  sealed ap: b =>\n    b value\n    b value",
+        "  sealed ap: b =>\n    b value: 1; value: 2",
+        // A parameter that is never used is never invoked, so nothing is lost.
+        "  sealed ap: b => 7",
+        // A `do:` loop assigning the invocation to a local bound before it.
+        "  sealed ap: b =>\n    last := nil\n    #(1, 2) do: [:e | last := b value: e]\n    last",
+        // The callable of an opaque-callable collection HOM (ADR 0128), as a
+        // statement, an operand, or inside a conditional or `to:do:` body.
+        "  sealed ap: b => #(1, 2) do: b",
+        "  sealed ap: b => (#(1, 2) collect: b) size",
+        "  sealed ap: b => #(1, 2) inject: 0 into: b",
+        "  sealed ap: b =>\n    4 > 3 ifTrue: [#(1) do: b]\n    nil",
+        "  sealed ap: b =>\n    1 to: 2 do: [:i | #(1) do: b]\n    nil",
+        "  sealed ap: b =>\n    [(#(1) count: b) > 5] whileTrue: [nil]\n    nil",
+        // Passed on to another sealed callee that threads it.
+        "  sealed ap: b => self target: b\n\n  sealed target: c => c value",
+        "  sealed ap: b =>\n    r := self target: b\n    r\n\n  sealed target: c => ^c value",
+    ] {
+        assert_eq!(section6_errors(&actor_calling("", callee)), 0, "{callee}");
+    }
+    // A `sealed` class seals every method.
+    assert_eq!(
+        section6_errors(&actor_calling("sealed ", "  ap: b => b value")),
+        0
+    );
+    // The block's position selects the parameter that must thread.
+    let two = "Actor subclass: Ac\n  sealed ap: a with: b => b value\n\n  probe =>\n    t := 0\n    self ap: 1 with: [t := t + 1]\n    t\n";
+    assert_eq!(section6_errors(two), 0);
+}
+
+/// Each of these answered a wrong value or raised before BT-3755 (probed on
+/// the debug build: the write was dropped, or `stateful_block_dispatch` / a
+/// `perform:` arity error was raised), and is a compile error until the
+/// callee-side `{Result, StateAcc}` protocol (BT-3742) lets a callee hand the
+/// write back. Two are conservative rather than probed wrong: a callee that
+/// passes the block on to another same-class callee (BT-3755) is rejected
+/// only because the target does not thread it, and an overridable callee, which is
+/// only wrong when a subclass overrides it. Widening the exemption
+/// (`tier2_callee::callee_threads_block_param`) fails this test.
+#[test]
+fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {
+    for (modifiers, callee) in [
+        // Invoked inside a loop, conditional, operand or another block.
+        ("", "  sealed ap: b => #(1) do: [:x | b value]"),
+        ("", "  sealed ap: b => 4 > 3 ifTrue: [b value]"),
+        ("", "  sealed ap: b => (b value) + 1"),
+        ("", "  sealed ap: b =>\n    f := [b value]\n    f value"),
+        ("", "  sealed ap: b =>\n    x := (b value) + 1\n    x"),
+        // Stored, returned, passed on or used as an argument.
+        ("", "  sealed ap: b =>\n    self.n := b\n    nil"),
+        ("", "  sealed ap: b => b"),
+        ("", "  sealed ap: b => self inherited: b"),
+        ("", "  sealed ap: b => self ap: b"),
+        (
+            "",
+            "  sealed ap: b => self target: b\n\n  target: c => c value",
+        ),
+        (
+            "",
+            "  sealed ap: b => self target: b\n\n  sealed target: c => #(1) do: [:e | c value]",
+        ),
+        (
+            "",
+            "  sealed ap: b => self target: b\n\n  sealed target: c => self ap: c",
+        ),
+        (
+            "",
+            "  sealed ap: b => self target: b with: b\n\n  sealed target: c with: d => c value",
+        ),
+        // A loop body that does not assign the invocation to a prior local,
+        // or does more with the block (the bare `do:` is probed: the write is
+        // dropped).
+        ("", "  sealed ap: b => #(1, 2) do: [:e | b value: e]"),
+        (
+            "",
+            "  sealed ap: b =>\n    #(1, 2) do: [:e | r := b value: e]\n    nil",
+        ),
+        (
+            "",
+            "  sealed ap: b =>\n    last := nil\n    #(1, 2) do: [:e | last := (b value: e) + 1]\n    last",
+        ),
+        (
+            "",
+            "  sealed ap: b =>\n    last := nil\n    #(1, 2) collect: [:e | last := b value: e]\n    last",
+        ),
+        (
+            "",
+            "  sealed ap: b =>\n    last := nil\n    1 to: 2 do: [:e | last := b value: e]\n    last",
+        ),
+        (
+            "",
+            "  sealed ap: b =>\n    last := nil\n    #(1, 2) do: [:e | last := b value: e. b value]\n    last",
+        ),
+        // The callable of a collection HOM from a closure, a loop or fold
+        // body, or an argument position the opaque fold does not cover.
+        ("", "  sealed ap: b =>\n    f := [#(1) do: b]\n    f value"),
+        ("", "  sealed ap: b => #(1) do: [:e | #(2) do: b]"),
+        ("", "  sealed ap: b => #(1) collect: [:e | #(2) do: b]"),
+        ("", "  sealed ap: b => #(1) do: [:e | e] separatedBy: b"),
+        ("", "  sealed ap: b => self.n sort: b"),
+        ("", "  sealed ap: b => #(1) do: (b)"),
+        ("", "  sealed ap: b => #(1) do: b; yourself"),
+        ("", "  sealed ap: b => b value: b"),
+        ("", "  sealed ap: b =>\n    b := b value\n    b"),
+        // Overridable: an actor self-send late-binds, and a subclass override
+        // is compiled with its parameter as a plain block (probed: raises).
+        ("", "  ap: b => b value"),
+        // Not defined by this class: unknown or class-side.
+        ("", "  other: b => b value"),
+        ("", "  class ap: b => b value"),
+    ] {
+        assert_eq!(
+            section6_errors(&actor_calling(modifiers, callee)),
+            1,
+            "{modifiers}{callee}"
+        );
+    }
+    // A callee defined by a superclass is not the class's own method, even
+    // when the superclass is in the same module and sealed.
+    let inherited = "Actor subclass: Parent\n  sealed ap: b => b value\n\nParent subclass: Ac\n  probe =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n";
+    assert_eq!(section6_errors(inherited), 1);
+    // The second parameter is the one that must thread.
+    let second = "Actor subclass: Ac\n  sealed ap: a with: b => #(1) do: [:x | b value]\n\n  probe =>\n    t := 0\n    self ap: 1 with: [t := t + 1]\n    t\n";
+    assert_eq!(section6_errors(second), 1);
+}
+
+/// A standalone `Ac >> probe` method is checked with no callee set: codegen's
+/// class pre-scan (`scan_class_for_tier2_blocks`) walks only the methods in the
+/// class body, so a callee is never compiled with a Tier 2 block parameter
+/// for a self-send made from a standalone method, even a `sealed` one in the
+/// same module. The self-send is therefore a §6 error (BT-3755).
+#[test]
+fn section6_standalone_method_actor_self_send_is_an_error() {
+    let src = "Actor subclass: Ac\n  sealed ap: b => b value\n\nAc >> probe =>\n  t := 0\n  self ap: [t := t + 1]\n  t\n";
+    assert_eq!(section6_errors(src), 1);
+}
+
+/// The inert pending fixture holds the rejected callee shapes as runtime
+/// programs: every `probe*` method is rejected and its `callee*` helpers are
+/// not.
+#[test]
+fn adr0131_section6_callee_pins() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    let name = "adr0131section6callee_actor_pending.bt.pending";
+    let src = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let module = parse_module(&src);
+    let diags = adr0131_diagnostics(&src);
+    let (mut probes, mut callees) = (0, 0);
+    for method in &module.classes[0].methods {
+        let selector = method.selector.name();
+        let rejected = diags
+            .iter()
+            .any(|d| method.span.start() <= d.span.start() && d.span.end() <= method.span.end());
+        if selector.starts_with("probe") {
+            probes += 1;
+            assert!(rejected, "{name}: `{selector}` is no longer rejected");
+        } else {
+            callees += 1;
+            assert!(!rejected, "{name}: helper `{selector}` is rejected");
+        }
+    }
+    assert!(
+        probes >= 4 && callees >= 4,
+        "{probes} probes, {callees} callees"
+    );
 }
 
 #[test]
