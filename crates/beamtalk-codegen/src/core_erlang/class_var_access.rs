@@ -181,6 +181,11 @@ impl CoreErlangGenerator {
         name: &str,
         span: beamtalk_core::source_analysis::Span,
     ) -> Option<CodeGenError> {
+        // A builder class is not in the static hierarchy and its variables are
+        // its `classVars:` keys (BT-3804): the generic error applies.
+        if self.builder_class_method_class().is_some() {
+            return None;
+        }
         let home = self.class_var_home();
         let owner = self
             .class_hierarchy
