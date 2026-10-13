@@ -901,6 +901,19 @@ impl CoreErlangGenerator {
         if prelude.is_empty() {
             return Ok(value);
         }
+        // BT-3802: this renders the cascade to one self-contained `Document`,
+        // so a `State`/`SelfVt` rebind in its hoisted prelude is scoped out of
+        // everything after the cascade (the BT-3791 `unbound variable
+        // 'State1'`). A cascade whose operands need a prelude is a producer
+        // (`threaded_expression` splices it into the caller's frame); reaching
+        // this closed rendering with such a prelude is a lowering that failed
+        // to splice, reported rather than silently dropped.
+        let escaped = super::threaded_ir::opaque_escapes(&prelude, false);
+        self.report_threaded_ir_verify_errors(
+            &escaped,
+            "cascade operand state rebind trapped in a closed cascade expression",
+            receiver.span(),
+        );
         Ok(docvec![self.threaded_prelude_doc(&prelude), value])
     }
 
