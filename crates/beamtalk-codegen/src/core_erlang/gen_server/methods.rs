@@ -2020,7 +2020,11 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        // Populate class variable names for field access validation
+        // Populate class variable names for field access validation. These are
+        // the class's own `classState:` declarations (BT-3762): the AST class
+        // definition is the same own-declaration set that
+        // `ClassHierarchy::own_class_variable_names` answers for the
+        // hierarchy-sourced callers, so an ancestor's variable is rejected.
         *self.class_var_names_mut() = class
             .class_variables
             .iter()
@@ -2154,6 +2158,7 @@ impl CoreErlangGenerator {
         pairs: &[MapPair],
         class_name: &str,
         class_var_names: &[String],
+        docs: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
     ) -> Result<Document<'static>> {
         if pairs.is_empty() {
             return Ok(Document::Str("~{}~"));
@@ -2164,38 +2169,44 @@ impl CoreErlangGenerator {
         // values are ordinary expressions evaluated by the *enclosing* method,
         // so they lower in its context — `self` there is the enclosing
         // receiver, not the builder class's unbound `ClassSelf`.
+        //
+        // BT-3791: a computed value can change actor state (a field
+        // assignment, a state-threading self-send), so it is split exactly like
+        // any other cascade argument and its prelude hoisted into the cascade's
+        // `docs`; otherwise its `StateN` rebind is trapped inside the map
+        // literal and later cascade messages see an unbound/stale `State`.
+        let mut key_docs: Vec<Document<'static>> = Vec::with_capacity(pairs.len());
+        let mut splits = Vec::with_capacity(pairs.len());
+        for pair in pairs {
+            key_docs.push(self.expression_doc(&pair.key)?);
+            if matches!(pair.value, Expression::Block(_)) {
+                let fun_doc = self.class_method_map_value_doc(
+                    &pair.key,
+                    &pair.value,
+                    class_name,
+                    class_var_names,
+                )?;
+                splits.push((Vec::new(), fun_doc));
+            } else {
+                splits.push(self.split_cascade_arg(&pair.value)?);
+            }
+        }
+        let span = pairs.first().map_or_else(
+            || beamtalk_core::source_analysis::Span::new(0, 0),
+            |p| p.value.span(),
+        );
+        let val_docs = self.hoist_cascade_splits(splits, docs, span);
+
         let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
-        let mut result: Result<()> = Ok(());
-        for (i, pair) in pairs.iter().enumerate() {
+        for (i, (key_doc, val_doc)) in key_docs.into_iter().zip(val_docs).enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            let key_doc = match self.expression_doc(&pair.key) {
-                Ok(d) => d,
-                Err(e) => {
-                    result = Err(e);
-                    break;
-                }
-            };
-            let val_doc = match self.class_method_map_value_doc(
-                &pair.key,
-                &pair.value,
-                class_name,
-                class_var_names,
-            ) {
-                Ok(d) => d,
-                Err(e) => {
-                    result = Err(e);
-                    break;
-                }
-            };
             parts.push(key_doc);
             parts.push(Document::Str(" => "));
             parts.push(val_doc);
         }
         parts.push(Document::Str(" }~"));
-
-        result?;
         Ok(Document::Vec(parts))
     }
 

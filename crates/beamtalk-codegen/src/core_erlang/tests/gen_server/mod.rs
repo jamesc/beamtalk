@@ -93,6 +93,7 @@ mod class_kind_and_value_accessors;
 mod class_registration;
 mod class_var_access;
 mod class_var_capture_catch;
+mod class_var_not_inherited;
 mod dispatch_and_lifecycle;
 mod extensions;
 mod late_field_read;

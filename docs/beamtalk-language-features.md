@@ -864,6 +864,20 @@ sealed Object subclass: MyRegistry
 
 `classState:` is distinct from `state:` (per-instance actor state) and `field:` (per-instance immutable data). It stores values at the class level, analogous to Smalltalk class variables.
 
+**Class variables are per class and are not inherited.** A class method may touch only the class variables its own class declares with `classState:`. Reading or writing a variable that only an ancestor declares is a compile error in a class body and in a class-side extension (`Sub class >> m => ...`); a `ClassBuilder` `classMethods:` block only sees the variables its own `classVars:` declares, so it is rejected too (with the generic "cannot access instance field" message). Redeclare it in the subclass:
+
+```beamtalk
+Object subclass: Base
+  classState: n = 0
+  class bump => self.n := self.n + 1
+
+Base subclass: Sub
+  classState: n = 0      // Sub's own variable; without it `peek` does not compile
+  class peek => self.n
+```
+
+Inherited methods follow the receiver, not the class that defines them: `Sub bump` (running `Base`'s `bump`) reads and writes `Sub`'s `n`, which is why `Sub` redeclares it. `Base`'s and `Sub`'s values are independent. `bump` itself compiles in `Base` either way, but without `Sub`'s own `classState: n`, `Sub bump` reads `nil` at runtime (the runtime's declared-set check still flattens ancestors; tracked in a follow-up). (ADR 0013 §1; ADR 0130.)
+
 A class variable is read and written in place in the class's own process; see [Class variables and blocks](#class-variables-and-blocks-adr-0130) for what a block, a caught error and a call from another process see.
 
 ### Programmatic Class Creation (ClassBuilder) (ADR 0038 / ADR 0084)

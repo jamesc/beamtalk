@@ -646,6 +646,11 @@ impl CoreErlangGenerator {
                 let late = self.is_late_class_var(&class_name, field.name.as_str());
                 return Ok(self.class_var_read_doc(field.name.as_str(), late));
             }
+            if Self::is_self_receiver(receiver) {
+                if let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span) {
+                    return Err(err);
+                }
+            }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
                     "cannot access instance field '{}' in a class method",
@@ -756,6 +761,9 @@ impl CoreErlangGenerator {
         // the assigned value, an expression like any other (no rebinding).
         if self.in_class_method() {
             if !self.class_var_names().contains(field_name) {
+                if let Some(err) = self.inherited_class_var_error(field_name, value.span()) {
+                    return Err(err);
+                }
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!(
                         "cannot assign to instance field '{field_name}' in a class method"
@@ -884,12 +892,31 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The cascade returns the result of the final message.
-    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_cascade(
         &mut self,
         receiver: &Expression,
         messages: &[CascadeMessage],
     ) -> Result<Document<'static>> {
+        let (prelude, value) = self.generate_cascade_parts(receiver, messages)?;
+        if prelude.is_empty() {
+            return Ok(value);
+        }
+        Ok(docvec![self.threaded_prelude_doc(&prelude), value])
+    }
+
+    /// [`Self::generate_cascade`] split into the statements that run before
+    /// the cascade's value (receiver binding, hoisted argument preludes,
+    /// every non-final message send) and the final message's send, which is
+    /// the cascade's value. BT-3791: a `State` rebind in a hoisted argument
+    /// prelude must stay in scope for the consumer, so
+    /// [`Self::threaded_expression`] splices `prelude` into the caller's
+    /// statement sequence instead of nesting it inside a value binding.
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn generate_cascade_parts(
+        &mut self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
         // ClassBuilder construction cascades with literal
         // block methods get synthesised source setters — methodSource: from
         // methods: (instance side) and classMethodSource: from classMethods:
@@ -900,7 +927,7 @@ impl CoreErlangGenerator {
 
         if messages.is_empty() {
             // Edge case: cascade with no messages just evaluates to the receiver
-            return self.generate_expression(receiver);
+            return Ok((Vec::new(), self.generate_expression(receiver)?));
         }
 
         // The parser represents cascades such that `receiver` is the *first*
@@ -958,17 +985,18 @@ impl CoreErlangGenerator {
         let mut seq = self.sequence_call(std::slice::from_ref(&underlying_receiver), "Recv")?;
         let receiver_value_doc = seq.next();
         let receiver_prelude = seq.into_prelude();
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        if !receiver_prelude.is_empty() {
-            docs.push(self.threaded_prelude_doc(&receiver_prelude));
-        }
-        docs.push(docvec![
-            "let ",
-            leaf::var(receiver_var.clone()),
-            " = ",
-            receiver_value_doc,
-            " in "
-        ]);
+        let recv_span = underlying_receiver.span();
+        let mut docs: Vec<ThreadedStmt> = receiver_prelude;
+        docs.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(receiver_var.clone()),
+                " = ",
+                receiver_value_doc,
+                " in "
+            ],
+            recv_span,
+        ));
 
         let total_messages = all_messages.len();
         for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
@@ -989,64 +1017,70 @@ impl CoreErlangGenerator {
             // `addClassMethod: #sel body: [block]` is the incremental
             // counterpart — its block (the second argument) is lowered the same
             // way, keeping the selector argument as an ordinary value.
-            let arg_docs = match &builder_ctx {
-                Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
-                    match arguments {
-                        [Expression::MapLiteral { pairs, .. }] => {
-                            vec![self.generate_class_methods_map_arg(pairs, bclass, cvars)?]
+            let arg_docs =
+                match &builder_ctx {
+                    Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
+                        match arguments {
+                            [Expression::MapLiteral { pairs, .. }] => {
+                                vec![self.generate_class_methods_map_arg(
+                                    pairs, bclass, cvars, &mut docs,
+                                )?]
+                            }
+                            _ => self.generate_cascade_args(arguments, &mut docs)?,
                         }
-                        _ => self.generate_cascade_args(arguments, &mut docs)?,
                     }
-                }
-                Some((bclass, cvars)) if selector.name().as_str() == "addClassMethod:body:" => {
-                    match arguments {
-                        [
-                            sel_arg @ Expression::Literal(Literal::Symbol(_), _),
-                            Expression::Block(block),
-                        ] => {
-                            let sel_doc = self
-                                .generate_cascade_args(std::slice::from_ref(sel_arg), &mut docs)?;
-                            let mut combined = sel_doc;
-                            combined.push(
-                                self.generate_class_method_single_arg(
+                    Some((bclass, cvars)) if selector.name().as_str() == "addClassMethod:body:" => {
+                        match arguments {
+                            [
+                                sel_arg @ Expression::Literal(Literal::Symbol(_), _),
+                                Expression::Block(block),
+                            ] => {
+                                let sel_doc = self.generate_cascade_args(
+                                    std::slice::from_ref(sel_arg),
+                                    &mut docs,
+                                )?;
+                                let mut combined = sel_doc;
+                                combined.push(self.generate_class_method_single_arg(
                                     sel_arg, block, bclass, cvars,
-                                )?,
-                            );
-                            combined
+                                )?);
+                                combined
+                            }
+                            _ => self.generate_cascade_args(arguments, &mut docs)?,
                         }
-                        _ => self.generate_cascade_args(arguments, &mut docs)?,
                     }
-                }
-                _ => self.generate_cascade_args(arguments, &mut docs)?,
-            };
+                    _ => self.generate_cascade_args(arguments, &mut docs)?,
+                };
 
-            if !is_last {
-                // For all but the last message, discard the result
-                docs.push(Document::Str("let _ = "));
-            }
-
-            docs.push(docvec![
+            let mut send: Vec<Document<'static>> = vec![docvec![
                 "call 'beamtalk_message_dispatch':'send'(",
                 leaf::var(receiver_var.clone()),
                 ", ",
                 leaf::atom(selector_atom),
                 ", [",
-            ]);
+            ]];
             for (j, arg_doc) in arg_docs.into_iter().enumerate() {
                 if j > 0 {
-                    docs.push(Document::Str(", "));
+                    send.push(Document::Str(", "));
                 }
-                docs.push(arg_doc);
+                send.push(arg_doc);
             }
+            send.push(Document::Str("])"));
+            let send = Document::Vec(send);
 
-            docs.push(Document::Str("])"));
-
-            if !is_last {
-                docs.push(Document::Str(" in "));
+            if is_last {
+                return Ok((docs, send));
             }
+            // For all but the last message, discard the result
+            docs.push(ThreadedStmt::Statement(
+                docvec!["let _ = ", send, " in "],
+                recv_span,
+            ));
         }
 
-        Ok(Document::Vec(docs))
+        // Unreachable: `messages` is non-empty, so the last iteration returns.
+        Err(CodeGenError::Internal(
+            "cascade lowered without a final message".to_string(),
+        ))
     }
 
     /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.
@@ -1075,40 +1109,66 @@ impl CoreErlangGenerator {
     pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
-        docs: &mut Vec<Document<'static>>,
+        docs: &mut Vec<ThreadedStmt>,
     ) -> Result<Vec<Document<'static>>> {
         let mut splits: Vec<(Vec<ThreadedStmt>, Document<'static>)> =
             Vec::with_capacity(arguments.len());
         for arg in arguments {
-            if self.is_field_assignment(arg) {
-                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                splits.push((
-                    vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],
-                    leaf::var(val_var),
-                ));
-            } else {
-                let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
-                let doc = seq.next();
-                splits.push((seq.into_prelude(), doc));
-            }
+            splits.push(self.split_cascade_arg(arg)?);
         }
+        let span = arguments.first().map_or_else(
+            || beamtalk_core::source_analysis::Span::new(0, 0),
+            beamtalk_core::ast::Expression::span,
+        );
+        Ok(self.hoist_cascade_splits(splits, docs, span))
+    }
 
+    /// Splits one cascade argument into its `(prelude, value)` pair: a field
+    /// assignment via [`Self::generate_field_assignment_open`], anything else
+    /// via [`Self::sequence_call`].
+    pub(super) fn split_cascade_arg(
+        &mut self,
+        arg: &Expression,
+    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
+        if self.is_field_assignment(arg) {
+            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+            Ok((
+                vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],
+                leaf::var(val_var),
+            ))
+        } else {
+            let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
+            let doc = seq.next();
+            Ok((seq.into_prelude(), doc))
+        }
+    }
+
+    /// The all-or-nothing hoisting decision of [`Self::generate_cascade_args`]
+    /// over already-split arguments: when any carries a prelude, every
+    /// prelude is spliced into `docs` (plain values bound to fresh temps) so
+    /// a `StateN` rebind stays in scope for later cascade messages.
+    pub(super) fn hoist_cascade_splits(
+        &mut self,
+        splits: Vec<(Vec<ThreadedStmt>, Document<'static>)>,
+        docs: &mut Vec<ThreadedStmt>,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Vec<Document<'static>> {
         let any_hoisted = splits.iter().any(|(prelude, _)| !prelude.is_empty());
         if !any_hoisted {
-            return Ok(splits.into_iter().map(|(_, doc)| doc).collect());
+            return splits.into_iter().map(|(_, doc)| doc).collect();
         }
         let mut arg_docs = Vec::with_capacity(splits.len());
         for (prelude, doc) in splits {
             if prelude.is_empty() {
                 let (binding, var) = self.bind_subexpr_to_temp("CascadeArg", doc);
-                docs.push(binding);
+                docs.push(ThreadedStmt::Statement(binding, span));
                 arg_docs.push(leaf::var(var));
             } else {
-                docs.push(self.threaded_prelude_doc(&prelude));
+                docs.extend(prelude);
                 arg_docs.push(doc);
             }
         }
-        Ok(arg_docs)
+        arg_docs
     }
 }
 

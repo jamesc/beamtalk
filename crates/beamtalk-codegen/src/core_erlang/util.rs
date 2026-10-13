@@ -431,6 +431,18 @@ impl CoreErlangGenerator {
             if let Some(tv) = self.threaded_cascade_on_self(receiver, messages, frame)? {
                 return Ok(tv);
             }
+            // BT-3791: a cascade on any other receiver whose operands need a
+            // prelude (a state-threading self-send in an argument, e.g. a
+            // computed `classMethods:` map value) is a producer too: its
+            // hoisted `State` rebinds must reach the consumer's statement
+            // sequence, not stay nested in the cascade's value expression.
+            if self.cascade_operands_need_prelude(receiver, messages, true) {
+                let (prelude, value) = self.generate_cascade_parts(receiver, messages)?;
+                return Ok(ThreadedValue {
+                    prelude,
+                    value: ValueRef::Doc(value),
+                });
+            }
         }
 
         // Anything else — a `Block` (a closure; its contents run later, or
@@ -862,9 +874,37 @@ impl CoreErlangGenerator {
         {
             return self
                 .cascade_self_dispatch_messages(receiver, messages)
-                .is_some();
+                .is_some()
+                || self.cascade_operands_need_prelude(receiver, messages, class_effects);
         }
         false
+    }
+
+    /// BT-3791: `true` when a cascade NOT on `self` has an operand (its
+    /// receiver, or any message argument — a `classMethods:` map's computed
+    /// values included, via the literal-container rule) that needs a prelude.
+    /// `generate_cascade_parts` hoists such preludes in front of the message
+    /// that uses them; mirrors `threaded_expression`'s cascade branch so the
+    /// hoisted `State` rebinds reach the consumer instead of being nested
+    /// inside the cascade's value binding.
+    fn cascade_operands_need_prelude(
+        &self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+        class_effects: bool,
+    ) -> bool {
+        let (underlying, first_args): (&Expression, &[Expression]) = match receiver {
+            Expression::MessageSend {
+                receiver: inner,
+                arguments,
+                ..
+            } => (inner.as_ref(), arguments.as_slice()),
+            _ => (receiver, &[]),
+        };
+        std::iter::once(underlying)
+            .chain(first_args.iter())
+            .chain(messages.iter().flat_map(|m| m.arguments.iter()))
+            .any(|e| self.subexpr_needs_prelude_with(e, class_effects))
     }
 
     /// ADR 0118 phase 0: `true` if compiling `expr`

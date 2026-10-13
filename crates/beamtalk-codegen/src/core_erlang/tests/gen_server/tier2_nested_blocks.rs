@@ -171,7 +171,75 @@ fn bt3777_add_class_method_computed_body_lowers_in_enclosing_method_context() {
     );
     let code = generate_module(&module, CodegenOptions::new("bt3777_computed_body"))
         .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    // Not weak on hosts where `assert_compiles_through_erlc` skips: the
+    // computed body must never lower as a builder class self-send.
+    let probe_start = code
+        .find("<'probe'> when 'true' ->")
+        .expect("dispatch must have a `probe` clause");
+    let probe_clause = &code[probe_start..];
+    let probe_clause = &probe_clause[..probe_clause
+        .find("<OtherSelector>")
+        .unwrap_or(probe_clause.len())];
+    assert!(
+        !probe_clause.contains("ClassSelf"),
+        "computed body must lower in the enclosing method context. Got:\n{probe_clause}"
+    );
     assert_compiles_through_erlc("bt3777_computed_body", &code);
+}
+
+/// BT-3791: a state-mutating computed `classMethods:` value (a state-threading
+/// self-send in value position) must hoist its `StateN`
+/// rebind into the cascade so a later cascade message reads the new state.
+/// Before the fix the rebind was trapped inside the map literal, leaving
+/// `State1` unbound for the later `addClassMethod:body: self.n` argument.
+#[test]
+fn bt3791_class_methods_state_mutating_computed_value_threads_state() {
+    let bodies = [
+        "classMethods: #{#k => (self bump)}; addClassMethod: #j body: self.n; register",
+        "classMethods: #{#k => (self bump), #m => (self bump), #answer => [:self | self k]}; addClassMethod: #j body: self.n; register",
+    ];
+    for (i, body) in bodies.iter().enumerate() {
+        let src = format!(
+            "Actor subclass: P\n  state: n = 0\n  bump -> Integer =>\n    self.n := self.n + 1\n    self.n\n  probe => Object classBuilder name: #PB; superclass: Object; {body}\n"
+        );
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            diags.is_empty(),
+            "Reproducer must parse cleanly. Got: {diags:?}"
+        );
+        let name = format!("bt3791_case{i}");
+        let code = generate_module(&module, CodegenOptions::new(&name))
+            .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+        // Structural check (holds on hosts where erlc is unavailable): the
+        // self-send dispatch is hoisted ahead of the `classMethods:` send and
+        // is not nested inside the map literal.
+        let probe_start = code
+            .find("<'probe'> when 'true' ->")
+            .expect("dispatch must have a `probe` clause");
+        let probe = &code[probe_start..];
+        let probe = &probe[..probe.find("<OtherSelector>").unwrap_or(probe.len())];
+        let dispatch_pos = probe
+            .find("'safe_dispatch'('bump'")
+            .expect("the computed value's self-send must be dispatched");
+        let send_pos = probe
+            .find("'classMethods:'")
+            .expect("classMethods: must be sent");
+        let map_start = probe[send_pos..].find("~{").map(|p| send_pos + p).unwrap();
+        let map_end = probe[map_start..]
+            .find("}~")
+            .map(|p| map_start + p)
+            .unwrap();
+        assert!(
+            dispatch_pos < send_pos,
+            "self-send must be hoisted before the cascade send. Got:\n{probe}"
+        );
+        assert!(
+            !probe[map_start..map_end].contains("safe_dispatch"),
+            "self-send must not be nested in the map literal. Got:\n{probe}"
+        );
+        assert_compiles_through_erlc(&name, &code);
+    }
 }
 
 /// BT-1213: an inline Tier 2 `[...] value` in an actor method threads a
