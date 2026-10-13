@@ -46,8 +46,9 @@ use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
-    is_safe_value_family_selector, local_threading_construct, operand_producer_writes,
-    outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
+    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, sequenced_operand_sites,
+    stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -678,10 +679,6 @@ const DENY_SET: &[Denied] = &[
 /// statement unless [`DENY_SET`] lists it, anything else only if
 /// [`ALLOW_SET`] does.
 pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-    // WIP-3793-EXPERIMENT: remove before commit.
-    if std::env::var_os("BT3793_ALLOW_ALL").is_some() {
-        return true;
-    }
     match position {
         Position::Statement | Position::NestedStatement { .. } => !DENY_SET
             .iter()
@@ -783,6 +780,15 @@ enum TopLevel {
 /// scope (so a write can be told apart from a block-local definition), the
 /// block nesting depth (a construct inside a block is in a nested frame) and
 /// the Tier 2 block-valued locals bound so far.
+/// The current statement of a threaded frame body (ADR 0131 Phase 2b).
+#[derive(Default)]
+struct FrameSites {
+    /// The statement's [`loop_body_producer_sites`].
+    sites: HashSet<Span>,
+    /// The statement itself, without parentheses.
+    statement: Span,
+}
+
 struct Walker<'d> {
     context: MethodContext,
     /// Names bound in the method so far, innermost frame last.
@@ -817,6 +823,15 @@ struct Walker<'d> {
     /// [`sequenced_operand_sites`]: where a loop or fold is lowered as an
     /// ADR 0131 local-threading producer (BT-3749).
     operand_sites: HashSet<Span>,
+    /// ADR 0131 Phase 2b (BT-3793): for each enclosing block, innermost last,
+    /// `Some(sites)` when it is the body of a loop or fold that codegen lowers
+    /// as a threaded frame ([`is_threaded_frame_body`]) — `sites` being the
+    /// current statement's [`loop_body_producer_sites`] — and `None` for any
+    /// other block (an arm, a handler, a protected body, a closure).
+    frame_sites: Vec<Option<FrameSites>>,
+    /// Set by a send's walk just before it descends into a block operand that
+    /// is a threaded frame body; consumed by [`Walker::block`].
+    pending_frame_body: bool,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -873,6 +888,8 @@ impl<'d> Walker<'d> {
             reported_locals: HashSet::new(),
             safe_stored_uses,
             operand_sites: HashSet::new(),
+            frame_sites: Vec::new(),
+            pending_frame_body: false,
             diagnostics,
         }
     }
@@ -930,6 +947,12 @@ impl<'d> Walker<'d> {
                     .into_iter()
                     .map(Expression::span)
                     .collect();
+            } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
+                frame.statement = stmt.expression.unwrap_parens().span();
+                frame.sites = loop_body_producer_sites(&stmt.expression)
+                    .into_iter()
+                    .map(Expression::span)
+                    .collect();
             }
             self.expr(&stmt.expression, Position::Statement);
         }
@@ -937,6 +960,13 @@ impl<'d> Walker<'d> {
     }
 
     fn block(&mut self, block: &Block, container: Container) {
+        let frame_body = std::mem::take(&mut self.pending_frame_body);
+        self.frame_sites.push(frame_body.then(FrameSites::default));
+        self.block_in_frame(block, container);
+        self.frame_sites.pop();
+    }
+
+    fn block_in_frame(&mut self, block: &Block, container: Container) {
         if self.depth == 0 {
             self.outer_stateful =
                 self.context != Repl && touches_state(block, self.context == Class);
@@ -1037,7 +1067,12 @@ impl<'d> Walker<'d> {
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 for arg in arguments {
                     let arg_role = role(arg, false);
+                    self.pending_frame_body = matches!(
+                        arg,
+                        Expression::Block(b) if is_threaded_frame_body(expr, b)
+                    );
                     self.operand_in(arg, Position::Argument, arg_role);
+                    self.pending_frame_body = false;
                 }
             }
             Expression::Cascade {
@@ -1192,6 +1227,37 @@ impl<'d> Walker<'d> {
         if self.depth == 0
             && self.context != Repl
             && self.operand_sites.contains(&expr.span())
+            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
+        {
+            return;
+        }
+        // ADR 0131 Phase 2b (BT-3793): in the body of a loop or fold that
+        // codegen lowers as a threaded frame — every enclosing block a
+        // frame body, none an arm, handler or closure — a loop or fold at
+        // one of the statement's `loop_body_producer_sites` is a
+        // local-threading producer there: its prelude rebinds the locals it
+        // writes, lowered by the enclosing frame's mode.
+        //
+        // `detect:`/`detect:ifNone:` stay out: a write in its search block is
+        // dropped by the `collect:` and nested `do:` frames around it, and in
+        // an actor by every frame (measured, BT-3793).
+        if self.depth > 0
+            && self.context != Repl
+            && !matches!(selector.as_str(), "detect:" | "detect:ifNone:")
+            && !self.frame_sites.is_empty()
+            && self.frame_sites.iter().all(Option::is_some)
+            && self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| {
+                    frame.sites.contains(&expr.span())
+                        // An actor's value-bearing sites (an assignment's
+                        // value, an operand) inside a tuple-accumulator
+                        // `do:` body are not lowered by the producer yet:
+                        // only the body statement itself is (BT-3793).
+                        && (self.context != Actor || frame.statement == expr.unwrap_parens().span())
+                })
             && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
         {
             return;

@@ -1,0 +1,222 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3793 (ADR 0131 Phase 2b): a loop or fold nested in the body of another
+// loop or fold is a local-threading producer in that body's frame. Each
+// method writes the outer local `t` (and sometimes `u`/`s`) inside a nested
+// construct; the enclosing frame (direct-params, tuple-acc or StateAcc)
+// lowers the rebinds, so the write is visible to everything after the
+// construct. The receivers (class, value type, actor) must agree.
+
+Value subclass: Adr0131LoopBodyProducerValue
+
+  whileInToDo =>
+    s := 0
+    1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]
+    s
+
+  whileInDo =>
+    s := 0
+    #(1, 2, 3) do: [:i | [s < i] whileTrue: [s := s + 1]]
+    s
+
+  whileFalseInToDo =>
+    s := 0
+    1 to: 3 do: [:i | [s >= i] whileFalse: [s := s + 1]]
+    s
+
+  doInDo =>
+    t := 0
+    #(1, 2) do: [:i | #(1, 2) do: [:j | t := t + j]]
+    t
+
+  collectInWhile =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        #(1, 2) collect: [:x | t := t + x]
+        i := i + 1
+      ]
+    t
+
+  timesInTimes =>
+    t := 0
+    2 timesRepeat: [3 timesRepeat: [t := t + 1]]
+    t
+
+  toDoInCollect =>
+    t := 0
+    #(1, 2)
+      collect: [:x |
+        1 to: 2 do: [:k | t := t + x]
+        x
+      ]
+    t
+
+  assignCollectInToDo =>
+    t := 0
+    1
+      to: 2
+      do: [:i |
+        r := #(1, 2) collect: [:x | t := t + x]
+        t := t + r size
+      ]
+    t
+
+  injectInDo =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+      ]
+    t
+
+  assignInjectInDo =>
+    t := 0
+    u := 0
+    #(1, 2)
+      do: [:i |
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        u := u + r
+      ]
+    #[t, u]
+
+  localInOuterOnly =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        w := 0
+        #(1, 2) do: [:j | w := w + j]
+        t := t + w
+      ]
+    t
+
+  readAfterInner =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        #(1, 2) do: [:j | t := t + j]
+        t := t * 2
+      ]
+    t
+
+  selectInDo =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        #(1, 2, 3)
+          select: [:x |
+            t := t + 1
+            x > 1
+          ]
+      ]
+    t
+
+  whileInWhile =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        j := 0
+        [j < 3]
+          whileTrue: [
+            t := t + 1
+            j := j + 1
+          ]
+        i := i + 1
+      ]
+    t
+
+  operandInBody =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        r := (#(1, 2) collect: [:x | t := t + x]) size
+        t := t + r
+      ]
+    t
+
+  collectLastIsLoop =>
+    t := 0
+    r := #(1, 2) collect: [:x | 1 to: 2 do: [:k | t := t + k]]
+    #[r size, t]
+
+  whileInInject =>
+    t := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :x |
+        s := 0
+        [s < x]
+          whileTrue: [
+            s := s + 1
+            t := t + 1
+          ]
+        a
+      ]
+    t
+
+  countInTimes =>
+    t := 0
+    u := 0
+    2
+      timesRepeat: [
+        u := u + (#(1, 2, 3)
+          count: [:x |
+            t := t + 1
+            x > 1
+          ])
+      ]
+    #[t, u]
+
+  selectLastInDo =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        #(1, 2, 3)
+          select: [:x |
+            t := t + x
+            x > 1
+          ]
+      ]
+    t
+
+  threadedAndLocal =>
+    t := 0
+    u := 0
+    1
+      to: 2
+      do: [:i |
+        w := 0
+        #(1, 2)
+          collect: [:x |
+            w := w + x
+            t := t + x
+          ]
+        u := u + w
+      ]
+    #[t, u]
+
+  nlrOutOfInner =>
+    t := 0
+    #(1, 2)
+      do: [:i |
+        #(1, 2)
+          collect: [:x |
+            t := t + 1
+            i == 2 ifTrue: [^t]
+            x
+          ]
+      ]
+    t

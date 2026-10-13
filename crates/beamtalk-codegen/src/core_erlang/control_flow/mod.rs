@@ -48,8 +48,6 @@ mod loop_mode;
 mod plan;
 mod util;
 mod while_loops;
-mod wip_debug; // WIP-3793-EXPERIMENT
-pub(crate) use wip_debug::wip_summary; // WIP-3793-EXPERIMENT
 
 // Re-exports so existing `super::X` / `super::super::X` references across
 // this subtree keep resolving to the same logical names now that their

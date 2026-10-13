@@ -108,13 +108,7 @@ impl CoreErlangGenerator {
         // here would hide from `final_loop_arg_identities`.
         let mut stmts = tv.prelude;
         stmts.push(ThreadedStmt::Statement(
-            docvec![
-                "let ",
-                leaf::var(core_var),
-                " = ",
-                value_doc,
-                " in ",
-            ],
+            docvec!["let ", leaf::var(core_var), " = ", value_doc, " in ",],
             expr.span(),
         ));
         Ok(Some(stmts))

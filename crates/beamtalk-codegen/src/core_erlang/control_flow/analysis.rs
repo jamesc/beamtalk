@@ -774,11 +774,39 @@ impl CoreErlangGenerator {
                 &mut nested,
             );
         }
+        // A local this inner block introduces itself (`k := 0. [k < 3] whileTrue:
+        // [...]`) is crossed by the loop nested in it but belongs to neither
+        // the enclosing constructs nor the outer scope.
+        let introduced = Self::body_introduced_locals(body_block, &analysis.captured_reads);
         for v in nested {
-            if !block_params.contains(v.as_str()) {
+            if !block_params.contains(v.as_str()) && !introduced.contains(v.as_str()) {
                 out.insert(v);
             }
         }
+    }
+
+    /// The locals `body` introduces with a top-level assignment and never
+    /// reads from outside (`captured_reads` is the body's own profile): decided
+    /// from the body alone, as `analyze_block` decides a "new binding", not
+    /// from the live scope, so classification does not depend on how far
+    /// lowering has got. The one rule behind "this local is the body's own,
+    /// not an outer local the construct threads".
+    pub(in crate::core_erlang) fn body_introduced_locals<'a>(
+        body: &'a beamtalk_core::ast::Block,
+        captured_reads: &std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<&'a str> {
+        body.body
+            .iter()
+            .filter_map(|stmt| match &stmt.expression {
+                Expression::Assignment { target, .. } => match target.as_ref() {
+                    Expression::Identifier(id) if !captured_reads.contains(id.name.as_str()) => {
+                        Some(id.name.as_str())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
     }
 
     /// Returns `true` if `expr` is (or wraps, via assignment RHS or parens) a

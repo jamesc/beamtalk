@@ -684,7 +684,9 @@ impl CoreErlangGenerator {
 
     /// ADR 0131 Phase 2: the threaded locals of `expr` when it is a
     /// local-threading producer at a sequenced operand site of the method
-    /// body being lowered — a loop or fold (`beamtalk_core`'s
+    /// body being lowered, or (BT-3793) at one of a loop or fold body's
+    /// `loop_body_producer_sites` (`with_body_producer_sites` narrows the
+    /// site set to the body's statements while it is lowered) — a loop or fold (`beamtalk_core`'s
     /// `producer_body_block`) whose construct tuple threads every local its
     /// blocks write (`ThreadedLocals::lowered == names`, the rule
     /// `operand_producer_writes` applies for the diagnostic), possibly none
@@ -890,12 +892,8 @@ impl CoreErlangGenerator {
     ) -> T {
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
-            let inner = stmt.unwrap_parens();
-            if beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner).is_some() {
-                sites.insert(inner.span());
-            }
             sites.extend(
-                beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
+                beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt)
                     .into_iter()
                     .map(Expression::span),
             );
@@ -913,7 +911,7 @@ impl CoreErlangGenerator {
     /// producer's prelude) instead of unpacking a construct tuple itself.
     pub(super) fn expr_has_local_producer(&self, expr: &Expression) -> bool {
         self.local_producer_locals(expr).is_some()
-            || beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(expr)
+            || beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(expr)
                 .into_iter()
                 .any(|site| self.local_producer_locals(site).is_some())
     }
@@ -1009,9 +1007,10 @@ impl CoreErlangGenerator {
         // construct's `State` is the one already in scope.
         let state_chain = match &enclosing.kind {
             RebindFrameKind::MethodBody | RebindFrameKind::BranchArm => true,
-            RebindFrameKind::Loop(mode) => {
-                !matches!(mode, ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_))
-            }
+            RebindFrameKind::Loop(mode) => !matches!(
+                mode,
+                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_)
+            ),
         };
         if actor && state_chain {
             let _ = self.next_state_var();

@@ -10,8 +10,7 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
 use super::super::threaded_ir::{
-    self, LoopCounter, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix,
-    VersionedVar,
+    self, LoopCounter, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result};
 use super::family_slots::append_family_slots;

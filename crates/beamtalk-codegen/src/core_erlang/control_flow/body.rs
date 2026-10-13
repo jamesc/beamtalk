@@ -138,12 +138,6 @@ impl CoreErlangGenerator {
                 span,
             };
             let errors = this.verify_threaded_ir(std::slice::from_ref(&fixture));
-            if !errors.is_empty() && std::env::var_os("BT3793_DEBUG_IR").is_some() {
-                eprintln!(
-                    "WIP-IR {}",
-                    super::wip_summary(std::slice::from_ref(&fixture), 0)
-                );
-            }
             this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
             let mut ctx = threaded_ir::RenderCtx::new(this);
             let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
@@ -782,10 +776,18 @@ impl CoreErlangGenerator {
                     );
                 }
             } else if Self::is_local_var_assignment(expr) {
+                let version_before = self.state_version();
                 if let Some(let_stmts) =
                     self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
                 {
                     has_plain_lets = true;
+                    // A producer in the value (ADR 0131 Phase 2b) advances the
+                    // `State` chain with its own prelude: the accumulator the
+                    // kind's epilogue returns is that new version, exactly as
+                    // after any other statement that mutates.
+                    if self.state_version() != version_before {
+                        has_mutations = true;
+                    }
                     stmts.extend(let_stmts);
                 } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
                     // Direct-params, tuple-acc, or

@@ -162,9 +162,9 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
         // gap scan counts it as the producer it is.
         let step = match stmt {
             ThreadedStmt::Bind { target, source, .. } => Some((target, source)),
-            ThreadedStmt::LocalRebind { lowering, .. } => {
-                lowering.version_step().map(|(source, target)| (target, source))
-            }
+            ThreadedStmt::LocalRebind { lowering, .. } => lowering
+                .version_step()
+                .map(|(source, target)| (target, source)),
             _ => None,
         };
         if let Some((target, source)) = step {

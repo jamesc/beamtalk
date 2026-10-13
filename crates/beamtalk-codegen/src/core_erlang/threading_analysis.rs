@@ -147,24 +147,36 @@ impl CoreErlangGenerator {
         // scope, so classification does not depend on how far lowering has
         // got.
         let analysis = self.block_profile_or_analyze(body);
-        let body_defined: std::collections::HashSet<&str> = body
-            .body
-            .iter()
-            .filter_map(|stmt| match &stmt.expression {
-                Expression::Assignment { target, .. } => match target.as_ref() {
-                    Expression::Identifier(id)
-                        if !analysis.captured_reads.contains(id.name.as_str()) =>
-                    {
-                        Some(id.name.as_str())
-                    }
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect();
+        let body_defined = Self::body_introduced_locals(body, &analysis.captured_reads);
         cross_scope_writes
             .iter()
             .any(|name| !body_defined.contains(name.as_str()))
+            || self.body_has_operand_loop_or_fold_writes(body)
+    }
+
+    /// ADR 0131 Phase 2b: whether a loop or fold at a sequenced operand site
+    /// of one of `body`'s statements (`(xs collect: [:x | t := t + x]) size`,
+    /// `r := (xs inject: …) + 1`) writes an outer local. The statement-level
+    /// scan above sees only a nested construct that *is* the statement (or an
+    /// assignment's value); this is the same recognizer the loop-body
+    /// producer fires on (`sequenced_operand_sites`, `threaded_locals_of`), so
+    /// the enclosing construct threads exactly when its body contains a
+    /// producer that writes.
+    fn body_has_operand_loop_or_fold_writes(&self, body: &Block) -> bool {
+        body.body.iter().any(|stmt| {
+            beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(&stmt.expression)
+                .into_iter()
+                .any(|site| {
+                    local_threading_construct(site).is_some_and(|c| {
+                        matches!(
+                            c.family,
+                            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                        )
+                    }) && self
+                        .threaded_locals_of(site)
+                        .is_some_and(|set| !set.lowered.is_empty())
+                })
+        })
     }
 
     /// The precomputed [`block_analysis::BlockMutationAnalysis`]
