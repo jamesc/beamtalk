@@ -2164,12 +2164,20 @@ impl CoreErlangGenerator {
                         .contains(field.name.as_str())
                 {
                     let val_var = self.fresh_temp_var("Val");
+                    // BT-3803: a field assignment nested in the RHS
+                    // (`self.x := (self.y := 42)`) is a producer; thread it
+                    // ahead so its rebind is spliced before this write
+                    // instead of being trapped in the RHS document.
+                    let mut ahead = Vec::new();
+                    let ahead_scope = self.thread_ahead(value, &mut ahead, FrameId::ROOT)?;
                     // Snapshot field params before evaluating RHS so nested field
                     // assignments (e.g. `self.x := (self.y := 42)`) don't leak
                     // inner updates past the outer assignment.
                     let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
                     let val_doc = self.expression_doc(value)?;
+                    self.finish_precompiled_scope(ahead_scope)?;
                     self.loop_mode.hybrid_readonly_field_params = saved_field_params;
+                    let ahead_doc = self.threaded_prelude_doc(&ahead);
                     let new_field_var = self
                         .fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
                     // Update the param map so subsequent reads use the new var.
@@ -2178,6 +2186,7 @@ impl CoreErlangGenerator {
                         .insert(field.name.to_string(), new_field_var.clone());
                     return Ok((
                         docvec![
+                            ahead_doc,
                             "let ",
                             leaf::var(val_var.clone()),
                             " = ",

@@ -1144,11 +1144,18 @@ impl CoreErlangGenerator {
         arg: &Expression,
     ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
         if self.is_field_assignment(arg) {
-            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-            Ok((
-                vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],
-                leaf::var(val_var),
-            ))
+            // BT-3803: a real `Bind` (not an opaque `Statement`), so the
+            // consumer of the cascade continues from the new `State`
+            // version (`state_var_after_prelude` reads the prelude's `Bind`s).
+            let mut prelude = Vec::new();
+            let span = arg.unwrap_parens().span();
+            let val_var = self.lower_field_assignment_bind(
+                arg.unwrap_parens(),
+                threaded_ir::FrameId::ROOT,
+                span,
+                &mut prelude,
+            )?;
+            Ok((prelude, leaf::var(val_var)))
         } else {
             let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
             let doc = seq.next();

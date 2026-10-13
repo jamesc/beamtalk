@@ -69,11 +69,13 @@ const HEADER: &str = "Actor subclass: CascadeOperandProbe
 /// non-`self` cascades; the `builder_*` ones are the `ClassBuilder` shape
 /// (`classMethods:` map values and keys, `addClassMethod:body:`).
 ///
-/// A field assignment as a cascade argument (`superclass: (self.n := 5)`) is deliberately
-/// absent: `generate_field_assignment_open` produces no `Bind`, so its `State` rebind is
-/// invisible to this check and trapped like BT-3803's send argument. BT-3803 owns it and
-/// adds that shape to this corpus.
+/// A field assignment as a cascade argument (`field_assignment_arg`, BT-3803) rebinds
+/// `State` like any other operand; `split_cascade_arg` lowers it to a real `Bind`.
 const CASCADES: &[(&str, &str)] = &[
+    (
+        "field_assignment_arg",
+        "Object classBuilder name: #A; superclass: (self.n := 5)",
+    ),
     ("receiver", "(self mk) name: #A; superclass: Object"),
     (
         "first_arg",
