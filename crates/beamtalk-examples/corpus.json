@@ -18274,6 +18274,26 @@
       "explanation": "Tests for user-defined error subclasses - migrated from bootstrap/custom_exceptions.bt (BT-827)"
     },
     {
+      "id": "stdlib-test-cv-own-only-test",
+      "title": "CvOwnOnlyTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "CvOwnOnlyTest",
+        "TestCase",
+        "cv_own_only_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "testBaseUsesItsOwnVariable",
+        "testRedeclaredVariableIsIndependent",
+        "testUndeclaredInheritedVariableRaises"
+      ],
+      "source": "// BT-3801: the runtime declared-set check for class variables is own-only\n// (ADR 0013 §1, ADR 0130). An inherited class method run through a subclass\n// touches the subclass's variables, so the subclass must redeclare them.\n\nTestCase subclass: CvOwnOnlyTest\n\n  testBaseUsesItsOwnVariable => self assert: CvOwnOnlyBase bump equals: 1\n\n  testRedeclaredVariableIsIndependent =>\n    self assert: CvOwnOnlyRedeclared bump equals: 11\n\n  testUndeclaredInheritedVariableRaises =>\n    self should: [CvOwnOnlyForgot bump] raise: #undeclared_class_variable",
+      "explanation": "BT-3801: the runtime declared-set check for class variables is own-only (ADR 0013 §1, ADR 0130). An inherited class method run through a subclass touches the subclass's variables, so the subclass must redeclare them."
+    },
+    {
       "id": "stdlib-test-date-time-test",
       "title": "DateTimeTest",
       "category": "stdlib-tests",
@@ -24780,6 +24800,75 @@
       ],
       "source": "// BT-1976 fixture — cross-file parent with a typed-no-default field and\n// no `initialize` method of its own. A child in a separate file is\n// expected to set the inherited field before post-initialize validation runs.\n\ntyped Actor subclass: CrossFileParentTyped\n  state: token :: String\n\n  getToken -> String => self.token",
       "explanation": "BT-1976 fixture — cross-file parent with a typed-no-default field and no `initialize` method of its own. A child in a separate file is expected to set the inherited field before post-initialize validation runs."
+    },
+    {
+      "id": "stdlib-test-fixtures-cv-own-only-base",
+      "title": "CvOwnOnlyBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "CvOwnOnlyBase",
+        "Object",
+        "assign",
+        "assignment",
+        "bump",
+        "cv_own_only_base",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-3801: class variables are own-only at run time too. See cv_own_only_test.bt.\n\nObject subclass: CvOwnOnlyBase\n  classState: n = 0\n\n  class bump -> Integer =>\n    self.n := self.n + 1\n    self.n",
+      "explanation": "BT-3801: class variables are own-only at run time too. See cv_own_only_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-cv-own-only-forgot",
+      "title": "CvOwnOnlyForgot",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "CvOwnOnlyBase",
+        "CvOwnOnlyForgot",
+        "cv_own_only_forgot",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "subclassing"
+      ],
+      "source": "// BT-3801: does not redeclare `n`, so the inherited `bump` raises through it.\n\nCvOwnOnlyBase subclass: CvOwnOnlyForgot\n  classState: other = 0",
+      "explanation": "BT-3801: does not redeclare `n`, so the inherited `bump` raises through it."
+    },
+    {
+      "id": "stdlib-test-fixtures-cv-own-only-redeclared",
+      "title": "CvOwnOnlyRedeclared",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "CvOwnOnlyBase",
+        "CvOwnOnlyRedeclared",
+        "cv_own_only_redeclared",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "subclassing"
+      ],
+      "source": "// BT-3801: redeclares `n`, so the inherited `bump` works through it.\n\nCvOwnOnlyBase subclass: CvOwnOnlyRedeclared\n  classState: n = 10",
+      "explanation": "BT-3801: redeclares `n`, so the inherited `bump` works through it."
     },
     {
       "id": "stdlib-test-fixtures-cvs-actor",

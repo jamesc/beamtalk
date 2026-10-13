@@ -91,6 +91,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     flatten_ancestor_map/2,
     class_var_kinds/1,
     inherited_class_var_kinds/1,
+    class_var_meta_readable/1,
     read_meta/1,
     read_meta_detailed/1,
     read_meta_autoload/1,
@@ -469,6 +470,18 @@ calling up into the class gen_server or the reflection intrinsics.
 -spec class_var_kinds(class_name()) -> #{atom() => eager | late}.
 class_var_kinds(Name) ->
     own_class_var_kinds(Name).
+
+-doc """
+True when `Name` has a registered module whose `__beamtalk_meta/0` is readable,
+so an empty `class_var_kinds/1` means "declares no class variables" rather than
+"unknown" (a ClassBuilder or hand-written Erlang class, or no live class).
+""".
+-spec class_var_meta_readable(class_name()) -> boolean().
+class_var_meta_readable(Name) ->
+    case lookup_module(Name) of
+        {ok, Module} -> read_meta(Module) =/= not_available;
+        not_found -> false
+    end.
 
 -doc """
 The class-variable kinds declared by the strict ancestors of `Name`, closer

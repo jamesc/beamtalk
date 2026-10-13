@@ -448,12 +448,16 @@ assert_declared(Class, Name) ->
     %% class's own declarations count.
     case beamtalk_class_metadata:class_var_kinds(Class) of
         Kinds when map_size(Kinds) =:= 0 ->
-            %% Empty own declared-kinds map: no metadata, no live class, or no
-            %% declared class variables, which today's `get_class_var` answers
-            %% with nil. The one case that is still decidable is an ancestor
-            %% declaring `Name` (an inherited method running through a subclass
-            %% that did not redeclare it), which raises.
-            case maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class)) of
+            %% Empty own declared-kinds map: unknown (no metadata, e.g. a
+            %% ClassBuilder class, or no live class) or genuinely none, which
+            %% today's `get_class_var` answers with nil. Only when the class's
+            %% metadata is readable (so the set is KNOWN empty) and an ancestor
+            %% declares `Name` (an inherited method running through a subclass
+            %% that did not redeclare it) does this raise.
+            case
+                beamtalk_class_metadata:class_var_meta_readable(Class) andalso
+                    maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class))
+            of
                 true -> beamtalk_class_var_errors:raise_undeclared(Class, Name);
                 false -> ok
             end;

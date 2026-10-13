@@ -581,8 +581,7 @@ fn undefined_class_variable_hint(
     Some(if class_vars.is_empty() {
         format!("`{class_name}` has no declared class variables")
     } else {
-        let mut names: Vec<&str> = class_vars.iter().map(EcoString::as_str).collect();
-        names.dedup();
+        let names: Vec<&str> = class_vars.iter().map(EcoString::as_str).collect();
         format!("Declared class variables: {}", names.join(", "))
     })
 }

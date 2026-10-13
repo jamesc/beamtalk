@@ -151,6 +151,7 @@ get_undeclared_test() ->
 get_inherited_not_redeclared_test() ->
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
     meck:expect(beamtalk_class_metadata, class_var_kinds, fun(_) -> #{} end),
+    meck:expect(beamtalk_class_metadata, class_var_meta_readable, fun(_) -> true end),
     meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun
         (?C) -> #{inh => eager};
         (_) -> #{}
@@ -161,6 +162,24 @@ get_inherited_not_redeclared_test() ->
             E = raised_error(fun() -> beamtalk_class_vars:get(self_obj(), inh) end),
             ?assertMatch(#beamtalk_error{kind = undeclared_class_variable}, E),
             ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), other))
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
+
+%% BT-3801 review: a class with unreadable metadata (every ClassBuilder class)
+%% has an unknown, not known-empty, own set, so an ancestor declaring the name
+%% must not make a read raise (e.g. after `clearField:` removed the key).
+get_no_meta_ancestor_declares_reads_nil_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds, fun(_) -> #{} end),
+    meck:expect(beamtalk_class_metadata, class_var_meta_readable, fun(_) -> false end),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun(_) -> #{inh => eager} end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{inh => 1}),
+            beamtalk_class_vars:clear(self_obj(), inh),
+            ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), inh))
         end)
     after
         meck:unload(beamtalk_class_metadata)
