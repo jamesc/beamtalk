@@ -171,7 +171,48 @@ fn bt3777_add_class_method_computed_body_lowers_in_enclosing_method_context() {
     );
     let code = generate_module(&module, CodegenOptions::new("bt3777_computed_body"))
         .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    // Not weak on hosts where `assert_compiles_through_erlc` skips: the
+    // computed body must never lower as a builder class self-send.
+    let probe_start = code
+        .find("<'probe'> when 'true' ->")
+        .expect("dispatch must have a `probe` clause");
+    let probe_clause = &code[probe_start..];
+    let probe_clause = &probe_clause[..probe_clause
+        .find("<OtherSelector>")
+        .unwrap_or(probe_clause.len())];
+    assert!(
+        !probe_clause.contains("ClassSelf"),
+        "computed body must lower in the enclosing method context. Got:\n{probe_clause}"
+    );
     assert_compiles_through_erlc("bt3777_computed_body", &code);
+}
+
+/// BT-3791: a state-mutating computed `classMethods:` value (a state-threading
+/// self-send in value position) must hoist its `StateN`
+/// rebind into the cascade so a later cascade message reads the new state.
+/// Before the fix the rebind was trapped inside the map literal, leaving
+/// `State1` unbound for the later `addClassMethod:body: self.n` argument.
+#[test]
+fn bt3791_class_methods_state_mutating_computed_value_threads_state() {
+    let bodies = [
+        "classMethods: #{#k => (self bump)}; addClassMethod: #j body: self.n; register",
+        "classMethods: #{#k => (self bump), #m => (self bump), #answer => [:self | self k]}; addClassMethod: #j body: self.n; register",
+    ];
+    for (i, body) in bodies.iter().enumerate() {
+        let src = format!(
+            "Actor subclass: P\n  state: n = 0\n  bump -> Integer =>\n    self.n := self.n + 1\n    self.n\n  probe => Object classBuilder name: #PB; superclass: Object; {body}\n"
+        );
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            diags.is_empty(),
+            "Reproducer must parse cleanly. Got: {diags:?}"
+        );
+        let name = format!("bt3791_case{i}");
+        let code = generate_module(&module, CodegenOptions::new(&name))
+            .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+        assert_compiles_through_erlc(&name, &code);
+    }
 }
 
 /// BT-1213: an inline Tier 2 `[...] value` in an actor method threads a
