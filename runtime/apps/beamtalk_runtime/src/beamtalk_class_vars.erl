@@ -74,7 +74,15 @@ tag fully (once per block-literal creation or region, not a hot path).
 - `put/3` of a name absent from the map applies the same declared-set rule
   (BT-3808); a name already in the map writes unchecked.
 - The class gen_server's `get_class_var` of an absent name applies the same
-  rule via `check_declared/2` (BT-3807), replying `{error, Error}`.
+  rule via `check_declared/3` (BT-3807), replying `{error, Error}`.
+- The class gen_server's `{set_class_var, Name, Value}` call
+  (`beamtalk_object_class:set_class_var/3`, `beamtalk_runtime_api:set_class_var/3`)
+  is deliberately **unchecked**: it is the out-of-band assignment path used by
+  the runtime API, bootstrap and ClassBuilder-style setup (ADR 0124), where
+  the write itself is the assignment, so it may create a name the class has
+  not declared. Later in-process `put/3`/`get/2` of that name then find it in
+  the map and skip the declared-set check. Only in-process accesses from
+  class-method bodies are checked.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
 
@@ -103,6 +111,7 @@ come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error valu
     get_late/3,
     put/3,
     check_declared/2,
+    check_declared/3,
     clear/2,
     has/2,
     has/3,
@@ -481,7 +490,18 @@ through a subclass that did not redeclare it). A non-empty own set that lacks
 """.
 -spec check_declared(atom(), atom()) -> ok | {error, #beamtalk_error{}}.
 check_declared(Class, Name) ->
-    case beamtalk_class_metadata:class_var_kinds_or_unknown(Class) of
+    check_declared(Class, Name, beamtalk_class_metadata:class_var_kinds_or_unknown(Class)).
+
+-doc """
+`check_declared/2` against a declared-kinds value the caller already read with
+`beamtalk_class_metadata:class_var_kinds_or_unknown/1`, so a caller that needs
+the kinds for something else too (the class gen_server's declared-`late`
+branch) reads the metadata once.
+""".
+-spec check_declared(atom(), atom(), unknown | #{atom() => eager | late}) ->
+    ok | {error, #beamtalk_error{}}.
+check_declared(Class, Name, KindsOrUnknown) ->
+    case KindsOrUnknown of
         unknown ->
             ok;
         Kinds when map_size(Kinds) =:= 0 ->

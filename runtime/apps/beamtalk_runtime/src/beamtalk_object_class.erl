@@ -1544,8 +1544,11 @@ handle_call(
 ) ->
     %% ADR 0124 §1/§4i/B4: a declared-`late` class variable is an error when
     %% unassigned, agreeing with the instance-side direct read
-    %% (`generate_late_field_read`) — keyed on *declared* late so a typo'd
-    %% variable name keeps today's plain `nil`.
+    %% (`generate_late_field_read`) — keyed on *declared* late. Any other
+    %% absent name goes through the shared declared-set rule below (BT-3807):
+    %% undeclared raises `undeclared_class_variable` as a method-body read
+    %% does, and a class with unknown metadata (ClassBuilder) answers `nil`.
+    %% The metadata is read once for both decisions.
     %%
     %% Replies `{error, Error}` rather than raising here: this
     %% `handle_call` clause runs directly in the class gen_server's own
@@ -1558,7 +1561,8 @@ handle_call(
     %% caller with a catchable error, so it is never called directly.
     %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
     %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
-    case class_var_declared_late(ClassName, Name) of
+    Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
+    case class_var_declared_late(Kinds, Name) of
         true ->
             case maps:find(Name, ClassVars) of
                 {ok, nil} ->
@@ -1578,7 +1582,7 @@ handle_call(
                 {ok, Value} ->
                     {reply, Value, State};
                 error ->
-                    case beamtalk_class_vars:check_declared(ClassName, Name) of
+                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds) of
                         ok -> {reply, nil, State};
                         {error, _} = Err -> {reply, Err, State}
                     end
@@ -1728,13 +1732,15 @@ notify_compiler_server_register(ClassName, Meta) ->
 -doc """
 True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
 `ClassName` itself (class variables are not inherited, BT-3801) — the class-side
-counterpart to `beamtalk_reflection`'s `declared_late/2`, via
-`beamtalk_class_metadata:class_var_kinds/1`. Keyed on *declared* late so a
-typo'd class variable name keeps today's plain `nil`.
+counterpart to `beamtalk_reflection`'s `declared_late/2`, over the kinds read by
+`beamtalk_class_metadata:class_var_kinds_or_unknown/1` (`unknown` is not late).
+Keyed on *declared* late: an undeclared name is not late and falls through to
+the `check_declared/3` branch of `get_class_var`.
 """.
--spec class_var_declared_late(class_name(), atom()) -> boolean().
-class_var_declared_late(ClassName, Name) ->
-    Kinds = beamtalk_class_metadata:class_var_kinds(ClassName),
+-spec class_var_declared_late(unknown | #{atom() => eager | late}, atom()) -> boolean().
+class_var_declared_late(unknown, _Name) ->
+    false;
+class_var_declared_late(Kinds, Name) ->
     maps:get(Name, Kinds, eager) =:= late.
 
 -doc """
