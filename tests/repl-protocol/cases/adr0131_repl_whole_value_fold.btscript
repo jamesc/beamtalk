@@ -110,3 +110,51 @@ t := 0. r := #(1, 2) inject: 0 into: [:a :x | a + x]. #[r, t]
 
 t := 0. r := 5. s := r + 1. #[r, s, t]
 // => #[5, 6, 0]
+
+// ===========================================================================
+// Every state-threading construct that is an assignment's whole value, not
+// only loops and folds: a mutating conditional and an inline block `value`
+// (BT-3800). Before the fix `r` was the raw `{Value, Bindings}` tuple and the
+// write was lost.
+// ===========================================================================
+
+t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]. #[r, u]
+// => #[5, 1]
+
+t := 0. u := 0. r := (t == 0) ifTrue: [u := 7] ifFalse: [u := 8]. #[r, u]
+// => #[7, 7]
+
+t := 0. u := 0. r := (t == 1) ifTrue: [u := 7]. #[r, u]
+// => #[nil, 0]
+
+t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]
+// => 5
+
+r
+// => 5
+
+u
+// => 1
+
+t := 0. u := 0. r := [u := u + 1. 5] value. #[r, u]
+// => #[5, 1]
+
+t := 0. u := 0. r := [:x | u := u + x. x] value: 3. #[r, u]
+// => #[3, 3]
+
+t := 0. u := 0. r := [u := u + 1. 5] value
+// => 5
+
+r
+// => 5
+
+u
+// => 1
+
+// `on:do:` and `ensure:` that write an outer local as an assignment's whole
+// value are still rejected by the analyser (BT-3743), before codegen.
+t := 0. u := 0. r := [u := u + 1. 5] on: Error do: [:e | 0]. #[r, u]
+// => ERROR: `on:do:` writes outer local `u`
+
+t := 0. u := 0. r := [u := u + 1. 5] ensure: [u := u + 10]
+// => ERROR: `ensure:` writes outer local `u`

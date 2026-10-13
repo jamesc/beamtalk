@@ -609,10 +609,13 @@ reports the same message at the same span. No operation is surface-specific.
   cascade, a field write) keep their diagnostics. Method bodies: the value of a
   `self.f := V` field or class-variable write is a producer site too (class and
   actor methods; a value type cannot write `self.f :=`).
-- **REPL multi-statement whole-value fold (BT-3800).** In a multi-statement
-  REPL input, `r := coll inject: 0 into: [:a :x | u := u + 1. a + x]` (a loop or
-  fold that is an assignment's whole value, with no producer in its receiver)
-  used to bind `r` to a raw `{Value, Bindings}` tuple and lose the write to `u`.
+- **REPL multi-statement whole-value construct (BT-3800).** In a multi-statement
+  REPL input, `r := coll inject: 0 into: [:a :x | u := u + 1. a + x]` (any
+  state-threading construct that is an assignment's whole value: a loop or fold,
+  a conditional with a binding write, an inline block `value`; `on:do:` and
+  `ensure:` reach the same path but the analyser rejects a write there first,
+  BT-3743) used to bind `r` to a raw `{Value, Bindings}` tuple and lose the write
+  to `u`.
   It now answers the value and keeps the write, exactly as the single-statement
   form already did (maintainer-approved REPL output change). One helper
   (`repl_assignment_value` in `beamtalk-repl`) compiles a multi-statement

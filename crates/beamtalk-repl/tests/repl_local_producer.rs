@@ -178,7 +178,8 @@ fn a_whole_value_fold_after_a_producer_is_unpacked_in_every_multi_statement_path
     }
 }
 
-/// Loops and folds, each writing the REPL binding `t` from its body.
+/// Loops, folds and other state-threading constructs, each writing a REPL
+/// binding from its body.
 const CONSTRUCTS: &[&str] = &[
     "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
     "#(1, 2) collect: [:x | t := t + x]",
@@ -191,6 +192,15 @@ const CONSTRUCTS: &[&str] = &[
     "1 to: 3 do: [:i | t := t + i]",
     "3 timesRepeat: [t := t + 1]",
     "[t < 9] whileTrue: [t := t + 3]",
+    // Other state-threading constructs that set `repl_loop_mutated`: a
+    // mutating conditional, an inline block `value`, and (reaching codegen
+    // only without the analyser, which rejects them, BT-3743) `on:do:` and
+    // `ensure:`.
+    "true ifTrue: [t := t + 1. 5] ifFalse: [6]",
+    "[t := t + 1. 5] value",
+    "[:x | t := t + x. x] value: 3",
+    "[t := t + 1. 5] on: Error do: [:e | 0]",
+    "[t := t + 1. 5] ensure: [u := u + 10]",
 ];
 
 /// A receiver whose own producer runs before the construct (the whole-value
@@ -298,6 +308,8 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
         "t := 0\nr := #(1, 2) inject: 0 into: [:a :x | a + x]\n#[r, t]",
         "t := 0\nr := #(1, 2) collect: [:x | x + 1]\nr",
         "t := 0\nr := 5\ns := r + 1\n#[r, s, t]",
+        "t := 0\nr := true ifTrue: [5] ifFalse: [6]\nr",
+        "t := 0\nr := [5] value\n#[r, t]",
     ] {
         for (entry, code) in both_outputs("plain", src, true) {
             assert!(
