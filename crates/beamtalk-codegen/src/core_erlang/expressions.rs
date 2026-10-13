@@ -1069,6 +1069,7 @@ impl CoreErlangGenerator {
             ));
         }
 
+        // Unreachable: `messages` is non-empty, so the last iteration returns.
         Err(CodeGenError::Internal(
             "cascade lowered without a final message".to_string(),
         ))

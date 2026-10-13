@@ -211,6 +211,33 @@ fn bt3791_class_methods_state_mutating_computed_value_threads_state() {
         let name = format!("bt3791_case{i}");
         let code = generate_module(&module, CodegenOptions::new(&name))
             .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+        // Structural check (holds on hosts where erlc is unavailable): the
+        // self-send dispatch is hoisted ahead of the `classMethods:` send and
+        // is not nested inside the map literal.
+        let probe_start = code
+            .find("<'probe'> when 'true' ->")
+            .expect("dispatch must have a `probe` clause");
+        let probe = &code[probe_start..];
+        let probe = &probe[..probe.find("<OtherSelector>").unwrap_or(probe.len())];
+        let dispatch_pos = probe
+            .find("'safe_dispatch'('bump'")
+            .expect("the computed value's self-send must be dispatched");
+        let send_pos = probe
+            .find("'classMethods:'")
+            .expect("classMethods: must be sent");
+        let map_start = probe[send_pos..].find("~{").map(|p| send_pos + p).unwrap();
+        let map_end = probe[map_start..]
+            .find("}~")
+            .map(|p| map_start + p)
+            .unwrap();
+        assert!(
+            dispatch_pos < send_pos,
+            "self-send must be hoisted before the cascade send. Got:\n{probe}"
+        );
+        assert!(
+            !probe[map_start..map_end].contains("safe_dispatch"),
+            "self-send must not be nested in the map literal. Got:\n{probe}"
+        );
         assert_compiles_through_erlc(&name, &code);
     }
 }
