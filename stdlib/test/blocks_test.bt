@@ -100,8 +100,9 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulBlock := [:x | count := count + x]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
-    laundered := #(statefulBlock) first
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBlock))
     self should: [
       laundered perform: #value: withArguments: #(3)
     ] raise: #stateful_block_dispatch
@@ -123,13 +124,13 @@ TestCase subclass: BlocksTest
     // BT-2914: the unary `value` fallback guard (statically-unknown
     // receiver) must arity-discriminate like the keyword value:* guards —
     // a Tier 2 (stateful) 0-arg block is an arity-1 fun whose StateAcc a
-    // generic call site can't supply. Laundering the block through a list
+    // generic call site can't supply. Laundering the block through an Erlang tuple
     // hides it from the call-site Tier 2 tracking (it's neither a block
     // literal nor a local assigned one), so the runtime guard is what fires.
     count := 0
     @expect dead_assignment
     statefulBlock := [count := count + 1]
-    laundered := #(statefulBlock) first
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBlock))
     self should: [laundered value] raise: #stateful_block_dispatch
 
     // A pure 0-arg block through the same laundering keeps working.
@@ -152,8 +153,9 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulZeroArgBlock := [count := count + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
-    laundered := #(statefulZeroArgBlock) first
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulZeroArgBlock))
     caught := [
       laundered perform: #value: withArguments: #(42)
     ] on: Exception do: [:e | e]
@@ -240,18 +242,23 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulIncrement := [i := i + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
-    launderedIncrement := #(statefulIncrement) first
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
+    launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulIncrement))
     self should: [
       [i < 3] perform: #whileTrue: withArguments: #(launderedIncrement)
     ] raise: #stateful_block_dispatch
     count := 0
     @expect dead_assignment
     statefulBody := [count := count + 1]
-    self should: [
-      [false] perform: #whileTrue: withArguments: #(statefulBody)
-    ] raise: #stateful_block_dispatch
-    launderedBody := #(statefulBody) first
+    self
+      should: [
+        [
+          false
+        ] perform: #whileTrue: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBody))
+      ]
+      raise: #stateful_block_dispatch
+    launderedBody := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBody))
     self should: [
       launderedBody perform: #repeat withArguments: #()
     ] raise: #stateful_block_dispatch
@@ -263,23 +270,28 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulReceiver := [count := count + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
-    laundered := #(statefulReceiver) first
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulReceiver))
     self should: [
       laundered perform: #on:do: withArguments: #(Error, [:e | "unused"])
     ] raise: #stateful_block_dispatch
     @expect dead_assignment
     statefulHandler := [:e | count := count + 1]
-    launderedHandler := #(statefulHandler) first
+    launderedHandler := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulHandler))
     self should: [
       [1 / 0] perform: #on:do: withArguments: #(Error, launderedHandler)
     ] raise: #stateful_block_dispatch
     self should: [
       laundered perform: #ensure: withArguments: #([nil])
     ] raise: #stateful_block_dispatch
-    self should: [
-      [42] perform: #ensure: withArguments: #(statefulReceiver)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        [
+          42
+        ] perform: #ensure: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulReceiver))
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnDoNonMatchingExceptionClassReraisesToOuterHandler =>
     // BT-2908 adversarial review: a non-matching exception class must
@@ -344,7 +356,11 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulZeroArgHandler := [count := count + 1]
-    result := [
-      1 / 0
-    ] perform: #on:do: withArguments: #(Error, statefulZeroArgHandler)
+    result := [1 / 0]
+      perform: #on:do:
+      withArguments: (Erlang erlang
+        tuple_to_list: (Erlang erlang
+          setelement: 1
+          of: (Erlang erlang make_tuple: 2 init: statefulZeroArgHandler)
+          value: Error))
     self assert: (result isKindOf: Tuple)

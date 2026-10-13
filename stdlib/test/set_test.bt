@@ -91,12 +91,15 @@ TestCase subclass: SetTest
   testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
     // BT-2888: the do: stateful_block_dispatch guard also applies
     // to Set, since the guard is keyed on selector name, not receiver class.
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulBlock := [:x | count := count + x]
-    self should: [
-      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
   testRespondstoMethodReflection =>
     s4 := (Set new) add: 1

@@ -378,7 +378,7 @@ fn dead_assignment_lint_fires_without_expect_bt_3384() {
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
          \x20\x20\x20\x20blk := [x := 2]\n\
-         \x20\x20\x20\x20#[blk, x]\n",
+         \x20\x20\x20\x20x\n",
     )
     .unwrap();
 
@@ -417,7 +417,7 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
          \x20\x20\x20\x20blk := [x := 2]\n\
-         \x20\x20\x20\x20#[blk, x]\n",
+         \x20\x20\x20\x20x\n",
     )
     .unwrap();
 

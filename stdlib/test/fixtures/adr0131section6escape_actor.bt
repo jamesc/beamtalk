@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3756 (ADR 0131 §6): the neighbours of the escaping shapes that stay
+// legal because the block writes no local of the method frame: a pure
+// closure, a closure that writes only its own locals, a closure over a
+// read-only outer local, and (actor) a field-writing closure stored in a
+// field and run by a later call. The shapes
+// that are rejected, `^[t := t + 1]` and its siblings, have no compiled
+// fixture (they do not compile); they are pinned in
+// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs
+// (`ESCAPE_SHAPES`). adr0131section6escape_test.bt asserts these run.
+
+Actor subclass: Adr0131Section6EscapeActor
+  state: n = 0
+  state: h = nil
+
+  returnedPure => [:x | x + 1]
+
+  returnedOwnLocal =>
+    ^[:x |
+      y := x * 2
+      y + 1
+    ]
+
+  returnedReadOnly =>
+    t := 10
+    ^[:x | x + t]
+
+  storedFieldWriter =>
+    self.h := [self.n := self.n + 1]
+    nil
+
+  runStored => self.h value
+
+  count => self.n

@@ -66,12 +66,18 @@ TestCase subclass: DictionaryTest
     // BT-2888: the do: stateful_block_dispatch guard also applies
     // to Dictionary, since the guard is keyed on selector name, not receiver
     // class.
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulBlock := [:v | count := count + v]
-    self should: [
-      #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>
     // BT-2913: doWithKey:'s BIF-lowered body had no stateful_block_dispatch
@@ -83,9 +89,14 @@ TestCase subclass: DictionaryTest
     count := 0
     @expect dead_assignment
     statefulBlock := [:k :v | count := count + v]
-    self should: [
-      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #doWithKey: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -95,7 +106,7 @@ TestCase subclass: DictionaryTest
         #{
           #a => 1,
           #b => 2
-        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)
+        } perform: #keysAndValuesDo: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock2))
       ]
       raise: #stateful_block_dispatch
 

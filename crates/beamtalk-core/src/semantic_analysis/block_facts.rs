@@ -253,48 +253,81 @@ fn as_block(expr: &Expression) -> Option<&Block> {
     }
 }
 
-/// Every block literal in a method body (nested blocks included) that is
-/// returned or stored, with how it escapes (cloned: the walker's borrows do
-/// not outlive its callback). Purely syntactic: a block passed
-/// as a message argument is not an escape here (whether it escapes depends on
-/// the callee). A block returned from inside a nested inlined conditional
-/// branch is not seen (only the method's own last statement and explicit `^`).
-pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)> {
-    let mut found = Vec::new();
-    if let Some(block) = body.last().and_then(|last| as_block(&last.expression)) {
-        found.push((block.clone(), EscapeShape::Returned));
+/// Calls `visit` with every operand of a method body (nested blocks included)
+/// that is returned or stored, and how it escapes: the one classification
+/// behind [`escaping_blocks`] and [`escape_sites`], so they cannot disagree
+/// about what an escape site is. Purely syntactic: an operand passed as a
+/// message argument is not an escape here (whether it escapes depends on the
+/// callee). A value returned from inside a nested inlined conditional branch
+/// is not seen (only the method's own last statement and explicit `^`).
+///
+/// `implicit_return` includes the last statement of `body` as a returned
+/// operand.
+fn for_each_escape_operand(
+    body: &[ExpressionStatement],
+    implicit_return: bool,
+    visit: &mut dyn FnMut(&Expression, EscapeShape),
+) {
+    if implicit_return {
+        if let Some(last) = body.last() {
+            visit(last.expression.unwrap_parens(), EscapeShape::Returned);
+        }
     }
     for stmt in body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |expr| match expr {
             Expression::Return { value, .. } => {
-                if let Some(block) = as_block(value) {
-                    found.push((block.clone(), EscapeShape::Returned));
-                }
+                visit(value.unwrap_parens(), EscapeShape::Returned);
             }
             Expression::Assignment { target, value, .. } => {
-                if let Some(block) = as_block(value) {
-                    let shape = if matches!(**target, Expression::FieldAccess { .. }) {
-                        EscapeShape::StoredClassVar
-                    } else {
-                        EscapeShape::StoredLocal
-                    };
-                    found.push((block.clone(), shape));
-                }
+                let shape = if matches!(**target, Expression::FieldAccess { .. }) {
+                    EscapeShape::StoredClassVar
+                } else {
+                    EscapeShape::StoredLocal
+                };
+                visit(value.unwrap_parens(), shape);
             }
             Expression::ListLiteral { elements, .. }
             | Expression::ArrayLiteral { elements, .. } => {
-                for block in elements.iter().filter_map(as_block) {
-                    found.push((block.clone(), EscapeShape::StoredInLiteral));
+                for element in elements {
+                    visit(element.unwrap_parens(), EscapeShape::StoredInLiteral);
                 }
             }
             Expression::MapLiteral { pairs, .. } => {
-                for block in pairs.iter().filter_map(|p| as_block(&p.value)) {
-                    found.push((block.clone(), EscapeShape::StoredInLiteral));
+                for pair in pairs {
+                    visit(pair.value.unwrap_parens(), EscapeShape::StoredInLiteral);
                 }
             }
             _ => {}
         });
     }
+}
+
+/// Every block literal in a method body (nested blocks included) that is
+/// returned or stored, with how it escapes (cloned: the walker's borrows do
+/// not outlive its callback). See [`for_each_escape_operand`] for what counts.
+pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)> {
+    let mut found = Vec::new();
+    for_each_escape_operand(body, true, &mut |operand, shape| {
+        if let Some(block) = as_block(operand) {
+            found.push((block.clone(), shape));
+        }
+    });
+    found
+}
+
+/// The spans of the block literals and bare local-variable references in a
+/// method body that are themselves a returned or stored operand (`^[..]`,
+/// `self.f := b`, `#[b]`), with how they escape: the same classification as
+/// [`escaping_blocks`], the body's last statement included. A local stored
+/// into another local is reported as [`EscapeShape::StoredLocal`].
+#[must_use]
+pub fn escape_sites(body: &[ExpressionStatement]) -> Vec<(Span, EscapeShape)> {
+    let mut found = Vec::new();
+    for_each_escape_operand(body, true, &mut |operand, shape| match operand {
+        Expression::Block(block) => found.push((block.span, shape)),
+        Expression::Identifier(id) => found.push((id.span, shape)),
+        _ => {}
+    });
     found
 }
 

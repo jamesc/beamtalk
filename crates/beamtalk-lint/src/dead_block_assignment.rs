@@ -28,9 +28,10 @@
 //!
 //! What is left for the lint (pinned by `lint_and_section6_agree` below):
 //!
-//! - a block stored or returned but never sent (`blk := [x := 2]`,
-//!   `^[x := 2]`, `#(blk)`, a field store) — §6 errors only once the block
-//!   reaches a send (BT-3756 tracks the rest);
+//! - a block stored in a local and never sent (`blk := [x := 2]`): it does not
+//!   leave the method, so §6 has nothing to reject (a block that is returned,
+//!   stored in a field, or placed in a collection literal is a §6 error since
+//!   BT-3756);
 //! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
@@ -917,7 +918,7 @@ sealed typed Value subclass: Foo
         Neither,
         /// An ADR 0131 compile error (§6 or the Phase 0 allow-set); no lint.
         CompileError,
-        /// The lint alone: a block value stored or returned but never sent.
+        /// The lint alone: a block value stored in a local and never sent.
         Lint,
         /// Wrong at runtime today but accepted by §6: exactly one of the two,
         /// whichever owns it at the moment (the Phase 0 allow-set is being
@@ -955,12 +956,19 @@ sealed typed Value subclass: Foo
             ("self run: [x := 1]; yourself", CompileError),
             ("blk := [x := 1]\n    blk value", CompileError),
             ("blk := [x := 1]\n    self run: blk", CompileError),
-            // A block stored or returned and never sent.
+            // §6 (BT-3756): a block value that escapes the method with no send.
+            ("blk := [x := 2]\n    #[blk]", CompileError),
+            ("blk := [x := 2]\n    ^blk", CompileError),
+            ("blk := [x := 2]\n    self.f := blk", CompileError),
+            ("^[x := 2]", CompileError),
+            ("#[[x := 2]]", CompileError),
+            ("#([x := 2])", CompileError),
+            // A block literal assigned straight to an instance field is the
+            // block analyzer's BT-2809 error (not a §6 one: it reports it once),
+            // so the lint still has it.
+            ("self.f := [x := 2]", Lint),
+            // A block stored in a local and never sent.
             ("blk := [x := 2]", Lint),
-            ("blk := [x := 2]\n    #[blk]", Lint),
-            ("blk := [x := 2]\n    ^blk", Lint),
-            ("^[x := 2]", Lint),
-            ("#[[x := 2]]", Lint),
             ("blk := [#(1, 2) do: [:e | x := x + e]]", Lint),
             // An Erlang FFI argument: lossy by design (ADR 0041 §Erlang
             // Interop Boundary), so §6 exempts it for good.
