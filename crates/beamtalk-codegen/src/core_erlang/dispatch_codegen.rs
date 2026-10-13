@@ -1732,73 +1732,11 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates self-dispatch with state threading (open binding pattern).
-    ///
-    /// Like `generate_self_dispatch`, but captures the new state from the dispatch
-    /// result and advances the state version. The let binding is left open so
-    /// subsequent expressions see the updated state.
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// let _SD0 = case call 'module':'safe_dispatch'('sel', [Args], State) of
-    ///   <{'reply', R, S}> when 'true' -> {R, S}
-    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
-    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
-    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
-    /// end in let State1 = call 'erlang':'element'(2, _SD0) in
-    /// ```
-    ///
-    /// The expression value `call 'erlang':'element'(1, _SD0)` is NOT emitted —
-    /// it's discarded since this is used for non-last expressions in block bodies.
-    ///
-    /// Uses Document/docvec! (ADR 0018) for composable rendering.
-    pub(super) fn generate_self_dispatch_open(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, String)> {
-        if let Expression::MessageSend {
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            return self.generate_self_dispatch_open_for(selector, arguments);
-        }
-        Err(CodeGenError::Internal(
-            "generate_self_dispatch_open called on non-MessageSend expression".to_string(),
-        ))
-    }
-
-    /// selector/arguments-based counterpart of
-    /// [`Self::generate_self_dispatch_open`], for callers that only have the
-    /// decomposed selector/arguments of a self-send, not the owning
-    /// `Expression::MessageSend` node itself — e.g.
-    /// `control_flow/conditionals.rs`'s `compile_conditional_receiver`, which
-    /// destructures a conditional's (unwrapped-of-parens) receiver expression
-    /// itself. `generate_self_dispatch_open` is now a thin wrapper over this.
-    pub(super) fn generate_self_dispatch_open_for(
-        &mut self,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) -> Result<(Document<'static>, String)> {
-        let (call_doc, dispatch_var) =
-            self.generate_self_dispatch_call_doc_for(selector, arguments)?;
-        let new_state = self.current_state_var();
-        let doc = docvec![
-            call_doc,
-            "let ",
-            leaf::var(new_state),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(dispatch_var.clone()),
-            ") in "
-        ];
-        Ok((doc, dispatch_var))
-    }
-
     /// ADR 0111 Addendum 5 (shape E2): the dispatch-call/
-    /// case-clause portion of [`Self::generate_self_dispatch_open`],
-    /// WITHOUT the trailing state-extraction `let` — factored out so
+    /// case-clause portion of a self-dispatch, WITHOUT the trailing
+    /// state-extraction `let` (the former `generate_self_dispatch_open` text;
+    /// BT-3809 removed that wrapper once every caller took the `Bind` form) —
+    /// factored out so
     /// `exception_handling.rs`'s per-arm `ThreadedIr` lowering can model the
     /// state-version bump as a real `Bind` (`BindOp::Direct`) instead of
     /// baking it into an opaque `Statement`'s text. Still mints the version
@@ -1809,10 +1747,7 @@ impl CoreErlangGenerator {
     /// name read it back via `current_state_var()` rather than consuming a
     /// return value, since a real `Bind`'s `render_bind` re-derives the same
     /// name from the version number, not from a string this function hands
-    /// back. `generate_self_dispatch_open` is unchanged in every other
-    /// respect (same mint order, same returned bytes) — it now simply
-    /// delegates here and appends the extraction `let` it used to build
-    /// inline.
+    /// back.
     pub(super) fn generate_self_dispatch_call_doc(
         &mut self,
         expr: &Expression,
@@ -1834,12 +1769,8 @@ impl CoreErlangGenerator {
     /// [`Self::generate_self_dispatch_call_doc`] — see that function's doc
     /// comment (ADR 0111 Addendum 5) for the shape this builds and
     /// why the state-version bump (`next_state_var()`) mints exactly where it
-    /// does. Factored out so [`Self::generate_self_dispatch_open_for`] (used
-    /// by `compile_conditional_receiver`, which only has the decomposed
-    /// selector/arguments of an unwrapped-of-parens receiver expression, not
-    /// an owning `MessageSend` node) can reuse the exact same dispatch-call/
-    /// state-threading shape instead of re-deriving a parallel
-    /// implementation (CLAUDE.md's no-duplicate-implementations rule).
+    /// does. Takes the decomposed selector/arguments so callers that only hold
+    /// those (not an owning `MessageSend` node) share one dispatch-call shape.
     #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_call_doc_for(
         &mut self,
@@ -1927,10 +1858,8 @@ impl CoreErlangGenerator {
             // Result/error clauses. The state-version bump
             // (`next_state_var()`) stays exactly here — mint-order fidelity
             // — but its returned name is no longer consumed for rendering;
-            // `generate_self_dispatch_open` re-reads it via
-            // `current_state_var()`, and the E2 `Bind`-based caller
-            // (`exception_handling.rs`) re-derives it from the version
-            // number via `render_bind`.
+            // the `Bind`-based callers re-derive it from the version number
+            // via `render_bind`.
             let _ = self.next_state_var();
             let error_clause =
                 self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);

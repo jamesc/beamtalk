@@ -641,6 +641,36 @@ statement-lowering modules, `dispatch_codegen.rs`, `expressions.rs`,
 and `state_threading_selectors.rs`, `crates/beamtalk-lint` (selector table
 consumer), `stdlib/test/`, `docs/development/debugging.md`.
 
+## Amendment: a self-send statement sequences its operands in every body (BT-3809)
+
+A `do:`/`collect:`/`inject:into:`/... fold body lowered a self-send *statement* through
+a path that compiled its operands into the dispatch's closed argument list, so an
+operand's `State` rebind was scoped inside the list: a single operand's rebind was
+dropped silently and a second operand read an unbound version. The method body and the
+Letrec bodies already lowered the statement through `threaded_expression`'s producer.
+
+**Invariant.** A self-send statement is lowered by `sequenced_self_dispatch`: each operand
+that needs a prelude is compiled first and its `Bind`s are spliced into the enclosing
+frame's statement sequence, then the dispatch `Statement` + `Bind` follow. After it, the
+frame's `State` is the post-dispatch version and every operand saw its predecessor's
+rebind. It holds for each scope kind that lowers a statement sequence:
+
+| Scope | Guarantee |
+|---|---|
+| Method-body statement | `threaded_expression`'s producer (unchanged) |
+| Conditional arm | arm frame, `threaded_expression` (unchanged) |
+| `Letrec` loop body (`whileTrue:`/`timesRepeat:`/`to:do:`) | `lower_letrec_body_statements` -> `threaded_expression` (unchanged) |
+| `Foldl` loop body (`do:`/`collect:`/`inject:into:`/...) | `lower_foldl_body_in_sites` -> `sequenced_self_dispatch` (the fix) |
+| `on:do:`/`ensure:` arm | arm frame, `threaded_expression` (unchanged) |
+| Bare block, stored closure, NLR boundary | not a statement sequence of this frame: a Tier 1 closure body threads no state, a Tier 2 body is an arm/fold body above; an NLR throw leaves the frame before the rebind matters |
+
+**Verifier.** `capture_argument_list_doc` (the closed argument list) reports
+`StateEffectEscapesExpression` when an argument's prelude carries a versioned `Bind`
+(the shared `opaque_escapes` rule), so a consumer that fails to sequence its operands
+fails the debug verifier. `loop_body_self_send_operand_corpus.rs` proves it over
+self-send shape x body shape; `FOLD_BODY_SELF_SEND_OPERANDS` is gone from
+`field_assignment_value_position.rs`.
+
 ## References
 - Epic: BT-3413 (issues BT-3414 – BT-3424)
 - Related issues: BT-3374, BT-3382, BT-3392, BT-3396, BT-3399, BT-3402,

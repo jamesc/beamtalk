@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3809: a self-send statement in a fold body sequences its operands. Each test
+// runs one shape of fixtures/bt3809fold_self_send_actor.bt on a fresh actor.
+
+TestCase subclass: FoldBodySelfSendOperandTest
+  field: a = nil
+
+  setUp => self.a := Bt3809FoldSelfSendActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  testDoOneOperand => self assert: self.a doOneOperand equals: 2
+
+  testDoTwoOperands => self assert: self.a doTwoOperands equals: 4
+
+  testDoOperandThenRead => self assert: self.a doOperandThenRead equals: 2
+
+  testCollectTwoOperands =>
+    self assert: self.a collectTwoOperands equals: #(12, 34)
+    self assert: self.a getN equals: 4
+
+  testInjectTwoOperands =>
+    self assert: self.a injectTwoOperands equals: 34
+    self assert: self.a getN equals: 4
+
+  testSelectOneOperand =>
+    self assert: self.a selectOneOperand equals: #(2, 3)
+    self assert: self.a getN equals: 3
