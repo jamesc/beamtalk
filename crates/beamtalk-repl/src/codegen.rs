@@ -393,6 +393,34 @@ impl<'a> ReplAssembler<'a> {
         value: &Expression,
     ) -> Result<(Document<'static>, String, Document<'static>)> {
         if let Some(producer) = self.generator.repl_statement_with_producers(stmt, value)? {
+            if producer.mutated {
+                // The value is itself a `{Value, Bindings}` tuple (a fold that
+                // is the assignment's whole value, with a producer in its
+                // receiver): bind its element 1 as the value and adopt its
+                // element 2 as the `State` the binding is `put` into, as the
+                // single-statement path does.
+                let tuple = self.generator.fresh_temp_var("AssignTuple");
+                let value_var = self.generator.fresh_temp_var("AssignValue");
+                let state = self.generator.next_state_var();
+                let prelude = docvec![
+                    "    ",
+                    producer.prelude,
+                    "\n    let ",
+                    leaf::var(tuple.clone()),
+                    " = ",
+                    producer.value,
+                    " in let ",
+                    leaf::var(value_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple.clone()),
+                    ") in let ",
+                    leaf::var(state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(tuple),
+                    ") in\n",
+                ];
+                return Ok((prelude, state, var(value_var)));
+            }
             let state = self.generator.current_state_var();
             return Ok((
                 docvec!["    ", producer.prelude, "\n"],

@@ -41,6 +41,12 @@ const INPUTS: &[&str] = &[
     "r := t + (#(5) inject: 0 into: [:a :x | t := t + x. a + x])\nr",
     "r := (#(1, 2) collect: [:x | t := t + x]) size\nr := r + (#(1) count: [:x | t := t + 1. true]) size\nr",
     "#(1, 2) do: [:x | t := t + x]\n(#(1) collect: [:x | u := u + x]) size",
+    // A fold that is the whole value of an assignment, with a producer in its
+    // receiver: the value is itself a `{Value, Bindings}` tuple the assembler
+    // unpacks, as an intermediate and as the last statement.
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\n#[r, t, u]",
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\nr := r + 1\nr",
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]",
     // No producer: the statement keeps the assembler's lowering.
     "#(1, 2) do: [:x | t := t + x]",
     "r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
