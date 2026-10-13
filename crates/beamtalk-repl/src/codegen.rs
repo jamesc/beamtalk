@@ -1430,7 +1430,10 @@ mod tests {
         )
         .unwrap();
         assert!(result.contains("module 'repl_trace_hier_assign'"));
-        assert!(result.contains("maps':'put'"), "should thread state via maps:put: {result}");
+        assert!(
+            result.contains("maps':'put'"),
+            "should thread state via maps:put: {result}"
+        );
         assert!(result.contains("'x'"), "variable key present");
     }
 
@@ -1457,9 +1460,13 @@ mod tests {
         // DestructureAssignment as the sole expression in traced mode.
         // Exercises the early-return branch in generate_repl_single_traced_inner.
         let expr = destructure_assign_expr(&["a", "b"], int_expr(99));
-        let result =
-            generate_repl_expressions_traced(&[expr], "99", "repl_trace_destr_single", HashMap::new())
-                .unwrap();
+        let result = generate_repl_expressions_traced(
+            &[expr],
+            "99",
+            "repl_trace_destr_single",
+            HashMap::new(),
+        )
+        .unwrap();
         assert!(result.contains("module 'repl_trace_destr_single'"));
         // The result should contain a trace list with the source text as binary.
         assert!(
@@ -1489,7 +1496,10 @@ mod tests {
             result.contains("maps':'put'"),
             "last assignment should store into state: {result}"
         );
-        assert!(result.contains("'x'"), "should bind variable name as atom key");
+        assert!(
+            result.contains("'x'"),
+            "should bind variable name as atom key"
+        );
     }
 
     #[test]
