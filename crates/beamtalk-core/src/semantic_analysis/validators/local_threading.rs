@@ -45,8 +45,9 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
-    is_safe_value_family_selector, local_threading_construct, operand_producer_writes,
+    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
+    is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
+    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
     outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -779,6 +780,17 @@ enum TopLevel {
 /// scope (so a write can be told apart from a block-local definition), the
 /// block nesting depth (a construct inside a block is in a nested frame) and
 /// the Tier 2 block-valued locals bound so far.
+/// The current statement of a threaded frame body (ADR 0131 Phase 2b).
+#[derive(Default)]
+struct FrameSites {
+    /// The statement's [`loop_body_producer_sites`].
+    sites: HashSet<Span>,
+    /// The statement itself, without parentheses.
+    statement: Span,
+    /// Whether the frame is a fold's ([`is_fold_frame_body`]).
+    fold: bool,
+}
+
 struct Walker<'d> {
     context: MethodContext,
     /// Names bound in the method so far, innermost frame last.
@@ -813,6 +825,15 @@ struct Walker<'d> {
     /// [`sequenced_operand_sites`]: where a loop or fold is lowered as an
     /// ADR 0131 local-threading producer (BT-3749).
     operand_sites: HashSet<Span>,
+    /// ADR 0131 Phase 2b (BT-3793): for each enclosing block, innermost last,
+    /// `Some(sites)` when it is the body of a loop or fold that codegen lowers
+    /// as a threaded frame ([`is_threaded_frame_body`]) — `sites` being the
+    /// current statement's [`loop_body_producer_sites`] — and `None` for any
+    /// other block (an arm, a handler, a protected body, a closure).
+    frame_sites: Vec<Option<FrameSites>>,
+    /// Set by a send's walk just before it descends into a block operand that
+    /// is a threaded frame body; consumed by [`Walker::block`].
+    pending_frame_body: Option<bool>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -869,6 +890,8 @@ impl<'d> Walker<'d> {
             reported_locals: HashSet::new(),
             safe_stored_uses,
             operand_sites: HashSet::new(),
+            frame_sites: Vec::new(),
+            pending_frame_body: None,
             diagnostics,
         }
     }
@@ -926,6 +949,12 @@ impl<'d> Walker<'d> {
                     .into_iter()
                     .map(Expression::span)
                     .collect();
+            } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
+                frame.statement = stmt.expression.unwrap_parens().span();
+                frame.sites = loop_body_producer_sites(&stmt.expression)
+                    .into_iter()
+                    .map(Expression::span)
+                    .collect();
             }
             self.expr(&stmt.expression, Position::Statement);
         }
@@ -933,6 +962,16 @@ impl<'d> Walker<'d> {
     }
 
     fn block(&mut self, block: &Block, container: Container) {
+        let frame_body = self.pending_frame_body.take();
+        self.frame_sites.push(frame_body.map(|fold| FrameSites {
+            fold,
+            ..FrameSites::default()
+        }));
+        self.block_in_frame(block, container);
+        self.frame_sites.pop();
+    }
+
+    fn block_in_frame(&mut self, block: &Block, container: Container) {
         if self.depth == 0 {
             self.outer_stateful =
                 self.context != Repl && touches_state(block, self.context == Class);
@@ -1033,7 +1072,14 @@ impl<'d> Walker<'d> {
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 for arg in arguments {
                     let arg_role = role(arg, false);
+                    self.pending_frame_body = match arg {
+                        Expression::Block(b) if is_threaded_frame_body(expr, b) => {
+                            Some(is_fold_frame_body(expr, b))
+                        }
+                        _ => None,
+                    };
                     self.operand_in(arg, Position::Argument, arg_role);
+                    self.pending_frame_body = None;
                 }
             }
             Expression::Cascade {
@@ -1192,6 +1238,44 @@ impl<'d> Walker<'d> {
         {
             return;
         }
+        // ADR 0131 Phase 2b (BT-3793): in the body of a loop or fold that
+        // codegen lowers as a threaded frame — every enclosing block a
+        // frame body, none an arm, handler or closure — a loop or fold at
+        // one of the statement's `loop_body_producer_sites` is a
+        // local-threading producer there: its prelude rebinds the locals it
+        // writes, lowered by the enclosing frame's mode.
+        //
+        // `detect:`/`detect:ifNone:` stay out: a write in its search block is
+        // dropped by the `collect:` and nested `do:` frames around it, and in
+        // an actor by every frame (measured, BT-3793).
+        let frame_site = self.depth > 0
+            && self.context != Repl
+            && !self.frame_sites.is_empty()
+            && self.frame_sites.iter().all(Option::is_some)
+            && self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| frame.sites.contains(&expr.span()))
+            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some();
+        let body_site = frame_site && !matches!(selector.as_str(), "detect:" | "detect:ifNone:");
+        // An actor fold's value-bearing sites (an assignment's value, an
+        // operand) are not lowered by the producer: only the body statement
+        // itself is, and the construct's carrier does not fit the fold's
+        // tuple accumulator. Phase 0 must not accept them through any other
+        // row either (`r := xs inject: 0 into: [...]` in a `do:` body
+        // compiled and then crashed, BT-3797). A letrec loop frame lowers
+        // them (the `whileTrue:` rows of the local-assign matrix).
+        let actor_value_site = frame_site
+            && self.context == Actor
+            && self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| frame.fold && is_value_bearing_site(frame.statement, expr));
+        if body_site && !actor_value_site {
+            return;
+        }
         let handler_writes = selector == "detect:ifNone:"
             && matches!(
                 expr.unwrap_parens(),
@@ -1227,7 +1311,7 @@ impl<'d> Walker<'d> {
             }
             other => other,
         };
-        if is_allowed(kind, position, self.context) {
+        if !actor_value_site && is_allowed(kind, position, self.context) {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);

@@ -84,3 +84,84 @@ fn a_map_put_rebind_at_the_method_root_is_local_rebind_mode_mismatch() {
 fn a_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
     assert_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2b (BT-3793): the same checks on producers nested in loop
+// and fold bodies, whose `LocalRebind`s are lowered by the enclosing frame.
+// ---------------------------------------------------------------------------
+
+/// The same §1a probe shape as a statement of a loop or fold body, in each
+/// frame mode a body can have: a counted loop (direct params), a `do:` fold
+/// (tuple accumulator, or the actor's `StateAcc`) and a `whileTrue:` loop.
+fn loop_programs() -> Vec<String> {
+    let mut out = Vec::new();
+    for frame in [
+        "1 to: 2 do: [:i | {s}]",
+        "#(1, 2) do: [:i | {s}]",
+        "[u < 2] whileTrue: [u := u + 1. {s}]",
+    ] {
+        let stmt = "r := t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])";
+        let body = format!(
+            "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
+            frame.replace("{s}", stmt)
+        );
+        out.push(format!(
+            "Object subclass: LoopCorpusClass\n  class go =>\n{body}"
+        ));
+        out.push(format!("Value subclass: LoopCorpusValue\n  go =>\n{body}"));
+        out.push(format!(
+            "Actor subclass: LoopCorpusActor\n  state: n = 0\n\n  go =>\n{body}"
+        ));
+    }
+    out
+}
+
+fn assert_loop_reports(fault: LocalRebindFault, error: &str) {
+    for src in loop_programs() {
+        let report = verifier_report(&src, fault)
+            .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
+        assert!(
+            report.contains(error),
+            "{fault:?} should be reported as {error}, got: {report}\n{src}"
+        );
+    }
+}
+
+#[test]
+fn the_unbroken_loop_body_producer_compiles() {
+    for src in loop_programs() {
+        let code = codegen(&src);
+        assert!(code.contains("let _Tmp"), "{src}\n{code}");
+    }
+}
+
+#[test]
+fn a_loop_body_sibling_read_in_place_is_local_read_after_sibling_rebind() {
+    assert_loop_reports(
+        LocalRebindFault::SkipSiblingSnapshot,
+        "LocalReadAfterSiblingRebind",
+    );
+}
+
+#[test]
+fn a_loop_body_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
+    assert_loop_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+}
+
+#[test]
+fn a_loop_body_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
+    assert_loop_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+}
+
+#[test]
+fn a_map_put_rebind_in_a_direct_params_loop_body_is_local_rebind_mode_mismatch() {
+    // The counted-loop frame in a class method threads its locals as letrec
+    // parameters, so a `MapPut` there threads nothing.
+    let src = &loop_programs()[0];
+    let report = verifier_report(src, LocalRebindFault::WrongLowering)
+        .unwrap_or_else(|| panic!("compiled without a verifier report:\n{src}"));
+    assert!(
+        report.contains("LocalRebindModeMismatch"),
+        "{report}\n{src}"
+    );
+}

@@ -21,7 +21,8 @@ impl CoreErlangGenerator {
     /// Try to generate a plain `let Var = value in` binding for a block-local
     /// variable assignment that does NOT need `StateAcc` threading.
     ///
-    /// Returns `Some(doc)` when the assignment is:
+    /// Returns `Some(stmts)` (the RHS's threaded prelude, then the `let`) when
+    /// the assignment is:
     /// - not the last expression in the block (`!is_last`)
     /// - not in the `threaded` set (block-local, not captured from outer scope)
     /// - not in REPL mode (REPL always uses `StateAcc` for local vars)
@@ -33,7 +34,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
         is_last: bool,
         threaded: &[String],
-    ) -> Result<Option<Document<'static>>> {
+    ) -> Result<Option<Vec<ThreadedStmt>>> {
         if is_last || self.is_repl_mode() {
             return Ok(None);
         }
@@ -66,7 +67,12 @@ impl CoreErlangGenerator {
         // which unwraps this exact shape and rebinds those
         // other locals via `push_control_flow_threaded_var_rereads`'s
         // loop-body counterpart.
-        if self.control_flow_has_mutations(value) {
+        //
+        // ADR 0131 Phase 2b: not a loop or fold that is a local-threading
+        // producer in this body — `threaded_expression` below splices its
+        // prelude (the construct tuple and its `LocalRebind`s) and yields
+        // the unwrapped value.
+        if self.control_flow_has_mutations(value) && !self.expr_has_local_producer(value) {
             return Ok(None);
         }
         // BT-3493: the RHS is itself a field write (`r := (self.x :=
@@ -94,18 +100,18 @@ impl CoreErlangGenerator {
         // built on `ThreadedValue` rather than an open-chain side channel).
         let frame = self.current_frame();
         let tv = self.threaded_expression(value, frame)?;
-        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
         let value_doc = self.threaded_value_doc(&tv.value);
         self.bind_var(&id.name, &core_var);
-        let doc = docvec![
-            prelude_doc,
-            "let ",
-            leaf::var(core_var),
-            " = ",
-            value_doc,
-            " in ",
-        ];
-        Ok(Some(doc))
+        // The prelude stays IR (spliced into the loop body's own statement
+        // list): a local-threading producer's `LocalRebind`s extend the
+        // loop's argument chain, which a prelude rendered to a `Document`
+        // here would hide from `final_loop_arg_identities`.
+        let mut stmts = tv.prelude;
+        stmts.push(ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(core_var), " = ", value_doc, " in ",],
+            expr.span(),
+        ));
+        Ok(Some(stmts))
     }
 
     /// ADR 0111 Addendum 15: `Bind`-producing local-var-update lowering shared
@@ -138,6 +144,19 @@ impl CoreErlangGenerator {
         };
         let Expression::Identifier(id) = target.as_ref() else {
             return Ok(());
+        };
+        // ADR 0131 Phase 2b: a loop or fold in the RHS (or an operand of it)
+        // that is a local-threading producer in this body is threaded ahead:
+        // its prelude rebinds the locals it writes (lowered by this frame's
+        // mode, i.e. extending the loop-argument chain) before the RHS reads
+        // the unwrapped value. Done before the target's own identity is read
+        // below, because that prelude may rebind the target itself.
+        let thread_scope = if self.local_assign_field_write(value).is_none()
+            && self.expr_has_local_producer(value)
+        {
+            Some(self.thread_ahead(value, stmts, frame)?)
+        } else {
+            None
         };
         let canonical = CoreErlangGenerator::to_core_erlang_var(&id.name);
         let current = self
@@ -180,6 +199,9 @@ impl CoreErlangGenerator {
         // Clear any pending list op result before generating the value.
         self.loop_mode.direct_params_list_op_result = None;
         let value_code = self.expression_doc(value)?;
+        if let Some(scope) = thread_scope {
+            self.finish_precompiled_scope(scope)?;
+        }
 
         if let Some(result_var) = self.loop_mode.direct_params_list_op_result.take() {
             let new_var = self.fresh_temp_var(&canonical);

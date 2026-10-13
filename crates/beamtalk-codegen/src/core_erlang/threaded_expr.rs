@@ -67,8 +67,9 @@
 //! classification), never a second recheck of the same Actor-body-mutation question.
 
 use super::threaded_ir::{
-    self, BindOp, CarrierSlot, FrameId, RebindFrame, RebindLowering, RebindShape,
-    ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, CarrierSlot, FrameId, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
+    ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
@@ -683,7 +684,9 @@ impl CoreErlangGenerator {
 
     /// ADR 0131 Phase 2: the threaded locals of `expr` when it is a
     /// local-threading producer at a sequenced operand site of the method
-    /// body being lowered — a loop or fold (`beamtalk_core`'s
+    /// body being lowered, or (BT-3793) at one of a loop or fold body's
+    /// `loop_body_producer_sites` (`with_body_producer_sites` narrows the
+    /// site set to the body's statements while it is lowered) — a loop or fold (`beamtalk_core`'s
     /// `producer_body_block`) whose construct tuple threads every local its
     /// blocks write (`ThreadedLocals::lowered == names`, the rule
     /// `operand_producer_writes` applies for the diagnostic), possibly none
@@ -822,10 +825,146 @@ impl CoreErlangGenerator {
         // diverge on a producer nested in an operand.
         let children = Self::sequenced_send_children(expr).unwrap_or_default();
         let (mut prelude, scope) = self.sequence_children(&children, frame)?;
-        let (stmts, value) = self.lower_construct_tuple(expr, locals, tail)?;
+        let (stmts, value) = self.lower_construct_tuple(expr, locals, tail, frame)?;
         self.finish_precompiled_scope(scope)?;
         prelude.extend(stmts);
         Ok((prelude, value))
+    }
+
+    /// Runs `f` with the enclosing direct-params loop's list-op mode
+    /// (`LoopMode::in_direct_params_loop`) off, restoring it afterwards.
+    fn with_cleared_direct_params_loop<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = std::mem::replace(&mut self.loop_mode.in_direct_params_loop, false);
+        let out = f(self);
+        self.loop_mode.in_direct_params_loop = saved;
+        out
+    }
+
+    /// The frame a local-threading producer in `frame` lowers its
+    /// `LocalRebind`s by (ADR 0131 §2): the loop or fold body registered for
+    /// it ([`Self::with_rebind_frame`]), or the method root.
+    fn rebind_frame_of(&self, frame: FrameId) -> Result<RebindFrame> {
+        if frame == FrameId::ROOT {
+            return Ok(RebindFrame::implicit_root());
+        }
+        self.rebind_frames.get(&frame).cloned().ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "ADR 0131: a local-threading producer in frame {frame:?} has no registered \
+                 enclosing frame"
+            ))
+        })
+    }
+
+    /// Runs `f` (a loop or fold body's lowering in frame `rebind.frame`)
+    /// with `rebind` registered as that frame's [`RebindFrame`], so a
+    /// local-threading producer nested in the body lowers its `LocalRebind`s
+    /// by it ([`Self::rebind_frame_of`]). `rebind` must be what
+    /// [`RebindFrame::of`] reads off the node built around the body
+    /// (`ThreadingPlan::rebind_frame`); the verifier's
+    /// `LocalRebindModeMismatch` checks that they agree.
+    pub(super) fn with_rebind_frame<T>(
+        &mut self,
+        rebind: RebindFrame,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let frame = rebind.frame;
+        let saved = self.rebind_frames.insert(frame, rebind);
+        let out = f(self);
+        match saved {
+            Some(previous) => self.rebind_frames.insert(frame, previous),
+            None => self.rebind_frames.remove(&frame),
+        };
+        out
+    }
+
+    /// Runs `f` (a loop or fold body's lowering) with the body's own
+    /// statements as local-producer sites (ADR 0131 Phase 2b): each
+    /// statement that is itself a loop or fold, and each sequenced operand
+    /// site of a statement (`sequenced_operand_sites`: an assignment's whole
+    /// value, a `^` value, a send's receiver and arguments, a literal's
+    /// elements). Restores the enclosing set afterwards, so a site is a
+    /// producer only in the body that lowers it through
+    /// [`Self::threaded_expression`] under a registered frame.
+    pub(super) fn with_body_producer_sites<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
+        for stmt in body {
+            sites.extend(
+                beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt)
+                    .into_iter()
+                    .map(Expression::span),
+            );
+        }
+        let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let out = f(self);
+        self.local_producer_sites = saved;
+        out
+    }
+
+    /// Whether `expr` is a local-threading producer
+    /// ([`Self::local_producer_locals`]) or has one at a sequenced operand
+    /// site — the question a loop-body statement lowering asks to leave the
+    /// statement to [`Self::threaded_expression`] (which splices the
+    /// producer's prelude) instead of unpacking a construct tuple itself.
+    pub(super) fn expr_has_local_producer(&self, expr: &Expression) -> bool {
+        self.local_producer_locals(expr).is_some()
+            || beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(expr)
+                .into_iter()
+                .any(|site| self.local_producer_locals(site).is_some())
+    }
+
+    /// The `RebindLowering` ADR 0131 §2's table assigns the rebind of `slot`
+    /// in `shape`'s cell, with its lowering-time names minted from the live
+    /// generator: a `LoopParam` steps the local's loop identity (the chain
+    /// `final_loop_arg_identities` follows into the recursive call) to
+    /// `Gensym(value_var)`; a `MapPut` steps the frame's `State` map by one
+    /// version.
+    fn mint_rebind_lowering(
+        &mut self,
+        slot: &ThreadedLocalSlot,
+        shape: RebindShape,
+        frame: FrameId,
+    ) -> RebindLowering {
+        match shape {
+            RebindShape::Let => RebindLowering::Let,
+            RebindShape::LoopParam => {
+                let canonical = Self::to_core_erlang_var(&slot.local);
+                let current = self
+                    .lookup_var(&slot.local)
+                    .cloned()
+                    .unwrap_or_else(|| canonical.clone());
+                let source = if current == canonical {
+                    VersionedVar::new(VersionPrefix::Local(slot.local.clone()), 0, frame)
+                } else {
+                    VersionedVar::new(VersionPrefix::Gensym(current), 1, frame)
+                };
+                RebindLowering::LoopParam {
+                    source,
+                    target: VersionedVar::new(
+                        VersionPrefix::Gensym(slot.value_var.clone()),
+                        1,
+                        frame,
+                    ),
+                }
+            }
+            RebindShape::MapPut => {
+                let source_version = self.state_version();
+                let _ = self.next_state_var();
+                let target_version = self.state_version();
+                let key = match &slot.slot {
+                    CarrierSlot::Key(key) => key.clone(),
+                    CarrierSlot::Pos(_) => Self::local_state_key(&slot.local),
+                };
+                RebindLowering::MapPut {
+                    key,
+                    source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                    target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                }
+            }
+        }
     }
 
     /// The construct-tuple half of [`Self::lower_local_threading_construct`],
@@ -835,16 +974,21 @@ impl CoreErlangGenerator {
         expr: &Expression,
         locals: &[String],
         tail: ProducerTail,
+        frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
         let span = expr.span();
         let actor = self.in_actor_instance_context();
+        let enclosing = self.rebind_frame_of(frame)?;
         let self_families = if actor {
             super::control_flow::analysis::ThreadedFamilies::default()
         } else {
             self.vt_loop_threaded_families(expr)
         };
         let source_version = self.state_version();
-        let doc = self.expression_doc(expr)?;
+        // A nested construct returns its own `{Value, StateAcc}` tuple: the
+        // enclosing direct-params loop's open-chain list-op forms (which
+        // rebind by name and return no tuple) must not apply to it.
+        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr))?;
         let carrier = self.fresh_temp_var("ThreadedResult");
         let element = |k: i64, carrier: &str| {
             docvec![
@@ -856,15 +1000,23 @@ impl CoreErlangGenerator {
             ]
         };
         let mut family_binds = Vec::new();
-        if actor {
+        // In an actor instance frame the carrier's element 2 is the `State`
+        // family's next version (ADR 0131 §2). A direct-params or tuple-acc
+        // frame has no `State` chain to extend: its body has no state effect
+        // (`select_direct_params`/`select_tuple_acc`), so the nested
+        // construct's `State` is the one already in scope.
+        let state_chain = match &enclosing.kind {
+            RebindFrameKind::MethodBody | RebindFrameKind::BranchArm => true,
+            RebindFrameKind::Loop(mode) => !matches!(
+                mode,
+                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_)
+            ),
+        };
+        if actor && state_chain {
             let _ = self.next_state_var();
             family_binds.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(
-                    VersionPrefix::State,
-                    self.state_version(),
-                    FrameId::ROOT,
-                ),
-                source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
+                target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
                 op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
                 span,
             });
@@ -879,27 +1031,15 @@ impl CoreErlangGenerator {
                         value_var: self.fresh_temp_var(local),
                     })
                     .collect();
-                let mut unsupported = None;
                 let prelude = threaded_ir::build_local_threading_prelude(
-                    &RebindFrame::implicit_root(),
+                    &enclosing,
                     &carrier,
                     doc,
                     &slots,
                     family_binds,
                     span,
-                    |slot, shape| {
-                        if shape != RebindShape::Let {
-                            unsupported = Some(slot.local.clone());
-                        }
-                        RebindLowering::Let
-                    },
+                    |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
                 );
-                if let Some(local) = unsupported {
-                    return Err(CodeGenError::Internal(format!(
-                        "ADR 0131: a method-root local-threading producer rebinds `{local}` \
-                         in a frame that threads it"
-                    )));
-                }
                 for slot in &slots {
                     self.bind_var(&slot.local, &slot.value_var);
                 }

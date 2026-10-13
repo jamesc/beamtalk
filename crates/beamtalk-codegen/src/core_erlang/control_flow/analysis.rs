@@ -711,25 +711,15 @@ impl CoreErlangGenerator {
         // here makes the *outer* loop's threaded-locals computation see
         // writes buried in an inner counted loop, so the outer loop threads
         // them via StateAcc instead of dropping them.
-        let body_block = match Self::block_arg_for_selector(&sel, arguments) {
-            Some(block)
-                if matches!(
-                    sel.as_str(),
-                    "do:"
-                        | "collect:"
-                        | "select:"
-                        | "reject:"
-                        | "anySatisfy:"
-                        | "allSatisfy:"
-                        | "timesRepeat:"
-                        | "inject:into:"
-                        | "to:do:"
-                        | "to:by:do:"
-                ) =>
-            {
-                block
-            }
-            _ => return,
+        // ADR 0131 Phase 2b: every loop and fold `block_arg_for_selector`
+        // knows (`whileTrue:`/`whileFalse:`, `detect:`, `count:`, … as well as
+        // the list ops and counted loops), not a hand-kept subset of them: a
+        // nested construct the enclosing loop's threaded set
+        // (`loop_threaded_locals`, the transitive `threaded_block_writes`)
+        // includes must also make the enclosing construct *thread* — the two
+        // answers can no longer disagree.
+        let Some(body_block) = Self::block_arg_for_selector(&sel, arguments) else {
+            return;
         };
 
         let analysis = facts
@@ -749,6 +739,27 @@ impl CoreErlangGenerator {
             }
         }
 
+        // A `whileTrue:`/`whileFalse:` condition block is part of the loop and
+        // writes outer locals like its body does.
+        if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
+            if let Expression::Block(cond) = receiver.as_ref() {
+                let cond_analysis = facts
+                    .block_profile(&cond.span)
+                    .cloned()
+                    .unwrap_or_else(|| block_analysis::analyze_block(cond));
+                let cond_params: std::collections::HashSet<String> =
+                    cond.parameters.iter().map(|p| p.name.to_string()).collect();
+                for v in cond_analysis
+                    .captured_reads
+                    .intersection(&cond_analysis.local_writes)
+                {
+                    if !cond_params.contains(v.as_str()) {
+                        out.insert(v.clone());
+                    }
+                }
+            }
+        }
+
         // Recurse into the inner block's statements so deeper nesting
         // (a counted/list op nested two or more levels deep) is still detected.
         // `analyze_block` does not propagate writes out of nested non-conditional
@@ -763,11 +774,39 @@ impl CoreErlangGenerator {
                 &mut nested,
             );
         }
+        // A local this inner block introduces itself (`k := 0. [k < 3] whileTrue:
+        // [...]`) is crossed by the loop nested in it but belongs to neither
+        // the enclosing constructs nor the outer scope.
+        let introduced = Self::body_introduced_locals(body_block, &analysis.captured_reads);
         for v in nested {
-            if !block_params.contains(v.as_str()) {
+            if !block_params.contains(v.as_str()) && !introduced.contains(v.as_str()) {
                 out.insert(v);
             }
         }
+    }
+
+    /// The locals `body` introduces with a top-level assignment and never
+    /// reads from outside (`captured_reads` is the body's own profile): decided
+    /// from the body alone, as `analyze_block` decides a "new binding", not
+    /// from the live scope, so classification does not depend on how far
+    /// lowering has got. The one rule behind "this local is the body's own,
+    /// not an outer local the construct threads".
+    pub(in crate::core_erlang) fn body_introduced_locals<'a>(
+        body: &'a beamtalk_core::ast::Block,
+        captured_reads: &std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<&'a str> {
+        body.body
+            .iter()
+            .filter_map(|stmt| match &stmt.expression {
+                Expression::Assignment { target, .. } => match target.as_ref() {
+                    Expression::Identifier(id) if !captured_reads.contains(id.name.as_str()) => {
+                        Some(id.name.as_str())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
     }
 
     /// Returns `true` if `expr` is (or wraps, via assignment RHS or parens) a
@@ -901,6 +940,48 @@ impl CoreErlangGenerator {
         }
 
         false
+    }
+
+    /// ADR 0131 Phase 2b: whether `expr` (through an assignment's value and
+    /// parentheses) is a `do:`/`anySatisfy:`/`allSatisfy:` over a literal block
+    /// that captures and mutates an outer local, in a context with no
+    /// tuple-accumulator mode (value-type and class methods:
+    /// `select_tuple_acc`). Such a list op is not a local-threading producer
+    /// (`producer_body_arg_index` lists neither) and lowers in map-accumulator
+    /// mode, which references `StateAcc` — so, like
+    /// [`Self::list_op_needs_stateacc_fallback`] for the shapes it covers, it
+    /// disqualifies the enclosing loop from direct-params. The other list ops
+    /// (`collect:`, `select:`, `reject:`, `inject:into:`, …) are producers: in
+    /// a direct-params body their tuple is rebound through the loop's
+    /// argument chain.
+    pub(in crate::core_erlang) fn nested_non_producer_map_acc_list_op(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        use beamtalk_core::ast::MessageSelector;
+        if !matches!(self.context, super::super::CodeGenContext::ValueType) {
+            return false;
+        }
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
+            other => other,
+        };
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = inner
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        if !matches!(sel.as_str(), "do:" | "anySatisfy:" | "allSatisfy:") {
+            return false;
+        }
+        let Some(body_block) = Self::block_arg_for_selector(&sel, arguments) else {
+            return false;
+        };
+        !self.loop_threaded_locals(body_block, None).is_empty()
     }
 
     /// Recursive wrapper for `list_op_needs_stateacc_fallback` that also

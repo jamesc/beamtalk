@@ -233,6 +233,18 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// ADR 0131 Phase 2b (BT-3793): the frame a local-threading producer's
+    /// `LocalRebind`s are lowered by (§2's table), for every loop or fold
+    /// body frame currently being lowered, keyed by that body's
+    /// [`FrameId`](super::threaded_ir::FrameId). A body's statements are
+    /// lowered before the loop node that encloses them exists, so the frame
+    /// is registered here from the same `ThreadingPlan` the node is built
+    /// from (`with_rebind_frame`) and the verifier's
+    /// `LocalRebindModeMismatch` re-derives it from the finished node. The
+    /// method root ([`FrameId::ROOT`](super::threaded_ir::FrameId::ROOT))
+    /// is never registered: it is `RebindFrame::implicit_root`.
+    pub(in crate::core_erlang) rebind_frames:
+        std::collections::HashMap<super::threaded_ir::FrameId, super::threaded_ir::RebindFrame>,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -397,6 +409,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
+            rebind_frames: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),

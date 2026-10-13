@@ -1070,7 +1070,20 @@ impl CoreErlangGenerator {
     /// prelude goes through, so a rendered-standalone and a spliced
     /// prelude never differ in bytes. `Document::Nil`-equivalent (empty)
     /// when `prelude` is empty.
+    ///
+    /// ADR 0131 §4 (`StateEffectEscapesExpression`): a `LocalRebind` whose
+    /// lowering steps a loop argument or the frame's `State` map belongs in
+    /// that frame's statement list, where the loop's recursive call and exit
+    /// follow the step; rendered here to a `Document` the step would be
+    /// invisible to them and the write silently lost. Reported, never
+    /// dropped.
     pub(super) fn threaded_prelude_doc(&mut self, prelude: &[ThreadedStmt]) -> Document<'static> {
+        let (escaped, at) = super::threaded_ir::stepping_local_rebinds(prelude);
+        self.report_threaded_ir_verify_errors(
+            &escaped,
+            "a loop-frame local rebind must be spliced into its frame, not rendered to a document",
+            at,
+        );
         let mut ctx = RenderCtx::new(self);
         render(prelude, &mut ctx)
     }

@@ -1429,7 +1429,12 @@ impl CoreErlangGenerator {
         // this body loop's C2 fallback previously had no equivalent,
         // silently leaking the tuple as the assigned value and the
         // branch's own result.
-        if self.control_flow_has_mutations(value) {
+        //
+        // ADR 0131 Phase 2b: not when the RHS is a loop or fold that is a
+        // local-threading producer in this body — C2 below threads it ahead
+        // (`thread_ahead` splices the construct tuple and its `LocalRebind`s,
+        // lowered by this frame's mode) and reads its unwrapped value back.
+        if self.control_flow_has_mutations(value) && !self.expr_has_local_producer(value) {
             let cf_tuple = self.fresh_temp_var("CfTuple");
             let cf_state = self.fresh_temp_var("CfSt");
             let thread_scope = self.thread_ahead(value, stmts, frame)?;

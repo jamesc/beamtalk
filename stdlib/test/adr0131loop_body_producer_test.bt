@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3793 (ADR 0131 Phase 2b): a loop or fold nested in the body of another
+// loop or fold is a local-threading producer in that body's frame. Each
+// method writes the outer local `t` (and sometimes `u`/`s`) inside a nested
+// construct; the enclosing frame (direct-params, tuple-acc or StateAcc)
+// lowers the rebinds, so the write is visible to everything after the
+// construct. The receivers (class, value type, actor) must agree.
+
+TestCase subclass: Adr0131LoopBodyProducerTest
+
+  testWhileInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass whileInToDo, (Adr0131LoopBodyProducerValue new) whileInToDo, (Adr0131LoopBodyProducerActor spawn) whileInToDo] equals: #[3, 3, 3]
+
+  testWhileInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass whileInDo, (Adr0131LoopBodyProducerValue new) whileInDo, (Adr0131LoopBodyProducerActor spawn) whileInDo] equals: #[3, 3, 3]
+
+  testWhileFalseInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass whileFalseInToDo, (Adr0131LoopBodyProducerValue new) whileFalseInToDo, (Adr0131LoopBodyProducerActor spawn) whileFalseInToDo] equals: #[3, 3, 3]
+
+  testDoInToDo =>
+    self assert: #[(Adr0131LoopBodyProducerActor spawn) doInToDo] equals: #[6]
+
+  testDoInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass doInDo, (Adr0131LoopBodyProducerValue new) doInDo] equals: #[6, 6]
+
+  testCollectInWhile =>
+    self assert: #[Adr0131LoopBodyProducerClass collectInWhile, (Adr0131LoopBodyProducerValue new) collectInWhile, (Adr0131LoopBodyProducerActor spawn) collectInWhile] equals: #[6, 6, 6]
+
+  testTimesInTimes =>
+    self assert: #[Adr0131LoopBodyProducerClass timesInTimes, (Adr0131LoopBodyProducerValue new) timesInTimes, (Adr0131LoopBodyProducerActor spawn) timesInTimes] equals: #[6, 6, 6]
+
+  testToDoInCollect =>
+    self assert: #[Adr0131LoopBodyProducerClass toDoInCollect, (Adr0131LoopBodyProducerValue new) toDoInCollect, (Adr0131LoopBodyProducerActor spawn) toDoInCollect] equals: #[6, 6, 6]
+
+  testAssignCollectInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass assignCollectInToDo, (Adr0131LoopBodyProducerValue new) assignCollectInToDo, (Adr0131LoopBodyProducerActor spawn) assignCollectInToDo] equals: #[10, 10, 10]
+
+  testInjectInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass injectInDo, (Adr0131LoopBodyProducerValue new) injectInDo, (Adr0131LoopBodyProducerActor spawn) injectInDo] equals: #[6, 6, 6]
+
+  testAssignInjectInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass assignInjectInDo, (Adr0131LoopBodyProducerValue new) assignInjectInDo] equals: #[#[6, 6], #[6, 6]]
+
+  testTwoLocals =>
+    self assert: #[(Adr0131LoopBodyProducerActor spawn) twoLocals] equals: #[#[6, 6]]
+
+  testLocalInOuterOnly =>
+    self assert: #[Adr0131LoopBodyProducerClass localInOuterOnly, (Adr0131LoopBodyProducerValue new) localInOuterOnly, (Adr0131LoopBodyProducerActor spawn) localInOuterOnly] equals: #[6, 6, 6]
+
+  testReadAfterInner =>
+    self assert: #[Adr0131LoopBodyProducerClass readAfterInner, (Adr0131LoopBodyProducerValue new) readAfterInner, (Adr0131LoopBodyProducerActor spawn) readAfterInner] equals: #[18, 18, 18]
+
+  testSelectInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass selectInDo, (Adr0131LoopBodyProducerValue new) selectInDo, (Adr0131LoopBodyProducerActor spawn) selectInDo] equals: #[6, 6, 6]
+
+  testThreeDeep =>
+    self assert: #[(Adr0131LoopBodyProducerActor spawn) threeDeep] equals: #[8]
+
+  testWhileInWhile =>
+    self assert: #[Adr0131LoopBodyProducerClass whileInWhile, (Adr0131LoopBodyProducerValue new) whileInWhile, (Adr0131LoopBodyProducerActor spawn) whileInWhile] equals: #[6, 6, 6]
+
+  testOperandInBody =>
+    self assert: #[Adr0131LoopBodyProducerClass operandInBody, (Adr0131LoopBodyProducerValue new) operandInBody] equals: #[10, 10]
+
+  testCollectLastIsLoop =>
+    self assert: #[Adr0131LoopBodyProducerClass collectLastIsLoop, (Adr0131LoopBodyProducerValue new) collectLastIsLoop, (Adr0131LoopBodyProducerActor spawn) collectLastIsLoop] equals: #[#[2, 6], #[2, 6], #[2, 6]]
+
+  testWhileInInject =>
+    self assert: #[Adr0131LoopBodyProducerClass whileInInject, (Adr0131LoopBodyProducerValue new) whileInInject, (Adr0131LoopBodyProducerActor spawn) whileInInject] equals: #[3, 3, 3]
+
+  testCountInTimes =>
+    self assert: #[Adr0131LoopBodyProducerClass countInTimes, (Adr0131LoopBodyProducerValue new) countInTimes] equals: #[#[6, 4], #[6, 4]]
+
+  testSelectLastInDo =>
+    self assert: #[Adr0131LoopBodyProducerClass selectLastInDo, (Adr0131LoopBodyProducerValue new) selectLastInDo, (Adr0131LoopBodyProducerActor spawn) selectLastInDo] equals: #[12, 12, 12]
+
+  testThreadedAndLocal =>
+    self assert: #[Adr0131LoopBodyProducerClass threadedAndLocal, (Adr0131LoopBodyProducerValue new) threadedAndLocal, (Adr0131LoopBodyProducerActor spawn) threadedAndLocal] equals: #[#[6, 6], #[6, 6], #[6, 6]]
+
+  testNlrOutOfInner =>
+    self assert: #[Adr0131LoopBodyProducerClass nlrOutOfInner, (Adr0131LoopBodyProducerValue new) nlrOutOfInner, (Adr0131LoopBodyProducerActor spawn) nlrOutOfInner] equals: #[3, 3, 3]
+
+  testAssignInjectInTimes =>
+    self assert: #[Adr0131LoopBodyProducerClass assignInjectInTimes, (Adr0131LoopBodyProducerValue new) assignInjectInTimes, (Adr0131LoopBodyProducerActor spawn) assignInjectInTimes] equals: #[12, 12, 12]
+
+  testAssignInjectInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass assignInjectInToDo, (Adr0131LoopBodyProducerValue new) assignInjectInToDo, (Adr0131LoopBodyProducerActor spawn) assignInjectInToDo] equals: #[12, 12, 12]

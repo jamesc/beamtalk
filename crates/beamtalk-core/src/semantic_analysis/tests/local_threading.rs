@@ -606,8 +606,9 @@ fn producer_operand_sites_are_accepted_in_every_method_context() {
 #[test]
 fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
     for body in [
-        // Inside a block: the construct's frame is not the method root.
-        "#(1) do: [:z | r := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
+        // Inside an arm: the construct's frame is not the method root, and an
+        // arm is not a loop or fold body (BT-3793 only accepts those).
+        "true ifTrue: [r := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
         // A conditional's receiver is threaded by the conditional (Phase 3).
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\nt",
         // Under a cascade.
@@ -883,9 +884,13 @@ fn adr0131_statement_probe_pins() {
 }
 
 #[test]
-fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
+fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
     // BT-3746 follow-up (PR #4230): a `whileTrue:` nested as a statement in a
-    // `to:do:` or `do:` body answers 0 instead of 3 in every method context.
+    // `to:do:` or `do:` body answered 0 instead of 3 in every method context.
+    // ADR 0131 Phase 2b (BT-3793) lowers it as a local-threading producer in
+    // the enclosing body's frame, so it answers 3 (the BUnit pins are
+    // `whileInToDo`, `whileInDo` and `whileFalseInToDo` in
+    // `adr0131loop_body_producer_test.bt`).
     for body in [
         "s := 0\n1 to: 3 do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
         "s := 0\n#(1, 2, 3) do: [:i | [s < i] whileTrue: [s := s + 1]]\ns",
@@ -893,11 +898,68 @@ fn deny_set_while_loop_in_a_loop_body_is_rejected_everywhere() {
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
-            assert_eq!(
-                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-                1,
-                "{src}: {diags:?}"
-            );
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+/// ADR 0131 Phase 2b (BT-3793): what the loop-body producer accept does not
+/// cover stays a Phase 0 error: an arm or closure around the construct, a
+/// `detect:ifNone:` (its search-block write is dropped by the frames around
+/// it), and, in an actor, a value-bearing site and a nested `do:` (not a
+/// producer).
+#[test]
+fn loop_body_producer_accept_stops_where_codegen_does() {
+    for (body, expect_error) in [
+        // An arm between the frame and the construct.
+        (
+            "s := 0\n1 to: 3 do: [:i | true ifTrue: [[s < i] whileTrue: [s := s + 1]]]\ns",
+            [true, true, true],
+        ),
+        // A closure between the frame and the construct.
+        (
+            "s := 0\n1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]\ns",
+            [true, true, true],
+        ),
+        (
+            "t := 0\n#(1, 2) do: [:i | #(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]]\nt",
+            [true, true, true],
+        ),
+        // A nested `do:` is no producer: its rows keep rejecting it in an actor.
+        (
+            "t := 0\n#(1, 2) do: [:i | #(1, 2) do: [:j | t := t + j]]\nt",
+            [false, false, true],
+        ),
+        // BT-3797: an actor's assigned fold in a `do:` body compiled and then
+        // crashed ("expected a Dictionary"); a letrec loop frame
+        // (`timesRepeat:`, `to:do:`) lowers it (`assignInjectInTimes`,
+        // `assignInjectInToDo` in adr0131loop_body_producer_test.bt).
+        (
+            "t := 0\n#(1, 2) do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, true],
+        ),
+        (
+            "t := 0\n2 timesRepeat: [r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, false],
+        ),
+        (
+            "t := 0\n1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, false],
+        ),
+        // An actor's value-bearing site in a `do:` body.
+        (
+            "t := 0\n#(1, 2) do: [:i | r := (#(1, 2) collect: [:x | t := t + x]) size. t := t + r]\nt",
+            [false, false, true],
+        ),
+    ] {
+        for (src, expect_error) in [in_class(body), in_value(body), in_actor(body)]
+            .into_iter()
+            .zip(expect_error)
+        {
+            let diags = adr0131_diagnostics(&src);
+            let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len()
+                + of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len();
+            assert_eq!(errors > 0, expect_error, "{src}: {diags:?}");
         }
     }
 }

@@ -1429,6 +1429,90 @@ pub fn operand_producer_writes(
 /// are not: a producer there would leak its construct tuple.
 #[must_use]
 pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
+    operand_sites_of_statement(stmt, false)
+}
+
+/// ADR 0131 Phase 2b (BT-3793): [`sequenced_operand_sites`] for a statement
+/// of a loop or fold body, which codegen compiles through
+/// `threaded_expression` (`thread_ahead`) first even when the statement is
+/// itself a local-threading construct: its own receiver and non-block
+/// arguments are then operand sites too (`(xs collect: [:x | t := t + x])
+/// inject: 0 into: [:a :x | a + x]` as a statement of a body). A method-body
+/// statement that is a construct keeps its own statement lowering instead,
+/// which compiles those operands itself ([`sequenced_operand_sites`]).
+#[must_use]
+pub fn loop_body_operand_sites(stmt: &Expression) -> Vec<&Expression> {
+    operand_sites_of_statement(stmt, true)
+}
+
+/// ADR 0131 Phase 2b (BT-3793): the sub-expressions of `stmt`, a statement of
+/// a loop or fold body, where a local-threading producer rebinds its locals
+/// in that body's frame: the statement itself when it is a loop or fold
+/// ([`producer_body_block`]), and its [`loop_body_operand_sites`]. The one
+/// rule the Phase 0 allow-set check and codegen's body lowerings
+/// (`with_body_producer_sites`) both read, so a construct the diagnostic
+/// accepts in a loop body is exactly one the producer lowers.
+#[must_use]
+pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
+    let mut sites = loop_body_operand_sites(stmt);
+    let inner = stmt.unwrap_parens();
+    if producer_body_block(inner).is_some() {
+        sites.push(inner);
+    }
+    sites
+}
+
+/// ADR 0131 Phase 2b (BT-3793/BT-3797): whether `site`, one of a loop or
+/// fold body statement's [`loop_body_producer_sites`], carries a value (an
+/// assignment's value or an operand) rather than being the statement
+/// itself. The one rule both the Phase 0 check and the agreement test read
+/// for what an actor body does not lower through the producer.
+#[must_use]
+pub fn is_value_bearing_site(statement: Span, site: &Expression) -> bool {
+    site.unwrap_parens().span() != statement
+}
+
+/// Whether the literal block `block`, an argument of the send `expr`, is the
+/// body of a loop or fold that codegen lowers as a threaded frame
+/// (`lower_letrec_body`/`lower_foldl_body`), so its statements are
+/// [`loop_body_producer_sites`]: a block argument of a loop or fold family
+/// construct ([`local_threading_construct`]) at an index
+/// [`crate::state_threading_selectors::state_threaded_block_arg_indices`]
+/// lists. Not a `whileTrue:`/`whileFalse:` condition (the receiver), not
+/// `detect:ifNone:`'s handler, not an arm, a handler or a protected body.
+#[must_use]
+pub fn is_threaded_frame_body(expr: &Expression, block: &Block) -> bool {
+    let Some(construct) = local_threading_construct(expr) else {
+        return false;
+    };
+    if !matches!(
+        construct.family,
+        LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+    ) {
+        return false;
+    }
+    let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() else {
+        return false;
+    };
+    crate::state_threading_selectors::state_threaded_block_arg_indices(&construct.selector)
+        .iter()
+        .any(|&i| matches!(arguments.get(i), Some(Expression::Block(b)) if std::ptr::eq(b, block)))
+}
+
+/// ADR 0131 Phase 2b (BT-3797): whether `block` is the body of a *fold*
+/// frame ([`is_threaded_frame_body`] with a `LocalThreadingFamily::Fold`
+/// construct: `do:`, `collect:`, `inject:into:`, …), as opposed to a
+/// `whileTrue:`/counted-loop letrec frame. An actor's fold frame carries
+/// its locals in a tuple accumulator, which a value-bearing producer in the
+/// body does not lower through.
+#[must_use]
+pub fn is_fold_frame_body(expr: &Expression, block: &Block) -> bool {
+    is_threaded_frame_body(expr, block)
+        && local_threading_construct(expr)
+            .is_some_and(|c| matches!(c.family, LocalThreadingFamily::Fold))
+}
+
+fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Vec<&Expression> {
     fn operands<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
         match expr.unwrap_parens() {
             Expression::MessageSend {
@@ -1497,7 +1581,7 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
             site(value, &mut out);
         }
         Expression::Return { value, .. } => site(value, &mut out),
-        other if local_threading_construct(other).is_some() => {}
+        other if !construct_operands && local_threading_construct(other).is_some() => {}
         other => operands(other, &mut out),
     }
     out
@@ -1513,6 +1597,15 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 /// `self.field`) and a self-send carrying a block argument (a
 /// possible Tier 2 self-send). Applied in every context, so the diagnostic does
 /// not depend on which method kind it sits in.
+///
+/// The `is_block_invocation()` stop is deliberately an over-approximation for
+/// **any receiver**: only a Tier 2 call on a bare local or a `self.field`
+/// takes the unsequenced actor lowering, but a `value`-family or
+/// `valueWithArguments:` send stops the sites whatever its receiver is (a
+/// literal block, a call result, a parenthesised expression). Deciding from
+/// the receiver would duplicate codegen's `is_tier2_value_call`, and the two
+/// could drift. A producer the over-approximation leaves out of the sites is
+/// never a miscompile: it keeps its Phase 0 diagnostic.
 #[must_use]
 fn operands_not_sequenced(
     receiver: &Expression,

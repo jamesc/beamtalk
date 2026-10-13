@@ -157,7 +157,17 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     let mut last_state_version = 0usize;
     for stmt in ir {
-        if let ThreadedStmt::Bind { target, source, .. } = stmt {
+        // ADR 0131 §2: a `MapPut` `LocalRebind` is a `State` version step
+        // exactly like a `Bind`'s (`RebindLowering::version_step`), so the
+        // gap scan counts it as the producer it is.
+        let step = match stmt {
+            ThreadedStmt::Bind { target, source, .. } => Some((target, source)),
+            ThreadedStmt::LocalRebind { lowering, .. } => lowering
+                .version_step()
+                .map(|(source, target)| (target, source)),
+            _ => None,
+        };
+        if let Some((target, source)) = step {
             backfill_opaque_version_gap(
                 &mut fixture,
                 &VersionPrefix::State,
@@ -355,6 +365,40 @@ impl ThreadedValue {
         };
         (doc, errors)
     }
+}
+
+/// ADR 0131 §4: the [`VerifyError::StateEffectEscapesExpression`]s for the
+/// top-level [`ThreadedStmt::LocalRebind`]s of `prelude` whose lowering steps
+/// a loop argument or the frame's `State` map ([`RebindLowering::version_step`]),
+/// and the span of the first (default when none). A prelude rendered to a
+/// standalone `Document` hides such a step from the enclosing loop's
+/// recursive call and exit, so the write is silently lost: callers that render
+/// a prelude (`threaded_prelude_doc`) report them.
+pub(in crate::core_erlang) fn stepping_local_rebinds(
+    prelude: &[ThreadedStmt],
+) -> (Vec<VerifyError>, Span) {
+    let errors: Vec<VerifyError> = prelude
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ThreadedStmt::LocalRebind {
+                local,
+                lowering,
+                span,
+                ..
+            } if lowering.version_step().is_some() => {
+                Some(VerifyError::StateEffectEscapesExpression {
+                    prefix: VersionPrefix::Local(local.clone()),
+                    at: *span,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    let at = match errors.first() {
+        Some(VerifyError::StateEffectEscapesExpression { at, .. }) => *at,
+        _ => Span::default(),
+    };
+    (errors, at)
 }
 
 // ─── ADR 0131 §1/§2: local-rebind preludes ─────────────────────────────────
