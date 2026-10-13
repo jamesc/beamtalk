@@ -20,7 +20,7 @@
 //! path remains for either family.
 
 use super::super::threaded_ir::{
-    self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::list_ops::BodyKind;
@@ -73,7 +73,8 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, usize)> {
         let span = body.span;
         let mut unpack_stmts: Vec<ThreadedStmt> = Vec::new();
-        let mode = if plan.use_tuple_acc {
+        let mode = plan.threading_mode();
+        if plan.use_tuple_acc {
             let (unpack_node, targets) = threaded_ir::build_tuple_acc_unpack(
                 acc_param_name,
                 plan.tuple_acc_gate_slots,
@@ -91,13 +92,11 @@ impl CoreErlangGenerator {
                 unreachable!("build_tuple_acc_unpack always returns a Threaded node")
             };
             unpack_stmts = unpack_body;
-            ThreadingMode::TupleAcc(plan.tuple_acc_gate_slots)
         } else {
             for doc in plan.generate_unpack_at_iteration_start(self) {
                 unpack_stmts.push(ThreadedStmt::Statement(doc, span));
             }
-            ThreadingMode::StateAcc(plan.fallback_reason.clone())
-        };
+        }
 
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
@@ -139,6 +138,12 @@ impl CoreErlangGenerator {
                 span,
             };
             let errors = this.verify_threaded_ir(std::slice::from_ref(&fixture));
+            if !errors.is_empty() && std::env::var_os("BT3793_DEBUG_IR").is_some() {
+                eprintln!(
+                    "WIP-IR {}",
+                    super::wip_summary(std::slice::from_ref(&fixture), 0)
+                );
+            }
             this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
             let mut ctx = threaded_ir::RenderCtx::new(this);
             let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
@@ -161,7 +166,11 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            let result = this.lower_letrec_body(body, plan, frame);
+            // ADR 0131 §2: a local-threading producer in this body rebinds
+            // by the frame the loop node built around it will record.
+            let result = this.with_rebind_frame(plan.rebind_frame(frame), |this| {
+                this.lower_letrec_body(body, plan, frame)
+            });
             result.map(|stmts| (stmts, frame))
         })
     }
@@ -260,6 +269,19 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
+        self.with_body_producer_sites(&filtered_body, |this| {
+            this.lower_letrec_body_statements(&filtered_body, plan, frame)
+        })
+    }
+
+    /// [`Self::lower_letrec_body`]'s per-statement loop, once the body's
+    /// local-producer sites are set.
+    fn lower_letrec_body_statements(
+        &mut self,
+        filtered_body: &[&Expression],
+        plan: &ThreadingPlan,
+        frame: FrameId,
+    ) -> Result<Vec<ThreadedStmt>> {
         let has_direct_field_assignments =
             filtered_body.iter().any(|e| self.is_field_assignment(e));
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
@@ -415,10 +437,10 @@ impl CoreErlangGenerator {
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        if let Some(doc) =
+        if let Some(let_stmts) =
             self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
         {
-            stmts.push(ThreadedStmt::Statement(doc, span));
+            stmts.extend(let_stmts);
             return Ok(());
         }
         if plan.use_direct_params || plan.use_hybrid_params {
@@ -600,8 +622,25 @@ impl CoreErlangGenerator {
     /// [`ThreadedStmt::ConditionalLoop`]'s own `exit_arm` precedent (ADR
     /// 0111 §Verifier-honesty: a fold's per-`BodyKind` exit shape is
     /// exactly as legitimately opaque as a loop's exit repack).
-    #[allow(clippy::too_many_lines)]
     fn lower_foldl_body(
+        &mut self,
+        body: &beamtalk_core::ast::Block,
+        plan: &ThreadingPlan,
+        kind: &BodyKind,
+        frame: FrameId,
+    ) -> Result<Vec<ThreadedStmt>> {
+        let filtered_body = super::super::util::collect_body_exprs(&body.body);
+        self.with_rebind_frame(plan.rebind_frame(frame), |this| {
+            this.with_body_producer_sites(&filtered_body, |this| {
+                this.lower_foldl_body_in_sites(body, plan, kind, frame)
+            })
+        })
+    }
+
+    /// [`Self::lower_foldl_body`] once the fold body's frame is registered
+    /// for local-threading producers and its statements are their sites.
+    #[allow(clippy::too_many_lines)]
+    fn lower_foldl_body_in_sites(
         &mut self,
         body: &beamtalk_core::ast::Block,
         plan: &ThreadingPlan,
@@ -743,11 +782,11 @@ impl CoreErlangGenerator {
                     );
                 }
             } else if Self::is_local_var_assignment(expr) {
-                if let Some(doc) =
+                if let Some(let_stmts) =
                     self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
                 {
                     has_plain_lets = true;
-                    stmts.push(ThreadedStmt::Statement(doc, span));
+                    stmts.extend(let_stmts);
                 } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
                     // Direct-params, tuple-acc, or
                     // hybrid mode. ADR 0111 Addendum 15: reuses the SAME
@@ -822,6 +861,24 @@ impl CoreErlangGenerator {
                         span,
                     );
                 }
+            } else if self.local_producer_locals(expr).is_some() {
+                // ADR 0131 Phase 2b: a nested loop or fold is a local-threading
+                // producer in this fold's frame. `lower_non_assign_expr`
+                // threads it ahead (`thread_ahead` -> `threaded_expression`),
+                // splicing its construct tuple and one `LocalRebind` per
+                // threaded local lowered by this frame's mode, and reads its
+                // value back for the kind's last-expression tail.
+                self.lower_non_assign_expr(
+                    &mut stmts,
+                    expr,
+                    i,
+                    is_last,
+                    &mut has_mutations,
+                    has_plain_lets,
+                    kind,
+                    pred_var.as_ref(),
+                    plan,
+                )?;
             } else if self.control_flow_has_mutations(expr)
                 || Self::inline_conditional_writes_threaded(
                     expr,

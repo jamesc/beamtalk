@@ -78,12 +78,12 @@ pub(super) use build::{
 // as `AccParam`/`CloseContext` below).
 pub(super) use build::{
     ThreadedLocalSlot, build_construct_tuple, build_discard_locals, build_local_threading_prelude,
+    stepping_local_rebinds,
 };
 #[cfg(test)]
 pub(super) use build::{build_branch_arm, build_local_rebind, build_method_body};
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
-#[cfg(test)]
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,

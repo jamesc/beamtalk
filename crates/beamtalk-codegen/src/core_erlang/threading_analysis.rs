@@ -138,7 +138,33 @@ impl CoreErlangGenerator {
                 &mut cross_scope_writes,
             );
         }
-        !cross_scope_writes.is_empty()
+        // ADR 0131 Phase 2b: a local the body itself introduces with a
+        // top-level assignment and never reads from outside
+        // (`w := 0. [w < 2] whileTrue: [w := w + 1]`) is crossed by the nested
+        // loop but is not this construct's to thread: counting it makes the
+        // enclosing construct thread an empty set. Decided from the body alone
+        // (as `analyze_block` decides a "new binding"), not from the live
+        // scope, so classification does not depend on how far lowering has
+        // got.
+        let analysis = self.block_profile_or_analyze(body);
+        let body_defined: std::collections::HashSet<&str> = body
+            .body
+            .iter()
+            .filter_map(|stmt| match &stmt.expression {
+                Expression::Assignment { target, .. } => match target.as_ref() {
+                    Expression::Identifier(id)
+                        if !analysis.captured_reads.contains(id.name.as_str()) =>
+                    {
+                        Some(id.name.as_str())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        cross_scope_writes
+            .iter()
+            .any(|name| !body_defined.contains(name.as_str()))
     }
 
     /// The precomputed [`block_analysis::BlockMutationAnalysis`]

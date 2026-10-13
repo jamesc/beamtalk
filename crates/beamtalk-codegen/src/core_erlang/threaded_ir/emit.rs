@@ -853,6 +853,13 @@ fn final_loop_arg_identities(
                     lowering: RebindLowering::LoopParam { source, target },
                     ..
                 } if *source == current => Some(target.clone()),
+                // A member rebind of a `StateAcc` frame steps the frame's
+                // `State` map (the `StateAcc` argument of the recursive
+                // call) like any `Put` `Bind`.
+                ThreadedStmt::LocalRebind {
+                    lowering: RebindLowering::MapPut { source, target, .. },
+                    ..
+                } if *source == current => Some(target.clone()),
                 _ => None,
             }) {
                 current = next;

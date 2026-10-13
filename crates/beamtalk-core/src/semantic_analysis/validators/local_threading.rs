@@ -678,6 +678,10 @@ const DENY_SET: &[Denied] = &[
 /// statement unless [`DENY_SET`] lists it, anything else only if
 /// [`ALLOW_SET`] does.
 pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
+    // WIP-3793-EXPERIMENT: remove before commit.
+    if std::env::var_os("BT3793_ALLOW_ALL").is_some() {
+        return true;
+    }
     match position {
         Position::Statement | Position::NestedStatement { .. } => !DENY_SET
             .iter()

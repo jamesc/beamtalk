@@ -9,7 +9,10 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::{FrameId, StateAccFallbackReason, VersionPrefix, VersionedVar};
+use super::super::threaded_ir::{
+    FrameId, RebindFrame, RebindFrameKind, StateAccFallbackReason, ThreadingMode, VersionPrefix,
+    VersionedVar,
+};
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
 use beamtalk_cerl_doc::docvec;
@@ -300,7 +303,7 @@ impl BodyEffects {
             CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
                 &s.expression,
                 &generator.semantic_facts,
-            )
+            ) || generator.nested_non_producer_map_acc_list_op(&s.expression)
         });
 
         // Detect a nested counted loop that mutates a threaded outer local.
@@ -566,6 +569,36 @@ impl ThreadingPlan {
             fallback_reason,
             mutated_fields,
             threaded_families,
+        }
+    }
+
+    /// The [`ThreadingMode`] the loop or fold node built from this plan
+    /// records — the one place a plan's mode flags become the IR's
+    /// `mode` (ADR 0131 §2's "frame mode"), so the `ConditionalLoop`/
+    /// `Threaded` node and the frame a nested local-threading producer
+    /// lowers its `LocalRebind`s by ([`Self::rebind_frame`]) cannot
+    /// disagree. Exactly one of `use_tuple_acc` (a fold), `use_direct_params`
+    /// and `use_hybrid_params` (a letrec loop) is ever set.
+    pub(in crate::core_erlang) fn threading_mode(&self) -> ThreadingMode {
+        if self.use_tuple_acc {
+            ThreadingMode::TupleAcc(self.tuple_acc_gate_slots)
+        } else if self.use_direct_params {
+            ThreadingMode::DirectParams
+        } else if self.use_hybrid_params {
+            ThreadingMode::Hybrid
+        } else {
+            ThreadingMode::StateAcc(self.fallback_reason.clone())
+        }
+    }
+
+    /// ADR 0131 §2: the frame a producer nested in this plan's body (frame
+    /// `frame`) lowers its `LocalRebind`s by — what
+    /// [`RebindFrame::of`] reads off the loop node once it is built.
+    pub(in crate::core_erlang) fn rebind_frame(&self, frame: FrameId) -> RebindFrame {
+        RebindFrame {
+            frame,
+            kind: RebindFrameKind::Loop(self.threading_mode()),
+            threads: self.threaded_locals.clone(),
         }
     }
 

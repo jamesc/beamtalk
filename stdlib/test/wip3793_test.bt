@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: Wip3793Test
+
+  answersOf: selector =>
+    #[Wip3793Class perform: selector, (Wip3793Value new) perform: selector, (Wip3793Actor spawn) perform: selector]
+
+  testWhileInToDo => self assert: (self answersOf: #whileInToDo) equals: #[3, 3, 3]
+
+  testWhileInDo => self assert: (self answersOf: #whileInDo) equals: #[3, 3, 3]
+
+  testWhileFalseInToDo => self assert: (self answersOf: #whileFalseInToDo) equals: #[3, 3, 3]
+
+  testDoInToDo => self assert: (self answersOf: #doInToDo) equals: #[6, 6, 6]
+
+  testDoInDo => self assert: (self answersOf: #doInDo) equals: #[6, 6, 6]
+
+  testDoInWhile => self assert: (self answersOf: #doInWhile) equals: #[6, 6, 6]
+
+  testCollectInWhile => self assert: (self answersOf: #collectInWhile) equals: #[6, 6, 6]
+
+  testTimesInTimes => self assert: (self answersOf: #timesInTimes) equals: #[6, 6, 6]
+
+  testToDoInCollect => self assert: (self answersOf: #toDoInCollect) equals: #[6, 6, 6]
+
+  testAssignCollectInToDo => self assert: (self answersOf: #assignCollectInToDo) equals: #[10, 10, 10]
+
+  testInjectInDo => self assert: (self answersOf: #injectInDo) equals: #[6, 6, 6]
+
+  testAssignInjectInDo => self assert: (self answersOf: #assignInjectInDo) equals: #[#[6, 6], #[6, 6], #[6, 6]]
+
+  testTwoLocals => self assert: (self answersOf: #twoLocals) equals: #[#[6, 6], #[6, 6], #[6, 6]]
+
+  testLocalInOuterOnly => self assert: (self answersOf: #localInOuterOnly) equals: #[6, 6, 6]
+
+  testReadAfterInner => self assert: (self answersOf: #readAfterInner) equals: #[18, 18, 18]
+
+  testSelectInDo => self assert: (self answersOf: #selectInDo) equals: #[6, 6, 6]
+
+  testDoInCollectLast => self assert: (self answersOf: #doInCollectLast) equals: #[#[#(1, 2), 6], #[#(1, 2), 6], #[#(1, 2), 6]]
+
+  testThreeDeep => self assert: (self answersOf: #threeDeep) equals: #[8, 8, 8]
+
+  testWhileInWhile => self assert: (self answersOf: #whileInWhile) equals: #[6, 6, 6]
+

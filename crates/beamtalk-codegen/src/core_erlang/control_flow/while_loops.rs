@@ -34,7 +34,7 @@
 
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::threaded_ir::{
-    self, RenderCtx, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::ThreadingPlan;
@@ -411,7 +411,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
-            mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
+            mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
             counter: None,
@@ -696,7 +696,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
-            mode: ThreadingMode::DirectParams,
+            mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
             counter: None,
@@ -845,7 +845,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: "while".to_string(),
-            mode: ThreadingMode::Hybrid,
+            mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
             counter: None,

@@ -10,7 +10,7 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
 use super::super::threaded_ir::{
-    self, LoopCounter, RenderCtx, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
+    self, LoopCounter, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix,
     VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result};
@@ -386,7 +386,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
-            mode: ThreadingMode::StateAcc(plan.fallback_reason.clone()),
+            mode: plan.threading_mode(),
             frame: ir_frame,
             threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
@@ -504,7 +504,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
-            mode: ThreadingMode::DirectParams,
+            mode: plan.threading_mode(),
             frame: ir_frame,
             threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
@@ -629,7 +629,7 @@ impl CoreErlangGenerator {
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
             fn_name: frame.fn_name.clone(),
-            mode: ThreadingMode::Hybrid,
+            mode: plan.threading_mode(),
             frame: ir_frame,
             threads: plan.threaded_locals.clone(),
             counter: Some(frame.loop_counter()),
@@ -1021,15 +1021,21 @@ mod bt2363_nested_counted_loops {
             code.contains("fun (_loopidx") && code.contains(", StateAcc) ->"),
             "outer nested-loop must use StateAcc threading, not direct-params. Got:\n{code}"
         );
-        // The inner loop's tuple result is unpacked via element(2, _NestTuple...) and the
-        // updated StateAcc is fed to the next outer iteration.
+        // ADR 0131 Phase 2b: the inner loop is a local-threading producer in the
+        // outer loop's `StateAcc` frame: its tuple result is bound to a carrier,
+        // `total` is read back from element(2) of it and `Put` into the outer
+        // loop's own `StateAcc`, which the next outer iteration receives.
         assert!(
-            code.contains("_NestTuple"),
-            "outer loop must bind the inner loop result to a _NestTuple var. Got:\n{code}"
+            code.contains("let _ThreadedResult"),
+            "outer loop must bind the inner loop result to a producer carrier. Got:\n{code}"
         );
         assert!(
-            code.contains("element'(2, _NestTuple"),
+            code.contains("element'(2, _ThreadedResult"),
             "outer loop must extract element(2) of the inner loop tuple. Got:\n{code}"
+        );
+        assert!(
+            code.contains("let StateAcc1 = call 'maps':'put'('__local__total'"),
+            "the rebound `total` must be Put into the outer StateAcc. Got:\n{code}"
         );
         // `total` is packed/unpacked under the __local__ key throughout.
         assert!(

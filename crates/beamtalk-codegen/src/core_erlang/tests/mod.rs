@@ -182,3 +182,4 @@ mod threaded_locals_agreement;
 mod trait_flattening;
 mod verifier_surfacing;
 mod while_condition_class_method;
+mod wip_dump; // WIP-3793-EXPERIMENT
