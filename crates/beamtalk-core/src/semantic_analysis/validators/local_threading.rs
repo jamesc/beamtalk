@@ -1706,10 +1706,7 @@ fn escape_map(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<S
     if context == Repl {
         return HashMap::new();
     }
-    escape_sites(body, true)
-        .into_iter()
-        .map(|site| (site.span, site.shape))
-        .collect()
+    escape_sites(body).into_iter().collect()
 }
 
 /// How a block escapes, for the §6 message.

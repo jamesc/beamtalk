@@ -176,6 +176,7 @@ TestCase subclass: CollectionsTest
     // the wrong arity and crash with a confusing raw error (`function_clause`,
     // `type_error`, ...) instead of the clear stateful_block_dispatch error
     // BT-2812 established for the same situation on Block's value*.
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulBlock := [:x |

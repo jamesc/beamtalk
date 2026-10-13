@@ -100,7 +100,8 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulBlock := [:x | count := count + x]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBlock))
     self should: [
       laundered perform: #value: withArguments: #(3)
@@ -123,7 +124,7 @@ TestCase subclass: BlocksTest
     // BT-2914: the unary `value` fallback guard (statically-unknown
     // receiver) must arity-discriminate like the keyword value:* guards —
     // a Tier 2 (stateful) 0-arg block is an arity-1 fun whose StateAcc a
-    // generic call site can't supply. Laundering the block through a list
+    // generic call site can't supply. Laundering the block through an Erlang tuple
     // hides it from the call-site Tier 2 tracking (it's neither a block
     // literal nor a local assigned one), so the runtime guard is what fires.
     count := 0
@@ -152,7 +153,8 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulZeroArgBlock := [count := count + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulZeroArgBlock))
     caught := [
       laundered perform: #value: withArguments: #(42)
@@ -240,7 +242,8 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulIncrement := [i := i + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
     launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulIncrement))
     self should: [
       [i < 3] perform: #whileTrue: withArguments: #(launderedIncrement)
@@ -267,7 +270,8 @@ TestCase subclass: BlocksTest
     @expect dead_assignment
     statefulReceiver := [count := count + 1]
     // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through a list to reach the runtime guard.
+    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
+    // the runtime guard; if that exemption narrows, this test must change.
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulReceiver))
     self should: [
       laundered perform: #on:do: withArguments: #(Error, [:e | "unused"])

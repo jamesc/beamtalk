@@ -318,38 +318,17 @@ pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)
 /// The spans of the block literals and bare local-variable references in a
 /// method body that are themselves a returned or stored operand (`^[..]`,
 /// `self.f := b`, `#[b]`), with how they escape: the same classification as
-/// [`escaping_blocks`] (`implicit_return` includes the body's last statement;
-/// pass `false` for a body whose last value is not returned to a caller, a
-/// REPL expression list). A local stored into another local is reported as
-/// [`EscapeShape::StoredLocal`].
+/// [`escaping_blocks`], the body's last statement included. A local stored
+/// into another local is reported as [`EscapeShape::StoredLocal`].
 #[must_use]
-pub fn escape_sites(body: &[ExpressionStatement], implicit_return: bool) -> Vec<EscapeSite> {
+pub fn escape_sites(body: &[ExpressionStatement]) -> Vec<(Span, EscapeShape)> {
     let mut found = Vec::new();
-    for_each_escape_operand(body, implicit_return, &mut |operand, shape| match operand {
-        Expression::Block(block) => found.push(EscapeSite {
-            span: block.span,
-            shape,
-            local: None,
-        }),
-        Expression::Identifier(id) => found.push(EscapeSite {
-            span: id.span,
-            shape,
-            local: Some(id.name.clone()),
-        }),
+    for_each_escape_operand(body, true, &mut |operand, shape| match operand {
+        Expression::Block(block) => found.push((block.span, shape)),
+        Expression::Identifier(id) => found.push((id.span, shape)),
         _ => {}
     });
     found
-}
-
-/// One [`escape_sites`] operand.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EscapeSite {
-    /// The block literal's or the local reference's span.
-    pub span: Span,
-    /// How it escapes.
-    pub shape: EscapeShape,
-    /// The local's name for a bare local reference, `None` for a block literal.
-    pub local: Option<ecow::EcoString>,
 }
 
 /// How a block literal written in a class method touches its home class's
