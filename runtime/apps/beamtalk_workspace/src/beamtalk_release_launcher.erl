@@ -30,6 +30,7 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([
     eval_main/0,
@@ -56,6 +57,7 @@ and dispatches through the shared synchronous path.
 """.
 -spec eval_main() -> no_return().
 eval_main() ->
+    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     case init:get_plain_arguments() of
         [ClassStr, SelectorStr | RestArgs] ->
             application:set_env(
@@ -82,11 +84,7 @@ eval_main() ->
                     activate_all_loaded_app_modules(),
                     do_eval_main(ClassStr, SelectorStr, RestArgs);
                 {error, Reason} ->
-                    io:format(
-                        standard_error,
-                        "Error: could not start the runtime (~p)~n",
-                        [Reason]
-                    ),
+                    ?LOG_ERROR("could not start the runtime: ~p", [Reason]),
                     beamtalk_script_harness:halt_unless_stopping(1)
             end;
         _ ->
