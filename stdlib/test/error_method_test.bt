@@ -4,6 +4,10 @@
 // E2E tests for Object>>error: (BT-424)
 
 TestCase subclass: ErrorMethodTest
+  field: exc = nil
+
+  // BT-1764 group: each test receives a caught badarith exception via setUp.
+  setUp => self.exc := [1 / 0] on: Exception do: [:e | e]
 
   testBasicErrorOnPrimitives =>
     self assert: ([
@@ -67,32 +71,22 @@ TestCase subclass: ErrorMethodTest
 
   // === BT-1764: Object-inherited methods work after removing orchestrator patch ===
   testExceptionRespondsToDisplayString =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    self assert: (exc respondsTo: #displayString)
+    self assert: (self.exc respondsTo: #displayString)
 
-  testExceptionRespondsToHash =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    self assert: (exc respondsTo: #hash)
+  testExceptionRespondsToHash => self assert: (self.exc respondsTo: #hash)
 
-  testExceptionRespondsToIsNil =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    self assert: (exc respondsTo: #isNil)
+  testExceptionRespondsToIsNil => self assert: (self.exc respondsTo: #isNil)
 
-  testExceptionIsNilReturnsFalse =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    self deny: exc isNil
+  testExceptionIsNilReturnsFalse => self deny: self.exc isNil
 
   testExceptionHash =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    result := exc hash
+    result := self.exc hash
     self assert: (result isKindOf: Integer)
 
   testExceptionInspect =>
     // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.
-    exc := [1 / 0] on: Exception do: [:e | e]
-    result := exc inspect
+    result := self.exc inspect
     self assert: (result isKindOf: Inspector)
 
   testExceptionRespondsToNonExistentMethod =>
-    exc := [1 / 0] on: Exception do: [:e | e]
-    self deny: (exc respondsTo: #totallyBogusMethod)
+    self deny: (self.exc respondsTo: #totallyBogusMethod)
