@@ -1571,7 +1571,18 @@ handle_call(
                         State}
             end;
         false ->
-            {reply, maps:get(Name, ClassVars, nil), State}
+            %% BT-3807: an absent name follows the method-body read rule
+            %% (`beamtalk_class_vars:check_declared/2`, own-only); unknown
+            %% metadata (ClassBuilder) stays lenient and answers nil.
+            case maps:find(Name, ClassVars) of
+                {ok, Value} ->
+                    {reply, Value, State};
+                error ->
+                    case beamtalk_class_vars:check_declared(ClassName, Name) of
+                        ok -> {reply, nil, State};
+                        {error, _} = Err -> {reply, Err, State}
+                    end
+            end
     end;
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},

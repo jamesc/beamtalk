@@ -23,7 +23,8 @@ borrow it.
     raise_unreachable/3,
     raise_no_snapshot/2,
     raise_read_only/2,
-    raise_undeclared/2
+    raise_undeclared/2,
+    undeclared_error/2
 ]).
 
 -doc "Hint of `uninitialized_state_error` for an unassigned `late` class variable.".
@@ -168,17 +169,24 @@ raise_read_only(Class, Name) ->
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
 
--doc "`undeclared_class_variable`: a read of a name the class does not declare.".
+-doc "`undeclared_class_variable`: an access of a name the class does not declare.".
 -spec raise_undeclared(atom(), atom()) -> no_return().
 raise_undeclared(Class, Name) ->
+    beamtalk_error:raise(undeclared_error(Class, Name)).
+
+-doc """
+Build (but do not raise) the `undeclared_class_variable` error, for the class
+gen_server's `get_class_var`, which must reply `{error, Error}` rather than
+raise (see `uninitialized_error/2`).
+""".
+-spec undeclared_error(atom(), atom()) -> #beamtalk_error{}.
+undeclared_error(Class, Name) ->
     Message = iolist_to_binary(
         io_lib:format("~s has no class variable named ~s", [Class, Name])
     ),
     Error0 = beamtalk_error:new(undeclared_class_variable, Class),
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Error2, <<"Declare it with `classState:` on the class, or check the spelling.">>
-        )
+    beamtalk_error:with_hint(
+        Error2, <<"Declare it with `classState:` on the class, or check the spelling.">>
     ).

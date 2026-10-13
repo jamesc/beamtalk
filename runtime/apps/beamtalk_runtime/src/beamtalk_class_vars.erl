@@ -71,6 +71,10 @@ tag fully (once per block-literal creation or region, not a hot path).
   the class's own declared set is non-empty and does not contain the name, or
   when it is empty but an ancestor declares the name (class variables are not
   inherited: the subclass must redeclare it, BT-3801).
+- `put/3` of a name absent from the map applies the same declared-set rule
+  (BT-3808); a name already in the map writes unchecked.
+- The class gen_server's `get_class_var` of an absent name applies the same
+  rule via `check_declared/2` (BT-3807), replying `{error, Error}`.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
 
@@ -98,6 +102,7 @@ come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error valu
     get_late/2,
     get_late/3,
     put/3,
+    check_declared/2,
     clear/2,
     has/2,
     has/3,
@@ -210,13 +215,24 @@ get_late(ClassSelf, Name, Captured) ->
     Tag = class_tag(ClassSelf),
     late_value(Tag, Name, map_or_captured(Tag, Name, Captured)).
 
--doc "Write a class variable. Returns the assigned value.".
+-doc """
+Write a class variable. Returns the assigned value. A write that would create
+a name absent from the map checks the declared set with the read rules
+(`check_declared/2`), so a write-first inherited method cannot silently create
+a variable the class does not declare (BT-3808).
+""".
 -spec put(class_self(), atom(), term()) -> term().
 put(ClassSelf, Name, Value) ->
     Tag = class_tag(ClassSelf),
     Key = ?BT_CLASS_VARS_KEY(Tag),
     case erlang:get(Key) of
         Map when is_map(Map) ->
+            %% A name already in the map was declared (or created under the
+            %% lenient unknown-set rule): only a creating write checks.
+            case maps:is_key(Name, Map) of
+                true -> ok;
+                false -> ok = assert_declared(tag_to_name(Tag), Name)
+            end,
             erlang:put(Key, Map#{Name => Value}),
             Value;
         ?BT_CLASS_VARS_RO(_) ->
@@ -444,26 +460,38 @@ has_value(Map, Name) ->
 
 -spec assert_declared(atom(), atom()) -> ok.
 assert_declared(Class, Name) ->
-    %% Class variables are per class and not inherited (BT-3801): only the
-    %% class's own declarations count.
-    case beamtalk_class_metadata:class_var_kinds(Class) of
+    case check_declared(Class, Name) of
+        ok -> ok;
+        {error, Error} -> beamtalk_error:raise(Error)
+    end.
+
+-doc """
+The declared-set rule shared by reads, writes (`put/3`) and the class
+gen_server's `get_class_var` (BT-3801, BT-3807, BT-3808): `ok` when `Name` is
+declared by `Class` itself or the set is not known, else
+`{error, #beamtalk_error{kind = undeclared_class_variable}}` (built, not
+raised, so the gen_server can reply with it instead of crashing).
+
+Class variables are per class and not inherited: only the class's own
+declarations count. The metadata is read once. `unknown` (no metadata, e.g. a
+ClassBuilder class, or no live class) is lenient. A KNOWN-empty own set is
+lenient too unless an ancestor declares `Name` (an inherited method running
+through a subclass that did not redeclare it). A non-empty own set that lacks
+`Name` is an error.
+""".
+-spec check_declared(atom(), atom()) -> ok | {error, #beamtalk_error{}}.
+check_declared(Class, Name) ->
+    case beamtalk_class_metadata:class_var_kinds_or_unknown(Class) of
+        unknown ->
+            ok;
         Kinds when map_size(Kinds) =:= 0 ->
-            %% Empty own declared-kinds map: unknown (no metadata, e.g. a
-            %% ClassBuilder class, or no live class) or genuinely none, which
-            %% today's `get_class_var` answers with nil. Only when the class's
-            %% metadata is readable (so the set is KNOWN empty) and an ancestor
-            %% declares `Name` (an inherited method running through a subclass
-            %% that did not redeclare it) does this raise.
-            case
-                beamtalk_class_metadata:class_var_meta_readable(Class) andalso
-                    maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class))
-            of
-                true -> beamtalk_class_var_errors:raise_undeclared(Class, Name);
+            case maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class)) of
+                true -> {error, beamtalk_class_var_errors:undeclared_error(Class, Name)};
                 false -> ok
             end;
         Kinds ->
             case maps:is_key(Name, Kinds) of
                 true -> ok;
-                false -> beamtalk_class_var_errors:raise_undeclared(Class, Name)
+                false -> {error, beamtalk_class_var_errors:undeclared_error(Class, Name)}
             end
     end.
