@@ -385,8 +385,13 @@ impl CoreErlangGenerator {
             // `produces` seed (`VersionPrefix::Gensym` of the pre-extracted
             // param name).
             let val_var = self.fresh_temp_var("Val");
+            // BT-3803: thread a field assignment nested in the RHS ahead
+            // (same step as `lower_field_assignment_bind`'s non-hybrid
+            // path), so its rebind lands in `stmts`, not in the RHS document.
+            let ahead_scope = self.thread_ahead(value, stmts, frame)?;
             let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
             let val_doc = self.expression_doc(value)?;
+            self.finish_precompiled_scope(ahead_scope)?;
             self.loop_mode.hybrid_readonly_field_params = saved_field_params;
             let current_field_var = self
                 .loop_mode

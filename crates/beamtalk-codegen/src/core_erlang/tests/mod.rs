@@ -168,6 +168,7 @@ mod control_flow;
 mod dispatch;
 mod expect_directive_statement;
 mod expressions;
+mod field_assignment_value_position;
 mod gen_server;
 mod late_reconcile_conformance;
 mod local_producer_agreement;

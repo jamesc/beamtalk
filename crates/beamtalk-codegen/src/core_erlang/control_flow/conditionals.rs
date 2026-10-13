@@ -252,6 +252,9 @@ impl CoreErlangGenerator {
     /// through this function are always rendered immediately (never spliced
     /// into a larger, independently-verified `ThreadedIr` tree), so `frame`
     /// is inert for them.
+    ///
+    /// BT-3803: a `Closed` write is reported when it mints a version `Bind`
+    /// (see [`Self::render_field_write`], which renders without checking).
     pub(in crate::core_erlang) fn lower_field_write(
         &mut self,
         site: FieldWriteSite,
@@ -261,6 +264,40 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<(Document<'static>, String)> {
         let span = value.span();
+        let (doc, val_var, bind) =
+            self.render_field_write(site, closure, field_name, value, frame)?;
+        if closure == Closure::Closed {
+            // BT-3803: a `Closed` write is a self-contained document, so the
+            // `State`/`Self` version its `Bind` mints is scoped away from the
+            // reply and every later statement (`unbound variable 'State1'`).
+            // A field assignment in value position is a producer that
+            // `threaded_expression` splices (`lower_field_assignment_bind`);
+            // reaching this closed rendering with a version `Bind` means a
+            // consumer compiled it as a plain sub-expression instead.
+            let escaped = threaded_ir::opaque_escapes(std::slice::from_ref(&bind), false);
+            self.report_threaded_ir_verify_errors(
+                &escaped,
+                "field-assignment state rebind trapped in a closed expression",
+                span,
+            );
+        }
+        Ok((doc, val_var))
+    }
+
+    /// [`Self::lower_field_write`] without the closed-rendering check: the
+    /// rendered write, its value variable and the real `Bind` it minted.
+    /// Exists so the byte-identical contract of the `Closed` rendering stays
+    /// directly testable (`expressions/tests.rs`) without tripping the
+    /// verifier that reports it as an escape in production.
+    pub(in crate::core_erlang) fn render_field_write(
+        &mut self,
+        site: FieldWriteSite,
+        closure: Closure,
+        field_name: &str,
+        value: &Expression,
+        frame: FrameId,
+    ) -> Result<(Document<'static>, String, ThreadedStmt)> {
+        let span = value.span();
         let (preamble, bind, val_var) =
             self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?;
         let bind_doc = {
@@ -268,10 +305,11 @@ impl CoreErlangGenerator {
             threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
         };
         let doc = docvec![preamble, bind_doc];
-        Ok(match closure {
-            Closure::Open => (doc, val_var),
-            Closure::Closed => (docvec![doc, leaf::var(val_var.clone())], val_var),
-        })
+        let doc = match closure {
+            Closure::Open => doc,
+            Closure::Closed => docvec![doc, leaf::var(val_var.clone())],
+        };
+        Ok((doc, val_var, bind))
     }
 }
 

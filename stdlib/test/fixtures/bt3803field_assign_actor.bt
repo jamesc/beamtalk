@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3803: a parenthesized field assignment in value position of a send
+// (`self take: (self.n := 5)`) is a producer: its `State` rebind is spliced into
+// the method's statement sequence, so the send, the reply and every later
+// statement see the new state. Expected answers are in
+// stdlib/test/field_assignment_value_position_test.bt.
+
+Actor subclass: Bt3803FieldAssignActor
+  state: n = 0
+  state: m = 0
+
+  take: x => x
+
+  take: x with: y => x + y
+
+  getN => self.n
+
+  getM => self.m
+
+  // The assignment is an argument of a send, and a later statement reads state.
+  sendArg =>
+    r := self take: (self.n := 5)
+    #[r, self.n]
+
+  // The assignment is a binary operand.
+  binaryOperand =>
+    r := (self.n := 5) + 1
+    #[r, self.n]
+
+  // Two assignments as operands of one send: left to right, each visible to the next.
+  twoOperands =>
+    self.n := 1
+    r := self take: (self.n := self.n + 1) with: (self.n := self.n * 10)
+    #[r, self.n]
+
+  // A later operand reads the state the earlier operand wrote.
+  operandReadsEarlierWrite =>
+    r := self take: (self.n := 5) with: self.n
+    #[r, self.n]
+
+  // The assignment is the right-hand side of another field write.
+  fieldWriteRhs =>
+    self.m := (self.n := 7)
+    #[self.m, self.n]
+
+  // The send is the method's last statement.
+  lastStatement => self take: (self.n := 9)
+
+  // The assignment sits in a conditional arm.
+  conditionalArm =>
+    r := self.m < 5 ifTrue: [self take: (self.n := 4)] ifFalse: [0]
+    #[r, self.n]
+
+  // The assignment sits in a loop body.
+  loopBody =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self take: (self.n := self.n + 1)
+        i := i + 1
+      ]
+    self.n
