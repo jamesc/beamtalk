@@ -714,6 +714,15 @@ impl CoreErlangGenerator {
     /// `repl_operand_sites` that writes a binding is a producer that threads
     /// no local on its own: the carrier's element 2 *is* the new bindings map
     /// and the producer adopts it whole (`lower_repl_construct_tuple`).
+    ///
+    /// Invariant (BT-3800): every REPL construct for which this answers
+    /// `Some` (one with a non-empty threaded set) compiles to a
+    /// `{Value, Bindings}` tuple and so sets `repl_loop_mutated`; the same flag
+    /// is what makes the assembler unpack a construct that is a statement or an
+    /// assignment's whole value. It is enforced over a generated corpus of
+    /// every producer selector, with and without a producer in the receiver,
+    /// by `beamtalk-repl`'s `repl_local_producer.rs`
+    /// (`every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked`).
     pub(super) fn local_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         let inner = expr.unwrap_parens();
         if self.local_producer_sites.is_empty()

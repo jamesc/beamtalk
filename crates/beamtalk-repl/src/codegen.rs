@@ -384,53 +384,53 @@ impl<'a> ReplAssembler<'a> {
     }
 
     /// [`Self::repl_expression_doc`] for the value of an identifier
-    /// assignment `stmt` in a multi-statement input: the producer prelude, the
-    /// `State` variable the binding is `put` into (read after the prelude, so
-    /// it is the version the producer left), and the value.
+    /// assignment `stmt` in a multi-statement input: the prelude, the `State`
+    /// variable the binding is `put` into, and the value.
+    ///
+    /// The one place a multi-statement assignment's value is compiled, for the
+    /// eval and trace assemblers alike, with or without a producer. When the
+    /// value is itself a `{Value, Bindings}` tuple (a loop or fold that is the
+    /// assignment's whole value, BT-3800), it is unpacked here: element 1 is
+    /// the value and element 2 the `State` the binding is `put` into, as the
+    /// single-statement path does. Otherwise the binding would be the raw
+    /// tuple and the construct's writes lost.
     fn repl_assignment_value(
         &mut self,
         stmt: &Expression,
         value: &Expression,
     ) -> Result<(Document<'static>, String, Document<'static>)> {
-        if let Some(producer) = self.generator.repl_statement_with_producers(stmt, value)? {
-            if producer.mutated {
-                // The value is itself a `{Value, Bindings}` tuple (a fold that
-                // is the assignment's whole value, with a producer in its
-                // receiver): bind its element 1 as the value and adopt its
-                // element 2 as the `State` the binding is `put` into, as the
-                // single-statement path does.
-                let tuple = self.generator.fresh_temp_var("AssignTuple");
-                let value_var = self.generator.fresh_temp_var("AssignValue");
-                let state = self.generator.next_state_var();
-                let prelude = docvec![
-                    "    ",
-                    producer.prelude,
-                    "\n    let ",
-                    leaf::var(tuple.clone()),
-                    " = ",
-                    producer.value,
-                    " in let ",
-                    leaf::var(value_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple.clone()),
-                    ") in let ",
-                    leaf::var(state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(tuple),
-                    ") in\n",
-                ];
-                return Ok((prelude, state, var(value_var)));
-            }
-            let state = self.generator.current_state_var();
-            return Ok((
-                docvec!["    ", producer.prelude, "\n"],
-                state,
-                producer.value,
-            ));
+        let state_before = self.generator.current_state_var();
+        let (prelude, value_doc, mutated) = self.repl_expression_doc(stmt, value)?;
+        if !mutated {
+            // With a producer, its prelude may have stepped `State` (read
+            // after it); with none, it is the version before compiling.
+            let state = if matches!(prelude, Document::Nil) {
+                state_before
+            } else {
+                self.generator.current_state_var()
+            };
+            return Ok((prelude, state, value_doc));
         }
-        let state = self.generator.current_state_var();
-        let doc = self.generator.expression_doc(value)?;
-        Ok((Document::Nil, state, doc))
+        let tuple = self.generator.fresh_temp_var("AssignTuple");
+        let value_var = self.generator.fresh_temp_var("AssignValue");
+        let state = self.generator.next_state_var();
+        let prelude = docvec![
+            prelude,
+            "    let ",
+            leaf::var(tuple.clone()),
+            " = ",
+            value_doc,
+            " in let ",
+            leaf::var(value_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple.clone()),
+            ") in let ",
+            leaf::var(state.clone()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(tuple),
+            ") in\n",
+        ];
+        Ok((prelude, state, var(value_var)))
     }
 
     /// Generates a REPL evaluation module (with workspace bindings).
