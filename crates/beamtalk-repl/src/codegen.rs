@@ -358,6 +358,81 @@ impl<'a> ReplAssembler<'a> {
         Self { generator }
     }
 
+    /// Compiles `target`, an expression of the REPL input statement `stmt`
+    /// (the statement itself, or an assignment's value), returning the
+    /// producer prelude to emit before `let Result = <value> in` (ADR 0131
+    /// Phase 2d, BT-3795: a loop or fold at an operand site of `stmt` is a
+    /// local-threading producer), the value, and whether the value is itself
+    /// a `{Value, Bindings}` tuple. A statement with no producer compiles
+    /// exactly as before, with `Document::Nil` for a prelude.
+    fn repl_expression_doc(
+        &mut self,
+        stmt: &Expression,
+        target: &Expression,
+    ) -> Result<(Document<'static>, Document<'static>, bool)> {
+        if let Some(producer) = self.generator.repl_statement_with_producers(stmt, target)? {
+            return Ok((
+                docvec!["    ", producer.prelude, "\n"],
+                producer.value,
+                producer.mutated,
+            ));
+        }
+        let (doc, mutated) = self
+            .generator
+            .expression_doc_with_repl_mutation_tracking(target)?;
+        Ok((Document::Nil, doc, mutated))
+    }
+
+    /// [`Self::repl_expression_doc`] for the value of an identifier
+    /// assignment `stmt` in a multi-statement input: the producer prelude, the
+    /// `State` variable the binding is `put` into (read after the prelude, so
+    /// it is the version the producer left), and the value.
+    fn repl_assignment_value(
+        &mut self,
+        stmt: &Expression,
+        value: &Expression,
+    ) -> Result<(Document<'static>, String, Document<'static>)> {
+        if let Some(producer) = self.generator.repl_statement_with_producers(stmt, value)? {
+            if producer.mutated {
+                // The value is itself a `{Value, Bindings}` tuple (a fold that
+                // is the assignment's whole value, with a producer in its
+                // receiver): bind its element 1 as the value and adopt its
+                // element 2 as the `State` the binding is `put` into, as the
+                // single-statement path does.
+                let tuple = self.generator.fresh_temp_var("AssignTuple");
+                let value_var = self.generator.fresh_temp_var("AssignValue");
+                let state = self.generator.next_state_var();
+                let prelude = docvec![
+                    "    ",
+                    producer.prelude,
+                    "\n    let ",
+                    leaf::var(tuple.clone()),
+                    " = ",
+                    producer.value,
+                    " in let ",
+                    leaf::var(value_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple.clone()),
+                    ") in let ",
+                    leaf::var(state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(tuple),
+                    ") in\n",
+                ];
+                return Ok((prelude, state, var(value_var)));
+            }
+            let state = self.generator.current_state_var();
+            return Ok((
+                docvec!["    ", producer.prelude, "\n"],
+                state,
+                producer.value,
+            ));
+        }
+        let state = self.generator.current_state_var();
+        let doc = self.generator.expression_doc(value)?;
+        Ok((Document::Nil, state, doc))
+    }
+
     /// Generates a REPL evaluation module (with workspace bindings).
     ///
     /// Creates a module with a single `eval/1` function that evaluates
@@ -455,9 +530,8 @@ impl<'a> ReplAssembler<'a> {
             return Ok(Document::Vec(parts));
         }
 
-        let (expr_code, repl_mutated) = self
-            .generator
-            .expression_doc_with_repl_mutation_tracking(expression)?;
+        let (prelude, expr_code, repl_mutated) =
+            self.repl_expression_doc(expression, expression)?;
         let final_state = self.generator.current_state_var();
 
         let return_tuple: Document<'static> = if repl_mutated {
@@ -488,6 +562,7 @@ impl<'a> ReplAssembler<'a> {
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
             "    let State = Bindings in\n",
+            prelude,
             "    let Result = ",
             expr_code,
             " in\n",
@@ -581,8 +656,7 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.to_string();
-                let current_state = self.generator.current_state_var();
-                let val_doc = self.generator.expression_doc(value)?;
+                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
                 let new_state = self.generator.next_state_var();
                 let mut all_steps = prev_steps;
                 all_steps.push((source_text.to_string(), Document::Str("Result")));
@@ -600,13 +674,11 @@ impl<'a> ReplAssembler<'a> {
                     leaf::var(new_state),
                     "}",
                 ];
-                return Ok((Vec::new(), val_doc, trace_return));
+                return Ok((vec![prelude], val_doc, trace_return));
             }
         }
 
-        let (val_doc, repl_mutated) = self
-            .generator
-            .expression_doc_with_repl_mutation_tracking(expr)?;
+        let (prelude, val_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;
         let final_state = self.generator.current_state_var();
 
         let mut all_steps = prev_steps;
@@ -635,7 +707,7 @@ impl<'a> ReplAssembler<'a> {
             docvec!["{", steps_doc, ", State}"]
         };
 
-        Ok((Vec::new(), val_doc, trace_return))
+        Ok((vec![prelude], val_doc, trace_return))
     }
 
     /// Builds a Core Erlang list literal from (`source_text`, `value_doc`) pairs.
@@ -728,9 +800,8 @@ impl<'a> ReplAssembler<'a> {
         }
 
         // Capture the expression output (ADR 0018 bridge)
-        let (expr_code, repl_mutated) = self
-            .generator
-            .expression_doc_with_repl_mutation_tracking(expression)?;
+        let (prelude, expr_code, repl_mutated) =
+            self.repl_expression_doc(expression, expression)?;
 
         // Check if state was mutated (must happen after capture)
         let final_state = self.generator.current_state_var();
@@ -761,6 +832,7 @@ impl<'a> ReplAssembler<'a> {
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
             "    let State = Bindings in\n",
+            prelude,
             "    let Result = ",
             expr_code,
             " in\n",
@@ -849,11 +921,11 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.to_string();
-                let current_state = self.generator.current_state_var();
-                let val_doc = self.generator.expression_doc(value)?;
+                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
                 let new_state = self.generator.next_state_var();
                 return Ok((
                     docvec![
+                        prelude,
                         "    let ",
                         leaf::var(result_var.to_string()),
                         " = ",
@@ -873,15 +945,14 @@ impl<'a> ReplAssembler<'a> {
             }
         }
         // Non-assignment: evaluate for side effects, discard value.
-        let (expr_doc, repl_mutated) = self
-            .generator
-            .expression_doc_with_repl_mutation_tracking(expr)?;
+        let (prelude, expr_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;
         if repl_mutated {
             // Loop with mutations returns {Result, StateAcc} — extract StateAcc and
             // thread it forward so subsequent expressions see the updated bindings.
             let new_state = self.generator.next_state_var();
             Ok((
                 docvec![
+                    prelude,
                     "    let ",
                     leaf::var(result_var.to_string()),
                     " = ",
@@ -897,6 +968,7 @@ impl<'a> ReplAssembler<'a> {
         } else {
             Ok((
                 docvec![
+                    prelude,
                     "    let ",
                     leaf::var(result_var.to_string()),
                     " = ",
@@ -926,8 +998,7 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.to_string();
-                let current_state = self.generator.current_state_var();
-                let val_doc = self.generator.expression_doc(value)?;
+                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
                 let new_state = self.generator.next_state_var();
                 let return_tuple = docvec![
                     "let ",
@@ -940,13 +1011,11 @@ impl<'a> ReplAssembler<'a> {
                     leaf::var(new_state),
                     "}",
                 ];
-                return Ok((Vec::new(), val_doc, return_tuple));
+                return Ok((vec![prelude], val_doc, return_tuple));
             }
         }
         // Non-assignment: same logic as single-expression path
-        let (val_doc, repl_mutated) = self
-            .generator
-            .expression_doc_with_repl_mutation_tracking(expr)?;
+        let (prelude, val_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;
         let final_state = self.generator.current_state_var();
         let return_tuple: Document<'static> = if repl_mutated {
             Document::Str(
@@ -959,7 +1028,7 @@ impl<'a> ReplAssembler<'a> {
         } else {
             Document::Str("{Result, State}")
         };
-        Ok((Vec::new(), val_doc, return_tuple))
+        Ok((vec![prelude], val_doc, return_tuple))
     }
 
     /// Generates REPL state-threading let-bindings for a destructuring assignment.

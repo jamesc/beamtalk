@@ -170,6 +170,7 @@ mod expressions;
 mod gen_server;
 mod late_reconcile_conformance;
 mod local_producer_agreement;
+mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
 mod nlr;
 mod primitives;

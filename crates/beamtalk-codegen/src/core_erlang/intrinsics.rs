@@ -816,7 +816,11 @@ impl CoreErlangGenerator {
             recv_code,
             " in ",
         ]);
-        let arg_docs = self.generate_cascade_args(arguments, &mut parts)?;
+        let mut hoisted = Vec::new();
+        let arg_docs = self.generate_cascade_args(arguments, &mut hoisted)?;
+        if !hoisted.is_empty() {
+            parts.push(self.threaded_prelude_doc(&hoisted));
+        }
 
         let args_doc = join(arg_docs, &Document::Str(", "));
 

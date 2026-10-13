@@ -41,14 +41,16 @@ r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1
 t
 // => 0
 
-// PIN-BUG BT-3743: `collect:` in receiver position raised (o4); since
-// BT-3745 it is a compile error. Correct answer: 2.
+// o4: `collect:` in receiver position raised before BT-3745 and was a compile
+// error until BT-3795 (ADR 0131 Phase 2d): the REPL root threads the loop's
+// bindings map, so it answers 2 and keeps its write.
 (#(1, 2) collect: [:x | t := t + x]) size
-// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+// => 2
 
-// PIN-BUG BT-3743: correct answer 4.
+// The ADR transcript reads 4 here: its `t` is 1 after o1, which is still a
+// compile error above (the `on:do:` family is Phase 3).
 t
-// => 0
+// => 3
 
 // PIN-BUG BT-3743: the Tier 2 block reaches `tryDo:`'s arity-0 native (ADR
 // 0131 §5). Correct answer: true.
@@ -56,9 +58,10 @@ t
 // => ERROR: tryDo: expected a zero-arity block, got: Block/1
 
 // PIN-BUG BT-3743: correct answer 4 (the protected region raised, so its
-// write is discarded). Today 0, because every write above was lost.
+// write is discarded). Today 3: o1 above is still a compile error, so its
+// write is missing from the 4.
 t
-// => 0
+// => 3
 
 // ===========================================================================
 // o-shapes (operand position)
@@ -256,14 +259,13 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: raised `invalid argument` before BT-3745, a compile error
-// since. Correct answer: 2.
+// Raised `invalid argument` before BT-3745 and was a compile error until
+// BT-3795 (ADR 0131 Phase 2d), when the REPL root made it a producer.
 r := (#(1, 2) reject: [:x | t := t + 1. false]) size
-// => ERROR: `reject:` writes outer local `t`, but as the receiver of a message
+// => 2
 
-// PIN-BUG BT-3743: correct answer 2.
 t
-// => 0
+// => 2
 
 // ===========================================================================
 // BT-3753: statement-position constructs nested in a block

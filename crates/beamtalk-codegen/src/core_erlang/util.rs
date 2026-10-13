@@ -348,7 +348,7 @@ impl CoreErlangGenerator {
         // evaluation order against its siblings (see
         // `class_method_prelude_producer`).
         if self.in_class_method() {
-            if let Some(tv) = self.class_method_prelude_producer(inner)? {
+            if let Some(tv) = self.class_method_prelude_producer(inner, frame)? {
                 return Ok(tv);
             }
         }
@@ -430,6 +430,18 @@ impl CoreErlangGenerator {
         {
             if let Some(tv) = self.threaded_cascade_on_self(receiver, messages, frame)? {
                 return Ok(tv);
+            }
+            // BT-3791: a cascade on any other receiver whose operands need a
+            // prelude (a state-threading self-send in an argument, e.g. a
+            // computed `classMethods:` map value) is a producer too: its
+            // hoisted `State` rebinds must reach the consumer's statement
+            // sequence, not stay nested in the cascade's value expression.
+            if self.cascade_operands_need_prelude(receiver, messages, true) {
+                let (prelude, value) = self.generate_cascade_parts(receiver, messages)?;
+                return Ok(ThreadedValue {
+                    prelude,
+                    value: ValueRef::Doc(value),
+                });
             }
         }
 
@@ -669,24 +681,40 @@ impl CoreErlangGenerator {
     /// ever runs, so `self class` or `self isNil` must still reach THOSE
     /// handlers — a selector the class itself declares as a class method can
     /// never collide with one of those reserved well-known names.
+    ///
+    /// ADR 0131 Phase 2d (BT-3795): the value of a class-variable write is a
+    /// sequenced operand site (`sequenced_operand_sites`), so a local-threading
+    /// producer in it (`self.n := (xs collect: [...]) size`) is sequenced
+    /// ahead of the write and its prelude spliced before it. Only a write
+    /// that holds a producer is sequenced, so every other class-variable
+    /// write compiles exactly as before.
     fn class_method_prelude_producer(
         &mut self,
         expr: &Expression,
+        frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         if self.is_class_side_effect(expr) {
+            let (mut prelude, scope) = match expr {
+                Expression::Assignment { value, .. } if self.statement_has_local_producer(expr) => {
+                    self.sequence_children(&[value.as_ref()], frame)?
+                }
+                _ => (Vec::new(), PrecompiledScope::new()),
+            };
             let doc = self.generate_expression(expr)?;
+            self.finish_precompiled_scope(scope)?;
             let result_var = self.fresh_temp_var("Effect");
+            prelude.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    beamtalk_cerl_doc::leaf::var(result_var.clone()),
+                    " = ",
+                    doc,
+                    " in "
+                ],
+                expr.span(),
+            ));
             return Ok(Some(ThreadedValue {
-                prelude: vec![ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        beamtalk_cerl_doc::leaf::var(result_var.clone()),
-                        " = ",
-                        doc,
-                        " in "
-                    ],
-                    expr.span(),
-                )],
+                prelude,
                 value: ValueRef::Var(result_var),
             }));
         }
@@ -846,9 +874,37 @@ impl CoreErlangGenerator {
         {
             return self
                 .cascade_self_dispatch_messages(receiver, messages)
-                .is_some();
+                .is_some()
+                || self.cascade_operands_need_prelude(receiver, messages, class_effects);
         }
         false
+    }
+
+    /// BT-3791: `true` when a cascade NOT on `self` has an operand (its
+    /// receiver, or any message argument — a `classMethods:` map's computed
+    /// values included, via the literal-container rule) that needs a prelude.
+    /// `generate_cascade_parts` hoists such preludes in front of the message
+    /// that uses them; mirrors `threaded_expression`'s cascade branch so the
+    /// hoisted `State` rebinds reach the consumer instead of being nested
+    /// inside the cascade's value binding.
+    fn cascade_operands_need_prelude(
+        &self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+        class_effects: bool,
+    ) -> bool {
+        let (underlying, first_args): (&Expression, &[Expression]) = match receiver {
+            Expression::MessageSend {
+                receiver: inner,
+                arguments,
+                ..
+            } => (inner.as_ref(), arguments.as_slice()),
+            _ => (receiver, &[]),
+        };
+        std::iter::once(underlying)
+            .chain(first_args.iter())
+            .chain(messages.iter().flat_map(|m| m.arguments.iter()))
+            .any(|e| self.subexpr_needs_prelude_with(e, class_effects))
     }
 
     /// ADR 0118 phase 0: `true` if compiling `expr`

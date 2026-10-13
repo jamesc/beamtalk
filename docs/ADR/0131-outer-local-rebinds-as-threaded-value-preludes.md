@@ -317,6 +317,19 @@ the `State` `Bind` (ADR 0122's `extract_family_slots`) is emitted **first**,
 and each `LocalRebind` then reads from that new `State` version, so one
 carrier read feeds both.
 
+**The REPL root adopts the bindings whole (Phase 2d, BT-3795).** The
+`MethodBody (REPL)` row's carrier is the bindings map itself: the REPL
+builders return `{Value, Bindings}`, so element 2 *is* the next `State`
+version. The producer emits one `State` `Bind` from `element(2, CF)` (the
+family case above, no `LocalRebind`, an empty `threads`) rather than one
+`Put` per local. A per-key `maps:get` would crash on a binding that the
+construct introduces and an empty loop never ran (`(#() collect: [:x | z :=
+x]) size`, where `z` must stay undefined), and the statement-level REPL path
+adopts element 2 the same way (ADR 0041), so a statement and an operand
+cannot disagree. Only a loop or fold nested in an operand is a REPL site
+(`repl_operand_sites`): a statement or an assignment's whole value keeps the
+REPL's own lowering.
+
 With this in place, these become ordinary consumers that splice a prelude,
 and are deleted: `emit_threaded_assign_rhs` and its three `emit_vt_*`
 helpers, `emit_actor_threaded_assign_rhs_stmts`'s raw-tuple path,

@@ -169,6 +169,23 @@ pub(super) enum ProducerTail {
     Discard,
 }
 
+/// A REPL input statement compiled through the local-threading producer
+/// (`CoreErlangGenerator::repl_statement_with_producers`): the producer's
+/// prelude, which the REPL assembler emits ahead of its own
+/// `let Result = <value> in`, the statement's value, and whether that value is
+/// itself a `{Value, Bindings}` tuple the assembler must still unpack.
+#[derive(Debug)]
+pub struct ReplProducerDoc {
+    /// The producer's construct tuples and `State` steps, as an open `let`
+    /// chain.
+    pub prelude: Document<'static>,
+    /// The statement's value, compiled after the prelude.
+    pub value: Document<'static>,
+    /// Whether `value` is a `{Value, Bindings}` tuple
+    /// (`repl_loop_mutated`).
+    pub mutated: bool,
+}
+
 /// Where a threading construct sits in its enclosing method body. Drives how the
 /// bound logical value (tuple element 1) is returned/stored.
 ///
@@ -691,17 +708,23 @@ impl CoreErlangGenerator {
     /// blocks write (`ThreadedLocals::lowered == names`, the rule
     /// `operand_producer_writes` applies for the diagnostic), possibly none
     /// when it threads only a family (an actor fold's `State`) — or `None`.
-    /// Never in the REPL, whose root frame threads its bindings map (a
-    /// later phase).
+    ///
+    /// ADR 0131 Phase 2d (BT-3795): in the REPL, whose root frame threads its
+    /// bindings map, a loop or fold at one of the input's
+    /// `repl_operand_sites` that writes a binding is a producer that threads
+    /// no local on its own: the carrier's element 2 *is* the new bindings map
+    /// and the producer adopts it whole (`lower_repl_construct_tuple`).
     pub(super) fn local_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         let inner = expr.unwrap_parens();
         if self.local_producer_sites.is_empty()
-            || self.is_repl_mode()
             || !self.local_producer_sites.contains(&inner.span())
         {
             return None;
         }
         beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner)?;
+        if self.is_repl_mode() {
+            return self.threaded_locals_of(inner).map(|_| Vec::new());
+        }
         let locals = self.construct_tuple_locals(inner)?;
         // A construct that writes no outer local still compiles to a tuple
         // when it threads a family (an actor fold's `State`, a value-type
@@ -778,7 +801,14 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         let inner = expr.unwrap_parens();
-        let Some(locals) = self.construct_tuple_locals(inner) else {
+        let locals = if self.is_repl_mode() {
+            // The REPL root threads no local on its own (see
+            // `local_producer_locals`).
+            self.threaded_locals_of(inner).map(|_| Vec::new())
+        } else {
+            self.construct_tuple_locals(inner)
+        };
+        let Some(locals) = locals else {
             return Ok(None);
         };
         let (prelude, value) =
@@ -818,17 +848,156 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
         #[cfg(test)]
-        fault::record_producer(expr.span(), locals);
+        fault::record_producer(
+            expr.span(),
+            &if self.is_repl_mode() {
+                // The REPL producer threads no local on its own: record the
+                // bindings the construct writes.
+                self.threaded_locals_of(expr)
+                    .map(|set| set.names)
+                    .unwrap_or_default()
+            } else {
+                locals.to_vec()
+            },
+        );
         // The construct's own receiver and non-block arguments evaluate
         // before it packs its locals (ADR 0118 §Decision 3): they are
         // sequenced here, for every tail, so `Rebind` and `Discard` cannot
         // diverge on a producer nested in an operand.
         let children = Self::sequenced_send_children(expr).unwrap_or_default();
         let (mut prelude, scope) = self.sequence_children(&children, frame)?;
-        let (stmts, value) = self.lower_construct_tuple(expr, locals, tail, frame)?;
+        let (stmts, value) = if self.is_repl_mode() {
+            self.lower_repl_construct_tuple(expr)?
+        } else {
+            self.lower_construct_tuple(expr, locals, tail, frame)?
+        };
         self.finish_precompiled_scope(scope)?;
         prelude.extend(stmts);
         Ok((prelude, value))
+    }
+
+    /// The REPL root's half of [`Self::lower_construct_tuple`] (ADR 0131
+    /// Phase 2d, BT-3795; §2's `MethodBody (REPL)` row).
+    ///
+    /// The REPL threads a loop or fold through its bindings map
+    /// (`KeyStyle::ReplPlain`): when the construct compiles to a
+    /// `{Value, Bindings}` tuple, the builder says so by setting
+    /// `repl_loop_mutated`, the flag the REPL assembler reads to unpack a
+    /// statement-level construct. This producer is the unpacker for one at an
+    /// operand site, so it consumes the flag: the tuple is bound, element 2 —
+    /// the whole new bindings map — becomes the next `State` version, and the
+    /// value is element 1.
+    ///
+    /// The bindings are adopted whole, not rebound one `Put` per local: a name
+    /// the construct introduces (`xs do: [:x | y := x]`) is in the map only
+    /// when the loop ran, and a per-key `maps:get` would crash on an empty
+    /// one. The statement-level REPL path adopts element 2 the same way.
+    /// Hence no `LocalRebind`, and an empty `threads`: the construct threads
+    /// the `State` family (the bindings map), as an actor fold does.
+    ///
+    /// A construct that does not compile to a tuple (the flag stayed unset)
+    /// is a plain value with no prelude.
+    fn lower_repl_construct_tuple(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
+        let span = expr.span();
+        let enclosing = self.repl_loop_mutated();
+        self.set_repl_loop_mutated(false);
+        let source_version = self.state_version();
+        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr))?;
+        let yields_tuple = self.repl_loop_mutated();
+        self.set_repl_loop_mutated(enclosing);
+        if !yields_tuple {
+            return Ok((Vec::new(), ValueRef::Doc(doc)));
+        }
+        let carrier = self.fresh_temp_var("ThreadedResult");
+        let element = |k: i64, carrier: &str| {
+            docvec![
+                "call 'erlang':'element'(",
+                leaf::int_lit(k),
+                ", ",
+                leaf::var(carrier.to_string()),
+                ")",
+            ]
+        };
+        let _ = self.next_state_var();
+        let prelude = vec![
+            threaded_ir::build_construct_tuple(carrier.clone(), doc, Vec::new(), span),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(
+                    VersionPrefix::State,
+                    self.state_version(),
+                    FrameId::ROOT,
+                ),
+                source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
+                span,
+            },
+        ];
+        Ok((prelude, ValueRef::Doc(element(1, &carrier))))
+    }
+
+    /// ADR 0131 Phase 2d (BT-3795): compiles `target`, an expression of the
+    /// REPL input statement `stmt` (the statement itself, or the value of an
+    /// assignment in a multi-statement input), when `stmt` holds a
+    /// local-threading producer at one of its `repl_operand_sites`: through
+    /// [`Self::threaded_expression`], returning the producer's prelude and the
+    /// value, for the REPL assembler to emit ahead of its own
+    /// `let Result = <value> in`. `None`, with nothing compiled, for any other
+    /// statement — it keeps the assembler's lowering, byte for byte.
+    ///
+    /// `mutated` is `repl_loop_mutated` after the compile: whether the value
+    /// is itself a `{Value, Bindings}` tuple (a construct that is the
+    /// statement or the whole value of an assignment, which is not a site),
+    /// exactly as `expression_doc_with_repl_mutation_tracking` reports it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodeGenError`] if compiling `target` fails.
+    pub fn repl_statement_with_producers(
+        &mut self,
+        stmt: &Expression,
+        target: &Expression,
+    ) -> Result<Option<ReplProducerDoc>> {
+        let sites: std::collections::HashSet<Span> =
+            beamtalk_core::semantic_analysis::block_facts::repl_operand_sites(stmt)
+                .into_iter()
+                .map(Expression::span)
+                .collect();
+        let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let result = self.repl_statement_in_sites(stmt, target);
+        self.local_producer_sites = saved;
+        result
+    }
+
+    /// [`Self::repl_statement_with_producers`] once the sites are set.
+    fn repl_statement_in_sites(
+        &mut self,
+        stmt: &Expression,
+        target: &Expression,
+    ) -> Result<Option<ReplProducerDoc>> {
+        if !self.statement_has_repl_producer(stmt) {
+            return Ok(None);
+        }
+        self.set_repl_loop_mutated(false);
+        let tv = self.threaded_expression(target, FrameId::ROOT)?;
+        let mutated = self.repl_loop_mutated();
+        self.set_repl_loop_mutated(false);
+        let prelude = self.verified_root_prelude_doc(&tv.prelude, target.span());
+        let value = self.threaded_value_doc(&tv.value);
+        Ok(Some(ReplProducerDoc {
+            prelude,
+            value,
+            mutated,
+        }))
+    }
+
+    /// Whether any `repl_operand_sites` site of `stmt` is a REPL producer.
+    fn statement_has_repl_producer(&self, stmt: &Expression) -> bool {
+        beamtalk_core::semantic_analysis::block_facts::repl_operand_sites(stmt)
+            .into_iter()
+            .any(|site| self.local_producer_locals(site).is_some())
     }
 
     /// Runs `f` with the enclosing direct-params loop's list-op mode
