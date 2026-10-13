@@ -94,13 +94,17 @@ impl CoreErlangGenerator {
     }
 
     /// The class whose class variables the current class method sees: the
-    /// extension target, else the `ClassBuilder` class, else the class being
-    /// compiled (BT-3762).
+    /// `ClassBuilder` class, else the extension target, else the class being
+    /// compiled (BT-3762). The innermost scope wins (BT-3804): a builder
+    /// `classMethods:` block nested in a class-side extension sees the
+    /// builder's `classVars:`, not the extension target's variables.
     pub(in crate::core_erlang) fn class_var_home(&self) -> String {
-        self.class_context
-            .as_ref()
-            .and_then(|ctx| ctx.extension_target_class.clone())
-            .or_else(|| self.builder_class_method_class())
+        self.builder_class_method_class()
+            .or_else(|| {
+                self.class_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.extension_target_class.clone())
+            })
             .unwrap_or_else(|| self.class_name())
     }
 
