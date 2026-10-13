@@ -1392,4 +1392,148 @@ mod tests {
         let result = generate_repl_expression(&int_expr(1), "repl_eval_999").unwrap();
         assert!(result.contains("module 'repl_eval_999'"));
     }
+
+    // ── generate_repl_expressions_traced_with_hierarchy ───────────────
+
+    #[test]
+    fn traced_with_hierarchy_integer() {
+        use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+        let hierarchy = ClassHierarchy::default();
+        let result = generate_repl_expressions_traced_with_hierarchy(
+            &[int_expr(42)],
+            "42",
+            "repl_trace_hier_1",
+            HashMap::new(),
+            &hierarchy,
+        )
+        .unwrap();
+        assert!(
+            result.contains("module 'repl_trace_hier_1'"),
+            "missing module name"
+        );
+        assert!(result.contains("42"), "should contain the integer value");
+    }
+
+    #[test]
+    fn traced_with_hierarchy_multi_assignment() {
+        // Multi-expression traced with hierarchy: exercises generate_repl_expressions_traced_with_hierarchy
+        // via the multi-expression code path so maps:put state threading is visible.
+        use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+        let hierarchy = ClassHierarchy::default();
+        let source = "1\nx := 42";
+        let result = generate_repl_expressions_traced_with_hierarchy(
+            &[int_expr(1), assign_expr("x", int_expr(42))],
+            source,
+            "repl_trace_hier_assign",
+            HashMap::new(),
+            &hierarchy,
+        )
+        .unwrap();
+        assert!(result.contains("module 'repl_trace_hier_assign'"));
+        assert!(result.contains("maps':'put'"), "should thread state via maps:put: {result}");
+        assert!(result.contains("'x'"), "variable key present");
+    }
+
+    // ── Traced single-expr DestructureAssignment path ─────────────────
+    // (generate_repl_single_traced_inner lines 434-456)
+
+    fn destructure_assign_expr(vars: &[&str], value: Expression) -> Expression {
+        let patterns: Vec<Pattern> = vars
+            .iter()
+            .map(|name| Pattern::Variable(Identifier::new(*name, span())))
+            .collect();
+        Expression::DestructureAssignment {
+            pattern: Pattern::Tuple {
+                elements: patterns,
+                span: span(),
+            },
+            value: Box::new(value),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn traced_single_destructure_assignment() {
+        // DestructureAssignment as the sole expression in traced mode.
+        // Exercises the early-return branch in generate_repl_single_traced_inner.
+        let expr = destructure_assign_expr(&["a", "b"], int_expr(99));
+        let result =
+            generate_repl_expressions_traced(&[expr], "99", "repl_trace_destr_single", HashMap::new())
+                .unwrap();
+        assert!(result.contains("module 'repl_trace_destr_single'"));
+        // The result should contain a trace list with the source text as binary.
+        assert!(
+            result.contains("[{"),
+            "should produce a trace list: {result}"
+        );
+    }
+
+    // ── Traced multi-expr: Assignment as last expression ──────────────
+    // (generate_trace_last_expr Assignment branch, lines 581-605)
+
+    #[test]
+    fn traced_multi_assignment_last() {
+        // Assignment as the LAST expression in multi-expr trace mode.
+        // Exercises the Assignment early-return branch in generate_trace_last_expr.
+        let exprs = vec![int_expr(1), assign_expr("x", int_expr(42))];
+        let source = "1\nx := 42";
+        let result = generate_repl_expressions_traced(
+            &exprs,
+            source,
+            "repl_trace_assign_last",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert!(result.contains("module 'repl_trace_assign_last'"));
+        assert!(
+            result.contains("maps':'put'"),
+            "last assignment should store into state: {result}"
+        );
+        assert!(result.contains("'x'"), "should bind variable name as atom key");
+    }
+
+    #[test]
+    fn traced_multi_assignment_last_threads_state() {
+        // When assignment is last, the trace return should reference the updated state.
+        let exprs = vec![int_expr(5), assign_expr("result_var", int_expr(99))];
+        let source = "5\nresult_var := 99";
+        let result = generate_repl_expressions_traced(
+            &exprs,
+            source,
+            "repl_trace_assign_state",
+            HashMap::new(),
+        )
+        .unwrap();
+        // The state variable should be threaded in the final return tuple.
+        assert!(
+            result.contains("maps':'put'"),
+            "state update via maps:put: {result}"
+        );
+        assert!(result.contains("'result_var'"), "variable key present");
+    }
+
+    // ── Traced multi-expr: DestructureAssignment as last expression ───
+    // (generate_trace_last_expr DestructureAssignment branch, lines 571-578)
+
+    #[test]
+    fn traced_multi_destructure_last() {
+        // DestructureAssignment as the LAST expression in multi-expr trace mode.
+        // Exercises the DestructureAssignment early-return in generate_trace_last_expr.
+        let destr = destructure_assign_expr(&["x", "y"], int_expr(7));
+        let exprs = vec![int_expr(1), destr];
+        let source = "1\n{x, y} := 7";
+        let result = generate_repl_expressions_traced(
+            &exprs,
+            source,
+            "repl_trace_destr_last",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert!(result.contains("module 'repl_trace_destr_last'"));
+        // The result should contain a trace list from prev_steps + current step.
+        assert!(
+            result.contains("[{"),
+            "should produce a multi-step trace list: {result}"
+        );
+    }
 }
