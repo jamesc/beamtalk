@@ -248,9 +248,13 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulBody := [count := count + 1]
-    self should: [
-      [false] perform: #whileTrue: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBody))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        [
+          false
+        ] perform: #whileTrue: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBody))
+      ]
+      raise: #stateful_block_dispatch
     launderedBody := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBody))
     self should: [
       launderedBody perform: #repeat withArguments: #()
@@ -277,9 +281,13 @@ TestCase subclass: BlocksTest
     self should: [
       laundered perform: #ensure: withArguments: #([nil])
     ] raise: #stateful_block_dispatch
-    self should: [
-      [42] perform: #ensure: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulReceiver))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        [
+          42
+        ] perform: #ensure: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulReceiver))
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnDoNonMatchingExceptionClassReraisesToOuterHandler =>
     // BT-2908 adversarial review: a non-matching exception class must
@@ -344,7 +352,11 @@ TestCase subclass: BlocksTest
     count := 0
     @expect dead_assignment
     statefulZeroArgHandler := [count := count + 1]
-    result := [
-      1 / 0
-    ] perform: #on:do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang setelement: 1 of: (Erlang erlang make_tuple: 2 init: statefulZeroArgHandler) value: Error))
+    result := [1 / 0]
+      perform: #on:do:
+      withArguments: (Erlang erlang
+        tuple_to_list: (Erlang erlang
+          setelement: 1
+          of: (Erlang erlang make_tuple: 2 init: statefulZeroArgHandler)
+          value: Error))
     self assert: (result isKindOf: Tuple)

@@ -69,9 +69,14 @@ TestCase subclass: DictionaryTest
     count := 0
     @expect dead_assignment
     statefulBlock := [:v | count := count + v]
-    self should: [
-      #{#a => 1, #b => 2} perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>
     // BT-2913: doWithKey:'s BIF-lowered body had no stateful_block_dispatch
@@ -83,9 +88,14 @@ TestCase subclass: DictionaryTest
     count := 0
     @expect dead_assignment
     statefulBlock := [:k :v | count := count + v]
-    self should: [
-      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #doWithKey: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment

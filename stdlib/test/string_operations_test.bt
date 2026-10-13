@@ -80,6 +80,8 @@ TestCase subclass: StringOperationsTest
       count := count + 1
       ch uppercase
     ]
-    self should: [
-      "hi" perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        "hi" perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch

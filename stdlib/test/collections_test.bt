@@ -182,16 +182,20 @@ TestCase subclass: CollectionsTest
       count := count + 1
       x * 2
     ]
-    self should: [
-      #(1, 2, 3) perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3) perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
-    self should: [
-      #(1, 2, 3) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -199,9 +203,11 @@ TestCase subclass: CollectionsTest
       count := count + 1
       x > 1
     ]
-    self should: [
-      #(1, 2, 3) perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3) perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -209,9 +215,11 @@ TestCase subclass: CollectionsTest
       count := count + 1
       x > 1
     ]
-    self should: [
-      #(1, 2, 3) perform: #reject: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulRejectBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3) perform: #reject: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulRejectBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
@@ -219,9 +227,17 @@ TestCase subclass: CollectionsTest
       count := count + 1
       acc + x
     ]
-    self should: [
-      #(1, 2, 3) perform: #inject:into: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang setelement: 1 of: (Erlang erlang make_tuple: 2 init: statefulInjectBlock) value: 0))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3)
+          perform: #inject:into:
+          withArguments: (Erlang erlang
+            tuple_to_list: (Erlang erlang
+              setelement: 1
+              of: (Erlang erlang make_tuple: 2 init: statefulInjectBlock)
+              value: 0))
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnEachWithIndexWithStatefulBlockRaisesClearError =>
     // BT-2914: eachWithIndex: is self-hosted (pure BT on inject:into:), not a
@@ -234,9 +250,11 @@ TestCase subclass: CollectionsTest
     count := 0
     @expect dead_assignment
     statefulBlock := [:x :i | count := count + x]
-    self should: [
-      #(1, 2, 3) perform: #eachWithIndex: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #(1, 2, 3) perform: #eachWithIndex: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
+      ]
+      raise: #stateful_block_dispatch
 
     // Pure (Tier 1) blocks via perform: keep working (baseline, mirrors
     // testPerformOnPureIterationBlocksAlreadyWorked).
