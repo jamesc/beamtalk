@@ -1451,8 +1451,14 @@ pub fn operand_producer_writes(
 /// too (a producer sequences them first; one that threads nothing compiles
 /// them through ordinary expression codegen). The statement itself is not
 /// a site (statement positions keep their own lowering), nor is anything
-/// inside a block, a cascade, a field assignment's value, a destructuring,
+/// inside a block, a cascade, a destructuring,
 /// a `match:` or an interpolation.
+///
+/// ADR 0131 Phase 2d (BT-3795): the value of a method-body field or
+/// class-variable write `self.f := V` is a site too, and so are its operands
+/// (`self.n := (xs collect: [...]) size`): the actor field-write arms and the
+/// class method's class-variable write splice the producer's prelude before
+/// the write. Not the value of a `^self.f := V`, nor of a write inside a block.
 ///
 /// The Phase 0 allow-set check and codegen's producer both read this, so a
 /// construct the diagnostic accepts in operand position is exactly one the
@@ -1464,6 +1470,40 @@ pub fn operand_producer_writes(
 #[must_use]
 pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     operand_sites_of_statement(stmt, false)
+}
+
+/// ADR 0131 Phase 2d (BT-3795): the sub-expressions of the REPL input
+/// statement `stmt` where a loop or fold is a local-threading producer
+/// (ADR 0131 §2's `MethodBody (REPL)` row): its [`sequenced_operand_sites`],
+/// less the value of `x := V` / `^V` itself and every site of a `self.f := V`
+/// write.
+///
+/// The REPL threads a loop or fold that is the statement, or the whole value
+/// of an assignment, through its own lowering (the assembler unpacks the
+/// `{Value, Bindings}` tuple and adopts the bindings map, ADR 0041), and the
+/// Phase 0 check accepts those through its REPL allow-set rows. Only a loop or
+/// fold nested in an operand (`(xs collect: [...]) size`, `r := t + (...)`) had
+/// no lowering, so that is where the producer fires. A field write has no
+/// REPL meaning, so it keeps its diagnostic.
+///
+/// The one rule the Phase 0 check and codegen's REPL producer both read.
+#[must_use]
+pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
+    let inner = stmt.unwrap_parens();
+    let whole_value = match inner {
+        Expression::Assignment { target, value, .. } => {
+            if is_self_field_target(target) {
+                return Vec::new();
+            }
+            Some(value.unwrap_parens().span())
+        }
+        Expression::Return { value, .. } => Some(value.unwrap_parens().span()),
+        _ => None,
+    };
+    sequenced_operand_sites(stmt)
+        .into_iter()
+        .filter(|site| Some(site.span()) != whole_value)
+        .collect()
 }
 
 /// ADR 0131 Phase 2b (BT-3793): [`sequenced_operand_sites`] for a statement
@@ -1614,11 +1654,34 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
         {
             site(value, &mut out);
         }
+        // ADR 0131 Phase 2d (BT-3795): the value of a method-body field or
+        // class-variable write `self.f := V`. Its three consumers (the actor
+        // `FieldAssignment`/`FieldAssignmentControlFlow` arms and the class
+        // method's `class_method_prelude_producer`) sequence `V` through
+        // `threaded_expression` before the write. Not a loop or fold body
+        // statement (`construct_operands`): a body's field write is lowered by
+        // its frame, which does not splice a prelude.
+        Expression::Assignment { target, value, .. }
+            if !construct_operands && is_self_field_target(target) =>
+        {
+            site(value, &mut out);
+        }
         Expression::Return { value, .. } => site(value, &mut out),
         other if !construct_operands && local_threading_construct(other).is_some() => {}
         other => operands(other, &mut out),
     }
     out
+}
+
+/// Whether `target` is the `self.<field>` target of a field or class-variable
+/// write: the one shape codegen's field-write lowerings recognise
+/// (`field_assignment_name`, `class_var_assignment_shape`).
+fn is_self_field_target(target: &Expression) -> bool {
+    matches!(
+        target,
+        Expression::FieldAccess { receiver, .. }
+            if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+    )
 }
 
 /// ADR 0131 Phase 2 (BT-3749): whether the send `receiver selector: arguments`

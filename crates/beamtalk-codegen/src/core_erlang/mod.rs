@@ -169,6 +169,7 @@ pub(in crate::core_erlang) use generator::version::render_state_prefix;
 pub use generator::{CodeGenContext, CoreErlangGenerator};
 pub(in crate::core_erlang) use nlr::NlrBoundary;
 pub use options::{CodegenOptions, GeneratedModule};
+pub use threaded_expr::ReplProducerDoc;
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;

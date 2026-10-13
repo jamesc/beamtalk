@@ -1,0 +1,179 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! ADR 0131 Phase 2d (BT-3795): the REPL assembler's use of the
+//! local-threading producer, through every public REPL-codegen entry point.
+//!
+//! A loop or fold at an operand site of a REPL input (`repl_operand_sites`)
+//! is lowered by the generator's producer (`repl_statement_with_producers`),
+//! whose prelude each assembler path (single and multi-statement, eval and
+//! trace, assignment and plain statement) must emit ahead of its own
+//! `let Result = <value> in`. The generator's agreement with the Phase 0
+//! check is `local_producer_agreement_repl.rs` in `beamtalk-codegen`; this
+//! test pins that the assembler emits what the generator returns: one
+//! carrier per producer site, and a module `erlc` accepts (so a `State`
+//! version the prelude steps is in scope where the assembler reads it).
+
+use beamtalk_core::ast::Expression;
+use beamtalk_core::semantic_analysis::block_facts::{
+    construct_outer_local_writes, local_threading_construct, producer_body_block,
+    repl_operand_sites,
+};
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
+use std::collections::{HashMap, HashSet};
+use std::process::Command;
+
+/// REPL inputs with producers, and statements around them: operand sites of
+/// a plain statement, of an assignment (single-statement inputs go through
+/// the eval module body; the value of an `x := V` is compiled by the REPL's
+/// own path), and of the intermediate and last statements of a
+/// multi-statement input.
+const INPUTS: &[&str] = &[
+    "(#(1, 2) collect: [:x | t := t + x]) size",
+    "r := (#(1, 2) reject: [:x | t := t + 1. false]) size",
+    "r := t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])",
+    "#[1 to: 3 do: [:i | t := t + i], t]",
+    "r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]",
+    "(#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]) + 1",
+    "t := 0\nr := (#(1, 2) collect: [:x | t := t + x]) size\n#[r, t]",
+    "(#(1, 2) collect: [:x | t := t + x]) size\nt",
+    "r := t + (#(5) inject: 0 into: [:a :x | t := t + x. a + x])\nr",
+    "r := (#(1, 2) collect: [:x | t := t + x]) size\nr := r + (#(1) count: [:x | t := t + 1. true]) size\nr",
+    "#(1, 2) do: [:x | t := t + x]\n(#(1) collect: [:x | u := u + x]) size",
+    // A fold that is the whole value of an assignment, with a producer in its
+    // receiver: the value is itself a `{Value, Bindings}` tuple the assembler
+    // unpacks, as an intermediate and as the last statement.
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\n#[r, t, u]",
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\nr := r + 1\nr",
+    "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]",
+    // No producer: the statement keeps the assembler's lowering.
+    "#(1, 2) do: [:x | t := t + x]",
+    "r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
+    "t := 0\nr := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]\nr",
+];
+
+fn statements(src: &str) -> Vec<Expression> {
+    let (module, diags) = parse(lex_with_eof(src));
+    assert!(diags.is_empty(), "{src}: {diags:?}");
+    module
+        .expressions
+        .into_iter()
+        .map(|s| s.expression)
+        .collect()
+}
+
+/// How many producers the core rule lowers in `expressions`: the loops and
+/// folds at `repl_operand_sites` that write a binding.
+fn expected_producers(expressions: &[Expression]) -> usize {
+    expressions
+        .iter()
+        .flat_map(repl_operand_sites)
+        .filter(|site| {
+            producer_body_block(site).is_some()
+                && local_threading_construct(site)
+                    .is_some_and(|c| !construct_outer_local_writes(&c, &|_| true).is_empty())
+        })
+        .count()
+}
+
+/// The distinct construct-tuple carrier variables of `code`.
+fn carriers(code: &str) -> usize {
+    code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|word| word.starts_with("_ThreadedResult"))
+        .collect::<HashSet<_>>()
+        .len()
+}
+
+/// Compiles `code` through `erlc +from_core`; skipped when `erlc` is absent.
+fn assert_compiles(name: &str, code: &str) {
+    let dir = std::env::temp_dir().join(format!("bt3795_{}_{}", std::process::id(), name));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("repl_producer.core");
+    std::fs::write(&file, code).expect("write core");
+    let output = Command::new("erlc")
+        .arg("+from_core")
+        .arg("-o")
+        .arg(&dir)
+        .arg(&file)
+        .output();
+    let result = match output {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => Err(format!(
+            "erlc failed:\n{}\n{}\n\nGenerated Core Erlang:\n{code}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to invoke erlc: {e}")),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(message) = result {
+        panic!("{message}");
+    }
+}
+
+#[test]
+fn the_repl_assembler_emits_one_carrier_per_producer_in_every_entry_point() {
+    let mut producers = 0;
+    for (i, src) in INPUTS.iter().enumerate() {
+        let expressions = statements(src);
+        let expected = expected_producers(&expressions);
+        let outputs: [(&str, String); 2] = [
+            (
+                "eval",
+                generate_repl_expressions(&expressions, "repl_producer")
+                    .unwrap_or_else(|e| panic!("{src}: {e:?}")),
+            ),
+            (
+                "trace",
+                generate_repl_expressions_traced(
+                    &expressions,
+                    src,
+                    "repl_producer",
+                    HashMap::new(),
+                )
+                .unwrap_or_else(|e| panic!("{src}: {e:?}")),
+            ),
+        ];
+        for (entry, code) in outputs {
+            assert_eq!(
+                carriers(&code),
+                expected,
+                "{entry}: {expected} producer carriers expected\n{src}\n{code}"
+            );
+            assert_compiles(&format!("{i}_{entry}"), &code);
+        }
+        producers += expected;
+    }
+    assert!(producers >= 10, "only {producers} producers compared");
+}
+
+/// A fold that is the whole value of an assignment in a multi-statement input
+/// compiles to a `{Value, Bindings}` tuple; with a producer in its receiver the
+/// assembler must unpack it (the value is element 1, the bindings element 2)
+/// before `put`ting the binding, in every entry point. Otherwise `r` is bound
+/// to the tuple and the fold's writes are lost.
+#[test]
+fn a_whole_value_fold_after_a_producer_is_unpacked_in_every_multi_statement_path() {
+    let fold =
+        "r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]";
+    for src in [
+        format!("t := 0\nu := 0\n{fold}\n#[r, t, u]"),
+        format!("t := 0\nu := 0\n{fold}\nr := r + 1\nr"),
+        format!("t := 0\nu := 0\n{fold}"),
+    ] {
+        let expressions = statements(&src);
+        let outputs = [
+            generate_repl_expressions(&expressions, "repl_producer").expect("eval"),
+            generate_repl_expressions_traced(&expressions, &src, "repl_producer", HashMap::new())
+                .expect("trace"),
+        ];
+        for code in outputs {
+            assert!(
+                code.contains("_AssignTuple"),
+                "the whole-value fold's tuple is not unpacked\n{src}\n{code}"
+            );
+        }
+    }
+}
