@@ -92,6 +92,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     class_var_kinds/1,
     read_meta/1,
     read_meta_detailed/1,
+    read_meta_autoload/1,
     lookup_is_abstract/1,
     match_subclasses/1,
     foldl/2,
@@ -533,6 +534,24 @@ read_meta_detailed(Module) when is_atom(Module) ->
             none
     end;
 read_meta_detailed(_) ->
+    none.
+
+-doc """
+Like `read_meta_detailed/1`, but loads `Module` first if it is not yet loaded.
+
+`read_meta/1` and `read_meta_detailed/1` guard with `erlang:function_exported/3`,
+which only inspects already-loaded code and reports `false` for a module nobody
+has touched yet. The workspace shape/signature stores read a rarely-hit class
+mid-session and must still see its metadata, so they use this variant: it calls
+`code:ensure_loaded/1` and then delegates to `read_meta_detailed/1`, so the
+guarded read itself stays in one place. Same return shape as
+`read_meta_detailed/1`; a module with no code at all (load fails) reads `none`.
+""".
+-spec read_meta_autoload(term()) -> {ok, map()} | {invalid, term()} | none.
+read_meta_autoload(Module) when is_atom(Module) ->
+    _ = code:ensure_loaded(Module),
+    read_meta_detailed(Module);
+read_meta_autoload(_) ->
     none.
 
 -spec merge_ancestor_map(

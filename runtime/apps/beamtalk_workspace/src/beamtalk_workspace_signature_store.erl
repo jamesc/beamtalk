@@ -213,47 +213,25 @@ since an unrecognised failure is more likely a real bug than routine absence.
 """.
 -spec seed_from_meta(binary(), binary(), side()) -> maybe_signature().
 seed_from_meta(ClassName, Selector, Side) ->
-    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal getter, no
-    %% block
     try
         ClassAtom = binary_to_existing_atom(ClassName, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),
-        %% A qualified remote call auto-loads an as-yet-unloaded module (unlike
-        %% erlang:function_exported/3, which only inspects already-loaded code
-        %% and silently reports `false` for a module nobody has touched yet —
-        %% exactly the state a rarely-hit class can be in during a workspace
-        %% session). `undef` from a module with no `__beamtalk_meta/0` (or no
-        %% code at all) is caught below like any other resolution failure.
-        Meta = Module:'__beamtalk_meta'(),
-        InfoKey =
-            case Side of
-                instance -> method_info;
-                class -> class_method_info
-            end,
-        MethodInfoMap = maps:get(InfoKey, Meta, #{}),
-        SelectorAtom = binary_to_existing_atom(Selector, utf8),
-        case maps:find(SelectorAtom, MethodInfoMap) of
-            {ok, Entry} ->
-                #{
-                    return_type => meta_type_to_binary(maps:get(return_type, Entry, none)),
-                    param_types => [
-                        meta_type_to_binary(T)
-                     || T <- maps:get(param_types, Entry, [])
-                    ]
-                };
-            error ->
-                undefined
+        %% read_meta_autoload/1 loads an as-yet-unloaded module first (a bare
+        %% erlang:function_exported/3 guard would report `false` for a module
+        %% nobody has touched yet — a rarely-hit class mid-session). A module
+        %% with no `__beamtalk_meta/0` (or no code) reads `none`.
+        case beamtalk_class_metadata:read_meta_autoload(Module) of
+            {ok, Meta} -> signature_from_meta(Meta, Selector, Side);
+            none -> undefined;
+            {invalid, Why} -> error({invalid_meta, Why})
         end
     catch
         %% Expected, ordinary resolution failures — silent, no log:
         %%   badarg   — ClassName/Selector isn't an atom yet (brand-new this session).
         %%   {badmatch, not_found} — class not registered in beamtalk_class_metadata.
-        %%   undef    — Module has no __beamtalk_meta/0 (or no code at all).
         error:badarg ->
             undefined;
         error:{badmatch, not_found} ->
-            undefined;
-        error:undef ->
             undefined;
         %% Anything else is unexpected — still degrade to `undefined` (this
         %% function must never crash the capture hook), but log it so a real
@@ -272,6 +250,28 @@ seed_from_meta(ClassName, Selector, Side) ->
                     domain => [beamtalk, runtime]
                 }
             ),
+            undefined
+    end.
+
+-spec signature_from_meta(map(), binary(), side()) -> maybe_signature().
+signature_from_meta(Meta, Selector, Side) ->
+    InfoKey =
+        case Side of
+            instance -> method_info;
+            class -> class_method_info
+        end,
+    MethodInfoMap = maps:get(InfoKey, Meta, #{}),
+    SelectorAtom = binary_to_existing_atom(Selector, utf8),
+    case maps:find(SelectorAtom, MethodInfoMap) of
+        {ok, Entry} ->
+            #{
+                return_type => meta_type_to_binary(maps:get(return_type, Entry, none)),
+                param_types => [
+                    meta_type_to_binary(T)
+                 || T <- maps:get(param_types, Entry, [])
+                ]
+            };
+        error ->
             undefined
     end.
 
