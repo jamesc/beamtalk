@@ -887,3 +887,46 @@ read_meta_test_() ->
                 ?_assertEqual(none, beamtalk_class_metadata:read_meta_detailed("not an atom"))
             ]
         end}.
+
+%%====================================================================
+%% read_meta_autoload/1 (BT-3792) — reads a not-yet-loaded class module.
+%%====================================================================
+
+read_meta_autoload_loads_unloaded_module_test() ->
+    Mod = bt3792_autoload_mod,
+    Dir = "bt3792_autoload_ebin",
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [
+            {clause, 3, [], [],
+                [{map, 3, [{map_field_assoc, 3, {atom, 3, class}, {atom, 3, 'Auto'}}]}]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    BeamFile = filename:join(Dir, atom_to_list(Mod) ++ ".beam"),
+    ok = file:write_file(BeamFile, Bin),
+    true = code:add_patha(Dir),
+    try
+        _ = code:purge(Mod),
+        _ = code:delete(Mod),
+        _ = code:purge(Mod),
+        ?assertNot(erlang:module_loaded(Mod)),
+        %% The guarded reads cannot see a module nobody has loaded yet ...
+        ?assertEqual(none, beamtalk_class_metadata:read_meta_detailed(Mod)),
+        ?assertEqual(not_available, beamtalk_class_metadata:read_meta(Mod)),
+        %% ... the auto-loading read does.
+        ?assertEqual({ok, #{class => 'Auto'}}, beamtalk_class_metadata:read_meta_autoload(Mod))
+    after
+        code:del_path(Dir),
+        _ = code:purge(Mod),
+        _ = code:delete(Mod),
+        _ = code:purge(Mod),
+        file:delete(BeamFile),
+        file:del_dir(Dir)
+    end.
+
+read_meta_autoload_unavailable_test() ->
+    ?assertEqual(none, beamtalk_class_metadata:read_meta_autoload(bt3792_no_such_module)),
+    ?assertEqual(none, beamtalk_class_metadata:read_meta_autoload("not an atom")).

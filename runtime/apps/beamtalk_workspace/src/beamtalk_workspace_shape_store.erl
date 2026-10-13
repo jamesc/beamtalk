@@ -294,11 +294,13 @@ read_own_meta(ClassNameBin) ->
     try
         ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),
-        %% A qualified remote call auto-loads an as-yet-unloaded module (see
-        %% beamtalk_workspace_signature_store:seed_from_meta/3's identical
-        %% reasoning) — matters for a rarely-touched class mid-session.
-        Meta = Module:'__beamtalk_meta'(),
-        {ok, ClassAtom, Meta}
+        %% read_meta_autoload/1 loads an as-yet-unloaded module first — matters
+        %% for a rarely-touched class mid-session.
+        case beamtalk_class_metadata:read_meta_autoload(Module) of
+            {ok, Meta} -> {ok, ClassAtom, Meta};
+            none -> undefined;
+            {invalid, Why} -> error({invalid_meta, Why})
+        end
     catch
         %% Expected, ordinary resolution failures — silent, no log:
         %%   badarg   — ClassNameBin isn't an atom yet (brand-new this session).
@@ -471,27 +473,19 @@ non-map or raising meta call) — mirrors
 dynamic/legacy ancestor contributing nothing at its level must not fail the
 whole flatten (see the moduledoc).
 
-Deliberately a **qualified call inside a `try`**, not an
-`erlang:function_exported/3` pre-check: `function_exported/3` only consults
-the currently-*loaded* module table and never triggers a load, so an
-ancestor whose module happens not to be loaded yet this session (rather than
-genuinely lacking `__beamtalk_meta/0`) would wrongly read back `#{}` — the
-same "qualified call auto-loads" reasoning `read_own_meta/1` already relies
-on for the starting class. `error:undef` is the "no such function" case this
-degrades on; anything else escapes to the outer catch-all.
+Reads through `beamtalk_class_metadata:read_meta_autoload/1`, which loads the
+module first: a bare `erlang:function_exported/3` pre-check only consults
+already-loaded code, so an ancestor whose module happens not to be loaded yet
+this session (rather than genuinely lacking `__beamtalk_meta/0`) would wrongly
+read back `#{}`. A missing export, unusable meta or crash all degrade to `#{}`.
 """.
 -spec ancestor_own_field_map(atom(), atom()) -> #{atom() => atom()}.
 ancestor_own_field_map(ClassAtom, MetaKey) ->
     case beamtalk_class_metadata:lookup_module(ClassAtom) of
         {ok, Module} ->
-            %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal
-            %% getter, no block
-            try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> maps:get(MetaKey, Meta, #{});
+            case beamtalk_class_metadata:read_meta_autoload(Module) of
+                {ok, Meta} -> maps:get(MetaKey, Meta, #{});
                 _ -> #{}
-            catch
-                error:undef -> #{};
-                _:_ -> #{}
             end;
         not_found ->
             #{}

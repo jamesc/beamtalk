@@ -218,13 +218,16 @@ seed_from_meta(ClassName, Selector, Side) ->
     try
         ClassAtom = binary_to_existing_atom(ClassName, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),
-        %% A qualified remote call auto-loads an as-yet-unloaded module (unlike
-        %% erlang:function_exported/3, which only inspects already-loaded code
-        %% and silently reports `false` for a module nobody has touched yet —
-        %% exactly the state a rarely-hit class can be in during a workspace
-        %% session). `undef` from a module with no `__beamtalk_meta/0` (or no
-        %% code at all) is caught below like any other resolution failure.
-        Meta = Module:'__beamtalk_meta'(),
+        %% read_meta_autoload/1 loads an as-yet-unloaded module first (a bare
+        %% erlang:function_exported/3 guard would report `false` for a module
+        %% nobody has touched yet — a rarely-hit class mid-session). A module
+        %% with no `__beamtalk_meta/0` (or no code) reads `none`.
+        Meta =
+            case beamtalk_class_metadata:read_meta_autoload(Module) of
+                {ok, M} -> M;
+                none -> error(undef);
+                {invalid, Why} -> error({invalid_meta, Why})
+            end,
         InfoKey =
             case Side of
                 instance -> method_info;
