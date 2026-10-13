@@ -1,0 +1,160 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3800 (ADR 0131): in a multi-statement REPL input, an assignment whose
+// whole value is a mutating loop or fold compiles to a `{Value, Bindings}`
+// tuple. The assembler must bind element 1 as the value and adopt element 2 as
+// the bindings -- with or without a producer in the fold's receiver (the
+// producer case is adr0131_repl_producer.btscript). Before the fix the
+// no-producer form bound the raw tuple and lost the fold's writes.
+
+// ===========================================================================
+// Single statement (the REPL's own lowering; unchanged)
+// ===========================================================================
+
+t := 0
+// => 0
+
+u := 0
+// => 0
+
+r := #(1, 2) inject: 0 into: [:a :x | u := u + 1. a + x]
+// => 3
+
+r
+// => 3
+
+u
+// => 2
+
+// ===========================================================================
+// Several statements: the assignment is an intermediate statement
+// ===========================================================================
+
+t := 0. u := 0. r := #(1, 2) inject: 0 into: [:a :x | u := u + 1. a + x]. #[r, u]
+// => #[3, 2]
+
+r
+// => 3
+
+u
+// => 2
+
+t := 0. u := 0. r := #(1, 2) collect: [:x | u := u + x]. #[r size, u]
+// => #[2, 3]
+
+t := 0. u := 0. r := #(1, 2) detect: [:x | u := u + 1. x > 1]. #[r, u]
+// => #[2, 2]
+
+t := 0. u := 0. r := #(1, 2, 3) select: [:x | u := u + 1. x > 1]. #[r size, u]
+// => #[2, 3]
+
+t := 0. u := 0. r := #(1, 2) do: [:x | u := u + x]. #[r, u]
+// => #[nil, 3]
+
+t := 0. u := 0. r := #(1, 2) count: [:x | u := u + 1. true]. #[r, u]
+// => #[2, 2]
+
+// ===========================================================================
+// Several statements: the assignment is the last statement
+// ===========================================================================
+
+t := 0. u := 0. r := #(1, 2) inject: 0 into: [:a :x | u := u + 1. a + x]
+// => 3
+
+r
+// => 3
+
+u
+// => 2
+
+t := 0. u := 0. r := #(1, 2) detect: [:x | u := u + 1. x > 1]
+// => 2
+
+u
+// => 2
+
+t := 0. u := 0. r := #(1, 2) collect: [:x | u := u + x]. r := r size
+// => 2
+
+u
+// => 3
+
+// ===========================================================================
+// Chained assignments, each a mutating fold
+// ===========================================================================
+
+u := 0. r := #(1, 2) inject: 0 into: [:a :x | u := u + 1. a + x]. s := #(3) inject: r into: [:a :x | u := u + 10. a + x]. #[r, s, u]
+// => #[3, 6, 12]
+
+u := 0. r := #(1, 2) inject: 0 into: [:a :x | u := u + 1. a + x]. s := #(3) inject: r into: [:a :x | u := u + 10. a + x]
+// => 6
+
+u
+// => 12
+
+// ===========================================================================
+// With a producer in the receiver (adr0131_repl_producer.btscript), mixed
+// with a fold that has none
+// ===========================================================================
+
+t := 0. u := 0. r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]. s := #(3) inject: 0 into: [:a :x | u := u + 10. a + x]. #[r, s, t, u]
+// => #[4, 3, 3, 12]
+
+// ===========================================================================
+// A loop that does not write a binding, and plain assignments, are unchanged
+// ===========================================================================
+
+t := 0. r := #(1, 2) inject: 0 into: [:a :x | a + x]. #[r, t]
+// => #[3, 0]
+
+t := 0. r := 5. s := r + 1. #[r, s, t]
+// => #[5, 6, 0]
+
+// ===========================================================================
+// Every state-threading construct that is an assignment's whole value, not
+// only loops and folds: a mutating conditional and an inline block `value`
+// (BT-3800). Before the fix `r` was the raw `{Value, Bindings}` tuple and the
+// write was lost.
+// ===========================================================================
+
+t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]. #[r, u]
+// => #[5, 1]
+
+t := 0. u := 0. r := (t == 0) ifTrue: [u := 7] ifFalse: [u := 8]. #[r, u]
+// => #[7, 7]
+
+t := 0. u := 0. r := (t == 1) ifTrue: [u := 7]. #[r, u]
+// => #[nil, 0]
+
+t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]
+// => 5
+
+r
+// => 5
+
+u
+// => 1
+
+t := 0. u := 0. r := [u := u + 1. 5] value. #[r, u]
+// => #[5, 1]
+
+t := 0. u := 0. r := [:x | u := u + x. x] value: 3. #[r, u]
+// => #[3, 3]
+
+t := 0. u := 0. r := [u := u + 1. 5] value
+// => 5
+
+r
+// => 5
+
+u
+// => 1
+
+// `on:do:` and `ensure:` that write an outer local as an assignment's whole
+// value are still rejected by the analyser (BT-3743), before codegen.
+t := 0. u := 0. r := [u := u + 1. 5] on: Error do: [:e | 0]. #[r, u]
+// => ERROR: `on:do:` writes outer local `u`
+
+t := 0. u := 0. r := [u := u + 1. 5] ensure: [u := u + 10]
+// => ERROR: `ensure:` writes outer local `u`

@@ -177,3 +177,145 @@ fn a_whole_value_fold_after_a_producer_is_unpacked_in_every_multi_statement_path
         }
     }
 }
+
+/// Loops, folds and other state-threading constructs, each writing a REPL
+/// binding from its body.
+const CONSTRUCTS: &[&str] = &[
+    "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
+    "#(1, 2) collect: [:x | t := t + x]",
+    "#(1, 2, 3) select: [:x | t := t + 1. x > 1]",
+    "#(1, 2, 3) reject: [:x | t := t + 1. x > 1]",
+    "#(1, 2, 3) detect: [:x | t := t + 1. x > 1]",
+    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 7. 0]",
+    "#(1, 2) count: [:x | t := t + 1. true]",
+    "#(1, 2) do: [:x | t := t + x]",
+    "1 to: 3 do: [:i | t := t + i]",
+    "3 timesRepeat: [t := t + 1]",
+    "[t < 9] whileTrue: [t := t + 3]",
+    // Other state-threading constructs that set `repl_loop_mutated`: a
+    // mutating conditional, an inline block `value`, and (reaching codegen
+    // only without the analyser, which rejects them, BT-3743) `on:do:` and
+    // `ensure:`.
+    "true ifTrue: [t := t + 1. 5] ifFalse: [6]",
+    "[t := t + 1. 5] value",
+    "[:x | t := t + x. x] value: 3",
+    "[t := t + 1. 5] on: Error do: [:e | 0]",
+    "[t := t + 1. 5] ensure: [u := u + 10]",
+];
+
+/// A receiver whose own producer runs before the construct (the whole-value
+/// construct then has a producer in its receiver); `None` for no producer.
+const RECEIVERS: &[Option<&str>] = &[None, Some("(#(1, 2) collect: [:y | u := u + y])")];
+
+/// `template` with its `#(1, 2)` receiver replaced by `receiver`, if any.
+fn construct(template: &str, receiver: Option<&str>) -> String {
+    match receiver {
+        Some(r) if template.starts_with("#(1, 2) ") => template.replacen("#(1, 2)", r, 1),
+        _ => template.to_string(),
+    }
+}
+
+/// Both generated modules (eval, trace) of `src`, erlc-checked when `compile`.
+fn both_outputs(name: &str, src: &str, compile: bool) -> [(&'static str, String); 2] {
+    let expressions = statements(src);
+    let outputs = [
+        (
+            "eval",
+            generate_repl_expressions(&expressions, "repl_producer")
+                .unwrap_or_else(|e| panic!("{src}: {e:?}")),
+        ),
+        (
+            "trace",
+            generate_repl_expressions_traced(&expressions, src, "repl_producer", HashMap::new())
+                .unwrap_or_else(|e| panic!("{src}: {e:?}")),
+        ),
+    ];
+    if compile {
+        for (entry, code) in &outputs {
+            assert_compiles(&format!("{name}_{entry}"), code);
+        }
+    }
+    outputs
+}
+
+/// BT-3800 and the ADR 0131 §2 REPL invariant: a construct the REPL threads
+/// through its bindings map (a loop or fold whose body writes a binding)
+/// always compiles to a `{Value, Bindings}` tuple, and a tuple that is the
+/// whole value of an assignment in a multi-statement input is always
+/// unpacked -- as an intermediate and as the last statement, with and without
+/// a producer in the construct's receiver, in the eval and the trace module.
+/// A construct that does not set `repl_loop_mutated` shows up here as a
+/// missing `_AssignTuple` (and, at a producer site, a missing carrier).
+#[test]
+fn every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked() {
+    let mut compared = 0;
+    for (c, template) in CONSTRUCTS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            let value = construct(template, *receiver);
+            for (k, src) in [
+                format!("t := 0\nu := 0\nr := {value}\n#[r, t, u]"),
+                format!("t := 0\nu := 0\nr := {value}\nr := r\nr"),
+                format!("t := 0\nu := 0\nr := {value}"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let expected = expected_producers(&statements(&src));
+                for (entry, code) in both_outputs(&format!("fold_{c}_{r}_{k}"), &src, k == 0) {
+                    assert!(
+                        code.contains("_AssignTuple"),
+                        "{entry}: the whole-value construct's tuple is not unpacked\n{src}\n{code}"
+                    );
+                    assert_eq!(
+                        carriers(&code),
+                        expected,
+                        "{entry}: one carrier per producer expected\n{src}\n{code}"
+                    );
+                    compared += 1;
+                }
+            }
+            // The same construct as an operand (where it is a producer site:
+            // `do:` and its like are not, and the Phase 0 check rejects them
+            // there), and as a statement of its own: not an assignment's whole
+            // value, so nothing to unpack there.
+            for (k, src) in [
+                format!("t := 0\nu := 0\nr := ({value}) size\nr"),
+                format!("t := 0\nu := 0\n{value}\nt"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if k == 0 && producer_body_block(&statements(&value)[0]).is_none() {
+                    continue;
+                }
+                for (entry, code) in both_outputs(&format!("operand_{c}_{r}_{k}"), &src, false) {
+                    assert!(
+                        !code.contains("_AssignTuple"),
+                        "{entry}: not an assignment's whole value\n{src}\n{code}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(compared >= 60, "only {compared} outputs compared");
+}
+
+/// A fold that writes no binding is a plain value: no tuple, nothing to
+/// unpack, and the output of an input that answered correctly is unchanged.
+#[test]
+fn a_fold_that_writes_no_binding_is_not_unpacked() {
+    for src in [
+        "t := 0\nr := #(1, 2) inject: 0 into: [:a :x | a + x]\n#[r, t]",
+        "t := 0\nr := #(1, 2) collect: [:x | x + 1]\nr",
+        "t := 0\nr := 5\ns := r + 1\n#[r, s, t]",
+        "t := 0\nr := true ifTrue: [5] ifFalse: [6]\nr",
+        "t := 0\nr := [5] value\n#[r, t]",
+    ] {
+        for (entry, code) in both_outputs("plain", src, true) {
+            assert!(
+                !code.contains("_AssignTuple"),
+                "{entry}: a plain value is not unpacked\n{src}\n{code}"
+            );
+        }
+    }
+}
