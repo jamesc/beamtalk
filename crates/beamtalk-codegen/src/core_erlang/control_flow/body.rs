@@ -263,7 +263,7 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
-        self.with_body_producer_sites(&filtered_body, |this| {
+        self.with_body_producer_sites(&filtered_body, false, |this| {
             this.lower_letrec_body_statements(&filtered_body, plan, frame)
         })
     }
@@ -630,7 +630,7 @@ impl CoreErlangGenerator {
     ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
         self.with_rebind_frame(plan.rebind_frame(frame), |this| {
-            this.with_body_producer_sites(&filtered_body, |this| {
+            this.with_body_producer_sites(&filtered_body, true, |this| {
                 this.lower_foldl_body_in_sites(body, plan, kind, frame)
             })
         })

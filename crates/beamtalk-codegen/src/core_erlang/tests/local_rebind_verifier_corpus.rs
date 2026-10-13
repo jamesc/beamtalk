@@ -109,6 +109,14 @@ fn loop_programs() -> Vec<String> {
             "Object subclass: LoopCorpusClass\n  class go =>\n{body}"
         ));
         out.push(format!("Value subclass: LoopCorpusValue\n  go =>\n{body}"));
+        // An actor fold frame (`do:`) does not lower a value-bearing site
+        // through the producer (`is_actor_fold_value_site`: the carrier does
+        // not fit its tuple accumulator), so this operand-position probe has
+        // no producer to break there. Its statement-position producers are
+        // covered by the agreement test.
+        if frame.starts_with("#(1, 2) do:") {
+            continue;
+        }
         out.push(format!(
             "Actor subclass: LoopCorpusActor\n  state: n = 0\n\n  go =>\n{body}"
         ));

@@ -596,6 +596,22 @@ reports the same message at the same span. No operation is surface-specific.
   `sealed` in the same module: codegen's class pre-scan reads only the methods
   in the class body.
 - Both are errors with no `[diagnostics]` key and no `@expect` category.
+- **`do:` as a producer (ADR 0131 Phase 2c, BT-3796).** `do:` joined the
+  loop-and-fold producer table (`producer_body_arg_index`), so a `do:` whose
+  block writes an outer local answers `nil` and keeps its writes in every
+  operand position of a method body (`r := xs do: [...]`, `#[xs do: [...], t]`,
+  `^xs do: [...]`), nested in a loop or fold body, and at a REPL operand site
+  (`(xs do: [:x | t := t + x]) isNil`); those inputs no longer report an
+  `UnmigratedLocalThreading` error on any surface. The verdict is the analyser's,
+  so CLI/LSP/MCP diagnostics and the REPL eval change together; the REPL display
+  of the answers is unchanged. In an actor method a loop or fold body's
+  value-bearing producer site stays an error under a fold frame
+  (`is_loop_body_producer_site` in `beamtalk-core`, read by the check and by
+  codegen). One shape goes the other way: `^xs do: [...]` inside an arm,
+  handler or closure (`c ifTrue: [^xs do: [...]]`) in a class or value-type
+  method now STARTS reporting `UnmigratedLocalThreading` on every surface
+  (CLI, REPL, LSP, MCP); it used to compile and answer `nil`. This is a
+  temporary narrowing, tracked by BT-3813.
 - **REPL root (ADR 0131 Phase 2d, BT-3795).** A loop or fold nested in an
   operand of a REPL input (`(xs collect: [:x | t := t + x]) size`,
   `r := t + (xs inject: ...)`) is now a local-threading producer: it answers

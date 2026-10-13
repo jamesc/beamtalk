@@ -20,10 +20,10 @@ TestCase subclass: Adr0131LoopBodyProducerTest
     self assert: #[Adr0131LoopBodyProducerClass whileFalseInToDo, (Adr0131LoopBodyProducerValue new) whileFalseInToDo, (Adr0131LoopBodyProducerActor spawn) whileFalseInToDo] equals: #[3, 3, 3]
 
   testDoInToDo =>
-    self assert: #[(Adr0131LoopBodyProducerActor spawn) doInToDo] equals: #[6]
+    self assert: #[Adr0131LoopBodyProducerClass doInToDo, (Adr0131LoopBodyProducerValue new) doInToDo, (Adr0131LoopBodyProducerActor spawn) doInToDo] equals: #[6, 6, 6]
 
   testDoInDo =>
-    self assert: #[Adr0131LoopBodyProducerClass doInDo, (Adr0131LoopBodyProducerValue new) doInDo] equals: #[6, 6]
+    self assert: #[Adr0131LoopBodyProducerClass doInDo, (Adr0131LoopBodyProducerValue new) doInDo, (Adr0131LoopBodyProducerActor spawn) doInDo] equals: #[6, 6, 6]
 
   testCollectInWhile =>
     self assert: #[Adr0131LoopBodyProducerClass collectInWhile, (Adr0131LoopBodyProducerValue new) collectInWhile, (Adr0131LoopBodyProducerActor spawn) collectInWhile] equals: #[6, 6, 6]
@@ -44,7 +44,7 @@ TestCase subclass: Adr0131LoopBodyProducerTest
     self assert: #[Adr0131LoopBodyProducerClass assignInjectInDo, (Adr0131LoopBodyProducerValue new) assignInjectInDo] equals: #[#[6, 6], #[6, 6]]
 
   testTwoLocals =>
-    self assert: #[(Adr0131LoopBodyProducerActor spawn) twoLocals] equals: #[#[6, 6]]
+    self assert: #[Adr0131LoopBodyProducerClass twoLocals, (Adr0131LoopBodyProducerValue new) twoLocals, (Adr0131LoopBodyProducerActor spawn) twoLocals] equals: #[#[6, 6], #[6, 6], #[6, 6]]
 
   testLocalInOuterOnly =>
     self assert: #[Adr0131LoopBodyProducerClass localInOuterOnly, (Adr0131LoopBodyProducerValue new) localInOuterOnly, (Adr0131LoopBodyProducerActor spawn) localInOuterOnly] equals: #[6, 6, 6]
@@ -56,7 +56,7 @@ TestCase subclass: Adr0131LoopBodyProducerTest
     self assert: #[Adr0131LoopBodyProducerClass selectInDo, (Adr0131LoopBodyProducerValue new) selectInDo, (Adr0131LoopBodyProducerActor spawn) selectInDo] equals: #[6, 6, 6]
 
   testThreeDeep =>
-    self assert: #[(Adr0131LoopBodyProducerActor spawn) threeDeep] equals: #[8]
+    self assert: #[Adr0131LoopBodyProducerClass threeDeep, (Adr0131LoopBodyProducerValue new) threeDeep, (Adr0131LoopBodyProducerActor spawn) threeDeep] equals: #[8, 8, 8]
 
   testWhileInWhile =>
     self assert: #[Adr0131LoopBodyProducerClass whileInWhile, (Adr0131LoopBodyProducerValue new) whileInWhile, (Adr0131LoopBodyProducerActor spawn) whileInWhile] equals: #[6, 6, 6]
@@ -87,3 +87,56 @@ TestCase subclass: Adr0131LoopBodyProducerTest
 
   testAssignInjectInToDo =>
     self assert: #[Adr0131LoopBodyProducerClass assignInjectInToDo, (Adr0131LoopBodyProducerValue new) assignInjectInToDo, (Adr0131LoopBodyProducerActor spawn) assignInjectInToDo] equals: #[12, 12, 12]
+
+  // BT-3796 (ADR 0131 Phase 2c): `do:` is a loop-body producer kind.
+  testDoInWhile =>
+    self assert: #[Adr0131LoopBodyProducerClass doInWhile, (Adr0131LoopBodyProducerValue new) doInWhile, (Adr0131LoopBodyProducerActor spawn) doInWhile] equals: #[6, 6, 6]
+
+  testDoInCollectLast =>
+    self assert: #[Adr0131LoopBodyProducerClass doInCollectLast, (Adr0131LoopBodyProducerValue new) doInCollectLast, (Adr0131LoopBodyProducerActor spawn) doInCollectLast] equals: #[#[2, 6], #[2, 6], #[2, 6]]
+
+  testInjectLastValue =>
+    self assert: #[Adr0131LoopBodyProducerClass injectLastValue, (Adr0131LoopBodyProducerValue new) injectLastValue, (Adr0131LoopBodyProducerActor spawn) injectLastValue] equals: #[#[6, 6], #[6, 6], #[6, 6]]
+
+  testDoInToDoStateful =>
+    self assert: #[Adr0131LoopBodyProducerClass doInToDoStateful, (Adr0131LoopBodyProducerValue new) doInToDoStateful, (Adr0131LoopBodyProducerActor spawn) doInToDoStateful] equals: #[6, 6, 6]
+
+  // The outer local the body reassigns before the nested `do:`
+  // (`body_introduced_locals`).
+  testOuterLocalReassignedFirst =>
+    self assert: #[Adr0131LoopBodyProducerClass outerLocalReassignedFirst, (Adr0131LoopBodyProducerValue new) outerLocalReassignedFirst, (Adr0131LoopBodyProducerActor spawn) outerLocalReassignedFirst] equals: #[3, 3, 3]
+
+  // Two-level frames (a letrec loop inside a fold, a letrec loop inside a
+  // `collect:`) with a value-bearing producer: 4 inner iterations of
+  // `t := t + 3 + 3`.
+  testFoldInLetrecInFold =>
+    self assert: #[Adr0131LoopBodyProducerClass foldInLetrecInFold, (Adr0131LoopBodyProducerValue new) foldInLetrecInFold, (Adr0131LoopBodyProducerActor spawn) foldInLetrecInFold] equals: #[24, 24, 24]
+
+  testFoldInLetrecInCollect =>
+    self assert: #[Adr0131LoopBodyProducerClass foldInLetrecInCollect, (Adr0131LoopBodyProducerValue new) foldInLetrecInCollect, (Adr0131LoopBodyProducerActor spawn) foldInLetrecInCollect] equals: #[24, 24, 24]
+
+  // The `state_chain` branch of the producer lowering: a producer nested in
+  // an actor loop frame next to a field write or a self-send.
+  testStateChainFieldWrite =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainFieldWrite equals: #[4, 4]
+
+  testStateChainSelfSend =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainSelfSend equals: #[4, 0]
+
+  testStateChainSelfSendWritesField =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainSelfSendWritesField equals: #[4, 4]
+
+  testStateChainToDoOperand =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainToDoOperand equals: #[4, 4, #[nil, 4]]
+
+  testStateChainTimesAssigned =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainTimesAssigned equals: #[6, 4, nil]
+
+  testStateChainDirect =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) stateChainDirect equals: #[6, 4]
+
+  testStateChainDoOverParameter =>
+    self assert: ((Adr0131LoopBodyProducerActor spawn) stateChainDoOverParameter: #(1, 2)) equals: #[6, 9]
+
+  testArmLoopInFoldStatement =>
+    self assert: #[Adr0131LoopBodyProducerClass armLoopInFoldStatement, (Adr0131LoopBodyProducerValue new) armLoopInFoldStatement] equals: #[4, 4]

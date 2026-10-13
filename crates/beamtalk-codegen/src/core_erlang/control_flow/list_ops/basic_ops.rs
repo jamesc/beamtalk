@@ -4,7 +4,7 @@
 //! Basic list iteration operations: `do:` and `collect:`.
 
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -114,21 +114,6 @@ impl CoreErlangGenerator {
                     ") in ",
                     extract_doc,
                 ]
-            } else if matches!(plan.context, CodeGenContext::ValueType) {
-                // ValueType context: skip StateAcc repack (no actor State to pack into).
-                docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(safe_list_var),
-                    ") in ",
-                    extract_doc,
-                    "'nil'",
-                ]
             } else {
                 // Re-pack updated locals into StateAcc so the outer method-body
                 // threading (`maps:get` in `lower_body_exprs_with_reply`) can extract them.
@@ -194,12 +179,7 @@ impl CoreErlangGenerator {
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
-        // Value types return 'nil' (no state); actors return {'nil', FinalState}.
-        if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
-            post_docs.push(Document::Str("'nil'"));
-        } else {
-            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
-        }
+        post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         docs.push(Document::Vec(post_docs));
 
         Ok(Document::Vec(docs))

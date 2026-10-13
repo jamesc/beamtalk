@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3796 (ADR 0131 Phase 2c): `do:` is a local-threading producer
+// (`producer_body_arg_index`), so at an operand site of a REPL input (the sites
+// of `repl_operand_sites`, ADR 0131 Phase 2d) it answers `nil` and keeps the
+// writes its block made: the REPL threads its bindings map, the producer
+// adopts the bindings the construct returns, and every write is visible to
+// what is evaluated after it, in source order. A `do:` that is the statement
+// or an assignment's whole value keeps the REPL's own lowering.
+
+t := 0
+// => 0
+
+// A `do:` as the receiver of a message.
+(#(1, 2) do: [:x | t := t + x]) isNil
+// => true
+
+t
+// => 3
+
+// A `do:` as an element of a literal, read before and after.
+#[t, #(1, 2) do: [:x | t := t + x], t]
+// => #[3, nil, 6]
+
+t
+// => 6
+
+// Two `do:` in one expression, in source order.
+#[#(1, 2) do: [:x | t := t + x], #(3) do: [:x | t := t + x], t]
+// => #[nil, nil, 12]
+
+// A `do:` as a keyword argument.
+t := 0
+// => 0
+
+(t max: (#(1, 2) do: [:x | t := t + x]) isNil printString size)
+// => 4
+
+t
+// => 3
+
+// The statement and the whole value of an assignment keep their lowering.
+#(1, 2) do: [:x | t := t + x]
+// => nil
+
+t
+// => 6
+
+r := #(1, 2) do: [:x | t := t + x]
+// => nil
+
+t
+// => 9
+
+// A nested `do:` writing two locals.
+u := 0
+// => 0
+
+#[#(1, 2) do: [:x | t := t + x. u := u + 10], t, u]
+// => #[nil, 12, 20]

@@ -1572,11 +1572,92 @@ pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
 /// ADR 0131 Phase 2b (BT-3793/BT-3797): whether `site`, one of a loop or
 /// fold body statement's [`loop_body_producer_sites`], carries a value (an
 /// assignment's value or an operand) rather than being the statement
-/// itself. The one rule both the Phase 0 check and the agreement test read
-/// for what an actor body does not lower through the producer.
+/// itself.
 #[must_use]
 pub fn is_value_bearing_site(statement: Span, site: &Expression) -> bool {
     site.unwrap_parens().span() != statement
+}
+
+/// What the loop-body site rule ([`is_loop_body_producer_site`]) reads off the
+/// current statement of a loop or fold body and the frames around it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LoopBodyContext {
+    /// The statement, without parentheses.
+    pub statement: Span,
+    /// The statement's whole value: the value of `x := V` or `^V`, without
+    /// parentheses, else the statement itself.
+    pub value: Span,
+    /// Whether the innermost enclosing frame is a fold's
+    /// ([`is_fold_frame_body`]).
+    pub innermost_fold: bool,
+    /// Whether an enclosing frame other than the innermost one is a fold's.
+    pub outer_fold: bool,
+    /// Whether the method is an actor instance method.
+    pub in_actor: bool,
+}
+
+impl LoopBodyContext {
+    /// The context of the statement `stmt` of a frame body.
+    #[must_use]
+    pub fn new(stmt: &Expression, innermost_fold: bool, outer_fold: bool, in_actor: bool) -> Self {
+        let statement = stmt.unwrap_parens();
+        let value = match statement {
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                value.unwrap_parens().span()
+            }
+            other => other.span(),
+        };
+        Self {
+            statement: statement.span(),
+            value,
+            innermost_fold,
+            outer_fold,
+            in_actor,
+        }
+    }
+}
+
+/// ADR 0131 Phase 2c (BT-3796, from the BT-3793/BT-3797 reviews): whether
+/// `site`, one of the statement's [`loop_body_producer_sites`], is a
+/// value-bearing site that an actor method's fold frame does not lower
+/// through the producer.
+///
+/// An actor fold's accumulator is a tuple the construct's carrier does not
+/// fit: `r := xs inject: 0 into: [...]` in a `do:` body compiled and then
+/// crashed (BT-3797). So every value-bearing site (an assignment's value or an
+/// operand, [`is_value_bearing_site`]) of a statement directly in a fold body
+/// is out. Under a letrec loop nested in a fold (BT-3796 probe) the whole value
+/// of an assignment is lowered, but an operand of a larger expression
+/// (`#[xs do: [...], t]`, `(xs do: [...]) printString`) wrote nothing back or
+/// crashed, so operands are out under *any* enclosing fold frame. A letrec
+/// loop frame alone lowers every value-bearing site.
+#[must_use]
+pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
+    if !ctx.in_actor || !is_value_bearing_site(ctx.statement, site) {
+        return false;
+    }
+    ctx.innermost_fold || (ctx.outer_fold && site.unwrap_parens().span() != ctx.value)
+}
+
+/// ADR 0131 Phase 2b/2c (BT-3796): whether `site`, one of the statement's
+/// [`loop_body_producer_sites`], is lowered as a local-threading producer. The
+/// one narrowing of that site list, read by the Phase 0 check, by codegen's
+/// `with_body_producer_sites` and by the agreement test, so the diagnostic, the
+/// lowering and the test's expectation cannot disagree:
+///
+/// - `detect:`/`detect:ifNone:` are not loop-body producers: a write in the
+///   search block is dropped by the `collect:` and nested `do:` frames around
+///   it, and in an actor by every frame (measured, BT-3793). They keep their
+///   statement-position rows; the short-circuit question is BT-3805.
+/// - [`is_actor_fold_value_site`].
+#[must_use]
+pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
+    if let Expression::MessageSend { selector, .. } = site.unwrap_parens() {
+        if matches!(selector.name().as_str(), "detect:" | "detect:ifNone:") {
+            return false;
+        }
+    }
+    !is_actor_fold_value_site(site, ctx)
 }
 
 /// Whether the literal block `block`, an argument of the send `expr`, is the

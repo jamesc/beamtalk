@@ -1,0 +1,946 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3796 (ADR 0131 Phase 2c): the loop-body producer matrix, one method per
+// cell of inner construct x enclosing frames x statement shape x write
+// variant, in the class-method, value-type and actor column. Every method sums into the outer local `t`
+// inside the inner construct, which sits in the body of the frame (a
+// `to:do:`/`timesRepeat:`/`whileTrue:` loop, a `do:`/`collect:`/`inject:into:`
+// fold, or two or three of them nested) as a bare statement, an assignment's
+// value, a literal element or after a read of `t`; the `plain`, `selfsend`
+// and `cvar` variants add a self-send or a field/class-variable write inside
+// the construct. A cell Phase 0 rejects (an actor fold frame's value-bearing
+// sites) has no method. The expected answers are in
+// stdlib/test/adr0131loop_matrix_test.bt.
+
+TestCase subclass: Adr0131LoopMatrixTest
+
+  testClassDoToDoBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_toDo_bare_plain equals: #[6, 0, 0]
+
+  testClassDoToDoBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_toDo_bare_cvar equals: #[6, 0, 0, 4]
+
+  testClassDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_toDo_assign_plain equals: #[6, nil, 0]
+
+  testClassDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_toDo_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_toDo_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassDoToDoAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_toDo_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testClassDoToDoAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_toDo_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testClassDoDoBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_do_bare_plain equals: #[6, 0, 0]
+
+  testClassDoDoBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_do_bare_cvar equals: #[6, 0, 0, 4]
+
+  testClassDoDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_do_assign_plain equals: #[6, nil, 0]
+
+  testClassDoDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_do_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassDoDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_do_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassDoDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_do_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassDoDoAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_do_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testClassDoDoAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_do_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testClassDoTimesBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_times_bare_plain equals: #[6, 0, 0]
+
+  testClassDoTimesBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_times_bare_cvar equals: #[6, 0, 0, 4]
+
+  testClassDoTimesAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_times_assign_plain equals: #[6, nil, 0]
+
+  testClassDoTimesAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_times_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassDoTimesLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_times_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassDoTimesLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_times_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassDoTimesAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_times_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testClassDoTimesAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_times_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testClassDoWhileBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_while_bare_plain equals: #[9, 0, 3]
+
+  testClassDoWhileBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_while_bare_cvar equals: #[9, 0, 3, 6]
+
+  testClassDoWhileAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_while_assign_plain equals: #[9, nil, 3]
+
+  testClassDoWhileAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_while_assign_cvar equals: #[9, nil, 3, 6]
+
+  testClassDoWhileLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testClassDoWhileLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_while_literal_cvar equals: #[9, #[nil, 9], 3, 6]
+
+  testClassDoWhileAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_while_afterRead_plain equals: #[9, #[6, nil, 9], 3]
+
+  testClassDoWhileAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_while_afterRead_cvar equals: #[9, #[6, nil, 9], 3, 6]
+
+  testClassDoCollectBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_collect_bare_plain equals: #[6, 0, 0]
+
+  testClassDoCollectBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_collect_bare_cvar equals: #[6, 0, 0, 4]
+
+  testClassDoCollectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_collect_assign_plain equals: #[6, nil, 0]
+
+  testClassDoCollectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_collect_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassDoCollectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_collect_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassDoCollectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_collect_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassDoCollectAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_collect_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testClassDoCollectAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_collect_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testClassDoInjectBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_inject_bare_plain equals: #[6, 0, 0]
+
+  testClassDoInjectBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_inject_bare_cvar equals: #[6, 0, 0, 4]
+
+  testClassDoInjectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_inject_assign_plain equals: #[6, nil, 0]
+
+  testClassDoInjectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_inject_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassDoInjectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_inject_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassDoInjectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_inject_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassDoInjectAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_inject_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testClassDoInjectAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_inject_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testClassDoDoDoBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_doDo_bare_plain equals: #[12, 0, 0]
+
+  testClassDoDoDoBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_doDo_bare_cvar equals: #[12, 0, 0, 8]
+
+  testClassDoDoDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_doDo_assign_plain equals: #[12, nil, 0]
+
+  testClassDoDoDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_doDo_assign_cvar equals: #[12, nil, 0, 8]
+
+  testClassDoDoDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_doDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testClassDoDoDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_doDo_literal_cvar equals: #[12, #[nil, 12], 0, 8]
+
+  testClassDoDoDoAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_doDo_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testClassDoDoDoAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_doDo_afterRead_cvar equals: #[12, #[9, nil, 12], 0, 8]
+
+  testClassDoDoToDoBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_bare_plain equals: #[12, 0, 0]
+
+  testClassDoDoToDoBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_bare_cvar equals: #[12, 0, 0, 8]
+
+  testClassDoDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testClassDoDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_assign_cvar equals: #[12, nil, 0, 8]
+
+  testClassDoDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testClassDoDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_literal_cvar equals: #[12, #[nil, 12], 0, 8]
+
+  testClassDoDoToDoAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testClassDoDoToDoAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_doToDo_afterRead_cvar equals: #[12, #[9, nil, 12], 0, 8]
+
+  testClassDoCollectTimesBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_bare_plain equals: #[12, 0, 0]
+
+  testClassDoCollectTimesBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_bare_cvar equals: #[12, 0, 0, 8]
+
+  testClassDoCollectTimesAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_assign_plain equals: #[12, nil, 0]
+
+  testClassDoCollectTimesAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_assign_cvar equals: #[12, nil, 0, 8]
+
+  testClassDoCollectTimesLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testClassDoCollectTimesLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_literal_cvar equals: #[12, #[nil, 12], 0, 8]
+
+  testClassDoCollectTimesAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testClassDoCollectTimesAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_collectTimes_afterRead_cvar equals: #[12, #[9, nil, 12], 0, 8]
+
+  testClassDoThreeDeepBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_bare_plain equals: #[24, 0, 0]
+
+  testClassDoThreeDeepBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_bare_cvar equals: #[24, 0, 0, 16]
+
+  testClassDoThreeDeepAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_assign_plain equals: #[24, nil, 0]
+
+  testClassDoThreeDeepAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_assign_cvar equals: #[24, nil, 0, 16]
+
+  testClassDoThreeDeepLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_literal_plain equals: #[24, #[nil, 24], 0]
+
+  testClassDoThreeDeepLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_literal_cvar equals: #[24, #[nil, 24], 0, 16]
+
+  testClassDoThreeDeepAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_afterRead_plain equals: #[24, #[21, nil, 24], 0]
+
+  testClassDoThreeDeepAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_threeDeep_afterRead_cvar equals: #[24, #[21, nil, 24], 0, 16]
+
+  testClassDoWhileDoBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_bare_plain equals: #[12, 0, 2]
+
+  testClassDoWhileDoBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_bare_cvar equals: #[12, 0, 2, 8]
+
+  testClassDoWhileDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_assign_plain equals: #[12, nil, 2]
+
+  testClassDoWhileDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_assign_cvar equals: #[12, nil, 2, 8]
+
+  testClassDoWhileDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_literal_plain equals: #[12, #[nil, 12], 2]
+
+  testClassDoWhileDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_literal_cvar equals: #[12, #[nil, 12], 2, 8]
+
+  testClassDoWhileDoAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_afterRead_plain equals: #[12, #[9, nil, 12], 2]
+
+  testClassDoWhileDoAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileDo_afterRead_cvar equals: #[12, #[9, nil, 12], 2, 8]
+
+  testClassDoWhileInjectBarePlain =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_bare_plain equals: #[12, 0, 2]
+
+  testClassDoWhileInjectBareCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_bare_cvar equals: #[12, 0, 2, 8]
+
+  testClassDoWhileInjectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_assign_plain equals: #[12, nil, 2]
+
+  testClassDoWhileInjectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_assign_cvar equals: #[12, nil, 2, 8]
+
+  testClassDoWhileInjectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_literal_plain equals: #[12, #[nil, 12], 2]
+
+  testClassDoWhileInjectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_literal_cvar equals: #[12, #[nil, 12], 2, 8]
+
+  testClassDoWhileInjectAfterReadPlain =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_afterRead_plain equals: #[12, #[9, nil, 12], 2]
+
+  testClassDoWhileInjectAfterReadCvar =>
+    self assert: Adr0131LoopMatrixClass do_whileInject_afterRead_cvar equals: #[12, #[9, nil, 12], 2, 8]
+
+  testClassDoToDoAssignSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_toDo_assign_selfsend equals: #[6, nil, 0]
+
+  testClassDoToDoLiteralSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_toDo_literal_selfsend equals: #[6, #[nil, 6], 0]
+
+  testClassDoDoAssignSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_do_assign_selfsend equals: #[6, nil, 0]
+
+  testClassDoDoLiteralSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_do_literal_selfsend equals: #[6, #[nil, 6], 0]
+
+  testClassDoWhileAssignSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_while_assign_selfsend equals: #[9, nil, 3]
+
+  testClassDoWhileLiteralSelfsend =>
+    self assert: Adr0131LoopMatrixClass do_while_literal_selfsend equals: #[9, #[nil, 9], 3]
+
+  testClassInjectToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass inject_toDo_assign_plain equals: #[6, 0, 0]
+
+  testClassInjectToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass inject_toDo_assign_cvar equals: #[6, 0, 0, 4]
+
+  testClassInjectToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass inject_toDo_literal_plain equals: #[6, #[0, 6], 0]
+
+  testClassInjectToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass inject_toDo_literal_cvar equals: #[6, #[0, 6], 0, 4]
+
+  testClassInjectWhileAssignPlain =>
+    self assert: Adr0131LoopMatrixClass inject_while_assign_plain equals: #[9, 0, 3]
+
+  testClassInjectWhileAssignCvar =>
+    self assert: Adr0131LoopMatrixClass inject_while_assign_cvar equals: #[9, 0, 3, 6]
+
+  testClassInjectWhileLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass inject_while_literal_plain equals: #[9, #[0, 9], 3]
+
+  testClassInjectWhileLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass inject_while_literal_cvar equals: #[9, #[0, 9], 3, 6]
+
+  testClassInjectDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass inject_doToDo_assign_plain equals: #[12, 0, 0]
+
+  testClassInjectDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass inject_doToDo_assign_cvar equals: #[12, 0, 0, 8]
+
+  testClassInjectDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass inject_doToDo_literal_plain equals: #[12, #[0, 12], 0]
+
+  testClassInjectDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass inject_doToDo_literal_cvar equals: #[12, #[0, 12], 0, 8]
+
+  testClassInjectCollectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass inject_collect_assign_plain equals: #[6, 0, 0]
+
+  testClassInjectCollectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass inject_collect_assign_cvar equals: #[6, 0, 0, 4]
+
+  testClassInjectCollectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass inject_collect_literal_plain equals: #[6, #[0, 6], 0]
+
+  testClassInjectCollectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass inject_collect_literal_cvar equals: #[6, #[0, 6], 0, 4]
+
+  testClassTimesToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass times_toDo_assign_plain equals: #[4, nil, 0]
+
+  testClassTimesToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass times_toDo_assign_cvar equals: #[4, nil, 0, 4]
+
+  testClassTimesToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass times_toDo_literal_plain equals: #[4, #[nil, 4], 0]
+
+  testClassTimesToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass times_toDo_literal_cvar equals: #[4, #[nil, 4], 0, 4]
+
+  testClassTimesWhileAssignPlain =>
+    self assert: Adr0131LoopMatrixClass times_while_assign_plain equals: #[6, nil, 3]
+
+  testClassTimesWhileAssignCvar =>
+    self assert: Adr0131LoopMatrixClass times_while_assign_cvar equals: #[6, nil, 3, 6]
+
+  testClassTimesWhileLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass times_while_literal_plain equals: #[6, #[nil, 6], 3]
+
+  testClassTimesWhileLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass times_while_literal_cvar equals: #[6, #[nil, 6], 3, 6]
+
+  testClassTimesDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass times_doToDo_assign_plain equals: #[8, nil, 0]
+
+  testClassTimesDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass times_doToDo_assign_cvar equals: #[8, nil, 0, 8]
+
+  testClassTimesDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass times_doToDo_literal_plain equals: #[8, #[nil, 8], 0]
+
+  testClassTimesDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass times_doToDo_literal_cvar equals: #[8, #[nil, 8], 0, 8]
+
+  testClassTimesCollectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass times_collect_assign_plain equals: #[4, nil, 0]
+
+  testClassTimesCollectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass times_collect_assign_cvar equals: #[4, nil, 0, 4]
+
+  testClassTimesCollectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass times_collect_literal_plain equals: #[4, #[nil, 4], 0]
+
+  testClassTimesCollectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass times_collect_literal_cvar equals: #[4, #[nil, 4], 0, 4]
+
+  testClassToDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_toDo_assign_plain equals: #[6, nil, 0]
+
+  testClassToDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_toDo_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassToDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassToDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_toDo_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testClassToDoWhileAssignPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_while_assign_plain equals: #[9, nil, 3]
+
+  testClassToDoWhileAssignCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_while_assign_cvar equals: #[9, nil, 3, 6]
+
+  testClassToDoWhileLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testClassToDoWhileLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_while_literal_cvar equals: #[9, #[nil, 9], 3, 6]
+
+  testClassToDoDoToDoAssignPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testClassToDoDoToDoAssignCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_doToDo_assign_cvar equals: #[12, nil, 0, 8]
+
+  testClassToDoDoToDoLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_doToDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testClassToDoDoToDoLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_doToDo_literal_cvar equals: #[12, #[nil, 12], 0, 8]
+
+  testClassToDoCollectAssignPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_collect_assign_plain equals: #[6, nil, 0]
+
+  testClassToDoCollectAssignCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_collect_assign_cvar equals: #[6, nil, 0, 4]
+
+  testClassToDoCollectLiteralPlain =>
+    self assert: Adr0131LoopMatrixClass toDo_collect_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testClassToDoCollectLiteralCvar =>
+    self assert: Adr0131LoopMatrixClass toDo_collect_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testValueDoToDoBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_bare_plain equals: #[6, 0, 0]
+
+  testValueDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_assign_plain equals: #[6, nil, 0]
+
+  testValueDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueDoToDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testValueDoDoBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_bare_plain equals: #[6, 0, 0]
+
+  testValueDoDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_assign_plain equals: #[6, nil, 0]
+
+  testValueDoDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueDoDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testValueDoTimesBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_times_bare_plain equals: #[6, 0, 0]
+
+  testValueDoTimesAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_times_assign_plain equals: #[6, nil, 0]
+
+  testValueDoTimesLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_times_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueDoTimesAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_times_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testValueDoWhileBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_bare_plain equals: #[9, 0, 3]
+
+  testValueDoWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_assign_plain equals: #[9, nil, 3]
+
+  testValueDoWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testValueDoWhileAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_afterRead_plain equals: #[9, #[6, nil, 9], 3]
+
+  testValueDoCollectBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collect_bare_plain equals: #[6, 0, 0]
+
+  testValueDoCollectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collect_assign_plain equals: #[6, nil, 0]
+
+  testValueDoCollectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collect_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueDoCollectAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collect_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testValueDoInjectBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_inject_bare_plain equals: #[6, 0, 0]
+
+  testValueDoInjectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_inject_assign_plain equals: #[6, nil, 0]
+
+  testValueDoInjectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_inject_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueDoInjectAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_inject_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testValueDoDoDoBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doDo_bare_plain equals: #[12, 0, 0]
+
+  testValueDoDoDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doDo_assign_plain equals: #[12, nil, 0]
+
+  testValueDoDoDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testValueDoDoDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doDo_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testValueDoDoToDoBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doToDo_bare_plain equals: #[12, 0, 0]
+
+  testValueDoDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testValueDoDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doToDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testValueDoDoToDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_doToDo_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testValueDoCollectTimesBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collectTimes_bare_plain equals: #[12, 0, 0]
+
+  testValueDoCollectTimesAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collectTimes_assign_plain equals: #[12, nil, 0]
+
+  testValueDoCollectTimesLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collectTimes_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testValueDoCollectTimesAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_collectTimes_afterRead_plain equals: #[12, #[9, nil, 12], 0]
+
+  testValueDoThreeDeepBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_threeDeep_bare_plain equals: #[24, 0, 0]
+
+  testValueDoThreeDeepAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_threeDeep_assign_plain equals: #[24, nil, 0]
+
+  testValueDoThreeDeepLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_threeDeep_literal_plain equals: #[24, #[nil, 24], 0]
+
+  testValueDoThreeDeepAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_threeDeep_afterRead_plain equals: #[24, #[21, nil, 24], 0]
+
+  testValueDoWhileDoBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileDo_bare_plain equals: #[12, 0, 2]
+
+  testValueDoWhileDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileDo_assign_plain equals: #[12, nil, 2]
+
+  testValueDoWhileDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileDo_literal_plain equals: #[12, #[nil, 12], 2]
+
+  testValueDoWhileDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileDo_afterRead_plain equals: #[12, #[9, nil, 12], 2]
+
+  testValueDoWhileInjectBarePlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileInject_bare_plain equals: #[12, 0, 2]
+
+  testValueDoWhileInjectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileInject_assign_plain equals: #[12, nil, 2]
+
+  testValueDoWhileInjectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileInject_literal_plain equals: #[12, #[nil, 12], 2]
+
+  testValueDoWhileInjectAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixValue new) do_whileInject_afterRead_plain equals: #[12, #[9, nil, 12], 2]
+
+  testValueDoToDoAssignSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_assign_selfsend equals: #[6, nil, 0]
+
+  testValueDoToDoLiteralSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_toDo_literal_selfsend equals: #[6, #[nil, 6], 0]
+
+  testValueDoDoAssignSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_assign_selfsend equals: #[6, nil, 0]
+
+  testValueDoDoLiteralSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_do_literal_selfsend equals: #[6, #[nil, 6], 0]
+
+  testValueDoWhileAssignSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_assign_selfsend equals: #[9, nil, 3]
+
+  testValueDoWhileLiteralSelfsend =>
+    self assert: (Adr0131LoopMatrixValue new) do_while_literal_selfsend equals: #[9, #[nil, 9], 3]
+
+  testValueInjectToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_toDo_assign_plain equals: #[6, 0, 0]
+
+  testValueInjectToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_toDo_literal_plain equals: #[6, #[0, 6], 0]
+
+  testValueInjectWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_while_assign_plain equals: #[9, 0, 3]
+
+  testValueInjectWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_while_literal_plain equals: #[9, #[0, 9], 3]
+
+  testValueInjectDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_doToDo_assign_plain equals: #[12, 0, 0]
+
+  testValueInjectDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_doToDo_literal_plain equals: #[12, #[0, 12], 0]
+
+  testValueInjectCollectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_collect_assign_plain equals: #[6, 0, 0]
+
+  testValueInjectCollectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) inject_collect_literal_plain equals: #[6, #[0, 6], 0]
+
+  testValueTimesToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_toDo_assign_plain equals: #[4, nil, 0]
+
+  testValueTimesToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_toDo_literal_plain equals: #[4, #[nil, 4], 0]
+
+  testValueTimesWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_while_assign_plain equals: #[6, nil, 3]
+
+  testValueTimesWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_while_literal_plain equals: #[6, #[nil, 6], 3]
+
+  testValueTimesDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_doToDo_assign_plain equals: #[8, nil, 0]
+
+  testValueTimesDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_doToDo_literal_plain equals: #[8, #[nil, 8], 0]
+
+  testValueTimesCollectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_collect_assign_plain equals: #[4, nil, 0]
+
+  testValueTimesCollectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) times_collect_literal_plain equals: #[4, #[nil, 4], 0]
+
+  testValueToDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_toDo_assign_plain equals: #[6, nil, 0]
+
+  testValueToDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testValueToDoWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_while_assign_plain equals: #[9, nil, 3]
+
+  testValueToDoWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testValueToDoDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testValueToDoDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_doToDo_literal_plain equals: #[12, #[nil, 12], 0]
+
+  testValueToDoCollectAssignPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_collect_assign_plain equals: #[6, nil, 0]
+
+  testValueToDoCollectLiteralPlain =>
+    self assert: (Adr0131LoopMatrixValue new) toDo_collect_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testActorDoToDoBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_bare_plain equals: #[6, 0, 0]
+
+  testActorDoToDoBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_bare_cvar equals: #[6, 0, 0, 4]
+
+  testActorDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_assign_plain equals: #[6, nil, 0]
+
+  testActorDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_assign_cvar equals: #[6, nil, 0, 4]
+
+  testActorDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testActorDoToDoLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testActorDoToDoAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testActorDoToDoAfterReadCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testActorDoDoBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_do_bare_plain equals: #[6, 0, 0]
+
+  testActorDoDoBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_do_bare_cvar equals: #[6, 0, 0, 4]
+
+  testActorDoTimesBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_bare_plain equals: #[6, 0, 0]
+
+  testActorDoTimesBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_bare_cvar equals: #[6, 0, 0, 4]
+
+  testActorDoTimesAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_assign_plain equals: #[6, nil, 0]
+
+  testActorDoTimesAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_assign_cvar equals: #[6, nil, 0, 4]
+
+  testActorDoTimesLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testActorDoTimesLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testActorDoTimesAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_afterRead_plain equals: #[6, #[3, nil, 6], 0]
+
+  testActorDoTimesAfterReadCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_times_afterRead_cvar equals: #[6, #[3, nil, 6], 0, 4]
+
+  testActorDoWhileBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_bare_plain equals: #[9, 0, 3]
+
+  testActorDoWhileBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_bare_cvar equals: #[9, 0, 3, 6]
+
+  testActorDoWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_assign_plain equals: #[9, nil, 3]
+
+  testActorDoWhileAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_assign_cvar equals: #[9, nil, 3, 6]
+
+  testActorDoWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testActorDoWhileLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_literal_cvar equals: #[9, #[nil, 9], 3, 6]
+
+  testActorDoWhileAfterReadPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_afterRead_plain equals: #[9, #[6, nil, 9], 3]
+
+  testActorDoWhileAfterReadCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_afterRead_cvar equals: #[9, #[6, nil, 9], 3, 6]
+
+  testActorDoCollectBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collect_bare_plain equals: #[6, 0, 0]
+
+  testActorDoCollectBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collect_bare_cvar equals: #[6, 0, 0, 4]
+
+  testActorDoInjectBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_inject_bare_plain equals: #[6, 0, 0]
+
+  testActorDoInjectBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_inject_bare_cvar equals: #[6, 0, 0, 4]
+
+  testActorDoDoDoBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doDo_bare_plain equals: #[12, 0, 0]
+
+  testActorDoDoDoBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doDo_bare_cvar equals: #[12, 0, 0, 8]
+
+  testActorDoDoToDoBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doToDo_bare_plain equals: #[12, 0, 0]
+
+  testActorDoDoToDoBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doToDo_bare_cvar equals: #[12, 0, 0, 8]
+
+  testActorDoDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testActorDoDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_doToDo_assign_cvar equals: #[12, nil, 0, 8]
+
+  testActorDoCollectTimesBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collectTimes_bare_plain equals: #[12, 0, 0]
+
+  testActorDoCollectTimesBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collectTimes_bare_cvar equals: #[12, 0, 0, 8]
+
+  testActorDoCollectTimesAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collectTimes_assign_plain equals: #[12, nil, 0]
+
+  testActorDoCollectTimesAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_collectTimes_assign_cvar equals: #[12, nil, 0, 8]
+
+  testActorDoThreeDeepBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_threeDeep_bare_plain equals: #[24, 0, 0]
+
+  testActorDoThreeDeepBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_threeDeep_bare_cvar equals: #[24, 0, 0, 16]
+
+  testActorDoThreeDeepAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_threeDeep_assign_plain equals: #[24, nil, 0]
+
+  testActorDoThreeDeepAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_threeDeep_assign_cvar equals: #[24, nil, 0, 16]
+
+  testActorDoWhileDoBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_whileDo_bare_plain equals: #[12, 0, 2]
+
+  testActorDoWhileDoBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_whileDo_bare_cvar equals: #[12, 0, 2, 8]
+
+  testActorDoWhileInjectBarePlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_whileInject_bare_plain equals: #[12, 0, 2]
+
+  testActorDoWhileInjectBareCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_whileInject_bare_cvar equals: #[12, 0, 2, 8]
+
+  testActorDoToDoAssignSelfsend =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_assign_selfsend equals: #[6, nil, 0]
+
+  testActorDoToDoLiteralSelfsend =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_toDo_literal_selfsend equals: #[6, #[nil, 6], 0]
+
+  testActorDoWhileAssignSelfsend =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_assign_selfsend equals: #[9, nil, 3]
+
+  testActorDoWhileLiteralSelfsend =>
+    self assert: (Adr0131LoopMatrixActor spawn) do_while_literal_selfsend equals: #[9, #[nil, 9], 3]
+
+  testActorInjectToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_toDo_assign_plain equals: #[6, 0, 0]
+
+  testActorInjectToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_toDo_assign_cvar equals: #[6, 0, 0, 4]
+
+  testActorInjectToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_toDo_literal_plain equals: #[6, #[0, 6], 0]
+
+  testActorInjectToDoLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_toDo_literal_cvar equals: #[6, #[0, 6], 0, 4]
+
+  testActorInjectWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_while_assign_plain equals: #[9, 0, 3]
+
+  testActorInjectWhileAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_while_assign_cvar equals: #[9, 0, 3, 6]
+
+  testActorInjectWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_while_literal_plain equals: #[9, #[0, 9], 3]
+
+  testActorInjectWhileLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_while_literal_cvar equals: #[9, #[0, 9], 3, 6]
+
+  testActorInjectDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_doToDo_assign_plain equals: #[12, 0, 0]
+
+  testActorInjectDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) inject_doToDo_assign_cvar equals: #[12, 0, 0, 8]
+
+  testActorTimesToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_toDo_assign_plain equals: #[4, nil, 0]
+
+  testActorTimesToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_toDo_assign_cvar equals: #[4, nil, 0, 4]
+
+  testActorTimesToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_toDo_literal_plain equals: #[4, #[nil, 4], 0]
+
+  testActorTimesToDoLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_toDo_literal_cvar equals: #[4, #[nil, 4], 0, 4]
+
+  testActorTimesWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_while_assign_plain equals: #[6, nil, 3]
+
+  testActorTimesWhileAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_while_assign_cvar equals: #[6, nil, 3, 6]
+
+  testActorTimesWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_while_literal_plain equals: #[6, #[nil, 6], 3]
+
+  testActorTimesWhileLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_while_literal_cvar equals: #[6, #[nil, 6], 3, 6]
+
+  testActorTimesDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_doToDo_assign_plain equals: #[8, nil, 0]
+
+  testActorTimesDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) times_doToDo_assign_cvar equals: #[8, nil, 0, 8]
+
+  testActorToDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_toDo_assign_plain equals: #[6, nil, 0]
+
+  testActorToDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_toDo_assign_cvar equals: #[6, nil, 0, 4]
+
+  testActorToDoToDoLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_toDo_literal_plain equals: #[6, #[nil, 6], 0]
+
+  testActorToDoToDoLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_toDo_literal_cvar equals: #[6, #[nil, 6], 0, 4]
+
+  testActorToDoWhileAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_while_assign_plain equals: #[9, nil, 3]
+
+  testActorToDoWhileAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_while_assign_cvar equals: #[9, nil, 3, 6]
+
+  testActorToDoWhileLiteralPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_while_literal_plain equals: #[9, #[nil, 9], 3]
+
+  testActorToDoWhileLiteralCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_while_literal_cvar equals: #[9, #[nil, 9], 3, 6]
+
+  testActorToDoDoToDoAssignPlain =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_doToDo_assign_plain equals: #[12, nil, 0]
+
+  testActorToDoDoToDoAssignCvar =>
+    self assert: (Adr0131LoopMatrixActor spawn) toDo_doToDo_assign_cvar equals: #[12, nil, 0, 8]
