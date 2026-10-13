@@ -834,6 +834,28 @@ class_var_kinds_unregistered_class_is_empty_test() ->
         ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds('CvkGhost'))
     end).
 
+%% BT-3808: one read tells "unknown" (no row, or no readable meta) from "known
+%% empty" (readable meta declaring none) from the declared kinds.
+class_var_kinds_or_unknown_test() ->
+    DeclMod = load_meta_module(bt3808_cvku_decl, #{class_field_kinds => #{a => late}}),
+    EmptyMod = load_meta_module(bt3808_cvku_empty, #{}),
+    try
+        with_clean_table(fun() ->
+            ok = beamtalk_class_metadata:insert('CvkuDecl', DeclMod, [], none, undefined),
+            ok = beamtalk_class_metadata:insert('CvkuEmpty', EmptyMod, [], none, undefined),
+            ok = beamtalk_class_metadata:insert('CvkuNoMeta', no_meta_module, [], none, undefined),
+            ?assertEqual(
+                #{a => late}, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuDecl')
+            ),
+            ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuEmpty')),
+            ?assertEqual(unknown, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuNoMeta')),
+            ?assertEqual(unknown, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuGhost'))
+        end)
+    after
+        unload_module(DeclMod),
+        unload_module(EmptyMod)
+    end.
+
 %%====================================================================
 %% read_meta/1, read_meta_detailed/1 (BT-3764) — the one guarded
 %% `__beamtalk_meta/0` read.

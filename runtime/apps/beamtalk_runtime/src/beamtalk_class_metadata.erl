@@ -91,7 +91,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     flatten_ancestor_map/2,
     class_var_kinds/1,
     inherited_class_var_kinds/1,
-    class_var_meta_readable/1,
+    class_var_kinds_or_unknown/1,
     read_meta/1,
     read_meta_detailed/1,
     read_meta_autoload/1,
@@ -461,26 +461,36 @@ for the diagnostic-only ancestor view.
 
 Returns `#{}` for a class with no metadata row (never registered, or removed),
 and for a class whose module exports no readable `__beamtalk_meta/0` (a
-ClassBuilder or hand-written Erlang class). Kept here, in the metadata leaf, so
-that `beamtalk_class_vars` (the class-variable access leaf,
-`undeclared_class_variable`) and `beamtalk_object_class` (the declared-`late`
-branch of `get_class_var`) share one implementation without the access leaf
-calling up into the class gen_server or the reflection intrinsics.
+ClassBuilder or hand-written Erlang class). Callers that must tell "unknown"
+from "declares none" use `class_var_kinds_or_unknown/1`, which this wraps.
 """.
 -spec class_var_kinds(class_name()) -> #{atom() => eager | late}.
 class_var_kinds(Name) ->
     own_class_var_kinds(Name).
 
 -doc """
-True when `Name` has a registered module whose `__beamtalk_meta/0` is readable,
-so an empty `class_var_kinds/1` means "declares no class variables" rather than
-"unknown" (a ClassBuilder or hand-written Erlang class, or no live class).
+`class_var_kinds/1` that tells "unknown" from "declares none" in a single
+`__beamtalk_meta/0` read (BT-3808): `unknown` for a class with no registered
+module or whose module exports no readable `__beamtalk_meta/0` (a ClassBuilder
+or hand-written Erlang class, or no live class), else the class's own declared
+kinds, which may be `#{}` (the set is KNOWN empty). One read answers both
+questions, so a hot reload between two reads cannot make them disagree. Kept
+here, in the metadata leaf, so that `beamtalk_class_vars` (the class-variable
+access leaf, `undeclared_class_variable`) and `beamtalk_object_class` (the
+declared-`late` branch and undeclared check of `get_class_var`) share one
+implementation without the access leaf calling up into the class gen_server or
+the reflection intrinsics.
 """.
--spec class_var_meta_readable(class_name()) -> boolean().
-class_var_meta_readable(Name) ->
+-spec class_var_kinds_or_unknown(class_name()) -> unknown | #{atom() => eager | late}.
+class_var_kinds_or_unknown(Name) ->
     case lookup_module(Name) of
-        {ok, Module} -> read_meta(Module) =/= not_available;
-        not_found -> false
+        {ok, Module} ->
+            case read_meta(Module) of
+                {ok, Meta} -> maps:get(class_field_kinds, Meta, #{});
+                not_available -> unknown
+            end;
+        not_found ->
+            unknown
     end.
 
 -doc """
@@ -496,16 +506,9 @@ inherited_class_var_kinds(Name) ->
 %% One level's own `class_field_kinds`; `#{}` when it cannot be read.
 -spec own_class_var_kinds(class_name()) -> #{atom() => eager | late}.
 own_class_var_kinds(Name) ->
-    case lookup_module(Name) of
-        {ok, Module} -> module_class_var_kinds(Module);
-        not_found -> #{}
-    end.
-
--spec module_class_var_kinds(module()) -> #{atom() => eager | late}.
-module_class_var_kinds(Module) ->
-    case read_meta(Module) of
-        {ok, Meta} -> maps:get(class_field_kinds, Meta, #{});
-        not_available -> #{}
+    case class_var_kinds_or_unknown(Name) of
+        unknown -> #{};
+        Kinds -> Kinds
     end.
 
 -doc """

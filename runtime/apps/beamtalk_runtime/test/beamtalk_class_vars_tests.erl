@@ -34,9 +34,9 @@ with_clean(Fun) ->
 %% Run Fun with declared class variables `x`, `late` (and `a`) mocked for ?C.
 with_declared(Fun) ->
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
-    meck:expect(beamtalk_class_metadata, class_var_kinds, fun
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun
         (?C) -> #{x => eager, a => eager, late => late};
-        (_) -> #{}
+        (_) -> unknown
     end),
     try
         with_clean(Fun)
@@ -150,8 +150,7 @@ get_undeclared_test() ->
 %% declares still reads nil.
 get_inherited_not_redeclared_test() ->
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
-    meck:expect(beamtalk_class_metadata, class_var_kinds, fun(_) -> #{} end),
-    meck:expect(beamtalk_class_metadata, class_var_meta_readable, fun(_) -> true end),
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> #{} end),
     meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun
         (?C) -> #{inh => eager};
         (_) -> #{}
@@ -172,8 +171,7 @@ get_inherited_not_redeclared_test() ->
 %% must not make a read raise (e.g. after `clearField:` removed the key).
 get_no_meta_ancestor_declares_reads_nil_test() ->
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
-    meck:expect(beamtalk_class_metadata, class_var_kinds, fun(_) -> #{} end),
-    meck:expect(beamtalk_class_metadata, class_var_meta_readable, fun(_) -> false end),
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> unknown end),
     meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun(_) -> #{inh => eager} end),
     try
         with_clean(fun() ->
@@ -204,6 +202,77 @@ cleared_then_read_test() ->
         beamtalk_class_vars:install(?KEY, #{x => 1}),
         beamtalk_class_vars:clear(self_obj(), x),
         ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), x))
+    end).
+
+%% BT-3808: a write that would create a name the class does not declare raises
+%% (own-only), instead of silently creating it.
+put_undeclared_name_raises_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 0}),
+        ?assertEqual(
+            undeclared_class_variable,
+            raised_kind(fun() -> beamtalk_class_vars:put(self_obj(), nope, 1) end)
+        ),
+        %% The failed write created nothing.
+        ?assertNot(beamtalk_class_vars:has(self_obj(), nope))
+    end).
+
+%% BT-3808: a declared name writes, whether or not it is in the map yet
+%% (declared-but-absent, e.g. a `late` variable's first assignment).
+put_declared_name_writes_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 0}),
+        ?assertEqual(1, beamtalk_class_vars:put(self_obj(), x, 1)),
+        ?assertEqual(2, beamtalk_class_vars:put(self_obj(), late, 2)),
+        ?assertEqual(2, beamtalk_class_vars:get(self_obj(), late))
+    end).
+
+%% BT-3808: write-first through a subclass that did not redeclare an inherited
+%% variable (known-empty own set, ancestor declares it) raises like the read.
+put_inherited_not_redeclared_raises_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> #{} end),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun
+        (?C) -> #{inh => eager};
+        (_) -> #{}
+    end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{}),
+            ?assertEqual(
+                undeclared_class_variable,
+                raised_kind(fun() -> beamtalk_class_vars:put(self_obj(), inh, 1) end)
+            ),
+            ?assertNot(beamtalk_class_vars:has(self_obj(), inh)),
+            %% A name no ancestor declares stays lenient (known-empty own set).
+            ?assertEqual(1, beamtalk_class_vars:put(self_obj(), other, 1))
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
+
+%% BT-3808: unreadable metadata (every ClassBuilder class) is an unknown set:
+%% writes stay lenient even when an ancestor declares the name.
+put_no_meta_stays_lenient_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> unknown end),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun(_) -> #{inh => eager} end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{}),
+            ?assertEqual(1, beamtalk_class_vars:put(self_obj(), inh, 1)),
+            ?assertEqual(1, beamtalk_class_vars:get(self_obj(), inh)),
+            ?assertEqual(2, beamtalk_class_vars:put(self_obj(), anything, 2))
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
+
+%% A name already in the map writes without consulting metadata.
+put_existing_name_skips_check_test() ->
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{count => 0}),
+        ?assertEqual(5, beamtalk_class_vars:put(self_obj(), count, 5))
     end).
 
 declared_but_absent_reads_nil_test() ->

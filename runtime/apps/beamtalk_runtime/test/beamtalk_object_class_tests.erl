@@ -2139,6 +2139,51 @@ get_class_var_default_nil_test_() ->
         ]
     end}.
 
+%% BT-3807: the class-side `get_class_var` of an absent name follows the
+%% method-body read rule: a class whose own declared set lacks the name replies
+%% a safe `{error, undeclared_class_variable}` (process survives); a declared
+%% name still answers nil; a class with no readable metadata (the test above)
+%% stays lenient and answers nil.
+get_class_var_undeclared_name_errors_without_crashing_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Meta = #{class_field_kinds => #{count => eager}},
+                MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
+                Forms = [
+                    {attribute, 1, module, bt3807_undeclared_classvar_mod},
+                    {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+                    {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
+                ],
+                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+                {module, Mod} = code:load_binary(Mod, "bt3807_undeclared_classvar_mod.erl", Bin),
+                try
+                    ClassInfo = #{
+                        name => 'BT3807UndeclaredClassVar',
+                        module => Mod,
+                        superclass => 'Object',
+                        instance_methods => #{},
+                        class_methods => #{}
+                    },
+                    {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                    ?assertMatch(
+                        {error, #beamtalk_error{kind = undeclared_class_variable}},
+                        gen_server:call(Pid, {get_class_var, typo})
+                    ),
+                    ?assert(is_process_alive(Pid)),
+                    %% Declared but unassigned: nil, as before.
+                    ?assertEqual(nil, gen_server:call(Pid, {get_class_var, count})),
+                    ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
+                    ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
+                after
+                    _ = code:purge(Mod),
+                    _ = code:delete(Mod),
+                    _ = code:purge(Mod)
+                end
+            end)
+        ]
+    end}.
+
 set_and_get_class_var_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
