@@ -901,6 +901,19 @@ impl CoreErlangGenerator {
         if prelude.is_empty() {
             return Ok(value);
         }
+        // BT-3802: this renders the cascade to one self-contained `Document`,
+        // so a `State`/`SelfVt` rebind in its hoisted prelude is scoped out of
+        // everything after the cascade (the BT-3791 `unbound variable
+        // 'State1'`). A cascade whose operands need a prelude is a producer
+        // (`threaded_expression` splices it into the caller's frame); reaching
+        // this closed rendering with such a prelude is a lowering that failed
+        // to splice, reported rather than silently dropped.
+        let escaped = super::threaded_ir::opaque_escapes(&prelude, false);
+        self.report_threaded_ir_verify_errors(
+            &escaped,
+            "cascade operand state rebind trapped in a closed cascade expression",
+            receiver.span(),
+        );
         Ok(docvec![self.threaded_prelude_doc(&prelude), value])
     }
 
@@ -1131,11 +1144,18 @@ impl CoreErlangGenerator {
         arg: &Expression,
     ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
         if self.is_field_assignment(arg) {
-            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-            Ok((
-                vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],
-                leaf::var(val_var),
-            ))
+            // BT-3803: a real `Bind` (not an opaque `Statement`), so the
+            // consumer of the cascade continues from the new `State`
+            // version (`state_var_after_prelude` reads the prelude's `Bind`s).
+            let mut prelude = Vec::new();
+            let span = arg.unwrap_parens().span();
+            let val_var = self.lower_field_assignment_bind(
+                arg.unwrap_parens(),
+                threaded_ir::FrameId::ROOT,
+                span,
+                &mut prelude,
+            )?;
+            Ok((prelude, leaf::var(val_var)))
         } else {
             let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
             let doc = seq.next();

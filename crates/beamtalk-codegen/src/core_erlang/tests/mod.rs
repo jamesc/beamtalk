@@ -162,11 +162,13 @@ pub(crate) fn make_value_subclass_point() -> Module {
 
 mod analysis_handoff;
 mod branch_context;
+mod cascade_operand_state_corpus;
 mod closed_fun_state_version;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;
 mod expressions;
+mod field_assignment_value_position;
 mod gen_server;
 mod late_reconcile_conformance;
 mod local_producer_agreement;

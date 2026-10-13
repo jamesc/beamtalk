@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3801: does not redeclare `n`, so the inherited `bump` raises through it.
+
+CvOwnOnlyBase subclass: CvOwnOnlyForgot
+  classState: other = 0

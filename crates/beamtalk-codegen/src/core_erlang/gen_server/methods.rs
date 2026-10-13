@@ -2175,10 +2175,22 @@ impl CoreErlangGenerator {
         // any other cascade argument and its prelude hoisted into the cascade's
         // `docs`; otherwise its `StateN` rebind is trapped inside the map
         // literal and later cascade messages see an unbound/stale `State`.
-        let mut key_docs: Vec<Document<'static>> = Vec::with_capacity(pairs.len());
-        let mut splits = Vec::with_capacity(pairs.len());
+        // BT-3802: a computed KEY can change state too (`#{(self bump) => 1}`),
+        // and `cascade_operands_need_prelude` counts keys as operands (the
+        // literal-container rule), so keys are split exactly like values and
+        // interleaved key-then-value in source order: the all-or-nothing hoist
+        // then runs every prelude in evaluation order, never value preludes
+        // ahead of a later key's. A literal key is pure and stays inline.
+        let mut splits = Vec::with_capacity(pairs.len() * 2);
+        // Per pair: the key's inline doc (literal) or `None` when it was split.
+        let mut inline_keys: Vec<Option<Document<'static>>> = Vec::with_capacity(pairs.len());
         for pair in pairs {
-            key_docs.push(self.expression_doc(&pair.key)?);
+            if matches!(pair.key, Expression::Literal(..)) {
+                inline_keys.push(Some(self.expression_doc(&pair.key)?));
+            } else {
+                inline_keys.push(None);
+                splits.push(self.split_cascade_arg(&pair.key)?);
+            }
             if matches!(pair.value, Expression::Block(_)) {
                 let fun_doc = self.class_method_map_value_doc(
                     &pair.key,
@@ -2195,13 +2207,20 @@ impl CoreErlangGenerator {
             || beamtalk_core::source_analysis::Span::new(0, 0),
             |p| p.value.span(),
         );
-        let val_docs = self.hoist_cascade_splits(splits, docs, span);
+        let mut hoisted = self.hoist_cascade_splits(splits, docs, span).into_iter();
+        let missing_split =
+            || CodeGenError::Internal("classMethods: map entry lost a hoisted operand".to_string());
 
         let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
-        for (i, (key_doc, val_doc)) in key_docs.into_iter().zip(val_docs).enumerate() {
+        for (i, inline_key) in inline_keys.into_iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
+            let key_doc = match inline_key {
+                Some(doc) => doc,
+                None => hoisted.next().ok_or_else(missing_split)?,
+            };
+            let val_doc = hoisted.next().ok_or_else(missing_split)?;
             parts.push(key_doc);
             parts.push(Document::Str(" => "));
             parts.push(val_doc);

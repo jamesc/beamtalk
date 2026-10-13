@@ -353,6 +353,22 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-3803: a field assignment in value position (`Transcript show:
+        // (self.n := 5)`) rebinds `State` and answers the assigned value, so
+        // it is a producer: its `Bind` must land in the caller's statement
+        // sequence. Compiled as a plain sub-expression it was a closed
+        // document that scoped the rebind away (`unbound variable 'State1'`).
+        // (`is_field_assignment` is `false` in a class method, where the write
+        // is an in-place class-variable `put`, ADR 0130 §2.)
+        if self.is_field_assignment(inner) {
+            let mut prelude = Vec::new();
+            let val_var = self.lower_field_assignment_bind(inner, frame, span, &mut prelude)?;
+            return Ok(ThreadedValue {
+                prelude,
+                value: ValueRef::Var(val_var),
+            });
+        }
+
         if self.is_prelude_producer(inner) {
             let Expression::MessageSend {
                 selector,
@@ -841,6 +857,10 @@ impl CoreErlangGenerator {
             return true;
         }
         if self.is_prelude_producer(inner) {
+            return true;
+        }
+        // BT-3803: mirrors `threaded_expression`'s field-assignment producer.
+        if self.is_field_assignment(inner) {
             return true;
         }
         if let Some(children) = Self::sequenced_send_children(inner) {

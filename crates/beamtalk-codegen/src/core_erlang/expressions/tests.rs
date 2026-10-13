@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::core_erlang::CoreErlangGenerator;
+use crate::core_erlang::control_flow::{Closure, FieldWriteSite};
+use crate::core_erlang::threaded_ir::FrameId;
 use beamtalk_core::ast::{Expression, Identifier, Literal, MapPair};
 use beamtalk_core::source_analysis::Span;
 
@@ -97,13 +99,54 @@ fn test_generate_identifier_reserved_words() {
 fn test_field_assignment_closed_actor_threads_state() {
     let mut generator = CoreErlangGenerator::new("test");
     let value = Expression::Literal(Literal::Integer(42), s());
-    let output = generator
-        .generate_field_assignment("count", &value)
-        .unwrap()
-        .to_pretty_string();
+    // `render_field_write`: the `Closed` rendering without BT-3803's escape
+    // check, which `generate_field_assignment` (production) runs.
+    let output = closed_write(&mut generator, &value);
     assert_eq!(
         output,
         "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in _Val1"
+    );
+}
+
+fn closed_write(generator: &mut CoreErlangGenerator, value: &Expression) -> String {
+    let site = FieldWriteSite::for_context(generator.context);
+    generator
+        .render_field_write(site, Closure::Closed, "count", value, FrameId::ROOT)
+        .unwrap()
+        .0
+        .to_pretty_string()
+}
+
+/// BT-3803: a `Closed` field write mints a `State`/`Self` version inside a
+/// self-contained document, so a consumer that compiles a field assignment as a
+/// plain sub-expression scopes the rebind away. Reaching the closed rendering
+/// is reported through `report_threaded_ir_verify_errors` (a hard failure in
+/// debug and CI, an `internal:` warning in release).
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "field-assignment state rebind trapped in a closed expression")]
+fn test_field_assignment_closed_is_reported_as_an_escaping_state_rebind() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let value = Expression::Literal(Literal::Integer(42), s());
+    // Debug: the shared reporter's `debug_assert!` fires.
+    let _ = generator.generate_field_assignment("count", &value);
+}
+
+/// The release half of the same check: an `internal:` verifier warning, no panic.
+#[cfg(not(debug_assertions))]
+#[test]
+fn test_field_assignment_closed_is_reported_as_an_escaping_state_rebind() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let value = Expression::Literal(Literal::Integer(42), s());
+    generator
+        .generate_field_assignment("count", &value)
+        .unwrap();
+    assert!(
+        generator
+            .take_codegen_warnings()
+            .iter()
+            .any(|d| d.message.contains("trapped in a closed expression")),
+        "release builds report an internal warning"
     );
 }
 
@@ -116,10 +159,7 @@ fn test_field_assignment_closed_value_type_threads_self() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.context = crate::core_erlang::CodeGenContext::ValueType;
     let value = Expression::Literal(Literal::Integer(42), s());
-    let output = generator
-        .generate_field_assignment("count", &value)
-        .unwrap()
-        .to_pretty_string();
+    let output = closed_write(&mut generator, &value);
     assert_eq!(
         output,
         "let _Val1 = 42 in let Self1 = call 'maps':'put'('count', _Val1, Self) in _Val1"

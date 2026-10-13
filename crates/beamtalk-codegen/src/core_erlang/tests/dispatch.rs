@@ -9,6 +9,20 @@
 
 use super::*;
 
+/// BT-3803: a cascade with a field-assignment argument is a producer (its `State`
+/// `Bind` is spliced into the caller's statement sequence), so it is compiled through
+/// `threaded_expression` and rendered with the prelude in front of the value. The
+/// closed `generate_expression` rendering would report the trapped rebind.
+fn render_threaded(
+    generator: &mut CoreErlangGenerator,
+    cascade: &beamtalk_core::ast::Expression,
+) -> beamtalk_cerl_doc::Document<'static> {
+    let tv = generator
+        .threaded_expression(cascade, crate::core_erlang::threaded_ir::FrameId::ROOT)
+        .unwrap();
+    generator.close_threaded_value_doc(tv)
+}
+
 #[test]
 fn test_generate_unary_message_send_creates_future() {
     let mut generator = CoreErlangGenerator::new("test");
@@ -1116,7 +1130,7 @@ fn test_cascade_field_assignment_arg_hoisted() {
         span: Span::new(0, 28),
     };
 
-    let doc = generator.generate_expression(&cascade).unwrap();
+    let doc = render_threaded(&mut generator, &cascade);
     let output = doc.to_pretty_string();
 
     // The state binding must appear BEFORE the send call, not inside it.
@@ -1204,7 +1218,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
         span: Span::new(0, 43),
     };
 
-    let doc = generator.generate_expression(&cascade).unwrap();
+    let doc = render_threaded(&mut generator, &cascade);
     let output = doc.to_pretty_string();
 
     // _Receiver1 takes temp var 1, so val vars are _Val2 and _Val3.
