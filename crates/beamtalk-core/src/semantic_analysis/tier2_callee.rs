@@ -43,7 +43,11 @@
 //!      ([`is_opaque_callable_hom_send`]), in operand position of a
 //!      method-body statement or inside the branches of a conditional, the
 //!      body of `to:do:` or the condition of `whileTrue:`/`whileFalse:`
-//!      (`mutation_corpus_actor.bt`, `self_send_hom_fold_pool.bt`);
+//!      (`mutation_corpus_actor.bt`, `self_send_hom_fold_pool.bt`); a fold
+//!      nested in the receiver or a non-block argument of another send is
+//!      accepted, pinned (runtime) at the argument of a self-send, the
+//!      argument and the receiver of a keyword send, and two folds in one
+//!      statement (`adr0131section6exemptions_actor.bt`, `calleeNest*`);
 //!    - passed as a bare argument of a method-body self-send to another
 //!      callee of the same class that itself threads that parameter.
 

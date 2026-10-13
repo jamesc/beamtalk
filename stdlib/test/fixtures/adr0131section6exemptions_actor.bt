@@ -140,3 +140,37 @@ Actor subclass: Adr0131Section6ExemptionsActor
     t := 0
     self apPassOn: [:x | t := t + x]
     t
+
+  // BT-3755: the opaque-callable fold nested below the method-body statement
+  // (an argument of a self-send, an argument of a keyword send,
+  // the receiver of a keyword send, two folds in one statement).
+  sealed apNestArg: b => self apSink: (#(1, 2) collect: b)
+
+  sealed apSink: xs => xs size
+
+  sealed apNestKwArg: b => #(5, 6, 7, 8) at: (#(1, 2) inject: 0 into: b)
+
+  sealed apNestRecv: b => (#(1, 2) collect: b) at: 1
+
+  sealed apNestDeep: b =>
+    (#(1, 2) collect: b) at: (#(1) collect: b) size
+
+  calleeNestArg =>
+    t := 0
+    self apNestArg: [:x | t := t + x]
+    t
+
+  calleeNestKwArg =>
+    t := 0
+    self apNestKwArg: [:acc :x | t := t + x. acc + x]
+    t
+
+  calleeNestRecv =>
+    t := 0
+    self apNestRecv: [:x | t := t + x]
+    t
+
+  calleeNestDeep =>
+    t := 0
+    self apNestDeep: [:x | t := t + x]
+    t

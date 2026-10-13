@@ -53,3 +53,15 @@ TestCase subclass: Adr0131Section6ExemptionsTest
 
   testCalleePassOn =>
     self assert: (Adr0131Section6ExemptionsActor spawn) calleePassOn equals: 7
+
+  testCalleeNestArg =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestArg equals: 3
+
+  testCalleeNestKwArg =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestKwArg equals: 3
+
+  testCalleeNestRecv =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestRecv equals: 3
+
+  testCalleeNestDeep =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestDeep equals: 4

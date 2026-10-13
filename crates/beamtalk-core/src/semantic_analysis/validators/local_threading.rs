@@ -1460,11 +1460,9 @@ impl<'d> Walker<'d> {
         // bare `[...]` argument whose block threads every outer local it
         // writes (`captured_mutations_for_block`). Anything else drops the
         // write or raises (probed, BT-3745). The callee must also thread the
-        // block (BT-3755): a sealed method of the same class whose every use
-        // of the parameter is a direct `value` send in its body
-        // ([`callee_threads_block_param`], the predicate codegen's class
-        // pre-scan reads too); an inherited, overridable or `do:`-nesting
-        // callee drops the write or raises. Pinned by
+        // block (BT-3755): see `semantic_analysis::tier2_callee`'s module docs
+        // for the exact callee shapes ([`callee_threads_block_param`], the
+        // predicate codegen's class pre-scan reads too). Pinned by
         // `section6_exemptions_match_codegen_shapes` and the compiled
         // fixture `adr0131section6exemptions_actor.bt`.
         let is_self_send = matches!(receiver, Expression::Identifier(id) if id.name == "self");

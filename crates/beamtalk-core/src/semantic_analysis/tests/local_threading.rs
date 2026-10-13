@@ -380,6 +380,17 @@ fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {
     assert_eq!(section6_errors(second), 1);
 }
 
+/// A standalone `Ac >> probe` method is checked with no callee set: codegen's
+/// class pre-scan (`scan_class_for_tier2_blocks`) walks only the methods in the
+/// class body, so a callee is never compiled with a Tier 2 block parameter
+/// for a self-send made from a standalone method, even a `sealed` one in the
+/// same module. The self-send is therefore a §6 error (BT-3755).
+#[test]
+fn section6_standalone_method_actor_self_send_is_an_error() {
+    let src = "Actor subclass: Ac\n  sealed ap: b => b value\n\nAc >> probe =>\n  t := 0\n  self ap: [t := t + 1]\n  t\n";
+    assert_eq!(section6_errors(src), 1);
+}
+
 /// The inert pending fixture holds the rejected callee shapes as runtime
 /// programs: every `probe*` method is rejected and its `callee*` helpers are
 /// not.
