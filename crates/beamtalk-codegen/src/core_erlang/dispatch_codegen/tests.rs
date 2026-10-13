@@ -760,3 +760,70 @@ fn test_field_assignment_open_class_var_is_an_in_place_put() {
         "nothing is threaded and there is no shadow write. Got: {output}"
     );
 }
+
+// ─── BT-3811: hybrid field rebind is lowered in the caller's frame ────
+
+/// A generator inside a hybrid loop body (`in_loop_body`, so
+/// `current_frame()` is a non-`ROOT` frame) whose `m` and `n` fields were
+/// extracted to fun parameters.
+fn hybrid_loop_body_generator() -> (
+    CoreErlangGenerator,
+    crate::core_erlang::threaded_ir::FrameId,
+) {
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.loop_mode.in_hybrid_loop = true;
+    generator
+        .loop_mode
+        .hybrid_mutated_fields
+        .extend(["m".to_string(), "n".to_string()]);
+    generator.in_loop_body = true;
+    generator.active_branch_frame = 7;
+    let frame = generator.current_frame();
+    assert_ne!(frame, crate::core_erlang::threaded_ir::FrameId::ROOT);
+    (generator, frame)
+}
+
+/// `self.m := (self.n := 1)`: the nested write is an ahead prelude. It is
+/// spliced as a real `Bind` in the caller's frame (not flattened to an opaque
+/// `Statement` under a hardcoded `FrameId::ROOT`), so the verifier sees it.
+#[test]
+fn test_hybrid_field_rebind_splices_ahead_prelude_in_the_callers_frame() {
+    use crate::core_erlang::threaded_ir::{ThreadedStmt, verify_bind_frames};
+    let (mut generator, frame) = hybrid_loop_body_generator();
+    let inner = self_field_assignment_expr("n", Expression::Literal(Literal::Integer(1), s()));
+    let outer = self_field_assignment_expr("m", inner);
+    let Expression::Assignment { value, .. } = &outer else {
+        unreachable!()
+    };
+    let mut stmts = Vec::new();
+    generator
+        .lower_hybrid_field_rebind("m", value, frame, s(), &mut stmts)
+        .unwrap();
+    let bind_frames: Vec<_> = stmts
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ThreadedStmt::Bind { target, .. } => Some(target.frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bind_frames,
+        vec![frame, frame],
+        "both the nested `n` rebind and the outer `m` rebind are Binds in the caller's frame"
+    );
+    assert_eq!(verify_bind_frames(&stmts, frame), Vec::new());
+}
+
+/// The `Document` API renders the same lowering: both field params are
+/// rebound, the nested one first.
+#[test]
+fn test_field_assignment_open_hybrid_renders_nested_rebind_before_outer() {
+    let (mut generator, _) = hybrid_loop_body_generator();
+    let inner = self_field_assignment_expr("n", Expression::Literal(Literal::Integer(1), s()));
+    let outer = self_field_assignment_expr("m", inner);
+    let (doc, _val) = generator.generate_field_assignment_open(&outer).unwrap();
+    let output = doc.to_pretty_string();
+    let n_rebind = output.find("NField").expect("nested rebind rendered");
+    let m_rebind = output.find("MField").expect("outer rebind rendered");
+    assert!(n_rebind < m_rebind, "nested write first. Got: {output}");
+}

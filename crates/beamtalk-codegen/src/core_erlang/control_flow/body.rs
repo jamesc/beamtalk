@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
             if self.is_field_assignment(expr) {
-                let _ = self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
+                let _ = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
                 // Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, span);
@@ -340,85 +340,6 @@ impl CoreErlangGenerator {
             }
         }
         Ok(stmts)
-    }
-
-    /// `Bind`-producing lowering of a Letrec body's field assignment
-    /// (ADR 0111 Addendum 15): a hybrid-mode mutated field reproduces
-    /// `generate_field_assignment_open`'s hybrid rebind as a real `Bind`
-    /// (needed so [`super::super::threaded_ir::VerifyError`]-free rendering's
-    /// `final_loop_arg_identities` can trace this field's own chain); every
-    /// other (plain `State`/`StateAcc`) field write reuses
-    /// [`Self::lower_field_assignment_bind`] verbatim — its own hybrid bypass
-    /// applies unchanged.
-    ///
-    /// Returns the assigned value's own temp var —
-    /// `lower_direct_var_update_in_loop_bind` needs it (a field write nested
-    /// inside a hybrid/direct-params loop's own local-var assignment, `r :=
-    /// (self.x := ...)`, must alias `r` to the SAME value); this statement's
-    /// own top-level bare-field-write call site (below, in
-    /// [`Self::lower_letrec_body`]) ignores it, exactly as it ignored the
-    /// three branches' previously-discarded `val_var`s.
-    pub(super) fn lower_letrec_field_assignment(
-        &mut self,
-        expr: &Expression,
-        frame: FrameId,
-        span: Span,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<String> {
-        let Expression::Assignment { target, value, .. } = expr else {
-            unreachable!("is_field_assignment guarantees an Assignment expr");
-        };
-        let Expression::FieldAccess { field, .. } = target.as_ref() else {
-            unreachable!("is_field_assignment guarantees a FieldAccess target");
-        };
-
-        if self.loop_mode.in_hybrid_loop
-            && self
-                .loop_mode
-                .hybrid_mutated_fields
-                .contains(field.name.as_str())
-        {
-            // Mirrors `generate_field_assignment_open`'s hybrid branch
-            // (`let Val = <value> in let NewFieldVar = Val in`, rebinding
-            // `hybrid_readonly_field_params`), decomposed into a real `Bind`
-            // so the field's own rebind chain is traceable from its
-            // `produces` seed (`VersionPrefix::Gensym` of the pre-extracted
-            // param name).
-            let val_var = self.fresh_temp_var("Val");
-            // BT-3803: thread a field assignment nested in the RHS ahead
-            // (same step as `lower_field_assignment_bind`'s non-hybrid
-            // path), so its rebind lands in `stmts`, not in the RHS document.
-            let ahead_scope = self.thread_ahead(value, stmts, frame)?;
-            let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
-            let val_doc = self.expression_doc(value)?;
-            self.finish_precompiled_scope(ahead_scope)?;
-            self.loop_mode.hybrid_readonly_field_params = saved_field_params;
-            let current_field_var = self
-                .loop_mode
-                .hybrid_readonly_field_params
-                .get(field.name.as_str())
-                .cloned()
-                .unwrap_or_else(|| field.name.to_string());
-            let source = VersionedVar::new(VersionPrefix::Gensym(current_field_var), 0, frame);
-            let new_field_var =
-                self.fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
-            self.loop_mode
-                .hybrid_readonly_field_params
-                .insert(field.name.to_string(), new_field_var.clone());
-            stmts.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in ",],
-                span,
-            ));
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::Gensym(new_field_var), 1, frame),
-                source,
-                op: BindOp::Direct(ValueRef::Var(val_var.clone())),
-                span,
-            });
-            return Ok(val_var);
-        }
-
-        self.lower_field_assignment_bind(expr, frame, span, stmts)
     }
 
     /// `Bind`-producing lowering of a Letrec body's local-var assignment
@@ -608,7 +529,7 @@ impl CoreErlangGenerator {
     /// `in_loop_body = true` and `state_version = 0`) merges with the
     /// fold's own unpack into one verified `Threaded` node. Field
     /// assignment and local-var assignment lower through the SAME shared
-    /// `Bind` producers [`Self::lower_letrec_field_assignment`]/
+    /// `Bind` producers [`Self::lower_field_assignment_bind`]/
     /// [`Self::lower_letrec_local_var_assignment`] already reuse
     /// (`lower_field_assignment_bind`/`lower_local_var_assignment_bind`/
     /// `lower_direct_var_update_in_loop_bind` — each documented as
@@ -706,7 +627,7 @@ impl CoreErlangGenerator {
             if self.is_field_assignment(expr) {
                 has_mutations = true;
                 // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
-                // `lower_letrec_field_assignment`'s own non-hybrid branch
+                // `lower_letrec_body`'s own field-write statements
                 // calls — `lower_field_assignment_bind`'s doc comment
                 // documents it as byte-identical to
                 // `generate_field_assignment_open`'s hand-rolled `Document`

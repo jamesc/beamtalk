@@ -91,7 +91,7 @@ pub(super) use ir::{
     ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
-pub(super) use verify::{SequencedSibling, verify_sibling_reads};
+pub(super) use verify::{SequencedSibling, verify_bind_frames, verify_sibling_reads};
 
 // `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s

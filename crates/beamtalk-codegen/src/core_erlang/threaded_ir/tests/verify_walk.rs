@@ -503,3 +503,57 @@ fn verify_unpack_silent_inside_stateacc_mode() {
     }];
     assert_eq!(verify(&ir), Vec::new());
 }
+
+// ── BT-3811: BindFrameMismatch ──────────────────────────────────────
+
+/// A `Bind` whose target was minted in another frame than the node enclosing
+/// it: the shape of a nested hybrid-field rebind threaded ahead with a
+/// hardcoded `FrameId::ROOT` and spliced into a loop-body frame.
+#[test]
+fn verify_flags_a_bind_whose_target_is_minted_in_another_frame() {
+    let frame = FrameId::new(1);
+    let source = VersionedVar::new(VersionPrefix::Gensym("nField".to_string()), 0, frame);
+    let target = VersionedVar::new(
+        VersionPrefix::Gensym("nField1".to_string()),
+        1,
+        FrameId::ROOT,
+    );
+    let ir = vec![ThreadedStmt::Threaded {
+        mode: ThreadingMode::DirectParams,
+        frame,
+        threads: Vec::new(),
+        body: vec![ThreadedStmt::Bind {
+            target: target.clone(),
+            source,
+            op: BindOp::Direct(ValueRef::Literal("1")),
+            span: span(),
+        }],
+        produces: Vec::new(),
+        span: span(),
+    }];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::BindFrameMismatch {
+            var: target,
+            enclosing: frame,
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn verify_bind_frames_checks_a_fragment_against_its_callers_frame() {
+    let frame = FrameId::new(3);
+    let bind = |bind_frame| ThreadedStmt::Bind {
+        target: VersionedVar::new(VersionPrefix::Gensym("f1".to_string()), 1, bind_frame),
+        source: VersionedVar::new(VersionPrefix::Gensym("f".to_string()), 0, bind_frame),
+        op: BindOp::Direct(ValueRef::Literal("1")),
+        span: span(),
+    };
+    assert_eq!(verify_bind_frames(&[bind(frame)], frame), Vec::new());
+    assert_eq!(
+        verify_bind_frames(&[bind(FrameId::ROOT)], frame).len(),
+        1,
+        "a fragment lowered at ROOT is not in the frame of its caller"
+    );
+}

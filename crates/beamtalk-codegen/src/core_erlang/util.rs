@@ -1189,6 +1189,27 @@ impl CoreErlangGenerator {
         render(prelude, &mut ctx)
     }
 
+    /// BT-3811: [`Self::threaded_prelude_doc`] for a `Document`-returning
+    /// consumer of a hybrid field rebind
+    /// ([`Self::lower_hybrid_field_rebind`]). The statements were lowered in
+    /// `frame` (the caller's, never a hardcoded `FrameId::ROOT`) and are
+    /// checked against it before they are flattened to text, where no later
+    /// verification can see them.
+    pub(super) fn rendered_field_rebind_doc(
+        &mut self,
+        stmts: &[ThreadedStmt],
+        frame: FrameId,
+        span: Span,
+    ) -> Document<'static> {
+        let errors = super::threaded_ir::verify_bind_frames(stmts, frame);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "hybrid field rebind lowered in a different frame than its caller's",
+            span,
+        );
+        self.threaded_prelude_doc(stmts)
+    }
+
     /// ADR 0118 phase 1a: for a consumer whose existing lowering
     /// compiles `expr` itself through a specialised path
     /// (`generate_field_assignment_open`, `emit_actor_threaded_last_stmts`,
