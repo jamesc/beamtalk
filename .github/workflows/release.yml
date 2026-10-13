@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-linux-x86_64
           path: |
@@ -179,7 +179,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-x86_64
           path: |
@@ -252,7 +252,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-arm64
           path: |
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-windows-x86_64
           path: |
