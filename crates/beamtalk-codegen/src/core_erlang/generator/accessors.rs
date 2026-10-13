@@ -84,6 +84,26 @@ impl CoreErlangGenerator {
             .map_or(&*EMPTY, |ctx| &ctx.class_var_names)
     }
 
+    /// Sets the class-side extension's target class (BT-3762), returning the
+    /// previous value so the caller can restore it.
+    pub(in crate::core_erlang) fn replace_extension_target_class(
+        &mut self,
+        value: Option<String>,
+    ) -> Option<String> {
+        std::mem::replace(&mut self.class_context_mut().extension_target_class, value)
+    }
+
+    /// The class whose class variables the current class method sees: the
+    /// extension target, else the `ClassBuilder` class, else the class being
+    /// compiled (BT-3762).
+    pub(in crate::core_erlang) fn class_var_home(&self) -> String {
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.extension_target_class.clone())
+            .or_else(|| self.builder_class_method_class())
+            .unwrap_or_else(|| self.class_name())
+    }
+
     /// Returns a mutable reference to the class variable names set.
     pub(in crate::core_erlang) fn class_var_names_mut(
         &mut self,

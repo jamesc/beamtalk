@@ -23,6 +23,7 @@
 //!
 //! `clearField:` and `hasField:` are rare and stay helper calls.
 
+use super::CodeGenError;
 use super::CoreErlangGenerator;
 use super::class_var_keys::{self, KeyScope};
 use super::erlang_types::ErlangVar;
@@ -166,8 +167,34 @@ impl CoreErlangGenerator {
     }
 
     /// `self` as the receiver of a class-side access.
-    fn is_self_receiver(expr: &Expression) -> bool {
+    pub(super) fn is_self_receiver(expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(id) if id.name == "self")
+    }
+
+    /// BT-3762: the diagnostic for a class method naming a class variable that
+    /// only an ancestor declares. Class variables are per class (ADR 0013 §1,
+    /// ADR 0130), so this is an error, not an inherited access; the message says
+    /// so and suggests redeclaring. `None` when no ancestor declares `name`
+    /// (the caller then reports the ordinary "instance field" error).
+    pub(super) fn inherited_class_var_error(
+        &self,
+        name: &str,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Option<CodeGenError> {
+        let home = self.class_var_home();
+        let owner = self
+            .class_hierarchy
+            .as_ref()?
+            .inherited_class_variable_owner(&home, name)?;
+        Some(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "class variable '{name}' is declared on '{owner}', not on '{home}': class \
+                 variables are per class and are not inherited. Redeclare it with \
+                 `classState: {name}` in '{home}' (inherited methods use the receiver's own \
+                 variables)"
+            ),
+            span: Some(span),
+        })
     }
 
     /// THE predicate for "`receiver.field` lowers to a class-variable read":

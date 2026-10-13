@@ -646,6 +646,11 @@ impl CoreErlangGenerator {
                 let late = self.is_late_class_var(&class_name, field.name.as_str());
                 return Ok(self.class_var_read_doc(field.name.as_str(), late));
             }
+            if Self::is_self_receiver(receiver) {
+                if let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span) {
+                    return Err(err);
+                }
+            }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
                     "cannot access instance field '{}' in a class method",
@@ -756,6 +761,9 @@ impl CoreErlangGenerator {
         // the assigned value, an expression like any other (no rebinding).
         if self.in_class_method() {
             if !self.class_var_names().contains(field_name) {
+                if let Some(err) = self.inherited_class_var_error(field_name, value.span()) {
+                    return Err(err);
+                }
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!(
                         "cannot assign to instance field '{field_name}' in a class method"
