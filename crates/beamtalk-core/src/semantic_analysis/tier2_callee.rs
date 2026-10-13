@@ -78,7 +78,8 @@ pub fn callee_threads_block_param(class: &ClassDefinition, selector: &str, index
 /// The `(selector, parameter index)` pairs of `class` that the Tier 2 block
 /// passed as parameter `index` of `selector` is passed on to as a bare
 /// argument of a method-body self-send. Codegen compiles each of them with a
-/// Tier 2 block parameter too. Empty when `selector` does not thread it.
+/// Tier 2 block parameter too (BT-3755). Empty if `selector` is not a
+/// threading callee.
 #[must_use]
 pub fn passed_on_targets(
     class: &ClassDefinition,
