@@ -170,27 +170,9 @@ const HYBRID_LOOP_METHODS: &[(&str, &str)] = &[
     ),
 ];
 
-/// The fold-body shapes (`do:`, `inject:into:`, `collect:`).
-const FOLD_BODY_SHAPES: &[&str] = &["do_block_body", "inject_into_body", "collect_body"];
-
-/// Positions where a self-send consumes the field assignment as an operand, inside a
-/// fold body. They are skipped there because the fold-body self-send path does not
-/// sequence its operands at all, independent of field assignments: `#(1, 2) do: [:e | self
-/// take: (self bump) with: (self bump)]` fails `erlc` with the same `unbound variable
-/// 'StateAcc1'` without any field assignment, and a single operand's rebind is dropped
-/// silently (BT-3809). Every other shape (`whileTrue:`/`to:do:`/`timesRepeat:` bodies,
-/// `on:do:`, `ensure:`, inline `value`/`value:` blocks, hybrid loops) is covered.
-///
-/// Not covered by this corpus: value-type methods (a value type cannot write `self.n :=`,
-/// ADR 0042, so no field assignment reaches value position there) and class methods (a
-/// class-variable write is an in-place `put`, ADR 0130 §2, which threads nothing). The REPL
-/// has no `self` field to write.
-const FOLD_BODY_SELF_SEND_OPERANDS: &[&str] = &[
-    "self_send_arg",
-    "two_keyword_args",
-    "keyword_arg_then_state_read",
-    "after_self_send_sibling",
-];
+/// Not covered by this corpus: value-type methods (the BT-3812 corpus owns them) and class
+/// methods (a class-variable write is an in-place `put`, ADR 0130 §2, which threads
+/// nothing). The REPL has no `self` field to write.
 
 #[test]
 fn field_assignment_value_position_corpus() {
@@ -205,10 +187,6 @@ fn field_assignment_value_position_corpus() {
         let cases: Vec<(&str, String)> = POSITIONS
             .iter()
             .enumerate()
-            .filter(|(_, (position_name, _))| {
-                !(FOLD_BODY_SHAPES.contains(shape_name)
-                    && FOLD_BODY_SELF_SEND_OPERANDS.contains(position_name))
-            })
             .map(|(i, (position_name, position))| {
                 let stmt = position.replace("EXPR", "(self.n := 5)");
                 (

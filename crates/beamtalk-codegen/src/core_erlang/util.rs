@@ -380,14 +380,11 @@ impl CoreErlangGenerator {
                     "is_prelude_producer accepted a non-MessageSend expression".to_string(),
                 ));
             };
-            let children: Vec<&Expression> = arguments.iter().collect();
-            let (mut prelude, scope) = self.sequence_children(&children, frame)?;
-            let dispatch = self.generate_self_dispatch(selector, arguments, frame, span)?;
-            self.finish_precompiled_scope(scope)?;
-            prelude.extend(dispatch.prelude);
+            let (prelude, dispatch_var) =
+                self.sequenced_self_dispatch(selector, arguments, frame, span)?;
             return Ok(ThreadedValue {
                 prelude,
-                value: dispatch.value,
+                value: Self::self_dispatch_result_value(&dispatch_var),
             });
         }
 
@@ -483,6 +480,34 @@ impl CoreErlangGenerator {
         let mut prelude = Vec::new();
         let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
         Ok(ThreadedValue { prelude, value })
+    }
+
+    /// BT-3809: the one lowering of an Actor self-send *statement* with its
+    /// operands sequenced (ADR 0118 §Decision 3): each operand that needs a
+    /// prelude is compiled first and its `State` rebind spliced into the
+    /// returned prelude, then the dispatch `Statement` + `Bind` follow, so the
+    /// dispatch reads the post-operand `State` and a sibling operand sees the
+    /// previous operand's rebind. Returns the prelude and the dispatch
+    /// variable holding the reply tuple.
+    ///
+    /// Shared by [`Self::threaded_expression`]'s self-send producer and every
+    /// loop/fold body statement that is a self-send (`lower_foldl_body`), so a
+    /// body statement cannot compile its operands in a closed argument list
+    /// that scopes their rebind away.
+    pub(super) fn sequenced_self_dispatch(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        frame: FrameId,
+        span: Span,
+    ) -> Result<(Vec<ThreadedStmt>, String)> {
+        let children: Vec<&Expression> = arguments.iter().collect();
+        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+        let (dispatch_prelude, dispatch_var) =
+            self.generate_self_dispatch_parts(selector, arguments, frame, span)?;
+        self.finish_precompiled_scope(scope)?;
+        prelude.extend(dispatch_prelude);
+        Ok((prelude, dispatch_var))
     }
 
     /// ADR 0118 phase 5b: compiles `expr` via plain

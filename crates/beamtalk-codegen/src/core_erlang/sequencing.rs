@@ -281,7 +281,20 @@ impl CoreErlangGenerator {
             let doc = if self.precompiled_subexprs_contains(arg) {
                 self.expression_doc(arg)?
             } else {
-                self.threaded_expression_doc(arg, frame)?
+                // BT-3809: an argument that is a producer (`self take: (self
+                // bump)`) must have been sequenced by the caller, which splices
+                // its prelude into the statement sequence. Rendering that
+                // prelude into the argument list scopes its `State` rebind
+                // inside the list: the dispatch reads the pre-operand state
+                // and a sibling operand reads an unbound version.
+                let tv = self.threaded_expression(arg, frame)?;
+                let escaped = super::threaded_ir::opaque_escapes(&tv.prelude, false);
+                self.report_threaded_ir_verify_errors(
+                    &escaped,
+                    "argument state rebind trapped in a closed argument list",
+                    arg.span(),
+                );
+                self.close_threaded_value_doc(tv)
             };
             parts.push(doc);
         }

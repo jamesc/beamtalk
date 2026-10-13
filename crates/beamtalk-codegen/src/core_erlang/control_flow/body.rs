@@ -727,8 +727,22 @@ impl CoreErlangGenerator {
                 has_mutations = true;
                 // Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, expr.span());
-                let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
-                stmts.push(ThreadedStmt::Statement(doc, span));
+                // BT-3809: the operands are sequenced ahead of the dispatch
+                // (the same producer `threaded_expression` and the Letrec body
+                // use), not compiled into a closed argument list.
+                let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                else {
+                    return Err(CodeGenError::Internal(
+                        "is_actor_self_send accepted a non-MessageSend expression".to_string(),
+                    ));
+                };
+                let (prelude, dispatch_var) =
+                    self.sequenced_self_dispatch(selector, arguments, frame, span)?;
+                stmts.extend(prelude);
                 if is_last {
                     self.lower_self_send_last_expr(
                         &mut stmts,
