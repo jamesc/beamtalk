@@ -152,8 +152,7 @@ Actor subclass: Adr0131Section6ExemptionsActor
 
   sealed apNestRecv: b => (#(1, 2) collect: b) at: 1
 
-  sealed apNestDeep: b =>
-    (#(1, 2) collect: b) at: (#(1) collect: b) size
+  sealed apNestDeep: b => (#(1, 2) collect: b) at: (#(1) collect: b) size
 
   calleeNestArg =>
     t := 0
@@ -162,7 +161,11 @@ Actor subclass: Adr0131Section6ExemptionsActor
 
   calleeNestKwArg =>
     t := 0
-    self apNestKwArg: [:acc :x | t := t + x. acc + x]
+    self
+      apNestKwArg: [:acc :x |
+        t := t + x
+        acc + x
+      ]
     t
 
   calleeNestRecv =>
