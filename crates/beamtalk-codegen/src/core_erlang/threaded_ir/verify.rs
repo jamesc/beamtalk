@@ -225,6 +225,22 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-3811: a [`ThreadedStmt::Bind`] whose `target` was minted in a
+    /// different [`FrameId`] than the frame node (or, for a prelude spliced
+    /// into a caller's statement list, the caller's frame) that encloses it.
+    /// A `Bind` is lowered against one frame's version history and spliced
+    /// into another's, so its version step belongs to the wrong frame: the
+    /// per-frame linearity and frame-flow checks are then answered against
+    /// the wrong frame (a nested hybrid-field rebind threaded ahead with a
+    /// hardcoded `FrameId::ROOT` inside a loop-body frame was invisible
+    /// because it was flattened to an opaque `Statement`). See
+    /// [`verify_bind_frames`].
+    BindFrameMismatch {
+        var: VersionedVar,
+        enclosing: FrameId,
+        at: Span,
+    },
+
     /// ADR 0131 §2: a [`ThreadedStmt::LocalRebind`]'s recorded `frame` is not
     /// the frame of the node that encloses it — the rebind was lowered
     /// against one frame's mode and spliced into another, so its shape (and
@@ -386,6 +402,36 @@ pub(in crate::core_erlang) fn verify_in_scope(
     walk.walk(ir);
 
     errors
+}
+
+/// [`VerifyError::BindFrameMismatch`] for one `Bind` target, shared by the
+/// full walk and [`verify_bind_frames`].
+fn bind_frame_mismatch(target: &VersionedVar, enclosing: FrameId, at: Span) -> Option<VerifyError> {
+    (target.frame != enclosing).then(|| VerifyError::BindFrameMismatch {
+        var: target.clone(),
+        enclosing,
+        at,
+    })
+}
+
+/// [`VerifyError::BindFrameMismatch`] over a prelude about to be spliced into
+/// (or rendered for) a statement list at `enclosing`: every top-level `Bind`
+/// must target `enclosing`. Nested frame nodes carry their own frame and are
+/// checked by the full walk once they are part of a verified tree. Needs no
+/// version history, so a fragment can be checked in isolation where the full
+/// walk would report its caller-produced sources as unbound.
+pub(in crate::core_erlang) fn verify_bind_frames(
+    ir: &[ThreadedStmt],
+    enclosing: FrameId,
+) -> Vec<VerifyError> {
+    ir.iter()
+        .filter_map(|stmt| match stmt {
+            ThreadedStmt::Bind { target, span, .. } => {
+                bind_frame_mismatch(target, enclosing, *span)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
@@ -683,6 +729,10 @@ impl VerifyWalk<'_> {
             } => {
                 self.check_use(source, *span);
                 self.check_class_method_family(target, *span);
+                let enclosing = self.frame_stack.last().copied().unwrap_or(FrameId::ROOT);
+                if let Some(error) = bind_frame_mismatch(target, enclosing, *span) {
+                    self.errors.push(error);
+                }
                 match op {
                     BindOp::Put { value, .. } | BindOp::Direct(value) => {
                         if let ValueRef::Version(v) = value {

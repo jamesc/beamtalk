@@ -171,7 +171,7 @@ impl CoreErlangGenerator {
 
         // BT-3493: the RHS is itself a field write (`r := (self.x :=
         // ...)`, at any parenthesization depth) — hybrid/direct-params mode
-        // threads a field write through `lower_letrec_field_assignment`'s
+        // threads a field write through `lower_field_assignment_bind`'s
         // own class-var/hybrid-mutated-field/plain dispatch (the SAME
         // producer this loop's own bare `self.field := ...` statements
         // already lower through), never through this function's generic
@@ -184,7 +184,7 @@ impl CoreErlangGenerator {
         // require.
         if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
-                self.lower_letrec_field_assignment(field_write, frame, span, stmts)?;
+                self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
             let new_var = self.fresh_temp_var(&canonical);
             self.bind_var(&id.name, &new_var);
             stmts.push(ThreadedStmt::Bind {

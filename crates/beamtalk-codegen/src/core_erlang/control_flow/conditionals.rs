@@ -1252,16 +1252,14 @@ impl CoreErlangGenerator {
     /// models the state mutation as a [`ThreadedStmt::Bind`] instead of a
     /// hand-rolled `maps:put` `Document` fragment.
     ///
-    /// `generate_field_assignment_open`'s hybrid full-extract sub-branch
-    /// (`in_hybrid_loop && hybrid_mutated_fields.contains(field)`) produces
-    /// no state-version step at all — it rebinds a direct fun parameter
-    /// instead of `maps:put`-ing into `StateAcc` — so it is delegated to
-    /// unchanged and modeled as a single opaque `Statement`, exactly as it
-    /// already renders. §Scope: a mutation-carrying conditional
-    /// forces `StateAcc` fallback, mutually exclusive with hybrid mode, so
-    /// this branch is unreached from `generate_conditional_branch_inline`;
-    /// This helper is reused by `expressions.rs`'s
-    /// `generate_block_stateful_body`, where the exclusion is less directly
+    /// The hybrid full-extract sub-branch (`in_hybrid_loop &&
+    /// hybrid_mutated_fields.contains(field)`) rebinds a direct fun parameter
+    /// instead of `maps:put`-ing into `StateAcc`; it lowers through
+    /// [`Self::lower_hybrid_field_rebind`], the one lowering
+    /// `generate_field_assignment_open`'s hybrid branch renders too.
+    /// §Scope: a mutation-carrying conditional forces `StateAcc` fallback,
+    /// mutually exclusive with hybrid mode, but `generate_block_stateful_body`
+    /// and the Letrec bodies reach this with the exclusion less directly
     /// self-evident, so the check is real rather than assumed away.
     pub(in crate::core_erlang) fn lower_field_assignment_bind(
         &mut self,
@@ -1282,9 +1280,7 @@ impl CoreErlangGenerator {
                 .hybrid_mutated_fields
                 .contains(field.name.as_str())
         {
-            let (doc, val_var) = self.generate_field_assignment_open(expr)?;
-            stmts.push(ThreadedStmt::Statement(doc, span));
-            return Ok(val_var);
+            return self.lower_hybrid_field_rebind(&field.name, value, frame, span, stmts);
         }
 
         // ADR 0118 phase 2a: `self.log := self.log ++
@@ -1307,6 +1303,69 @@ impl CoreErlangGenerator {
         self.finish_precompiled_scope(thread_scope)?;
         stmts.push(ThreadedStmt::Statement(preamble, span));
         stmts.push(bind);
+        Ok(val_var)
+    }
+
+    /// The one lowering of a hybrid-loop field rebind (BT-3811): in a hybrid
+    /// loop a mutated field is extracted to a direct fun parameter, so
+    /// `self.field := value` rebinds that parameter instead of stepping the
+    /// `State` map (`let Val = <value> in let FieldN = Val in`, plus an update
+    /// of `hybrid_readonly_field_params` so later reads see the new variable),
+    /// decomposed into a real `Bind` so the field's own rebind chain is
+    /// traceable from its `produces` seed (`VersionPrefix::Gensym` of the
+    /// pre-extracted param name).
+    ///
+    /// Appends to `stmts`, in `frame`: the RHS's ahead prelude (a field
+    /// assignment or self-send nested in the RHS, threaded by
+    /// [`Self::thread_ahead`] so its steps land in the caller's statement
+    /// list, not in the RHS document), the opaque `let Val = ...`, and the
+    /// rebind `Bind`. Returns the assigned value's temp var.
+    ///
+    /// Shared by [`Self::lower_field_assignment_bind`] (every `Vec<ThreadedStmt>`
+    /// consumer: Letrec bodies, conditional arms, stateful-block bodies) and
+    /// [`CoreErlangGenerator::generate_field_assignment_open`] (the
+    /// `Document`-returning consumers, which render these statements through
+    /// [`CoreErlangGenerator::rendered_field_rebind_doc`]).
+    pub(in crate::core_erlang) fn lower_hybrid_field_rebind(
+        &mut self,
+        field: &str,
+        value: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<String> {
+        let val_var = self.fresh_temp_var("Val");
+        let ahead_scope = self.thread_ahead(value, stmts, frame)?;
+        // `thread_ahead` above already committed any nested field
+        // assignment's update (`self.x := (self.y := 42)` keeps `y`'s new
+        // param); only the RHS's own (precompiled, value-only) compile below
+        // is scoped, so snapshot the params around it.
+        let saved_field_params = self.loop_mode.hybrid_readonly_field_params.clone();
+        let val_doc = self.expression_doc(value)?;
+        self.finish_precompiled_scope(ahead_scope)?;
+        self.loop_mode.hybrid_readonly_field_params = saved_field_params;
+        let current_field_var = self
+            .loop_mode
+            .hybrid_readonly_field_params
+            .get(field)
+            .cloned()
+            .unwrap_or_else(|| field.to_string());
+        let source = VersionedVar::new(VersionPrefix::Gensym(current_field_var), 0, frame);
+        let new_field_var =
+            self.fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(field)));
+        self.loop_mode
+            .hybrid_readonly_field_params
+            .insert(field.to_string(), new_field_var.clone());
+        stmts.push(ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in "],
+            span,
+        ));
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::Gensym(new_field_var), 1, frame),
+            source,
+            op: BindOp::Direct(ValueRef::Var(val_var.clone())),
+            span,
+        });
         Ok(val_var)
     }
 
