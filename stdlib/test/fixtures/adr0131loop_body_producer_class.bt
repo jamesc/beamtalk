@@ -375,3 +375,14 @@ Object subclass: Adr0131LoopBodyProducerClass
     t
 
   class plain => 0
+
+  class armLoopInFoldStatement =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        k > 0
+          ifTrue: [
+            1 to: 2 do: [:i | t := t + 1]
+          ]
+      ]
+    t

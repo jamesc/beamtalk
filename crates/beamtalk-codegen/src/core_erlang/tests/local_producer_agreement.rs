@@ -321,6 +321,18 @@ const FRAMES: &[&str] = &[
     "[s < 3] whileTrue: [s := s + 1. #(1, 2) inject: 0 into: [:a :i | {s}. a + i]]",
     "#(1, 2) do: [:k | true ifTrue: [{s}]]",
     "#(1, 2) do: [:k | [:z | {s}] value: k]",
+    // A letrec loop (or fold) nested in a fold through an arm or a closure:
+    // the arm/closure sits between the two frames, so only the inner frame is
+    // a frame site, yet an enclosing fold frame still exists for codegen.
+    "#(1, 2) do: [:k | true ifTrue: [1 to: 2 do: [:i | {s}]]]",
+    "#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | {s}]] value: k]",
+    "#(1, 2) collect: [:k | true ifTrue: [2 timesRepeat: [{s}]]. k]",
+    "#(1, 2) collect: [:k | [:z | 2 timesRepeat: [{s}]] value: k. k]",
+    "#(1, 2) inject: 0 into: [:a :k | true ifTrue: [1 to: 2 do: [:i | {s}]]. a + k]",
+    "#(1, 2) inject: 0 into: [:a :k | [:z | 1 to: 2 do: [:i | {s}]] value: k. a + k]",
+    "2 timesRepeat: [true ifTrue: [#(1, 2) do: [:i | {s}]]]",
+    "2 timesRepeat: [[:z | #(1, 2) do: [:i | {s}]] value: 1]",
+    "#(1, 2) do: [:k | true ifTrue: [#(1, 2) inject: 0 into: [:a :i | {s}. a + i]]]",
 ];
 
 /// The statements placed in a frame body, the loop-body counterpart of

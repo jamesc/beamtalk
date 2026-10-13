@@ -535,6 +535,33 @@ fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
 }
 
 #[test]
+fn a_loop_nested_in_an_actor_fold_through_an_arm_or_closure_is_rejected() {
+    // BT-3796: codegen's `in_fold_frame` crosses an arm or closure between a
+    // fold and a nested loop, as `local_producer_sites` does (the validator's
+    // `frame_sites` stop being all frames there), so the nested loop is judged
+    // by the rows, not as a frame site. In an actor each of these is a Phase 0
+    // error and so never reaches the narrowing; the agreement test's arm and
+    // closure two-level FRAMES pin that the two sides agree on the rest. The
+    // class and value-type answer is `armLoopInFoldStatement` in
+    // `adr0131loop_body_producer_test.bt`.
+    for body in [
+        "r := 0\n#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]]]\n#[t, r]",
+        "r := 0\n#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]] value: k]\n#[t, r]",
+        "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]\nt",
+        "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | #(1, 2) do: [:x | t := t + x]]]]\nt",
+    ] {
+        assert!(
+            !adr0131_diagnostics(&in_actor(body)).is_empty(),
+            "an actor accepted {body}"
+        );
+    }
+    let accepted = "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]\nt";
+    for src in [in_class(accepted), in_value(accepted)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+    }
+}
+
+#[test]
 fn allow_set_do_assignment_is_accepted_in_every_context() {
     // `r := coll do: [...]` dropped the write in class and value-type methods
     // and worked in an actor method. ADR 0131 Phase 2c (BT-3796) makes `do:` a

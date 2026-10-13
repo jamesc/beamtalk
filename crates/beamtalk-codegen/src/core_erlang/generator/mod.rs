@@ -236,7 +236,13 @@ pub struct CoreErlangGenerator {
     /// ADR 0131 Phase 2c (BT-3796): whether any loop or fold frame whose body
     /// is being lowered (`with_body_producer_sites`) is a fold's — the
     /// `outer_fold` input of `beamtalk_core`'s `LoopBodyContext` for the body
-    /// of the frame nested in them.
+    /// of the frame nested in them. Deliberately crosses arm and closure
+    /// boundaries between frames, the same way `local_producer_sites` is
+    /// inherited by a nested body; the validator's `frame_sites` skip those
+    /// boundaries when counting outer folds too, and a nested loop behind an
+    /// arm or closure is judged by the rows there, not as a frame site. The
+    /// agreement test's arm and closure two-level FRAMES pin that the two
+    /// sides agree.
     pub(in crate::core_erlang) in_fold_frame: bool,
     /// ADR 0131 Phase 2b (BT-3793): the frame a local-threading producer's
     /// `LocalRebind`s are lowered by (§2's table), for every loop or fold

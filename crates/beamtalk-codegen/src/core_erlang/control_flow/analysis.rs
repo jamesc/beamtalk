@@ -978,7 +978,7 @@ impl CoreErlangGenerator {
             return false;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        if !matches!(sel.as_str(), "do:" | "anySatisfy:" | "allSatisfy:")
+        if !matches!(sel.as_str(), "anySatisfy:" | "allSatisfy:")
             || beamtalk_core::state_threading_selectors::producer_body_arg_index(
                 &sel,
                 arguments.len(),
