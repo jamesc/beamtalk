@@ -148,3 +148,32 @@ fn the_repl_assembler_emits_one_carrier_per_producer_in_every_entry_point() {
     }
     assert!(producers >= 10, "only {producers} producers compared");
 }
+
+/// A fold that is the whole value of an assignment in a multi-statement input
+/// compiles to a `{Value, Bindings}` tuple; with a producer in its receiver the
+/// assembler must unpack it (the value is element 1, the bindings element 2)
+/// before `put`ting the binding, in every entry point. Otherwise `r` is bound
+/// to the tuple and the fold's writes are lost.
+#[test]
+fn a_whole_value_fold_after_a_producer_is_unpacked_in_every_multi_statement_path() {
+    let fold =
+        "r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]";
+    for src in [
+        format!("t := 0\nu := 0\n{fold}\n#[r, t, u]"),
+        format!("t := 0\nu := 0\n{fold}\nr := r + 1\nr"),
+        format!("t := 0\nu := 0\n{fold}"),
+    ] {
+        let expressions = statements(&src);
+        let outputs = [
+            generate_repl_expressions(&expressions, "repl_producer").expect("eval"),
+            generate_repl_expressions_traced(&expressions, &src, "repl_producer", HashMap::new())
+                .expect("trace"),
+        ];
+        for code in outputs {
+            assert!(
+                code.contains("_AssignTuple"),
+                "the whole-value fold's tuple is not unpacked\n{src}\n{code}"
+            );
+        }
+    }
+}
