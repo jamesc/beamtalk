@@ -475,6 +475,9 @@ const ALLOW_SET: &[Allowed] = &[
     // `{nil, StateAcc}` carrier, which only a producer site unpacks; a `^`
     // inside an arm, handler or closure is not one, so the carrier would be
     // returned raw. The keyed `do:` forms still answer a plain `nil`.
+    // Temporary narrowing (BT-3813): `c ifTrue: [^xs do: [...]]` used to
+    // compile and answer `nil`; BT-3813 lowers it by unpacking element 1 at
+    // the nested `^`, after which `Do` returns to this row.
     Allowed {
         kinds: &[KeyedDo],
         position: Position::ReturnValue { nested: true },

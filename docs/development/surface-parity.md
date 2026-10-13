@@ -607,7 +607,11 @@ reports the same message at the same span. No operation is surface-specific.
   of the answers is unchanged. In an actor method a loop or fold body's
   value-bearing producer site stays an error under a fold frame
   (`is_loop_body_producer_site` in `beamtalk-core`, read by the check and by
-  codegen).
+  codegen). One shape goes the other way: `^xs do: [...]` inside an arm,
+  handler or closure (`c ifTrue: [^xs do: [...]]`) in a class or value-type
+  method now STARTS reporting `UnmigratedLocalThreading` on every surface
+  (CLI, REPL, LSP, MCP); it used to compile and answer `nil`. This is a
+  temporary narrowing, tracked by BT-3813.
 - **REPL root (ADR 0131 Phase 2d, BT-3795).** A loop or fold nested in an
   operand of a REPL input (`(xs collect: [:x | t := t + x]) size`,
   `r := t + (xs inject: ...)`) is now a local-threading producer: it answers

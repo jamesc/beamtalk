@@ -146,9 +146,17 @@ fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
     else {
         return;
     };
-    // The receiver block of `[...] ensure:`/`on:do:` is the protected body,
-    // whose statements lower themselves like an arm's.
-    for arg in std::iter::once(receiver.as_ref()).chain(arguments) {
+    // The receiver block of `[...] ensure:`/`on:do:`/`ifCurtailed:` is the
+    // protected body, whose statements lower themselves like an arm's. Only
+    // those selectors: a `whileTrue:` condition or `[...] value` receiver is
+    // not a statement position.
+    let protected_body = matches!(
+        value,
+        Expression::MessageSend { selector, .. }
+            if matches!(selector.name().as_str(), "ensure:" | "on:do:" | "ifCurtailed:")
+    );
+    let receiver_block = protected_body.then_some(receiver.as_ref());
+    for arg in receiver_block.into_iter().chain(arguments) {
         if let Expression::Block(block) = arg {
             for inner in &block.body {
                 whole_values(&inner.expression, out);
