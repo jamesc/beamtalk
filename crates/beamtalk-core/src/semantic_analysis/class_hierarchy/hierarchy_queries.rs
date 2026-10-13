@@ -647,23 +647,6 @@ impl ClassHierarchy {
             .unwrap_or_default()
     }
 
-    /// Returns the class variables declared by `class_name` and every ancestor.
-    ///
-    /// **Not** the answer to "which class variables can a method of this class
-    /// access?" (that is [`Self::own_class_variable_names`]; BT-3762). It exists
-    /// for the one caller that must match the runtime, whose declared-set check
-    /// for `Cls classState: #name` (`beamtalk_class_metadata:class_var_kinds/1`)
-    /// flattens the ancestor chain: the `Undefined class variable` warning on a
-    /// `classState:` send in `class_validators.rs`.
-    #[must_use]
-    pub fn class_variable_names_with_inherited(&self, class_name: &str) -> Vec<EcoString> {
-        let mut vars = self.own_class_variable_names(class_name);
-        for ancestor in self.superclass_chain(class_name) {
-            vars.extend(self.own_class_variable_names(ancestor.as_str()));
-        }
-        vars
-    }
-
     /// The nearest strict ancestor of `class_name` that declares the class
     /// variable `var_name`, if any. Diagnostic-only: it names the class whose
     /// variable a subclass method tried to reach, so the error can say "redeclare

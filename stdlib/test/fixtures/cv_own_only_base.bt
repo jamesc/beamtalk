@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3801: class variables are own-only at run time too. See cv_own_only_test.bt.
+
+Object subclass: CvOwnOnlyBase
+  classState: n = 0
+
+  class bump -> Integer =>
+    self.n := self.n + 1
+    self.n

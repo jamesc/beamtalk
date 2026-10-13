@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3801: the runtime declared-set check for class variables is own-only
+// (ADR 0013 §1, ADR 0130). An inherited class method run through a subclass
+// touches the subclass's variables, so the subclass must redeclare them.
+
+TestCase subclass: CvOwnOnlyTest
+
+  testBaseUsesItsOwnVariable => self assert: CvOwnOnlyBase bump equals: 1
+
+  testRedeclaredVariableIsIndependent =>
+    self assert: CvOwnOnlyRedeclared bump equals: 11
+
+  testUndeclaredInheritedVariableRaises =>
+    self should: [CvOwnOnlyForgot bump] raise: #undeclared_class_variable
