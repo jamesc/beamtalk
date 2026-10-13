@@ -17,8 +17,8 @@ use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
-    is_threaded_frame_body, loop_body_producer_sites, operand_producer_writes,
-    sequenced_operand_sites,
+    is_fold_frame_body, is_threaded_frame_body, is_value_bearing_site, loop_body_producer_sites,
+    operand_producer_writes, sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -267,7 +267,11 @@ fn body_sources(frame: &str, construct: &str, statement: &str) -> [String; 3] {
 /// The core rule's verdict for every producer site of every loop or fold
 /// body reachable from `stmt` (`loop_body_producer_sites`), frames nested in
 /// one another included.
-fn core_body_producers(stmt: &Expression, out: &mut HashMap<Span, Vec<String>>) {
+fn core_body_producers(
+    stmt: &Expression,
+    out: &mut HashMap<Span, Vec<String>>,
+    value_bearing: &mut HashSet<Span>,
+) {
     let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
     let Expression::MessageSend { arguments, .. } = stmt.unwrap_parens() else {
         return;
@@ -287,10 +291,15 @@ fn core_body_producers(stmt: &Expression, out: &mut HashMap<Span, Vec<String>>) 
                     names.sort();
                     names.dedup();
                     out.insert(Expression::span(site), names);
-                    core_body_producers(site, out);
+                    if is_fold_frame_body(stmt.unwrap_parens(), block)
+                        && is_value_bearing_site(inner.expression.unwrap_parens().span(), site)
+                    {
+                        value_bearing.insert(Expression::span(site));
+                    }
+                    core_body_producers(site, out, value_bearing);
                 }
             }
-            core_body_producers(&inner.expression, out);
+            core_body_producers(&inner.expression, out, value_bearing);
         }
     }
 }
@@ -331,9 +340,17 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                         .next()
                         .expect("one method");
                     let mut expected = core_producers(&method.body);
+                    let mut value_bearing = HashSet::new();
                     for stmt in &method.body {
-                        core_body_producers(&stmt.expression, &mut expected);
+                        core_body_producers(&stmt.expression, &mut expected, &mut value_bearing);
                     }
+                    // An actor fold body lowers only the statement itself through
+                    // the producer: Phase 0 must reject every value-bearing
+                    // site there (BT-3797, `r := xs inject: ...` in a `do:`).
+                    assert!(
+                        !src.starts_with("Actor") || value_bearing.is_empty(),
+                        "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"
+                    );
                     let (generated, records) = recording_producers(|| {
                         generate_module_with_warnings(&module, CodegenOptions::new("agree"))
                     });

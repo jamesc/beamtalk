@@ -81,3 +81,9 @@ TestCase subclass: Adr0131LoopBodyProducerTest
 
   testNlrOutOfInner =>
     self assert: #[Adr0131LoopBodyProducerClass nlrOutOfInner, (Adr0131LoopBodyProducerValue new) nlrOutOfInner, (Adr0131LoopBodyProducerActor spawn) nlrOutOfInner] equals: #[3, 3, 3]
+
+  testAssignInjectInTimes =>
+    self assert: #[Adr0131LoopBodyProducerClass assignInjectInTimes, (Adr0131LoopBodyProducerValue new) assignInjectInTimes, (Adr0131LoopBodyProducerActor spawn) assignInjectInTimes] equals: #[12, 12, 12]
+
+  testAssignInjectInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass assignInjectInToDo, (Adr0131LoopBodyProducerValue new) assignInjectInToDo, (Adr0131LoopBodyProducerActor spawn) assignInjectInToDo] equals: #[12, 12, 12]

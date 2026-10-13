@@ -45,10 +45,10 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
-    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, sequenced_operand_sites,
-    stored_block_var_uses,
+    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
+    is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
+    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
+    outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -787,6 +787,8 @@ struct FrameSites {
     sites: HashSet<Span>,
     /// The statement itself, without parentheses.
     statement: Span,
+    /// Whether the frame is a fold's ([`is_fold_frame_body`]).
+    fold: bool,
 }
 
 struct Walker<'d> {
@@ -831,7 +833,7 @@ struct Walker<'d> {
     frame_sites: Vec<Option<FrameSites>>,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
-    pending_frame_body: bool,
+    pending_frame_body: Option<bool>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -889,7 +891,7 @@ impl<'d> Walker<'d> {
             safe_stored_uses,
             operand_sites: HashSet::new(),
             frame_sites: Vec::new(),
-            pending_frame_body: false,
+            pending_frame_body: None,
             diagnostics,
         }
     }
@@ -960,8 +962,11 @@ impl<'d> Walker<'d> {
     }
 
     fn block(&mut self, block: &Block, container: Container) {
-        let frame_body = std::mem::take(&mut self.pending_frame_body);
-        self.frame_sites.push(frame_body.then(FrameSites::default));
+        let frame_body = self.pending_frame_body.take();
+        self.frame_sites.push(frame_body.map(|fold| FrameSites {
+            fold,
+            ..FrameSites::default()
+        }));
         self.block_in_frame(block, container);
         self.frame_sites.pop();
     }
@@ -1067,12 +1072,14 @@ impl<'d> Walker<'d> {
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 for arg in arguments {
                     let arg_role = role(arg, false);
-                    self.pending_frame_body = matches!(
-                        arg,
-                        Expression::Block(b) if is_threaded_frame_body(expr, b)
-                    );
+                    self.pending_frame_body = match arg {
+                        Expression::Block(b) if is_threaded_frame_body(expr, b) => {
+                            Some(is_fold_frame_body(expr, b))
+                        }
+                        _ => None,
+                    };
                     self.operand_in(arg, Position::Argument, arg_role);
-                    self.pending_frame_body = false;
+                    self.pending_frame_body = None;
                 }
             }
             Expression::Cascade {
@@ -1241,25 +1248,32 @@ impl<'d> Walker<'d> {
         // `detect:`/`detect:ifNone:` stay out: a write in its search block is
         // dropped by the `collect:` and nested `do:` frames around it, and in
         // an actor by every frame (measured, BT-3793).
-        if self.depth > 0
+        let frame_site = self.depth > 0
             && self.context != Repl
-            && !matches!(selector.as_str(), "detect:" | "detect:ifNone:")
             && !self.frame_sites.is_empty()
             && self.frame_sites.iter().all(Option::is_some)
             && self
                 .frame_sites
                 .last()
                 .and_then(Option::as_ref)
-                .is_some_and(|frame| {
-                    frame.sites.contains(&expr.span())
-                        // An actor's value-bearing sites (an assignment's
-                        // value, an operand) inside a tuple-accumulator
-                        // `do:` body are not lowered by the producer yet:
-                        // only the body statement itself is (BT-3793).
-                        && (self.context != Actor || frame.statement == expr.unwrap_parens().span())
-                })
-            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
-        {
+                .is_some_and(|frame| frame.sites.contains(&expr.span()))
+            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some();
+        let body_site = frame_site && !matches!(selector.as_str(), "detect:" | "detect:ifNone:");
+        // An actor fold's value-bearing sites (an assignment's value, an
+        // operand) are not lowered by the producer: only the body statement
+        // itself is, and the construct's carrier does not fit the fold's
+        // tuple accumulator. Phase 0 must not accept them through any other
+        // row either (`r := xs inject: 0 into: [...]` in a `do:` body
+        // compiled and then crashed, BT-3797). A letrec loop frame lowers
+        // them (the `whileTrue:` rows of the local-assign matrix).
+        let actor_value_site = frame_site
+            && self.context == Actor
+            && self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| frame.fold && is_value_bearing_site(frame.statement, expr));
+        if body_site && !actor_value_site {
             return;
         }
         let handler_writes = selector == "detect:ifNone:"
@@ -1297,7 +1311,7 @@ impl<'d> Walker<'d> {
             }
             other => other,
         };
-        if is_allowed(kind, position, self.context) {
+        if !actor_value_site && is_allowed(kind, position, self.context) {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);

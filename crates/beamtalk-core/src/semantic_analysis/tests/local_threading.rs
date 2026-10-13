@@ -930,6 +930,22 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
             "t := 0\n#(1, 2) do: [:i | #(1, 2) do: [:j | t := t + j]]\nt",
             [false, false, true],
         ),
+        // BT-3797: an actor's assigned fold in a `do:` body compiled and then
+        // crashed ("expected a Dictionary"); a letrec loop frame
+        // (`timesRepeat:`, `to:do:`) lowers it (`assignInjectInTimes`,
+        // `assignInjectInToDo` in adr0131loop_body_producer_test.bt).
+        (
+            "t := 0\n#(1, 2) do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, true],
+        ),
+        (
+            "t := 0\n2 timesRepeat: [r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, false],
+        ),
+        (
+            "t := 0\n1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + r]\nt",
+            [false, false, false],
+        ),
         // An actor's value-bearing site in a `do:` body.
         (
             "t := 0\n#(1, 2) do: [:i | r := (#(1, 2) collect: [:x | t := t + x]) size. t := t + r]\nt",

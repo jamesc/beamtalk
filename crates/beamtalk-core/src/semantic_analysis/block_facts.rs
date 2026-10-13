@@ -1462,6 +1462,16 @@ pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     sites
 }
 
+/// ADR 0131 Phase 2b (BT-3793/BT-3797): whether `site`, one of a loop or
+/// fold body statement's [`loop_body_producer_sites`], carries a value (an
+/// assignment's value or an operand) rather than being the statement
+/// itself. The one rule both the Phase 0 check and the agreement test read
+/// for what an actor body does not lower through the producer.
+#[must_use]
+pub fn is_value_bearing_site(statement: Span, site: &Expression) -> bool {
+    site.unwrap_parens().span() != statement
+}
+
 /// Whether the literal block `block`, an argument of the send `expr`, is the
 /// body of a loop or fold that codegen lowers as a threaded frame
 /// (`lower_letrec_body`/`lower_foldl_body`), so its statements are
@@ -1487,6 +1497,19 @@ pub fn is_threaded_frame_body(expr: &Expression, block: &Block) -> bool {
     crate::state_threading_selectors::state_threaded_block_arg_indices(&construct.selector)
         .iter()
         .any(|&i| matches!(arguments.get(i), Some(Expression::Block(b)) if std::ptr::eq(b, block)))
+}
+
+/// ADR 0131 Phase 2b (BT-3797): whether `block` is the body of a *fold*
+/// frame ([`is_threaded_frame_body`] with a `LocalThreadingFamily::Fold`
+/// construct: `do:`, `collect:`, `inject:into:`, …), as opposed to a
+/// `whileTrue:`/counted-loop letrec frame. An actor's fold frame carries
+/// its locals in a tuple accumulator, which a value-bearing producer in the
+/// body does not lower through.
+#[must_use]
+pub fn is_fold_frame_body(expr: &Expression, block: &Block) -> bool {
+    is_threaded_frame_body(expr, block)
+        && local_threading_construct(expr)
+            .is_some_and(|c| matches!(c.family, LocalThreadingFamily::Fold))
 }
 
 fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Vec<&Expression> {

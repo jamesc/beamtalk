@@ -220,3 +220,32 @@ Value subclass: Adr0131LoopBodyProducerValue
           ]
       ]
     t
+
+  assignInjectInTimes =>
+    t := 0
+    2
+      timesRepeat: [
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        t := t + r
+      ]
+    t
+
+  assignInjectInToDo =>
+    t := 0
+    1
+      to: 2
+      do: [:i |
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        t := t + r
+      ]
+    t
