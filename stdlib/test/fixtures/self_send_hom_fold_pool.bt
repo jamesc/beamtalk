@@ -19,32 +19,33 @@ Actor subclass: SelfSendHomFoldPool
   state: total = 0
 
   // ── forwarding HOMs: opaque `block` straight to the primitive ─────────────
-  fwdInject: initial into: block => self.items inject: initial into: block
+  sealed fwdInject: initial into: block =>
+    self.items inject: initial into: block
 
-  fwdDetect: block => self.items detect: block
+  sealed fwdDetect: block => self.items detect: block
 
-  fwdDetect: block ifNone: noneBlock =>
+  sealed fwdDetect: block ifNone: noneBlock =>
     self.items detect: block ifNone: noneBlock
 
-  fwdCount: block => self.items count: block
+  sealed fwdCount: block => self.items count: block
 
-  fwdAnySatisfy: block => self.items anySatisfy: block
+  sealed fwdAnySatisfy: block => self.items anySatisfy: block
 
-  fwdAllSatisfy: block => self.items allSatisfy: block
+  sealed fwdAllSatisfy: block => self.items allSatisfy: block
 
-  arrDo: block => self.arr do: block
+  sealed arrDo: block => self.arr do: block
 
-  arrCollect: block => self.arr collect: block
+  sealed arrCollect: block => self.arr collect: block
 
-  arrInject: initial into: block => self.arr inject: initial into: block
+  sealed arrInject: initial into: block => self.arr inject: initial into: block
 
-  setDo: block => self.set do: block
+  sealed setDo: block => self.set do: block
 
-  setCollect: block => self.set collect: block
+  sealed setCollect: block => self.set collect: block
 
   setSelect: block => self.set select: block
 
-  setInject: initial into: block => self.set inject: initial into: block
+  sealed setInject: initial into: block => self.set inject: initial into: block
 
   // Opaque-callable folds in expression position (a receiver, a binary
   // operand, a conditional receiver) and inside a conditional arm / loop
@@ -57,16 +58,16 @@ Actor subclass: SelfSendHomFoldPool
   nestedAnyAnswer: block =>
     (self.items anySatisfy: block) ifTrue: ["yes"] ifFalse: ["no"]
 
-  doWhen: flag with: block =>
+  sealed doWhen: flag with: block =>
     flag ifTrue: [self.items do: block]
     nil
 
-  injectTwice: block =>
+  sealed injectTwice: block =>
     t := 0
     1 to: 2 do: [:_k | t := t + (self.items inject: 0 into: block)]
     t
 
-  countUpWhile: block =>
+  sealed countUpWhile: block =>
     i := 0
     [(self.items count: block) > i] whileTrue: [i := i + 1]
     i

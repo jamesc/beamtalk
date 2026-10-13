@@ -538,24 +538,25 @@ Actor subclass: MutationCorpusActor
   // threaded `do:`/`ifTrue:` in a class with a `classState:` is a separate,
   // pre-existing compiler crash (`unbound variable 'ClassVars1'`) — see
   // ADR 0128's Scope section.
-  opaqueDo: block => #(1, 2, 3) do: block
+  sealed opaqueDo: block => #(1, 2, 3) do: block
 
-  opaqueCollect: block => #(1, 2, 3) collect: block
+  sealed opaqueCollect: block => #(1, 2, 3) collect: block
 
-  opaqueSelect: block => #(1, 2, 3) select: block
+  sealed opaqueSelect: block => #(1, 2, 3) select: block
 
-  opaqueInject: initial into: block => #(1, 2, 3) inject: initial into: block
+  sealed opaqueInject: initial into: block =>
+    #(1, 2, 3) inject: initial into: block
 
-  opaqueDetect: block => #(1, 2, 3) detect: block
+  sealed opaqueDetect: block => #(1, 2, 3) detect: block
 
-  opaqueDetect: block ifNone: noneBlock =>
+  sealed opaqueDetect: block ifNone: noneBlock =>
     #(1, 2, 3) detect: block ifNone: noneBlock
 
-  opaqueCount: block => #(1, 2, 3) count: block
+  sealed opaqueCount: block => #(1, 2, 3) count: block
 
-  opaqueAnySatisfy: block => #(1, 2, 3) anySatisfy: block
+  sealed opaqueAnySatisfy: block => #(1, 2, 3) anySatisfy: block
 
-  opaqueAllSatisfy: block => #(1, 2, 3) allSatisfy: block
+  sealed opaqueAllSatisfy: block => #(1, 2, 3) allSatisfy: block
 
   opaqueDoNonLastReadWrite =>
     n := 0

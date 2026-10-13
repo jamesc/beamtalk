@@ -10,18 +10,18 @@ Actor subclass: Tier2BlockTestActor
   // BT-851: HOM that receives a block and calls it with the Tier 2 protocol
   // The block parameter `aBlock` is compiled with the stateful calling convention
   // when the compiler detects it receives a Tier 2 (captured-mutation) block
-  applyBlock: aBlock to: anItem => aBlock value: anItem
+  sealed applyBlock: aBlock to: anItem => aBlock value: anItem
 
   // BT-853: HOM where the block call is NOT the last expression
   // After calling the block (which mutates count via StateAcc), this method
   // returns a fixed sentinel value. The state update must still propagate back
-  applyBlockNonLast: aBlock to: anItem =>
+  sealed applyBlockNonLast: aBlock to: anItem =>
     aBlock value: anItem
     99
 
   // BT-853: HOM where the block result is captured in a local variable
   // The block returns (count + x) and this HOM adds an extra offset to it
-  applyBlockGetResult: aBlock to: anItem addend: extra =>
+  sealed applyBlockGetResult: aBlock to: anItem addend: extra =>
     result := aBlock value: anItem
     result + extra
 
@@ -29,7 +29,7 @@ Actor subclass: Tier2BlockTestActor
   // Verifies state is correctly threaded across multiple Tier 2 assignments
   // If new_state were pre-computed before expression_doc, duplicate StateN bindings
   // in generated Core Erlang would cause an Erlang compile-time failure
-  applyTwoBlocks: aBlock1 and: aBlock2 to: anItem =>
+  sealed applyTwoBlocks: aBlock1 and: aBlock2 to: anItem =>
     r1 := aBlock1 value: anItem
     r2 := aBlock2 value: r1
     r2

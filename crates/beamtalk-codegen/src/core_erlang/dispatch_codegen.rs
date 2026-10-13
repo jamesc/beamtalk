@@ -2816,9 +2816,39 @@ impl CoreErlangGenerator {
         // Clear previous class's info to avoid cross-class pollution in multi-class modules
         self.tier2_method_info.clear();
 
+        // BT-3755: a captured-local write promotes the callee's parameter
+        // only when the callee threads it; the same predicate the §6
+        // diagnostic reads (`semantic_analysis::tier2_callee`).
+        let threads = |selector: &str, index: usize| {
+            beamtalk_core::semantic_analysis::tier2_callee::callee_threads_block_param(
+                class, selector, index,
+            )
+        };
         for method in &class.methods {
             for stmt in &method.body {
-                self.scan_expr_for_tier2(&stmt.expression, &analyze_block);
+                self.scan_expr_for_tier2(&stmt.expression, &analyze_block, &threads);
+            }
+        }
+        // A callee that passes the block on to another callee of the class
+        // makes that callee's parameter a Tier 2 block parameter too.
+        let recorded: Vec<(String, usize)> = self
+            .tier2_method_info
+            .iter()
+            .flat_map(|(sel, positions)| positions.iter().map(move |p| (sel.clone(), *p)))
+            .collect();
+        for (selector, index) in recorded {
+            for (target, position) in
+                beamtalk_core::semantic_analysis::tier2_callee::passed_on_targets(
+                    class, &selector, index,
+                )
+            {
+                let positions = self
+                    .tier2_method_info
+                    .entry(target.to_string())
+                    .or_default();
+                if !positions.contains(&position) {
+                    positions.push(position);
+                }
             }
         }
     }
@@ -2830,6 +2860,7 @@ impl CoreErlangGenerator {
         analyze: &dyn Fn(
             &beamtalk_core::ast::Block,
         ) -> super::block_analysis::BlockMutationAnalysis,
+        threads: &dyn Fn(&str, usize) -> bool,
     ) {
         match expr {
             Expression::MessageSend {
@@ -2849,7 +2880,8 @@ impl CoreErlangGenerator {
                                     .local_writes
                                     .intersection(&analysis.captured_reads)
                                     .next()
-                                    .is_some();
+                                    .is_some()
+                                    && threads(&sel_name, i);
                                 // Also promote blocks with field writes to Tier 2.
                                 let has_field_writes = !analysis.field_writes.is_empty();
                                 if has_captured_mutations || has_field_writes {
@@ -2863,25 +2895,25 @@ impl CoreErlangGenerator {
                     }
                 }
                 // Recurse into receiver and arguments
-                self.scan_expr_for_tier2(receiver, analyze);
+                self.scan_expr_for_tier2(receiver, analyze, threads);
                 for arg in arguments {
-                    self.scan_expr_for_tier2(arg, analyze);
+                    self.scan_expr_for_tier2(arg, analyze, threads);
                 }
             }
             Expression::Assignment { target, value, .. } => {
-                self.scan_expr_for_tier2(target, analyze);
-                self.scan_expr_for_tier2(value, analyze);
+                self.scan_expr_for_tier2(target, analyze, threads);
+                self.scan_expr_for_tier2(value, analyze, threads);
             }
             Expression::Block(block) => {
                 for body_stmt in &block.body {
-                    self.scan_expr_for_tier2(&body_stmt.expression, analyze);
+                    self.scan_expr_for_tier2(&body_stmt.expression, analyze, threads);
                 }
             }
             Expression::Return { value, .. } => {
-                self.scan_expr_for_tier2(value, analyze);
+                self.scan_expr_for_tier2(value, analyze, threads);
             }
             Expression::Parenthesized { expression, .. } => {
-                self.scan_expr_for_tier2(expression, analyze);
+                self.scan_expr_for_tier2(expression, analyze, threads);
             }
             Expression::Cascade {
                 receiver, messages, ..
@@ -2898,7 +2930,8 @@ impl CoreErlangGenerator {
                                         .local_writes
                                         .intersection(&analysis.captured_reads)
                                         .next()
-                                        .is_some();
+                                        .is_some()
+                                        && threads(&sel_name, i);
                                     // Also promote blocks with field writes to Tier 2.
                                     let has_field_writes = !analysis.field_writes.is_empty();
                                     if has_captured_mutations || has_field_writes {
@@ -2913,20 +2946,20 @@ impl CoreErlangGenerator {
                     }
                 }
                 // Recurse into receiver and arguments
-                self.scan_expr_for_tier2(receiver, analyze);
+                self.scan_expr_for_tier2(receiver, analyze, threads);
                 for msg in messages {
                     for arg in &msg.arguments {
-                        self.scan_expr_for_tier2(arg, analyze);
+                        self.scan_expr_for_tier2(arg, analyze, threads);
                     }
                 }
             }
             Expression::Match { value, arms, .. } => {
-                self.scan_expr_for_tier2(value, analyze);
+                self.scan_expr_for_tier2(value, analyze, threads);
                 for arm in arms {
                     if let Some(guard) = &arm.guard {
-                        self.scan_expr_for_tier2(guard, analyze);
+                        self.scan_expr_for_tier2(guard, analyze, threads);
                     }
-                    self.scan_expr_for_tier2(&arm.body, analyze);
+                    self.scan_expr_for_tier2(&arm.body, analyze, threads);
                 }
             }
             _ => {}
@@ -2976,7 +3009,9 @@ impl CoreErlangGenerator {
                                 .collect::<std::collections::BTreeSet<_>>()
                                 .into_iter()
                                 .collect();
-                            if !captured_mutations.is_empty() {
+                            // BT-3755: the pre-scan records `hom_positions` for a
+                            // captured-local write only when the callee threads it.
+                            if !captured_mutations.is_empty() && hom_positions.contains(&i) {
                                 tier2_args.push((i, captured_mutations));
                             } else if !analysis.field_writes.is_empty() {
                                 // Field-write block — promote to Tier 2 with no local
