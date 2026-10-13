@@ -289,8 +289,6 @@ mirrors `beamtalk_workspace_signature_store:seed_from_meta/3`.
 """.
 -spec read_own_meta(binary()) -> {ok, atom(), map()} | undefined.
 read_own_meta(ClassNameBin) ->
-    %% bt-catcher-audit: not-applicable-no-block - generated __beamtalk_meta/0 literal getter, no
-    %% block
     try
         ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
         {ok, Module} = beamtalk_class_metadata:lookup_module(ClassAtom),
@@ -305,12 +303,10 @@ read_own_meta(ClassNameBin) ->
         %% Expected, ordinary resolution failures — silent, no log:
         %%   badarg   — ClassNameBin isn't an atom yet (brand-new this session).
         %%   {badmatch, not_found} — class not registered in beamtalk_class_metadata.
-        %%   undef    — Module has no __beamtalk_meta/0 (or no code at all).
+        %% (A module with no __beamtalk_meta/0, or no code, reads `none` above.)
         error:badarg ->
             undefined;
         error:{badmatch, not_found} ->
-            undefined;
-        error:undef ->
             undefined;
         %% Anything else is unexpected — still degrade to `undefined` (this
         %% function must never crash the prime/capture hook), but log it so a
