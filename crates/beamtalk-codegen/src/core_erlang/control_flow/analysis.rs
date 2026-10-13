@@ -942,18 +942,21 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// ADR 0131 Phase 2b: whether `expr` (through an assignment's value and
-    /// parentheses) is a `do:`/`anySatisfy:`/`allSatisfy:` over a literal block
-    /// that captures and mutates an outer local, in a context with no
-    /// tuple-accumulator mode (value-type and class methods:
-    /// `select_tuple_acc`). Such a list op is not a local-threading producer
-    /// (`producer_body_arg_index` lists neither) and lowers in map-accumulator
-    /// mode, which references `StateAcc` — so, like
+    /// ADR 0131 Phase 2b/2c: whether `expr` (through an assignment's value and
+    /// parentheses) is a list op over a literal block that captures and
+    /// mutates an outer local, is not a local-threading producer
+    /// (`producer_body_arg_index` does not list it), and lowers in
+    /// map-accumulator mode, which references `StateAcc` — so, like
     /// [`Self::list_op_needs_stateacc_fallback`] for the shapes it covers, it
-    /// disqualifies the enclosing loop from direct-params. The other list ops
-    /// (`collect:`, `select:`, `reject:`, `inject:into:`, …) are producers: in
-    /// a direct-params body their tuple is rebound through the loop's
-    /// argument chain.
+    /// disqualifies the enclosing loop from direct-params.
+    ///
+    /// Answers `false` outside the `ValueType` codegen context: that is the
+    /// only context with no tuple-accumulator mode (`select_tuple_acc`); an
+    /// actor or class-method body does not take this fallback. Today only
+    /// `anySatisfy:`/`allSatisfy:` qualify: `do:` joined the producer table in
+    /// BT-3796, and the other list ops (`collect:`, `select:`, `reject:`,
+    /// `inject:into:`, …) were producers already — in a direct-params body
+    /// their tuple is rebound through the loop's argument chain.
     pub(in crate::core_erlang) fn nested_non_producer_map_acc_list_op(
         &self,
         expr: &Expression,
@@ -975,7 +978,13 @@ impl CoreErlangGenerator {
             return false;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        if !matches!(sel.as_str(), "do:" | "anySatisfy:" | "allSatisfy:") {
+        if !matches!(sel.as_str(), "do:" | "anySatisfy:" | "allSatisfy:")
+            || beamtalk_core::state_threading_selectors::producer_body_arg_index(
+                &sel,
+                arguments.len(),
+            )
+            .is_some()
+        {
             return false;
         }
         let Some(body_block) = Self::block_arg_for_selector(&sel, arguments) else {

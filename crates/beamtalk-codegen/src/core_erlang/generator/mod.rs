@@ -233,6 +233,11 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// ADR 0131 Phase 2c (BT-3796): whether any loop or fold frame whose body
+    /// is being lowered (`with_body_producer_sites`) is a fold's — the
+    /// `outer_fold` input of `beamtalk_core`'s `LoopBodyContext` for the body
+    /// of the frame nested in them.
+    pub(in crate::core_erlang) in_fold_frame: bool,
     /// ADR 0131 Phase 2b (BT-3793): the frame a local-threading producer's
     /// `LocalRebind`s are lowered by (§2's table), for every loop or fold
     /// body frame currently being lowered, keyed by that body's
@@ -409,6 +414,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
+            in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),

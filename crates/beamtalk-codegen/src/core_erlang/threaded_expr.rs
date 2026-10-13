@@ -1051,25 +1051,38 @@ impl CoreErlangGenerator {
     /// statement that is itself a loop or fold, and each sequenced operand
     /// site of a statement (`sequenced_operand_sites`: an assignment's whole
     /// value, a `^` value, a send's receiver and arguments, a literal's
-    /// elements). Restores the enclosing set afterwards, so a site is a
-    /// producer only in the body that lowers it through
-    /// [`Self::threaded_expression`] under a registered frame.
+    /// elements) — narrowed by `beamtalk_core`'s `is_loop_body_producer_site`,
+    /// the rule the Phase 0 check reads too. `fold` says whether the body is a
+    /// fold's (`is_fold_frame_body`) rather than a letrec loop's. Restores the
+    /// enclosing set afterwards, so a site is a producer only in the body that
+    /// lowers it through [`Self::threaded_expression`] under a registered
+    /// frame.
     pub(super) fn with_body_producer_sites<T>(
         &mut self,
         body: &[&Expression],
+        fold: bool,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
+        };
+        let in_actor = self.in_actor_instance_context();
+        let outer_fold = self.in_fold_frame;
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
+            let ctx = LoopBodyContext::new(stmt, fold, outer_fold, in_actor);
             sites.extend(
-                beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt)
+                loop_body_producer_sites(stmt)
                     .into_iter()
+                    .filter(|site| is_loop_body_producer_site(site, &ctx))
                     .map(Expression::span),
             );
         }
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let saved_fold = std::mem::replace(&mut self.in_fold_frame, outer_fold || fold);
         let out = f(self);
         self.local_producer_sites = saved;
+        self.in_fold_frame = saved_fold;
         out
     }
 

@@ -535,22 +535,16 @@ fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
 }
 
 #[test]
-fn allow_set_is_per_context() {
-    // `r := coll do: [...]` silently drops the write in class and value-type
-    // methods and works in an actor method.
+fn allow_set_do_assignment_is_accepted_in_every_context() {
+    // `r := coll do: [...]` dropped the write in class and value-type methods
+    // and worked in an actor method. ADR 0131 Phase 2c (BT-3796) makes `do:` a
+    // local-threading producer (`producer_body_arg_index`), so it is accepted
+    // in every context; the BUnit pins are `doAsAssignedValue` and friends in
+    // `adr0131do_producer_test.bt`.
     let body = "r := #(1, 2) do: [:x | t := t + x]\nt";
-    for src in [in_class(body), in_value(body)] {
-        assert_eq!(
-            of_category(
-                &adr0131_diagnostics(&src),
-                DiagnosticCategory::UnmigratedLocalThreading
-            )
-            .len(),
-            1,
-            "{src}"
-        );
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
     }
-    assert!(adr0131_diagnostics(&in_actor(body)).is_empty());
 }
 
 #[test]
@@ -1061,20 +1055,23 @@ fn deny_set_block_local_writes_are_not_in_scope() {
 }
 
 #[test]
-fn deny_set_state_access_changes_a_class_loop_body() {
-    // A `do:` in a `to:do:` body loses the write, unless the loop body
-    // touches the class's state (class_method_protected_locals.bt
-    // `nestedDoInACountedLoop`, probed).
-    let plain = in_class("1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j]]\nt");
-    assert_eq!(adr0131_diagnostics(&plain).len(), 1);
-    let stateful = in_class("1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j. self ap: [nil]]]\nt");
-    assert!(
-        of_category(
-            &adr0131_diagnostics(&stateful),
-            DiagnosticCategory::UnmigratedLocalThreading
-        )
-        .is_empty()
-    );
+fn a_nested_do_in_a_class_loop_body_is_accepted_with_or_without_state_access() {
+    // A `do:` in a `to:do:` body used to lose the write unless the loop body
+    // touched the class's state (class_method_protected_locals.bt
+    // `nestedDoInACountedLoop`, probed). ADR 0131 Phase 2c (BT-3796) lowers it
+    // as a local-threading producer in the enclosing frame, so both answer
+    // right (`doInToDo`, `doInToDoStateful` in
+    // `adr0131loop_body_producer_test.bt`).
+    for body in [
+        "1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j]]\nt",
+        "1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j. self ap: [nil]]]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_class(body));
+        assert!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            "{body}: {diags:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1299,10 +1296,16 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
             "t := 0\n#(1, 2) do: [:i | #(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]]\nt",
             [true, true, true],
         ),
-        // A nested `do:` is no producer: its rows keep rejecting it in an actor.
+        // ADR 0131 Phase 2c (BT-3796): a nested `do:` is a producer in every
+        // context.
         (
             "t := 0\n#(1, 2) do: [:i | #(1, 2) do: [:j | t := t + j]]\nt",
-            [false, false, true],
+            [false, false, false],
+        ),
+        // ... as a statement of a letrec loop or a fold body.
+        (
+            "t := 0\n1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j]]\nt",
+            [false, false, false],
         ),
         // BT-3797: an actor's assigned fold in a `do:` body compiled and then
         // crashed ("expected a Dictionary"); a letrec loop frame
@@ -1324,6 +1327,17 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
         (
             "t := 0\n#(1, 2) do: [:i | r := (#(1, 2) collect: [:x | t := t + x]) size. t := t + r]\nt",
             [false, false, true],
+        ),
+        // BT-3796: and under *any* enclosing actor fold frame, not only the
+        // innermost one (a letrec loop inside a `do:` wrote nothing back).
+        (
+            "t := 0\n#(1, 2) do: [:i | 1 to: 2 do: [:k | r := #[#(1, 2) do: [:x | t := t + x], t]. t := t + r size]]\nt",
+            [false, false, true],
+        ),
+        // A letrec loop frame alone lowers value-bearing sites, in an actor too.
+        (
+            "t := 0\n1 to: 2 do: [:i | r := #[#(1, 2) do: [:x | t := t + x], t]. t := t + r size]\nt",
+            [false, false, false],
         ),
     ] {
         for (src, expect_error) in [in_class(body), in_value(body), in_actor(body)]

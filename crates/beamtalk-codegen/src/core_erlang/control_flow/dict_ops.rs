@@ -35,11 +35,8 @@ impl CoreErlangGenerator {
              \x20 dict do: [:value | value printString]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_dict_do_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_dict_do_with_mutations(receiver, body_block);
         }
 
         // No mutations: delegate to runtime helper
@@ -112,20 +109,6 @@ impl CoreErlangGenerator {
                     ") in ",
                     extract_doc,
                 ]
-            } else if matches!(plan.context, CodeGenContext::ValueType) {
-                docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(values_var),
-                    ") in ",
-                    extract_doc,
-                    "'nil'",
-                ]
             } else {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
@@ -190,11 +173,7 @@ impl CoreErlangGenerator {
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
-        if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
-            post_docs.push(Document::Str("'nil'"));
-        } else {
-            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
-        }
+        post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         docs.push(Document::Vec(post_docs));
 
         Ok(Document::Vec(docs))
@@ -519,10 +498,13 @@ mod tests {
             "NLR throw tuple must not reference a bare unbound `_` as the return \
              value — the NoValue case must substitute 'nil'. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
         );
+        // ADR 0131 Phase 2c (BT-3796): `do:` is a local-threading producer, so
+        // the nested `do:` is lowered to its own `{nil, StateAcc}` carrier and
+        // the throw's value is that carrier's element 1 (`do:` answers nil).
         assert!(
-            nlr_throw_window.contains("'nil'"),
-            "NLR throw tuple should substitute the literal 'nil' atom for a \
-             NoValue open scope. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
+            nlr_throw_window.contains("'element'(1, _ThreadedResult"),
+            "NLR throw tuple should carry the nested `do:` producer's value (element 1 of \
+             its carrier). Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
         );
     }
 

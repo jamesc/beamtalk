@@ -17,8 +17,9 @@ use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
-    is_fold_frame_body, is_threaded_frame_body, is_value_bearing_site, loop_body_producer_sites,
-    operand_producer_writes, sequenced_operand_sites,
+    LoopBodyContext, is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_threaded_frame_body, loop_body_producer_sites, operand_producer_writes,
+    sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -43,6 +44,8 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. u := u + 1. 0]",
     "#(1, 2) detect: [:x | x > 5] ifNone: ([t := t + 1. 0])",
     "#(1, 2) do: [:x | t := t + x]",
+    // A map literal receiver goes through the dictionary `do:` lowering.
+    "#{#a => 1, #b => 2} do: [:x | t := t + x]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
     "#(1, 2) select: [:x | t := t + 1. true]",
     "#(1, 2) detect: [:x | t := t + 1. x > 1]",
@@ -301,8 +304,10 @@ fn every_field_write_value_site_the_core_rule_accepts_is_lowered_by_the_producer
 // ---------------------------------------------------------------------------
 
 /// The loop and fold frames a producer is nested in; `{s}` is the statement
-/// under test. The last two put an arm and a closure between the frame and
-/// the construct, where no site exists.
+/// under test. The two-level frames (BT-3796) put a letrec loop inside a fold
+/// and a fold inside a letrec loop, where the innermost frame alone does not
+/// tell whether an actor fold encloses the site. The last two put an arm and a
+/// closure between the frame and the construct, where no site exists.
 const FRAMES: &[&str] = &[
     "1 to: 2 do: [:k | {s}]",
     "#(1, 2) do: [:k | {s}]",
@@ -310,6 +315,10 @@ const FRAMES: &[&str] = &[
     "[s < 3] whileTrue: [s := s + 1. {s}]",
     "#(1, 2) collect: [:k | {s}. k]",
     "#(1, 2) inject: 0 into: [:a :k | {s}. a + k]",
+    "#(1, 2) do: [:k | 1 to: 2 do: [:i | {s}]]",
+    "#(1, 2) collect: [:k | 2 timesRepeat: [{s}]. k]",
+    "1 to: 2 do: [:k | #(1, 2) do: [:i | {s}]]",
+    "[s < 3] whileTrue: [s := s + 1. #(1, 2) inject: 0 into: [:a :i | {s}. a + i]]",
     "#(1, 2) do: [:k | true ifTrue: [{s}]]",
     "#(1, 2) do: [:k | [:z | {s}] value: k]",
 ];
@@ -358,10 +367,16 @@ fn body_sources(frame: &str, construct: &str, statement: &str) -> [String; 3] {
 }
 
 /// The core rule's verdict for every producer site of every loop or fold
-/// body reachable from `stmt` (`loop_body_producer_sites`), frames nested in
-/// one another included.
+/// body reachable from `stmt` (`loop_body_producer_sites`, narrowed by the
+/// shared `is_loop_body_producer_site` exactly as the Phase 0 check and
+/// codegen's `with_body_producer_sites` narrow it), frames nested in one
+/// another included. `outer_fold` says whether a frame enclosing `stmt` is a
+/// fold's; `value_bearing` collects the actor fold-frame value sites the
+/// narrowing drops, which Phase 0 must have rejected.
 fn core_body_producers(
     stmt: &Expression,
+    outer_fold: bool,
+    in_actor: bool,
     out: &mut HashMap<Span, Vec<String>>,
     value_bearing: &mut HashSet<Span>,
 ) {
@@ -376,23 +391,32 @@ fn core_body_producers(
         if !is_threaded_frame_body(stmt.unwrap_parens(), block) {
             continue;
         }
+        let fold = is_fold_frame_body(stmt.unwrap_parens(), block);
         for inner in &block.body {
+            let ctx = LoopBodyContext::new(&inner.expression, fold, outer_fold, in_actor);
             for site in loop_body_producer_sites(&inner.expression) {
                 if let Some(writes) = operand_producer_writes(site, &bound) {
+                    if is_actor_fold_value_site(site, &ctx) {
+                        value_bearing.insert(Expression::span(site));
+                    }
+                    if !is_loop_body_producer_site(site, &ctx) {
+                        continue;
+                    }
                     let mut names: Vec<String> =
                         writes.into_iter().map(|w| w.name.to_string()).collect();
                     names.sort();
                     names.dedup();
                     out.insert(Expression::span(site), names);
-                    if is_fold_frame_body(stmt.unwrap_parens(), block)
-                        && is_value_bearing_site(inner.expression.unwrap_parens().span(), site)
-                    {
-                        value_bearing.insert(Expression::span(site));
-                    }
-                    core_body_producers(site, out, value_bearing);
+                    core_body_producers(site, outer_fold || fold, in_actor, out, value_bearing);
                 }
             }
-            core_body_producers(&inner.expression, out, value_bearing);
+            core_body_producers(
+                &inner.expression,
+                outer_fold || fold,
+                in_actor,
+                out,
+                value_bearing,
+            );
         }
     }
 }
@@ -434,18 +458,24 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                         .expect("one method");
                     let mut expected = core_producers(&method.body);
                     let mut value_bearing = HashSet::new();
+                    let in_actor = src.starts_with("Actor");
                     for stmt in &method.body {
-                        core_body_producers(&stmt.expression, &mut expected, &mut value_bearing);
+                        core_body_producers(
+                            &stmt.expression,
+                            false,
+                            in_actor,
+                            &mut expected,
+                            &mut value_bearing,
+                        );
                     }
-                    // An actor fold body lowers only the statement itself through
-                    // the producer: Phase 0 must reject every value-bearing
-                    // site there (BT-3797, `r := xs inject: ...` in a `do:`).
-                    // This pins the validator's use of the shared rule
-                    // (`is_fold_frame_body` + `is_value_bearing_site`, the
-                    // `actor_value_site` arm of `check_construct`), not an
-                    // independent check of codegen: codegen's frame lowering
-                    // does not read that rule, it simply has no producer
-                    // path for a value-bearing site in an actor fold body.
+                    // An actor fold frame (any enclosing one, BT-3796) lowers
+                    // only the statement itself through the producer: Phase 0
+                    // must reject every value-bearing site there (BT-3797,
+                    // `r := xs inject: ...` in a `do:`, and the same site in a
+                    // letrec nested in the fold). The narrowing is the shared
+                    // `is_loop_body_producer_site`, which codegen's
+                    // `with_body_producer_sites` reads too, so the lowered
+                    // set compared below drops those sites as well.
                     assert!(
                         !src.starts_with("Actor") || value_bearing.is_empty(),
                         "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"

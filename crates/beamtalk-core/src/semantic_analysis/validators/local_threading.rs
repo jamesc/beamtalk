@@ -46,11 +46,12 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
-    escape_sites, is_fold_frame_body, is_safe_value_family_selector, is_threaded_frame_body,
-    is_value_bearing_site, local_threading_construct, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, producer_body_block, repl_operand_sites,
-    sequenced_operand_sites, stored_block_var_uses,
+    EscapeShape, LoopBodyContext, OuterLocalWrite, captured_local_mutations,
+    construct_outer_local_writes, escape_sites, is_actor_fold_value_site, is_fold_frame_body,
+    is_loop_body_producer_site, is_safe_value_family_selector, is_threaded_frame_body,
+    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
+    outer_local_writes, producer_body_block, repl_operand_sites, sequenced_operand_sites,
+    stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -370,7 +371,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            Do,
             KeyedDo,
             ListOp,
             DetectIfNoneSearch,
@@ -420,7 +420,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            Do,
             KeyedDo,
             ListOp,
             DetectIfNoneSearch,
@@ -439,7 +438,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            Do,
             KeyedDo,
             ListOp,
             DetectIfNoneSearch,
@@ -450,7 +448,7 @@ const ALLOW_SET: &[Allowed] = &[
         contexts: &[Class],
     },
     Allowed {
-        kinds: &[Do, KeyedDo],
+        kinds: &[KeyedDo],
         position: Position::ReturnValue { nested: false },
         contexts: &[ValueType],
     },
@@ -458,7 +456,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            Do,
             KeyedDo,
             ListOp,
             DetectIfNoneSearch,
@@ -658,8 +655,8 @@ const DENY_SET: &[Denied] = &[
     deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
-    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], ALL),
+    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Do, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[DetectIfNoneSearch, DetectIfNone, BlockValue]),
@@ -833,8 +830,9 @@ enum TopLevel {
 struct FrameSites {
     /// The statement's [`loop_body_producer_sites`].
     sites: HashSet<Span>,
-    /// The statement itself, without parentheses.
-    statement: Span,
+    /// The statement's [`LoopBodyContext`] with the frame facts that do not
+    /// change per statement filled in at the statement.
+    statement: LoopBodyContext,
     /// Whether the frame is a fold's ([`is_fold_frame_body`]).
     fold: bool,
 }
@@ -960,6 +958,22 @@ impl<'d> Walker<'d> {
         self.scope.iter().any(|f| f.contains(name))
     }
 
+    /// The [`LoopBodyContext`] of the loop or fold body statement being walked:
+    /// the innermost frame's statement, with whether that frame and the ones
+    /// around it are folds.
+    fn loop_body_context(&self) -> LoopBodyContext {
+        let frames: Vec<&FrameSites> = self.frame_sites.iter().flatten().collect();
+        let Some((innermost, outer)) = frames.split_last() else {
+            return LoopBodyContext::default();
+        };
+        LoopBodyContext {
+            innermost_fold: innermost.fold,
+            outer_fold: outer.iter().any(|frame| frame.fold),
+            in_actor: self.context == Actor,
+            ..innermost.statement
+        }
+    }
+
     /// The index of the innermost scope frame binding `name`.
     fn binding_frame(&self, name: &str) -> Option<usize> {
         self.scope.iter().rposition(|f| f.contains(name))
@@ -1014,7 +1028,7 @@ impl<'d> Walker<'d> {
                 };
                 self.operand_sites = sites.into_iter().map(Expression::span).collect();
             } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
-                frame.statement = stmt.expression.unwrap_parens().span();
+                frame.statement = LoopBodyContext::new(&stmt.expression, false, false, false);
                 frame.sites = loop_body_producer_sites(&stmt.expression)
                     .into_iter()
                     .map(Expression::span)
@@ -1317,9 +1331,13 @@ impl<'d> Walker<'d> {
         // local-threading producer there: its prelude rebinds the locals it
         // writes, lowered by the enclosing frame's mode.
         //
-        // `detect:`/`detect:ifNone:` stay out: a write in its search block is
-        // dropped by the `collect:` and nested `do:` frames around it, and in
-        // an actor by every frame (measured, BT-3793).
+        // `is_loop_body_producer_site` is the one narrowing of those sites,
+        // shared with codegen's `with_body_producer_sites`: `detect:`/
+        // `detect:ifNone:` stay out (they keep their statement rows), and an
+        // actor fold frame's value-bearing sites are not lowered by the
+        // producer at all, so no other row may accept them either
+        // (`r := xs inject: 0 into: [...]` in a `do:` body compiled and then
+        // crashed, BT-3797).
         let frame_site = self.depth > 0
             && self.context != Repl
             && !self.frame_sites.is_empty()
@@ -1330,22 +1348,9 @@ impl<'d> Walker<'d> {
                 .and_then(Option::as_ref)
                 .is_some_and(|frame| frame.sites.contains(&expr.span()))
             && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some();
-        let body_site = frame_site && !matches!(selector.as_str(), "detect:" | "detect:ifNone:");
-        // An actor fold's value-bearing sites (an assignment's value, an
-        // operand) are not lowered by the producer: only the body statement
-        // itself is, and the construct's carrier does not fit the fold's
-        // tuple accumulator. Phase 0 must not accept them through any other
-        // row either (`r := xs inject: 0 into: [...]` in a `do:` body
-        // compiled and then crashed, BT-3797). A letrec loop frame lowers
-        // them (the `whileTrue:` rows of the local-assign matrix).
-        let actor_value_site = frame_site
-            && self.context == Actor
-            && self
-                .frame_sites
-                .last()
-                .and_then(Option::as_ref)
-                .is_some_and(|frame| frame.fold && is_value_bearing_site(frame.statement, expr));
-        if body_site && !actor_value_site {
+        let ctx = self.loop_body_context();
+        let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
+        if frame_site && is_loop_body_producer_site(expr, &ctx) {
             return;
         }
         let handler_writes = selector == "detect:ifNone:"

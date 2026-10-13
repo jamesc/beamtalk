@@ -249,3 +249,129 @@ Value subclass: Adr0131LoopBodyProducerValue
         t := t + r
       ]
     t
+
+  // BT-3796 (ADR 0131 Phase 2c): `do:` is a local-threading producer through
+  // `producer_body_arg_index`, so a `do:` nested in a loop or fold body
+  // rebinds the locals it writes in the enclosing frame.
+  doInToDo =>
+    t := 0
+    1 to: 2 do: [:i | #(1, 2) do: [:j | t := t + j]]
+    t
+
+  doInWhile =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        #(1, 2) do: [:j | t := t + j]
+        i := i + 1
+      ]
+    t
+
+  twoLocals =>
+    t := 0
+    u := 0
+    1
+      to: 2
+      do: [:i |
+        #(1, 2)
+          do: [:j |
+            t := t + j
+            u := u + i
+          ]
+      ]
+    #[t, u]
+
+  doInCollectLast =>
+    t := 0
+    r := #(1, 2) collect: [:x | #(1, 2) do: [:k | t := t + k]]
+    #[r size, t]
+
+  threeDeep =>
+    t := 0
+    1 to: 2 do: [:i | 1 to: 2 do: [:j | #(1, 2) do: [:k | t := t + 1]]]
+    t
+
+  injectLastValue =>
+    t := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        #(1, 2)
+          inject: a
+          into: [:b :y |
+            t := t + y
+            b + y
+          ]
+      ]
+    #[r, t]
+
+  // A `do:` in a loop body whose enclosing loop also touches state: the
+  // body's own self-send or field write picks the frame's `StateAcc` mode.
+  doInToDoStateful =>
+    t := 0
+    1
+      to: 2
+      do: [:i |
+        #(1, 2)
+          do: [:j |
+            t := t + j
+            self plain
+          ]
+      ]
+    t
+
+  // BT-3793 review: a local the outer body reassigns before the nested `do:`
+  // (`body_introduced_locals`) is the body's own, the nested `do:` still
+  // rebinds it.
+  outerLocalReassignedFirst =>
+    w := 5
+    1
+      to: 2
+      do: [:i |
+        w := 0
+        #(1, 2) do: [:j | w := w + j]
+      ]
+    w
+
+  // BT-3793 review: a producer nested two frames deep with a value-bearing
+  // assignment, where the outermost frame is a fold and the middle one a
+  // letrec loop, and the same under a letrec loop inside a `collect:`
+  // (both answered 24 in a probe).
+  foldInLetrecInFold =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        1
+          to: 2
+          do: [:i |
+            r := #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+            t := t + r
+          ]
+      ]
+    t
+
+  foldInLetrecInCollect =>
+    t := 0
+    #(1, 2)
+      collect: [:k |
+        2
+          timesRepeat: [
+            r := #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+            t := t + r
+          ]
+        k
+      ]
+    t
+
+  plain => 0

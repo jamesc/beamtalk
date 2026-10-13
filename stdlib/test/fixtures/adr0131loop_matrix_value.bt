@@ -1,0 +1,864 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3796 (ADR 0131 Phase 2c): the loop-body producer matrix, one method per
+// cell of inner construct x enclosing frames x statement shape x write
+// variant, in the value-type column. Every method sums into the outer local `t`
+// inside the inner construct, which sits in the body of the frame (a
+// `to:do:`/`timesRepeat:`/`whileTrue:` loop, a `do:`/`collect:`/`inject:into:`
+// fold, or two or three of them nested) as a bare statement, an assignment's
+// value, a literal element or after a read of `t`; the `plain`, `selfsend`
+// and `cvar` variants add a self-send or a field/class-variable write inside
+// the construct. A cell Phase 0 rejects (an actor fold frame's value-bearing
+// sites) has no method. The expected answers are in
+// stdlib/test/adr0131loop_matrix_test.bt.
+
+Value subclass: Adr0131LoopMatrixValue
+
+  plain => 0
+
+  do_toDo_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | #(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_toDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := #(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_toDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := #[#(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_toDo_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_do_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | #(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_do_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | r := #(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_do_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | r := #[#(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_do_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_times_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_times_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]
+    #[t, r, s]
+
+  do_times_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    2 timesRepeat: [r := #[#(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_times_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    2 timesRepeat: [r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  do_while_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        #(1, 2) do: [:x | t := t + x]
+      ]
+    #[t, r, s]
+
+  do_while_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #(1, 2) do: [:x | t := t + x]
+      ]
+    #[t, r, s]
+
+  do_while_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[#(1, 2) do: [:x | t := t + x], t]
+      ]
+    #[t, r, s]
+
+  do_while_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[t, #(1, 2) do: [:x | t := t + x], t]
+      ]
+    #[t, r, s]
+
+  do_collect_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        #(1, 2) do: [:x | t := t + x]
+        k
+      ]
+    #[t, r, s]
+
+  do_collect_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #(1, 2) do: [:x | t := t + x]
+        k
+      ]
+    #[t, r, s]
+
+  do_collect_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #[#(1, 2) do: [:x | t := t + x], t]
+        k
+      ]
+    #[t, r, s]
+
+  do_collect_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #[t, #(1, 2) do: [:x | t := t + x], t]
+        k
+      ]
+    #[t, r, s]
+
+  do_inject_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :k |
+        #(1, 2) do: [:x | t := t + x]
+        a + k
+      ]
+    #[t, r, s]
+
+  do_inject_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :k |
+        r := #(1, 2) do: [:x | t := t + x]
+        a + k
+      ]
+    #[t, r, s]
+
+  do_inject_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :k |
+        r := #[#(1, 2) do: [:x | t := t + x], t]
+        a + k
+      ]
+    #[t, r, s]
+
+  do_inject_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :k |
+        r := #[t, #(1, 2) do: [:x | t := t + x], t]
+        a + k
+      ]
+    #[t, r, s]
+
+  do_doDo_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | #(1, 2) do: [:m | #(1, 2) do: [:x | t := t + x]]]
+    #[t, r, s]
+
+  do_doDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | #(1, 2) do: [:m | r := #(1, 2) do: [:x | t := t + x]]]
+    #[t, r, s]
+
+  do_doDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      #(1, 2) do: [:m | r := #[#(1, 2) do: [:x | t := t + x], t]]
+    ]
+    #[t, r, s]
+
+  do_doDo_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      #(1, 2) do: [:m | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+    ]
+    #[t, r, s]
+
+  do_doToDo_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | 1 to: 2 do: [:m | #(1, 2) do: [:x | t := t + x]]]
+    #[t, r, s]
+
+  do_doToDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | 1 to: 2 do: [:m | r := #(1, 2) do: [:x | t := t + x]]]
+    #[t, r, s]
+
+  do_doToDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      1 to: 2 do: [:m | r := #[#(1, 2) do: [:x | t := t + x], t]]
+    ]
+    #[t, r, s]
+
+  do_doToDo_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      1 to: 2 do: [:m | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+    ]
+    #[t, r, s]
+
+  do_collectTimes_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]
+        k
+      ]
+    #[t, r, s]
+
+  do_collectTimes_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]
+        k
+      ]
+    #[t, r, s]
+
+  do_collectTimes_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        2 timesRepeat: [r := #[#(1, 2) do: [:x | t := t + x], t]]
+        k
+      ]
+    #[t, r, s]
+
+  do_collectTimes_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        2 timesRepeat: [r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+        k
+      ]
+    #[t, r, s]
+
+  do_threeDeep_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      1 to: 2 do: [:m | 2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]]
+    ]
+    #[t, r, s]
+
+  do_threeDeep_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      1 to: 2 do: [:m | 2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]]
+    ]
+    #[t, r, s]
+
+  do_threeDeep_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        1 to: 2 do: [:m |
+          2 timesRepeat: [r := #[#(1, 2) do: [:x | t := t + x], t]]
+        ]
+      ]
+    #[t, r, s]
+
+  do_threeDeep_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        1 to: 2 do: [:m |
+          2 timesRepeat: [r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+        ]
+      ]
+    #[t, r, s]
+
+  do_whileDo_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2) do: [:m | #(1, 2) do: [:x | t := t + x]]
+      ]
+    #[t, r, s]
+
+  do_whileDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2) do: [:m | r := #(1, 2) do: [:x | t := t + x]]
+      ]
+    #[t, r, s]
+
+  do_whileDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2) do: [:m | r := #[#(1, 2) do: [:x | t := t + x], t]]
+      ]
+    #[t, r, s]
+
+  do_whileDo_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2) do: [:m | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
+      ]
+    #[t, r, s]
+
+  do_whileInject_bare_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2)
+          inject: 0
+          into: [:a :m |
+            #(1, 2) do: [:x | t := t + x]
+            a + m
+          ]
+      ]
+    #[t, r, s]
+
+  do_whileInject_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2)
+          inject: 0
+          into: [:a :m |
+            r := #(1, 2) do: [:x | t := t + x]
+            a + m
+          ]
+      ]
+    #[t, r, s]
+
+  do_whileInject_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2)
+          inject: 0
+          into: [:a :m |
+            r := #[#(1, 2) do: [:x | t := t + x], t]
+            a + m
+          ]
+      ]
+    #[t, r, s]
+
+  do_whileInject_afterRead_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 2]
+      whileTrue: [
+        s := s + 1
+        #(1, 2)
+          inject: 0
+          into: [:a :m |
+            r := #[t, #(1, 2) do: [:x | t := t + x], t]
+            a + m
+          ]
+      ]
+    #[t, r, s]
+
+  do_toDo_assign_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    1
+      to: 2
+      do: [:k |
+        r := #(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ]
+      ]
+    #[t, r, s]
+
+  do_toDo_literal_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    1
+      to: 2
+      do: [:k |
+        r := #[#(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ], t]
+      ]
+    #[t, r, s]
+
+  do_do_assign_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        r := #(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ]
+      ]
+    #[t, r, s]
+
+  do_do_literal_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        r := #[#(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ], t]
+      ]
+    #[t, r, s]
+
+  do_while_assign_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ]
+      ]
+    #[t, r, s]
+
+  do_while_literal_selfsend =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[#(1, 2)
+          do: [:x |
+            t := t + x
+            self plain
+          ], t]
+      ]
+    #[t, r, s]
+
+  inject_toDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1
+      to: 2
+      do: [:k |
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ]
+      ]
+    #[t, r, s]
+
+  inject_toDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1
+      to: 2
+      do: [:k |
+        r := #[#(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ], t]
+      ]
+    #[t, r, s]
+
+  inject_while_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ]
+      ]
+    #[t, r, s]
+
+  inject_while_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[#(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ], t]
+      ]
+    #[t, r, s]
+
+  inject_doToDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        1
+          to: 2
+          do: [:m |
+            r := #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a
+              ]
+          ]
+      ]
+    #[t, r, s]
+
+  inject_doToDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        1
+          to: 2
+          do: [:m |
+            r := #[#(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a
+              ], t]
+          ]
+      ]
+    #[t, r, s]
+
+  inject_collect_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ]
+        k
+      ]
+    #[t, r, s]
+
+  inject_collect_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #[#(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a
+          ], t]
+        k
+      ]
+    #[t, r, s]
+
+  times_toDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := 2 timesRepeat: [t := t + 1]]
+    #[t, r, s]
+
+  times_toDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := #[2 timesRepeat: [t := t + 1], t]]
+    #[t, r, s]
+
+  times_while_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := 2 timesRepeat: [t := t + 1]
+      ]
+    #[t, r, s]
+
+  times_while_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[2 timesRepeat: [t := t + 1], t]
+      ]
+    #[t, r, s]
+
+  times_doToDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | 1 to: 2 do: [:m | r := 2 timesRepeat: [t := t + 1]]]
+    #[t, r, s]
+
+  times_doToDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | 1 to: 2 do: [:m | r := #[2 timesRepeat: [t := t + 1], t]]]
+    #[t, r, s]
+
+  times_collect_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := 2 timesRepeat: [t := t + 1]
+        k
+      ]
+    #[t, r, s]
+
+  times_collect_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #[2 timesRepeat: [t := t + 1], t]
+        k
+      ]
+    #[t, r, s]
+
+  toDo_toDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := 1 to: 2 do: [:x | t := t + x]]
+    #[t, r, s]
+
+  toDo_toDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    1 to: 2 do: [:k | r := #[1 to: 2 do: [:x | t := t + x], t]]
+    #[t, r, s]
+
+  toDo_while_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := 1 to: 2 do: [:x | t := t + x]
+      ]
+    #[t, r, s]
+
+  toDo_while_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    [s < 3]
+      whileTrue: [
+        s := s + 1
+        r := #[1 to: 2 do: [:x | t := t + x], t]
+      ]
+    #[t, r, s]
+
+  toDo_doToDo_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k | 1 to: 2 do: [:m | r := 1 to: 2 do: [:x | t := t + x]]]
+    #[t, r, s]
+
+  toDo_doToDo_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2) do: [:k |
+      1 to: 2 do: [:m | r := #[1 to: 2 do: [:x | t := t + x], t]]
+    ]
+    #[t, r, s]
+
+  toDo_collect_assign_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := 1 to: 2 do: [:x | t := t + x]
+        k
+      ]
+    #[t, r, s]
+
+  toDo_collect_literal_plain =>
+    t := 0
+    s := 0
+    r := 0
+    #(1, 2)
+      collect: [:k |
+        r := #[1 to: 2 do: [:x | t := t + x], t]
+        k
+      ]
+    #[t, r, s]

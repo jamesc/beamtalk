@@ -312,9 +312,16 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 
 /// ADR 0131 Phase 2 (BT-3749): the loops and folds whose `{Value, StateAcc}`
 /// result codegen unwraps as a local-threading producer (`whileTrue:`/
-/// `whileFalse:`, the counted loops, and the value-returning folds). Returns
-/// the 0-based index of the body block argument of a send of `sel` with
-/// `arity` arguments, or `None` for any other selector or arity.
+/// `whileFalse:`, the counted loops, `do:` (BT-3796; it answers `nil`) and the
+/// value-returning folds). Returns the 0-based index of the body block
+/// argument of a send of `sel` with `arity` arguments, or `None` for any other
+/// selector or arity.
+///
+/// Not listed, deliberately: `keysAndValuesDo:`/`doWithKey:` (a measured
+/// actor loop-body site is not lowered through the producer),
+/// `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
+/// `inject:into:` whose spans are the original send's, so a site keyed on the
+/// original has no producer to lower it) and `anySatisfy:`/`allSatisfy:`.
 ///
 /// The body block is the one whose outer-local writes the construct packs
 /// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
@@ -328,8 +335,8 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
         (
-            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "collect:" | "select:" | "reject:"
-            | "count:" | "detect:",
+            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
+            | "reject:" | "count:" | "detect:",
             1,
         )
         | ("detect:ifNone:", 2) => Some(0),

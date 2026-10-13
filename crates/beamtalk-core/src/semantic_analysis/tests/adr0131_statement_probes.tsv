@@ -337,7 +337,7 @@ actor	coll	outer	any	bad
 actor	coll	outer	collect	ok
 actor	coll	outer	dinH	bad
 actor	coll	outer	dinS	bad
-actor	coll	outer	do	bad
+actor	coll	outer	do	ok
 actor	coll	outer	dsb	bad
 actor	coll	outer	ensure	ok
 actor	coll	outer	ewi	bad
@@ -569,7 +569,7 @@ actor	iter	outer	any	bad
 actor	iter	outer	collect	ok
 actor	iter	outer	dinH	bad
 actor	iter	outer	dinS	bad
-actor	iter	outer	do	bad
+actor	iter	outer	do	ok
 actor	iter	outer	dsb	bad
 actor	iter	outer	ensure	ok
 actor	iter	outer	ewi	bad
@@ -682,23 +682,23 @@ actor	iterIter	local	value	gap
 actor	iterIter	local	while	gap
 actor	iterIter	outer	and	bad
 actor	iterIter	outer	any	bad
-actor	iterIter	outer	collect	bad
+actor	iterIter	outer	collect	ok
 actor	iterIter	outer	dinH	bad
 actor	iterIter	outer	dinS	bad
-actor	iterIter	outer	do	bad
+actor	iterIter	outer	do	ok
 actor	iterIter	outer	dsb	bad
 actor	iterIter	outer	ensure	bad
 actor	iterIter	outer	ewi	bad
 actor	iterIter	outer	ifNil	bad
 actor	iterIter	outer	ifTrue	bad
-actor	iterIter	outer	inject	bad
+actor	iterIter	outer	inject	ok
 actor	iterIter	outer	kv	bad
 actor	iterIter	outer	onDo	bad
-actor	iterIter	outer	times	bad
-actor	iterIter	outer	toDo	bad
+actor	iterIter	outer	times	ok
+actor	iterIter	outer	toDo	ok
 actor	iterIter	outer	value	bad
-actor	iterIter	outer	while	bad
-actor	loop	cvar	do	over
+actor	iterIter	outer	while	ok
+actor	loop	cvar	do	ok
 actor	loop	cvar	ewi	bad
 actor	loop	cvar	ifTrue	ok
 actor	loop	cvar	inject	ok
@@ -706,7 +706,7 @@ actor	loop	cvar	onDo	over
 actor	loop	cvar	toDo	ok
 actor	loop	cvar	value	bad
 actor	loop	cvar	while	ok
-actor	loop	cvarOuter	do	bad
+actor	loop	cvarOuter	do	ok
 actor	loop	cvarOuter	ewi	bad
 actor	loop	cvarOuter	ifTrue	ok
 actor	loop	cvarOuter	inject	ok
@@ -719,7 +719,7 @@ actor	loop	direct	any	bad
 actor	loop	direct	collect	ok
 actor	loop	direct	dinH	bad
 actor	loop	direct	dinS	bad
-actor	loop	direct	do	bad
+actor	loop	direct	do	ok
 actor	loop	direct	dsb	bad
 actor	loop	direct	ensure	bad
 actor	loop	direct	ewi	bad
@@ -773,7 +773,7 @@ actor	loop	outer	any	bad
 actor	loop	outer	collect	ok
 actor	loop	outer	dinH	bad
 actor	loop	outer	dinS	bad
-actor	loop	outer	do	bad
+actor	loop	outer	do	ok
 actor	loop	outer	dsb	bad
 actor	loop	outer	ensure	bad
 actor	loop	outer	ewi	bad
@@ -786,7 +786,7 @@ actor	loop	outer	times	ok
 actor	loop	outer	toDo	ok
 actor	loop	outer	value	bad
 actor	loop	outer	while	ok
-actor	loop	selfsend	do	over
+actor	loop	selfsend	do	ok
 actor	loop	selfsend	ewi	bad
 actor	loop	selfsend	ifTrue	ok
 actor	loop	selfsend	inject	ok
@@ -1106,7 +1106,7 @@ actor	timesC	outer	times	ok
 actor	timesC	outer	toDo	ok
 actor	timesC	outer	value	bad
 actor	timesC	outer	while	ok
-actor	toDoC	cvar	do	over
+actor	toDoC	cvar	do	ok
 actor	toDoC	cvar	ewi	bad
 actor	toDoC	cvar	ifTrue	ok
 actor	toDoC	cvar	inject	ok
@@ -1114,7 +1114,7 @@ actor	toDoC	cvar	onDo	over
 actor	toDoC	cvar	toDo	ok
 actor	toDoC	cvar	value	bad
 actor	toDoC	cvar	while	ok
-actor	toDoC	cvarOuter	do	bad
+actor	toDoC	cvarOuter	do	ok
 actor	toDoC	cvarOuter	ewi	bad
 actor	toDoC	cvarOuter	ifTrue	ok
 actor	toDoC	cvarOuter	inject	ok
@@ -1194,7 +1194,7 @@ actor	toDoC	outer	times	ok
 actor	toDoC	outer	toDo	ok
 actor	toDoC	outer	value	bad
 actor	toDoC	outer	while	ok
-actor	toDoC	selfsend	do	over
+actor	toDoC	selfsend	do	ok
 actor	toDoC	selfsend	ewi	bad
 actor	toDoC	selfsend	ifTrue	ok
 actor	toDoC	selfsend	inject	ok
@@ -1777,7 +1777,7 @@ class	coll	outer	any	bad
 class	coll	outer	collect	ok
 class	coll	outer	dinH	bad
 class	coll	outer	dinS	bad
-class	coll	outer	do	bad
+class	coll	outer	do	ok
 class	coll	outer	dsb	bad
 class	coll	outer	ensure	ok
 class	coll	outer	ewi	bad
@@ -2197,7 +2197,7 @@ class	iterIter	outer	any	ok
 class	iterIter	outer	collect	ok
 class	iterIter	outer	dinH	bad
 class	iterIter	outer	dinS	bad
-class	iterIter	outer	do	over
+class	iterIter	outer	do	ok
 class	iterIter	outer	dsb	bad
 class	iterIter	outer	ensure	ok
 class	iterIter	outer	ewi	bad
@@ -2231,7 +2231,7 @@ class	loop	direct	any	bad
 class	loop	direct	collect	ok
 class	loop	direct	dinH	bad
 class	loop	direct	dinS	bad
-class	loop	direct	do	bad
+class	loop	direct	do	ok
 class	loop	direct	dsb	bad
 class	loop	direct	ensure	bad
 class	loop	direct	ewi	bad
@@ -2285,7 +2285,7 @@ class	loop	outer	any	bad
 class	loop	outer	collect	ok
 class	loop	outer	dinH	bad
 class	loop	outer	dinS	bad
-class	loop	outer	do	bad
+class	loop	outer	do	ok
 class	loop	outer	dsb	bad
 class	loop	outer	ensure	bad
 class	loop	outer	ewi	bad
@@ -2551,7 +2551,7 @@ class	timesC	direct	any	bad
 class	timesC	direct	collect	ok
 class	timesC	direct	dinH	bad
 class	timesC	direct	dinS	bad
-class	timesC	direct	do	bad
+class	timesC	direct	do	ok
 class	timesC	direct	dsb	bad
 class	timesC	direct	ensure	bad
 class	timesC	direct	ewi	bad
@@ -2605,7 +2605,7 @@ class	timesC	outer	any	bad
 class	timesC	outer	collect	ok
 class	timesC	outer	dinH	bad
 class	timesC	outer	dinS	bad
-class	timesC	outer	do	bad
+class	timesC	outer	do	ok
 class	timesC	outer	dsb	bad
 class	timesC	outer	ensure	bad
 class	timesC	outer	ewi	bad
@@ -2639,7 +2639,7 @@ class	toDoC	direct	any	bad
 class	toDoC	direct	collect	ok
 class	toDoC	direct	dinH	bad
 class	toDoC	direct	dinS	bad
-class	toDoC	direct	do	bad
+class	toDoC	direct	do	ok
 class	toDoC	direct	dsb	bad
 class	toDoC	direct	ensure	bad
 class	toDoC	direct	ewi	bad
@@ -2693,7 +2693,7 @@ class	toDoC	outer	any	bad
 class	toDoC	outer	collect	ok
 class	toDoC	outer	dinH	bad
 class	toDoC	outer	dinS	bad
-class	toDoC	outer	do	bad
+class	toDoC	outer	do	ok
 class	toDoC	outer	dsb	bad
 class	toDoC	outer	ensure	bad
 class	toDoC	outer	ewi	bad
@@ -3327,7 +3327,7 @@ value	coll	outer	any	bad
 value	coll	outer	collect	ok
 value	coll	outer	dinH	bad
 value	coll	outer	dinS	bad
-value	coll	outer	do	bad
+value	coll	outer	do	ok
 value	coll	outer	dsb	bad
 value	coll	outer	ensure	ok
 value	coll	outer	ewi	bad
@@ -3659,7 +3659,7 @@ value	iterIter	outer	any	ok
 value	iterIter	outer	collect	ok
 value	iterIter	outer	dinH	bad
 value	iterIter	outer	dinS	bad
-value	iterIter	outer	do	over
+value	iterIter	outer	do	ok
 value	iterIter	outer	dsb	bad
 value	iterIter	outer	ensure	ok
 value	iterIter	outer	ewi	bad
@@ -3677,7 +3677,7 @@ value	loop	direct	any	bad
 value	loop	direct	collect	ok
 value	loop	direct	dinH	bad
 value	loop	direct	dinS	bad
-value	loop	direct	do	bad
+value	loop	direct	do	ok
 value	loop	direct	dsb	bad
 value	loop	direct	ensure	bad
 value	loop	direct	ewi	bad
@@ -3731,7 +3731,7 @@ value	loop	outer	any	bad
 value	loop	outer	collect	ok
 value	loop	outer	dinH	bad
 value	loop	outer	dinS	bad
-value	loop	outer	do	bad
+value	loop	outer	do	ok
 value	loop	outer	dsb	bad
 value	loop	outer	ensure	bad
 value	loop	outer	ewi	bad
@@ -3981,7 +3981,7 @@ value	timesC	direct	any	bad
 value	timesC	direct	collect	ok
 value	timesC	direct	dinH	bad
 value	timesC	direct	dinS	bad
-value	timesC	direct	do	bad
+value	timesC	direct	do	ok
 value	timesC	direct	dsb	bad
 value	timesC	direct	ensure	bad
 value	timesC	direct	ewi	bad
@@ -4035,7 +4035,7 @@ value	timesC	outer	any	bad
 value	timesC	outer	collect	ok
 value	timesC	outer	dinH	bad
 value	timesC	outer	dinS	bad
-value	timesC	outer	do	bad
+value	timesC	outer	do	ok
 value	timesC	outer	dsb	bad
 value	timesC	outer	ensure	bad
 value	timesC	outer	ewi	bad
@@ -4053,7 +4053,7 @@ value	toDoC	direct	any	bad
 value	toDoC	direct	collect	ok
 value	toDoC	direct	dinH	bad
 value	toDoC	direct	dinS	bad
-value	toDoC	direct	do	bad
+value	toDoC	direct	do	ok
 value	toDoC	direct	dsb	bad
 value	toDoC	direct	ensure	bad
 value	toDoC	direct	ewi	bad
@@ -4107,7 +4107,7 @@ value	toDoC	outer	any	bad
 value	toDoC	outer	collect	ok
 value	toDoC	outer	dinH	bad
 value	toDoC	outer	dinS	bad
-value	toDoC	outer	do	bad
+value	toDoC	outer	do	ok
 value	toDoC	outer	dsb	bad
 value	toDoC	outer	ensure	bad
 value	toDoC	outer	ewi	bad

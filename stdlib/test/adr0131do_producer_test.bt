@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3796 (ADR 0131 Phase 2c): `do:` is a local-threading producer
+// (`producer_body_arg_index`), so a `do:` whose block writes an outer local
+// is lowered through the construct tuple in every operand position of a
+// method-body statement, in every method context: the write is visible to
+// everything evaluated after it, and the `do:` answers `nil`. The columns are
+// adr0131do_producer_{class,value,actor}.bt (the value-type column has no
+// field writes); this file holds the expected answers.
+
+TestCase subclass: Adr0131DoProducerTest
+
+  testDoAsAssignedValue =>
+    self assert: #[Adr0131DoProducerClass doAsAssignedValue, (Adr0131DoProducerValue new) doAsAssignedValue, (Adr0131DoProducerActor spawn) doAsAssignedValue] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDoInLiteral =>
+    self assert: #[Adr0131DoProducerClass doInLiteral, (Adr0131DoProducerValue new) doInLiteral, (Adr0131DoProducerActor spawn) doInLiteral] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDoReturnedInLiteral =>
+    self assert: #[Adr0131DoProducerClass doReturnedInLiteral, (Adr0131DoProducerValue new) doReturnedInLiteral, (Adr0131DoProducerActor spawn) doReturnedInLiteral] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDoAsReceiver =>
+    self assert: #[Adr0131DoProducerClass doAsReceiver, (Adr0131DoProducerValue new) doAsReceiver, (Adr0131DoProducerActor spawn) doAsReceiver] equals: #[#[true, 3], #[true, 3], #[true, 3]]
+
+  testDoTwoLocals =>
+    self assert: #[Adr0131DoProducerClass doTwoLocals, (Adr0131DoProducerValue new) doTwoLocals, (Adr0131DoProducerActor spawn) doTwoLocals] equals: #[#[3, 20], #[3, 20], #[3, 20]]
+
+  testDoTwice =>
+    self assert: #[Adr0131DoProducerClass doTwice, (Adr0131DoProducerValue new) doTwice, (Adr0131DoProducerActor spawn) doTwice] equals: #[#[nil, nil, 6], #[nil, nil, 6], #[nil, nil, 6]]
+
+  testDoAfterLeftRead =>
+    self assert: #[Adr0131DoProducerClass doAfterLeftRead, (Adr0131DoProducerValue new) doAfterLeftRead, (Adr0131DoProducerActor spawn) doAfterLeftRead] equals: #[#[0, nil, 3], #[0, nil, 3], #[0, nil, 3]]
+
+  testDoParenthesisedAssigned =>
+    self assert: #[Adr0131DoProducerClass doParenthesisedAssigned, (Adr0131DoProducerValue new) doParenthesisedAssigned, (Adr0131DoProducerActor spawn) doParenthesisedAssigned] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDoStatementThenRead =>
+    self assert: #[Adr0131DoProducerClass doStatementThenRead, (Adr0131DoProducerValue new) doStatementThenRead, (Adr0131DoProducerActor spawn) doStatementThenRead] equals: #[3, 3, 3]
+
+  testDoAsArgument =>
+    self assert: #[Adr0131DoProducerClass doAsArgument, (Adr0131DoProducerValue new) doAsArgument, (Adr0131DoProducerActor spawn) doAsArgument] equals: #[#[4, 3], #[4, 3], #[4, 3]]
+
+  testDoWithSelfSend =>
+    self assert: #[Adr0131DoProducerClass doWithSelfSend, (Adr0131DoProducerValue new) doWithSelfSend, (Adr0131DoProducerActor spawn) doWithSelfSend] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDictLiteralDoAssigned =>
+    self assert: #[Adr0131DoProducerClass dictLiteralDoAssigned, (Adr0131DoProducerValue new) dictLiteralDoAssigned, (Adr0131DoProducerActor spawn) dictLiteralDoAssigned] equals: #[#[nil, 3], #[nil, 3], #[nil, 3]]
+
+  testDictLiteralDoInToDo =>
+    self assert: #[Adr0131DoProducerClass dictLiteralDoInToDo, (Adr0131DoProducerValue new) dictLiteralDoInToDo, (Adr0131DoProducerActor spawn) dictLiteralDoInToDo] equals: #[6, 6, 6]
+
+  testDoReadsAndWrites =>
+    self assert: #[Adr0131DoProducerClass doReadsAndWrites, (Adr0131DoProducerValue new) doReadsAndWrites, (Adr0131DoProducerActor spawn) doReadsAndWrites] equals: #[#[nil, 10], #[nil, 10], #[nil, 10]]
+
+  testDoWithFieldWrite =>
+    self assert: #[Adr0131DoProducerClass doWithFieldWrite, (Adr0131DoProducerActor spawn) doWithFieldWrite] equals: #[#[nil, 3, 2], #[nil, 3, 2]]
+
+  testDoInFieldAssignment =>
+    self assert: #[Adr0131DoProducerClass doInFieldAssignment, (Adr0131DoProducerActor spawn) doInFieldAssignment] equals: #[#["nil", 3], #["nil", 3]]

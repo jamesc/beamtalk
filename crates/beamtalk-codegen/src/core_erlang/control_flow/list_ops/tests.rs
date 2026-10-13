@@ -2464,10 +2464,14 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
         "NLR throw tuple must not reference a bare unbound `_` as the return \
          value — the NoValue case must substitute 'nil'. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
     );
+    // ADR 0131 Phase 2c (BT-3796): `do:` is a local-threading producer, so
+    // the nested `do:` is lowered to its own `{nil, StateAcc}` carrier and the
+    // throw's value is that carrier's element 1 (`do:` answers nil), not a
+    // substituted `'nil'` for an open scope.
     assert!(
-        nlr_throw_window.contains("'nil'"),
-        "NLR throw tuple should substitute the literal 'nil' atom for a \
-         NoValue open scope. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
+        nlr_throw_window.contains("'element'(1, _ThreadedResult"),
+        "NLR throw tuple should carry the nested `do:` producer's value (element 1 of its \
+         carrier). Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
     );
 }
 

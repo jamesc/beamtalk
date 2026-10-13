@@ -272,6 +272,15 @@ pub(in crate::core_erlang) fn condition_has_state_effects(
 }
 
 impl BodyEffects {
+    /// `stmt` and the sub-expressions of it where a loop body lowers a
+    /// local-threading producer (`loop_body_producer_sites`, the one rule the
+    /// Phase 0 check and the body lowerings read).
+    fn statement_and_producer_sites(stmt: &Expression) -> Vec<&Expression> {
+        let mut out = vec![stmt];
+        out.extend(beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt));
+        out
+    }
+
     /// Analyze the loop body and condition to compute all effect predicates.
     fn analyze(
         generator: &CoreErlangGenerator,
@@ -299,26 +308,45 @@ impl BodyEffects {
         // Check for nested list ops with cross-scope mutations whose inner
         // blocks can't use tuple-acc. These fall back to map-acc which references
         // StateAcc — incompatible with direct-params mode.
+        //
+        // ADR 0131 Phase 2c: a loop or fold the body lowers as a local-threading
+        // producer at one of the statement's `loop_body_producer_sites` (an
+        // operand, a parenthesised value, a literal element) is the same nested
+        // list op as one written as the statement itself, so the sites are
+        // examined too: a producer there rebinds through this loop's frame, and
+        // a body that is not `StateAcc` has no `State` chain for its carrier.
         let has_non_tuple_safe_list_op = body.body.iter().any(|s| {
-            CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
-                &s.expression,
-                &generator.semantic_facts,
-            ) || generator.nested_non_producer_map_acc_list_op(&s.expression)
+            Self::statement_and_producer_sites(&s.expression)
+                .into_iter()
+                .any(|e| {
+                    CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
+                        e,
+                        &generator.semantic_facts,
+                    ) || generator.nested_non_producer_map_acc_list_op(e)
+                })
         });
 
         // Detect a nested counted loop that mutates a threaded outer local.
         // Such an inner loop returns a `{value, StateAcc}` tuple; the outer loop must
         // unpack `element(2, …)` to propagate the local — only possible in StateAcc mode.
         let has_nested_counted_loop_mutation = body.body.iter().any(|s| {
-            generator.expr_has_nested_counted_loop_threading(&s.expression, threaded_locals)
+            Self::statement_and_producer_sites(&s.expression)
+                .into_iter()
+                .any(|e| generator.expr_has_nested_counted_loop_threading(e, threaded_locals))
         });
 
         // Guard: control-flow sub-expressions with field mutations (e.g.
         // `flag ifTrue: [self.n := ...]`). These generate `StateAcc`-dependent code.
-        let has_cf_mutations = body
-            .body
-            .iter()
-            .any(|s| generator.control_flow_has_mutations(&s.expression));
+        //
+        // A producer at one of the statement's `loop_body_producer_sites` is
+        // control flow with mutations like the statement itself: its carrier
+        // threads the `State` (or a hybrid body's pre-extracted field
+        // parameters, which it cannot reach).
+        let has_cf_mutations = body.body.iter().any(|s| {
+            Self::statement_and_producer_sites(&s.expression)
+                .into_iter()
+                .any(|e| generator.control_flow_has_mutations(e))
+        });
 
         // Guard: inline conditionals that write threaded locals (e.g.
         // `each > max ifTrue: [max := each]`). `control_flow_has_mutations` only

@@ -191,6 +191,7 @@ impl CoreErlangGenerator {
             // tuple too — `block_arg_needs_threading`'s two-part check.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || !self.loop_threaded_locals(body_block, None).is_empty()
             {
                 return Some(body_block);
             }
