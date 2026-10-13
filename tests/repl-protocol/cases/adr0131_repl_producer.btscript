@@ -1,0 +1,239 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3795 (ADR 0131 Phase 2d): a loop or fold at an operand site of a REPL
+// input is a local-threading producer. The REPL threads its bindings map (the
+// `MethodBody (REPL)` row of ADR 0131 §2), so the producer unpacks the
+// construct's `{Value, Bindings}` tuple and adopts the bindings it returns:
+// every write the construct made is visible to what is evaluated after it,
+// in source order. The same shapes in a class, value-type or actor method are
+// stdlib/test/adr0131local_producer_test.bt.
+//
+// A construct that is the statement, or the whole value of an assignment, keeps
+// the REPL's own lowering (not a site), and so do the positions the producer
+// does not reach (inside a block, a conditional's receiver, a cascade): those
+// are asserted last.
+//
+// The approved display of the ADR's §"REPL and error examples" shapes o4/s9 is
+// asserted in adr0131_local_rebind.btscript.
+
+t := 0
+// => 0
+
+u := 0
+// => 0
+
+// ===========================================================================
+// A fold as the receiver of a message
+// ===========================================================================
+
+(#(1, 2) collect: [:x | t := t + x]) size
+// => 2
+
+t
+// => 3
+
+(#(1, 2, 3) select: [:x | t := t + x. x > 1]) size
+// => 2
+
+t
+// => 9
+
+(#(1, 2) reject: [:x | t := t + 1. x > 1]) size
+// => 1
+
+t
+// => 11
+
+t := 0
+// => 0
+
+(#(1, 2) count: [:x | t := t + 1. true]) + 1
+// => 3
+
+t
+// => 2
+
+// The loop runs before the read of `t` to its right.
+(#(1, 2) detect: [:x | t := t + 1. x > 1]) + t
+// => 6
+
+t
+// => 4
+
+// ===========================================================================
+// A fold as an operand, after a read of `t` (ADR 0131 §1a)
+// ===========================================================================
+
+t := 10
+// => 10
+
+r := t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])
+// => 13
+
+t
+// => 12
+
+t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])
+// => 15
+
+t
+// => 14
+
+r
+// => 13
+
+// ===========================================================================
+// A loop as an element of a literal
+// ===========================================================================
+
+t := 0
+// => 0
+
+#[1 to: 3 do: [:i | t := t + i], t]
+// => #[nil, 6]
+
+#[[t < 9] whileTrue: [t := t + 3], t]
+// => #[nil, 9]
+
+// Two producers in one expression run in source order.
+t := 0
+// => 0
+
+#[(#(1, 2) collect: [:x | t := t + x]) size, (#(3) collect: [:x | t := t + x]) size, t]
+// => #[2, 1, 6]
+
+// ===========================================================================
+// A `detect:ifNone:` whose handler writes (BT-3794)
+// ===========================================================================
+
+t := 0
+// => 0
+
+(#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 7. 0]) + 1
+// => 1
+
+t
+// => 7
+
+// The handler does not run when the search finds an element.
+(#(1, 2) detect: [:x | x > 1] ifNone: [t := t + 100. 0]) + 1
+// => 3
+
+t
+// => 7
+
+// ===========================================================================
+// A producer in the receiver of the construct that is the whole value
+// ===========================================================================
+
+t := 0
+// => 0
+
+u := 0
+// => 0
+
+r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]
+// => 4
+
+t
+// => 3
+
+u
+// => 2
+
+((#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]) + 1
+// => 11
+
+t
+// => 6
+
+u
+// => 4
+
+// ===========================================================================
+// A binding the construct introduces exists only when the loop ran
+// ===========================================================================
+
+(#(1, 2) collect: [:x | fresh := x * 2. fresh]) size
+// => 2
+
+fresh
+// => 4
+
+(#() collect: [:x | none := x]) size
+// => 0
+
+none
+// => ERROR: Undefined variable: none
+
+// ===========================================================================
+// A raise inside the construct keeps the bindings the input started with
+// ===========================================================================
+
+t := 0
+// => 0
+
+(#(1, 2) collect: [:x | t := t + x. x / 0]) size
+// => ERROR: bad arithmetic operation
+
+t
+// => 0
+
+// ===========================================================================
+// Several statements in one input
+// ===========================================================================
+
+t := 0. r := (#(1, 2) collect: [:x | t := t + x]) size. #[r, t]
+// => #[2, 3]
+
+t := 0. (#(1, 2) collect: [:x | t := t + x]) size. t
+// => 3
+
+t := 0. r := t + (#(5) inject: 0 into: [:a :x | t := t + x. a + x])
+// => 5
+
+t := 0. r := (#(1, 2, 3) select: [:x | t := t + x. x > 1]) size + (#(1) count: [:x | t := t + 100. true])
+// => 3
+
+r
+// => 3
+
+t
+// => 106
+
+// ===========================================================================
+// Not sites: the REPL's own lowering, and the diagnostics that remain
+// ===========================================================================
+
+t := 0
+// => 0
+
+// The statement itself, and the whole value of an assignment.
+#(1, 2) do: [:x | t := t + x]
+// => _
+
+r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]
+// => 3
+
+t
+// => 5
+
+// A conditional's receiver is threaded by the conditional (Phase 3).
+(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]
+// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+
+// Inside a block that is not a loop or fold body.
+[(#(1, 2) collect: [:x | t := t + x]) size] value
+// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+
+// The receiver of a construct that is the statement.
+(#(1, 2) collect: [:x | t := t + x]) do: [:e | u := u + e]
+// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+
+// A cascade.
+(#(1, 2) collect: [:x | t := t + x]) size; yourself
+// => ERROR: `collect:` writes outer local `t`
+
+t
+// => 5

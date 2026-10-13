@@ -48,7 +48,8 @@ use crate::semantic_analysis::block_facts::{
     OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
     is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
     local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, producer_body_block, sequenced_operand_sites, stored_block_var_uses,
+    outer_local_writes, producer_body_block, repl_operand_sites, sequenced_operand_sites,
+    stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -944,10 +945,14 @@ impl<'d> Walker<'d> {
                 *last = i + 1 == body.len();
             }
             if self.depth == 0 {
-                self.operand_sites = sequenced_operand_sites(&stmt.expression)
-                    .into_iter()
-                    .map(Expression::span)
-                    .collect();
+                // ADR 0131 Phase 2d (BT-3795): the REPL root's sites are its
+                // own subset of the method-body rule.
+                let sites = if self.context == Repl {
+                    repl_operand_sites(&stmt.expression)
+                } else {
+                    sequenced_operand_sites(&stmt.expression)
+                };
+                self.operand_sites = sites.into_iter().map(Expression::span).collect();
             } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
                 frame.statement = stmt.expression.unwrap_parens().span();
                 frame.sites = loop_body_producer_sites(&stmt.expression)
@@ -1228,10 +1233,11 @@ impl<'d> Walker<'d> {
             return;
         };
         // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
-        // site of a method-body statement is a local-threading producer in
-        // every method context but the REPL, wherever it sits there.
+        // site of a method-body statement is a local-threading producer,
+        // wherever it sits there. Phase 2d (BT-3795): and at an operand site
+        // of a REPL input (`repl_operand_sites`), whose root frame threads the
+        // bindings map.
         if self.depth == 0
-            && self.context != Repl
             && self.operand_sites.contains(&expr.span())
             && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
         {

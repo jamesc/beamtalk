@@ -588,6 +588,19 @@ reports the same message at the same span. No operation is surface-specific.
   position that does not thread the write back yet, including the statement
   positions that lose the write (BT-3753).
 - Both are errors with no `[diagnostics]` key and no `@expect` category.
+- **REPL root (ADR 0131 Phase 2d, BT-3795).** A loop or fold nested in an
+  operand of a REPL input (`(xs collect: [:x | t := t + x]) size`,
+  `r := t + (xs inject: ...)`) is now a local-threading producer: it answers
+  its value and keeps its writes instead of being an `UnmigratedLocalThreading`
+  error. This is the analyser's verdict, so the CLI/LSP/MCP diagnostics and the
+  REPL eval (single and multi-statement, eval and trace) change together; the
+  site rule is `repl_operand_sites` in `beamtalk-core`, read by the check and by
+  the REPL producer. No other REPL display changes: a construct that is the
+  statement or an assignment's whole value keeps its lowering, and the
+  positions that stay errors (inside a block, a conditional's receiver, a
+  cascade, a field write) keep their diagnostics. Method bodies: the value of a
+  `self.f := V` field or class-variable write is a producer site too (class and
+  actor methods; a value type cannot write `self.f :=`).
 - The REPL sees only the current input: a stored block bound in one input and
   sent `value` in a later one is not seen by the §6 check and still raises
   `stateful_block_dispatch` at run time.

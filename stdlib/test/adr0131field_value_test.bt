@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3795 (ADR 0131 Phase 2d): a loop or fold in the value of a field or
+// class-variable write (`self.n := <here>`) is a local-threading producer: the
+// write's value is a sequenced operand site, so the construct's locals are
+// rebound before the write and visible to everything after it. Each test runs
+// one shape (fixtures/adr0131field_value_{class,actor}.bt) in a class method
+// and an actor method and asserts the answer Smalltalk semantics give. A value
+// type cannot write `self.n :=` (ADR 0042), so it has no column.
+
+TestCase subclass: Adr0131FieldValueTest
+
+  answersOf: selector =>
+    #[Adr0131FieldValueClass perform: selector, (Adr0131FieldValueActor spawn) perform: selector]
+
+  assertBoth: selector equal: expected =>
+    self assert: (self answersOf: selector) equals: #[expected, expected]
+
+  testCollectSize => self assertBoth: #collectSize equal: #[2, 3]
+
+  testWholeFold => self assertBoth: #wholeFold equal: #[3, 2]
+
+  testFoldOverCollect => self assertBoth: #foldOverCollect equal: #[4, 2, 2]
+
+  testCountedLoop => self assertBoth: #countedLoop equal: #[true, 6]
+
+  testWhileLoop => self assertBoth: #whileLoop equal: #[true, 3]
+
+  testCountOperand => self assertBoth: #countOperand equal: #[3, 2]
+
+  testParenthesised => self assertBoth: #parenthesised equal: #[2, 3]
+
+  testReadsBeforeWrite => self assertBoth: #readsBeforeWrite equal: #[13, 12]
+
+  testReadAfter => self assertBoth: #readAfter equal: 6
+
+  testLastStatement => self assertBoth: #lastStatement equal: 2
+
+  testTwoWrites => self assertBoth: #twoWrites equal: #[3, 8]
+
+  testDetectHandler => self assertBoth: #detectHandler equal: #[7, 1]
+
+  testViaLocal => self assertBoth: #viaLocal equal: #[5, 2, 3]
+
+  testInLiteral => self assertBoth: #inLiteral equal: #[2, 3]
+
+  testSelfSendNeighbourClass =>
+    self assert: Adr0131FieldValueClass selfSendNeighbour equals: #[12, 3]
+
+  testWriteInBodyClass =>
+    self assert: Adr0131FieldValueClass writeInBody equals: #[2, 3]
+
+  testSelfSendNeighbourActor =>
+    self assert: (Adr0131FieldValueActor spawn) selfSendNeighbour equals: #[12, 3, 10]
+
+  testSelfSendLeftActor =>
+    self assert: (Adr0131FieldValueActor spawn) selfSendLeft equals: #[12, 3, 10]
+
+  testFieldWriteInBodyActor =>
+    self assert: (Adr0131FieldValueActor spawn) fieldWriteInBody equals: #[2, 3, 7]
+
+  testSelfSendInBodyActor =>
+    self assert: (Adr0131FieldValueActor spawn) selfSendInBody equals: #[2, 3, 3]
+
+  testFieldReadBeforeActor =>
+    self assert: (Adr0131FieldValueActor spawn) fieldReadBefore equals: #[7, 2]
+
+  testLastStatementReplyActor =>
+    self assert: (Adr0131FieldValueActor spawn) lastStatementReply equals: 2

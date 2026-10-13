@@ -461,8 +461,15 @@ fn allow_set_detect_if_none_needs_a_literal_search_block() {
 #[test]
 fn allow_set_repl_uses_its_own_row() {
     let known = ["t"];
-    // REPL o4: receiver position.
+    // REPL o4: receiver position. A local-threading producer since BT-3795
+    // (ADR 0131 Phase 2d); a conditional's receiver is not a site, and keeps
+    // the diagnostic.
     let diags = adr0131_diagnostics_with("(#(1, 2) collect: [:x | t := t + x]) size\n", &known);
+    assert!(diags.is_empty(), "{diags:?}");
+    let diags = adr0131_diagnostics_with(
+        "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\n",
+        &known,
+    );
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(p0[0].message.contains("in a top-level expression"));
@@ -670,12 +677,136 @@ fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
             );
         }
     }
-    // The REPL root threads its bindings map (a later phase).
-    let known = ["t"];
-    let diags = adr0131_diagnostics_with("(#(1, 2) collect: [:x | t := t + x]) size\n", &known);
-    assert_eq!(
-        of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-        1,
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2d (BT-3795): the REPL root and field-write values
+// ---------------------------------------------------------------------------
+
+#[test]
+fn repl_operand_sites_are_producers() {
+    let known = ["t", "u"];
+    for src in [
+        // o4, s9: a fold as a message receiver, bare and as an assignment's
+        // value.
+        "(#(1, 2) collect: [:x | t := t + x]) size\n",
+        "r := (#(1, 2) reject: [:x | t := t + 1. false]) size\n",
+        // A fold as an argument, after a read of `t` (ADR 0131 §1a).
+        "r := t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])\n",
+        "t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])\n",
+        // A loop as an element of a literal.
+        "#[1 to: 3 do: [:i | t := t + i], t]\n",
+        "#[[t < 3] whileTrue: [t := t + 1], t]\n",
+        // A fold in the receiver of the fold that is the whole value.
+        "r := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\n",
+        // A handler-writing `detect:ifNone:`.
+        "(#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]) + 1\n",
+        // Several statements in one input.
+        "t := 0\nr := (#(1, 2) collect: [:x | t := t + x]) size\n#[r, t]\n",
+    ] {
+        let diags = adr0131_diagnostics_with(src, &known);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+#[test]
+fn repl_producer_sites_stop_at_blocks_conditionals_and_statement_constructs() {
+    let known = ["t", "u"];
+    for src in [
+        // Inside a block that is not a loop or fold body.
+        "[(#(1, 2) collect: [:x | t := t + x]) size] value\n",
+        "true ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]\n",
+        // A conditional's receiver is threaded by the conditional (Phase 3).
+        "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\n",
+        // Under a cascade.
+        "(#(1, 2) collect: [:x | t := t + x]) size; yourself\n",
+        // The receiver of a construct that is itself the statement: the
+        // statement lowering compiles its own operands.
+        "(#(1, 2) collect: [:x | t := t + x]) do: [:e | u := u + e]\n",
+        // A destructuring's value.
+        "#(a, b) := (#(1, 2) collect: [:x | t := t + x]) asArray\n",
+        // A `self.f :=` has no REPL meaning.
+        "self.n := (#(1, 2) collect: [:x | t := t + x]) size\n",
+    ] {
+        let diags = adr0131_diagnostics_with(src, &known);
+        assert!(
+            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn field_write_value_sites_are_producers_in_class_and_actor_methods() {
+    for value in [
+        "(#(1, 2) collect: [:x | t := t + x]) size",
+        "t + (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x])",
+        "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
+        "(#(1, 3) collect: [:e | t := t + 1. e]) inject: 0 into: [:a :e | u := u + 1. a + e]",
+        "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
+        "0 max: ((1 to: 3 do: [:i | t := t + i]) isNil ifTrue: [1] ifFalse: [2])",
+    ] {
+        let class = format!(
+            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    u := 0\n    self.n := {value}\n    #[self.n, t, u]\n"
+        );
+        let actor = format!(
+            "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n    u := 0\n    self.n := {value}\n    #[self.n, t, u]\n"
+        );
+        for src in [class, actor] {
+            let diags = adr0131_diagnostics(&src);
+            // The last value is a conditional's receiver: still rejected.
+            let expect_rejected = value.contains("ifTrue:");
+            assert_eq!(
+                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                expect_rejected,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn field_write_value_sites_stop_at_returns_assignments_and_blocks() {
+    for body in [
+        // The value of a `^` write is not a method-body site.
+        "^self.n := (#(1, 2) collect: [:x | t := t + x]) size",
+        // A write nested in a local assignment's value or another write's.
+        "r := (self.n := (#(1, 2) collect: [:x | t := t + x]) size)\nr",
+        "self.n := (self.n := (#(1, 2) collect: [:x | t := t + x]) size)\nt",
+        // A write inside a block.
+        "true ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
+        // A cascade on the value.
+        "self.n := (#(1, 2) collect: [:x | t := t + x]) size; yourself\nt",
+    ] {
+        let class = format!(
+            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{}\n",
+            indent(body)
+        );
+        let actor = format!(
+            "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n{}\n",
+            indent(body)
+        );
+        for src in [class, actor] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn field_write_in_a_value_type_is_still_a_hard_error() {
+    // A value type cannot write `self.n :=` (ADR 0042), so codegen never sees
+    // a field-write value site in one.
+    let src = "Value subclass: Vt\n  field: n = 0\n\n  probe =>\n    t := 0\n    self.n := (#(1, 2) collect: [:x | t := t + x]) size\n    t\n";
+    let diags = analyse_full(&parse_module(src), AnalysisContext::default()).diagnostics;
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("value type")),
         "{diags:?}"
     );
 }

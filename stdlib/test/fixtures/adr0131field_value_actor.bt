@@ -1,0 +1,192 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3795 (ADR 0131 Phase 2d): a loop or fold in the value of a field or
+// class-variable write (`self.n := <here>`) is a local-threading producer: the
+// write's value is a sequenced operand site, so the construct's locals are
+// rebound before the write and stay visible to the statements after it.
+// Actor-instance-method column. The other column is adr0131field_value_class.bt (a value type cannot
+// write `self.n :=`: ADR 0042); the expected answers are in
+// stdlib/test/adr0131field_value_test.bt.
+
+Actor subclass: Adr0131FieldValueActor
+  state: n = 0
+  state: m = 0
+
+  bump: x =>
+    self.m := self.m + x
+    x
+
+  // The write's value is an operand of a send: `size` of a writing `collect:`.
+  collectSize =>
+    t := 0
+    self.n := (#(1, 2) collect: [:x | t := t + x]) size
+    #[self.n, t]
+
+  // The write's value is the loop itself: a writing `inject:into:`.
+  wholeFold =>
+    t := 0
+    self.n := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]
+    #[self.n, t]
+
+  // The `local_touch` corpus shape: a writing fold over a writing `collect:`.
+  foldOverCollect =>
+    t := 0
+    u := 0
+    self.n := (#(1, 3)
+      collect: [:e |
+        t := t + 1
+        e
+      ])
+      inject: 0
+      into: [:a :e |
+        u := u + 1
+        a + e
+      ]
+    #[self.n, t, u]
+
+  // A counted loop as the value's receiver.
+  countedLoop =>
+    t := 0
+    self.n := (1 to: 3 do: [:i | t := t + i]) isNil
+    #[self.n, t]
+
+  // A `whileTrue:` as the value's receiver.
+  whileLoop =>
+    t := 0
+    self.n := ([t < 3] whileTrue: [t := t + 1]) isNil
+    #[self.n, t]
+
+  // A `count:` as the right operand of a binary send.
+  countOperand =>
+    t := 0
+    self.n := 1 + (#(1, 2)
+      count: [:x |
+        t := t + 1
+        true
+      ])
+    #[self.n, t]
+
+  // A parenthesised value.
+  parenthesised =>
+    t := 0
+    self.n := ((#(1, 2) collect: [:x | t := t + x]) size)
+    #[self.n, t]
+
+  // The left operand reads `t` before the right operand's loop writes it.
+  readsBeforeWrite =>
+    t := 10
+    self.n := t + (#(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ])
+    #[self.n, t]
+
+  // The loop writes the local the statement after the write reads.
+  readAfter =>
+    t := 0
+    self.n := (#(1, 2, 3)
+      reject: [:x |
+        t := t + x
+        x > 1
+      ]) size
+    t
+
+  // The write is the last statement: the method answers its value.
+  lastStatement =>
+    t := 0
+    self.n := (#(1, 2) collect: [:x | t := t + x]) size
+
+  // Two writes in a row, each with its own loop.
+  twoWrites =>
+    t := 0
+    self.n := (#(1, 2) collect: [:x | t := t + x]) size
+    self.n := self.n + (#(5)
+      count: [:x |
+        t := t + x
+        true
+      ])
+    #[self.n, t]
+
+  // A `detect:ifNone:` whose handler writes (BT-3794) in the value.
+  detectHandler =>
+    t := 0
+    self.n := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        7
+      ]
+    #[self.n, t]
+
+  // A local assigned from the loop, then the write.
+  viaLocal =>
+    t := 0
+    r := (#(1, 2) collect: [:x | t := t + x]) size
+    self.n := r + t
+    #[self.n, r, t]
+
+  // The loop is in a literal inside the value.
+  inLiteral =>
+    t := 0
+    self.n := #[(#(1, 2) collect: [:x | t := t + x]) size, t] size
+    #[self.n, t]
+
+  // An actor self-send neighbour: the send is evaluated after the loop.
+  selfSendNeighbour =>
+    t := 0
+    self.n := (#(1, 2) collect: [:x | t := t + x]) size + (self bump: 10)
+    #[self.n, t, self.m]
+
+  // A self-send to the left of the loop.
+  selfSendLeft =>
+    t := 0
+    self.n := (self bump: 10) + (#(1, 2) collect: [:x | t := t + x]) size
+    #[self.n, t, self.m]
+
+  // A field write inside the loop body, with the field write as the value's neighbour.
+  fieldWriteInBody =>
+    t := 0
+    self.m := 5
+    self.n := (#(1, 2)
+      collect: [:x |
+        t := t + x
+        self.m := self.m + 1
+        x
+      ]) size
+    #[self.n, t, self.m]
+
+  // A self-send inside the loop body.
+  selfSendInBody =>
+    t := 0
+    self.n := (#(1, 2)
+      collect: [:x |
+        t := t + x
+        self bump: x
+      ]) size
+    #[self.n, t, self.m]
+
+  // A field read on the left of the loop that writes the same field.
+  fieldReadBefore =>
+    self.n := 4
+    t := 0
+    self.n := self.n + (#(1, 2)
+      inject: 0
+      into: [:a :x |
+        self.n := self.n + 1
+        t := t + 1
+        a + x
+      ])
+    #[self.n, t]
+
+  // The write is the actor's last statement, answering its value to the caller.
+  lastStatementReply =>
+    t := 0
+    self.n := (#(1, 2) collect: [:x | t := t + x]) size

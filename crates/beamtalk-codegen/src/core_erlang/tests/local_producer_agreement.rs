@@ -24,7 +24,7 @@ use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
 use std::collections::{HashMap, HashSet};
 
-const CONSTRUCTS: &[&str] = &[
+pub(super) const CONSTRUCTS: &[&str] = &[
     "#(1, 2) collect: [:x | t := t + x]",
     "#(1, 2) reject: [:x | t := t + 1. false]",
     "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
@@ -153,61 +153,147 @@ fn every_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     for construct in CONSTRUCTS {
         for position in POSITIONS {
             for src in sources(construct, position) {
-                let (module, parse_diags) = parse(lex_with_eof(&src));
-                assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
-                let analysis = analyse_full(&module, AnalysisContext::default());
-                let rejected = analysis.diagnostics.iter().any(|d| {
-                    d.severity == Severity::Error
-                        && matches!(
-                            d.category,
-                            Some(
-                                DiagnosticCategory::UnmigratedLocalThreading
-                                    | DiagnosticCategory::Tier2BlockNoReturnChannel
-                            )
-                        )
-                });
-                if rejected {
-                    continue;
-                }
-                let class = &module.classes[0];
-                // A program the checks accept must compile.
-                let method = class.methods.iter().chain(&class.class_methods).next();
-                let expected = core_producers(&method.expect("one method").body);
-                let (generated, records) = recording_producers(|| {
-                    generate_module_with_warnings(&module, CodegenOptions::new("agree"))
-                });
-                assert!(generated.is_ok(), "{src}: {:?}", generated.err());
-                let lowered: HashMap<Span, Vec<String>> = records
-                    .into_iter()
-                    .filter(|(_, names)| !names.is_empty())
-                    .collect();
-                for (span, names) in &expected {
-                    assert_eq!(
-                        lowered.get(span),
-                        Some(names),
-                        "the core rule accepts the construct at {span:?} as a producer \
-                         threading {names:?}, but codegen lowered {lowered:?}\n{src}"
-                    );
-                    checked += 1;
-                }
-                // And the other way: no producer codegen lowers is one the
-                // core rule does not name.
-                let mut whole = HashSet::new();
-                for stmt in &method.expect("one method").body {
-                    whole_values(&stmt.expression, &mut whole);
-                }
-                for (span, names) in &lowered {
-                    assert!(
-                        expected.contains_key(span) || whole.contains(span),
-                        "codegen lowered the construct at {span:?} as a producer \
-                         threading {names:?}, but the core rule names {expected:?}\n{src}"
-                    );
-                }
+                check_operand_agreement(&src, &mut checked);
             }
         }
     }
     // Not vacuous: most fold/loop × position × context cells are producers.
     assert!(checked > 100, "only {checked} producer sites compared");
+}
+
+/// The producer half of ADR 0131 §6 for the sequenced operand sites of one
+/// program's method body, both ways: a site the core rule
+/// (`sequenced_operand_sites` + `operand_producer_writes`) names is lowered by
+/// codegen's producer threading exactly its names, and codegen lowers no
+/// producer at a site the rule does not name. A program the Phase 0 checks
+/// reject is skipped (nothing is compiled for it). `checked` counts the
+/// producer sites compared.
+fn check_operand_agreement(src: &str, checked: &mut usize) {
+    let (module, parse_diags) = parse(lex_with_eof(src));
+    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    let rejected = analysis.diagnostics.iter().any(|d| {
+        d.severity == Severity::Error
+            && matches!(
+                d.category,
+                Some(
+                    DiagnosticCategory::UnmigratedLocalThreading
+                        | DiagnosticCategory::Tier2BlockNoReturnChannel
+                )
+            )
+    });
+    if rejected {
+        return;
+    }
+    let class = &module.classes[0];
+    // A program the checks accept must compile.
+    let method = class.methods.iter().chain(&class.class_methods).next();
+    let expected = core_producers(&method.expect("one method").body);
+    let (generated, records) = recording_producers(|| {
+        generate_module_with_warnings(&module, CodegenOptions::new("agree"))
+    });
+    assert!(generated.is_ok(), "{src}: {:?}", generated.err());
+    let lowered: HashMap<Span, Vec<String>> = records
+        .into_iter()
+        .filter(|(_, names)| !names.is_empty())
+        .collect();
+    for (span, names) in &expected {
+        assert_eq!(
+            lowered.get(span),
+            Some(names),
+            "the core rule accepts the construct at {span:?} as a producer \
+             threading {names:?}, but codegen lowered {lowered:?}\n{src}"
+        );
+        *checked += 1;
+    }
+    // And the other way: no producer codegen lowers is one the
+    // core rule does not name.
+    let mut whole = HashSet::new();
+    for stmt in &method.expect("one method").body {
+        whole_values(&stmt.expression, &mut whole);
+    }
+    for (span, names) in &lowered {
+        assert!(
+            expected.contains_key(span) || whole.contains(span),
+            "codegen lowered the construct at {span:?} as a producer \
+             threading {names:?}, but the core rule names {expected:?}\n{src}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2d (BT-3795): the value of a field / class-variable write
+// ---------------------------------------------------------------------------
+
+/// Positions around a field or class-variable write `self.n := ...`. Only a
+/// class method (a class-variable write) and an actor method (a field write)
+/// have one: a value type cannot write `self.n :=` (ADR 0042), so the value
+/// column is not compiled.
+const FIELD_POSITIONS: &[&str] = &[
+    "self.n := ({c}) size\n#[self.n, t]",
+    "self.n := t + ({c})\n#[self.n, t]",
+    "self.n := {c}\n#[self.n, t]",
+    "self.n := ({c})\n#[self.n, t]",
+    "self.n := #[{c}, t]\nself.n",
+    "self.n := 0 max: ({c})\n#[self.n, t]",
+    "self.n := ({c}) inject: 0 into: [:a :x | u := u + 1. a + x]\n#[self.n, t, u]",
+    "self.n := ({c}) size\nself.n := self.n + ({c}) size\n#[self.n, t]",
+    "self.n := ({c}) size",
+    // A producer in the value of a write that is itself a `^` value, an
+    // assignment's value, or nested in another write: not sites, so they
+    // stay Phase 0 errors (skipped below) or compile with no producer.
+    "^self.n := ({c}) size",
+    "r := (self.n := ({c}) size)\n#[r, t]",
+    "self.n := (self.n := ({c}) size)\n#[self.n, t]",
+    // Sends whose statement lowering does not sequence its operands.
+    "self.n := super respondsTo: ({c}) printString\nself.n",
+    "self.n := self perform: #size with: ({c})\nself.n",
+    "self.n := self.blk valueWithArguments: ({c})\nself.n",
+    "self.n := self error: ({c}) printString\nt",
+];
+
+fn field_sources(construct: &str, position: &str) -> [String; 2] {
+    let mut body = String::new();
+    for line in format!(
+        "t := 0\nu := 0\ns := 0\n{}",
+        position.replace("{c}", construct)
+    )
+    .lines()
+    {
+        body.push_str("    ");
+        body.push_str(line);
+        body.push('\n');
+    }
+    [
+        format!(
+            "Object subclass: AgreeClass\n  classState: n = 0\n  classState: blk = nil\n\n  class go =>\n{body}"
+        ),
+        format!(
+            "Actor subclass: AgreeActor\n  state: n = 0\n  state: blk = nil\n\n  go =>\n{body}"
+        ),
+    ]
+}
+
+/// The value of a method-body field or class-variable write is a sequenced
+/// operand site: a loop or fold in it that the core rule names is lowered by
+/// codegen's producer, in both directions, in class and actor methods.
+#[test]
+fn every_field_write_value_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+    let mut checked = 0;
+    let mut by_context = [0, 0];
+    for construct in CONSTRUCTS {
+        for position in FIELD_POSITIONS {
+            for (i, src) in field_sources(construct, position).iter().enumerate() {
+                let before = checked;
+                check_operand_agreement(src, &mut checked);
+                by_context[i] += checked - before;
+            }
+        }
+    }
+    assert!(
+        by_context.iter().all(|&n| n > 50),
+        "class and actor field-write sites compared: {by_context:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +440,12 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                     // An actor fold body lowers only the statement itself through
                     // the producer: Phase 0 must reject every value-bearing
                     // site there (BT-3797, `r := xs inject: ...` in a `do:`).
+                    // This pins the validator's use of the shared rule
+                    // (`is_fold_frame_body` + `is_value_bearing_site`, the
+                    // `actor_value_site` arm of `check_construct`), not an
+                    // independent check of codegen: codegen's frame lowering
+                    // does not read that rule, it simply has no producer
+                    // path for a value-bearing site in an actor fold body.
                     assert!(
                         !src.starts_with("Actor") || value_bearing.is_empty(),
                         "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"
@@ -451,7 +543,9 @@ fn detect_sends(body: &[beamtalk_core::ast::ExpressionStatement]) -> Vec<&Expres
 /// can hold one (the producer test above compares operand sites only): Phase
 /// 0 accepts it (outside the REPL) exactly when core's producer rule names
 /// it — a literal search block whose packed blocks cover every local it
-/// writes — and codegen compiles every program Phase 0 accepts.
+/// writes — and codegen compiles every program Phase 0 accepts. Both
+/// directions are asserted: accepted => named, and named => the check never
+/// rejects the send itself.
 #[test]
 fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it() {
     let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
@@ -464,16 +558,22 @@ fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it(
                     let (module, parse_diags) = parse(lex_with_eof(&src));
                     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
                     let analysis = analyse_full(&module, AnalysisContext::default());
-                    let rejected = analysis.diagnostics.iter().any(|d| {
-                        d.severity == Severity::Error
-                            && matches!(
-                                d.category,
-                                Some(
-                                    DiagnosticCategory::UnmigratedLocalThreading
-                                        | DiagnosticCategory::Tier2BlockNoReturnChannel
+                    let phase0_spans: Vec<Span> = analysis
+                        .diagnostics
+                        .iter()
+                        .filter(|d| {
+                            d.severity == Severity::Error
+                                && matches!(
+                                    d.category,
+                                    Some(
+                                        DiagnosticCategory::UnmigratedLocalThreading
+                                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+                                    )
                                 )
-                            )
-                    });
+                        })
+                        .map(|d| d.span)
+                        .collect();
+                    let rejected = !phase0_spans.is_empty();
                     let class = &module.classes[0];
                     let method = class
                         .methods
@@ -491,6 +591,13 @@ fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it(
                             continue;
                         }
                         let named = operand_producer_writes(send, &bound).is_some();
+                        // And the converse (named => accepted): the check
+                        // never rejects the send itself when the rule names it.
+                        assert!(
+                            !(named && phase0_spans.contains(&send.span())),
+                            "Phase 0 rejects a writing `detect:ifNone:` the producer rule \
+                             names\n{src}"
+                        );
                         if rejected {
                             rejected_count += 1;
                         } else {

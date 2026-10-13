@@ -994,6 +994,7 @@ impl CoreErlangGenerator {
                             // ADR 0118 phase 1a: `self.f := 1 to: (self bump)
                             // do: [..]` — the construct's own state-effecting
                             // operands thread ahead of it.
+                            let producer = self.local_producer_locals(value.unwrap_parens());
                             let rhs_scope =
                                 self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
                             // ADR 0118 phase 4: when the RHS is
@@ -1014,7 +1015,15 @@ impl CoreErlangGenerator {
                             // tuple `Document`, unpacked by the `tuple_var`/
                             // `lower_cf_field_assignment_binds` path below.
                             let val_var = self.fresh_temp_var("CfVal");
-                            if self.inline_control_flow_needs_threading(value.unwrap_parens()) {
+                            // ADR 0131 Phase 2d (BT-3795): a loop or fold that
+                            // is a local-threading producer (a sequenced site
+                            // of this write, `sequenced_operand_sites`) was
+                            // spliced by `thread_ahead` above too: its tuple
+                            // is unpacked and its locals rebound in the
+                            // prelude, so the value is already unwrapped.
+                            if producer.is_some()
+                                || self.inline_control_flow_needs_threading(value.unwrap_parens())
+                            {
                                 let value_str = self.expression_doc(value)?;
                                 self.finish_precompiled_scope(rhs_scope)?;
                                 let source_version = self.state_version();
@@ -1081,6 +1090,7 @@ impl CoreErlangGenerator {
                             if let Some(threaded_vars) = self
                                 .threaded_locals_of(value)
                                 .and_then(ThreadedLocals::into_lowered)
+                                .filter(|_| producer.is_none())
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
