@@ -104,6 +104,16 @@ Actor subclass: Adr0131FieldValueActor
     t := 0
     self.n := (#(1, 2) collect: [:x | t := t + x]) size
 
+  // The write is the last statement and its value is the loop itself.
+  lastWholeFold =>
+    t := 0
+    self.n := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        t := t + 1
+        a + x
+      ]
+
   // Two writes in a row, each with its own loop.
   twoWrites =>
     t := 0

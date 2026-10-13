@@ -37,6 +37,8 @@ TestCase subclass: Adr0131FieldValueTest
 
   testLastStatement => self assertBoth: #lastStatement equal: 2
 
+  testLastWholeFold => self assertBoth: #lastWholeFold equal: 3
+
   testTwoWrites => self assertBoth: #twoWrites equal: #[3, 8]
 
   testDetectHandler => self assertBoth: #detectHandler equal: #[7, 1]
