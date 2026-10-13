@@ -120,6 +120,10 @@ fn class_builder_class_methods_reject_inherited_class_variable() {
     for (what, body) in ACCESSES {
         // `n` belongs to the superclass `Base`, not to this builder's
         // `classVars:`, so the fun has no class variable `n`.
+        // A builder class is not in the static class hierarchy, so lowering has
+        // no declared superclass to consult: it gets the generic "cannot
+        // access instance field" error, not the per-class message the
+        // compiled and extension spellings get. Rejection is what is pinned.
         let src = format!(
             "Object classBuilder name: #SubB; superclass: Base; \
              classMethods: #{{ #touch => [:self | {body}] }}; register"
