@@ -90,6 +90,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_superclass/1,
     flatten_ancestor_map/2,
     class_var_kinds/1,
+    inherited_class_var_kinds/1,
     read_meta/1,
     read_meta_detailed/1,
     read_meta_autoload/1,
@@ -449,32 +450,37 @@ flatten_ancestor_map(ClassAtom, ReadOwnMapFun) ->
     end.
 
 -doc """
-The declared class-variable (`classState:`) kinds of `Name`, flattened over
-its ancestor chain (ADR 0124 §1): variable name -> `eager | late`, closer
-levels winning, read from each level's compiled `__beamtalk_meta/0`
-(`class_field_kinds`) via the module this table records for it.
+The class-variable (`classState:`) kinds `Name` itself declares (ADR 0013 §1,
+ADR 0130, BT-3801): variable name -> `eager | late`, read from the class's own
+compiled `__beamtalk_meta/0` (`class_field_kinds`) via the module this table
+records for it. Class variables are per class and **not inherited**, so an
+ancestor's declarations are deliberately not merged in; a subclass redeclares
+the variables its inherited methods touch. See `inherited_class_var_kinds/1`
+for the diagnostic-only ancestor view.
 
 Returns `#{}` for a class with no metadata row (never registered, or removed),
-and a level whose module exports no readable `__beamtalk_meta/0` (a
-ClassBuilder or hand-written Erlang class) contributes nothing. Kept here, in
-the metadata leaf, so that `beamtalk_class_vars` (the class-variable access
-leaf, `undeclared_class_variable`) and `beamtalk_object_class` (the declared-
-`late` branch of `get_class_var`) share one implementation without the access
-leaf calling up into the class gen_server or the reflection intrinsics.
+and for a class whose module exports no readable `__beamtalk_meta/0` (a
+ClassBuilder or hand-written Erlang class). Kept here, in the metadata leaf, so
+that `beamtalk_class_vars` (the class-variable access leaf,
+`undeclared_class_variable`) and `beamtalk_object_class` (the declared-`late`
+branch of `get_class_var`) share one implementation without the access leaf
+calling up into the class gen_server or the reflection intrinsics.
 """.
 -spec class_var_kinds(class_name()) -> #{atom() => eager | late}.
 class_var_kinds(Name) ->
-    case lookup_module(Name) of
-        not_found ->
-            #{};
-        {ok, Module} ->
-            maps:merge(
-                flatten_ancestor_map(Name, fun own_class_var_kinds/1),
-                module_class_var_kinds(Module)
-            )
-    end.
+    own_class_var_kinds(Name).
 
-%% One ancestor level's own `class_field_kinds`; `#{}` when it cannot be read.
+-doc """
+The class-variable kinds declared by the strict ancestors of `Name`, closer
+levels winning. Diagnostic-only (BT-3801): it never makes a variable accessible
+to `Name`; `beamtalk_class_vars` uses it to tell "this class declares no class
+variables" from "an ancestor declares it and this class forgot to redeclare it".
+""".
+-spec inherited_class_var_kinds(class_name()) -> #{atom() => eager | late}.
+inherited_class_var_kinds(Name) ->
+    flatten_ancestor_map(Name, fun own_class_var_kinds/1).
+
+%% One level's own `class_field_kinds`; `#{}` when it cannot be read.
 -spec own_class_var_kinds(class_name()) -> #{atom() => eager | late}.
 own_class_var_kinds(Name) ->
     case lookup_module(Name) of

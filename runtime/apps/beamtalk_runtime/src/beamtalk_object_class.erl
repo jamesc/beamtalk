@@ -1716,10 +1716,9 @@ notify_compiler_server_register(ClassName, Meta) ->
 
 -doc """
 True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
-`ClassName` or an ancestor — the class-side counterpart to
-`beamtalk_reflection`'s `declared_late/2`, via
-`beamtalk_class_metadata:class_var_kinds/1` (B5a's
-flattened class-variable kind metadata). Keyed on *declared* late so a
+`ClassName` itself (class variables are not inherited, BT-3801) — the class-side
+counterpart to `beamtalk_reflection`'s `declared_late/2`, via
+`beamtalk_class_metadata:class_var_kinds/1`. Keyed on *declared* late so a
 typo'd class variable name keeps today's plain `nil`.
 """.
 -spec class_var_declared_late(class_name(), atom()) -> boolean().

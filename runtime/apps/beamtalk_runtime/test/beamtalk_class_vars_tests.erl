@@ -144,6 +144,28 @@ get_undeclared_test() ->
         ?assertEqual(false, beamtalk_class_vars:has(self_obj(), nope, #{}))
     end).
 
+%% BT-3801: class variables are not inherited. A class that declares none of
+%% its own, whose ancestor declares `inh`, raises on `inh` (the inherited
+%% method ran through a subclass that did not redeclare it); a name no ancestor
+%% declares still reads nil.
+get_inherited_not_redeclared_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds, fun(_) -> #{} end),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun
+        (?C) -> #{inh => eager};
+        (_) -> #{}
+    end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{}),
+            E = raised_error(fun() -> beamtalk_class_vars:get(self_obj(), inh) end),
+            ?assertMatch(#beamtalk_error{kind = undeclared_class_variable}, E),
+            ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), other))
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
+
 %% No metadata (ClassBuilder / dynamic class) or no live class: kinds are
 %% unknown, so a read of an absent name answers nil like get_class_var.
 get_without_metadata_reads_nil_test() ->

@@ -67,8 +67,10 @@ tag fully (once per block-literal creation or region, not a hot path).
   reads `nil` when the declared-kinds map is empty (no metadata, e.g.
   ClassBuilder classes, no live class, or a class that declares no class
   variables: the declared set cannot be told apart from "unknown") or the name
-  is declared; it raises `undeclared_class_variable` only when the declared
-  set is non-empty and does not contain the name.
+  is declared by the class itself; it raises `undeclared_class_variable` when
+  the class's own declared set is non-empty and does not contain the name, or
+  when it is empty but an ancestor declares the name (class variables are not
+  inherited: the subclass must redeclare it, BT-3801).
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
 
@@ -76,7 +78,7 @@ tag fully (once per block-literal creation or region, not a hot path).
 
 This module is a leaf of the object system: it never calls
 `beamtalk_object_class` or `beamtalk_behaviour_intrinsics`. Declared kinds
-come from `beamtalk_class_metadata:class_var_kinds/1`, the error values from
+come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error values from
 `beamtalk_class_var_errors` (shared with the class gen_server), and the
 `class_var_abi` load gate lives in `beamtalk_class_var_abi`.
 """.
@@ -442,12 +444,19 @@ has_value(Map, Name) ->
 
 -spec assert_declared(atom(), atom()) -> ok.
 assert_declared(Class, Name) ->
+    %% Class variables are per class and not inherited (BT-3801): only the
+    %% class's own declarations count.
     case beamtalk_class_metadata:class_var_kinds(Class) of
         Kinds when map_size(Kinds) =:= 0 ->
-            %% Empty declared-kinds map (no metadata, no live class, or no
-            %% declared class variables): today's `get_class_var` answers nil,
-            %% so do not claim "undeclared".
-            ok;
+            %% Empty own declared-kinds map: no metadata, no live class, or no
+            %% declared class variables, which today's `get_class_var` answers
+            %% with nil. The one case that is still decidable is an ancestor
+            %% declaring `Name` (an inherited method running through a subclass
+            %% that did not redeclare it), which raises.
+            case maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class)) of
+                true -> beamtalk_class_var_errors:raise_undeclared(Class, Name);
+                false -> ok
+            end;
         Kinds ->
             case maps:is_key(Name, Kinds) of
                 true -> ok;

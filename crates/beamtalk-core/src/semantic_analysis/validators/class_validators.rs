@@ -553,6 +553,40 @@ pub(crate) fn check_class_variable_access(
     walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_classvar_access);
 }
 
+/// The hint for the `Undefined class variable` warning on `Cls classState: #x`,
+/// or `None` when `Cls` is unknown or declares `x` itself.
+///
+/// Own-only, like compiled method bodies and the runtime declared-set check
+/// (BT-3762, BT-3801): class variables are per class and not inherited, so a
+/// variable only an ancestor declares is undefined here and the hint says to
+/// redeclare it.
+fn undefined_class_variable_hint(
+    hierarchy: &ClassHierarchy,
+    class_name: &str,
+    var_name: &str,
+) -> Option<String> {
+    if !hierarchy.has_class(class_name) {
+        return None;
+    }
+    let class_vars = hierarchy.own_class_variable_names(class_name);
+    if class_vars.iter().any(|cv| cv.as_str() == var_name) {
+        return None;
+    }
+    if let Some(owner) = hierarchy.inherited_class_variable_owner(class_name, var_name) {
+        return Some(format!(
+            "`{owner}` declares it, but class variables are not inherited; \
+             redeclare it with `classState: {var_name}` on `{class_name}`"
+        ));
+    }
+    Some(if class_vars.is_empty() {
+        format!("`{class_name}` has no declared class variables")
+    } else {
+        let mut names: Vec<&str> = class_vars.iter().map(EcoString::as_str).collect();
+        names.dedup();
+        format!("Declared class variables: {}", names.join(", "))
+    })
+}
+
 fn visit_classvar_access(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
@@ -572,22 +606,9 @@ fn visit_classvar_access(
                 if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                     arguments.first()
                 {
-                    // Stays inherited (BT-3762 review): this checks a *runtime*
-                    // `Cls classState: #x` send, whose declared-set check
-                    // flattens the ancestor chain (`beamtalk_class_metadata:
-                    // class_var_kinds/1`), so own-only would warn on sends the
-                    // runtime accepts. Compiled method bodies are own-only.
-                    let class_vars = hierarchy.class_variable_names_with_inherited(class_name);
-                    if hierarchy.has_class(class_name)
-                        && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
+                    if let Some(hint) =
+                        undefined_class_variable_hint(hierarchy, class_name, var_name)
                     {
-                        let hint = if class_vars.is_empty() {
-                            format!("`{class_name}` has no declared class variables")
-                        } else {
-                            let vars: Vec<&str> =
-                                class_vars.iter().map(EcoString::as_str).collect();
-                            format!("Declared class variables: {}", vars.join(", "))
-                        };
                         diagnostics.push(
                             Diagnostic::warning(
                                 format!(
@@ -615,18 +636,9 @@ fn visit_classvar_access(
                     if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                         msg.arguments.first()
                     {
-                        // Stays inherited, same reasoning as the non-cascade arm above.
-                        let class_vars = hierarchy.class_variable_names_with_inherited(class_name);
-                        if hierarchy.has_class(class_name)
-                            && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
+                        if let Some(hint) =
+                            undefined_class_variable_hint(hierarchy, class_name, var_name)
                         {
-                            let hint = if class_vars.is_empty() {
-                                format!("`{class_name}` has no declared class variables")
-                            } else {
-                                let vars: Vec<&str> =
-                                    class_vars.iter().map(EcoString::as_str).collect();
-                                format!("Declared class variables: {}", vars.join(", "))
-                            };
                             diagnostics.push(
                                 Diagnostic::warning(
                                     format!(

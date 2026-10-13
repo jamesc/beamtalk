@@ -168,7 +168,7 @@ class_bump(ClassSelf) ->
 |---|---|
 | `beamtalk_class_vars` | The process-dictionary key shape (from the generated `beamtalk_class_vars_keys.hrl`), `install/2`/`uninstall/1`, the access helpers, `snapshot/0`/`restore/1`/`protect/1`, `with_snapshot/2`. |
 | `beamtalk_class_var_errors` | The structured errors and hint text (`class_state_unreachable`, `class_state_read_only`, `undeclared_class_variable`, `uninitialized_state_error`), shared by the accesses and the class gen_server's `get_class_var`. |
-| `beamtalk_class_metadata:class_var_kinds/1` | Declared class-variable kinds (`eager`/`late`), flattened over the superclass chain from each level's `__beamtalk_meta/0`. |
+| `beamtalk_class_metadata:class_var_kinds/1` | Declared class-variable kinds (`eager`/`late`) of the class itself, own-only (class variables are not inherited, BT-3801), from its `__beamtalk_meta/0`; `inherited_class_var_kinds/1` is the diagnostic-only ancestor view. |
 | `beamtalk_class_var_abi` | The `class_var_abi` load gate: `abi/0`, `check_class_info_abi/2` (called by `beamtalk_object_class:start/2` and `update_class/2`) and `collect_abi_refusals/1` (the release preflight). |
 
 ---
