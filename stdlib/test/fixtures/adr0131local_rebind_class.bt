@@ -98,7 +98,12 @@ Object subclass: Adr0131LocalRebindClass
   // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes.
   class s2 =>
     t := 0
-    r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        0
+      ]
     #[r, t]
 
   class stDetectIfNone =>
