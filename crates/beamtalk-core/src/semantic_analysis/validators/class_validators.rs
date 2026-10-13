@@ -572,7 +572,12 @@ fn visit_classvar_access(
                 if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                     arguments.first()
                 {
-                    let class_vars = hierarchy.class_variable_names(class_name);
+                    // Stays inherited (BT-3762 review): this checks a *runtime*
+                    // `Cls classState: #x` send, whose declared-set check
+                    // flattens the ancestor chain (`beamtalk_class_metadata:
+                    // class_var_kinds/1`), so own-only would warn on sends the
+                    // runtime accepts. Compiled method bodies are own-only.
+                    let class_vars = hierarchy.class_variable_names_with_inherited(class_name);
                     if hierarchy.has_class(class_name)
                         && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
                     {
@@ -610,7 +615,8 @@ fn visit_classvar_access(
                     if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                         msg.arguments.first()
                     {
-                        let class_vars = hierarchy.class_variable_names(class_name);
+                        // Stays inherited, same reasoning as the non-cascade arm above.
+                        let class_vars = hierarchy.class_variable_names_with_inherited(class_name);
                         if hierarchy.has_class(class_name)
                             && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
                         {
@@ -1569,7 +1575,11 @@ pub(crate) fn check_shape_version_and_migrations(
         }
 
         let declared_version = class.effective_shape_version();
-        let class_var_names = hierarchy.class_variable_names(class.name.name.as_str());
+        // Own-only (BT-3762): `self.<name>` in a `migrateFromVN:` body is a
+        // class-variable access only for the class's own declarations; an
+        // ancestor's name does not compile as a class variable at all, so
+        // flagging it here as "class variables unavailable" would be misleading.
+        let class_var_names = hierarchy.own_class_variable_names(class.name.name.as_str());
 
         for method in &class.class_methods {
             let selector_text = method.selector.name();

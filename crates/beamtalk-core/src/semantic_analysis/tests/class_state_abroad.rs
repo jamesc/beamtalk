@@ -238,6 +238,7 @@ const LATE_BOUND: &str = "Object subclass: Base
   class sealed viaSealedChain => self viaHelper
 
 Base subclass: Leaf
+  classState: n = 0
 
   class helper => self.n := self.n + 1
 
@@ -281,9 +282,12 @@ fn unsealed_method_with_only_sealed_self_sends_does_not_warn() {
 
 /// `LATE_BOUND` plus a `sealed` subclass of the open `Base`, whose body is
 /// `body` followed by a block-passing `a` that self-sends `viaPlain`.
+/// `SealedLeaf` redeclares `n`: class variables are per class (BT-3762), and
+/// the lint only reasons about a class's own variables.
 fn sealed_sub(body: &str) -> Vec<Diagnostic> {
     abroad(&format!(
         "{HEADER}{}sealed Base subclass: SealedLeaf
+  classState: n = 0
 {body}
   class a => Driver each: [self viaPlain]
 ",
@@ -331,7 +335,10 @@ fn self_send_in_a_sealed_class_is_proven_pure() {
 }
 
 #[test]
-fn write_of_an_inherited_class_variable_is_a_write() {
+fn inherited_class_variable_is_not_class_state_for_the_lint() {
+    // BT-3762: class variables are per class. `Sub` does not declare `n`, so
+    // its `self.n` does not compile (codegen rejects it) and the lint does not
+    // treat it as one of `Sub`'s variables.
     let d = abroad(
         "Object subclass: Driver
   class each: aBlock => aBlock value
@@ -340,6 +347,29 @@ Object subclass: Base
   classState: n = 0
 
 Base subclass: Sub
+
+  class sealed bumpN => self.n := self.n + 1
+
+  class a => Driver each: [Sub bumpN]
+
+  class reader => [self.n]
+",
+    );
+    assert!(d.is_empty(), "{d:?}");
+}
+
+#[test]
+fn write_of_a_redeclared_class_variable_is_a_write() {
+    // `Sub` redeclares `n`; its own write is a write for the lint.
+    let d = abroad(
+        "Object subclass: Driver
+  class each: aBlock => aBlock value
+
+Object subclass: Base
+  classState: n = 0
+
+Base subclass: Sub
+  classState: n = 0
 
   class sealed bumpN => self.n := self.n + 1
 

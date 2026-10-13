@@ -624,27 +624,65 @@ impl ClassHierarchy {
                 .any(|s| matches!(s.as_str(), "Integer" | "Float" | "Number"))
     }
 
-    /// Returns all class variable names for a class, including inherited ones.
+    /// Returns the class variables `class_name` itself declares with
+    /// `classState:` — own declarations only, never an ancestor's.
+    ///
+    /// Class variables are per class, not inherited (ADR 0013 §1; ADR 0130
+    /// amendment "Not inherited, per-class ownership", BT-3762). This is the
+    /// single answer to "which class variables does the class being compiled
+    /// have?", shared by class-side extensions, the `class-state-abroad` lint
+    /// and the `classState:` / migration checks, so codegen and the lint cannot
+    /// disagree. An inherited method running through a subclass reads and writes
+    /// the *subclass's* variables, which is why the subclass redeclares them.
     #[must_use]
-    pub fn class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
-        let mut vars = Vec::new();
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                vars.extend(info.class_variables.iter().map(|cv| cv.name.clone()));
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
-            }
+    pub fn own_class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
+        self.classes
+            .get(class_name)
+            .map(|info| {
+                info.class_variables
+                    .iter()
+                    .map(|cv| cv.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns the class variables declared by `class_name` and every ancestor.
+    ///
+    /// **Not** the answer to "which class variables can a method of this class
+    /// access?" (that is [`Self::own_class_variable_names`]; BT-3762). It exists
+    /// for the one caller that must match the runtime, whose declared-set check
+    /// for `Cls classState: #name` (`beamtalk_class_metadata:class_var_kinds/1`)
+    /// flattens the ancestor chain: the `Undefined class variable` warning on a
+    /// `classState:` send in `class_validators.rs`.
+    #[must_use]
+    pub fn class_variable_names_with_inherited(&self, class_name: &str) -> Vec<EcoString> {
+        let mut vars = self.own_class_variable_names(class_name);
+        for ancestor in self.superclass_chain(class_name) {
+            vars.extend(self.own_class_variable_names(ancestor.as_str()));
         }
         vars
+    }
+
+    /// The nearest strict ancestor of `class_name` that declares the class
+    /// variable `var_name`, if any. Diagnostic-only: it names the class whose
+    /// variable a subclass method tried to reach, so the error can say "redeclare
+    /// it with `classState:`" (BT-3762). It never makes `var_name` accessible.
+    #[must_use]
+    pub fn inherited_class_variable_owner(
+        &self,
+        class_name: &str,
+        var_name: &str,
+    ) -> Option<EcoString> {
+        self.superclass_chain(class_name)
+            .into_iter()
+            .find(|ancestor| {
+                self.classes.get(ancestor.as_str()).is_some_and(|info| {
+                    info.class_variables
+                        .iter()
+                        .any(|cv| cv.name.as_str() == var_name)
+                })
+            })
     }
 
     /// Returns all state (instance variable) names for a class,

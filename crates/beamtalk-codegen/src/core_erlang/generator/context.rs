@@ -114,6 +114,11 @@ pub(in crate::core_erlang) struct ClassContext {
     /// runtime dispatch helpers (`class_self_dispatch_local`/`class_self_dispatch`)
     /// keyed on this class name, not through a direct module call.
     pub builder_class_method_class: Option<String>,
+    /// BT-3762: the class-side extension's *target* class while its method is
+    /// lowered (the extension module's own class identity is not the target).
+    /// Used only to name the class in the "class variables are per class"
+    /// diagnostic; see [`CoreErlangGenerator::class_var_home`].
+    pub extension_target_class: Option<String>,
 }
 
 /// ADR 0084: Snapshot of the class-method-relevant `ClassContext`
@@ -166,6 +171,7 @@ impl ClassContext {
             in_class_method: false,
             stdlib_mode: false,
             builder_class_method_class: None,
+            extension_target_class: None,
         }
     }
 }
