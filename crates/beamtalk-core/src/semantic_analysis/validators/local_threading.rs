@@ -46,10 +46,11 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
-    is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
-    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, producer_body_block, sequenced_operand_sites, stored_block_var_uses,
+    EscapeShape, OuterLocalWrite, captured_local_mutations, construct_outer_local_writes,
+    escape_sites, is_fold_frame_body, is_safe_value_family_selector, is_threaded_frame_body,
+    is_value_bearing_site, local_threading_construct, loop_body_producer_sites,
+    operand_producer_writes, outer_local_writes, producer_body_block, sequenced_operand_sites,
+    stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -884,6 +885,12 @@ struct Walker<'d> {
     /// The actor self-send callees of the enclosing class that thread a Tier 2
     /// block argument ([`threading_callees`]).
     callees: &'d HashSet<(EcoString, usize)>,
+    /// ADR 0131 §6 (BT-3756): the block literals and bare locals of the method
+    /// body that escape the method without a send — returned, stored in a
+    /// field or class variable, or an element of a collection literal
+    /// ([`escape_sites`], the classification behind `escaping_blocks`). Keyed
+    /// by the operand's span.
+    escapes: HashMap<Span, EscapeShape>,
     diagnostics: &'d mut Vec<Diagnostic>,
 }
 
@@ -944,6 +951,7 @@ impl<'d> Walker<'d> {
             frame_sites: Vec::new(),
             pending_frame_body: None,
             callees,
+            escapes: escape_map(context, body),
             diagnostics,
         }
     }
@@ -1014,6 +1022,9 @@ impl<'d> Walker<'d> {
     }
 
     fn block(&mut self, block: &Block, container: Container) {
+        if let Some(shape) = self.escapes.get(&block.span).copied() {
+            self.report_escaping_literal(block, shape);
+        }
         let frame_body = self.pending_frame_body.take();
         self.frame_sites.push(frame_body.map(|fold| FrameSites {
             fold,
@@ -1214,8 +1225,12 @@ impl<'d> Walker<'d> {
                     }
                 }
             }
+            Expression::Identifier(id) => {
+                if let Some(shape) = self.escapes.get(&expr.span()).copied() {
+                    self.report_escaping_local(&id.name, shape, expr.span());
+                }
+            }
             Expression::Literal(..)
-            | Expression::Identifier(_)
             | Expression::ClassReference { .. }
             | Expression::Super(_)
             | Expression::Primitive { .. }
@@ -1549,18 +1564,27 @@ impl<'d> Walker<'d> {
     }
 
     fn report_literal(&mut self, block: &Block, selector: &str) {
-        let hint = self
-            .writes_of(block)
-            .first()
-            .map(|w| section6_help(&w.name, selector))
-            .unwrap_or_default();
-        self.report_literal_with_hint(block, selector, hint);
+        let Some(write) = self.writes_of(block).into_iter().next() else {
+            return;
+        };
+        let hint = section6_help(&write.name, selector);
+        self.push_literal(block, selector, &write, hint);
     }
 
     fn report_literal_with_hint(&mut self, block: &Block, selector: &str, hint: String) {
         let Some(write) = self.writes_of(block).into_iter().next() else {
             return;
         };
+        self.push_literal(block, selector, &write, hint);
+    }
+
+    fn push_literal(
+        &mut self,
+        block: &Block,
+        selector: &str,
+        write: &OuterLocalWrite,
+        hint: String,
+    ) {
         let name = &write.name;
         self.diagnostics.push(
             Diagnostic::error(
@@ -1575,27 +1599,92 @@ impl<'d> Walker<'d> {
         );
     }
 
-    fn report_local(&mut self, local: &EcoString, selector: &str, use_span: Span) {
-        let Some(info) = self.tier2_locals.get(local) else {
+    /// ADR 0131 §6 (BT-3756): a block literal that writes an outer local of
+    /// the method and escapes it without a send.
+    fn report_escaping_literal(&mut self, block: &Block, shape: EscapeShape) {
+        // A block literal assigned straight to a field of an instance is
+        // already a compile error from the block analyzer (BT-2809, "cannot
+        // mutate captured variable ... inside a closure stored in a field"),
+        // which reports it once; `section6_field_stored_literal_is_an_error_in_every_context`
+        // pins that some error survives. A class variable store has no such
+        // error, so the class-method context reports it here.
+        if shape == EscapeShape::StoredLocal
+            || (shape == EscapeShape::StoredClassVar && self.context != Class)
+        {
+            return;
+        }
+        let Some(write) = self.writes_of(block).into_iter().next() else {
             return;
         };
-        // A block parameter or match binding of the same name shadows it.
+        let name = &write.name;
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "block writes outer local `{name}`, but it is {} and nothing can return \
+                     the write",
+                    escape_phrase(shape)
+                ),
+                block.span,
+            )
+            .with_hint(escape_help(name))
+            .with_note(format!("`{name}` is written here"), Some(write.span))
+            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
+        );
+    }
+
+    /// As [`Walker::report_escaping_literal`] for a local bound to such a
+    /// block (`b := [...]`, then `^b`).
+    fn report_escaping_local(&mut self, local: &EcoString, shape: EscapeShape, use_span: Span) {
+        if shape == EscapeShape::StoredLocal {
+            return;
+        }
+        let Some((binding, write)) = self.tier2_local_to_report(local) else {
+            return;
+        };
+        let name = &write.name;
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "block stored in `{local}` writes outer local `{name}`, but `{local}` is {} \
+                     and nothing can return the write",
+                    escape_phrase(shape)
+                ),
+                binding,
+            )
+            .with_hint(escape_help(name))
+            .with_note(format!("`{name}` is written here"), Some(write.span))
+            .with_note(format!("`{local}` escapes here"), Some(use_span))
+            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
+        );
+    }
+
+    /// The binding and first write of the Tier 2 block-valued local `local`
+    /// if it has not been reported yet (one diagnostic per binding); `None`
+    /// for a name that is not one, or that a block parameter or match binding
+    /// of the same name shadows.
+    fn tier2_local_to_report(&mut self, local: &EcoString) -> Option<(Span, OuterLocalWrite)> {
+        let info = self.tier2_locals.get(local)?;
         if self.binding_frame(local) != Some(info.frame) {
-            return;
+            return None;
         }
-        if !self.reported_locals.insert(local.clone()) {
+        let found = (info.binding, info.write.clone());
+        self.reported_locals.insert(local.clone()).then_some(found)
+    }
+
+    fn report_local(&mut self, local: &EcoString, selector: &str, use_span: Span) {
+        let Some((binding, write)) = self.tier2_local_to_report(local) else {
             return;
-        }
-        let name = &info.write.name;
+        };
+        let name = &write.name;
         let diagnostic = Diagnostic::error(
             format!(
                 "block stored in `{local}` writes outer local `{name}`, but `{selector}` cannot \
                  return the write"
             ),
-            info.binding,
+            binding,
         )
         .with_hint(section6_help(name, selector))
-        .with_note(format!("`{name}` is written here"), Some(info.write.span))
+        .with_note(format!("`{name}` is written here"), Some(write.span))
         .with_note(
             format!("`{local}` flows to `{selector}` here"),
             Some(use_span),
@@ -1603,6 +1692,38 @@ impl<'d> Walker<'d> {
         .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
         self.diagnostics.push(diagnostic);
     }
+}
+
+/// The [`escape_sites`] of a method body that §6 inspects (BT-3756). A REPL
+/// expression list is skipped: its locals are session bindings, and the value
+/// of its last expression goes to the display, not to a caller.
+fn escape_map(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<Span, EscapeShape> {
+    if context == Repl {
+        return HashMap::new();
+    }
+    escape_sites(body, true)
+        .into_iter()
+        .map(|site| (site.span, site.shape))
+        .collect()
+}
+
+/// How a block escapes, for the §6 message.
+fn escape_phrase(shape: EscapeShape) -> &'static str {
+    match shape {
+        EscapeShape::Returned => "returned from the method",
+        EscapeShape::StoredClassVar => "stored in a field or class variable",
+        EscapeShape::StoredInLiteral => "placed in a collection literal",
+        EscapeShape::StoredLocal => "stored in a local",
+    }
+}
+
+/// The ADR 0131 §6 help text for a block that escapes the method.
+fn escape_help(name: &str) -> String {
+    format!(
+        "once the method returns, no later call of the block can hand `{name}` back: keep the \
+         state in a field (`self.{name} := self.{name} + 1`) or return the new value from the \
+         block and assign it where the block is called"
+    )
 }
 
 /// Whether a statement of `block` (not of a nested block) is an assignment
@@ -1659,8 +1780,10 @@ fn self_send_help(selector: &str) -> String {
     format!(
         "`{selector}` must be a `sealed` method of this class that only invokes the block \
          directly (`b value`) as a statement, an assignment or a `^` in its body, or hands it \
-         to a collection message (`do:`, `inject:into:`) or another such method; otherwise \
-         return the new value from the block and assign it"
+         on to another such method. Only two other forms are accepted: the bare callable form \
+         (`#(1) do: b`, never `do: [:e | b value: e]`) and the loop shape \
+         `last := b value: e` inside `items do: [:e | ...]`, with `last` bound before the loop. \
+         Otherwise return the new value from the block and assign it"
     )
 }
 

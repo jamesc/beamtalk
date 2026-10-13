@@ -89,7 +89,7 @@ TestCase subclass: ArrayTest
     @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
     self should: [
-      #[1, 2, 3] perform: #do: withArguments: #(statefulDoBlock)
+      #[1, 2, 3] perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -99,7 +99,7 @@ TestCase subclass: ArrayTest
       x * 2
     ]
     self should: [
-      #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)
+      #[1, 2, 3] perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -109,7 +109,7 @@ TestCase subclass: ArrayTest
       x > 1
     ]
     self should: [
-      #[1, 2, 3] perform: #select: withArguments: #(statefulSelectBlock)
+      #[1, 2, 3] perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -119,7 +119,7 @@ TestCase subclass: ArrayTest
       acc + x
     ]
     self should: [
-      #[1, 2, 3] perform: #inject:into: withArguments: #(0, statefulInjectBlock)
+      #[1, 2, 3] perform: #inject:into: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang setelement: 1 of: (Erlang erlang make_tuple: 2 init: statefulInjectBlock) value: 0))
     ] raise: #stateful_block_dispatch
 
   testPrintString =>

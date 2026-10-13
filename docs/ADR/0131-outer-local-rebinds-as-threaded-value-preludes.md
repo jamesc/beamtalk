@@ -441,8 +441,8 @@ StateAcc}` protocol, the same as any user HOM (§6).
 Outside an actor instance method there is no channel through which a callee
 can return a `StateAcc`. So a **Tier 2 block value** (a block literal that
 writes an outer local, or a local bound to one and not reassigned) that
-flows to a send that is neither a §1 construct nor an actor self-send is
-rejected at compile time:
+flows to a send that is neither a §1 construct nor an actor self-send **or
+escapes the method** is rejected at compile time:
 
 ```text
 error: block writes outer local `t`, but `ap:` cannot return the write
@@ -471,6 +471,22 @@ raise, so they are the same error until the callee-side `{Result, StateAcc}`
 protocol exists (BT-3742). One predicate,
 `semantic_analysis::tier2_callee::callee_threads_block_param`, decides it for
 both the diagnostic and codegen's class pre-scan.
+
+**Escaping without a send (BT-3756).** The same error covers a Tier 2 block
+value that leaves the method without being sent anywhere: returned (`^[t := t
++ 1]`, the method's last expression, or `^b`), stored in a field or class
+variable (`self.f := b`), or placed in a list, array or map literal (`#[b]`).
+Once the method frame is gone nothing can hand `t` back, in any method kind;
+probed before the fix, each shape compiled and then raised `Cannot call 'value'
+on Block ... captures mutable state` at the first later `value`, except the
+actor `b := [...]. self.f := b`, which silently lost the write. A block that
+writes no local of the method (a pure closure, its own locals only, or an actor
+`self.x` field) is unaffected. A block literal assigned straight to an instance
+field is already the block analyzer's "cannot mutate captured variable ...
+stored in a field" error, reported once; §6 reports it for a class variable.
+The escape classification is `block_facts::escape_sites`, the one behind
+`escaping_blocks`; a REPL expression list is not checked. A block that is only the
+implicit value of a nested conditional branch or block (no `^`) is not seen.
 
 **Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
 x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy

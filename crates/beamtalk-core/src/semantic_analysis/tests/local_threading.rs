@@ -156,7 +156,7 @@ fn section6_reassigned_local_is_not_a_tier2_block_value() {
 
 #[test]
 fn section6_shadowing_block_parameter_is_not_the_tier2_local() {
-    let src = in_class("b := [t := t + 1]\n#(1, 2) do: [:b | b printString]\n#[b, t]");
+    let src = in_class("b := [t := t + 1]\n#(1, 2) do: [:b | b printString]\nt");
     let diags = adr0131_diagnostics(&src);
     assert!(diags.is_empty(), "{diags:?}");
 }
@@ -1234,4 +1234,186 @@ fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// §6: a Tier 2 block that escapes the method without a send (BT-3756)
+// ---------------------------------------------------------------------------
+
+/// The shapes in which a block that writes the method local `t` leaves the
+/// method with no send: returned (explicitly, as the last statement, or via a
+/// local), stored through a field or class variable, or placed in a collection
+/// literal. Probed on a real build before the fix: each compiled, then raised
+/// `Cannot call 'value' on Block ... captures mutable state` on the first
+/// later `value`, in class, value-type and actor methods, except the actor
+/// `b := [...]. self.f := b`, which ran and silently lost the write.
+/// Each is `(name, body)`.
+const ESCAPE_SHAPES: &[(&str, &str)] = &[
+    ("explicit return", "^[t := t + 1]"),
+    ("implicit return", "[t := t + 1]"),
+    ("returned local", "b := [t := t + 1]\n^b"),
+    ("implicit returned local", "b := [t := t + 1]\nb"),
+    ("returned in a branch", "true ifTrue: [^[t := t + 1]]\nnil"),
+    ("list literal", "#([t := t + 1])"),
+    ("array literal", "#[[t := t + 1]]"),
+    ("map literal", "#{#a => [t := t + 1]}"),
+    ("local in array", "b := [t := t + 1]\n#[b]"),
+    ("local in list", "b := [t := t + 1]\n#(b)"),
+    (
+        "local stored in a field",
+        "b := [t := t + 1]\nself.n := b\nnil",
+    ),
+    ("write-only block", "^[t := 5]"),
+    ("parenthesized", "^([t := t + 1])"),
+];
+
+#[test]
+fn section6_escaping_blocks_are_errors_in_every_context() {
+    for (name, body) in ESCAPE_SHAPES {
+        for (context, src) in [
+            ("class", in_class(body)),
+            ("value", in_value(body)),
+            ("actor", in_actor(body)),
+        ] {
+            let diags = adr0131_diagnostics(&src);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{name} in {context}: {src}\n{diags:?}");
+            let d = s6[0];
+            assert_eq!(d.severity, Severity::Error, "{name} in {context}");
+            assert!(
+                d.message.contains("writes outer local `t`")
+                    && d.message.contains("nothing can return the write"),
+                "{name} in {context}: {}",
+                d.message
+            );
+            let hint = d.hint.as_deref().unwrap_or_default();
+            assert!(
+                hint.contains("`self.t := self.t + 1`") && hint.contains("assign it where"),
+                "{name} in {context}: {hint}"
+            );
+            assert!(
+                d.notes
+                    .iter()
+                    .any(|n| n.message.contains("`t` is written here")),
+                "{name} in {context}"
+            );
+        }
+    }
+}
+
+#[test]
+fn section6_escape_points_at_the_block_or_its_binding() {
+    let src = in_class("^[t := t + 1]");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(
+        diags[0].span.start() as usize,
+        src.find("[t := t + 1]").unwrap()
+    );
+    assert!(diags[0].message.contains("returned from the method"));
+
+    let src = in_class("b := [t := t + 1]\n^b");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].span.start() as usize, src.find("b := [").unwrap());
+    assert!(
+        diags[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("`b` escapes here")),
+        "{diags:?}"
+    );
+
+    let src = in_actor("b := [t := t + 1]\nself.n := b\nnil");
+    assert!(
+        adr0131_diagnostics(&src)[0]
+            .message
+            .contains("stored in a field or class variable")
+    );
+    let src = in_class("#([t := t + 1])");
+    assert!(
+        adr0131_diagnostics(&src)[0]
+            .message
+            .contains("placed in a collection literal")
+    );
+}
+
+/// A block literal assigned straight to a field is reported once per method
+/// kind: by §6 for a class variable (`self.h := [...]` in a class method), by
+/// the block analyzer's BT-2809 error for an instance (so the
+/// `bt2809_mixed_...produces_one_error` test keeps its single diagnostic).
+/// This pins that no context lets it through.
+#[test]
+fn section6_field_stored_literal_is_an_error_in_every_context() {
+    let body = "self.n := [t := t + 1]\nnil";
+    assert_eq!(section6_errors(&in_class(body)), 1);
+    for src in [in_value(body), in_actor(body)] {
+        let all = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
+        let reported = all.iter().filter(|d| {
+            d.severity == Severity::Error
+                && d.message.contains("cannot mutate captured variable 't'")
+        });
+        assert_eq!(reported.count(), 1, "{src}: {all:?}");
+    }
+}
+
+#[test]
+fn section6_escaping_blocks_that_write_no_outer_local_are_accepted() {
+    // Own locals, block parameters and reads need no write-back; in an actor a
+    // field write has a home that outlives the method frame.
+    for body in [
+        "^[:x | x + 1]",
+        "^[:x | y := x. y + 1]",
+        "^[t + 1]",
+        "#([:x | x], [t])",
+        "b := [:x | y := x. y]\n^b",
+        "b := [t + 1]\n#[b]",
+        "^[:t | t := t + 1]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(section6_errors(&src), 0, "{src}");
+        }
+    }
+    for body in [
+        "^[self.n := self.n + 1]",
+        "b := [self.n := self.n + 1]\n^b",
+        "#[[self.n := self.n + 1]]",
+    ] {
+        assert_eq!(section6_errors(&in_actor(body)), 0, "{body}");
+    }
+}
+
+#[test]
+fn section6_non_escaping_uses_are_not_escapes() {
+    assert_eq!(
+        section6_errors(&in_class("true ifTrue: [t := t + 1]\n^t")),
+        0
+    );
+    assert_eq!(
+        section6_errors(&in_class("#(1, 2) do: [:x | t := t + x]\n#[t, t]")),
+        0
+    );
+}
+
+#[test]
+fn section6_escape_in_a_repl_expression_list_is_not_checked() {
+    // The REPL's last value goes to the display and its locals are session
+    // bindings; only sends are checked there.
+    let diags = adr0131_diagnostics_with("t := 0\n[t := t + 1]", &[]);
+    assert!(
+        of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+        "{diags:?}"
+    );
+}
+
+/// BT-3755 review: the help for a non-threading actor self-send callee names
+/// exactly the two accepted non-direct forms, not "a collection message".
+#[test]
+fn section6_self_send_help_names_only_the_accepted_forms() {
+    let src = actor_calling("sealed ", "  ap: b => b foo: 1");
+    let diags = adr0131_diagnostics(&src);
+    let hint = diags[0].hint.as_deref().unwrap_or_default();
+    assert!(hint.contains("`#(1) do: b`"), "{hint}");
+    assert!(hint.contains("`last := b value: e`"), "{hint}");
+    assert!(!hint.contains("`inject:into:`"), "{hint}");
 }

@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3756 (ADR 0131 §6): class-method column of
+// adr0131section6escape_actor.bt (blocks that write no local of the method
+// frame stay legal when returned or placed in a collection literal).
+
+Object subclass: Adr0131Section6EscapeClass
+
+  class returnedPure => [:x | x + 1]
+
+  class returnedOwnLocal =>
+    ^[:x |
+      y := x * 2
+      y + 1
+    ]
+
+  class returnedReadOnly =>
+    t := 10
+    ^[:x | x + t]
+
+  class literalOfPure => #([:x | x + 1], [:x | x * 2])

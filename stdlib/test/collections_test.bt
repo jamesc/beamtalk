@@ -183,14 +183,14 @@ TestCase subclass: CollectionsTest
       x * 2
     ]
     self should: [
-      #(1, 2, 3) perform: #collect: withArguments: #(statefulBlock)
+      #(1, 2, 3) perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
     @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
     self should: [
-      #(1, 2, 3) perform: #do: withArguments: #(statefulDoBlock)
+      #(1, 2, 3) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -200,7 +200,7 @@ TestCase subclass: CollectionsTest
       x > 1
     ]
     self should: [
-      #(1, 2, 3) perform: #select: withArguments: #(statefulSelectBlock)
+      #(1, 2, 3) perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -210,7 +210,7 @@ TestCase subclass: CollectionsTest
       x > 1
     ]
     self should: [
-      #(1, 2, 3) perform: #reject: withArguments: #(statefulRejectBlock)
+      #(1, 2, 3) perform: #reject: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulRejectBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -220,7 +220,7 @@ TestCase subclass: CollectionsTest
       acc + x
     ]
     self should: [
-      #(1, 2, 3) perform: #inject:into: withArguments: #(0, statefulInjectBlock)
+      #(1, 2, 3) perform: #inject:into: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang setelement: 1 of: (Erlang erlang make_tuple: 2 init: statefulInjectBlock) value: 0))
     ] raise: #stateful_block_dispatch
 
   testPerformOnEachWithIndexWithStatefulBlockRaisesClearError =>
@@ -235,7 +235,7 @@ TestCase subclass: CollectionsTest
     @expect dead_assignment
     statefulBlock := [:x :i | count := count + x]
     self should: [
-      #(1, 2, 3) perform: #eachWithIndex: withArguments: #(statefulBlock)
+      #(1, 2, 3) perform: #eachWithIndex: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
     // Pure (Tier 1) blocks via perform: keep working (baseline, mirrors

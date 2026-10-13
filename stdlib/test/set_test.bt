@@ -95,7 +95,7 @@ TestCase subclass: SetTest
     @expect dead_assignment
     statefulBlock := [:x | count := count + x]
     self should: [
-      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)
+      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
   testRespondstoMethodReflection =>

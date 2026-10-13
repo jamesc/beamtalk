@@ -70,7 +70,7 @@ TestCase subclass: DictionaryTest
     @expect dead_assignment
     statefulBlock := [:v | count := count + v]
     self should: [
-      #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
+      #{#a => 1, #b => 2} perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
   testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>
@@ -84,7 +84,7 @@ TestCase subclass: DictionaryTest
     @expect dead_assignment
     statefulBlock := [:k :v | count := count + v]
     self should: [
-      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)
+      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
     ] raise: #stateful_block_dispatch
 
     count := 0
@@ -95,7 +95,7 @@ TestCase subclass: DictionaryTest
         #{
           #a => 1,
           #b => 2
-        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)
+        } perform: #keysAndValuesDo: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock2))
       ]
       raise: #stateful_block_dispatch
 
