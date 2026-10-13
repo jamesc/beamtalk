@@ -57,6 +57,8 @@ and dispatches through the shared synchronous path.
 """.
 -spec eval_main() -> no_return().
 eval_main() ->
+    %% eval VM has no sys.config logger redirect; route to stderr before any log call.
+    _ = logger:update_handler_config(default, config, #{type => standard_error}),
     logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     case init:get_plain_arguments() of
         [ClassStr, SelectorStr | RestArgs] ->
