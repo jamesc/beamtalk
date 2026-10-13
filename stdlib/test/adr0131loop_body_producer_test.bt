@@ -134,3 +134,6 @@ TestCase subclass: Adr0131LoopBodyProducerTest
 
   testStateChainDirect =>
     self assert: (Adr0131LoopBodyProducerActor spawn) stateChainDirect equals: #[6, 4]
+
+  testStateChainDoOverParameter =>
+    self assert: ((Adr0131LoopBodyProducerActor spawn) stateChainDoOverParameter: #(1, 2)) equals: #[6, 9]

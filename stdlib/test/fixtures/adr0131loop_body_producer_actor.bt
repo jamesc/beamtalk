@@ -418,6 +418,22 @@ Actor subclass: Adr0131LoopBodyProducerActor
       ]
     #[t, self.n, r]
 
+  // The test-package-compiler `letrec_stateacc_fallbacks` shape: a `do:` over
+  // a parameter that writes a field and an outer local, in a `whileTrue:`.
+  stateChainDoOverParameter: coll =>
+    x := 0
+    count := 0
+    [x < 3]
+      whileTrue: [
+        coll
+          do: [:each |
+            self.n := self.n + each
+            count := count + 1
+          ]
+        x := x + 1
+      ]
+    #[count, self.n]
+
   stateChainDirect =>
     t := 0
     i := 0
