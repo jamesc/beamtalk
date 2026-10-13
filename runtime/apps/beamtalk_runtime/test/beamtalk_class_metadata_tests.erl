@@ -798,9 +798,10 @@ unload_module(Mod) ->
     _ = code:purge(Mod),
     ok.
 
-%% Own and inherited kinds merge, the closer level winning; a level whose
-%% module has no `__beamtalk_meta/0` contributes nothing.
-class_var_kinds_flattens_own_and_ancestors_test() ->
+%% Own-only (BT-3801): an ancestor's kinds are not merged into a subclass's;
+%% inherited_class_var_kinds/1 is the diagnostic-only ancestor view, closer
+%% level winning, and a level with no `__beamtalk_meta/0` contributes nothing.
+class_var_kinds_is_own_only_test() ->
     RootMod = load_meta_module(bt3764_cvk_root, #{class_field_kinds => #{a => eager, b => eager}}),
     LeafMod = load_meta_module(bt3764_cvk_leaf, #{class_field_kinds => #{b => late, c => late}}),
     try
@@ -809,11 +810,17 @@ class_var_kinds_flattens_own_and_ancestors_test() ->
             ok = beamtalk_class_metadata:insert('CvkMid', no_meta_module, [], 'CvkRoot', undefined),
             ok = beamtalk_class_metadata:insert('CvkLeaf', LeafMod, [], 'CvkMid', undefined),
             ?assertEqual(
-                #{a => eager, b => late, c => late},
+                #{b => late, c => late},
                 beamtalk_class_metadata:class_var_kinds('CvkLeaf')
             ),
+            ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds('CvkMid')),
             ?assertEqual(
-                #{a => eager, b => eager}, beamtalk_class_metadata:class_var_kinds('CvkMid')
+                #{a => eager, b => eager},
+                beamtalk_class_metadata:inherited_class_var_kinds('CvkMid')
+            ),
+            ?assertEqual(
+                #{a => eager, b => eager},
+                beamtalk_class_metadata:inherited_class_var_kinds('CvkLeaf')
             )
         end)
     after

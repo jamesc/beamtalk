@@ -984,6 +984,28 @@ mod tests {
     }
 
     #[test]
+    fn warn_inherited_only_classvar_is_own_only() {
+        // BT-3801: class variables are not inherited, so a `classState:` send
+        // naming a variable only an ancestor declares warns, with a redeclare hint.
+        let source = "Object subclass: Base\n  classState: n = 0\n  check => 1\n\nBase subclass: Sub\n  check2 => 1\n\nSub classState: #n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let diag = diagnostics
+            .iter()
+            .find(|d| d.message.contains("Undefined class variable"))
+            .expect("inherited-only class variable should warn");
+        assert!(
+            diag.hint
+                .as_ref()
+                .is_some_and(|h| h.contains("Base") && h.contains("redeclare")),
+            "Should hint to redeclare, got: {:?}",
+            diag.hint
+        );
+    }
+
+    #[test]
     fn error_actor_new_inside_method_body() {
         // Actor new error should also fire inside method bodies
         let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nObject subclass: Factory\n  make => Counter new";
