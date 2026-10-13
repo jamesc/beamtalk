@@ -9,8 +9,7 @@
 //
 //   class o3, o12 / value o3, o12, o13: erlc `unbound variable 'State'`
 //     (ADR 0131 §3: conditional families are hard-coded to `[State]`)
-//   class s2: ThreadedIr verifier panic (verify.rs); value s2: erlc
-//     `unbound variable 'State'`
+//   (s2, `detect:ifNone:` whose handler writes, compiles since BT-3794.)
 //
 // BT-3745 (ADR 0131 Phase 0b) added every cell that crashed or answered wrong
 // (each now an ADR 0131 Phase 0 allow-set or §6 compile error, pinned by
@@ -33,12 +32,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testO13Value =>
     self assert: ((Adr0131LocalRebindValuePending new) o13: false) equals: #[1, 1]
-
-  testS2Class =>
-    self assert: (Adr0131LocalRebindClassPending s2) equals: #[0, 1]
-
-  testS2Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) s2) equals: #[0, 1]
 
   testO1Class =>
     self assert: (Adr0131LocalRebindClassPending o1) equals: #[2, 1]
@@ -129,9 +122,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testS1Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) s1) equals: #[0, 1]
-
-  testS2Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) s2) equals: #[0, 1]
 
   testS7Class =>
     self assert: (Adr0131LocalRebindClassPending s7) equals: #[1, 1]
@@ -229,12 +219,3 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testStLoopArmValue =>
     self assert: ((Adr0131LocalRebindValuePending new) stLoopArm) equals: 5
-
-  testStDetectIfNoneClass =>
-    self assert: (Adr0131LocalRebindClassPending stDetectIfNone) equals: 1
-
-  testStDetectIfNoneValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stDetectIfNone) equals: 1
-
-  testStDetectIfNoneActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) stDetectIfNone) equals: 1

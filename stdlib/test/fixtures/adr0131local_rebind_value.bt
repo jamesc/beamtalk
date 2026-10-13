@@ -126,3 +126,19 @@ Value subclass: Adr0131LocalRebindValue
         t := t + 1
         a + x
       ]
+
+  // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes.
+  s2 =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  stDetectIfNone =>
+    t := 0
+    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+    t

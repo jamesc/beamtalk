@@ -157,3 +157,21 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testVtReturnInjectValue =>
     self assert: ((Adr0131LocalRebindValue new) vtReturnInject) equals: 3
+
+  // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes
+  // compiles in every context (s2 and the statement form).
+  testS2Class => self assert: (Adr0131LocalRebindClass s2) equals: #[0, 1]
+
+  testS2Value => self assert: ((Adr0131LocalRebindValue new) s2) equals: #[0, 1]
+
+  testS2Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) s2) equals: #[0, 1]
+
+  testStDetectIfNoneClass =>
+    self assert: (Adr0131LocalRebindClass stDetectIfNone) equals: 1
+
+  testStDetectIfNoneValue =>
+    self assert: ((Adr0131LocalRebindValue new) stDetectIfNone) equals: 1
+
+  testStDetectIfNoneActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stDetectIfNone) equals: 1

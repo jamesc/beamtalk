@@ -489,8 +489,23 @@ impl CoreErlangGenerator {
         // `generate_detect_if_none_simple`'s bare closure, which silently
         // drops (or — since that closure closes over a state map ultimately
         // wrapped and passed to a runtime dispatch — crashes) that mutation.
-        if self.block_needs_mutation_threading(if_none).is_some() {
-            if let Expression::Block(pred_block) = predicate.unwrap_parens() {
+        //
+        // ADR 0131 Phase 2c (BT-3794): a handler that only writes an outer
+        // local (`[t := 5]`, which `block_needs_mutation_threading` misses
+        // in class and value-type methods when the block does not also read
+        // it) threads through the same fold: the fold packs the handler's
+        // writes (`loop_threaded_locals_with_handler`).
+        // The handler-only write routes only for a LITERAL search block (no
+        // `unwrap_parens`): the shape core's `producer_packed_blocks` packs
+        // and Phase 0 accepts (`producer_body_block`).
+        let packs_handler_writes = match (predicate, if_none) {
+            (Expression::Block(pred_block), Expression::Block(handler)) => !self
+                .loop_threaded_locals_with_handler(pred_block, None, Some(handler))
+                .is_empty(),
+            _ => false,
+        };
+        if let Expression::Block(pred_block) = predicate.unwrap_parens() {
+            if self.block_needs_mutation_threading(if_none).is_some() || packs_handler_writes {
                 return self
                     .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
             }
@@ -582,7 +597,20 @@ impl CoreErlangGenerator {
         // repacking, we'll use a different approach: emit the full foldl inline here
         // but return {FoundItem, FoundFlag, StateAcc} and post-process.
 
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::TwoSlot);
+        // ADR 0131 Phase 2c (BT-3794): the `ifNone:` handler's outer-local
+        // writes are packed with the search block's (core's
+        // `producer_packed_blocks`), so the handler arm below starts from
+        // their post-fold values and its own writes ride the result.
+        let handler = match if_none {
+            Expression::Block(handler) => Some(handler),
+            _ => None,
+        };
+        let plan = ThreadingPlan::new_for_foldl_list_op_with_handler(
+            self,
+            body,
+            ListOpKind::TwoSlot,
+            handler,
+        );
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");

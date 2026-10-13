@@ -1239,7 +1239,7 @@ actor	top	local	while	ok
 actor	top	outer	and	ok
 actor	top	outer	any	ok
 actor	top	outer	collect	ok
-actor	top	outer	dinH	bad
+actor	top	outer	dinH	ok
 actor	top	outer	dinS	ok
 actor	top	outer	do	ok
 actor	top	outer	dsb	ok
@@ -2751,7 +2751,7 @@ class	top	local	while	ok
 class	top	outer	and	bad
 class	top	outer	any	bad
 class	top	outer	collect	ok
-class	top	outer	dinH	bad
+class	top	outer	dinH	ok
 class	top	outer	dinS	ok
 class	top	outer	do	ok
 class	top	outer	dsb	bad
@@ -4149,7 +4149,7 @@ value	top	local	while	ok
 value	top	outer	and	bad
 value	top	outer	any	bad
 value	top	outer	collect	ok
-value	top	outer	dinH	bad
+value	top	outer	dinH	ok
 value	top	outer	dinS	ok
 value	top	outer	do	ok
 value	top	outer	dsb	bad

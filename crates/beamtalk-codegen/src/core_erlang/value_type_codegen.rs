@@ -2018,7 +2018,7 @@ impl CoreErlangGenerator {
                 .unwrap_or_default()
         } else {
             Self::foldl_list_op_body_block(expr)
-                .map(|body| self.loop_threaded_locals(body, None))
+                .map(|_| self.producer_threaded_locals(expr))
                 .unwrap_or_default()
         }
     }
@@ -2328,10 +2328,10 @@ impl CoreErlangGenerator {
         if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
-        let Some(body) = Self::foldl_list_op_body_block(expr) else {
+        if Self::foldl_list_op_body_block(expr).is_none() {
             return false;
-        };
-        !self.loop_threaded_locals(body, None).is_empty()
+        }
+        !self.producer_threaded_locals(expr).is_empty()
     }
 
     /// Returns the body block of a foldl list-op message send
@@ -2364,7 +2364,7 @@ impl CoreErlangGenerator {
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
-            .map(|body| self.loop_threaded_locals(body, None))
+            .map(|_| self.producer_threaded_locals(expr))
             .unwrap_or_default();
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,

@@ -1359,17 +1359,57 @@ pub fn producer_body_block(expr: &Expression) -> Option<(String, &Block)> {
     }
 }
 
+/// ADR 0131 Phase 2 (BT-3749, BT-3794): the literal blocks a loop or fold
+/// producer packs into its construct tuple, in source order: the condition
+/// block of `whileTrue:`/`whileFalse:` (the receiver), the body block
+/// ([`producer_body_block`]) and, for `detect:ifNone:`, the `ifNone:` handler
+/// ([`crate::state_threading_selectors::producer_handler_arg_index`]). Empty
+/// when `expr` is not a producer send.
+///
+/// The one rule for what a producer packs: [`operand_producer_writes`] (the
+/// Phase 0 allow-set check) and codegen's `lowered_construct_blocks` and fold
+/// plans all read it, so the diagnostic and the lowering cannot pack
+/// different sets.
+#[must_use]
+pub fn producer_packed_blocks(expr: &Expression) -> Vec<&Block> {
+    let Some((sel, body)) = producer_body_block(expr) else {
+        return Vec::new();
+    };
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return Vec::new();
+    };
+    let mut packed: Vec<&Block> = Vec::with_capacity(3);
+    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
+        if let Expression::Block(cond) = receiver.as_ref() {
+            packed.push(cond);
+        }
+    }
+    packed.push(body);
+    if let Some(index) =
+        crate::state_threading_selectors::producer_handler_arg_index(&sel, arguments.len())
+    {
+        if let Some(Expression::Block(handler)) = arguments.get(index) {
+            packed.push(handler);
+        }
+    }
+    packed
+}
+
 /// ADR 0131 Phase 2 (BT-3749): the threaded set of a loop or fold that
 /// codegen lowers as a local-threading producer in operand position, or
 /// `None` when `expr` is not one.
 ///
 /// `expr` qualifies when it is a [`producer_body_block`] send whose
 /// threaded set ([`construct_outer_local_writes`]) is not empty and equals
-/// the set its tuple packs today ([`threaded_today_block_writes`] over the
-/// body block, plus the condition block of `whileTrue:`/`whileFalse:`). A
-/// construct whose set is larger than what it packs (a `detect:ifNone:`
-/// handler write, a write inside a nested lookup or `tryDo:`) would drop
-/// the difference, so it does not qualify.
+/// the set its tuple packs ([`threaded_today_block_writes`] over
+/// [`producer_packed_blocks`]). A construct whose set is larger than what it
+/// packs (a write inside a nested lookup or `tryDo:`) would drop the
+/// difference, so it does not qualify.
 ///
 /// Read by the Phase 0 allow-set check; codegen's producer applies the same
 /// rule through `threaded_locals_of` (`ThreadedLocals::lowered ==
@@ -1379,17 +1419,11 @@ pub fn operand_producer_writes(
     expr: &Expression,
     bound_outside: &dyn Fn(&str) -> bool,
 ) -> Option<Vec<OuterLocalWrite>> {
-    let (sel, body) = producer_body_block(expr)?;
     let construct = local_threading_construct(expr)?;
-    let mut packed: Vec<&Block> = Vec::with_capacity(2);
-    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
-        if let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() {
-            if let Expression::Block(cond) = receiver.as_ref() {
-                packed.push(cond);
-            }
-        }
+    let packed = producer_packed_blocks(expr);
+    if packed.is_empty() {
+        return None;
     }
-    packed.push(body);
     let names = |writes: &[OuterLocalWrite]| {
         let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
         names.sort_unstable();

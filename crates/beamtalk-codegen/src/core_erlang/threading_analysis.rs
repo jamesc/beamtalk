@@ -15,7 +15,8 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, expression_threaded_writes,
-    local_threading_construct, threaded_block_writes, threaded_today_block_writes,
+    local_threading_construct, producer_body_block, producer_packed_blocks, threaded_block_writes,
+    threaded_today_block_writes,
 };
 use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
@@ -388,17 +389,53 @@ impl CoreErlangGenerator {
         body: &Block,
         condition: Option<&Expression>,
     ) -> Vec<String> {
-        let mut blocks: Vec<&Block> = Vec::with_capacity(2);
+        self.loop_threaded_locals_with_handler(body, condition, None)
+    }
+
+    /// [`Self::loop_threaded_locals`] for a fold that also packs a handler
+    /// block (ADR 0131 Phase 2c: `detect:ifNone:`'s `ifNone:` block,
+    /// `producer_handler_arg_index`).
+    pub(in crate::core_erlang) fn loop_threaded_locals_with_handler(
+        &self,
+        body: &Block,
+        condition: Option<&Expression>,
+        handler: Option<&Block>,
+    ) -> Vec<String> {
+        let mut blocks: Vec<&Block> = Vec::with_capacity(3);
         if let Some(Expression::Block(cond)) = condition {
             blocks.push(cond);
         }
         blocks.push(body);
+        blocks.extend(handler);
         // `Loop` and `Fold` lower alike here (they differ only in which
         // blocks the send contributes, which the caller has already picked).
         self.threaded_locals_of_blocks(
             ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
             &blocks,
             &blocks,
+        )
+        .map(|t| t.lowered)
+        .unwrap_or_default()
+    }
+
+    /// The lowered set of the loop or fold producer send `expr`
+    /// (paren-unwrapped): the writes of every block core's
+    /// `producer_packed_blocks` names — the body and, for `detect:ifNone:`,
+    /// the handler. Empty when `expr` is not a producer send or packs
+    /// nothing. The fold plans, the value-type/class tuple unwrapping and the
+    /// producer rule all read this set.
+    pub(in crate::core_erlang) fn producer_threaded_locals(
+        &self,
+        expr: &Expression,
+    ) -> Vec<String> {
+        let packed = producer_packed_blocks(expr);
+        if packed.is_empty() {
+            return Vec::new();
+        }
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::Fold),
+            &packed,
+            &packed,
         )
         .map(|t| t.lowered)
         .unwrap_or_default()
@@ -435,7 +472,6 @@ impl CoreErlangGenerator {
         expr: &'a Expression,
     ) -> Vec<&'a Block> {
         let Expression::MessageSend {
-            receiver,
             selector: MessageSelector::Keyword(_),
             arguments,
             ..
@@ -453,16 +489,14 @@ impl CoreErlangGenerator {
                 construct.blocks.clone()
             }
             LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
-                // The body is packed whether or not the condition is a
-                // literal block (`aBlock whileTrue: [...]`), exactly as the
-                // while generators' `loop_threaded_locals(body, condition)`.
-                "whileTrue:" | "whileFalse:" => match literal(arguments.first()) {
-                    Some(body) => literal(Some(receiver.as_ref()))
-                        .into_iter()
-                        .chain([body])
-                        .collect(),
-                    None => Vec::new(),
-                },
+                // A loop or fold producer packs the blocks core's one rule
+                // names (`producer_packed_blocks`): the body, `whileTrue:`'s
+                // condition and `detect:ifNone:`'s handler. The body is
+                // packed whether or not the condition is a literal block
+                // (`aBlock whileTrue: [...]`), exactly as the while
+                // generators' `loop_threaded_locals(body, condition)`.
+                _ if producer_body_block(expr).is_some() => producer_packed_blocks(expr),
+                "whileTrue:" | "whileFalse:" => Vec::new(),
                 "eachWithIndex:" | "do:separatedBy:" => {
                     let arity = if sel == "eachWithIndex:" { 1 } else { 2 };
                     if arguments.len() == arity && self.enumeration_threads_actor_state() {

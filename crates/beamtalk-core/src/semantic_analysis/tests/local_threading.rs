@@ -392,11 +392,29 @@ fn allow_set_nested_assignment_of_block_local_is_accepted() {
 }
 
 #[test]
-fn allow_set_detect_if_none_handler_write_is_an_error_everywhere() {
+fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
     // s2: a verifier panic (class), unbound `State` (value) or a silently
-    // dropped write (actor) before BT-3745.
-    let body = "r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]\n#[r, t]";
-    for src in [in_class(body), in_value(body), in_actor(body)] {
+    // dropped write (actor) before BT-3745. ADR 0131 Phase 2c (BT-3794): the
+    // fold packs the `ifNone:` handler's writes with its search block's, so a
+    // handler-writing `detect:ifNone:` is a producer at every method-body
+    // operand site and a statement, in every method context.
+    for body in [
+        "r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]\n#[r, t]",
+        "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]\nt",
+        "^(#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]) + t",
+        "r := t + (#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0])\n#[r, t]",
+        "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [t := t + 10. 0]\nt",
+        "u := 0\nr := #(1) detect: [:x | t := t + 1. false] ifNone: [u := 1. 0]\n#[r, t, u]",
+        "u := 0\nr := (#(1) detect: [:x | t := t + 1. false] ifNone: [u := 1. 0]) + 1\n#[r, t, u]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+    // Still rejected inside a block that is not a threaded frame body: an arm.
+    let arm = "true ifTrue: [r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]]\nt";
+    for src in [in_class(arm), in_value(arm)] {
         assert_eq!(
             of_category(
                 &adr0131_diagnostics(&src),
@@ -407,9 +425,37 @@ fn allow_set_detect_if_none_handler_write_is_an_error_everywhere() {
             "{src}"
         );
     }
-    // Only the search block writing still threads.
-    let search = "r := #(1, 2) detect: [:x | t := t + 1. x > 1] ifNone: [0]\n#[r, t]";
-    assert!(adr0131_diagnostics(&in_class(search)).is_empty());
+}
+
+#[test]
+fn allow_set_detect_if_none_needs_a_literal_search_block() {
+    // BT-3794 review: codegen packs the handler's writes only when the search
+    // block is a literal (`producer_body_block`). A parenthesised search block
+    // routes to the fold but is not packed, so its handler's write was dropped
+    // (statement) or leaked a raw tuple (`r :=`). Phase 0 rejects every
+    // position in every method context; the REPL threads its bindings map.
+    for body in [
+        "#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7]\nt",
+        "(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7])\nt",
+        "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n#[r, t]",
+        "^(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]) + t",
+        "r := t + (#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0])\n#[r, t]",
+        "#(1, 2) detect: ([:x | t := t + 1. x > 5]) ifNone: [t := t + 10. 0]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                "{src}: {diags:?}"
+            );
+        }
+    }
+    let known = ["t"];
+    let ok = adr0131_diagnostics_with(
+        "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n",
+        &known,
+    );
+    assert!(ok.is_empty(), "{ok:?}");
 }
 
 #[test]
@@ -613,9 +659,6 @@ fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\nt",
         // Under a cascade.
         "(#(1, 2) collect: [:x | t := t + x]) size; yourself\nt",
-        // `detect:ifNone:` whose handler writes a local its search does not:
-        // the construct tuple does not carry `u`.
-        "u := 0\nr := (#(1) detect: [:x | t := t + 1. false] ifNone: [u := 1. 0]) + 1\n#[r, t, u]",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);

@@ -1,0 +1,211 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose `ifNone:` handler writes
+// an outer local, actor-instance-method column. The fold packs the handler's writes with the
+// search block's (core's `producer_packed_blocks`), so the send is a
+// local-threading producer in every operand position and a statement. The
+// other columns are adr0131detect_handler_{class,value,actor}.bt; the
+// expected answers are in stdlib/test/adr0131detect_handler_test.bt.
+
+Actor subclass: Adr0131DetectHandlerActor
+  state: n = 0
+
+  bump: x =>
+    self.n := self.n + x
+    x
+
+  // A `detect:ifNone:` whose handler (not the search block) writes `t`, as the whole value of an assignment (s2).
+  s2 =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // The same as a statement (stDetectIfNone).
+  handlerStatement =>
+    t := 0
+    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+    t
+
+  // The handler does not run when the search finds an element: `t` is unchanged.
+  handlerFound =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 1]
+      ifNone: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // A handler that only writes (never reads) the local.
+  handlerWriteOnly =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := 7
+        0
+      ]
+    #[r, t]
+
+  // The search block and the handler write different locals.
+  handlerOtherLocal =>
+    t := 0
+    u := 0
+    r := #(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 5
+      ]
+      ifNone: [
+        u := u + 10
+        0
+      ]
+    #[r, t, u]
+
+  // The same, with the search finding an element: only the search block's write happens.
+  handlerOtherLocalFound =>
+    t := 0
+    u := 0
+    r := #(1, 2)
+      detect: [:x |
+        t := t + 1
+        x > 1
+      ]
+      ifNone: [
+        u := u + 10
+        0
+      ]
+    #[r, t, u]
+
+  // A handler writing two locals.
+  handlerTwoLocals =>
+    t := 0
+    u := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        u := u + 2
+        0
+      ]
+    #[r, t, u]
+
+  // A handler-writing `detect:ifNone:` as the left operand of a `^` value that reads `t` afterwards.
+  handlerReturned =>
+    t := 0
+    ^(#(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        5
+      ]) + t
+
+  // A handler-writing `detect:ifNone:` as a binary operand after a read of `t`.
+  handlerLeftRead =>
+    t := 0
+    r := t + (#(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        5
+      ])
+    #[r, t]
+
+  // A handler-writing `detect:ifNone:` as the method's last expression.
+  handlerLast =>
+    t := 0
+    #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        3
+      ]
+
+  // A parenthesised handler-writing `detect:ifNone:` statement.
+  handlerParenthesised =>
+    t := 0
+    (#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1])
+    t
+
+  // The assignment target is the local the handler writes: the assigned value wins.
+  handlerAssignsTarget =>
+    t := 0
+    t := #(1)
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        9
+      ]
+    t
+
+  // A found `nil` is a hit, not a miss: the handler does not run.
+  handlerNilFound =>
+    t := 0
+    r := #(nil)
+      detect: [:x | x isNil]
+      ifNone: [
+        t := t + 1
+        5
+      ]
+    #[r, t]
+
+  // An empty collection runs the handler.
+  handlerEmpty =>
+    t := 0
+    r := #()
+      detect: [:x | x > 5]
+      ifNone: [
+        t := t + 1
+        5
+      ]
+    #[r, t]
+
+  // Two handler-writing sends in a row, as statements.
+  handlerTwice =>
+    t := 0
+    #(1) detect: [:x | x > 5] ifNone: [t := t + 1]
+    #(2) detect: [:x | x > 5] ifNone: [t := t + 10]
+    t
+
+  // A handler-writing send as an argument, before a read of `t`.
+  handlerInArgument =>
+    t := 0
+    r := 0
+      max: (#(1, 2)
+        detect: [:x | x > 5]
+        ifNone: [
+          t := t + 4
+          3
+        ])
+    #[r, t]
+
+  // An actor handler writing a field and a local.
+  handlerFieldAndLocal =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        self.n := self.n + 1
+        t := t + 1
+        0
+      ]
+    #[r, t, self.n]
+
+  // An actor handler that self-sends and writes a local.
+  handlerSelfSendAndLocal =>
+    t := 0
+    r := #(1, 2)
+      detect: [:x | x > 5]
+      ifNone: [
+        self bump: 3
+        t := t + 1
+        0
+      ]
+    #[r, t, self.n]

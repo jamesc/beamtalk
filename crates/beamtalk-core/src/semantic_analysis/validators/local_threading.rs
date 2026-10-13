@@ -48,7 +48,7 @@ use crate::semantic_analysis::block_facts::{
     OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
     is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
     local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
+    outer_local_writes, producer_body_block, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -612,10 +612,9 @@ const fn deny(
 /// right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Actor], &[DetectIfNone]),
-    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
     deny(None, None, None, None, None, None, &[Repl], &[IfNil]),
-    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, DetectIfNone, Enumeration, IfNil, AndOr]),
+    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
@@ -1311,7 +1310,15 @@ impl<'d> Walker<'d> {
             }
             other => other,
         };
-        if !actor_value_site && is_allowed(kind, position, self.context) {
+        // ADR 0131 Phase 2c (BT-3794): a handler-writing `detect:ifNone:` is
+        // only threaded through the producer shape — a literal search block
+        // (`producer_body_block`), the one rule codegen's router and fold
+        // plan read. A parenthesised search block routes to the fold but is
+        // not packed, so the write would be dropped. The REPL threads its
+        // bindings map and is not shaped by it.
+        let producer_shape =
+            kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
+        if !actor_value_site && producer_shape && is_allowed(kind, position, self.context) {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);
@@ -1635,8 +1642,10 @@ mod tests {
         for context in [Class, ValueType, Actor, Repl] {
             assert!(is_allowed(Do, Position::Statement, context));
         }
-        // `detect:ifNone:` with a writing handler loses the write as a
-        // statement in an actor method (BT-3753).
-        assert!(!is_allowed(DetectIfNone, Position::Statement, Actor));
+        // `detect:ifNone:` with a writing handler packs the write with its
+        // search block's, as a statement in every method context (BT-3794).
+        for context in [Class, ValueType, Actor] {
+            assert!(is_allowed(DetectIfNone, Position::Statement, context));
+        }
     }
 }

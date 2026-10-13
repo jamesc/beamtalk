@@ -362,7 +362,7 @@ impl ThreadingPlan {
         body: &beamtalk_core::ast::Block,
         condition: Option<&Expression>,
     ) -> Self {
-        Self::new_impl(generator, body, condition, false, None)
+        Self::new_impl(generator, body, condition, false, None, None)
     }
 
     /// Creates a `ThreadingPlan` for a letrec-based loop body (whileTrue:, timesRepeat:, etc.).
@@ -376,7 +376,7 @@ impl ThreadingPlan {
         body: &beamtalk_core::ast::Block,
         condition: Option<&Expression>,
     ) -> Self {
-        Self::new_impl(generator, body, condition, true, None)
+        Self::new_impl(generator, body, condition, true, None, None)
     }
 
     /// Creates a `ThreadingPlan` for a foldl list-op body with tuple accumulator
@@ -396,7 +396,21 @@ impl ThreadingPlan {
         body: &beamtalk_core::ast::Block,
         kind: ListOpKind,
     ) -> Self {
-        Self::new_impl(generator, body, None, false, Some(kind))
+        Self::new_impl(generator, body, None, false, Some(kind), None)
+    }
+
+    /// [`Self::new_for_foldl_list_op`] for a fold that also packs a handler
+    /// block with its body (ADR 0131 Phase 2c: `detect:ifNone:`'s `ifNone:`
+    /// block, `producer_handler_arg_index`). The handler's outer-local writes
+    /// join the plan's threaded locals, so they ride the fold accumulator
+    /// and the handler arm starts from their post-fold values.
+    pub fn new_for_foldl_list_op_with_handler(
+        generator: &mut CoreErlangGenerator,
+        body: &beamtalk_core::ast::Block,
+        kind: ListOpKind,
+        handler: Option<&beamtalk_core::ast::Block>,
+    ) -> Self {
+        Self::new_impl(generator, body, None, false, Some(kind), handler)
     }
 
     #[allow(
@@ -411,6 +425,7 @@ impl ThreadingPlan {
         condition: Option<&Expression>,
         allow_direct_params: bool,
         tuple_acc_kind: Option<ListOpKind>,
+        handler: Option<&beamtalk_core::ast::Block>,
     ) -> Self {
         let allow_tuple_acc = tuple_acc_kind.is_some();
         if generator.is_repl_mode() {
@@ -422,7 +437,7 @@ impl ThreadingPlan {
             KeyStyle::LocalPrefixed
         };
         let context = generator.context;
-        let threaded_locals = generator.loop_threaded_locals(body, condition);
+        let threaded_locals = generator.loop_threaded_locals_with_handler(body, condition, handler);
         // BT-3562 follow-up: `current_field_read_state_var()`, not the raw
         // `current_state_var()` — when this plan is built for a loop nested
         // inside an outer non-hybrid direct-params loop, `in_loop_body` is

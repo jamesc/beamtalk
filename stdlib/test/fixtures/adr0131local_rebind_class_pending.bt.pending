@@ -7,12 +7,11 @@
 // `.pending` suffix (and from adr0131local_rebind_pending_test.bt.pending).
 //
 //   o3, o12: erlc `unbound variable 'State'` in `class_*` (ADR 0131 §3)
-//   s2: ThreadedIr verifier panic (verify.rs)
 //   o1, o2, o5-o10, o13, s1, s7, seq: ADR 0131 Phase 0 compile errors
 //     (BT-3745: the allow-set error, or §6 for s1's `at:ifAbsent:` block)
 //
-// Every method here is rejected by an ADR 0131 diagnostic today (and o3, o12,
-// s2 are now rejected before codegen too); `adr0131_probe_matrix_pins` in
+// Every method here is rejected by an ADR 0131 diagnostic today (and o3, o12
+// are now rejected before codegen too); `adr0131_probe_matrix_pins` in
 // beamtalk-core checks that.
 
 Object subclass: Adr0131LocalRebindClassPending
@@ -27,11 +26,6 @@ Object subclass: Adr0131LocalRebindClassPending
     t := 0
     self.n := (c ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
     #[self.n, t]
-
-  class s2 =>
-    t := 0
-    r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]
-    #[r, t]
 
   class o1 =>
     t := 0
@@ -235,10 +229,4 @@ Object subclass: Adr0131LocalRebindClassPending
       i := i + 1
       i > 1 ifTrue: [t := t + 5]
     ]
-    t
-
-  // `detect:ifNone:` whose handler writes, as a statement.
-  class stDetectIfNone =>
-    t := 0
-    #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
     t

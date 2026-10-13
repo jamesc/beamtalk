@@ -118,15 +118,24 @@ fn a_nested_construct_not_threaded_today_is_in_names_but_not_lowered() {
 }
 
 #[test]
-fn detect_if_none_handler_is_in_the_set_but_not_lowered_today() {
-    let generator = make_generator(CodeGenContext::Actor, &["a", "b"]);
-    let set = threaded(
-        &generator,
-        "#(1) detect: [:x | a := x. true] ifNone: [b := 0. 0]",
-    )
-    .expect("set");
-    assert_eq!(set.names, vec!["a", "b"]);
-    assert_eq!(set.lowered, vec!["a"]);
+fn detect_if_none_handler_is_in_the_set_and_lowered() {
+    // ADR 0131 Phase 2c (BT-3794): the fold packs the `ifNone:` handler's
+    // writes with its search block's, in every method context.
+    for context in [CodeGenContext::Actor, CodeGenContext::ValueType] {
+        let generator = make_generator(context, &["a", "b"]);
+        let set = threaded(
+            &generator,
+            "#(1) detect: [:x | a := x. true] ifNone: [b := 0. 0]",
+        )
+        .expect("set");
+        assert_eq!(set.names, vec!["a", "b"]);
+        assert_eq!(set.lowered, vec!["a", "b"]);
+    }
+    // A handler that is the only writer.
+    let generator = make_generator(CodeGenContext::ValueType, &["b"]);
+    let set = threaded(&generator, "#(1) detect: [:x | true] ifNone: [b := 0. 0]").expect("set");
+    assert_eq!(set.names, vec!["b"]);
+    assert_eq!(set.lowered, vec!["b"]);
 }
 
 #[test]

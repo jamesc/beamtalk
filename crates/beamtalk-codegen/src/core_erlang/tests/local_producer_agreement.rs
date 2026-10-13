@@ -35,6 +35,13 @@ const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]",
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [t := t + 1. 0]",
     "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [u := 1. 0]",
+    // BT-3794: a handler that is the only writer (read-write and write-only),
+    // two locals, and a parenthesised handler (a block value: rejected, so
+    // skipped).
+    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
+    "#(1, 2) detect: [:x | x > 1] ifNone: [t := 7. 0]",
+    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. u := u + 1. 0]",
+    "#(1, 2) detect: [:x | x > 5] ifNone: ([t := t + 1. 0])",
     "#(1, 2) do: [:x | t := t + x]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
     "#(1, 2) select: [:x | t := t + 1. true]",
@@ -384,4 +391,128 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
         }
     }
     assert!(checked > 100, "only {checked} loop-body sites compared");
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2c (BT-3794): statement-position `detect:ifNone:`
+// ---------------------------------------------------------------------------
+
+const DETECT_PREDICATES: &[&str] = &[
+    "[:x | x > 5]",
+    "[:x | t := t + 1. x > 5]",
+    "([:x | x > 5])",
+    "([:x | t := t + 1. x > 5])",
+];
+
+const DETECT_HANDLERS: &[&str] = &[
+    "[t := t + 1. 0]",
+    "[t := 7. 0]",
+    "[u := 1. 0]",
+    "([t := t + 1. 0])",
+    "[0]",
+];
+
+const DETECT_STATEMENTS: &[&str] = &[
+    "{c}\nt",
+    "({c})\nt",
+    "r := {c}\n#[r, t]",
+    "r := ({c}) + t\n#[r, t]",
+    "^({c}) + t",
+    "{c}",
+];
+
+/// Every method-body `detect:ifNone:` send reachable as a statement, the
+/// value of `x := V` / `^V`, or an operand site.
+fn detect_sends(body: &[beamtalk_core::ast::ExpressionStatement]) -> Vec<&Expression> {
+    let mut out = Vec::new();
+    for stmt in body {
+        let inner = stmt.expression.unwrap_parens();
+        let value = match inner {
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                value.unwrap_parens()
+            }
+            other => other,
+        };
+        let mut candidates = vec![inner, value];
+        candidates.extend(sequenced_operand_sites(&stmt.expression));
+        for c in candidates {
+            if matches!(c.unwrap_parens(), Expression::MessageSend { selector, .. }
+                if selector.name() == "detect:ifNone:")
+                && !out.iter().any(|o: &&Expression| o.span() == c.span())
+            {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// Both ways, for a writing `detect:ifNone:` anywhere a method-body statement
+/// can hold one (the producer test above compares operand sites only): Phase
+/// 0 accepts it (outside the REPL) exactly when core's producer rule names
+/// it — a literal search block whose packed blocks cover every local it
+/// writes — and codegen compiles every program Phase 0 accepts.
+#[test]
+fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it() {
+    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
+    let (mut accepted, mut rejected_count) = (0, 0);
+    for predicate in DETECT_PREDICATES {
+        for handler in DETECT_HANDLERS {
+            let construct = format!("#(1, 2) detect: {predicate} ifNone: {handler}");
+            for position in DETECT_STATEMENTS {
+                for src in sources(&construct, position) {
+                    let (module, parse_diags) = parse(lex_with_eof(&src));
+                    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+                    let analysis = analyse_full(&module, AnalysisContext::default());
+                    let rejected = analysis.diagnostics.iter().any(|d| {
+                        d.severity == Severity::Error
+                            && matches!(
+                                d.category,
+                                Some(
+                                    DiagnosticCategory::UnmigratedLocalThreading
+                                        | DiagnosticCategory::Tier2BlockNoReturnChannel
+                                )
+                            )
+                    });
+                    let class = &module.classes[0];
+                    let method = class
+                        .methods
+                        .iter()
+                        .chain(&class.class_methods)
+                        .next()
+                        .expect("one method");
+                    for send in detect_sends(&method.body) {
+                        let writes = beamtalk_core::semantic_analysis::block_facts::local_threading_construct(send)
+                            .map(|c| {
+                                beamtalk_core::semantic_analysis::block_facts::construct_outer_local_writes(&c, &bound)
+                            })
+                            .unwrap_or_default();
+                        if writes.is_empty() {
+                            continue;
+                        }
+                        let named = operand_producer_writes(send, &bound).is_some();
+                        if rejected {
+                            rejected_count += 1;
+                        } else {
+                            assert!(
+                                named,
+                                "Phase 0 accepted a writing `detect:ifNone:` the producer rule \
+                                 does not name (codegen would drop its write)\n{src}"
+                            );
+                            accepted += 1;
+                        }
+                    }
+                    if !rejected {
+                        let generated =
+                            generate_module_with_warnings(&module, CodegenOptions::new("agree"));
+                        assert!(generated.is_ok(), "{src}: {:?}", generated.err());
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        accepted > 50 && rejected_count > 50,
+        "{accepted} accepted, {rejected_count} rejected"
+    );
 }
