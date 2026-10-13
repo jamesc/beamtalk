@@ -424,7 +424,10 @@ impl CoreErlangGenerator {
     /// the handler. Empty when `expr` is not a producer send or packs
     /// nothing. The fold plans, the value-type/class tuple unwrapping and the
     /// producer rule all read this set.
-    pub(in crate::core_erlang) fn producer_threaded_locals(&self, expr: &Expression) -> Vec<String> {
+    pub(in crate::core_erlang) fn producer_threaded_locals(
+        &self,
+        expr: &Expression,
+    ) -> Vec<String> {
         let packed = producer_packed_blocks(expr);
         if packed.is_empty() {
             return Vec::new();
