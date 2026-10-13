@@ -58,3 +58,15 @@ TestCase subclass: Adr0131DoProducerTest
 
   testDoInFieldAssignment =>
     self assert: #[Adr0131DoProducerClass doInFieldAssignment, (Adr0131DoProducerActor spawn) doInFieldAssignment] equals: #[#["nil", 3], #["nil", 3]]
+
+  testKeyedDoReturnedInArm =>
+    self assert: #[Adr0131DoProducerClass keyedDoReturnedInArm: true, (Adr0131DoProducerValue new) keyedDoReturnedInArm: true] equals: #[nil, nil]
+
+  testKeyedDoNotReturnedInArm =>
+    self assert: #[Adr0131DoProducerClass keyedDoReturnedInArm: false, (Adr0131DoProducerValue new) keyedDoReturnedInArm: false] equals: #[0, 0]
+
+  testCollectWithNestedLoopWrite =>
+    self assert: #[Adr0131DoProducerClass collectWithNestedLoopWrite, (Adr0131DoProducerValue new) collectWithNestedLoopWrite, (Adr0131DoProducerActor spawn) collectWithNestedLoopWrite] equals: #[#[#(1, 2), 6], #[#(1, 2), 6], #[#(1, 2), 6]]
+
+  testSelectWithNestedLoopWrite =>
+    self assert: #[Adr0131DoProducerClass selectWithNestedLoopWrite, (Adr0131DoProducerValue new) selectWithNestedLoopWrite, (Adr0131DoProducerActor spawn) selectWithNestedLoopWrite] equals: #[#[#(2, 3), 9], #[#(2, 3), 9], #[#(2, 3), 9]]

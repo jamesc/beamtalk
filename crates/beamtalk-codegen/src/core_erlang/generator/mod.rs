@@ -241,8 +241,8 @@ pub struct CoreErlangGenerator {
     /// inherited by a nested body; the validator's `frame_sites` skip those
     /// boundaries when counting outer folds too, and a nested loop behind an
     /// arm or closure is judged by the rows there, not as a frame site. The
-    /// agreement test's arm and closure two-level FRAMES pin that the two
-    /// sides agree.
+    /// agreement test's arm, closure and protected-body (`ensure:`, `on:do:`
+    /// body and handler) two-level FRAMES pin that the two sides agree.
     pub(in crate::core_erlang) in_fold_frame: bool,
     /// ADR 0131 Phase 2b (BT-3793): the frame a local-threading producer's
     /// `LocalRebind`s are lowered by (§2's table), for every loop or fold

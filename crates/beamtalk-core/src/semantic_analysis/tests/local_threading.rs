@@ -535,6 +535,33 @@ fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
 }
 
 #[test]
+fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
+    // BT-3796: `do:` answers the `{nil, StateAcc}` carrier in class and
+    // value-type methods, which only a producer site unpacks. A `^` inside an
+    // arm, handler or closure is not one (the carrier was returned raw, and
+    // before this change `do:` answered a plain `nil` there), so the shape is
+    // a Phase 0 error; the keyed `do:` forms still answer `nil` and stay
+    // accepted (`keyedDoReturnedInArm` in `adr0131do_producer_test.bt`).
+    for body in [
+        "c ifTrue: [^#(1, 2) do: [:x | t := t + x]]\nt",
+        "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            let diags = of_category(
+                &adr0131_diagnostics_with(&src, &["c"]),
+                DiagnosticCategory::UnmigratedLocalThreading,
+            )
+            .len();
+            assert_eq!(diags, 1, "{src}");
+        }
+    }
+    let keyed = "c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]\nt";
+    for src in [in_class(keyed), in_value(keyed)] {
+        assert!(adr0131_diagnostics_with(&src, &["c"]).is_empty(), "{src}");
+    }
+}
+
+#[test]
 fn a_loop_nested_in_an_actor_fold_through_an_arm_or_closure_is_rejected() {
     // BT-3796: codegen's `in_fold_frame` crosses an arm or closure between a
     // fold and a nested loop, as `local_producer_sites` does (the validator's

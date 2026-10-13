@@ -138,10 +138,17 @@ fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
         }
         other => other,
     };
-    let Expression::MessageSend { arguments, .. } = value else {
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = value
+    else {
         return;
     };
-    for arg in arguments {
+    // The receiver block of `[...] ensure:`/`on:do:` is the protected body,
+    // whose statements lower themselves like an arm's.
+    for arg in std::iter::once(receiver.as_ref()).chain(arguments) {
         if let Expression::Block(block) = arg {
             for inner in &block.body {
                 whole_values(&inner.expression, out);
@@ -333,6 +340,11 @@ const FRAMES: &[&str] = &[
     "2 timesRepeat: [true ifTrue: [#(1, 2) do: [:i | {s}]]]",
     "2 timesRepeat: [[:z | #(1, 2) do: [:i | {s}]] value: 1]",
     "#(1, 2) do: [:k | true ifTrue: [#(1, 2) inject: 0 into: [:a :i | {s}. a + i]]]",
+    // A protected body or a handler between a fold and a nested loop.
+    "#(1, 2) do: [:k | [1 to: 2 do: [:i | {s}]] ensure: [nil]]",
+    "#(1, 2) do: [:k | [1 to: 2 do: [:i | {s}]] on: Error do: [:e | nil]]",
+    "#(1, 2) do: [:k | [nil] on: Error do: [:e | 1 to: 2 do: [:i | {s}]]]",
+    "#(1, 2) inject: 0 into: [:a :k | [2 timesRepeat: [{s}]] ensure: [nil]. a + k]",
 ];
 
 /// The statements placed in a frame body, the loop-body counterpart of

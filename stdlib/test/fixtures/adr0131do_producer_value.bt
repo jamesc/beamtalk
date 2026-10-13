@@ -87,3 +87,26 @@ Value subclass: Adr0131DoProducerValue
     t := 5
     r := #(1, 2) do: [:x | t := t * x]
     #[r, t]
+
+  keyedDoReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  collectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2)
+      collect: [:x |
+        1 to: 2 do: [:i | t := t + x]
+        x
+      ]
+    #[r, t]
+
+  selectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2, 3)
+      select: [:x |
+        #(1, 2) do: [:i | t := t + i]
+        x > 1
+      ]
+    #[r, t]

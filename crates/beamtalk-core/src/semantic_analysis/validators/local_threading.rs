@@ -470,9 +470,13 @@ const ALLOW_SET: &[Allowed] = &[
         position: Position::ReturnValue { nested: false },
         contexts: &[Actor],
     },
-    // `^<construct>` inside a block (a non-local return).
+    // `^<construct>` inside a block (a non-local return). `Do` is not here
+    // (BT-3796): it is a producer now and its closed form answers the
+    // `{nil, StateAcc}` carrier, which only a producer site unpacks; a `^`
+    // inside an arm, handler or closure is not one, so the carrier would be
+    // returned raw. The keyed `do:` forms still answer a plain `nil`.
     Allowed {
-        kinds: &[Do, KeyedDo],
+        kinds: &[KeyedDo],
         position: Position::ReturnValue { nested: true },
         contexts: &[Class, ValueType],
     },

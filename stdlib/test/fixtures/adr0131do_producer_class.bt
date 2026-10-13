@@ -104,3 +104,26 @@ Object subclass: Adr0131DoProducerClass
     t := 0
     self.n := (#(1, 2) do: [:x | t := t + x]) printString
     #[self.n, t]
+
+  class keyedDoReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class collectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2)
+      collect: [:x |
+        1 to: 2 do: [:i | t := t + x]
+        x
+      ]
+    #[r, t]
+
+  class selectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2, 3)
+      select: [:x |
+        #(1, 2) do: [:i | t := t + i]
+        x > 1
+      ]
+    #[r, t]

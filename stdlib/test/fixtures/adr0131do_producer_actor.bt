@@ -104,3 +104,21 @@ Actor subclass: Adr0131DoProducerActor
     t := 0
     self.n := (#(1, 2) do: [:x | t := t + x]) printString
     #[self.n, t]
+
+  collectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2)
+      collect: [:x |
+        1 to: 2 do: [:i | t := t + x]
+        x
+      ]
+    #[r, t]
+
+  selectWithNestedLoopWrite =>
+    t := 0
+    r := #(1, 2, 3)
+      select: [:x |
+        #(1, 2) do: [:i | t := t + i]
+        x > 1
+      ]
+    #[r, t]
