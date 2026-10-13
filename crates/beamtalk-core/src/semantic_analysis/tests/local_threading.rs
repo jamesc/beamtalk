@@ -289,8 +289,9 @@ fn section6_actor_self_send_to_a_threading_callee_is_exempt() {
 /// `perform:` arity error was raised), and is a compile error until the
 /// callee-side `{Result, StateAcc}` protocol (BT-3742) lets a callee hand the
 /// write back. Two are conservative rather than probed wrong: a callee that
-/// passes the block on to another same-class callee threads today, and an
-/// overridable callee is only wrong when a subclass overrides it. Widening the exemption
+/// passes the block on to another same-class callee (BT-3755) is rejected
+/// only because the target does not thread it, and an overridable callee, which is
+/// only wrong when a subclass overrides it. Widening the exemption
 /// (`tier2_callee::callee_threads_block_param`) fails this test.
 #[test]
 fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {

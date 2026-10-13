@@ -17,8 +17,8 @@
 // `section6_actor_self_send_to_a_non_threading_callee_is_an_error` instead:
 // a callee inherited from a superclass raises `stateful_block_dispatch`, and
 // an override in a subclass raises a `perform:` arity error. A callee that
-// passes the block on to another same-class callee threads today, but is
-// rejected too (BT-3755 narrows to a direct `value` send).
+// passes the block on to another same-class callee that does not itself
+// thread it (BT-3755) is rejected too.
 
 Actor subclass: Adr0131Section6CalleePending
   state: n = 0
