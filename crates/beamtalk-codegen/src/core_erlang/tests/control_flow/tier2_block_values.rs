@@ -857,3 +857,30 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
          Got:\n{code}"
     );
 }
+
+#[test]
+fn test_bt3755_self_send_promotes_block_only_for_a_callee_that_threads_it() {
+    // The class pre-scan reads the same predicate as the ADR 0131 §6
+    // diagnostic (`semantic_analysis::tier2_callee`): a captured-local write
+    // is packed into the actor state around the self-send only when the
+    // callee is a sealed method of the class that invokes the block directly.
+    let threading = "Actor subclass: Ctr\n  sealed ap: b => b value\n\n  run =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n";
+    let code = codegen(threading);
+    assert!(
+        code.contains("'maps':'put'('__local__t', T, State"),
+        "a threading callee gets the Tier 2 pack/extract. Got:\n{code}"
+    );
+    for callee in [
+        "sealed ap: b => #(1) do: [:x | b value]",
+        "ap: b => b value",
+    ] {
+        let src = format!(
+            "Actor subclass: Ctr\n  {callee}\n\n  run =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n"
+        );
+        let code = codegen(&src);
+        assert!(
+            !code.contains("'maps':'put'('__local__t', T, State"),
+            "`{callee}` does not thread the block, so it is not promoted. Got:\n{code}"
+        );
+    }
+}

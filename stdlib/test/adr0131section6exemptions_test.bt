@@ -22,3 +22,46 @@ TestCase subclass: Adr0131Section6ExemptionsTest
 
   testStoredValueCascade =>
     self assert: (Adr0131Section6ExemptionsActor spawn) storedValueCascade equals: 3
+
+  // BT-3755: a sealed same-class callee that invokes the block directly.
+  testCalleeArg =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeArg equals: 5
+
+  testCalleeAssign =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeAssign equals: 1
+
+  testCalleeReturn =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeReturn equals: 1
+
+  testCalleeTwice =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeTwice equals: 2
+
+  testCalleeCascade =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeCascade equals: 3
+
+  testCalleeLoop =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeLoop equals: 6
+
+  testCalleeOpaque =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeOpaque equals: 6
+
+  testCalleeOpaqueOperand =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeOpaqueOperand equals: 6
+
+  testCalleeOpaqueBranch =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeOpaqueBranch equals: 6
+
+  testCalleePassOn =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleePassOn equals: 7
+
+  testCalleeNestArg =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestArg equals: 3
+
+  testCalleeNestKwArg =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestKwArg equals: 3
+
+  testCalleeNestRecv =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestRecv equals: 3
+
+  testCalleeNestDeep =>
+    self assert: (Adr0131Section6ExemptionsActor spawn) calleeNestDeep equals: 4

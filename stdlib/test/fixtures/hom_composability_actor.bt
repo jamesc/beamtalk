@@ -17,13 +17,13 @@ Actor subclass: HomComposabilityActor
   // User-defined HOM: calls aBlock for each element in #(1, 2, 3, 4, 5)
   // The `last :=` write activates the stateful do: path so that
   // aBlock value: each is called via the Tier 2 protocol with StateAcc threading
-  eachItem: aBlock =>
+  sealed eachItem: aBlock =>
     last := nil
     #(1, 2, 3, 4, 5) do: [:each | last := aBlock value: each]
     last
 
   // Nested HOM: outer delegates to inner, testing two-layer state threading
-  outerEachItem: aBlock => self eachItem: aBlock
+  sealed outerEachItem: aBlock => self eachItem: aBlock
 
   // Returns sum of (aBlock value: each) for each item in items
   // Used to test pure block correctness via a loop HOM
