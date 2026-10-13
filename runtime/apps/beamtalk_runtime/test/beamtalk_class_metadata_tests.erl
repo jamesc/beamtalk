@@ -900,8 +900,9 @@ read_meta_autoload_loads_unloaded_module_test() ->
         {attribute, 1, module, Mod},
         {attribute, 2, export, [{'__beamtalk_meta', 0}]},
         {function, 3, '__beamtalk_meta', 0, [
-            {clause, 3, [], [],
-                [{map, 3, [{map_field_assoc, 3, {atom, 3, class}, {atom, 3, 'Auto'}}]}]}
+            {clause, 3, [], [], [
+                {map, 3, [{map_field_assoc, 3, {atom, 3, class}, {atom, 3, 'Auto'}}]}
+            ]}
         ]}
     ],
     {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
