@@ -64,13 +64,13 @@ tag fully (once per block-literal creation or region, not a hot path).
 - `has/2` is key presence in the map and never raises on the name (as
   `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
   the key (as `clearField:` is today). `get/2` on a name absent from the map
-  reads `nil` when the declared-kinds map is empty (no metadata, e.g.
-  ClassBuilder classes, no live class, or a class that declares no class
-  variables: the declared set cannot be told apart from "unknown") or the name
-  is declared by the class itself; it raises `undeclared_class_variable` when
-  the class's own declared set is non-empty and does not contain the name, or
-  when it is empty but an ancestor declares the name (class variables are not
-  inherited: the subclass must redeclare it, BT-3801).
+  reads `nil` when the declared set is unknown (no metadata, e.g. ClassBuilder
+  classes or no live class), when the name is declared by the class itself, or
+  when the class's own set is known to be empty and no ancestor declares the
+  name. It raises `undeclared_class_variable` when the class's own declared set
+  is non-empty and does not contain the name, or when it is known-empty but an
+  ancestor declares the name (class variables are not inherited: the subclass
+  must redeclare it, BT-3801).
 - `put/3` of a name absent from the map applies the same declared-set rule
   (BT-3808); a name already in the map writes unchecked.
 - The class gen_server's `get_class_var` of an absent name applies the same

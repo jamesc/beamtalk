@@ -751,7 +751,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// entry in a straight-line `ThreadedStmt` sequence — the statement-level
     /// counterpart of [`ValueRef::Doc`]'s value-level opacity (ADR 0111
     /// Addendum 3), built by the SAME codegen call production already runs at
-    /// this point (`expression_doc`, `generate_self_dispatch_open`, the
+    /// this point (`expression_doc`, `generate_self_dispatch_call_doc_for`, the
     /// `{'reply', ...}` epilogue builders, …).
     /// Legal in any straight-line sequence rendered by [`render`]'s top-level
     /// loop (a `gen_server` method body, an [`NlrCatch`](Self::NlrCatch)

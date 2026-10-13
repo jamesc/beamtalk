@@ -661,7 +661,7 @@ rebind. It holds for each scope kind that lowers a statement sequence:
 | Conditional arm | arm frame, `threaded_expression` (unchanged) |
 | `Letrec` loop body (`whileTrue:`/`timesRepeat:`/`to:do:`) | `lower_letrec_body_statements` -> `threaded_expression` (unchanged) |
 | `Foldl` loop body (`do:`/`collect:`/`inject:into:`/...) | `lower_foldl_body_in_sites` -> `sequenced_self_dispatch` (the fix) |
-| `on:do:`/`ensure:` arm | arm frame, `threaded_expression` (unchanged) |
+| `on:do:`/`ensure:` arm | `generate_exception_body_with_threading_inner` -> `sequenced_self_dispatch` (BT-3814; keeps its own `ExResult` epilogue) |
 | Bare block, stored closure, NLR boundary | not a statement sequence of this frame: a Tier 1 closure body threads no state, a Tier 2 body is an arm/fold body above; an NLR throw leaves the frame before the rebind matters |
 
 **Verifier.** `capture_argument_list_doc` (the closed argument list) reports

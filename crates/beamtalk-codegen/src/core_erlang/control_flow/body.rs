@@ -313,11 +313,10 @@ impl CoreErlangGenerator {
                 self.emit_self_send_in_loop_diagnostic(expr, span);
                 // ADR 0118 phase 2a: `threaded_expression`'s
                 // self-send producer path (`generate_self_dispatch_parts`)
-                // builds the exact same `Statement`+`Bind` pair
-                // `generate_self_dispatch_open` used to hand-render — see
-                // that function's own doc comment for the byte-for-byte
-                // equivalence. Letrec's own body value is always discarded,
-                // so `tv.value` is intentionally never referenced.
+                // builds the `Statement`+`Bind` pair through
+                // `sequenced_self_dispatch`. Letrec's own body value is
+                // always discarded, so `tv.value` is intentionally never
+                // referenced.
                 let tv = self.threaded_expression(expr, frame)?;
                 stmts.extend(tv.prelude);
             } else if Self::is_local_var_assignment(expr) {
@@ -627,8 +626,7 @@ impl CoreErlangGenerator {
             if self.is_field_assignment(expr) {
                 has_mutations = true;
                 // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
-                // `lower_letrec_body`'s own field-write statements
-                // calls — `lower_field_assignment_bind`'s doc comment
+                // `lower_letrec_body` uses for its field-write statements — `lower_field_assignment_bind`'s doc comment
                 // documents it as byte-identical to
                 // `generate_field_assignment_open`'s hand-rolled `Document`
                 // (same helper calls, same mint order, including its own

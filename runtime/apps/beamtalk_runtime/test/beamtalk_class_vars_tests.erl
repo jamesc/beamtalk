@@ -270,10 +270,29 @@ put_no_meta_stays_lenient_test() ->
 
 %% A name already in the map writes without consulting metadata.
 put_existing_name_skips_check_test() ->
-    with_clean(fun() ->
-        beamtalk_class_vars:install(?KEY, #{count => 0}),
-        ?assertEqual(5, beamtalk_class_vars:put(self_obj(), count, 5))
-    end).
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    %% A known, non-empty declared set that lacks `count`: a creating write
+    %% would raise, so only the skipped check lets this write through.
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) ->
+        #{other => eager}
+    end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{count => 0}),
+            ?assertEqual(5, beamtalk_class_vars:put(self_obj(), count, 5)),
+            ?assertEqual(5, beamtalk_class_vars:get(self_obj(), count)),
+            ?assertEqual(
+                0, meck:num_calls(beamtalk_class_metadata, class_var_kinds_or_unknown, '_')
+            ),
+            %% Control: a name absent from the map does consult the declared set.
+            ?assertEqual(
+                undeclared_class_variable,
+                raised_kind(fun() -> beamtalk_class_vars:put(self_obj(), absent, 1) end)
+            )
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
 
 declared_but_absent_reads_nil_test() ->
     with_declared(fun() ->

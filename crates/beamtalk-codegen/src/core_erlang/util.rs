@@ -490,10 +490,13 @@ impl CoreErlangGenerator {
     /// previous operand's rebind. Returns the prelude and the dispatch
     /// variable holding the reply tuple.
     ///
-    /// Shared by [`Self::threaded_expression`]'s self-send producer and every
-    /// loop/fold body statement that is a self-send (`lower_foldl_body`), so a
-    /// body statement cannot compile its operands in a closed argument list
-    /// that scopes their rebind away.
+    /// Shared by [`Self::threaded_expression`]'s self-send producer, the
+    /// Letrec body (`lower_letrec_non_assign_expr` via `threaded_expression`),
+    /// every fold body statement that is a self-send (`lower_foldl_body`) and
+    /// the `on:do:`/`ensure:` arm's self-send statement
+    /// (`generate_exception_body_with_threading_inner`, which keeps its own `ExResult`
+    /// epilogue), so a body statement cannot compile its operands in a
+    /// closed argument list that scopes their rebind away.
     pub(super) fn sequenced_self_dispatch(
         &mut self,
         selector: &MessageSelector,
@@ -986,7 +989,7 @@ impl CoreErlangGenerator {
     /// `threaded_expression` ran) when the prelude has none. Read this
     /// instead of `current_state_var()` after a `threaded_expression` call:
     /// the value's own compile may have minted versions INSIDE its closed
-    /// document (a conditional receiver's `generate_self_dispatch_open`
+    /// document (a conditional receiver's `generate_self_dispatch_call_doc_for`
     /// chain, say), and those are not in scope where the consumer's reply
     /// or next statement runs.
     pub(super) fn state_var_after_prelude(
@@ -1191,10 +1194,13 @@ impl CoreErlangGenerator {
 
     /// BT-3811: [`Self::threaded_prelude_doc`] for a `Document`-returning
     /// consumer of a hybrid field rebind
-    /// ([`Self::lower_hybrid_field_rebind`]). The statements were lowered in
-    /// `frame` (the caller's, never a hardcoded `FrameId::ROOT`) and are
-    /// checked against it before they are flattened to text, where no later
-    /// verification can see them.
+    /// ([`Self::lower_hybrid_field_rebind`]). The statements are checked
+    /// against `frame` (the caller's) before they are flattened to text,
+    /// where no later verification can see them. The caller derives `frame`
+    /// once and passes it to both the lowering and this check, so the check
+    /// guards a later edit that lowers a nested piece under another frame;
+    /// the full-walk `BindFrameMismatch` over the spliced `Vec<ThreadedStmt>`
+    /// consumers is the independent check.
     pub(super) fn rendered_field_rebind_doc(
         &mut self,
         stmts: &[ThreadedStmt],

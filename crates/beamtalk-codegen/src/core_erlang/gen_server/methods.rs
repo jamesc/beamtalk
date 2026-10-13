@@ -644,7 +644,7 @@ impl CoreErlangGenerator {
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
     /// Version steps hidden inside shared multi-module helpers
-    /// (`generate_self_dispatch_open`, `emit_super_send_open`,
+    /// (`generate_self_dispatch_call_doc_for`, `emit_super_send_open`,
     /// `generate_tier2_self_send_open`, `generate_field_assignment_open`,
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
@@ -1600,6 +1600,21 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::SuperSend => {
+                    // BT-3814: `super take: (self bump)` — the operands'
+                    // state-effecting sub-expressions thread ahead of the
+                    // super dispatch (the sequencing rule, as for every other
+                    // statement shape here), so the dispatch reads the
+                    // post-operand `State` and the operand's rebind is not
+                    // scoped away inside the dispatch's argument list.
+                    let operands: Vec<&Expression> =
+                        if let Expression::MessageSend { arguments, .. } = expr {
+                            arguments.iter().collect()
+                        } else {
+                            Vec::new()
+                        };
+                    let (operand_prelude, super_scope) =
+                        self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
+                    stmts.extend(operand_prelude);
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
@@ -1617,6 +1632,7 @@ impl CoreErlangGenerator {
                         self.emit_super_send_open(expr, &mut open_docs)?;
                         stmts.push(ThreadedStmt::Statement(Document::Vec(open_docs), span));
                     }
+                    self.finish_precompiled_scope(super_scope)?;
                 }
                 BodyExprKind::ErrorSend => {
                     if is_last {
