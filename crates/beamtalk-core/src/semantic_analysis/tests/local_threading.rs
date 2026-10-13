@@ -428,6 +428,37 @@ fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
 }
 
 #[test]
+fn allow_set_detect_if_none_needs_a_literal_search_block() {
+    // BT-3794 review: codegen packs the handler's writes only when the search
+    // block is a literal (`producer_body_block`). A parenthesised search block
+    // routes to the fold but is not packed, so its handler's write was dropped
+    // (statement) or leaked a raw tuple (`r :=`). Phase 0 rejects every
+    // position in every method context; the REPL threads its bindings map.
+    for body in [
+        "#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7]\nt",
+        "(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7])\nt",
+        "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n#[r, t]",
+        "^(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]) + t",
+        "r := t + (#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0])\n#[r, t]",
+        "#(1, 2) detect: ([:x | t := t + 1. x > 5]) ifNone: [t := t + 10. 0]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                "{src}: {diags:?}"
+            );
+        }
+    }
+    let known = ["t"];
+    let ok = adr0131_diagnostics_with(
+        "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n",
+        &known,
+    );
+    assert!(ok.is_empty(), "{ok:?}");
+}
+
+#[test]
 fn allow_set_repl_uses_its_own_row() {
     let known = ["t"];
     // REPL o4: receiver position.

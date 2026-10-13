@@ -48,7 +48,7 @@ use crate::semantic_analysis::block_facts::{
     OuterLocalWrite, captured_local_mutations, construct_outer_local_writes, is_fold_frame_body,
     is_safe_value_family_selector, is_threaded_frame_body, is_value_bearing_site,
     local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, sequenced_operand_sites, stored_block_var_uses,
+    outer_local_writes, producer_body_block, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -1310,7 +1310,15 @@ impl<'d> Walker<'d> {
             }
             other => other,
         };
-        if !actor_value_site && is_allowed(kind, position, self.context) {
+        // ADR 0131 Phase 2c (BT-3794): a handler-writing `detect:ifNone:` is
+        // only threaded through the producer shape — a literal search block
+        // (`producer_body_block`), the one rule codegen's router and fold
+        // plan read. A parenthesised search block routes to the fold but is
+        // not packed, so the write would be dropped. The REPL threads its
+        // bindings map and is not shaped by it.
+        let producer_shape =
+            kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
+        if !actor_value_site && producer_shape && is_allowed(kind, position, self.context) {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);

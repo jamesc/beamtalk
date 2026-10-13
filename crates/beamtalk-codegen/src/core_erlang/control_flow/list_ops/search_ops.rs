@@ -495,16 +495,17 @@ impl CoreErlangGenerator {
         // in class and value-type methods when the block does not also read
         // it) threads through the same fold: the fold packs the handler's
         // writes (`loop_threaded_locals_with_handler`).
+        // The handler-only write routes only for a LITERAL search block (no
+        // `unwrap_parens`): the shape core's `producer_packed_blocks` packs
+        // and Phase 0 accepts (`producer_body_block`).
+        let packs_handler_writes = match (predicate, if_none) {
+            (Expression::Block(pred_block), Expression::Block(handler)) => !self
+                .loop_threaded_locals_with_handler(pred_block, None, Some(handler))
+                .is_empty(),
+            _ => false,
+        };
         if let Expression::Block(pred_block) = predicate.unwrap_parens() {
-            let handler = match if_none {
-                Expression::Block(handler) => Some(handler),
-                _ => None,
-            };
-            if self.block_needs_mutation_threading(if_none).is_some()
-                || !self
-                    .loop_threaded_locals_with_handler(pred_block, None, handler)
-                    .is_empty()
-            {
+            if self.block_needs_mutation_threading(if_none).is_some() || packs_handler_writes {
                 return self
                     .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
             }
