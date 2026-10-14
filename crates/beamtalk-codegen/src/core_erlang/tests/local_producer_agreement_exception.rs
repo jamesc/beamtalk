@@ -59,6 +59,10 @@ const EXCEPTIONS: &[&str] = &[
     "[2] ensure: [Result tryDo: [t := t + 1]]",
     "Result tryDo: [2]",
     "Result tryDo: [(s < 3) ifTrue: [2]]",
+    // ADR 0131 Phase 2d (BT-3798) x Phase 4: a `Dictionary at:ifAbsent:`
+    // producer nested in a `tryDo:` block.
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "Result tryDo: [v := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. v]",
 ];
 
 /// The frames an exception producer's blocks form: `{s}` holds a statement.
@@ -77,6 +81,7 @@ const EXCEPTION_FRAMES: &[&str] = &[
     "[#(1, 2) do: [:k | {s}]] ensure: [nil]",
     "Result tryDo: [{s}. 1]",
     "Result tryDo: [t := t + 1. {s}. 1]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [{s}. 0]. 1]",
     "#(1, 2) do: [:k | Result tryDo: [{s}. 1]]",
     "(s < 3) ifTrue: [Result tryDo: [{s}. 1]]",
     "[Result tryDo: [{s}. 1]] ensure: [nil]",

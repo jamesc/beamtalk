@@ -162,13 +162,19 @@ impl CoreErlangGenerator {
     /// producer that writes.
     fn body_has_operand_loop_or_fold_writes(&self, body: &Block) -> bool {
         body.body.iter().any(|stmt| {
+            // ADR 0131 Phase 4 (BT-3750): and a `Result tryDo:` that is the
+            // statement itself, whose block may hold constructs (a `Dictionary`
+            // lookup) the block-level analysis does not propagate out.
             beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(&stmt.expression)
                 .into_iter()
+                .chain(std::iter::once(stmt.expression.unwrap_parens()))
                 .any(|site| {
                     local_threading_construct(site).is_some_and(|c| {
                         matches!(
                             c.family,
-                            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                            LocalThreadingFamily::Loop
+                                | LocalThreadingFamily::Fold
+                                | LocalThreadingFamily::TryDo
                         )
                     }) && self
                         .threaded_locals_of(site)

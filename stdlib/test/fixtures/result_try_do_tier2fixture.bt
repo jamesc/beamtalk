@@ -101,3 +101,13 @@ Object subclass: ResultTryDoTier2Fixture
         ^t + 41
       ]
     -1
+
+  // --- a Dictionary lookup producer nested in the block (BT-3798) -------------
+  class tier2Lookup =>
+    t := 0
+    Result
+      tryDo: [
+        #{#a => 1} at: #k ifAbsent: [t := t + 1]
+        7
+      ]
+    t

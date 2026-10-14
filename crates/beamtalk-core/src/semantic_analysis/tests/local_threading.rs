@@ -798,6 +798,22 @@ fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
 }
 
 #[test]
+fn a_try_do_sent_to_another_receiver_takes_the_ordinary_section6_path() {
+    // Only `Result tryDo:` is a §1 construct. An actor's own `tryDo:` taking
+    // the block is a plain `self` send: the BT-3755 exemption and callee check
+    // apply to it like any other.
+    let actor = |callee: &str| {
+        format!(
+            "Actor subclass: Ac\n  state: n = 0\n\n{callee}\n\n  probe =>\n    t := 0\n    self tryDo: [t := t + 1]\n    t\n"
+        )
+    };
+    let threading = actor("  sealed tryDo: b => b value");
+    assert!(adr0131_diagnostics(&threading).is_empty(), "{threading}");
+    let non_threading = actor("  sealed tryDo: b => #(1) do: [:x | b value]");
+    assert_eq!(section6_errors(&non_threading), 1, "{non_threading}");
+}
+
+#[test]
 fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     // The block is Tier 1 and reaches `'tryDo:'/1`: nothing to thread, nothing
     // to reject, in a position that would reject a writing one.

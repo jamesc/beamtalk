@@ -221,16 +221,18 @@ impl CoreErlangGenerator {
             } => {
                 // ADR 0131 §5 (Phase 4): `Result tryDo: [...]` writing a REPL
                 // binding compiles to its `{Value, Bindings}` construct tuple.
-                if !*is_cast {
-                    if let Some(doc) = self.repl_try_do_tier2_send(expr)? {
-                        return Ok(doc);
-                    }
-                }
-                let doc = if *is_cast {
-                    self.generate_cast_send(receiver, selector, arguments)
+                let repl_try_do = if *is_cast {
+                    None
                 } else {
-                    self.generate_message_send(receiver, selector, arguments)
-                }?;
+                    self.repl_try_do_tier2_send(expr)?
+                };
+                let doc = if let Some(doc) = repl_try_do {
+                    doc
+                } else if *is_cast {
+                    self.generate_cast_send(receiver, selector, arguments)?
+                } else {
+                    self.generate_message_send(receiver, selector, arguments)?
+                };
                 // Annotate message sends with source line for BEAM stacktraces.
                 // Only annotate CLOSED expressions — see `can_annotate_closed_expression`.
                 if self.can_annotate_closed_expression() {

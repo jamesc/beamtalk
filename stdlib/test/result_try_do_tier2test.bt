@@ -42,3 +42,6 @@ TestCase subclass: ResultTryDoTier2Test
 
   testNonLocalReturnPassesThrough =>
     self assert: ResultTryDoTier2Fixture tier2NonLocalReturn equals: 42
+
+  testDictionaryLookupProducerNestedInTheBlockKeepsItsWrite =>
+    self assert: ResultTryDoTier2Fixture tier2Lookup equals: 1

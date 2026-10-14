@@ -1749,7 +1749,12 @@ impl<'d> Walker<'d> {
             inlined && self.context == Actor && is_self_send && top != TopLevel::None;
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
         // send of a §1 selector (`local_threading_construct`).
-        let construct_send = inlined && is_section1_selector(&sel);
+        // (`tryDo:` is a §1 construct only sent to the `Result` class: any other
+        // receiver takes the ordinary §6 path, actor self-send exemption and
+        // callee check included.)
+        let construct_send = inlined
+            && (is_section1_selector(&sel)
+                || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
         // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup
         // accepted as a producer at this position (`check_construct`); a
         // block in any other argument position is a key that is a block value.
@@ -2144,7 +2149,6 @@ fn is_section1_selector(selector: &str) -> bool {
     is_state_threading_keyword_selector(selector)
         || is_conditional_selector(selector)
         || is_exception_selector(selector)
-        || crate::state_threading_selectors::is_try_do_selector(selector)
 }
 
 /// Whether a block literal *receiver* of `selector` is inlined: a block

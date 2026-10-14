@@ -103,6 +103,7 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
     "s ifNil: [t := t + 1. 2]",
     "Result tryDo: [t := t + 1. 2]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]",
 ];
 
 /// The core rule's verdict for every conditional and `on:do:`/`ensure:`

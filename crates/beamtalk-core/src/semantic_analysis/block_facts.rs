@@ -1247,7 +1247,7 @@ impl LocalThreadingConstruct<'_> {
 pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingConstruct<'_>> {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
-        is_state_threading_keyword_selector, is_state_threading_unary_selector, is_try_do_selector,
+        is_state_threading_keyword_selector, is_state_threading_unary_selector,
         lookup_block_arg_indices,
     };
     let Expression::MessageSend {
@@ -1303,7 +1303,7 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
                     }
                 }));
                 LocalThreadingFamily::Lookup
-            } else if is_try_do_selector(&sel) {
+            } else if is_result_try_do(receiver, &sel) {
                 blocks.extend(literal_args());
                 LocalThreadingFamily::TryDo
             } else {
