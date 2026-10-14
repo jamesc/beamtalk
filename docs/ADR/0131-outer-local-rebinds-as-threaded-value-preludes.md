@@ -226,7 +226,14 @@ condition is a runtime receiver guard
 `BranchArm` frame): a `Dictionary` (an untagged map) answers `{ok, Value}` or
 `error`, and any other receiver, including a value-type instance (also a map,
 but tagged), raises a structured `type_error` when the handler writes an outer
-local, instead of dropping the write. The lookups are rows of ONE table in
+local, instead of dropping the write. The guard is for receivers whose class is
+not known: a receiver statically known NOT to be a `Dictionary` (`self` or
+`super` outside a `Dictionary`, a class object, an inferred type that is a
+known class other than `Dictionary`, its subclasses and its ancestors, or a
+union of such) would raise on every call even when the key is present, so it
+keeps the §6 compile error (`lookup_receiver_statically_not_dictionary` in
+`block_facts`, read by the Phase 0 check; codegen lowers whatever Phase 0
+accepts and never sees the rejected programs). The lookups are rows of ONE table in
 `beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen
 through `conditional_arm_blocks`; a row is `dictionary_inline` only when
 `Dictionary` implements the selector (a test pins that against the class

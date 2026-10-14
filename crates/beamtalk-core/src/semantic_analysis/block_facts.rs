@@ -16,6 +16,7 @@ use crate::ast::{
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
 };
+use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::Span;
 use std::collections::HashSet;
 
@@ -1178,9 +1179,8 @@ impl LocalThreadingFamily {
     ///
     /// [`Self::Lookup`] answers `true` here because some of its selectors are
     /// threaded; whether one send is depends on its selector, which
-    /// [`LocalThreadingConstruct::is_threaded_today`] answers. Use that.
-    #[must_use]
-    pub fn is_threaded_today(self) -> bool {
+    /// [`LocalThreadingConstruct::is_threaded_today`] answers, the only caller.
+    fn is_threaded_today(self) -> bool {
         !matches!(self, Self::TryDo)
     }
 }
@@ -1534,6 +1534,65 @@ pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     };
     (!arguments.is_empty() && arguments.iter().all(|a| matches!(a, Expression::Block(_))))
         .then_some(construct.blocks)
+}
+
+/// ADR 0131 Phase 2d (BT-3798 review): whether the receiver of a lookup send
+/// is statically known NOT to be a `Dictionary`, so the send can only ever
+/// reach another class's `at:ifAbsent:` and the runtime guard
+/// (`beamtalk_map:lookup_for_threading/3`) would raise on every call, even when
+/// the key is present. Such a send keeps its §6 compile error instead of
+/// becoming a producer; the guard is for receivers whose class is not known
+/// (unannotated, `Dynamic`, or a class that may hold a `Dictionary`).
+///
+/// The one rule the Phase 0 check reads (codegen lowers every send core's
+/// [`lookup_arm_blocks`] names and never sees a program Phase 0 rejects, so it
+/// needs no copy of it). A receiver is statically non-`Dictionary` when it is
+///
+/// - `super`, or `self` where `self_is_dictionary` is false (the enclosing
+///   class is not `Dictionary` or a subclass, or the method is class-side, whose
+///   `self` is the class object);
+/// - of an inferred type `ty` that is a known class (or the metatype of one)
+///   that is neither `Dictionary`, a subclass of it, nor one of its ancestors
+///   (`Object`, `Collection`, … may hold a `Dictionary`), or a union of such.
+#[must_use]
+pub fn lookup_receiver_statically_not_dictionary(
+    receiver: &Expression,
+    ty: Option<&InferredType>,
+    self_is_dictionary: bool,
+    hierarchy: &crate::semantic_analysis::ClassHierarchy,
+) -> bool {
+    match receiver.unwrap_parens() {
+        Expression::Super(_) => return !self_is_dictionary,
+        Expression::Identifier(id) if id.name == "self" => return !self_is_dictionary,
+        _ => {}
+    }
+    ty.is_some_and(|ty| excludes(ty, hierarchy))
+}
+
+/// Whether `name` is a known class that can never hold a `Dictionary`.
+fn class_excludes_dictionary(
+    name: &str,
+    hierarchy: &crate::semantic_analysis::ClassHierarchy,
+) -> bool {
+    hierarchy.has_class(name)
+        && name != "Dictionary"
+        && !hierarchy
+            .superclass_chain(name)
+            .iter()
+            .any(|c| c == "Dictionary")
+        && !hierarchy
+            .superclass_chain("Dictionary")
+            .iter()
+            .any(|c| c == name)
+}
+/// [`class_excludes_dictionary`] over an inferred type.
+fn excludes(ty: &InferredType, hierarchy: &crate::semantic_analysis::ClassHierarchy) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. } => class_excludes_dictionary(class_name, hierarchy),
+        InferredType::Meta { .. } => true,
+        InferredType::Union { members, .. } => members.iter().all(|m| excludes(m, hierarchy)),
+        _ => false,
+    }
 }
 
 /// ADR 0131 Phase 2d (BT-3798): the handler blocks of a lookup send that

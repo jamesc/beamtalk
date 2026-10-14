@@ -31,6 +31,10 @@
 //! end
 //! ```
 //!
+//! A receiver statically known not to be a `Dictionary` never gets here: the
+//! Phase 0 check keeps its §6 error (`lookup_receiver_statically_not_dictionary`
+//! in core), so the guard serves receivers whose class is not known.
+//!
 //! The result tuple, the handler's `BranchArm` frame and the `LocalRebind`s
 //! that bring the threaded locals back are the conditional producer's
 //! (`conditional_tuple_to_threaded_value`): core's `conditional_arm_blocks`

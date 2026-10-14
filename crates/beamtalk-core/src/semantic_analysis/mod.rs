@@ -571,7 +571,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 #[must_use]
 pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    validators::check_local_threading(module, hierarchy, &[], &mut diagnostics);
+    validators::check_local_threading(module, hierarchy, None, &[], &mut diagnostics);
     diagnostics
 }
 
@@ -1030,6 +1030,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_local_threading(
         module,
         &result.class_hierarchy,
+        Some(&result.type_map),
         known_vars,
         &mut result.diagnostics,
     );

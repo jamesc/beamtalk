@@ -51,10 +51,12 @@ use crate::semantic_analysis::block_facts::{
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
     is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
-    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
+    lookup_receiver_statically_not_dictionary, loop_body_producer_sites, operand_producer_writes,
+    outer_local_writes, producer_body_block, repl_operand_sites, root_producer_writes,
+    sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
+use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -701,9 +703,20 @@ pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: Metho
 pub(crate) fn check_local_threading(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    type_map: Option<&TypeMap>,
     known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let facts = |class_name: &str, class_side: bool| ReceiverFacts {
+        hierarchy,
+        type_map,
+        self_is_dictionary: !class_side
+            && (class_name == "Dictionary"
+                || hierarchy
+                    .superclass_chain(class_name)
+                    .iter()
+                    .any(|c| c == "Dictionary")),
+    };
     let instance_context = |class_name: &str| {
         if hierarchy.is_actor_subclass(class_name) {
             Actor
@@ -725,6 +738,7 @@ pub(crate) fn check_local_threading(
                 param_names(method),
                 &method.body,
                 &callees,
+                &facts(class_name, false),
                 diagnostics,
             );
         }
@@ -734,6 +748,7 @@ pub(crate) fn check_local_threading(
                 param_names(method),
                 &method.body,
                 &HashSet::new(),
+                &facts(class_name, true),
                 diagnostics,
             );
         }
@@ -750,6 +765,10 @@ pub(crate) fn check_local_threading(
             param_names(method),
             &method.body,
             &HashSet::new(),
+            &facts(
+                standalone.class_name.name.as_str(),
+                standalone.is_class_method,
+            ),
             diagnostics,
         );
     }
@@ -760,9 +779,23 @@ pub(crate) fn check_local_threading(
             known,
             &module.expressions,
             &HashSet::new(),
+            &facts("", true),
             diagnostics,
         );
     }
+}
+
+/// What the lookup-receiver rule
+/// ([`lookup_receiver_statically_not_dictionary`]) reads for one method body.
+#[derive(Clone)]
+struct ReceiverFacts<'a> {
+    hierarchy: &'a ClassHierarchy,
+    /// The inferred types of the module's expressions; `None` when the caller
+    /// has none (`beamtalk-lint`'s query), so only `self`/`super` are judged.
+    type_map: Option<&'a TypeMap>,
+    /// Whether `self` may be a `Dictionary`: an instance method of `Dictionary`
+    /// or a subclass.
+    self_is_dictionary: bool,
 }
 
 /// Walks one method body (or module-level expression list) whose
@@ -772,9 +805,11 @@ fn check_body(
     params: Vec<EcoString>,
     body: &[ExpressionStatement],
     callees: &HashSet<(EcoString, usize)>,
+    receivers: &ReceiverFacts<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut walker = Walker::new(context, body, callees, diagnostics);
+    walker.receivers = Some(receivers.clone());
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
 }
@@ -906,6 +941,9 @@ struct Walker<'d> {
     /// producers at their position by [`Walker::check_construct`], whose
     /// handler blocks the §6 check then exempts ([`Walker::check_send`]).
     lookup_producers: HashSet<Span>,
+    /// What the lookup-receiver rule reads; `None` only before [`check_body`]
+    /// has set it.
+    receivers: Option<ReceiverFacts<'d>>,
     /// The actor self-send callees of the enclosing class that thread a Tier 2
     /// block argument ([`threading_callees`]).
     callees: &'d HashSet<(EcoString, usize)>,
@@ -975,6 +1013,7 @@ impl<'d> Walker<'d> {
             frame_sites: Vec::new(),
             pending_frame_body: None,
             lookup_producers: HashSet::new(),
+            receivers: None,
             callees,
             escapes: escape_map(context, body),
             diagnostics,
@@ -1430,6 +1469,12 @@ impl<'d> Walker<'d> {
         let Some(first) = writes.first().cloned() else {
             return;
         };
+        // ADR 0131 Phase 2d (BT-3798 review): a lookup whose receiver is
+        // statically known not to be a `Dictionary` would only ever raise at
+        // run time (the guard), so it keeps its §6 compile error.
+        if is_lookup && self.lookup_receiver_is_not_dictionary(expr) {
+            return;
+        }
         // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
         // site of a method-body statement is a local-threading producer,
         // wherever it sits there. Phase 2d (BT-3795): and at an operand site
@@ -1573,6 +1618,25 @@ impl<'d> Walker<'d> {
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
+    }
+
+    /// Whether the receiver of the lookup send `expr` is statically known not
+    /// to be a `Dictionary` ([`lookup_receiver_statically_not_dictionary`]).
+    fn lookup_receiver_is_not_dictionary(&self, expr: &Expression) -> bool {
+        let (Some(facts), Expression::MessageSend { receiver, .. }) =
+            (&self.receivers, expr.unwrap_parens())
+        else {
+            return false;
+        };
+        let ty = facts
+            .type_map
+            .and_then(|map| map.get(receiver.unwrap_parens().span()));
+        lookup_receiver_statically_not_dictionary(
+            receiver,
+            ty,
+            facts.self_is_dictionary,
+            facts.hierarchy,
+        )
     }
 
     /// The help text for a construct the Phase 0 check rejects at

@@ -257,3 +257,28 @@ fn lookup_selectors_that_dictionary_does_not_implement_stay_rejected() {
     }
     assert!(checked > 100, "only {checked} programs checked");
 }
+
+/// Receivers statically known not to be a `Dictionary` (BT-3798 review): the
+/// runtime guard would raise on every call, so Phase 0 keeps the §6 error and
+/// codegen is never asked to lower them as producers.
+const NON_DICTIONARY_RECEIVER_LOOKUPS: &[&str] = &[
+    "self at: #k ifAbsent: [t := t + 1. 0]",
+    "super at: #k ifAbsent: [t := t + 1. 0]",
+    "(self at: #k ifAbsent: [t := t + 1. 0])",
+    "self at: #k ifAbsent: [t := 7]",
+];
+
+#[test]
+fn lookups_on_a_statically_non_dictionary_receiver_are_rejected_in_every_position() {
+    let mut checked = 0;
+    for construct in NON_DICTIONARY_RECEIVER_LOOKUPS {
+        for position in POSITIONS.iter().chain(CONDITIONAL_POSITIONS) {
+            for src in sources(construct, position) {
+                assert!(rejected(&src), "{src}");
+                assert_eq!(check_conditional_agreement(&src), None, "{src}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 100, "only {checked} programs checked");
+}
