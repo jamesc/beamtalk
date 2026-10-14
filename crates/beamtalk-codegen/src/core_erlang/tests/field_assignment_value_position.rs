@@ -170,7 +170,7 @@ const HYBRID_LOOP_METHODS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Not covered by this corpus: value-type methods (the BT-3812 corpus owns them) and class
+/// Not covered by this corpus: value-type methods (BT-3812 adds them) and class
 /// methods (a class-variable write is an in-place `put`, ADR 0130 §2, which threads
 /// nothing). The REPL has no `self` field to write.
 

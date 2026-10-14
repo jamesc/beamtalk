@@ -1430,49 +1430,33 @@ impl CoreErlangGenerator {
                     result_var = "'nil'".to_string();
                 }
             } else if self.is_actor_self_send(expr) {
-                // E2 — the dispatch-open helper both emits the dispatch
-                // Statement and bumps the state version; split via
-                // `generate_self_dispatch_call_doc` so the bump becomes a
-                // real Bind (Direct rebind, `element(2, _SD)`) instead of
-                // living inside an opaque Statement's text.
+                let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                else {
+                    unreachable!("is_actor_self_send guarantees a MessageSend");
+                };
+                // E2 — BT-3814: the one self-send-statement lowering
+                // (`sequenced_self_dispatch`, shared with
+                // `threaded_expression`'s producer, the Letrec body and the
+                // fold bodies): operands sequenced ahead, then the dispatch
+                // `Statement` + the `State` `Bind` (`element(2, _SD)`). This
+                // arm keeps its own `ExResult` epilogue below.
                 //
-                // ADR 0118 phase 2a: `self log: (self nextId)` —
-                // thread the arguments' own self-sends ahead of this
-                // dispatch via [`Self::sequence_children`] (the sequencing
-                // rule) instead of the planner's `hoist_self_send_arguments`.
-                // `expr` itself stays on the dispatch call below, NOT
-                // `threaded_expression`'s producer path: `is_actor_self_send`
-                // (this arm's guard) is WIDER than `is_dispatching_actor_self_send`
-                // (the producer's gate) — it also matches a well-known
-                // selector (`self class`, `self hash`, …) that
-                // `generate_self_dispatch_call_doc` dispatches uniformly
-                // through `safe_dispatch` here (an `on:do:`/`ensure:` body's
-                // own long-standing behavior, unrelated to this migration),
-                // where the producer would instead intercept it specially —
-                // a real behavior change this call site must not make.
-                let arg_children: Vec<&Expression> =
-                    if let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() {
-                        arguments.iter().collect()
-                    } else {
-                        Vec::new()
-                    };
-                let (arg_prelude, arg_scope) = self.sequence_children(&arg_children, frame)?;
-                stmts.extend(arg_prelude);
-                let source_version = self.state_version();
-                let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
-                self.finish_precompiled_scope(arg_scope)?;
-                stmts.push(ThreadedStmt::Statement(call_doc, span));
-                let target_version = self.state_version();
-                stmts.push(ThreadedStmt::Bind {
-                    target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                    source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                    op: BindOp::Direct(ValueRef::Doc(docvec![
-                        "call 'erlang':'element'(2, ",
-                        leaf::var(dispatch_var.clone()),
-                        ")",
-                    ])),
-                    span,
-                });
+                // `expr` stays on this path, NOT `threaded_expression`'s
+                // producer: `is_actor_self_send` (this arm's guard) is WIDER
+                // than `is_dispatching_actor_self_send` (the producer's
+                // gate) — it also matches a well-known selector (`self
+                // class`, `self hash`, …) that the dispatch call dispatches
+                // uniformly through `safe_dispatch` here (an `on:do:`/
+                // `ensure:` body's own long-standing behavior), where the
+                // producer would instead intercept it specially — a real
+                // behavior change this call site must not make.
+                let (prelude, dispatch_var) =
+                    self.sequenced_self_dispatch(selector, arguments, frame, span)?;
+                stmts.extend(prelude);
                 if is_last {
                     // Self-dispatch result is in dispatch_var
                     let rv = self.fresh_temp_var("ExResult");

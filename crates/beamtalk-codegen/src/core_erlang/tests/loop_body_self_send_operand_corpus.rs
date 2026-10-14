@@ -212,3 +212,120 @@ fn loop_body_self_send_operands_thread_state() {
         failures.join("\n\n")
     );
 }
+
+/// BT-3814: positions that do not lower a self-send *statement* through
+/// `sequenced_self_dispatch`: `capture_argument_list_doc`'s
+/// `StateEffectEscapesExpression` guard sits under six dispatch callers
+/// (`generate_self_cast_send`, `generate_discarding_self_dispatch`,
+/// `generate_self_dispatch_call_doc_for`, `generate_sealed_self_dispatch`,
+/// `generate_direct_sealed_call`, `generate_super_send`); each must be
+/// unreachable from valid source (`take: (self bump)` here either threads or
+/// is rejected by the language, never trips the guard). The `on:do:`/
+/// `ensure:` rows are the arm that BT-3814 routes through
+/// `sequenced_self_dispatch`.
+const OTHER_POSITIONS: &[(&str, &str)] = &[
+    (
+        "cascade_message",
+        "    (OrderedCollection new) add: 1; add: (self take: (self bump)); yourself.\n    self.n\n",
+    ),
+    (
+        "match_arm",
+        "    1 match: [1 -> (self take: (self bump)); _ -> 0].\n    self.n\n",
+    ),
+    (
+        "match_scrutinee",
+        "    (self take: (self bump)) match: [1 -> #one; _ -> #other].\n    self.n\n",
+    ),
+    (
+        "sort_comparator",
+        "    #(1, 2) sort: [:a :b | (self take: (self bump)) > 0].\n    self.n\n",
+    ),
+    (
+        "interpolation_segment",
+        "    \"v={self take: (self bump)}\".\n    self.n\n",
+    ),
+    (
+        "interpolation_after_effectful_segment",
+        "    \"v={self bump} w={self take: (self bump)}\".\n    self.n\n",
+    ),
+    (
+        "cast_statement",
+        "    self take: (self bump)!\n    self.n\n",
+    ),
+    (
+        "cast_in_do",
+        "    #(1, 2) do: [:e | self take: (self bump)!].\n    self.n\n",
+    ),
+    (
+        "on_do_protected_last",
+        "    [self take: (self bump)] on: Error do: [:e | 0].\n    self.n\n",
+    ),
+    (
+        "on_do_protected_two_operands",
+        "    [self take: (self bump) with: (self bump)] on: Error do: [:e | 0].\n    self.n\n",
+    ),
+    (
+        "on_do_protected_then_read",
+        "    [self take: (self bump). self.n] on: Error do: [:e | 0].\n    self.n\n",
+    ),
+    (
+        "on_do_handler",
+        "    [1] on: Error do: [:e | self take: (self bump)].\n    self.n\n",
+    ),
+    (
+        "ensure_body",
+        "    [self take: (self bump)] ensure: [self.m := 1].\n    self.n\n",
+    ),
+    (
+        "ensure_cleanup",
+        "    [1] ensure: [self take: (self bump)].\n    self.n\n",
+    ),
+    (
+        "ensure_cleanup_two_operands",
+        "    [1] ensure: [self take: (self bump) with: (self bump)].\n    self.n\n",
+    ),
+    ("super_method_body", "    super take: (self bump)\n"),
+    (
+        "super_non_last_statement",
+        "    super take: (self bump).\n    self.n\n",
+    ),
+    (
+        "super_two_operands",
+        "    super take: (self bump) with: (self bump).\n    self.n\n",
+    ),
+    (
+        "super_in_conditional_arm",
+        "    true ifTrue: [super take: (self bump)].\n    self.n\n",
+    ),
+    (
+        "super_in_on_do",
+        "    [super take: (self bump)] on: Error do: [:e | 0].\n    self.n\n",
+    ),
+    (
+        "super_in_do",
+        "    #(1, 2) do: [:e | super take: (self bump)].\n    self.n\n",
+    ),
+];
+
+#[test]
+fn self_send_operands_thread_state_in_every_other_position() {
+    let passes = |src: &str| {
+        catch_unwind(AssertUnwindSafe(|| {
+            assert_compiles_through_erlc("test", &codegen(src));
+        }))
+        .is_ok()
+    };
+    let mut failures: Vec<String> = Vec::new();
+    for (name, body) in OTHER_POSITIONS {
+        let src = format!("{HEADER}\n  probe =>\n{body}");
+        if !passes(&src) {
+            failures.push(format!("{name}:\n{src}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} self-send operand position(s) fail verified codegen:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}

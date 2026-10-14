@@ -1379,7 +1379,7 @@ impl CoreErlangGenerator {
     /// of a hand-rolled `maps:put` `Document` fragment. Unlike the
     /// top-level `BodyExprKind` shapes `gen_server/methods.rs` lowers
     /// (which route `LocalAssignSelfSend` through
-    /// `generate_self_dispatch_open` instead), the four kinds above ALL
+    /// `generate_self_dispatch_parts` instead), the four kinds above ALL
     /// reach `generate_local_var_assignment_in_loop` in this body loop —
     /// its own `is_tier2_value_call`/open-scope checks decide the actual
     /// shape at runtime, not `classify_body_expr`'s static kind.
@@ -1700,11 +1700,11 @@ impl CoreErlangGenerator {
             // debug-fatal on this exact shape).
             //
             // Mirrors C12b's `DispatchingSelfSend` Bind pattern immediately
-            // below: dispatch via `generate_self_dispatch_call_doc`, Bind the
+            // below: dispatch via `generate_self_dispatch_call_doc_for`, Bind the
             // arm's next real `State` version from the call's `NewState`
             // element, then throw the NLR tuple against *that* version
             // instead of the branch's stale entry state — the same
-            // `generate_self_dispatch_open`-vs-closed distinction
+            // `generate_self_dispatch_parts`-vs-closed distinction
             // `lower_body_exprs_with_reply`'s own `DispatchingSelfSend` arm
             // already applies for the top-level (unnested) `^self foo` shape
             // — just expressed as this loop's own `Bind`+`Statement`
@@ -1713,7 +1713,7 @@ impl CoreErlangGenerator {
             // real, verifiable production, not text buried in an opaque `Doc`.
             // excludes class methods (`in_class_method()`) for the
             // same reason `mod.rs`'s `Expression::Return` handler does —
-            // `generate_self_dispatch_call_doc` unconditionally threads
+            // `generate_self_dispatch_call_doc_for` unconditionally threads
             // `current_state_var()` (Actor instance state), which a class
             // method does not have — so a class-method self-send here falls
             // to the C12 catch-all below instead, unchanged from before this

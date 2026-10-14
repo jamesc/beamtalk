@@ -1748,29 +1748,9 @@ impl CoreErlangGenerator {
     /// return value, since a real `Bind`'s `render_bind` re-derives the same
     /// name from the version number, not from a string this function hands
     /// back.
-    pub(super) fn generate_self_dispatch_call_doc(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, String)> {
-        if let Expression::MessageSend {
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            return self.generate_self_dispatch_call_doc_for(selector, arguments);
-        }
-        Err(CodeGenError::Internal(
-            "generate_self_dispatch_call_doc called on non-MessageSend expression".to_string(),
-        ))
-    }
-
-    /// selector/arguments-based core of
-    /// [`Self::generate_self_dispatch_call_doc`] — see that function's doc
-    /// comment (ADR 0111 Addendum 5) for the shape this builds and
-    /// why the state-version bump (`next_state_var()`) mints exactly where it
-    /// does. Takes the decomposed selector/arguments so callers that only hold
-    /// those (not an owning `MessageSend` node) share one dispatch-call shape.
+    ///
+    /// Takes the decomposed selector/arguments so callers that only hold those
+    /// (not an owning `MessageSend` node) share one dispatch-call shape.
     #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_call_doc_for(
         &mut self,

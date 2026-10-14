@@ -2973,7 +2973,7 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
     // closed generate_self_dispatch -> generate_sealed_self_dispatch ->
     // generate_direct_sealed_call path (the most optimized sealed-method
     // call, bypassing safe_dispatch/dispatch entirely) rather than the
-    // top-level-statement generate_self_dispatch_open path already covered
+    // top-level-statement `sequenced_self_dispatch` path already covered
     // by test_self_call_error_branch_threads_selector_class_breadcrumb.
     let src = concat!(
         "sealed Actor subclass: Srv\n",
