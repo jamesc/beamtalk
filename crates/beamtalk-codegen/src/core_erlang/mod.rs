@@ -219,6 +219,13 @@ impl CoreErlangGenerator {
                 is_cast,
                 ..
             } => {
+                // ADR 0131 §5 (Phase 4): `Result tryDo: [...]` writing a REPL
+                // binding compiles to its `{Value, Bindings}` construct tuple.
+                if !*is_cast {
+                    if let Some(doc) = self.repl_try_do_tier2_send(expr)? {
+                        return Ok(doc);
+                    }
+                }
                 let doc = if *is_cast {
                     self.generate_cast_send(receiver, selector, arguments)
                 } else {

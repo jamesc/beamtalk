@@ -839,10 +839,13 @@ fn is_exception_selector_name(selector_name: &str) -> bool {
 /// affect the enclosing scope: `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`
 /// (via [`crate::state_threading_selectors::is_conditional_selector`]), plus
 /// `on:do:`/`ensure:` (their non-receiver block arguments — e.g.
-/// `on:do:`'s handler — are inline for the same reason as the receiver).
+/// `on:do:`'s handler — are inline for the same reason as the receiver), and
+/// (ADR 0131 Phase 4, BT-3750) `tryDo:`, whose block runs in the enclosing
+/// activation as a frame of its own that threads its writes back.
 fn is_inline_propagating_selector(selector_name: &str) -> bool {
     crate::state_threading_selectors::is_conditional_selector(selector_name)
         || is_exception_selector_name(selector_name)
+        || crate::state_threading_selectors::is_try_do_selector(selector_name)
 }
 
 /// Propagates a nested inline-compiled block's mutation
@@ -1161,7 +1164,9 @@ pub enum LocalThreadingFamily {
     /// ([`crate::state_threading_selectors::lookup_block_arg_indices`]).
     /// Not threaded yet (ADR 0131 phase 2).
     Lookup,
-    /// `Result tryDo:` (ADR 0131 §5). Not threaded yet (phase 4).
+    /// `Result tryDo:` (ADR 0131 §5, Phase 4): a catch-boundary construct
+    /// whose block literal compiles to a Tier 2 `fun(StateAcc)` and is a
+    /// producer through [`exception_producer_writes`], like `on:do:`.
     TryDo,
 }
 
@@ -1171,10 +1176,11 @@ impl LocalThreadingFamily {
     /// the Phase 0 allow-set check nor codegen's tuple builders act on it
     /// yet, and a nested one adds nothing to an enclosing construct's
     /// [`threaded_today_block_writes`] (it does add to
-    /// [`construct_outer_local_writes`]).
+    /// [`construct_outer_local_writes`]). (`tryDo:` joined with ADR 0131
+    /// Phase 4, BT-3750.)
     #[must_use]
     pub fn is_threaded_today(self) -> bool {
-        !matches!(self, Self::Lookup | Self::TryDo)
+        !matches!(self, Self::Lookup)
     }
 }
 
@@ -1505,12 +1511,15 @@ pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
 /// send. A construct with a non-literal protected body or handler
 /// (`aBlock on: Error do: aHandler`) is not inlined by codegen, so it is not a
 /// producer.
+///
+/// ADR 0131 Phase 4 (BT-3750): and the one block of a `tryDo:` send whose
+/// argument is a block literal, the other exception-like catch boundary. It
+/// is not inlined into a `try`: it compiles to a `fun(StateAcc)` handed to
+/// `beamtalk_result:'tryDo:'/2`, whose body is a `BranchArm` frame like any
+/// other arm of an exception producer.
 #[must_use]
 pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     let construct = local_threading_construct(expr)?;
-    if construct.family != LocalThreadingFamily::Exception {
-        return None;
-    }
     let Expression::MessageSend {
         receiver,
         arguments,
@@ -1519,15 +1528,35 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     else {
         return None;
     };
-    let &[handler_index] =
-        crate::state_threading_selectors::state_threaded_block_arg_indices(&construct.selector)
-    else {
-        return None;
-    };
-    match (receiver.as_ref(), arguments.get(handler_index)) {
-        (Expression::Block(protected), Some(Expression::Block(handler))) => {
-            Some(vec![protected, handler])
+    match construct.family {
+        LocalThreadingFamily::Exception => {
+            let &[handler_index] =
+                crate::state_threading_selectors::state_threaded_block_arg_indices(
+                    &construct.selector,
+                )
+            else {
+                return None;
+            };
+            match (receiver.as_ref(), arguments.get(handler_index)) {
+                (Expression::Block(protected), Some(Expression::Block(handler))) => {
+                    Some(vec![protected, handler])
+                }
+                _ => None,
+            }
         }
+        // Only the `Result` class lowers to `beamtalk_result:'tryDo:'/2`: any
+        // other receiver keeps its own `tryDo:` and a dynamic send.
+        LocalThreadingFamily::TryDo => match (receiver.as_ref(), arguments.as_slice()) {
+            (
+                Expression::ClassReference {
+                    name,
+                    package: None,
+                    ..
+                },
+                [Expression::Block(body)],
+            ) if name.name == "Result" => Some(vec![body]),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1734,7 +1763,7 @@ pub fn exception_producer_writes(
     kind: RootMethodKind,
 ) -> Option<Vec<OuterLocalWrite>> {
     let arms = exception_arm_blocks(expr)?;
-    if !exception_arms_lower_as_producer(&arms, kind, bound_outside) {
+    if !exception_send_lowers_as_producer(expr, &arms, kind, bound_outside) {
         return None;
     }
     let construct = local_threading_construct(expr)?;
@@ -1742,10 +1771,39 @@ pub fn exception_producer_writes(
         // No outer local is written. A value-type exception that writes only
         // `self.field` still threads the `Self` family (its result tuple's
         // trailing slot, ADR 0122), so it is a producer with an empty set and
-        // no `LocalRebind`s; anything else is not a producer.
-        return (kind == RootMethodKind::ValueType && arms_write_self_field(&arms)).then(Vec::new);
+        // no `LocalRebind`s; anything else is not a producer. (`tryDo:`'s
+        // Tier 2 block threads no field: it never is.)
+        return (construct.family == LocalThreadingFamily::Exception
+            && kind == RootMethodKind::ValueType
+            && arms_write_self_field(&arms))
+        .then(Vec::new);
     }
     packed_writes_agree(&construct, &arms, bound_outside)
+}
+
+/// ADR 0131 Phase 4 (BT-3750): whether the blocks `arms` of the exception-like
+/// send `expr` ([`exception_arm_blocks`]) can be lowered by the exception
+/// producer in a method of kind `kind`: [`exception_arms_lower_as_producer`]
+/// for `on:do:`/`ensure:`, [`conditional_arms_lower_as_producer`] for `tryDo:`'s one block. The one
+/// predicate the Phase 0 check and codegen's `exception_producer_locals` read.
+#[must_use]
+pub fn exception_send_lowers_as_producer(
+    expr: &Expression,
+    arms: &[&Block],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    match local_threading_construct(expr).map(|c| c.family) {
+        // The block is a `BranchArm` frame whose `StateAcc` the runtime's
+        // `tryDo:/2` threads, so the rule is a conditional arm's: a nested
+        // construct that writes a local must itself be a producer, and a
+        // value-type block writes no field (its tuple carries no `Self`).
+        Some(LocalThreadingFamily::TryDo) => {
+            matches!(arms, [body] if body.parameters.is_empty())
+                && conditional_arms_lower_as_producer(arms, kind, bound_outside)
+        }
+        _ => exception_arms_lower_as_producer(arms, kind, bound_outside),
+    }
 }
 
 /// Whether any statement of `arms` assigns a `self.field`.
@@ -3484,7 +3542,7 @@ mod tests {
             assert_eq!(construct.blocks.len(), blocks, "{src}");
             assert_eq!(
                 family.is_threaded_today(),
-                !matches!(family, Lookup | TryDo),
+                !matches!(family, Lookup),
                 "{src}"
             );
         }
@@ -3545,11 +3603,20 @@ mod tests {
         );
         // A nested construct that is not threaded today is in the set, but
         // not in the part threaded today.
-        let src = "#(1) do: [:x | Result tryDo: [t := 1]]";
+        let src = "#(1) do: [:x | d at: #k ifAbsent: [t := 1]]";
         assert_eq!(threaded_set(src, &["t"]), vec!["t"]);
         let expr = parse_first_expr(src);
         let construct = local_threading_construct(&expr).expect("construct");
         assert!(threaded_today_block_writes(&construct.blocks, &|n| n == "t").is_empty());
+        // `tryDo:` is threaded since ADR 0131 Phase 4 (BT-3750).
+        let src = "#(1) do: [:x | Result tryDo: [t := 1]]";
+        assert_eq!(threaded_set(src, &["t"]), vec!["t"]);
+        let expr = parse_first_expr(src);
+        let construct = local_threading_construct(&expr).expect("construct");
+        assert_eq!(
+            threaded_today_block_writes(&construct.blocks, &|n| n == "t").len(),
+            1
+        );
         // Its own set is recognized too.
         assert_eq!(threaded_set("Result tryDo: [t := 1]", &["t"]), vec!["t"]);
         assert_eq!(

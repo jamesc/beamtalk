@@ -50,10 +50,10 @@ t
 t
 // => 4
 
-// PIN-BUG BT-3743: the Tier 2 block reaches `tryDo:`'s arity-0 native (ADR
-// 0131 §5). Correct answer: true.
+// ADR 0131 Phase 4 (BT-3750): the Tier 2 block reaches
+// `beamtalk_result:'tryDo:'/2`, a local-threading producer.
 (Result tryDo: [t := t + 1. 1 / 0]) isError
-// => ERROR: tryDo: expected a zero-arity block, got: Block/1
+// => true
 
 // The protected region raised, so its write is discarded (ADR 0131 §"REPL and
 // error examples"): `t` stays 4.
@@ -487,3 +487,45 @@ t := 0. #(1, 2, 3) do: [:x | [t := t + x] ensure: [t := t + 10]]. t
 
 t := 0. 1 to: 3 do: [:i | [Error signal: "x"] on: Error do: [:e | t := t + i]]. t
 // => ERROR: `on:do:` writes outer local `t`
+
+// ===========================================================================
+// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` whose block writes a binding is
+// a local-threading producer. A raise discards the block's writes; success
+// keeps them.
+// ===========================================================================
+
+t := 0
+// => 0
+
+// As a statement.
+Result tryDo: [t := t + 1. 7]
+// => Result ok: 7
+
+t
+// => 1
+
+// As an assignment's whole value, raising: the write is discarded.
+r := Result tryDo: [t := t + 10. 1 / 0]
+// => _
+
+r isError
+// => true
+
+t
+// => 1
+
+// As an operand, succeeding: the write is kept.
+(Result tryDo: [t := t + 5. t]) unwrap + 1
+// => 7
+
+t
+// => 6
+
+// A binding first written inside a raising block stays undefined.
+(Result tryDo: [fresh := 1. 1 / 0]) isError
+// => true
+
+// A nested loop writing the binding keeps the Phase 0 error, as in an
+// `on:do:` protected body (the REPL's arms are not frames yet, BT-3823).
+t := 0. Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]
+// => ERROR: `do:` writes outer local `t`

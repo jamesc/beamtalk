@@ -444,11 +444,19 @@ This answers each objection that removed the AST lowering from PR #4187:
 | Handler-parameter aliasing | There is no handler block. |
 | "Only helps once operand-position producers exist" | §1 makes the call a producer. |
 
-The arity choice keys on the **selector and a literal Tier 2 block
-argument**, not on the receiver being spelled `Result`: a shadowed or
-aliased `Result` still gets the right arity, and a non-`Result` receiver
-that happens to answer `tryDo:` gets the Tier 2 fun and a plain `{Value,
-StateAcc}` protocol, the same as any user HOM (§6).
+The arity choice keys on the **selector and a literal block argument that
+writes an outer local**. *Implementation note (BT-3750):* the producer also
+requires the receiver to be the `Result` class reference, because the
+emitted call is `beamtalk_result:'tryDo:'/2` itself: a `tryDo:` sent to any
+other receiver (a user class that happens to answer `tryDo:`, a variable)
+keeps its dynamic send, and its writing block is a §6 / Phase 0 compile
+error instead of a Tier 2 fun reaching a callee that cannot return the
+write. The block is lowered as a `BranchArm` frame over the fun's `StateAcc`
+parameter, with the same rule as a conditional arm
+(`conditional_arms_lower_as_producer`), so a loop, fold, conditional or
+`on:do:` inside it rebinds its locals into that frame. In the REPL the fun
+runs over the bindings map itself, so `'tryDo:'/2` answers the `{Value,
+Bindings}` tuple the REPL assembler unpacks.
 
 ### 6. A Tier 2 block with no return channel is a compile error
 

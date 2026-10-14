@@ -176,8 +176,9 @@ fn a_map_put_rebind_in_a_direct_params_loop_body_is_local_rebind_mode_mismatch()
 
 // ---------------------------------------------------------------------------
 // ADR 0131 Phase 3b (BT-3817): the same checks on `on:do:` / `ensure:`
-// producers, at the method root and in the frames they open or sit in (a
-// conditional arm, a loop body, the protected body of another exception).
+// (and, since Phase 4, BT-3750, `Result tryDo:`) producers, at the method
+// root and in the frames they open or sit in (a conditional arm, a loop body,
+// the protected body of another exception).
 // ---------------------------------------------------------------------------
 
 /// The §1a probe shape with an exception as the right operand, at the method
@@ -201,6 +202,25 @@ fn exception_programs() -> Vec<String> {
         (
             "[[1] ensure: [nil]. {s}] on: Error do: [:e | 0]",
             "r := t + ([t := t + 1. 5] on: Error do: [:e | 0])",
+        ),
+        // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` is the same producer,
+        // its catch boundary in the runtime, at the root and in each frame.
+        ("{s}", "r := t + (Result tryDo: [t := t + 1. 5])"),
+        (
+            "(u < 3) ifTrue: [{s}]",
+            "r := t + (Result tryDo: [t := t + 1. 5])",
+        ),
+        (
+            "1 to: 2 do: [:i | {s}]",
+            "r := t + (Result tryDo: [t := t + 1. 5])",
+        ),
+        (
+            "[[1] ensure: [nil]. {s}] on: Error do: [:e | 0]",
+            "r := t + (Result tryDo: [t := t + 1. 5])",
+        ),
+        (
+            "Result tryDo: [{s}. 1]",
+            "r := t + (Result tryDo: [t := t + 1. 5])",
         ),
     ] {
         let body = format!(

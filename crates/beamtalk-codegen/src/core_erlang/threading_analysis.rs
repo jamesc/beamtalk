@@ -462,8 +462,8 @@ impl CoreErlangGenerator {
     /// today's tuple builders pack into `__local__` keys. Empty for a
     /// construct whose result is not unpacked that way yet: the unary loops,
     /// `value` sent to a block literal (threaded by the inline-block path,
-    /// `get_inline_block_captured_mutations`), the lookup selectors and
-    /// `tryDo:` (ADR 0131 phases 2 and 4), and `eachWithIndex:`/
+    /// `get_inline_block_captured_mutations`), the lookup selectors (ADR 0131
+    /// phase 2), and `eachWithIndex:`/
     /// `do:separatedBy:` outside an actor's own fold
     /// ([`Self::enumeration_threads_actor_state`]).
     fn lowered_construct_blocks<'a>(
@@ -485,9 +485,9 @@ impl CoreErlangGenerator {
         };
         let sel = construct.selector.as_str();
         match construct.family {
-            LocalThreadingFamily::Conditional | LocalThreadingFamily::Exception => {
-                construct.blocks.clone()
-            }
+            LocalThreadingFamily::Conditional
+            | LocalThreadingFamily::Exception
+            | LocalThreadingFamily::TryDo => construct.blocks.clone(),
             LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
                 // A loop or fold producer packs the blocks core's one rule
                 // names (`producer_packed_blocks`): the body, `whileTrue:`'s
@@ -510,9 +510,7 @@ impl CoreErlangGenerator {
                     .filter_map(|&i| literal(arguments.get(i)))
                     .collect(),
             },
-            LocalThreadingFamily::BlockValue
-            | LocalThreadingFamily::Lookup
-            | LocalThreadingFamily::TryDo => Vec::new(),
+            LocalThreadingFamily::BlockValue | LocalThreadingFamily::Lookup => Vec::new(),
         }
     }
 

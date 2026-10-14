@@ -66,6 +66,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 
 /// ADR 0122 / BT-3506: an arm's (or the construct's own) contribution to the
 /// trailing family slot — the family this construct threads (`SelfVt`)
@@ -661,6 +662,11 @@ impl CoreErlangGenerator {
         };
         let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         match (selector.as_str(), receiver.as_ref(), arguments.as_slice()) {
+            // ADR 0131 §5 (Phase 4, BT-3750): `Result tryDo: [...]` whose block
+            // writes an outer local.
+            ("tryDo:", Expression::ClassReference { .. }, [Expression::Block(body)]) => {
+                self.try_do_tier2_tuple_doc(body)
+            }
             (
                 "on:do:",
                 Expression::Block(protected),
@@ -681,6 +687,101 @@ impl CoreErlangGenerator {
                 "exception producer reached `{selector}` with non-literal blocks"
             ))),
         }
+    }
+
+    /// ADR 0131 §5 (Phase 4, BT-3750): the construct tuple `{Result, StateAcc}`
+    /// of `Result tryDo: [...]` whose block writes an outer local. The catch
+    /// boundary stays in the runtime; codegen only chooses the arity:
+    ///
+    /// ```erlang
+    /// let SeededState = <scratch map with the block's locals> in
+    /// call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> {Value, StateAcc1}, SeededState)
+    /// ```
+    ///
+    /// The scratch map is seeded like an `on:do:`'s ([`Self::exception_body_outer_state`],
+    /// `seed_conditional_locals`): the actor `State` (or the REPL bindings map)
+    /// continued, or a private map in a class or value-type method. A raise
+    /// answers the entry map, so the block's local writes are discarded.
+    fn try_do_tier2_tuple_doc(&mut self, body: &Block) -> Result<Document<'static>> {
+        if self.is_repl_mode() {
+            return self.repl_try_do_tier2_tuple_doc(body);
+        }
+        // The block is a `BranchArm` frame over the `StateAcc` parameter, like
+        // the protected body of an `on:do:` producer: a loop, fold, conditional
+        // or exception in it rebinds its locals into that frame.
+        let arm = self.exception_arm_frame(&[body], true);
+        let current_state = self.exception_body_outer_state();
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[body], &current_state);
+        let families = ThreadedFamilies::default();
+        let outer_self = self.self_version();
+        let mut fun_docs: Vec<Document<'static>> = Vec::new();
+        let (result_var, final_version, slot) =
+            self.push_exception_arm(&mut fun_docs, body, &families, 0, arm.as_ref())?;
+        fun_docs.push(self.close_exception_result_tuple(
+            result_var,
+            final_version,
+            &families,
+            &slot,
+        ));
+        self.set_self_version(outer_self);
+        Ok(docvec![
+            seed_doc,
+            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
+            Document::Vec(fun_docs),
+            ", ",
+            leaf::var(base_state),
+            ")",
+        ])
+    }
+
+    /// [`Self::try_do_tier2_tuple_doc`] at the REPL root, whose locals live in
+    /// the bindings map under their plain names (the REPL's inlined arm
+    /// statements read and write plain keys, as an `on:do:` arm does). The
+    /// block body is the inlined arm over a `StateAcc` that is the bindings
+    /// map itself, so `tryDo:/2` answers the `{Value, Bindings}` tuple the REPL
+    /// assembler unpacks, with the entry bindings on a raise:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> {Value, StateAcc1}, Bindings)
+    /// ```
+    ///
+    /// Sets `repl_loop_mutated`.
+    fn repl_try_do_tier2_tuple_doc(&mut self, body: &Block) -> Result<Document<'static>> {
+        self.set_repl_loop_mutated(true);
+        let bindings = self.current_state_var();
+        let (arm_doc, _final_version) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(body))?;
+        Ok(docvec![
+            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
+            arm_doc,
+            ", ",
+            leaf::var(bindings),
+            ")",
+        ])
+    }
+
+    /// ADR 0131 §5 (Phase 4, BT-3750): the REPL's hook for
+    /// `Result tryDo: [...]` whose block writes a binding: its
+    /// [`Self::repl_try_do_tier2_tuple_doc`] construct tuple wherever the REPL
+    /// compiles the send, or `None` for any other expression. The Phase 0 check
+    /// admits it only where the REPL assembler or producer unpacks the tuple.
+    pub(in crate::core_erlang) fn repl_try_do_tier2_send(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<Document<'static>>> {
+        if !self.is_repl_mode() {
+            return Ok(None);
+        }
+        let is_try_do =
+            beamtalk_core::semantic_analysis::block_facts::local_threading_construct(expr)
+                .is_some_and(|c| c.family == LocalThreadingFamily::TryDo);
+        if !is_try_do
+            || beamtalk_core::semantic_analysis::block_facts::exception_arm_blocks(expr).is_none()
+            || self.threaded_locals_of(expr).is_none()
+        {
+            return Ok(None);
+        }
+        self.exception_producer_tuple_doc(expr).map(Some)
     }
 
     /// the real value to seed this construct's `StateAcc` scratch

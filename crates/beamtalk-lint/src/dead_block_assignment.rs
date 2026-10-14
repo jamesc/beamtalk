@@ -36,7 +36,7 @@
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
 //!   table does not thread (a `whileTrue:` condition, BT-3782; `eachWithIndex:` /
-//!   `do:separatedBy:` outside an actor, `tryDo:` until ADR 0131 Phase 4),
+//!   `do:separatedBy:` outside an actor),
 //!   which crashes or loses the write at runtime today. As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
@@ -198,8 +198,12 @@ impl BlockPosition<'_> {
         match self {
             BlockPosition::Value => false,
             BlockPosition::Receiver(selector) => table::is_state_threaded_block_receiver(selector),
+            // ADR 0131 Phase 4 (BT-3750): the block of `Result tryDo:` is
+            // threaded back by the exception producer, not by the shared
+            // table's inline arms.
             BlockPosition::Arg(selector, index) => {
                 table::is_state_threaded_block_arg(selector, index)
+                    || (index == 0 && table::is_try_do_selector(selector))
             }
         }
     }
@@ -947,6 +951,8 @@ sealed typed Value subclass: Foo
             ("[x := x + 1] value", Neither),
             ("[x := 1] on: Error do: [:e | x := 2]", Neither),
             ("[nil] ensure: [x := 2]", Neither),
+            // ADR 0131 Phase 4 (BT-3750): `tryDo:` is a local-threading producer.
+            ("Result tryDo: [x := x + 1. 1]", Neither),
             ("blk := [:t | t := 1. t]", Neither),
             // §6: a block value that reaches a send with no return channel.
             ("self customLoop: [x := x + 1]", CompileError),
@@ -978,8 +984,6 @@ sealed typed Value subclass: Foo
             ("[i := i + 1. i < 3] whileTrue: [nil]", Either),
             ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),
             ("#(1, 2) do: [:e | nil] separatedBy: [x := x + 1]", Either),
-            // Raises a type_error today (PIN-BUG BT-3743, ADR 0131 Phase 4).
-            ("Result tryDo: [x := x + 1. 1]", Either),
         ];
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,

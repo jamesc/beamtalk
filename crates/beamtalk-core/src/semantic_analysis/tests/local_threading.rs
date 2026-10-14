@@ -752,6 +752,65 @@ fn allow_set_repl_uses_its_own_row() {
 /// compile moves it out of the pending fixture (and its test into
 /// `adr0131local_rebind_test.bt`), which keeps this green; phase 5 (BT-3751)
 /// deletes the allow-set and with it the pending allow-set shapes.
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` as a local-threading producer
+// ---------------------------------------------------------------------------
+
+#[test]
+fn try_do_is_a_producer_in_every_position_of_every_method_context() {
+    for body in [
+        // statement, last expression, assignment value, operand
+        "Result tryDo: [t := t + 1. 1]\nt",
+        "Result tryDo: [t := t + 1. 1]",
+        "r := Result tryDo: [t := t + 1. 1]\n#[r isOk, t]",
+        "r := (Result tryDo: [t := t + 1. 1]) valueOr: 0\n#[r, t]",
+        "r := t + ((Result tryDo: [t := t + 1. 1]) valueOr: 0)\n#[r, t]",
+        // a write-only block, two locals, and a nested producer
+        "Result tryDo: [t := 5]\nt",
+        "Result tryDo: [t := t + 1. u := u + 1. 1]\n#[t, u]",
+        "Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]\nt",
+        // in the frames of other producers
+        "#(1, 2) do: [:k | Result tryDo: [t := t + k. 1]]\nt",
+        "(t < 3) ifTrue: [Result tryDo: [t := t + 1. 1]]\nt",
+        "[Result tryDo: [t := t + 1. 1]] on: Error do: [:e | 0]\nt",
+    ] {
+        let body = format!("u := 0\n{body}");
+        for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
+    // A `tryDo:` whose Tier 2 block reaches the arity-0 native raises, so
+    // wherever the producer does not lower it the write is a compile error:
+    // inside a closure, as the argument of a send that does not sequence its
+    // operands, and on a receiver other than the `Result` class.
+    for body in [
+        "CvA ap: [Result tryDo: [t := t + 1. 1]]\nt",
+        "blk := [Result tryDo: [t := t + 1. 1]]\nblk value\nt",
+        "r := Set tryDo: [t := t + 1. 1]\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                diags.iter().any(|d| d.severity == Severity::Error),
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
+    // The block is Tier 1 and reaches `'tryDo:'/1`: nothing to thread, nothing
+    // to reject, in a position that would reject a writing one.
+    let src = in_class("CvA ap: [Result tryDo: [1]]\nt");
+    assert!(adr0131_diagnostics(&src).is_empty());
+}
+
 #[test]
 fn adr0131_probe_matrix_pins() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");

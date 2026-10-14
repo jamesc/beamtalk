@@ -124,6 +124,9 @@ pub(crate) enum ConstructKind {
     Exception,
     /// `value`/`value:`… sent to a block literal.
     BlockValue,
+    /// `Result tryDo:` (ADR 0131 §5, Phase 4): a producer wherever
+    /// [`exception_producer_writes`] says so, and in no other position.
+    TryDo,
 }
 
 impl ConstructKind {
@@ -131,7 +134,7 @@ impl ConstructKind {
     /// `detect:ifNone:` send's `ifNone:` handler block writes an outer local
     /// (the case that fails today, s2), as opposed to only its search block.
     fn of(selector: &str, handler_writes: bool) -> Self {
-        use crate::state_threading_selectors::is_exception_selector;
+        use crate::state_threading_selectors::{is_exception_selector, is_try_do_selector};
         match selector {
             "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "repeat" => Self::Loop,
             "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
@@ -145,6 +148,7 @@ impl ConstructKind {
             "detect:ifNone:" if handler_writes => Self::DetectIfNone,
             "detect:ifNone:" => Self::DetectIfNoneSearch,
             s if is_exception_selector(s) => Self::Exception,
+            s if is_try_do_selector(s) => Self::TryDo,
             s if s.starts_with("value") => Self::BlockValue,
             _ => Self::ListOp,
         }
@@ -168,6 +172,7 @@ impl fmt::Display for ConstructKind {
             Self::AndOr => "`and:`/`or:`",
             Self::Exception => "exception handler",
             Self::BlockValue => "block evaluation",
+            Self::TryDo => "`tryDo:` block",
         })
     }
 }
@@ -214,6 +219,9 @@ impl Container {
             Loop => Self::LoopBody,
             CountedLoop => Self::CountedLoopBody,
             BlockValue => Self::EvaluatedBlock,
+            // A `tryDo:` block is a protected body: the block of a catch
+            // boundary, lowered like an `on:do:`'s (ADR 0131 Phase 4).
+            TryDo => Self::ProtectedBody,
             Do | KeyedDo | Enumeration => Self::DoBody,
             ListOp | Satisfy | DetectIfNone | DetectIfNoneSearch => Self::ListOpBody,
         }
@@ -224,7 +232,7 @@ impl fmt::Display for Container {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Arm => "a conditional arm",
-            Self::ProtectedBody => "a protected body (`on:do:`/`ensure:`)",
+            Self::ProtectedBody => "a protected body (`on:do:`/`ensure:`/`Result tryDo:`)",
             Self::Handler => "an exception handler or `ensure:` block",
             Self::LoopBody => "a loop",
             Self::CountedLoopBody => "a counted loop",
@@ -327,7 +335,7 @@ impl fmt::Display for Position {
 
 use ConstructKind::{
     AndOr, BlockValue, CountedLoop, DetectIfNone, DetectIfNoneSearch, Do, Enumeration, Exception,
-    IfNil, IfTrue, KeyedDo, ListOp, Loop, Satisfy,
+    IfNil, IfTrue, KeyedDo, ListOp, Loop, Satisfy, TryDo,
 };
 use Container::{
     Arm, CountedLoopBody, DoBody, EvaluatedBlock, Handler, ListOpBody, LoopBody, ProtectedBody,
@@ -1515,7 +1523,10 @@ impl<'d> Walker<'d> {
         // bindings map and is not shaped by it.
         let producer_shape =
             kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
-        if !actor_value_site && producer_shape && is_allowed(kind, position, self.context) {
+        if !actor_value_site
+            && producer_shape
+            && self.allowed_beyond_producers(kind, position, root_producer.is_some())
+        {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);
@@ -1543,6 +1554,35 @@ impl<'d> Walker<'d> {
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
+    }
+
+    /// Whether the allow-set accepts `kind` at `position` once the producer
+    /// checks of [`Self::check_construct`] have not (`root_producer`: the core
+    /// rule names it a producer at a method root or REPL site).
+    ///
+    /// `tryDo:` has no allow-set row and no statement position that works other
+    /// than as a producer (ADR 0131 Phase 4, BT-3750): a Tier 2 block reaching
+    /// the arity-0 native raises, so anything the producer checks did not
+    /// accept is rejected. The REPL root is the exception: it compiles a
+    /// `tryDo:` that is the statement or the whole value of an assignment to the
+    /// `{Value, Bindings}` tuple its assembler unpacks
+    /// (`repl_try_do_tier2_send`).
+    fn allowed_beyond_producers(
+        &self,
+        kind: ConstructKind,
+        position: Position,
+        root_producer: bool,
+    ) -> bool {
+        if kind != TryDo {
+            return is_allowed(kind, position, self.context);
+        }
+        root_producer
+            && self.context == Repl
+            && self.depth == 0
+            && matches!(
+                position,
+                Position::Statement | Position::AssignValue { nested: false }
+            )
     }
 
     /// The help text for a construct the Phase 0 check rejects at
