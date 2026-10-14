@@ -628,10 +628,15 @@ class_send_dispatch(ClassPid, Selector, Args) ->
                     Result
             end;
         {error, not_found} ->
-            ClassName = gen_server:call(ClassPid, class_name),
+            %% BT-3820: resolve name/module from the metadata ETS rows, not by
+            %% calling back into ClassPid. The `class_method_call` above already
+            %% waited for the class process; a second and third 5s-timeout
+            %% `gen_server:call` here re-queue behind whatever else the class
+            %% process is serving and time out when it is busy.
+            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
             %% ADR 0032 Phase 0: Try Class chain before raising does_not_understand.
             %% Class objects are instances of 'Class'; fall through to Class instance methods.
-            ModuleName = gen_server:call(ClassPid, module_name),
+            ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
             ClassSelf = #beamtalk_object{
                 class = beamtalk_class_registry:class_object_tag(ClassName),
                 class_mod = ModuleName,
