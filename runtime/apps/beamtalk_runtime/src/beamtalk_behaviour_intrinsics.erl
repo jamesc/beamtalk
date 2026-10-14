@@ -283,7 +283,7 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     InstanceSupers = walk_hierarchy(
         'Class',
         fun(CN, CPid, Acc) ->
-            Module = gen_server:call(CPid, module_name),
+            Module = beamtalk_object_class:module_name(CPid),
             Tag = beamtalk_class_registry:class_object_tag(CN),
             ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
             {cont, [ClassObj | Acc]}
@@ -298,7 +298,7 @@ classAllSuperclasses(Self) ->
     Supers = walk_hierarchy(
         SuperName,
         fun(CN, CPid, Acc) ->
-            Module = gen_server:call(CPid, module_name),
+            Module = beamtalk_object_class:module_name(CPid),
             Tag = beamtalk_class_registry:class_object_tag(CN),
             ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
             {cont, [ClassObj | Acc]}
@@ -788,7 +788,7 @@ classRemoveFromSystemByName(ClassName) ->
             ),
             beamtalk_error:raise(Error1);
         ClassPid ->
-            Module = gen_server:call(ClassPid, module_name),
+            Module = beamtalk_object_class:module_name(ClassPid),
             %% Safety: refuse to remove stdlib classes
             case is_stdlib_module_name(Module) of
                 true ->

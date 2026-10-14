@@ -2995,6 +2995,34 @@ put_method_reindexes_xref_test_() ->
 %% BT-3820: name/module lookups that must not queue behind a busy class
 %%====================================================================
 
+%% `module_name/1` logs what the class process is doing before re-raising a
+%% timeout; the diagnostics must never mask the original exit.
+module_name_timeout_diagnostics_reraise_original_exit_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {timeout, 30,
+                ?_test(begin
+                    ClassInfo = #{
+                        name => 'TimeoutDiagClass',
+                        module => timeout_diag_class,
+                        superclass => 'Object',
+                        instance_methods => #{},
+                        instance_variables => []
+                    },
+                    {ok, Pid} = beamtalk_object_class:start_link('TimeoutDiagClass', ClassInfo),
+                    ok = sys:suspend(Pid),
+                    try
+                        ?assertExit(
+                            {timeout, {gen_server, call, [Pid, module_name]}},
+                            beamtalk_object_class:module_name(Pid)
+                        )
+                    after
+                        ok = sys:resume(Pid)
+                    end
+                end)}
+        ]
+    end}.
+
 %% A class-object send of an inherited selector (`ProcessNavigation default
 %% isKindOf: ProcessNavigation` -> `includesBehaviour:`) falls through
 %% `beamtalk_class_dispatch:class_send_dispatch/3`'s `{error, not_found}`

@@ -420,7 +420,72 @@ from the process dictionary instead of gen_server:call to avoid calling_self.
 module_name(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_module);
 module_name(ClassPid) ->
-    gen_server:call(ClassPid, module_name).
+    call_with_timeout_diagnostics(ClassPid, module_name).
+
+-doc """
+`gen_server:call(ClassPid, Request)` that, on a timeout exit, first logs what
+the class process is doing (BT-3820 diagnostics).
+
+`ProcessNavigationTest testDefaultIsProcessNavigation` times out in CI on a 5s
+`module_name` call to a class process that is idle in every local run. The
+bare `{timeout, {gen_server, call, ...}}` exit says nothing about *why* the
+class process did not answer, so on timeout this logs its status, current
+function and stacktrace, mailbox length and head, and — if it is itself blocked
+in a `gen_server:call` — the same for the process it is waiting on (up to three
+hops), plus the caller's stacktrace. The exit is then re-raised unchanged.
+""".
+-spec call_with_timeout_diagnostics(pid(), term()) -> term().
+call_with_timeout_diagnostics(ClassPid, Request) ->
+    try
+        gen_server:call(ClassPid, Request)
+    catch
+        exit:{timeout, _} = Reason:Stack ->
+            Diagnostics = #{
+                msg => "class process call timed out",
+                request => Request,
+                class_pid => ClassPid,
+                caller => self(),
+                caller_stacktrace => Stack,
+                blocked_chain => timeout_blocked_chain(ClassPid, 3)
+            },
+            ?LOG_ERROR(Diagnostics#{domain => [beamtalk, runtime]}),
+            %% The test runner may not surface the node's logger output, so
+            %% also write to stderr (this path only runs on a 5s timeout).
+            io:format(standard_error, "~n[BT-3820] ~p~n", [Diagnostics]),
+            erlang:raise(exit, Reason, Stack)
+    end.
+
+-spec timeout_blocked_chain(pid(), non_neg_integer()) -> [term()].
+timeout_blocked_chain(_Pid, 0) ->
+    [];
+timeout_blocked_chain(Pid, Depth) ->
+    Keys = [
+        registered_name,
+        status,
+        current_function,
+        current_stacktrace,
+        message_queue_len,
+        reductions,
+        total_heap_size,
+        monitors,
+        messages
+    ],
+    case erlang:process_info(Pid, Keys) of
+        undefined ->
+            [{Pid, dead}];
+        Info0 ->
+            Info = [
+                case I of
+                    {messages, Ms} -> {messages, lists:sublist(Ms, 5)};
+                    _ -> I
+                end
+             || I <- Info0
+            ],
+            %% A process blocked in `gen_server:call` holds a monitor on its
+            %% target; follow those to see who the class process waits on.
+            Targets = [T || {process, T} <- proplists:get_value(monitors, Info, []), is_pid(T)],
+            [{Pid, Info} | lists:append([timeout_blocked_chain(T, Depth - 1) || T <- Targets])]
+    end.
 
 -doc """
 Get the module name, preferring a deadlock-safe metadata lookup.
