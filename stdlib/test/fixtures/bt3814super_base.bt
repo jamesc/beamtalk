@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3814: superclass of Bt3814SuperOperand.
+
+Counter subclass: Bt3814SuperBase
+
+  addAmount: n => self.value := self.value + n

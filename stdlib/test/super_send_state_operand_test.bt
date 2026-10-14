@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3814: `super addAmount: self bump` keeps the operand's state change.
+
+TestCase subclass: SuperSendStateOperandTest
+
+  testSuperSendLastStatementKeepsOperandState =>
+    a := Bt3814SuperOperand spawn
+    a superLast
+    self assert: a getCalls equals: 1
+    self assert: a getValue equals: 1
+
+  testSuperSendNonLastStatementKeepsOperandState =>
+    a := Bt3814SuperOperand spawn
+    self assert: a superNonLast equals: 3
+    self assert: a getCalls equals: 2
+    self assert: a getValue equals: 3
