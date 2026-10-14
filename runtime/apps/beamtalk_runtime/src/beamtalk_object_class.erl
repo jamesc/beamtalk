@@ -477,18 +477,18 @@ record_timeout_diagnostics(ClassPid, Request, Stack) ->
             caller_stacktrace => lists:sublist(Stack, 8),
             blocked_chain => timeout_blocked_chain(ClassPid, 3)
         },
-        ?LOG_ERROR(#{
-            msg => "class process call timed out",
-            diagnostics => Diagnostics,
-            domain => [beamtalk, runtime]
-        }),
-        Text = unicode:characters_to_binary(
+        Text0 = unicode:characters_to_binary(
             io_lib:format("~n  [BT-3820 class call timeout] ~P", [Diagnostics, 40])
         ),
-        put(
-            timeout_diagnostics_key(),
-            unicode:characters_to_binary(string:slice(Text, 0, 6000))
-        ),
+        %% Bounded to 6000 characters (graphemes, not bytes) on a valid UTF-8 boundary.
+        Text = unicode:characters_to_binary(string:slice(Text0, 0, 6000)),
+        %% Log the bounded text, never the raw map (mailbox messages, stack args).
+        ?LOG_ERROR(#{
+            msg => "class process call timed out",
+            diagnostics => Text,
+            domain => [beamtalk, runtime]
+        }),
+        put(timeout_diagnostics_key(), Text),
         ok
     catch
         _:_ -> ok

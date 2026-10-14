@@ -3023,7 +3023,7 @@ module_name_timeout_diagnostics_reraise_original_exit_test_() ->
                     end,
                     Diag = beamtalk_object_class:take_timeout_diagnostics(),
                     ?assert(is_binary(Diag)),
-                    ?assert(byte_size(Diag) =< 6000),
+                    ?assert(string:length(Diag) =< 6000),
                     ?assertNotEqual(nomatch, binary:match(Diag, <<"BT-3820 class call timeout">>)),
                     %% names the stalled class process and its mailbox
                     ?assertNotEqual(nomatch, binary:match(Diag, <<"message_queue_len">>)),
