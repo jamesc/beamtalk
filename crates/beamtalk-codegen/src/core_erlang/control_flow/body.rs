@@ -128,7 +128,11 @@ impl CoreErlangGenerator {
             else {
                 unreachable!("node is always a Threaded node, constructed just above")
             };
-            let backfilled_body = threaded_ir::backfill_opaque_version_gaps(real_body, frame);
+            let backfilled_body = threaded_ir::backfill_opaque_version_gaps(
+                real_body,
+                frame,
+                &[threaded_ir::VersionPrefix::State],
+            );
             let fixture = ThreadedStmt::Threaded {
                 mode,
                 frame,

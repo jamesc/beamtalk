@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3816: a parenthesized field assignment in value position inside a value-type
+// (TestCase) method answers the assigned value AND rebinds `Self` for every later
+// statement. The value-type method-body lowering used to compile such a statement as a
+// closed sub-expression, so the `Self` rebind was scoped away (`erlc`: unbound variable
+// 'Self1'). BT-3803 did the same for actors; see field_assignment_value_position_test.bt.
+
+TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
+  field: n = 0
+  field: m = 0
+
+  take: x => x
+
+  take: x with: y => x + y
+
+  lastValue => self take: (self.n := 9)
+
+  blockEarlyExit =>
+    [
+      self.n := 5
+      ^3
+    ] value
+    99
+
+  conditionalReturn =>
+    #(1) do: [:e | e]
+    ^((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]
+
+  testSendArgThenRead =>
+    r := self take: (self.n := 5)
+    self assert: r equals: 5
+    self assert: self.n equals: 5
+
+  testBinaryOperand =>
+    r := (self.n := 5) + 1
+    self assert: r equals: 6
+    self assert: self.n equals: 5
+
+  testTwoOperandsLeftToRight =>
+    self.n := 1
+    r := self take: (self.n := self.n + 1) with: (self.n := self.n * 10)
+    self assert: r equals: 22
+    self assert: self.n equals: 20
+
+  testOperandReadsEarlierWrite =>
+    r := self take: (self.n := 5) with: self.n
+    self assert: r equals: 10
+
+  testFieldWriteRhs =>
+    self.m := (self.n := 7)
+    self assert: self.m equals: 7
+    self assert: self.n equals: 7
+
+  testBetweenFieldWrites =>
+    self.m := 1
+    self take: (self.n := 4)
+    self.m := self.m + self.n
+    self assert: self.m equals: 5
+    self assert: self.n equals: 4
+
+  testStringInterpolation =>
+    s := "v={(self.n := 4)}"
+    self assert: s equals: "v=4"
+    self assert: self.n equals: 4
+
+  testListLiteralElement =>
+    xs := #(1, (self.n := 2), self.n)
+    self assert: xs equals: #(1, 2, 2)
+
+  testLastStatementValue => self assert: self lastValue equals: 9
+
+  testBlockValueBody =>
+    [
+      self.n := 5
+      self take: (self.m := 6)
+    ] value
+    self assert: self.n equals: 5
+    self assert: self.m equals: 6
+
+  testBlockValueWithArgument =>
+    [:x | self take: (self.n := x)] value: 3
+    self assert: self.n equals: 3
+
+  testBlockValueAnswersLastExpression =>
+    x := [
+      self.n := 5
+      7
+    ] value
+    self assert: x equals: 7
+    self assert: self.n equals: 5
+
+  testConditionalCondition =>
+    ((self.n := 5) > 3) ifTrue: [self.m := 1] ifFalse: [self.m := 2]
+    self assert: self.m equals: 1
+    self assert: self.n equals: 5
+
+  testLoopReceiver =>
+    (self.n := 3) timesRepeat: [self.m := self.m + 1]
+    self assert: self.m equals: 3
+    self assert: self.n equals: 3
+
+  testBlockValueEarlyReturnExitsTheMethod =>
+    self assert: self blockEarlyExit equals: 3
+    self assert: self.n equals: 0
+
+  testReturnedConditionalWithFieldWriteReceiver =>
+    self assert: self conditionalReturn equals: 1
+
+  testConstructNestedInBlockValueBody =>
+    c := true
+    [
+      self.n := 5
+      c ifTrue: [self.m := 9]
+      7
+    ] value
+    self assert: self.n equals: 5
+    self assert: self.m equals: 9

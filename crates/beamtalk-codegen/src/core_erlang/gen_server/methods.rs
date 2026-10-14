@@ -2576,7 +2576,11 @@ impl CoreErlangGenerator {
             && self
                 .conditional_producer_locals(expr.unwrap_parens())
                 .is_some();
-        if !direct && !conditional_statement && !self.statement_has_local_producer(expr) {
+        if !direct
+            && !conditional_statement
+            && !self.statement_has_local_producer(expr)
+            && !self.statement_has_value_type_producer(expr)
+        {
             return Ok(None);
         }
         let Some((var_name, value)) = assign else {

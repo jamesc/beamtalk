@@ -18,7 +18,7 @@
 //! `StateEffectEscapesExpression` from the closed cascade rendering) and compile through
 //! `erlc`.
 
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_compiles_through_erlc, codegen, erlc_available};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const HEADER: &str = "Actor subclass: FieldAssignProbe
@@ -313,39 +313,77 @@ const VT_POSITIONS: &[(&str, &str)] = &[
         "cascade_argument",
         "Object classBuilder name: #A; superclass: EXPR",
     ),
+    // A conditional whose receiver is EXPR, in value position.
+    (
+        "conditional_wrapping_arg",
+        "self take: (EXPR > 3 ifTrue: [1] ifFalse: [2])",
+    ),
+    // The conditional's arms write fields too: threaded or cleanly rejected, never lost.
+    (
+        "conditional_wrapping_arg_with_field_arms",
+        "self take: (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0])",
+    ),
+    (
+        "conditional_wrapping_assigned_with_field_arms",
+        "c := (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]). c",
+    ),
+    (
+        "assigned_loop_receiver",
+        "c := EXPR timesRepeat: [self.m := self.m + 1]. c",
+    ),
+    (
+        "conditional_wrapping_field_rhs",
+        "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
+    ),
 ];
 
-/// Enclosing shapes. A value-type field write inside a conditional arm or loop body is either
-/// threaded or rejected with a structured diagnostic (`ValueSelf*` errors); both are fine.
-/// What is not fine is an `erlc` failure, a debug-verifier failure or any other error.
-const VT_SHAPES: &[(&str, &str)] = &[
-    ("then_read", "    STMT.\n    self.n\n"),
-    ("last_statement", "    STMT\n"),
+/// Positions whose own construct writes fields in a conditional arm or loop body, which the
+/// value-type lowering rejects with a structured diagnostic instead of threading (BT-3821).
+const VT_REJECTABLE_POSITIONS: &[&str] = &[
+    "conditional_wrapping_arg_with_field_arms",
+    "conditional_wrapping_assigned_with_field_arms",
+    "assigned_loop_receiver",
+];
+
+/// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
+/// diagnostic instead of compiling. A value-type field write inside a conditional arm or loop
+/// body is either threaded or rejected (`ValueSelf*` errors); both are fine. The statement-level
+/// shapes (`may_reject == false`) have no such escape: every case must compile. What is never
+/// fine is an `erlc` failure, a verifier failure or any other error.
+const VT_SHAPES: &[(&str, &str, bool)] = &[
+    ("then_read", "    STMT.\n    self.n\n", false),
+    ("last_statement", "    STMT\n", false),
     (
         "between_field_writes",
         "    self.m := 1.\n    STMT.\n    self.m := self.m + 1.\n    self.n\n",
+        false,
     ),
     (
         "conditional_arm",
         "    self.m > 5 ifTrue: [STMT] ifFalse: [self.m := 1].\n    self.n\n",
+        true,
     ),
     (
         "conditional_condition",
         "    ((STMT) > 3) ifTrue: [self.m := 1].\n    self.n\n",
+        false,
     ),
     (
         "loop_body",
         "    i := 0.\n    [i < 2] whileTrue: [STMT. i := i + 1].\n    self.n\n",
+        true,
     ),
     (
         "do_block_body",
         "    #(1, 2) do: [:e | STMT].\n    self.n\n",
+        true,
     ),
     (
         "on_do_protected",
         "    [STMT] on: Error do: [:e | 0].\n    self.n\n",
+        true,
     ),
-    ("block_value", "    [STMT] value.\n    self.n\n"),
+    ("block_value", "    [STMT] value.\n    self.n\n", false),
 ];
 
 enum VtOutcome {
@@ -355,12 +393,18 @@ enum VtOutcome {
     Fails(String),
 }
 
+/// Compiles `src` as a value type and classifies the result.
+///
+/// A `ThreadedIr` verifier finding is a failure in every build profile: a debug build panics in
+/// `report_threaded_ir_verify_errors` (caught here), a release build only attaches an
+/// `internal:` warning, which `generate_module_surfacing_verifier` returns and this reports.
+/// `erlc` rejection is a failure only when `erlc` exists (see [`erlc_available`]).
 fn vt_outcome(src: &str) -> VtOutcome {
-    use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module};
+    use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let generated = catch_unwind(AssertUnwindSafe(|| {
-        generate_module(&module, CodegenOptions::new("test"))
+        generate_module_surfacing_verifier(&module, CodegenOptions::new("test"))
     }));
     match generated {
         Err(_) => VtOutcome::Fails("debug ThreadedIr verifier / codegen panic".to_string()),
@@ -370,7 +414,15 @@ fn vt_outcome(src: &str) -> VtOutcome {
             | CodeGenError::FieldAssignmentInUnsupportedBlock { .. },
         )) => VtOutcome::RejectedCleanly,
         Ok(Err(other)) => VtOutcome::Fails(format!("codegen error: {other:?}")),
-        Ok(Ok(code)) => {
+        Ok(Ok((_, verifier))) if !verifier.is_empty() => VtOutcome::Fails(format!(
+            "ThreadedIr verifier diagnostic(s): {}",
+            verifier
+                .iter()
+                .map(|d| d.message.to_string())
+                .collect::<Vec<_>>()
+                .join("; ")
+        )),
+        Ok(Ok((code, _))) => {
             if catch_unwind(AssertUnwindSafe(|| {
                 assert_compiles_through_erlc("test", &code);
             }))
@@ -384,90 +436,43 @@ fn vt_outcome(src: &str) -> VtOutcome {
     }
 }
 
-/// PIN-BUG (BT-3816): value-type field assignment in value position is not threaded by the
-/// value-type method-body lowering (`emit_vt_body_expr`), so these `shape / position` cases fail
-/// `erlc` (unbound `Self{N}`) or the debug `ThreadedIr` verifier. The corpus asserts the failing
-/// set EQUALS this list: a fix for BT-3816 makes every pin fail the equality, and flips them by
-/// emptying the list.
-const VT_PINNED_FAILURES: &[&str] = &[
-    "then_read / self_send_arg",
-    "then_read / binary_left",
-    "then_read / binary_right",
-    "then_read / unary_receiver",
-    "then_read / two_keyword_args",
-    "then_read / keyword_arg_then_state_read",
-    "then_read / list_literal_element",
-    "then_read / string_interpolation",
-    "then_read / assigned_to_local",
-    "then_read / assigned_to_field",
-    "then_read / nested_field_assignment",
-    "then_read / returned",
-    "then_read / cascade_argument",
-    "last_statement / string_interpolation",
-    "last_statement / assigned_to_local",
-    "last_statement / assigned_to_field",
-    "last_statement / nested_field_assignment",
-    "last_statement / returned",
-    "last_statement / cascade_argument",
-    "between_field_writes / self_send_arg",
-    "between_field_writes / binary_left",
-    "between_field_writes / binary_right",
-    "between_field_writes / unary_receiver",
-    "between_field_writes / two_keyword_args",
-    "between_field_writes / keyword_arg_then_state_read",
-    "between_field_writes / list_literal_element",
-    "between_field_writes / string_interpolation",
-    "between_field_writes / assigned_to_local",
-    "between_field_writes / assigned_to_field",
-    "between_field_writes / nested_field_assignment",
-    "between_field_writes / returned",
-    "between_field_writes / cascade_argument",
-    "conditional_condition / self_send_arg",
-    "conditional_condition / binary_left",
-    "conditional_condition / binary_right",
-    "conditional_condition / unary_receiver",
-    "conditional_condition / two_keyword_args",
-    "conditional_condition / keyword_arg_then_state_read",
-    "conditional_condition / list_literal_element",
-    "conditional_condition / string_interpolation",
-    "conditional_condition / assigned_to_local",
-    "conditional_condition / assigned_to_field",
-    "conditional_condition / nested_field_assignment",
-    "conditional_condition / returned",
-    "conditional_condition / cascade_argument",
-    "block_value / self_send_arg",
-    "block_value / binary_left",
-    "block_value / binary_right",
-    "block_value / unary_receiver",
-    "block_value / two_keyword_args",
-    "block_value / keyword_arg_then_state_read",
-    "block_value / list_literal_element",
-    "block_value / string_interpolation",
-    "block_value / assigned_to_local",
-    "block_value / assigned_to_field",
-    "block_value / nested_field_assignment",
-    "block_value / returned",
-    "block_value / cascade_argument",
-];
+/// PIN-BUG list: `shape / position` cases that fail today, each citing an open issue. The corpus
+/// asserts the failing set EQUALS this list, so a fix flips every pin it covers (the equality
+/// fails until the fixed entries are removed). BT-3816 flipped all of its pins; empty.
+const VT_PINNED_FAILURES: &[&str] = &[];
 
 #[test]
 fn value_type_field_assignment_value_position_corpus() {
     let mut failing: Vec<String> = Vec::new();
     let mut details: Vec<String> = Vec::new();
     let mut compiled = 0usize;
-    for (shape_name, shape) in VT_SHAPES {
+    // Statement-level shapes cannot be rejected: every unpinned case of one must compile.
+    let mut must_compile = 0usize;
+    let mut must_compile_compiled = 0usize;
+    for (shape_name, shape, shape_may_reject) in VT_SHAPES {
         for (i, (position_name, position)) in VT_POSITIONS.iter().enumerate() {
             let stmt = position.replace("EXPR", "(self.n := 5)");
             let src = format!(
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
+            let may_reject = *shape_may_reject || VT_REJECTABLE_POSITIONS.contains(position_name);
+            let name = format!("{shape_name} / {position_name}");
+            let pinned = VT_PINNED_FAILURES.contains(&name.as_str());
+            if !may_reject && !pinned {
+                must_compile += 1;
+            }
             match vt_outcome(&src) {
-                VtOutcome::Compiles => compiled += 1,
+                VtOutcome::Compiles => {
+                    compiled += 1;
+                    if !may_reject && !pinned {
+                        must_compile_compiled += 1;
+                    }
+                }
                 VtOutcome::RejectedCleanly => {}
                 VtOutcome::Fails(why) => {
-                    failing.push(format!("{shape_name} / {position_name}"));
-                    details.push(format!("{shape_name} / {position_name}: {why}\n{src}"));
+                    failing.push(name.clone());
+                    details.push(format!("{name}: {why}\n{src}"));
                 }
             }
         }
@@ -477,19 +482,84 @@ fn value_type_field_assignment_value_position_corpus() {
         .map(|s| (*s).to_string())
         .collect();
     let unexpected: Vec<&String> = failing.iter().filter(|f| !pinned.contains(f)).collect();
-    let fixed: Vec<&String> = pinned.iter().filter(|p| !failing.contains(p)).collect();
     assert!(
         unexpected.is_empty(),
         "new value-type field-assignment failure(s) not pinned to an open issue: {unexpected:?}\n\n{}",
         details.join("\n\n")
     );
-    assert!(
-        fixed.is_empty(),
-        "BT-3816 pin(s) now pass; remove them from VT_PINNED_FAILURES: {fixed:?}"
+    // Without `erlc` a case that only fails at `erlc` reports as compiling, so a pin may look
+    // fixed when it is not: the pin-equality half is only meaningful with `erlc`.
+    if erlc_available() {
+        let fixed: Vec<&String> = pinned.iter().filter(|p| !failing.contains(p)).collect();
+        assert!(
+            fixed.is_empty(),
+            "pin(s) now pass; remove them from VT_PINNED_FAILURES: {fixed:?}"
+        );
+    }
+    // The floor is derived, not a magic number: a shape that cannot be rejected must compile
+    // every unpinned case, so a regression to blanket rejection cannot hide behind the
+    // `RejectedCleanly` allowance, and at least one case must compile at all.
+    assert_eq!(
+        must_compile_compiled, must_compile,
+        "{must_compile_compiled} of {must_compile} unpinned statement-level value-type cases compiled; they cannot be rejected"
     );
-    // The unpinned cases are compiled or rejected with a structured diagnostic; pin that some compile (the last-statement shapes).
     assert!(
-        compiled >= 7,
-        "only {compiled} value-type cases compiled; the unpinned ones must"
+        compiled >= must_compile && compiled > 0,
+        "only {compiled} value-type cases compiled"
     );
+}
+
+/// The BT-3816 repro verbatim: the `Self1` rebind of `(self.n := 5)` must reach the read after it.
+#[test]
+fn value_type_field_assignment_repro_threads_self_to_the_read() {
+    let code = codegen(
+        "TestCase subclass: P
+  field: n = 0
+  take: x -> Integer => x
+  probe =>
+    self take: (self.n := 5).
+    self.n
+",
+    );
+    assert_compiles_through_erlc("test", &code);
+    assert!(
+        code.contains("call 'maps':'get'('n', Self1)"),
+        "the read after the write must see the rebound Self:\n{code}"
+    );
+}
+
+/// Value-type statement shapes beyond the corpus's 13 positions: a field assignment as an operand
+/// of a threading construct (conditional condition, loop receiver), an inlined block value with
+/// several statements / arguments / a captured local, a destructure value, and last position.
+#[test]
+fn value_type_field_assignment_in_construct_operands_and_block_values_compiles() {
+    let methods = [
+        "[self.m := 1. self take: (self.n := 5)] value.\n    self.n + self.m",
+        "[:x | self take: (self.n := x)] value: 3.\n    self.n",
+        "x := [self.n := 5. 7] value.\n    x + self.n",
+        "#(1, 2) do: [:e | ^ e].\n    self take: (self.n := 5).\n    self.n",
+        "self take: (self.n := 5)",
+        "^ [self.n := 5. self.n] value",
+        "[self.n := 5] value",
+        "c := 0.\n    [c := c + 1. self take: (self.n := c)] value.\n    c + self.n",
+        "#[a, b] := #[(self.n := 5), 2].\n    a + self.n",
+        "((self.n := 5) > 3) ifTrue: [self.m := 1] ifFalse: [self.m := 2].\n    self.m + self.n",
+        "(self.n := 5) timesRepeat: [self.m := self.m + 1].\n    self.m",
+        // A `^` value whose receiver holds a field write, in a method with a non-local return.
+        "#(1) do: [:e | ^ e].\n    ^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
+        "^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
+        // A `^` inside a spliced block body.
+        "[self.m := 1. ((self.n := 5) > 3) ifTrue: [self.m := 2]. 7] value.\n    self.n",
+        "[self.n := 5. ^ 3] value.\n    self.n",
+        "#(1) do: [:e | ^ e].\n    [self.n := 5. ^ 3] value.\n    self.n",
+        // A construct nested in a spliced block body keeps its open-chain builder.
+        "c := true.\n    [self.n := 5. c ifTrue: [self.m := 9]. 7] value.\n    self.n + self.m",
+    ];
+    for (i, body) in methods.iter().enumerate() {
+        let src = format!("{VT_HEADER}\n  probe{i} =>\n    {body}\n");
+        assert!(
+            matches!(vt_outcome(&src), VtOutcome::Compiles),
+            "value-type case {i} must compile:\n{src}"
+        );
+    }
 }
