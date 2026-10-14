@@ -79,6 +79,24 @@ sync(_) ->
     _ = sys:get_state(beamtalk_object_watch),
     ok.
 
+%% Poll (bounded) until `Actor` leaves the watched table. Death cleanup is
+%% eventually consistent (BT-3818): the server removes the entry only after it
+%% handles the monitor 'DOWN', and a sys:get_state/1 round trip does not order
+%% that signal (different senders), so asserting right after the death races.
+wait_unwatched(Actor) ->
+    wait_unwatched(Actor, 200).
+
+wait_unwatched(Actor, 0) ->
+    ?assertNot(beamtalk_object_watch:is_watched(Actor));
+wait_unwatched(Actor, N) ->
+    case beamtalk_object_watch:is_watched(Actor) of
+        false ->
+            ok;
+        true ->
+            timer:sleep(10),
+            wait_unwatched(Actor, N - 1)
+    end.
+
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -158,9 +176,8 @@ subscriber_death_cleans_up_test_() ->
             ?assert(beamtalk_object_watch:is_watched(Actor)),
             Sub ! die,
             wait_dead(Sub),
-            ok = sync(ok),
-            %% Last subscriber gone → pid no longer watched.
-            ?assertNot(beamtalk_object_watch:is_watched(Actor)),
+            %% Last subscriber gone → pid no longer watched (once the DOWN lands).
+            wait_unwatched(Actor),
             stop_dummy(Actor)
         end)
     end}.
@@ -173,8 +190,7 @@ watched_actor_death_cleans_up_test_() ->
             ok = sync(ok),
             ?assert(beamtalk_object_watch:is_watched(Actor)),
             stop_dummy(Actor),
-            ok = sync(ok),
-            ?assertNot(beamtalk_object_watch:is_watched(Actor)),
+            wait_unwatched(Actor),
             ?assertNot(lists:member(Actor, beamtalk_object_watch:watched_pids()))
         end)
     end}.

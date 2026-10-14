@@ -36,47 +36,7 @@ setup() ->
     %% the stdlib `Counter` loaded by the dispatch/actor tests, which the
     %% still-running beamtalk_class_monitor watches) must not leak into this
     %% module. Stop them exactly as teardown does.
-    stop_pg_class_processes(),
-    ok.
-
-%% Stop every live class process in the `beamtalk_classes` pg group.
-%%
-%% BT-3810: a class registered through `beamtalk_object_class:start/2` is
-%% watched by `beamtalk_class_monitor` whenever the runtime supervision tree is
-%% up (other test modules leave it running). Killing such a class makes the
-%% monitor eagerly restart it from `beamtalk_class_metadata`, racing the
-%% metadata cleanup in teardown/1: when the monitor wins, a fresh class process
-%% (e.g. 'Counter') is resurrected after teardown and a later fixture's
-%% `start_link/2` fails with `{error, {already_started, Pid}}`. Unwatching
-%% first turns the kill into a deliberate stop, so nothing is revived.
-stop_pg_class_processes() ->
-    Members =
-        try
-            pg:get_members(beamtalk_classes)
-        catch
-            _:_ -> []
-        end,
-    lists:foreach(fun stop_class_process/1, Members).
-
-stop_class_process(Pid) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            case beamtalk_class_registry:class_name_for_pid(Pid) of
-                {ok, Name} -> ok = beamtalk_class_monitor:unwatch(Name);
-                not_found -> ok
-            end,
-            MRef = monitor(process, Pid),
-            exit(Pid, kill),
-            receive
-                {'DOWN', MRef, process, Pid, _} -> ok
-            after 1000 ->
-                %% Timeout waiting for process to die
-                ok
-            end;
-        false ->
-            ok
-    end;
-stop_class_process(_) ->
+    beamtalk_test_class_teardown:stop_pg_class_processes(),
     ok.
 
 teardown(_) ->
@@ -88,7 +48,7 @@ teardown(_) ->
     end,
     %% Terminate each class process and wait for them to die
     %% gen_server will auto-unregister names when processes terminate
-    stop_pg_class_processes(),
+    beamtalk_test_class_teardown:stop_pg_class_processes(),
 
     %% Force unregister any stragglers that didn't auto-unregister
     %% (shouldn't be necessary with gen_server, but defensive cleanup)
@@ -250,7 +210,7 @@ pg_group_membership_test_() ->
 %% BT-3810 regression guard: stopping a class that `beamtalk_class_monitor` is
 %% watching (every class started via `start/2` while the runtime tree is up)
 %% must not let the monitor resurrect it. The class's ETS metadata is left in
-%% place on purpose, so without the unwatch in stop_class_process/1 the
+%% place on purpose, so without the unwatch in beamtalk_test_class_teardown:stop_class_process/1 the
 %% monitor's eager restart succeeds and the class reappears under its
 %% registered name, which is how 'Counter' leaked into methods_test_/0.
 stopped_watched_class_is_not_resurrected_test_() ->
@@ -273,7 +233,7 @@ stopped_watched_class_is_not_resurrected_test_() ->
                     },
                     {ok, Pid} = beamtalk_object_class:start('BT3810GuardClass', ClassInfo),
                     ?assert(is_process_alive(Pid)),
-                    stop_pg_class_processes(),
+                    beamtalk_test_class_teardown:stop_pg_class_processes(),
                     ?assertNot(is_process_alive(Pid)),
                     %% Give an (erroneous) eager restart ample time to land.
                     timer:sleep(200),

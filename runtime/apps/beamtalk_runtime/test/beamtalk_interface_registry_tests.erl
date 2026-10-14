@@ -87,32 +87,9 @@ ensure_class_started(ClassName, ClassInfo) ->
     end.
 
 cleanup_test_classes() ->
-    Members =
-        try
-            pg:get_members(beamtalk_classes)
-        catch
-            _:_ -> []
-        end,
-    lists:foreach(
-        fun
-            (Pid) when is_pid(Pid) ->
-                case is_process_alive(Pid) of
-                    true ->
-                        MRef = monitor(process, Pid),
-                        exit(Pid, kill),
-                        receive
-                            {'DOWN', MRef, process, Pid, _} -> ok
-                        after 1000 ->
-                            ok
-                        end;
-                    false ->
-                        ok
-                end;
-            (_) ->
-                ok
-        end,
-        Members
-    ),
+    %% BT-3815: unwatch before killing so beamtalk_class_monitor cannot
+    %% resurrect these classes mid-teardown.
+    beamtalk_test_class_teardown:stop_pg_class_processes(),
     lists:foreach(
         fun(Name) ->
             try

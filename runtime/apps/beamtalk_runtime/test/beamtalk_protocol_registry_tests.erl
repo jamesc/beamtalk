@@ -62,21 +62,6 @@ start_class_with_ping(ClassName) ->
     },
     beamtalk_object_class:start(ClassName, ClassInfo).
 
--doc "Kill a class process and wait for it to fully exit (name auto-unregisters).".
--spec stop_class_process(pid()) -> ok.
-stop_class_process(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            MRef = monitor(process, Pid),
-            exit(Pid, kill),
-            receive
-                {'DOWN', MRef, process, Pid, _} -> ok
-            after 1000 -> ok
-            end;
-        false ->
-            ok
-    end.
-
 %%% ============================================================================
 %%% Registration Tests
 %%% ============================================================================
@@ -569,7 +554,7 @@ conforms_to_caches_result_across_process_death_test() ->
     }),
     {ok, Pid} = start_class_with_ping('BT3222CacheHitClass'),
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222CacheHitClass', 'BT3222PingProto')),
-    stop_class_process(Pid),
+    beamtalk_test_class_teardown:stop_class_process(Pid),
     %% The class process is gone; a fresh walk would fail — the cache must
     %% still answer `true`.
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222CacheHitClass', 'BT3222PingProto')).
@@ -591,7 +576,7 @@ conforms_to_invalidated_by_protocol_registration_test() ->
     ?assert(
         beamtalk_protocol_registry:conforms_to('BT3222ProtoRegClass', 'BT3222LatePingProto')
     ),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc "unregister_protocol/1 must invalidate a stale cached `true`.".
 conforms_to_invalidated_by_unregister_protocol_test() ->
@@ -607,7 +592,7 @@ conforms_to_invalidated_by_unregister_protocol_test() ->
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222UnregClass', 'BT3222UnregProto')),
     ok = beamtalk_protocol_registry:unregister_protocol(bt3222_unreg_proto_mod),
     ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222UnregClass', 'BT3222UnregProto')),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc """
 Class registration (`beamtalk_object_class:init/1`) must invalidate a stale
@@ -629,7 +614,7 @@ conforms_to_invalidated_by_class_registration_test() ->
     ?assert(
         beamtalk_protocol_registry:conforms_to('BT3222RegLaterClass', 'BT3222RegLaterProto')
     ),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc """
 Class re-registration / hot reload (`{update_class, _}`) must invalidate a
@@ -659,7 +644,7 @@ conforms_to_invalidated_by_update_class_test() ->
     ?assert(
         beamtalk_protocol_registry:conforms_to('BT3222HotReloadClass', 'BT3222HotReloadProto')
     ),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc "put_method/4 (instance-side hot patch) must invalidate a stale cached `false`.".
 conforms_to_invalidated_by_put_method_test() ->
@@ -683,7 +668,7 @@ conforms_to_invalidated_by_put_method_test() ->
     ?assert(
         beamtalk_protocol_registry:conforms_to('BT3222PutMethodClass', 'BT3222PutMethodProto')
     ),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc "put_class_method/4 (class-side hot patch) must invalidate a stale cached `false`.".
 conforms_to_invalidated_by_put_class_method_test() ->
@@ -714,7 +699,7 @@ conforms_to_invalidated_by_put_class_method_test() ->
             'BT3222PutClassMethodClass', 'BT3222PutClassMethodProto'
         )
     ),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc """
 Class removal (`beamtalk_class_lifecycle:class_removed/2`, the single
@@ -734,7 +719,7 @@ conforms_to_invalidated_by_class_removal_test() ->
     }),
     {ok, Pid} = start_class_with_ping('BT3222RemovalClass'),
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')),
-    stop_class_process(Pid),
+    beamtalk_test_class_teardown:stop_class_process(Pid),
     %% Not yet flushed — still cached `true`.
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')),
     ok = beamtalk_class_lifecycle:class_removed('BT3222RemovalClass', bt3222_removal_class_mod),
@@ -783,7 +768,7 @@ conforms_to_ignores_entry_stamped_with_stale_generation_test() ->
     %% A stale-generation entry must never be returned — conforms_to/2 must
     %% recompute and see the true, current answer.
     ?assert(beamtalk_protocol_registry:conforms_to('BT3222RaceClass', 'BT3222RaceProto')),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc "invalidate_conforms_cache/0 is a no-op (never raises) when the cache table doesn't exist.".
 invalidate_conforms_cache_before_init_test() ->
@@ -888,7 +873,7 @@ conforms_to_requires_provided_methods_test() ->
     %% Only implements the required selector, not the provided one.
     {ok, Pid} = start_class_with_ping('BT3592OnlyRequired'),
     ?assertNot(beamtalk_protocol_registry:conforms_to('BT3592OnlyRequired', 'BT3592Trait')),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 conforms_to_true_when_provided_methods_also_satisfied_test() ->
     rt_setup(),
@@ -909,7 +894,7 @@ conforms_to_true_when_provided_methods_also_satisfied_test() ->
     },
     {ok, Pid} = beamtalk_object_class:start('BT3592BothClass', ClassInfo),
     ?assert(beamtalk_protocol_registry:conforms_to('BT3592BothClass', 'BT3592Trait2')),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 %%% ============================================================================
 %%% Users index (ADR 0127 §12): register_uses/2, unregister_uses/1,
@@ -1028,7 +1013,7 @@ class_start_registers_uses_from_class_info_test() ->
         ['BT3592ClassInfoUses'],
         beamtalk_protocol_registry:users_of('BT3592UsesFixtureProto')
     ),
-    stop_class_process(Pid),
+    beamtalk_test_class_teardown:stop_class_process(Pid),
     %% Class removal must also purge the users index — exercises
     %% beamtalk_class_lifecycle:purge_uses_index/1's wiring end to end.
     ok = beamtalk_class_lifecycle:class_removed(
@@ -1080,7 +1065,7 @@ class_objects_resolve_registered_classes_test() ->
         length(beamtalk_protocol_registry:conforming_classes('BT3627Conform')),
         length(Objs)
     ),
-    stop_class_process(Pid),
+    beamtalk_test_class_teardown:stop_class_process(Pid),
     ok = beamtalk_class_lifecycle:class_removed('BT3627UserClass', bt3627_user_class_mod),
     ?assertEqual([], beamtalk_protocol_registry:user_class_objects('BT3627Proto')).
 
@@ -1094,7 +1079,7 @@ class_start_without_uses_key_registers_empty_test() ->
     rt_setup(),
     {ok, Pid} = start_class_with_ping('BT3592ClassInfoNoUses'),
     ?assertEqual([], beamtalk_protocol_registry:used_protocols('BT3592ClassInfoNoUses')),
-    stop_class_process(Pid).
+    beamtalk_test_class_teardown:stop_class_process(Pid).
 
 %%% ============================================================================
 %%% Registration-shape conformance (ADR 0127 §10, BT-3625)
