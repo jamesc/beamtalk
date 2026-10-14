@@ -283,7 +283,7 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     InstanceSupers = walk_hierarchy(
         'Class',
         fun(CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             Tag = beamtalk_class_registry:class_object_tag(CN),
             ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
             {cont, [ClassObj | Acc]}
@@ -298,7 +298,7 @@ classAllSuperclasses(Self) ->
     Supers = walk_hierarchy(
         SuperName,
         fun(CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             Tag = beamtalk_class_registry:class_object_tag(CN),
             ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
             {cont, [ClassObj | Acc]}

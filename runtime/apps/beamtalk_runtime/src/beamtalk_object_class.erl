@@ -52,6 +52,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_name_safe/1,
     module_name/1,
     module_name_safe/1,
+    take_timeout_diagnostics/0,
     superclass_safe/1,
     class_send/3,
     local_call/3,
@@ -423,16 +424,25 @@ module_name(ClassPid) ->
     call_with_timeout_diagnostics(ClassPid, module_name).
 
 -doc """
-`gen_server:call(ClassPid, Request)` that, on a timeout exit, first logs what
-the class process is doing (BT-3820 diagnostics).
+`gen_server:call(ClassPid, Request)` that, on a timeout exit, records what the
+class process is doing before re-raising the original exit unchanged.
 
-`ProcessNavigationTest testDefaultIsProcessNavigation` times out in CI on a 5s
-`module_name` call to a class process that is idle in every local run. The
-bare `{timeout, {gen_server, call, ...}}` exit says nothing about *why* the
-class process did not answer, so on timeout this logs its status, current
-function and stacktrace, mailbox length and head, and — if it is itself blocked
-in a `gen_server:call` — the same for the process it is waiting on (up to three
-hops), plus the caller's stacktrace. The exit is then re-raised unchanged.
+TODO(BT-3820): temporary diagnostics. `ProcessNavigationTest
+testDefaultIsProcessNavigation` times out in CI on a 5s `module_name` call to a
+class process that is idle in every local run; the bare `{timeout, {gen_server,
+call, ...}}` exit says nothing about *why* it did not answer. Remove once the
+stall is understood.
+
+The dump is logged (`?LOG_ERROR`) and also stashed in the caller's process
+dictionary under `timeout_diagnostics_key/0`, because the BUnit runner
+(`beamtalk test`) captures the node's stdout/stderr and shows neither; the
+runner's failure formatter (`beamtalk_test_case:format_test_error/3`) appends
+`take_timeout_diagnostics/0` to the failure message so it reaches the job log.
+
+Introspection is best-effort and can never mask the original exit: only local
+pids are inspected, every `process_info` call is guarded, and the class
+process's mailbox is never copied wholesale (length plus at most 3 truncated
+messages, and only when the queue is short).
 """.
 -spec call_with_timeout_diagnostics(pid(), term()) -> term().
 call_with_timeout_diagnostics(ClassPid, Request) ->
@@ -440,51 +450,94 @@ call_with_timeout_diagnostics(ClassPid, Request) ->
         gen_server:call(ClassPid, Request)
     catch
         exit:{timeout, _} = Reason:Stack ->
-            Diagnostics = #{
-                msg => "class process call timed out",
-                request => Request,
-                class_pid => ClassPid,
-                caller => self(),
-                caller_stacktrace => Stack,
-                blocked_chain => timeout_blocked_chain(ClassPid, 3)
-            },
-            ?LOG_ERROR(Diagnostics#{domain => [beamtalk, runtime]}),
-            %% The test runner may not surface the node's logger output, so
-            %% also write to stderr (this path only runs on a 5s timeout).
-            io:format(standard_error, "~n[BT-3820] ~p~n", [Diagnostics]),
+            record_timeout_diagnostics(ClassPid, Request, Stack),
             erlang:raise(exit, Reason, Stack)
     end.
 
--spec timeout_blocked_chain(pid(), non_neg_integer()) -> [term()].
+-doc "Process-dictionary key holding the last class-call timeout dump (BT-3820).".
+-spec timeout_diagnostics_key() -> atom().
+timeout_diagnostics_key() -> '$beamtalk_class_call_timeout_diagnostics'.
+
+-doc """
+Return and clear the timeout dump recorded by the calling process, or
+`undefined` (TODO(BT-3820): remove with the diagnostics).
+""".
+-spec take_timeout_diagnostics() -> binary() | undefined.
+take_timeout_diagnostics() ->
+    erase(timeout_diagnostics_key()).
+
+-spec record_timeout_diagnostics(pid(), term(), list()) -> ok.
+record_timeout_diagnostics(ClassPid, Request, Stack) ->
+    try
+        Diagnostics = #{
+            request => Request,
+            class_pid => ClassPid,
+            caller => self(),
+            caller_stacktrace => lists:sublist(Stack, 8),
+            blocked_chain => timeout_blocked_chain(ClassPid, 3)
+        },
+        ?LOG_ERROR(#{
+            msg => "class process call timed out",
+            diagnostics => Diagnostics,
+            domain => [beamtalk, runtime]
+        }),
+        Text = unicode:characters_to_binary(
+            io_lib:format("~n  [BT-3820 class call timeout] ~P", [Diagnostics, 40])
+        ),
+        put(timeout_diagnostics_key(), binary:part(Text, 0, min(byte_size(Text), 6000))),
+        ok
+    catch
+        _:_ -> ok
+    end.
+
+-spec timeout_blocked_chain(term(), non_neg_integer()) -> [term()].
 timeout_blocked_chain(_Pid, 0) ->
     [];
-timeout_blocked_chain(Pid, Depth) ->
-    Keys = [
-        registered_name,
-        status,
-        current_function,
-        current_stacktrace,
-        message_queue_len,
-        reductions,
-        total_heap_size,
-        monitors,
-        messages
-    ],
-    case erlang:process_info(Pid, Keys) of
+timeout_blocked_chain(Pid, Depth) when is_pid(Pid), node(Pid) =:= node() ->
+    case
+        safe_process_info(Pid, [
+            registered_name,
+            status,
+            current_function,
+            current_stacktrace,
+            message_queue_len,
+            reductions,
+            total_heap_size,
+            monitors
+        ])
+    of
         undefined ->
-            [{Pid, dead}];
-        Info0 ->
-            Info = [
-                case I of
-                    {messages, Ms} -> {messages, lists:sublist(Ms, 5)};
-                    _ -> I
-                end
-             || I <- Info0
-            ],
-            %% A process blocked in `gen_server:call` holds a monitor on its
-            %% target; follow those to see who the class process waits on.
+            [{Pid, unavailable}];
+        Info ->
+            QueueLen = proplists:get_value(message_queue_len, Info, 0),
+            Head = mailbox_head(Pid, QueueLen),
             Targets = [T || {process, T} <- proplists:get_value(monitors, Info, []), is_pid(T)],
-            [{Pid, Info} | lists:append([timeout_blocked_chain(T, Depth - 1) || T <- Targets])]
+            [
+                {Pid, [{mailbox_head, Head} | proplists:delete(monitors, Info)]}
+                | lists:append([timeout_blocked_chain(T, Depth - 1) || T <- Targets])
+            ]
+    end;
+timeout_blocked_chain(_NotLocalPid, _Depth) ->
+    [].
+
+%% At most 3 messages, only when the queue is short enough that copying it is
+%% cheap (`process_info(Pid, messages)` copies the whole mailbox).
+-spec mailbox_head(pid(), term()) -> [term()] | skipped.
+mailbox_head(Pid, QueueLen) when is_integer(QueueLen), QueueLen =< 50 ->
+    case safe_process_info(Pid, [messages]) of
+        [{messages, Ms}] -> lists:sublist(Ms, 3);
+        _ -> []
+    end;
+mailbox_head(_Pid, _QueueLen) ->
+    skipped.
+
+-spec safe_process_info(pid(), [atom()]) -> [tuple()] | undefined.
+safe_process_info(Pid, Keys) ->
+    try erlang:process_info(Pid, Keys) of
+        Info when is_list(Info) -> Info;
+        _ -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 -doc """

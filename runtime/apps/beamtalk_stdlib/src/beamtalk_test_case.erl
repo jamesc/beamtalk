@@ -617,7 +617,14 @@ format_test_error(throw, Reason, Stacktrace) ->
 format_test_error(exit, Reason, Stacktrace) ->
     Msg = iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]),
     ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
+    %% TODO(BT-3820): temporary -- the BUnit job log shows only the failure
+    %% message, so surface the class-call timeout dump here.
+    Diag =
+        case beamtalk_object_class:take_timeout_diagnostics() of
+            Bin when is_binary(Bin) -> Bin;
+            undefined -> <<>>
+        end,
+    <<Msg/binary, ST/binary, Diag/binary>>;
 %% Erlang only supports error/throw/exit as exception classes, so this
 %% clause is never reached in practice — retained for exhaustiveness.
 format_test_error(Class, Reason, Stacktrace) ->

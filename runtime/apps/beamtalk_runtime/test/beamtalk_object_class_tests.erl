@@ -2995,8 +2995,9 @@ put_method_reindexes_xref_test_() ->
 %% BT-3820: name/module lookups that must not queue behind a busy class
 %%====================================================================
 
-%% `module_name/1` logs what the class process is doing before re-raising a
-%% timeout; the diagnostics must never mask the original exit.
+%% TODO(BT-3820): `module_name/1` records what the class process is doing on a
+%% timeout (for the BUnit failure message) and always re-raises the original
+%% exit unchanged; the dump is bounded and local-only.
 module_name_timeout_diagnostics_reraise_original_exit_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -3010,6 +3011,7 @@ module_name_timeout_diagnostics_reraise_original_exit_test_() ->
                         instance_variables => []
                     },
                     {ok, Pid} = beamtalk_object_class:start_link('TimeoutDiagClass', ClassInfo),
+                    undefined = beamtalk_object_class:take_timeout_diagnostics(),
                     ok = sys:suspend(Pid),
                     try
                         ?assertExit(
@@ -3018,19 +3020,30 @@ module_name_timeout_diagnostics_reraise_original_exit_test_() ->
                         )
                     after
                         ok = sys:resume(Pid)
-                    end
-                end)}
+                    end,
+                    Diag = beamtalk_object_class:take_timeout_diagnostics(),
+                    ?assert(is_binary(Diag)),
+                    ?assert(byte_size(Diag) =< 6000),
+                    ?assertNotEqual(nomatch, binary:match(Diag, <<"BT-3820 class call timeout">>)),
+                    %% names the stalled class process and its mailbox
+                    ?assertNotEqual(nomatch, binary:match(Diag, <<"message_queue_len">>)),
+                    ?assertNotEqual(nomatch, binary:match(Diag, <<"mailbox_head">>)),
+                    %% taken once
+                    ?assertEqual(undefined, beamtalk_object_class:take_timeout_diagnostics())
+                end)},
+            ?_test(begin
+                %% A dead pid: introspection must not mask the original exit.
+                Dead = spawn(fun() -> ok end),
+                MRef = monitor(process, Dead),
+                receive
+                    {'DOWN', MRef, _, _, _} -> ok
+                end,
+                ?assertExit({noproc, _}, beamtalk_object_class:module_name(Dead)),
+                ?assertEqual(undefined, beamtalk_object_class:take_timeout_diagnostics())
+            end)
         ]
     end}.
 
-%% A class-object send of an inherited selector (`ProcessNavigation default
-%% isKindOf: ProcessNavigation` -> `includesBehaviour:`) falls through
-%% `beamtalk_class_dispatch:class_send_dispatch/3`'s `{error, not_found}`
-%% branch, which used to `gen_server:call(ClassPid, class_name)` and
-%% `gen_server:call(ClassPid, module_name)` -- two more 5s-timeout calls that
-%% re-queue behind whatever the class process is doing. `class_name_safe/1` and
-%% `module_name_safe/1` answer from the metadata ETS rows without a message
-%% send, so a stalled (here: suspended) class process cannot time them out.
 safe_name_lookups_do_not_message_class_process_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
