@@ -861,3 +861,30 @@ bt3831_update_wildcard_key_rejected_test() ->
             beamtalk_ets:updateAt(T, {'$1', x}, fun(_) -> 1 end)
         )
     end).
+
+bt3831_keys_and_values_do_badarg_runs_once_test() ->
+    with_table(bt3831_kvdo, fun(T) ->
+        beamtalk_ets:insert(T, a, 1),
+        Self = self(),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:keysAndValuesDo(T, fun(_, _) ->
+                Self ! ran,
+                erlang:error(badarg)
+            end)
+        ),
+        ?assertEqual(
+            ran,
+            receive
+                ran -> ran
+            after 100 -> none
+            end
+        ),
+        ?assertEqual(
+            none,
+            receive
+                ran -> ran
+            after 50 -> none
+            end
+        )
+    end).

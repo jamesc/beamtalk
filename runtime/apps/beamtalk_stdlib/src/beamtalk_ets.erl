@@ -372,7 +372,10 @@ the block may freely modify the table. Returns nil.
 keysAndValuesDo(#{'$beamtalk_class' := 'Ets', table := TableName}, Block) when
     is_function(Block, 2)
 ->
-    lists:foreach(fun({K, V}) -> Block(K, V) end, entries(TableName, 'keysAndValuesDo:')),
+    lists:foreach(
+        fun({K, V}) -> call_block(Block, [K, V], 'keysAndValuesDo:') end,
+        entries(TableName, 'keysAndValuesDo:')
+    ),
     nil;
 keysAndValuesDo(#{'$beamtalk_class' := 'Ets'}, _Block) ->
     beamtalk_error:raise_type_error(
@@ -402,7 +405,7 @@ ifPresent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
 ->
     %% Block runs in the `of` branch so its own badarg is not a stale table.
     try ets:lookup(TableName, Key) of
-        [{_K, Value} | _] -> call_block(Block, Value, 'at:ifPresent:');
+        [{_K, Value} | _] -> call_block(Block, [Value], 'at:ifPresent:');
         [] -> nil
     catch
         error:badarg -> stale_table_error('at:ifPresent:', TableName)
@@ -484,7 +487,7 @@ update_loop(TableName, Key, _Block, 0) ->
 update_loop(TableName, Key, Block, Retries) ->
     case guarded(TableName, 'at:update:', fun() -> ets:lookup(TableName, Key) end) of
         [] ->
-            New = call_block(Block, nil, 'at:update:'),
+            New = call_block(Block, [nil], 'at:update:'),
             %% insert_new fails if another writer created the key meanwhile.
             case
                 guarded(TableName, 'at:update:', fun() -> ets:insert_new(TableName, {Key, New}) end)
@@ -493,7 +496,7 @@ update_loop(TableName, Key, Block, Retries) ->
                 false -> update_loop(TableName, Key, Block, Retries - 1)
             end;
         [{StoredKey, Old}] ->
-            New = call_block(Block, Old, 'at:update:'),
+            New = call_block(Block, [Old], 'at:update:'),
             %% Match the key as stored (an orderedSet may hold 1 for lookup 1.0)
             %% and the exact old value, so a concurrent change makes the
             %% replace a no-op.
@@ -532,14 +535,24 @@ guarded(TableName, Selector, Fun) ->
             end
     end.
 
--doc "Call a user Block, converting a raw `badarg` into a structured error.".
--spec call_block(function(), term(), atom()) -> term().
-call_block(Block, Arg, Selector) ->
+-doc """
+Call a user Block with Args, converting a raw `badarg` into a structured error
+that keeps the original reason and stacktrace in its details.
+""".
+-spec call_block(function(), [term()], atom()) -> term().
+call_block(Block, Args, Selector) ->
     try
-        Block(Arg)
+        apply(Block, Args)
     catch
-        error:badarg ->
-            beamtalk_error:raise_type_error('Ets', Selector, <<"Block raised badarg">>)
+        error:badarg:St ->
+            beamtalk_error:raise(
+                beamtalk_error:with_details(
+                    beamtalk_error:new(
+                        type_error, 'Ets', Selector, <<"Block raised badarg">>
+                    ),
+                    #{reason => badarg, stacktrace => St}
+                )
+            )
     end.
 
 -doc """
