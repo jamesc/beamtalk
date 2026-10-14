@@ -7,8 +7,9 @@
 // that makes a shape compile moves its test into adr0131local_rebind_test.bt
 // (or drops the `.pending` suffix here and from its fixture) in the same PR.
 //
-//   class o3, o12 / value o3, o12, o13: erlc `unbound variable 'State'`
-//     (ADR 0131 §3: conditional families are hard-coded to `[State]`)
+//   (o3, o12, o13, s7, seqArg, seqRecv and the conditional-arm statement
+//   shapes compile since BT-3738, ADR 0131 Phase 3a; the `on:do:`/`ensure:`
+//   shapes are BT-3817.)
 //   (s2, `detect:ifNone:` whose handler writes, compiles since BT-3794.)
 //
 // BT-3745 (ADR 0131 Phase 0b) added every cell that crashed or answered wrong
@@ -18,20 +19,6 @@
 
 TestCase subclass: Adr0131LocalRebindPendingTest
 
-  testO3Class =>
-    self assert: (Adr0131LocalRebindClassPending o3) equals: #[2, 1]
-
-  testO3Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o3) equals: #[2, 1]
-
-  testO12Class =>
-    self assert: (Adr0131LocalRebindClassPending o12: false) equals: #[2, 1]
-
-  testO12Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o12: false) equals: #[2, 1]
-
-  testO13Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o13: false) equals: #[1, 1]
 
   testO1Class =>
     self assert: (Adr0131LocalRebindClassPending o1) equals: #[2, 1]
@@ -50,12 +37,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testO2Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) o2) equals: #[2, 2]
-
-  testO3Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o3) equals: #[2, 1]
-
-
-
 
   testO5Class =>
     self assert: (Adr0131LocalRebindClassPending o5) equals: #[1, 1]
@@ -108,12 +89,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testO10Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) o10: true) equals: 2
 
-  testO12Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o12: false) equals: #[2, 1]
-
-  testO13Class =>
-    self assert: (Adr0131LocalRebindClassPending o13: false) equals: #[1, 1]
-
   testS1Class =>
     self assert: (Adr0131LocalRebindClassPending s1) equals: #[0, 1]
 
@@ -122,15 +97,6 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testS1Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) s1) equals: #[0, 1]
-
-  testS7Class =>
-    self assert: (Adr0131LocalRebindClassPending s7) equals: #[1, 1]
-
-  testS7Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) s7) equals: #[1, 1]
-
-
-
 
   testSeqClass =>
     self assert: (Adr0131LocalRebindClassPending seq) equals: #[1, 1]
@@ -141,48 +107,8 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testSeqActor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) seq) equals: #[1, 1]
 
-  testSeqArgClass =>
-    self assert: (Adr0131LocalRebindClassPending seqArg: true) equals: #[1, 1]
-
-  testSeqArgValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) seqArg: true) equals: #[1, 1]
-
-  testSeqArgActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) seqArg: true) equals: #[1, 1]
-
-  testSeqRecvClass =>
-    self assert: (Adr0131LocalRebindClassPending seqRecv: true) equals: #[1, 1]
-
-  testSeqRecvValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) seqRecv: true) equals: #[1, 1]
-
-  testSeqRecvActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) seqRecv: true) equals: #[1, 1]
-
-
   // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
   // error today), with their ADR Expected answers.
-
-  testStArmDoClass =>
-    self assert: (Adr0131LocalRebindClassPending stArmDo: true) equals: 3
-
-  testStArmDoValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stArmDo: true) equals: 3
-
-  testStArmWhileClass =>
-    self assert: (Adr0131LocalRebindClassPending stArmWhile: true) equals: 2
-
-  testStArmWhileValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stArmWhile: true) equals: 2
-
-  testStArmWhileActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) stArmWhile: true) equals: 2
-
-  testStArmInjectClass =>
-    self assert: (Adr0131LocalRebindClassPending stArmInject: true) equals: 3
-
-  testStArmInjectValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stArmInject: true) equals: 3
 
   testStProtectedDoClass =>
     self assert: (Adr0131LocalRebindClassPending stProtectedDo) equals: 3

@@ -84,14 +84,14 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: codegen referenced an unbound `State` (ADR 0131 §3);
-// since BT-3745 it is a compile error. Correct answer: 2.
+// Codegen referenced an unbound `State` (ADR 0131 §3) until BT-3745, a
+// compile error until ADR 0131 Phase 3 (BT-3738), when the REPL root made the
+// conditional a producer that adopts the bindings map.
 r := (4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]) + 1
-// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as the receiver of a message
+// => 2
 
-// PIN-BUG BT-3743: correct answer 1.
 t
-// => 0
+// => 1
 
 // o7: an `on:do:` nested in a conditional arm inside another `on:do:`.
 t := 0
@@ -236,14 +236,13 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the Tier 2 block was called with the wrong arity; since
-// BT-3745 it is a compile error. Correct answer: 1.
+// The Tier 2 block was called with the wrong arity until BT-3745, a compile
+// error until ADR 0131 Phase 3 (BT-3738).
 r := nil ifNil: [t := t + 1. 1]
-// => ERROR: `ifNil:` writes outer local `t`, but as the value of an assignment
+// => 1
 
-// PIN-BUG BT-3743: correct answer 1.
 t
-// => 0
+// => 1
 
 // s8: a statement-position `do:`.
 t := 0
@@ -301,14 +300,13 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: called the block with the wrong arity before BT-3753, a
-// compile error since. Correct answer: 1.
+// Called the block with the wrong arity before BT-3753, a compile error until
+// ADR 0131 Phase 3 (BT-3738).
 nil ifNil: [t := t + 1]
-// => ERROR: `ifNil:` writes outer local `t`, but as a statement in a top-level expression
+// => 1
 
-// PIN-BUG BT-3743: correct answer 1.
 t
-// => 0
+// => 1
 
 // A conditional in a conditional arm answers right and is accepted.
 t := 0
@@ -319,3 +317,105 @@ t := 0
 
 t
 // => 1
+
+// ===========================================================================
+// ADR 0131 Phase 3 (BT-3738): conditionals as local-threading producers
+// ===========================================================================
+//
+// A conditional that writes a binding is a producer at an operand site of a
+// REPL input (and the nil-testing family is lowered like the boolean one):
+// its `{Value, Bindings}` tuple is bound, the bindings map adopted whole and
+// the value read from element 1. Each of these was an ADR 0131 Phase 0
+// compile error before this phase.
+
+// `and:` as a receiver.
+t := 0
+// => 0
+
+r := ((4 =:= 4) and: [t := t + 1. true]) printString size
+// => 4
+
+t
+// => 1
+
+// `or:` as a receiver.
+t := 0
+// => 0
+
+r := ((4 =:= 5) or: [t := t + 1. false]) printString size
+// => 5
+
+t
+// => 1
+
+// `ifNotNil:` with a block parameter, as a binary operand.
+t := 0
+// => 0
+
+r := (3 ifNotNil: [:v | t := t + v. 10]) + 1
+// => 11
+
+t
+// => 3
+
+// The two-arm nil forms, the nil arm and the non-nil arm.
+t := 0
+// => 0
+
+r := (nil ifNil: [t := t + 1. 7] ifNotNil: [:v | 8]) + 1
+// => 8
+
+t
+// => 1
+
+t := 0
+// => 0
+
+r := (5 ifNil: [t := t + 1. 7] ifNotNil: [:v | t := t + 2. v]) + 1
+// => 6
+
+t
+// => 2
+
+// `ifNotNil:ifNil:` (reversed keyword order) as an operand.
+t := 0
+// => 0
+
+r := (nil ifNotNil: [:v | t := t + 2. v] ifNil: [t := t + 1. 4]) + 1
+// => 5
+
+t
+// => 1
+
+// Two locals, written by different arms, as an operand.
+t := 0
+// => 0
+
+u := 0
+// => 0
+
+r := ((4 =:= 4) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]) + 1
+// => 3
+
+t
+// => 1
+
+u
+// => 5
+
+// A conditional that is an assignment's whole value, the nil family.
+t := 0
+// => 0
+
+r := 4 ifNotNil: [:v | t := t + v. v]
+// => 4
+
+t
+// => 4
+
+// A conditional operand in a multi-statement input.
+t := 0
+// => 0
+
+r := 0. r := r + ((4 =:= 4) ifTrue: [t := t + 1. 2] ifFalse: [3]). #[r, t]
+// => #[2, 1]

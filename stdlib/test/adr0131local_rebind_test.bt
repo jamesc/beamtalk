@@ -175,3 +175,69 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testStDetectIfNoneActor =>
     self assert: ((Adr0131LocalRebindActor spawn) stDetectIfNone) equals: 1
+
+  // ADR 0131 Phase 3 (BT-3738): conditionals as local-threading producers
+  testO3Class => self assert: (Adr0131LocalRebindClass o3) equals: #[2, 1]
+
+  testO12Class =>
+    self assert: (Adr0131LocalRebindClass o12: false) equals: #[2, 1]
+
+  testO13Class =>
+    self assert: (Adr0131LocalRebindClass o13: false) equals: #[1, 1]
+
+  testS7Class => self assert: (Adr0131LocalRebindClass s7) equals: #[1, 1]
+
+  testSeqArgClass =>
+    self assert: (Adr0131LocalRebindClass seqArg: true) equals: #[1, 1]
+
+  testSeqRecvClass =>
+    self assert: (Adr0131LocalRebindClass seqRecv: true) equals: #[1, 1]
+
+  testStArmDoClass =>
+    self assert: (Adr0131LocalRebindClass stArmDo: true) equals: 3
+
+  testStArmWhileClass =>
+    self assert: (Adr0131LocalRebindClass stArmWhile: true) equals: 2
+
+  testStArmInjectClass =>
+    self assert: (Adr0131LocalRebindClass stArmInject: true) equals: 3
+
+  testO3Value => self assert: ((Adr0131LocalRebindValue new) o3) equals: #[2, 1]
+
+  testO12Value =>
+    self assert: ((Adr0131LocalRebindValue new) o12: false) equals: #[2, 1]
+
+  testO13Value =>
+    self assert: ((Adr0131LocalRebindValue new) o13: false) equals: #[1, 1]
+
+  testS7Value => self assert: ((Adr0131LocalRebindValue new) s7) equals: #[1, 1]
+
+  testSeqArgValue =>
+    self assert: ((Adr0131LocalRebindValue new) seqArg: true) equals: #[1, 1]
+
+  testSeqRecvValue =>
+    self assert: ((Adr0131LocalRebindValue new) seqRecv: true) equals: #[1, 1]
+
+  testStArmDoValue =>
+    self assert: ((Adr0131LocalRebindValue new) stArmDo: true) equals: 3
+
+  testStArmWhileValue =>
+    self assert: ((Adr0131LocalRebindValue new) stArmWhile: true) equals: 2
+
+  testStArmInjectValue =>
+    self assert: ((Adr0131LocalRebindValue new) stArmInject: true) equals: 3
+
+  testO3Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o3) equals: #[2, 1]
+
+  testO12Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o12: false) equals: #[2, 1]
+
+  testSeqArgActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) seqArg: true) equals: #[1, 1]
+
+  testSeqRecvActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) seqRecv: true) equals: #[1, 1]
+
+  testStArmWhileActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stArmWhile: true) equals: 2
