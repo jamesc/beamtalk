@@ -142,9 +142,10 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
   testNonLocalReturnNotTakenAnswersTheArmValuePlusTheWrite =>
     self assert: self earlyExitInArm equals: 4
 
-  // An arm that writes an outer local AND a field, as an operand, is lowered by codegen
-  // (`conditional_field_and_local_arms` in the codegen corpus) but still refused by the
-  // front-end ADR 0131 allow-set check (BT-3743), so it has no runtime test here.
+  // NOT TESTED HERE (about the arms-write-a-local-and-a-field case, not the test below):
+  // such an operand is lowered by codegen (`conditional_field_and_local_arms` in the
+  // codegen corpus) but still refused by the front-end ADR 0131 allow-set check
+  // (BT-3743), so it has no runtime test. The test below is the local-only-arm case.
   testLocalOnlyArmWithFieldWriteReceiver =>
     t := 0
     r := self take: (((self.n := 5) > 3) ifTrue: [t := t + 1] ifFalse: [0])
