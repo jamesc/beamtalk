@@ -490,23 +490,23 @@ impl CoreErlangGenerator {
 
     /// Whether a conditional in `frame` is lowered as a local-threading
     /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
-    /// `frame` is the method root or a registered `BranchArm` frame
-    /// ([`Self::is_conditional_producer_frame`]), and it is not the REPL. The one
-    /// predicate for both the arm frames and the `LocalRebind`s.
+    /// `frame` is the method root or a registered frame (a `BranchArm`, or a loop
+    /// or fold body, where the conditional is one of the body's producer sites),
+    /// and it is not the REPL. The one predicate for both the arm frames and the
+    /// `LocalRebind`s.
     fn lowers_as_conditional_producer(&self, frame: FrameId, producer: bool) -> bool {
         producer
-            && (self.is_conditional_producer_frame(frame)
-                || self.rebind_frames.contains_key(&frame))
+            && (frame == FrameId::ROOT || self.rebind_frames.contains_key(&frame))
             && !self.is_repl_mode()
     }
 
     /// The `BranchArm` frame the arms of a conditional producer are lowered
     /// as (ADR 0131 §2): the construct's seeded set, for a conditional
-    /// producer at the method root or in another conditional producer's arm (a
-    /// registered `BranchArm` frame). `producer` says whether the construct is
-    /// one ([`Self::conditional_producer_locals`]): a conditional the Phase 0
-    /// check does not name as a producer keeps the legacy arm, as do the arms of
-    /// a conditional in a loop or fold body and of the REPL
+    /// producer at the method root, in another conditional producer's arm (a
+    /// registered `BranchArm` frame) or in a loop or fold body (ADR 0131 Phase 3c).
+    /// `producer` says whether the construct is one
+    /// ([`Self::conditional_producer_locals`]): a conditional the Phase 0 check
+    /// does not name as a producer keeps the legacy arm, as do the arms in the REPL
     /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
     /// unpack their own tuples).
     pub(in crate::core_erlang::control_flow) fn conditional_arm_frame(
@@ -612,15 +612,15 @@ impl CoreErlangGenerator {
     /// `[Statement(let CF = <case…> in), Bind(State_{n+1} ← element(2,
     /// CF))]`, value `element(1, CF)`.
     ///
-    /// ADR 0131 §1/§2 (Phase 3): at the method root or in a registered
-    /// `BranchArm` frame the prelude also carries one `LocalRebind` per local
-    /// the construct threads (`arms`' threaded set), lowered by that frame: the
-    /// construct is a local-threading producer. In a class or value-type method
-    /// the scratch map is private ([`Self::conditional_has_private_scratch`])
-    /// and there is no `State` `Bind`; in an actor instance method the `State`
-    /// `Bind` comes first and each rebind reads through it. In a loop or fold
-    /// frame the prelude is the legacy one: the frame's consumer re-reads its
-    /// own locals.
+    /// ADR 0131 §1/§2 (Phase 3, 3c): at the method root, in a registered
+    /// `BranchArm` frame or in a loop or fold body the prelude also carries one
+    /// `LocalRebind` per local the construct threads (`arms`' threaded set),
+    /// lowered by that frame: the construct is a local-threading producer. Where
+    /// the scratch map is private ([`Self::conditional_has_private_scratch`]:
+    /// the root of a class or value-type method, a direct-params or tuple-acc
+    /// frame) there is no `State` `Bind`; in an actor instance method the
+    /// `State` `Bind` comes first and each rebind reads through it. A
+    /// conditional that is not a producer gets the legacy prelude.
     ///
     /// `frame` MUST be captured by the caller via
     /// [`CoreErlangGenerator::current_frame`] BEFORE building `tuple_doc` —
@@ -649,9 +649,8 @@ impl CoreErlangGenerator {
             leaf::var(carrier.clone()),
             ")",
         ]);
-        // The method root and a registered `BranchArm` frame lower the
-        // construct's `LocalRebind`s; a loop or fold frame's consumer re-reads
-        // its own locals.
+        // The method root and a registered frame (a `BranchArm`, a loop or fold
+        // body) lower the construct's `LocalRebind`s.
         let rebinds_locals = self.lowers_as_conditional_producer(frame, producer);
         let locals = if rebinds_locals {
             self.branch_threaded_locals(arms)

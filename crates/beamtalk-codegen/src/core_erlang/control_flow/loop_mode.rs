@@ -21,9 +21,11 @@ pub(in crate::core_erlang) struct LoopMode {
     /// Set by `generate_counted_stateful_loop_hybrid` and `generate_while_loop_hybrid`.
     pub(in crate::core_erlang) in_hybrid_loop: bool,
     /// When `true`, the generator is inside a direct-params (or hybrid) counted
-    /// loop body. List ops that thread captured outer-scope locals should skip the
-    /// `append_repack_stateacc_doc` step and return just the result value (not
-    /// `{Result, StateAcc}`), since there is no `StateAcc` variable in scope.
+    /// loop body, where there is no `StateAcc` variable in scope. A nested
+    /// construct that threads locals is a local-threading producer there (ADR
+    /// 0131) and clears this flag while it lowers
+    /// (`with_cleared_direct_params_loop`); other statement lowerings read it to
+    /// decide how to emit a closed or open value.
     pub(in crate::core_erlang) in_direct_params_loop: bool,
     /// Map of actor field name → Core Erlang variable name for fields
     /// that have been pre-extracted before a hybrid/full-extract letrec loop.

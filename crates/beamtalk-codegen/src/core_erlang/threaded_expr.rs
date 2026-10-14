@@ -701,8 +701,8 @@ impl CoreErlangGenerator {
 
     /// ADR 0131 Phase 3 (BT-3738): the threaded locals of the conditional
     /// `expr` (paren-unwrapped: `ifTrue:` … `ifNil:ifNotNil:`, `and:`/`or:`)
-    /// when it is a local-threading producer at the method root or in an arm
-    /// of another conditional producer, or `None`.
+    /// when it is a local-threading producer at the method root, in an arm
+    /// of another conditional producer or in a loop or fold body, or `None`.
     ///
     /// The codegen half of `beamtalk_core`'s `conditional_producer_writes`,
     /// which the Phase 0 check reads: every arm is a block literal
@@ -715,8 +715,8 @@ impl CoreErlangGenerator {
     /// answers for an operand site that writes a binding. The site set decides
     /// the frame: a method-root site, a method-body assignment's whole value or
     /// statement, or a statement of a conditional producer's arm
-    /// (`with_body_producer_sites` with `arm`); never a conditional nested in a
-    /// loop or fold body.
+    /// (`with_body_producer_sites` with `arm`), or a producer site of a loop or
+    /// fold body (`is_loop_body_producer_site`).
     pub(super) fn conditional_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
             conditional_arm_blocks, conditional_arms_lower_as_producer,

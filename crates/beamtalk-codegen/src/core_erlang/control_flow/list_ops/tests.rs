@@ -821,22 +821,16 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
     );
 }
 
-// ── in_direct_params_loop path for search ops ────────────────
-// Each test nests a search op with a local-var mutation inside a to:do:
-// loop that has its own local-var mutation. The outer loop's threaded-locals
-// are purely local (count + seen/inner), so it chooses use_direct_params=true
-// and sets in_direct_params_loop=true before compiling the body. The inner
-// search op then hits the in_direct_params_loop=true branch inside
-// generate_list_bool_predicate_with_mutations / generate_list_detect_with_mutations /
-// generate_list_detect_if_none_with_mutations.
+// ── list ops nested inside a direct-params loop ────────────────
+// Each test nests a list op with a local-var mutation inside a to:do: loop that
+// has its own local-var mutation. The outer loop threads its locals as direct
+// parameters, and the nested list op is a local-threading producer in that
+// loop frame (ADR 0131): its construct tuple is unpacked by the frame.
 
 #[test]
 fn test_any_satisfy_nested_in_direct_params_loop() {
-    // anySatisfy: with a local mutation nested inside a direct-params
-    // to:do: loop. The outer loop uses use_direct_params=true (local-only mutations
-    // on `count` and `seen`), which sets in_direct_params_loop=true before
-    // compiling the body. The inner anySatisfy: picks up in_direct_params_loop=true
-    // and skips the StateAcc repack in generate_list_bool_predicate_with_mutations.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -874,9 +868,8 @@ fn test_any_satisfy_nested_in_direct_params_loop() {
 
 #[test]
 fn test_all_satisfy_nested_in_direct_params_loop() {
-    // allSatisfy: with a local mutation nested inside a direct-params
-    // to:do: loop. Exercises generate_list_bool_predicate_with_mutations(is_all=true)
-    // with in_direct_params_loop=true.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -910,9 +903,8 @@ fn test_all_satisfy_nested_in_direct_params_loop() {
 
 #[test]
 fn test_detect_nested_in_direct_params_loop() {
-    // detect: with a local mutation nested inside a direct-params
-    // to:do: loop. Exercises generate_list_detect_with_mutations with
-    // in_direct_params_loop=true (skips the StateAcc repack in the non-direct path).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -950,9 +942,8 @@ fn test_detect_nested_in_direct_params_loop() {
 
 #[test]
 fn test_detect_if_none_nested_in_direct_params_loop() {
-    // detect:ifNone: with a local mutation nested inside a direct-params
-    // to:do: loop. Exercises generate_list_detect_if_none_with_mutations with
-    // in_direct_params_loop=true.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -1458,10 +1449,8 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
 
 #[test]
 fn test_value_type_do_with_local_mutation_open_chain() {
-    // ValueType + do: + local mutation → generate_value_type_do_open (value_type_codegen.rs).
-    // Unlike Actor mode (which produces a closed expression returning {'nil', StateAcc}),
-    // ValueType emits an open let-chain: foldl → let X = maps:get(key, FoldResult) in
-    // so updated locals are visible to all subsequent method-body expressions.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    #(1, 2, 3) do: [:item | total := total + item]\n    total\n";
     let code = codegen(src);
     assert!(
@@ -2298,10 +2287,8 @@ fn test_detect_if_none_wrong_arity_if_none_block_is_compile_error() {
 
 #[test]
 fn test_select_nested_in_direct_params_loop() {
-    // select: with a local mutation nested inside a direct-params to:do:
-    // loop. The outer loop sets in_direct_params_loop=true, which causes
-    // generate_list_filter_with_mutations to skip the StateAcc repack and emit an
-    // open let-chain instead. Covers filter_ops.rs lines 168-193 (negate=false path).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2336,11 +2323,8 @@ fn test_select_nested_in_direct_params_loop() {
 
 #[test]
 fn test_reject_nested_in_direct_params_loop() {
-    // reject: with a local mutation nested inside a direct-params to:do:
-    // loop. The outer loop sets in_direct_params_loop=true, which causes
-    // generate_list_filter_with_mutations to skip the StateAcc repack (negate=true path).
-    // The negate=true flag additionally emits `call 'erlang':'not'` in the fold body.
-    // Covers filter_ops.rs lines 168-193 (negate=true path).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2376,13 +2360,8 @@ fn test_reject_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_nested_in_direct_params_loop() {
-    // do: with a local mutation nested inside a direct-params to:do: loop.
-    // The outer loop sets in_direct_params_loop=true, which causes
-    // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
-    // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
-    // let-chain is emitted, and direct_params_do_open_chain is set to true
-    // (ADR 0118 phase 5b) so the outer loop can chain the next
-    // expression directly.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2417,22 +2396,8 @@ fn test_do_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
-    // `^` (Expression::Return, compiled via the NLR-throw path since
-    // it's inside a block) fed the *direct result* of a mutation-threaded
-    // `do:` nested inside a direct-params loop — the exact shape that used to
-    // reference the bare `"_"` sentinel as if it were a bound variable (the
-    // producer-state field was a plain `Option<String>` before this fix, and
-    // `"_"` did double duty as both a real name and a "still open, no value"
-    // flag). Before the fix this produced `call 'erlang':'throw'({'$bt_nlr',
-    // Token, _, State})` — a reference to an unbound `_`. After the fix, the
-    // NoValue case substitutes `do:`'s own `nil` return-value contract.
-    //
-    // Reuses the outer-loop/nested-do: setup from
-    // `test_do_nested_in_direct_params_loop` above, with `^` inside the
-    // outer to:do:'s own block wrapping the nested do:'s result directly —
-    // any `^` inside a block (not just the ADR 0109 cross-process case)
-    // goes through the NLR-throw codegen path (`Expression::Return`) rather
-    // than a plain return.
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr3053\n",
         "  state: x = 0\n\n",
@@ -2477,9 +2442,7 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
 
 #[test]
 fn test_collect_nested_in_direct_params_loop() {
-    // collect: with a local mutation nested inside a direct-params to:do:
-    // loop. The outer loop sets in_direct_params_loop=true, which causes
-    // generate_list_collect_with_mutations to hit the tuple-acc path, which is a
+    // A list op with a local mutation nested inside a direct-params loop is a
     // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
@@ -2561,19 +2524,15 @@ fn test_collect_wrong_arity_block_is_compile_error() {
 }
 
 // ── transform ops nested inside a direct-params to:do: loop ─────────
-//
-// Each of the seven remaining transform operations (count:, flatMap:,
-// inject:into:, takeWhile:, dropWhile:, partition:, groupBy:) has an
-// `in_direct_params_loop=true` branch that skips the StateAcc repack and emits
-// an open let-chain so variable rebindings escape to the outer to:do: scope.
-// A parallel test series already covers the search and filter/basic ops;
-// these tests cover the remaining transform_ops.rs paths.
+// Each test nests a list op with a local-var mutation inside a to:do: loop that
+// has its own local-var mutation. The outer loop threads its locals as direct
+// parameters, and the nested list op is a local-threading producer in that
+// loop frame (ADR 0131): its construct tuple is unpacked by the frame.
 
 #[test]
 fn test_count_nested_in_direct_params_loop() {
-    // count: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_count_with_mutations to
-    // skip the StateAcc repack and emit an open let-chain (transform_ops.rs:131).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2607,10 +2566,8 @@ fn test_count_nested_in_direct_params_loop() {
 
 #[test]
 fn test_flat_map_nested_in_direct_params_loop() {
-    // flatMap: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_flat_map_with_mutations to
-    // skip the StateAcc repack; the branch also emits lists:reverse + lists:append
-    // to reconstruct the flattened result (transform_ops.rs:358).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2652,9 +2609,8 @@ fn test_flat_map_nested_in_direct_params_loop() {
 
 #[test]
 fn test_inject_nested_in_direct_params_loop() {
-    // inject:into: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_inject_with_mutations to skip
-    // the StateAcc repack and emit an open let-chain (transform_ops.rs:670).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2684,10 +2640,8 @@ fn test_inject_nested_in_direct_params_loop() {
 
 #[test]
 fn test_take_while_nested_in_direct_params_loop() {
-    // takeWhile: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_take_while_with_mutations to
-    // skip the StateAcc repack; the branch reverses the accumulated result list
-    // (transform_ops.rs:920).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2725,10 +2679,8 @@ fn test_take_while_nested_in_direct_params_loop() {
 
 #[test]
 fn test_drop_while_nested_in_direct_params_loop() {
-    // dropWhile: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_drop_while_with_mutations to
-    // skip the StateAcc repack; the branch reverses the accumulated result list
-    // (transform_ops.rs:1170).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2766,10 +2718,8 @@ fn test_drop_while_nested_in_direct_params_loop() {
 
 #[test]
 fn test_partition_nested_in_direct_params_loop() {
-    // partition: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_partition_with_mutations to
-    // skip the StateAcc repack and emit an open let-chain that extracts two reversed
-    // sublists from the fold result (transform_ops.rs:1425).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2803,10 +2753,8 @@ fn test_partition_nested_in_direct_params_loop() {
 
 #[test]
 fn test_group_by_nested_in_direct_params_loop() {
-    // groupBy: with a local mutation nested inside a direct-params to:do: loop.
-    // in_direct_params_loop=true causes generate_list_group_by_with_mutations to
-    // skip the StateAcc repack; the branch still calls beamtalk_list:reverse_group_values
-    // to finalise the accumulated map (transform_ops.rs:1720).
+    // A list op with a local mutation nested inside a direct-params loop is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
