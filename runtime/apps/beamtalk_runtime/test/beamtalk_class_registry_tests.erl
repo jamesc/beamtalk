@@ -738,6 +738,9 @@ get_method_return_type_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
             beamtalk_class_registry:ensure_hierarchy_table(),
+            %% BT-3826: return types are read from the class's published metadata
+            %% row, so the hierarchy edges below are merged into it (`insert/5`
+            %% would overwrite the whole row, wiping the published reflection).
             Saved = ets:tab2list(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_metadata),
             %% Create a simple hierarchy: Child -> Parent -> Object
@@ -745,20 +748,22 @@ get_method_return_type_test_() ->
                 superclass => none,
                 method_return_types => #{getValue => 'Integer'}
             }),
-            beamtalk_class_metadata:insert('TestObject1002', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:merge_identity(
+                'TestObject1002', undefined, undefined, none, undefined
+            ),
             {ok, ParentPid} = beamtalk_object_class:start('TestParent1002', #{
                 superclass => 'TestObject1002',
                 method_return_types => #{name => 'String'},
                 class_method_return_types => #{'from:' => 'TestParent1002'}
             }),
-            beamtalk_class_metadata:insert(
+            beamtalk_class_metadata:merge_identity(
                 'TestParent1002', undefined, undefined, 'TestObject1002', undefined
             ),
             {ok, ChildPid} = beamtalk_object_class:start('TestChild1002', #{
                 superclass => 'TestParent1002',
                 method_return_types => #{size => 'Integer'}
             }),
-            beamtalk_class_metadata:insert(
+            beamtalk_class_metadata:merge_identity(
                 'TestChild1002', undefined, undefined, 'TestParent1002', undefined
             ),
             {Saved, [ObjPid, ParentPid, ChildPid]}
@@ -1467,12 +1472,14 @@ bt1982_get_method_return_type_walks_on_process_exit_test_() ->
                 superclass => none,
                 method_return_types => #{answer => 'Integer'}
             }),
-            beamtalk_class_metadata:insert('BT1982RTParent', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:merge_identity(
+                'BT1982RTParent', undefined, undefined, none, undefined
+            ),
             {ok, ChildPid} = beamtalk_object_class:start('BT1982RTChild', #{
                 superclass => 'BT1982RTParent',
                 method_return_types => #{}
             }),
-            beamtalk_class_metadata:insert(
+            beamtalk_class_metadata:merge_identity(
                 'BT1982RTChild', undefined, undefined, 'BT1982RTParent', undefined
             ),
             [ParentPid, ChildPid]
@@ -1530,6 +1537,7 @@ bt1982_drain_warnings_qualified_no_table_test() ->
 %% cache, so no broadcast is needed when class methods change.
 %%
 %% Test removed: invalidate_subclass_flattened_tables_test
+
 %%% ============================================================================
 %%% BT-3826: no class-to-class blocking calls inside class handlers
 %%% ============================================================================
@@ -1649,6 +1657,30 @@ bt3826_reflection_no_cross_class_deadlock_test_() ->
                 ?assertEqual([bt3826Probe], maps:get(class_side, R)),
                 ?assertEqual([bt3826Probe], maps:get(class_side_all, R)),
                 ?assert(maps:get(class_side_has, R))
+            end,
+            Results
+        )
+    end}.
+
+%% `get_method_return_type/2` and `get_class_method_return_type/2` (the REPL
+%% type-chain walk).
+bt3826_return_type_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{
+            method_return_types => #{bt3826Foo => 'Integer'},
+            class_method_return_types => #{bt3826Make => 'String'}
+        },
+        Site = fun(Other) ->
+            {
+                beamtalk_class_registry:get_method_return_type(Other, bt3826Foo),
+                beamtalk_class_registry:get_class_method_return_type(Other, bt3826Make),
+                beamtalk_class_registry:get_method_return_type(Other, bt3826Missing)
+            }
+        end,
+        Results = bt3826_two_busy_classes("RetType", Extra, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) ->
+                ?assertEqual({ok, {{ok, 'Integer'}, {ok, 'String'}, {error, not_found}}}, Outcome)
             end,
             Results
         )

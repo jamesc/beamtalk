@@ -1358,40 +1358,8 @@ Absence means "dynamic" — the REPL should not rely on a specific type.
 Chain walking follows the same superclass order as method dispatch.
 """.
 -spec get_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
-get_method_return_type(none, _Selector) ->
-    {error, not_found};
 get_method_return_type(ClassName, Selector) ->
-    case whereis_class(ClassName) of
-        undefined ->
-            {error, not_found};
-        Pid ->
-            Result =
-                try
-                    gen_server:call(Pid, {get_method_return_type, Selector}, 5000)
-                catch
-                    exit:{timeout, _} -> not_found;
-                    exit:{noproc, _} -> not_found;
-                    exit:{normal, _} -> not_found;
-                    exit:{shutdown, _} -> not_found;
-                    exit:{{shutdown, _}, _} -> not_found
-                end,
-            case Result of
-                {ok, _} = Found ->
-                    Found;
-                {error, not_found} ->
-                    %% Walk to superclass using the hierarchy table.
-                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                        not_found -> {error, not_found};
-                        {ok, Super} -> get_method_return_type(Super, Selector)
-                    end;
-                not_found ->
-                    %% Process exited during call — not in this class, walk to superclass.
-                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                        not_found -> {error, not_found};
-                        {ok, Super} -> get_method_return_type(Super, Selector)
-                    end
-            end
-    end.
+    walk_return_type(ClassName, Selector, fun beamtalk_class_metadata:lookup_method_return_type/2).
 
 -doc """
 Look up the return type for a class-side method, walking the superclass chain.
@@ -1399,36 +1367,38 @@ Look up the return type for a class-side method, walking the superclass chain.
 Same semantics as `get_method_return_type/2` but consults `class_method_return_types`.
 """.
 -spec get_class_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
-get_class_method_return_type(none, _Selector) ->
-    {error, not_found};
 get_class_method_return_type(ClassName, Selector) ->
+    walk_return_type(
+        ClassName, Selector, fun beamtalk_class_metadata:lookup_class_method_return_type/2
+    ).
+
+%% Shared superclass-chain walk behind both lookups above. Each level is read
+%% from the class's published metadata row (`beamtalk_class_metadata`), never by
+%% `gen_server:call` into the class process (BT-3826): this runs inside class
+%% handlers (e.g. a class method the REPL type-checks against), and a blocking
+%% call into another class there deadlocks two busy classes against each other
+%% until the 5s timeout. A class with no live process is "not in this class" and
+%% the walk continues to its superclass, as before; only local classes are
+%% reachable by `whereis_class/1`, so there is no remote-pid path here.
+-spec walk_return_type(
+    atom(),
+    atom(),
+    fun((atom(), atom()) -> {ok, atom() | tuple()} | not_found)
+) -> {ok, atom() | tuple()} | {error, not_found}.
+walk_return_type(none, _Selector, _Lookup) ->
+    {error, not_found};
+walk_return_type(ClassName, Selector, Lookup) ->
     case whereis_class(ClassName) of
         undefined ->
             {error, not_found};
-        Pid ->
-            Result =
-                try
-                    gen_server:call(Pid, {get_class_method_return_type, Selector}, 5000)
-                catch
-                    exit:{timeout, _} -> not_found;
-                    exit:{noproc, _} -> not_found;
-                    exit:{normal, _} -> not_found;
-                    exit:{shutdown, _} -> not_found;
-                    exit:{{shutdown, _}, _} -> not_found
-                end,
-            case Result of
+        _Pid ->
+            case Lookup(ClassName, Selector) of
                 {ok, _} = Found ->
                     Found;
-                {error, not_found} ->
-                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                        not_found -> {error, not_found};
-                        {ok, Super} -> get_class_method_return_type(Super, Selector)
-                    end;
                 not_found ->
-                    %% Process exited during call — not in this class, walk to superclass.
                     case beamtalk_class_metadata:lookup_superclass(ClassName) of
                         not_found -> {error, not_found};
-                        {ok, Super} -> get_class_method_return_type(Super, Selector)
+                        {ok, Super} -> walk_return_type(Super, Selector, Lookup)
                     end
             end
     end.
