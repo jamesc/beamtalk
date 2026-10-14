@@ -2990,3 +2990,53 @@ put_method_reindexes_xref_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% BT-3820: name/module lookups that must not queue behind a busy class
+%%====================================================================
+
+%% A class-object send of an inherited selector (`ProcessNavigation default
+%% isKindOf: ProcessNavigation` -> `includesBehaviour:`) falls through
+%% `beamtalk_class_dispatch:class_send_dispatch/3`'s `{error, not_found}`
+%% branch, which used to `gen_server:call(ClassPid, class_name)` and
+%% `gen_server:call(ClassPid, module_name)` -- two more 5s-timeout calls that
+%% re-queue behind whatever the class process is doing. `class_name_safe/1` and
+%% `module_name_safe/1` answer from the metadata ETS rows without a message
+%% send, so a stalled (here: suspended) class process cannot time them out.
+safe_name_lookups_do_not_message_class_process_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'SafeLookupTestClass',
+                    module => safe_lookup_test_class,
+                    superclass => 'Object',
+                    instance_methods => #{},
+                    instance_variables => []
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('SafeLookupTestClass', ClassInfo),
+                ok = sys:suspend(Pid),
+                try
+                    ?assertEqual(
+                        'SafeLookupTestClass', beamtalk_object_class:class_name_safe(Pid)
+                    ),
+                    ?assertEqual(
+                        safe_lookup_test_class, beamtalk_object_class:module_name_safe(Pid)
+                    ),
+                    %% The unsafe form really does block on a suspended
+                    %% process -- the failure shape from BT-3820.
+                    ?assertExit(
+                        {timeout, {gen_server, call, [Pid, class_name, 100]}},
+                        gen_server:call(Pid, class_name, 100)
+                    )
+                after
+                    ok = sys:resume(Pid)
+                end,
+                %% Once resumed the ETS-backed and call-backed answers agree.
+                ?assertEqual(
+                    beamtalk_object_class:class_name(Pid),
+                    beamtalk_object_class:class_name_safe(Pid)
+                )
+            end)
+        ]
+    end}.

@@ -215,7 +215,8 @@ resolve_class_object(ClassName) when is_atom(ClassName) ->
         undefined ->
             undefined;
         ClassPid ->
-            Module = gen_server:call(ClassPid, module_name),
+            %% BT-3820: ETS-backed lookup, not a 5s-timeout call into a possibly busy class.
+            Module = beamtalk_object_class:module_name_safe(ClassPid),
             Tag = class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
     end.

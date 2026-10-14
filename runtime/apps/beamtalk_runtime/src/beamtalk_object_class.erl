@@ -49,6 +49,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     is_constructible/1,
     shape_version/1,
     class_name/1,
+    class_name_safe/1,
     module_name/1,
     module_name_safe/1,
     superclass_safe/1,
@@ -388,6 +389,26 @@ class_name(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_name);
 class_name(ClassPid) ->
     gen_server:call(ClassPid, class_name).
+
+-doc """
+Get the class name, preferring a message-free metadata lookup.
+
+`class_name/1`'s `gen_server:call(ClassPid, class_name)` uses the default 5s
+timeout and queues behind whatever `ClassPid` is currently running, so it
+fails with `{timeout, {gen_server, call, [ClassPid, class_name]}}` when the
+class process is busy serving a long class-side call (BT-3820). This resolves
+the name via `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse
+lookup, no message send), falling back to `class_name/1` only on a miss. The
+same caveat as `module_name_safe/1` applies to an untrappable `kill`.
+""".
+-spec class_name_safe(pid()) -> class_name().
+class_name_safe(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_name);
+class_name_safe(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} -> ClassName;
+        not_found -> class_name(ClassPid)
+    end.
 
 -doc """
 Get the module name.
