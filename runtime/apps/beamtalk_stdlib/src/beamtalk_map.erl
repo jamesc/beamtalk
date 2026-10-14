@@ -15,7 +15,14 @@ stdlib module bt@stdlib@dictionary.
 Replaces the former beamtalk_map.erl hand-written dispatch module.
 """.
 
--export([at_if_absent/3, do/2, do_with_key/2, includes/2, print_string/1]).
+-export([
+    at_if_absent/3,
+    do/2,
+    do_with_key/2,
+    includes/2,
+    lookup_for_threading/3,
+    print_string/1
+]).
 
 -doc "Get value at key, or evaluate block if absent.".
 -spec at_if_absent(map(), term(), fun(() -> term())) -> term().
@@ -25,6 +32,43 @@ at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
         {ok, Value} -> Value;
         error -> Block()
     end.
+
+-doc """
+The receiver guard of an inlined `at:ifAbsent:` whose handler writes an
+outer local (ADR 0131 Phase 2d, BT-3798).
+
+Compiled code runs the handler inline, in the caller's activation, so the
+write can be threaded back. That is only valid when the primitive itself would
+have run it: a `Dictionary` (an untagged map). Any other receiver would have
+dispatched to its own `at:ifAbsent:` with a closure, which cannot return the
+write, so it raises a structured `type_error` instead of dropping it.
+
+A value-type instance is also a map, but tagged with `'$beamtalk_class'`; it is
+not a `Dictionary` and takes the error branch. `Selector` is the lookup
+selector, for the error only.
+""".
+-spec lookup_for_threading(term(), atom(), term()) -> {ok, term()} | error.
+lookup_for_threading(Receiver, Selector, Key) when is_map(Receiver) ->
+    case beamtalk_primitive:is_object(Receiver) of
+        false ->
+            maps:find(Key, Receiver);
+        true ->
+            unsupported_receiver(Receiver, Selector)
+    end;
+lookup_for_threading(Receiver, Selector, _Key) ->
+    unsupported_receiver(Receiver, Selector).
+
+-spec unsupported_receiver(term(), atom()) -> no_return().
+unsupported_receiver(Receiver, Selector) ->
+    beamtalk_error:raise_type_error(
+        beamtalk_primitive:class_of(Receiver),
+        Selector,
+        <<
+            "The block writes a local of the enclosing method, and only a Dictionary "
+            "receiver can run it inline; assign the result instead of writing the local "
+            "from the block"
+        >>
+    ).
 
 -doc "Iterate over all values in the dictionary.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.

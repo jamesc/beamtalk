@@ -1,0 +1,141 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes
+// an outer local is a local-threading producer: the handler runs inline (a
+// `BranchArm` frame) behind a runtime receiver guard, in every operand
+// position and as a statement, in class, value-type and actor methods. Each
+// test runs one shape (fixtures/adr0131lookup_{class,value,actor}.bt) in all
+// three contexts and asserts the answer Smalltalk semantics give.
+//
+// `Dictionary` implements `at:ifAbsent:` only; `at:ifAbsentPut:`,
+// `at:ifPresent:`, `at:ifPresent:ifAbsent:` and `removeKey:ifAbsent:` are not
+// Dictionary selectors, so there is no Dictionary behaviour to lower and a
+// handler-writing send of one stays a compile error (ADR 0131 §6, pinned by
+// `lookup_selectors_that_dictionary_does_not_implement_stay_rejected` in
+// beamtalk-core).
+
+TestCase subclass: Adr0131LookupTest
+
+  answersOf: selector =>
+    #[Adr0131LookupClass perform: selector, (Adr0131LookupValue new) perform: selector, (Adr0131LookupActor spawn) perform: selector]
+
+  assertAll: selector equal: expected =>
+    self assert: (self answersOf: selector) equals: #[expected, expected, expected]
+
+  testS1 => self assertAll: #s1 equal: #[0, 1]
+
+  testFound => self assertAll: #found equal: #[1, 0]
+
+  testFoundNil => self assertAll: #foundNil equal: #[nil, 0]
+
+  testEmptyDictionary => self assertAll: #emptyDictionary equal: #[5, 1]
+
+  testStatement => self assertAll: #statement equal: 1
+
+  testWriteOnly => self assertAll: #writeOnly equal: #[0, 7]
+
+  testTwoLocals => self assertAll: #twoLocals equal: #[0, 1, 2]
+
+  testArgument => self assertAll: #argument equal: #[6, 4]
+
+  testLeftRead => self assertAll: #leftRead equal: #[5, 1]
+
+  testReturned => self assertAll: #returned equal: 6
+
+  testLast => self assertAll: #last equal: 3
+
+  testParenthesised => self assertAll: #parenthesised equal: 1
+
+  testAssignsTarget => self assertAll: #assignsTarget equal: 9
+
+  testTwice => self assertAll: #twice equal: 11
+
+  testBothOperands => self assertAll: #bothOperands equal: #[3, 11]
+
+  testKeyReadsLocal => self assertAll: #keyReadsLocal equal: #[0, 6]
+
+  testReceiverSelfSend => self assertAll: #receiverSelfSend equal: #[0, 1]
+
+  testKeySelfSend => self assertAll: #keySelfSend equal: #[0, 1]
+
+  testArmMissing =>
+    self assert: (Adr0131LookupClass armMissing: true) equals: #[0, 1]
+    self assert: ((Adr0131LookupValue new) armMissing: true) equals: #[0, 1]
+    self assert: ((Adr0131LookupActor spawn) armMissing: true) equals: #[0, 1]
+
+  testArmSkipped =>
+    self assert: (Adr0131LookupClass armMissing: false) equals: #[nil, 0]
+    self assert: ((Adr0131LookupValue new) armMissing: false) equals: #[nil, 0]
+    self assert: ((Adr0131LookupActor spawn) armMissing: false) equals: #[nil, 0]
+
+  testOnDoBody => self assertAll: #onDoBody equal: #[0, 1]
+
+  testNestedLookup => self assertAll: #nestedLookup equal: #[4, 1]
+
+  testHandlerHoldsLoop => self assertAll: #handlerHoldsLoop equal: #[0, 3]
+
+  testHandlerHoldsFold => self assertAll: #handlerHoldsFold equal: #[3, 3]
+
+  testEarlyReturnMissing =>
+    self assert: (Adr0131LookupClass earlyReturn: #k) equals: 1
+    self assert: ((Adr0131LookupValue new) earlyReturn: #k) equals: 1
+    self assert: ((Adr0131LookupActor spawn) earlyReturn: #k) equals: 1
+
+  testEarlyReturnFound =>
+    self assert: (Adr0131LookupClass earlyReturn: #a) equals: #[1, 0]
+    self assert: ((Adr0131LookupValue new) earlyReturn: #a) equals: #[1, 0]
+    self assert: ((Adr0131LookupActor spawn) earlyReturn: #a) equals: #[1, 0]
+
+  // Actor only: a receiver or key that is a self-send mutating a field threads
+  // `State` ahead of the lookup, and a handler may read a field.
+  testKeyBumpsStateActor =>
+    self assert: (Adr0131LookupActor spawn) keyBumpsState equals: #[0, 1, 1]
+
+  testReceiverBumpsStateActor =>
+    self assert: (Adr0131LookupActor spawn) receiverBumpsState equals: #[0, 1, 11]
+
+  testFieldReadInHandlerActor =>
+    self assert: (Adr0131LookupActor spawn) fieldReadInHandler equals: #[0, 4, 4]
+
+  // A Dictionary receiver passed in at run time takes the inline path.
+  testDictionaryReceiver =>
+    self assert: (Adr0131LookupClass lookupIn: #{#a => 1}) equals: #[0, 1]
+    self assert: ((Adr0131LookupValue new) lookupIn: #{#a => 1}) equals: #[0, 1]
+    self assert: ((Adr0131LookupActor spawn) lookupIn: #{
+      #a => 1
+    }) equals: #[0, 1]
+
+  testDictionaryReceiverFound =>
+    self assert: (Adr0131LookupClass lookupIn: #{#k => 4}) equals: #[4, 0]
+    self assert: ((Adr0131LookupValue new) lookupIn: #{#k => 4}) equals: #[4, 0]
+    self assert: ((Adr0131LookupActor spawn) lookupIn: #{
+      #k => 4
+    }) equals: #[4, 0]
+
+  // A receiver that is a map but not a Dictionary (a value-type instance
+  // with its own `at:ifAbsent:`), and any other receiver, cannot run the
+  // handler inline: the guard raises a structured `type_error` before the
+  // write could be dropped.
+  testValueTypeReceiverRaises =>
+    self should: [
+      Adr0131LookupClass lookupIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+    self should: [
+      (Adr0131LookupValue new) lookupIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+    self should: [
+      (Adr0131LookupActor spawn) lookupIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+
+  testListReceiverRaises =>
+    self should: [Adr0131LookupClass lookupIn: #(1, 2)] raise: #type_error
+    self should: [(Adr0131LookupValue new) lookupIn: #(1, 2)] raise: #type_error
+    self should: [
+      (Adr0131LookupActor spawn) lookupIn: #(1, 2)
+    ] raise: #type_error
+
+  testIntegerReceiverRaises =>
+    self should: [Adr0131LookupClass lookupIn: 3] raise: #type_error
+    self should: [(Adr0131LookupValue new) lookupIn: 3] raise: #type_error
+    self should: [(Adr0131LookupActor spawn) lookupIn: 3] raise: #type_error

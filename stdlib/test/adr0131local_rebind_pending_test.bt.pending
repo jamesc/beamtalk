@@ -10,23 +10,15 @@
 //   (o3, o12, o13, s7, seqArg, seqRecv and the conditional-arm statement
 //   shapes compile since BT-3738, ADR 0131 Phase 3a; the `on:do:`/`ensure:`
 //   shapes are BT-3817.)
-//   (s2, `detect:ifNone:` whose handler writes, compiles since BT-3794.)
+//   (s2, `detect:ifNone:` whose handler writes, compiles since BT-3794; s1,
+//   `Dictionary at:ifAbsent:` whose handler writes, since BT-3798.)
 //
 // BT-3745 (ADR 0131 Phase 0b) added every cell that crashed or answered wrong
 // (each now an ADR 0131 Phase 0 allow-set or §6 compile error, pinned by
 // `adr0131_probe_matrix_pins` in beamtalk-core): the tests from testO1Class
-// on, including the actor column (fixtures/adr0131local_rebind_actor_pending).
+// on (the actor column has no pending shape left: fixtures/adr0131local_rebind_actor.bt).
 
 TestCase subclass: Adr0131LocalRebindPendingTest
-
-  testS1Class =>
-    self assert: (Adr0131LocalRebindClassPending s1) equals: #[0, 1]
-
-  testS1Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) s1) equals: #[0, 1]
-
-  testS1Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) s1) equals: #[0, 1]
 
   // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
   // error today), with their ADR Expected answers.

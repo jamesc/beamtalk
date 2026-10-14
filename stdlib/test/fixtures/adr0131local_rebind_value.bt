@@ -14,7 +14,7 @@
 //
 // The shapes that do not compile in a value-type method today are in
 // adr0131local_rebind_value_pending.bt.pending, so this module compiles: o3,
-// o12, o13 and s2 (codegen failures before BT-3745), and o1, o2, o5-o10, s1,
+// o12, o13 and s2 (codegen failures before BT-3745), and o1, o2, o5-o10,
 // s7 and seq (ADR 0131 Phase 0 compile errors since BT-3745). o4, s9 and
 // vtReturnInject moved here when ADR 0131 Phase 2 (BT-3749) made loops and
 // folds local-threading producers. s4 is a permanent ADR 0131 §6 error and is
@@ -126,6 +126,18 @@ Value subclass: Adr0131LocalRebindValue
         t := t + 1
         a + x
       ]
+
+  // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes.
+  s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
 
   // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes.
   s2 =>

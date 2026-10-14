@@ -15,8 +15,8 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, expression_threaded_writes,
-    local_threading_construct, producer_body_block, producer_packed_blocks, threaded_block_writes,
-    threaded_today_block_writes,
+    local_threading_construct, lookup_arm_blocks, producer_body_block, producer_packed_blocks,
+    threaded_block_writes, threaded_today_block_writes,
 };
 use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
@@ -28,9 +28,6 @@ pub(in crate::core_erlang) enum ThreadedConstruct {
     Inline(LocalThreadingFamily),
     /// A `value`-family send to a Tier 2 block-valued local.
     Tier2Value,
-    /// An ADR 0128 opaque-callable fold over a Tier 2 block-valued local,
-    /// in actor instance context.
-    OpaqueFold,
 }
 
 /// ADR 0131 §1: the threaded outer locals of one local-threading construct,
@@ -258,9 +255,7 @@ impl CoreErlangGenerator {
     ///   family, `on:do:`/`ensure:`, `value` sent to a block literal, the
     ///   block-taking lookup selectors and `Result tryDo:`;
     /// - a `value`-family send to a Tier 2 block-valued local
-    ///   (`tier2_local_vars`);
-    /// - an ADR 0128 opaque-callable fold over such a local, in actor
-    ///   instance context only.
+    ///   (`tier2_local_vars`).
     ///
     /// `match:` has no construct of its own. Its arms are not closures, so
     /// their writes belong to whichever construct block contains the
@@ -462,8 +457,9 @@ impl CoreErlangGenerator {
     /// today's tuple builders pack into `__local__` keys. Empty for a
     /// construct whose result is not unpacked that way yet: the unary loops,
     /// `value` sent to a block literal (threaded by the inline-block path,
-    /// `get_inline_block_captured_mutations`), the lookup selectors and
-    /// `tryDo:` (ADR 0131 phases 2 and 4), and `eachWithIndex:`/
+    /// `get_inline_block_captured_mutations`), the lookup selectors that are
+    /// not `Dictionary`-inline (BT-3798) and `tryDo:` (ADR 0131 phase 4), and
+    /// `eachWithIndex:`/
     /// `do:separatedBy:` outside an actor's own fold
     /// ([`Self::enumeration_threads_actor_state`]).
     fn lowered_construct_blocks<'a>(
@@ -510,50 +506,38 @@ impl CoreErlangGenerator {
                     .filter_map(|&i| literal(arguments.get(i)))
                     .collect(),
             },
-            LocalThreadingFamily::BlockValue
-            | LocalThreadingFamily::Lookup
-            | LocalThreadingFamily::TryDo => Vec::new(),
+            // ADR 0131 Phase 2d (BT-3798): a `Dictionary`-inline lookup packs
+            // its handler, the one block core's `lookup_arm_blocks` names.
+            LocalThreadingFamily::Lookup => lookup_arm_blocks(expr).unwrap_or_default(),
+            LocalThreadingFamily::BlockValue | LocalThreadingFamily::TryDo => Vec::new(),
         }
     }
 
-    /// The Tier 2 shapes of [`Self::threaded_locals_of`]: a `value`-family
-    /// send to a Tier 2 block-valued local, and (actor instance context
-    /// only, ADR 0128 §"Explicitly narrowed") an opaque-callable fold over
-    /// one. Their set is the block's captured mutations, recorded by
-    /// `prescan_tier2_local_vars`. Today's tuple builders pack neither (the
-    /// Tier 2 protocol threads them), so [`ThreadedLocals::lowered`] is
-    /// empty.
+    /// The Tier 2 shape of [`Self::threaded_locals_of`]: a `value`-family
+    /// send to a Tier 2 block-valued local. Its set is the block's captured
+    /// mutations, recorded by `prescan_tier2_local_vars`. Today's tuple
+    /// builders pack nothing for it (the Tier 2 protocol threads it), so
+    /// [`ThreadedLocals::lowered`] is empty.
+    ///
+    /// An ADR 0128 opaque-callable fold over such a local (`#(1) do: blk`) is
+    /// not a construct here: `prescan_tier2_local_vars` promotes a stored
+    /// block only when every later use is a `value`-family send, so passing
+    /// it to a collection HOM keeps it a plain closure, and ADR 0131 §6
+    /// rejects that site if the block writes an outer local (BT-3798).
     fn tier2_threaded_locals(&self, expr: &Expression) -> Option<ThreadedLocals> {
         let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
+            receiver, selector, ..
         } = expr
         else {
             return None;
         };
-        let (construct, local) = if selector.is_block_invocation() {
-            let Expression::Identifier(id) = receiver.as_ref() else {
-                return None;
-            };
-            (ThreadedConstruct::Tier2Value, id.name.as_str())
-        } else if self.context == CodeGenContext::Actor
-            && !self.in_class_method()
-            && !self.is_repl_mode()
-            && beamtalk_core::state_threading_selectors::is_opaque_callable_hom_send(expr)
-        {
-            let callable = beamtalk_core::state_threading_selectors::opaque_fold_callable_arg(
-                &selector.name(),
-                arguments,
-            );
-            let Some(Expression::Identifier(id)) = callable.map(Expression::unwrap_parens) else {
-                return None;
-            };
-            (ThreadedConstruct::OpaqueFold, id.name.as_str())
-        } else {
+        if !selector.is_block_invocation() {
+            return None;
+        }
+        let Expression::Identifier(id) = receiver.as_ref() else {
             return None;
         };
+        let local = id.name.as_str();
         if !self.tier2_local_vars.contains(local) {
             return None;
         }
@@ -568,7 +552,7 @@ impl CoreErlangGenerator {
         names.sort();
         names.dedup();
         Some(ThreadedLocals {
-            construct,
+            construct: ThreadedConstruct::Tier2Value,
             names,
             lowered: Vec::new(),
         })
