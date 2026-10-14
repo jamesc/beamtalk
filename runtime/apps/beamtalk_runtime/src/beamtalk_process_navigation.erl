@@ -1192,7 +1192,7 @@ child_label(BClass, RegName) ->
 class_name_of(nil) ->
     nil;
 class_name_of(BClass) when is_tuple(BClass) ->
-    beamtalk_object_class:class_name(element(4, BClass)).
+    beamtalk_object_class:class_name_safe(element(4, BClass)).
 
 %% Best-effort behaviour-class atom for a restarting child id (a class atom when
 %% the id names a Beamtalk class), or `nil`.
@@ -1327,7 +1327,7 @@ supervisor_config(_Kind, _BClass) ->
 -spec supervisor_strategy(pid()) -> atom() | nil.
 supervisor_strategy(ClassPid) ->
     try
-        ClassName = beamtalk_object_class:class_name(ClassPid),
+        ClassName = beamtalk_object_class:class_name_safe(ClassPid),
         case beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
             true ->
                 simpleOneForOne;
@@ -1393,8 +1393,9 @@ per supervisor-*looking* pid the walk meets, both at root selection
 (`registered_beamtalk_supervisor_pids/0`) and during the recursive walk
 itself) resolves a module to its Beamtalk class name via
 `beamtalk_class_registry:live_class_entries/0`. That function is O(number of
-loaded classes) and, per class, calls `beamtalk_object_class:class_name/1` —
-a `gen_server:call` to *that class's own process* (not a pure ETS read).
+loaded classes) and reads each class's name/module from ETS metadata
+(BT-3820: it must not `gen_server:call` class processes — this runs inside a
+class process, so such calls deadlock two classes against each other).
 Calling it **fresh for every supervisor-looking pid** turns one snapshot into
 O(supervisor-looking-pids × loaded-classes) gen_server round trips — cheap
 enough locally to go unnoticed (a handful of pids × ~100 stdlib classes, each

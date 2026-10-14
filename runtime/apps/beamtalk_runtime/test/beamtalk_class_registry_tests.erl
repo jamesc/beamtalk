@@ -369,6 +369,76 @@ live_class_entries_skips_class_dying_mid_call_test() ->
         pg:leave(beamtalk_classes, Pid)
     end.
 
+%% BT-3820 regression: two class processes whose class-side handlers each run
+%% `live_class_entries/0` concurrently must not deadlock. Both handlers are held
+%% at a barrier until both are inside their `class_method_call`, so each is
+%% occupied serving a call when it asks the registry for the other's name. If
+%% `live_class_entries/0` reads names with `gen_server:call(Pid, class_name)`,
+%% each handler waits on the other's (busy) mailbox until the 5s call timeout
+%% (`{timeout, {gen_server, call, [_, class_name]}}`, swallowed by the registry's
+%% `exit:_ -> false` filter) and the peer is silently missing from the result.
+live_class_entries_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        beamtalk_class_registry:ensure_pg_started(),
+        Coord = self(),
+        NameA = 'BT3820DeadlockA',
+        NameB = 'BT3820DeadlockB',
+        Probe = fun(_ClassSelf) ->
+            Coord ! {in_handler, self()},
+            receive
+                {go, Me} when Me =:= self() -> ok
+            after 10000 -> exit(barrier_timeout)
+            end,
+            [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()]
+        end,
+        Info = fun() ->
+            #{
+                superclass => none,
+                module => bt3820_no_module,
+                class_methods => #{bt3820Probe => #{block => Probe, arity => 1}}
+            }
+        end,
+        {ok, PidA} = beamtalk_object_class:start_link(NameA, Info()),
+        {ok, PidB} = beamtalk_object_class:start_link(NameB, Info()),
+        try
+            Callers = [
+                spawn_link(fun() ->
+                    Coord ! {result, P, beamtalk_class_dispatch:class_send(P, bt3820Probe, [])}
+                end)
+             || P <- [PidA, PidB]
+            ],
+            %% Wait until both class processes are inside their handlers, then release.
+            InHandler = [
+                receive
+                    {in_handler, H} -> H
+                after 10000 -> error(handler_not_entered)
+                end
+             || _ <- Callers
+            ],
+            [H ! {go, H} || H <- InHandler],
+            Start = erlang:monotonic_time(millisecond),
+            Results = [
+                receive
+                    {result, P, Names} -> {P, Names}
+                after 15000 -> error({no_result, P})
+                end
+             || P <- [PidA, PidB]
+            ],
+            Elapsed = erlang:monotonic_time(millisecond) - Start,
+            lists:foreach(
+                fun({_P, Names}) ->
+                    ?assert(lists:member(NameA, Names)),
+                    ?assert(lists:member(NameB, Names))
+                end,
+                Results
+            ),
+            %% Far below the 5s gen_server:call timeout the deadlock would burn.
+            ?assert(Elapsed < 2000)
+        after
+            [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
+        end
+    end}.
+
 %%% ============================================================================
 %%% loaded-class name index tests
 %%% ============================================================================

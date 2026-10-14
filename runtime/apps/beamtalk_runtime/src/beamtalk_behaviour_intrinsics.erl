@@ -191,7 +191,7 @@ Queries the ETS hierarchy table for O(1) lookup per level.
 -spec classSubclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Subclasses = beamtalk_class_registry:direct_subclasses(ClassName),
     lists:filtermap(
         fun(SC) ->
@@ -211,7 +211,7 @@ Queries the ETS hierarchy table recursively.
 -spec classAllSubclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     AllSubclasses = beamtalk_class_registry:all_subclasses(ClassName),
     lists:filtermap(
         fun(SC) ->
@@ -320,7 +320,7 @@ of instance methods.
 -spec classMethods(#beamtalk_object{}) -> [atom()].
 classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% Metaclass receiver — collect class methods up the hierarchy.
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
@@ -334,7 +334,7 @@ classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     ordsets:to_list(Acc);
 classMethods(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
@@ -381,7 +381,7 @@ falls back to gen_server for dynamic classes.
 -spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
 classAllFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     classAllFieldNamesByName(ClassName).
 
 -doc """
@@ -513,7 +513,7 @@ instance-side counterpart to `classAllFieldNames/1`. Delegates to
 -spec classAllFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
 classAllFieldKinds(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     classAllFieldKindsByName(ClassName).
 
 -doc """
@@ -646,7 +646,7 @@ class-side slots precede subclass ones).
 -spec classAllClassVarNames(#beamtalk_object{}) -> [atom()].
 classAllClassVarNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->
@@ -667,7 +667,7 @@ classAllClassVarNames(Self) ->
 -spec className(#beamtalk_object{}) -> atom().
 className(Self) ->
     ClassPid = erlang:element(4, Self),
-    gen_server:call(ClassPid, class_name).
+    beamtalk_object_class:class_name_safe(ClassPid).
 
 -doc """
 Return the metaclass object for the receiver.
@@ -749,7 +749,7 @@ Delegates to classRemoveFromSystemByName/1 after extracting the class name.
 -spec classRemoveFromSystem(#beamtalk_object{}) -> 'nil'.
 classRemoveFromSystem(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     classRemoveFromSystemByName(ClassName).
 
 -doc """
@@ -975,7 +975,7 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 -spec remove_selector(#beamtalk_object{}, atom()) -> removed | absent.
 remove_selector(Self, Selector) ->
     {Side, ClassPid} = removal_target(Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     case Side =:= instance andalso beamtalk_protocol_registry:is_protocol(ClassName) of
         true -> remove_protocol_selector(ClassName, Selector);
         false -> remove_class_selector(Self, ClassName, Side, Selector)
@@ -1321,7 +1321,7 @@ object, on success.
 -spec classRenameTo(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
 classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
-    OldName = gen_server:call(ClassPid, class_name),
+    OldName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
@@ -1955,7 +1955,7 @@ log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult) ->
 -spec selector_not_found_error(#beamtalk_object{}, atom()) -> #beamtalk_error{}.
 selector_not_found_error(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Error0 = beamtalk_error:new(selector_not_found, ClassName, Selector),
     Msg = iolist_to_binary([
         atom_to_binary(ClassName, utf8),
@@ -2025,7 +2025,7 @@ protocol_or_class_module(ClassName, ClassPid) ->
 -spec classReload(#beamtalk_object{}) -> #beamtalk_object{}.
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = require_class_capability(reload, ClassName, <<"reload">>),
     ModuleName = protocol_or_class_module(ClassName, ClassPid),
     SourceFile = beamtalk_reflection:source_file_from_module(ModuleName),
@@ -2161,7 +2161,7 @@ compile_source_op(ephemeral) -> 'tryCompile:source:'.
     #beamtalk_object{}.
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace(compile_source_op(Intent), ClassName),
     ok = require_method_capability(compile_source_op(Intent), ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
@@ -2206,7 +2206,7 @@ same underlying shape).
 -spec classPrecheckCompileSource(#beamtalk_object{}, atom(), binary()) -> map().
 classPrecheckCompileSource(Self, Selector, Source) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace('precheckCompile:source:', ClassName),
     ok = require_method_capability('precheckCompile:source:', ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
@@ -2492,7 +2492,7 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
     is_map(Fields), is_integer(FromVersion), FromVersion > 0
 ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     case beamtalk_shape_migration:migrate(ClassName, FromVersion, Fields) of
         {ok, NewFields, _ToVersion} -> NewFields;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -2515,7 +2515,7 @@ rename_selector(Self, OldSelector, NewSelector) ->
         true ->
             ok = ensure_rename_selector_collision_free(Self, NewSelector),
             {Side, ClassPid} = removal_target(Self),
-            ClassName = gen_server:call(ClassPid, class_name),
+            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
             ok = refuse_if_protocol_provided(ClassName, Side, OldSelector, rename),
             ClassNameBin = atom_to_binary(ClassName, utf8),
             OldSelectorBin = atom_to_binary(OldSelector, utf8),
@@ -2601,7 +2601,7 @@ ensure_rename_selector_collision_free(Self, NewSelector) ->
             ok;
         true ->
             ClassPid = erlang:element(4, Self),
-            ClassName = gen_server:call(ClassPid, class_name),
+            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
             beamtalk_error:raise(rename_selector_collision_error(ClassName, NewSelector))
     end.
 
@@ -3168,7 +3168,7 @@ The protocol argument is expected to be a Symbol (atom) naming the protocol.
 -spec classConformsTo(#beamtalk_object{}, atom()) -> boolean().
 classConformsTo(Self, ProtocolName) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     beamtalk_protocol_registry:conforms_to(ClassName, ProtocolName).
 
 -doc """
@@ -3180,7 +3180,7 @@ Returns a list of protocol name atoms, sorted alphabetically.
 -spec classProtocols(#beamtalk_object{}) -> [atom()].
 classProtocols(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     beamtalk_protocol_registry:protocols_for_class(ClassName).
 
 -doc """
@@ -3196,7 +3196,7 @@ pure Beamtalk composed on top of this primitive plus `allSuperclasses`.
 -spec classUsedProtocols(#beamtalk_object{}) -> [atom()].
 classUsedProtocols(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     beamtalk_protocol_registry:used_protocols(ClassName).
 
 %%% ============================================================================
@@ -3213,7 +3213,7 @@ the class object. Example: `Counter class class thisClass == Counter`.
 -spec metaclassThisClass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassThisClass(Self) ->
     Pid = erlang:element(4, Self),
-    ClassName = gen_server:call(Pid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(Pid),
     atom_to_class_object(ClassName).
 
 -doc """
@@ -3298,7 +3298,7 @@ Walks the superclass chain collecting all class-side selectors.
 -spec metaclassClassMethods(#beamtalk_object{}) -> [atom()].
 metaclassClassMethods(Self) ->
     Pid = erlang:element(4, Self),
-    ClassName = gen_server:call(Pid, class_name),
+    ClassName = beamtalk_object_class:class_name_safe(Pid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->

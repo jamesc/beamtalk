@@ -110,6 +110,13 @@ Fetch all live class entries from the registry.
 Returns a list of {Name, ModuleName, Pid} tuples for all registered class
 processes that are still alive. Dead processes (noproc, timeout) are silently
 filtered out. Returns [] if the pg process group is not running.
+
+Sends no messages to class processes (BT-3820): name and module come from the
+metadata ETS rows (`class_name_safe/1`, `module_name_safe/1`), and a dead local
+pid is dropped with `is_process_alive/1`. This upholds the class-process
+invariant (a class process never makes a blocking call into another class
+process while handling a call); this function runs inside class handlers
+(protocol conformance, process navigation).
 """.
 -type class_entry() :: {atom(), module(), pid()}.
 -spec live_class_entries() -> [class_entry()].
@@ -119,7 +126,13 @@ live_class_entries() ->
         lists:filtermap(
             fun(Pid) ->
                 try
-                    Name = beamtalk_object_class:class_name(Pid),
+                    %% BT-3820: ETS-backed reads only. A class process runs
+                    %% class-side methods that reach this function (protocol
+                    %% conformance, process navigation); a `gen_server:call`
+                    %% per class here deadlocks two such classes against each
+                    %% other until the 5s call timeout.
+                    true = is_live_class_pid(Pid),
+                    Name = beamtalk_object_class:class_name_safe(Pid),
                     Mod = beamtalk_object_class:module_name_safe(Pid),
                     {true, {Name, Mod, Pid}}
                 catch
@@ -138,6 +151,14 @@ live_class_entries() ->
             []
     end.
 
+%% A pg member is live if it is remote (not checkable locally; the name lookup
+%% then falls back to a call, whose exit filters it) or a local alive process.
+%% The ETS reverse index outlives an untrappable `kill`, so liveness is checked
+%% explicitly rather than inferred from a successful name lookup.
+-spec is_live_class_pid(pid()) -> boolean().
+is_live_class_pid(Pid) ->
+    node(Pid) =/= node() orelse is_process_alive(Pid).
+
 -doc """
 Return all loaded user classes (those with a source file recorded).
 
@@ -154,7 +175,8 @@ user_classes() ->
         lists:filtermap(
             fun(Pid) ->
                 try
-                    ClassName = beamtalk_object_class:class_name(Pid),
+                    true = is_live_class_pid(Pid),
+                    ClassName = beamtalk_object_class:class_name_safe(Pid),
                     ModuleName = beamtalk_object_class:module_name_safe(Pid),
                     case beamtalk_reflection:source_file_from_module(ModuleName) of
                         nil ->
@@ -187,7 +209,7 @@ is `==` to the registry reference).
 """.
 -spec class_object_from_pid(pid()) -> #beamtalk_object{}.
 class_object_from_pid(Pid) when is_pid(Pid) ->
-    ClassName = beamtalk_object_class:class_name(Pid),
+    ClassName = beamtalk_object_class:class_name_safe(Pid),
     ModuleName = beamtalk_object_class:module_name_safe(Pid),
     ClassTag = class_object_tag(ClassName),
     #beamtalk_object{class = ClassTag, class_mod = ModuleName, pid = Pid}.
