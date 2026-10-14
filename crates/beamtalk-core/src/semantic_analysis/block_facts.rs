@@ -2132,11 +2132,9 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
     out
 }
 
-/// Whether `target` is the `self.<field>` target of a field or class-variable
-/// write: the one shape codegen's field-write lowerings recognise
-/// (`field_assignment_name`, `class_var_assignment_shape`).
-/// Whether `target` is `self.<field>`, the assignment target the field-write
-/// rules (here and in codegen's `field_assignment_name`) share.
+/// Whether `target` is `self.<field>`, the target of a field or class-variable
+/// write: the one shape the field-write rules share (here, and codegen's
+/// `field_assignment_name` and `class_var_assignment_shape`).
 #[must_use]
 pub fn is_self_field_target(target: &Expression) -> bool {
     matches!(

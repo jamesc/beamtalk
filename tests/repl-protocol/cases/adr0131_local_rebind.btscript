@@ -475,3 +475,15 @@ t := 0
 
 r := 0. r := r + ((4 =:= 4) ifTrue: [t := t + 1. 2] ifFalse: [3]). #[r, t]
 // => #[2, 1]
+
+// `on:do:` / `ensure:` as a statement of a REPL loop body is still a Phase 0
+// error (the REPL's loop frames are not exception producers yet; BT-3823), so
+// nothing reaches codegen to mis-thread the loop's accumulator.
+t := 0. #(1, 2, 3) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t
+// => ERROR: `on:do:` writes outer local `t`
+
+t := 0. #(1, 2, 3) do: [:x | [t := t + x] ensure: [t := t + 10]]. t
+// => ERROR: `ensure:` writes outer local `t`
+
+t := 0. 1 to: 3 do: [:i | [Error signal: "x"] on: Error do: [:e | t := t + i]]. t
+// => ERROR: `on:do:` writes outer local `t`
