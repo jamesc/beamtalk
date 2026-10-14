@@ -657,15 +657,10 @@ impl VerifyWalk<'_> {
                     // (the method ends), never a declared *family*: its merge
                     // `Bind` still has to have run, or the tail reads a stale
                     // `Self`/`State` (BT-3830).
-                    if let Some(o) = open.take() {
-                        dropped.extend(o.pending_families.into_iter().map(|family| {
-                            VerifyError::ConstructFamilyDropped {
-                                family,
-                                carrier: o.carrier.to_string(),
-                                at: o.at,
-                            }
-                        }));
+                    if let Some(o) = open.as_mut() {
+                        o.pending.clear();
                     }
+                    close(&mut open, &mut dropped);
                 }
                 _ => close(&mut open, &mut dropped),
             }
