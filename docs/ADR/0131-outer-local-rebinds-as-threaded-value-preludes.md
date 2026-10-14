@@ -16,6 +16,7 @@ Accepted (2026-10-08)
 | 1b | [BT-3747](https://linear.app/beamtalk/issue/BT-3747) | IR nodes `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` | M | |
 | 1c | [BT-3748](https://linear.app/beamtalk/issue/BT-3748) | Verifier checks; `ScopeKind::ValueType`; §1a sequencing amendment | M | |
 | 2 | [BT-3749](https://linear.app/beamtalk/issue/BT-3749) | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors, actor-only opaque folds | M | |
+| 2d | [BT-3798](https://linear.app/beamtalk/issue/BT-3798) | `Dictionary at:ifAbsent:` as a producer (a guarded inline lowering); retire the unreachable `OpaqueFold` construct | M | |
 | 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | |
 | 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | |
 | 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
@@ -198,13 +199,44 @@ locals:
 - the ADR 0128 opaque-callable folds, **in actor instance context only**:
   ADR 0128 records that a non-literal callable cannot thread captured
   locals in class or value-type context at all (its §"Explicitly narrowed");
-  there the fold is a §6 case, not a producer;
+  there the fold is a §6 case, not a producer (**Amendment, Phase 2d,
+  BT-3798:** no user program reaches the actor case either, so it is not a
+  producer and codegen has no construct for it. A stored block is promoted
+  to a Tier 2 local only when every later use is a `value`-family send, and
+  passing it to a collection higher-order method (`#(1, 2) do: blk`) is an
+  unsafe use; §6 additionally rejects `blk` flowing to `do:`/`collect:`.
+  If a future ADR makes a stored block passable to one, it needs its own
+  `__local__` seeding, designed then);
 - read+write conditionals (`ifTrue:` … `match:`; this is
   `inline_control_flow_producer` with its family list taken from context,
   §3);
 - `on:do:` and `ensure:`;
 - `Result tryDo:` (§5);
 - an inline Tier 2 `value`/`value:`… call on a block-valued local.
+
+**Amendment, Phase 2d (BT-3798): the lookup selectors.** The receiver type of
+`r := d at: #k ifAbsent: [t := t + 1. 0]` is unknown at compile time: the
+selector is implemented by the `Dictionary` primitive, by stdlib methods that
+call `block value` themselves (`Ets at:ifAbsent:`) and by any user class, and
+an inline lowering is valid for only one of them. Instead of a callee-side
+tier protocol (Alternative D, BT-3742), the lookup is a **guarded inline
+lowering for a `Dictionary` receiver**, lowered as a conditional whose
+condition is a runtime receiver guard
+(`beamtalk_map:lookup_for_threading/3`) and whose arm is the handler (a
+`BranchArm` frame): a `Dictionary` (an untagged map) answers `{ok, Value}` or
+`error`, and any other receiver, including a value-type instance (also a map,
+but tagged), raises a structured `type_error` when the handler writes an outer
+local, instead of dropping the write. The lookups are rows of ONE table in
+`beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen
+through `conditional_arm_blocks`; a row is `dictionary_inline` only when
+`Dictionary` implements the selector (a test pins that against the class
+hierarchy). `Dictionary` implements `at:ifAbsent:` only, so
+`at:ifAbsentPut:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:` and
+`removeKey:ifAbsent:` stay §6 errors until `Dictionary` gains them (they have
+no behaviour to lower); each then needs its own result shape and its flag
+flipped. The REPL keeps the §6 error, and a lookup in a loop or fold body is
+not a producer (it lowers at the method root and in `BranchArm` frames, like a
+conditional).
 
 Its result is:
 

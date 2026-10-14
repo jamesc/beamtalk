@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3798 (ADR 0131 Phase 2d): a receiver that is a map but not a Dictionary
+// (a value-type instance) and that implements `at:ifAbsent:` itself. A lookup
+// whose handler writes an outer local must not run that handler inline against
+// it; the guard raises a structured error instead.
+
+Value subclass: Adr0131LookupBag
+
+  field: n = 0
+
+  at: _key ifAbsent: block =>
+    block value

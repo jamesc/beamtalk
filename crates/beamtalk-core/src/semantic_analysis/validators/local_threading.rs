@@ -46,13 +46,13 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, LoopBodyContext, OuterLocalWrite, RootMethodKind, captured_local_mutations,
-    conditional_arm_blocks, conditional_producer_writes, construct_outer_local_writes,
-    escape_sites, exception_arm_blocks, exception_producer_writes, is_actor_fold_value_site,
-    is_fold_frame_body, is_loop_body_producer_site, is_safe_value_family_selector,
-    is_threaded_frame_body, local_threading_construct, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, producer_body_block, repl_operand_sites,
-    root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
+    EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
+    RootMethodKind, captured_local_mutations, conditional_arm_blocks, conditional_producer_writes,
+    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
+    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
+    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -124,6 +124,11 @@ pub(crate) enum ConstructKind {
     Exception,
     /// `value`/`value:`… sent to a block literal.
     BlockValue,
+    /// A lookup selector whose handler is lowered inline for a `Dictionary`
+    /// receiver (`at:ifAbsent:`, ADR 0131 Phase 2d, BT-3798). Never judged by
+    /// the allow-set: it is accepted exactly where it is a producer
+    /// (`conditional_arm_blocks`), and otherwise the §6 check reports it.
+    Lookup,
 }
 
 impl ConstructKind {
@@ -145,6 +150,7 @@ impl ConstructKind {
             "detect:ifNone:" if handler_writes => Self::DetectIfNone,
             "detect:ifNone:" => Self::DetectIfNoneSearch,
             s if is_exception_selector(s) => Self::Exception,
+            s if crate::state_threading_selectors::lookup_shape(s).is_some() => Self::Lookup,
             s if s.starts_with("value") => Self::BlockValue,
             _ => Self::ListOp,
         }
@@ -168,6 +174,7 @@ impl fmt::Display for ConstructKind {
             Self::AndOr => "`and:`/`or:`",
             Self::Exception => "exception handler",
             Self::BlockValue => "block evaluation",
+            Self::Lookup => "lookup",
         })
     }
 }
@@ -208,7 +215,7 @@ impl Container {
     /// argument of a construct send of `selector`.
     fn of(selector: &str, receiver: bool) -> Self {
         match ConstructKind::of(selector, false) {
-            IfTrue | IfNil | AndOr => Self::Arm,
+            IfTrue | IfNil | AndOr | Lookup => Self::Arm,
             Exception if receiver => Self::ProtectedBody,
             Exception => Self::Handler,
             Loop => Self::LoopBody,
@@ -327,7 +334,7 @@ impl fmt::Display for Position {
 
 use ConstructKind::{
     AndOr, BlockValue, CountedLoop, DetectIfNone, DetectIfNoneSearch, Do, Enumeration, Exception,
-    IfNil, IfTrue, KeyedDo, ListOp, Loop, Satisfy,
+    IfNil, IfTrue, KeyedDo, ListOp, Lookup, Loop, Satisfy,
 };
 use Container::{
     Arm, CountedLoopBody, DoBody, EvaluatedBlock, Handler, ListOpBody, LoopBody, ProtectedBody,
@@ -894,6 +901,11 @@ struct Walker<'d> {
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<FrameBody>,
+    /// ADR 0131 Phase 2d (BT-3798): the spans of the lookup sends
+    /// ([`LocalThreadingFamily::Lookup`]) accepted as local-threading
+    /// producers at their position by [`Walker::check_construct`], whose
+    /// handler blocks the §6 check then exempts ([`Walker::check_send`]).
+    lookup_producers: HashSet<Span>,
     /// The actor self-send callees of the enclosing class that thread a Tier 2
     /// block argument ([`threading_callees`]).
     callees: &'d HashSet<(EcoString, usize)>,
@@ -962,6 +974,7 @@ impl<'d> Walker<'d> {
             operand_sites: HashSet::new(),
             frame_sites: Vec::new(),
             pending_frame_body: None,
+            lookup_producers: HashSet::new(),
             callees,
             escapes: escape_map(context, body),
             diagnostics,
@@ -1153,12 +1166,13 @@ impl<'d> Walker<'d> {
             } => {
                 self.check_construct(expr, position);
                 let top = self.top_level(position);
-                self.check_send(receiver, selector, arguments, true, top);
+                let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
+                self.check_send(receiver, selector, arguments, true, top, lookup_producer);
                 // The role of each block literal the construct inlines (the
                 // same recognizer as `check_construct`); any other block is a
                 // block value.
-                let construct =
-                    local_threading_construct(expr).filter(|c| c.family.is_threaded_today());
+                let construct = local_threading_construct(expr)
+                    .filter(LocalThreadingConstruct::is_threaded_today);
                 let role = |e: &Expression, is_receiver: bool| match (e, &construct) {
                     (Expression::Block(b), Some(c))
                         if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) =>
@@ -1227,9 +1241,9 @@ impl<'d> Walker<'d> {
                         self.report_literal(block, &selector.name());
                     }
                     let top = self.top_level(position);
-                    self.check_send(shared, selector, arguments, false, top);
+                    self.check_send(shared, selector, arguments, false, top, false);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments, false, top);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false, top, false);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -1403,12 +1417,14 @@ impl<'d> Walker<'d> {
     }
 
     /// The Phase 0 allow-set check for a construct at `position`.
+    #[allow(clippy::too_many_lines)] // one rule per accepted position, each documented
     fn check_construct(&mut self, expr: &Expression, position: Position) {
         let Some(construct) =
-            local_threading_construct(expr).filter(|c| c.family.is_threaded_today())
+            local_threading_construct(expr).filter(LocalThreadingConstruct::is_threaded_today)
         else {
             return;
         };
+        let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
         let selector = construct.selector;
         let Some(first) = writes.first().cloned() else {
@@ -1428,6 +1444,9 @@ impl<'d> Walker<'d> {
         // conditional lowering.
         let bound = |name: &str| self.is_bound(name);
         let root_producer = match self.context {
+            // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
+            // only; the REPL keeps the §6 rejection.
+            Repl if is_lookup => None,
             // The REPL's conditionals at an operand site (`repl_operand_sites`)
             // are producers that adopt the bindings map whole.
             Repl | Actor => root_producer_writes(expr, &bound, RootMethodKind::Actor),
@@ -1440,6 +1459,9 @@ impl<'d> Walker<'d> {
                 && (conditional_arm_blocks(expr).is_some()
                     || exception_arm_blocks(expr).is_some()));
         if self.depth == 0 && root_site && root_producer.is_some() {
+            if is_lookup {
+                self.lookup_producers.insert(expr.unwrap_parens().span());
+            }
             return;
         }
         // ADR 0131 Phase 2b (BT-3793): in the body of a loop or fold that
@@ -1470,6 +1492,14 @@ impl<'d> Walker<'d> {
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
         if frame_site && is_loop_body_producer_site(expr, &ctx) {
+            if is_lookup {
+                self.lookup_producers.insert(expr.unwrap_parens().span());
+            }
+            return;
+        }
+        // ADR 0131 Phase 2d (BT-3798): a lookup that is not a producer here has
+        // no allow-set row: the §6 check reports its handler's write.
+        if is_lookup {
             return;
         }
         let handler_writes = selector == "detect:ifNone:"
@@ -1591,6 +1621,7 @@ impl<'d> Walker<'d> {
         arguments: &[Expression],
         inlined: bool,
         top: TopLevel,
+        lookup_producer: bool,
     ) {
         let sel = selector.name().to_string();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
@@ -1615,6 +1646,14 @@ impl<'d> Walker<'d> {
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
         // send of a §1 selector (`local_threading_construct`).
         let construct_send = inlined && is_section1_selector(&sel);
+        // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup
+        // accepted as a producer at this position (`check_construct`); a
+        // block in any other argument position is a key that is a block value.
+        let handler_indices: &[usize] = if lookup_producer {
+            crate::state_threading_selectors::lookup_block_arg_indices(&sel)
+        } else {
+            &[]
+        };
 
         // A block literal receiver. EXEMPTION: a bare `[...]` receiver of an
         // inlined `value`/loop/protected-body send (codegen's
@@ -1638,7 +1677,7 @@ impl<'d> Walker<'d> {
         // value in every send.
         for (index, arg) in arguments.iter().enumerate() {
             match arg {
-                Expression::Block(block) if construct_send => {}
+                Expression::Block(_) if construct_send || handler_indices.contains(&index) => {}
                 Expression::Block(block) if actor_self_send => {
                     let writes = self.writes_of(block);
                     // BT-3755: the callee must hand the block's `StateAcc`

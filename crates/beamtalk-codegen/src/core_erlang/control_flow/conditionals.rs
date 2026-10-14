@@ -506,7 +506,11 @@ impl CoreErlangGenerator {
     /// a conditional in a loop or fold body and of the REPL
     /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
     /// unpack their own tuples).
-    fn conditional_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
+    pub(in crate::core_erlang::control_flow) fn conditional_arm_frame(
+        &self,
+        blocks: &[&Block],
+        producer: bool,
+    ) -> Option<ArmFrame> {
         self.lowers_as_conditional_producer(self.current_frame(), producer)
             .then(|| ArmFrame {
                 threads: self.branch_threaded_locals(blocks),
@@ -516,7 +520,7 @@ impl CoreErlangGenerator {
     /// One arm of a conditional producer: a `BranchArm` frame
     /// ([`Self::generate_conditional_arm`]) when `arm` is given, else the
     /// legacy arm.
-    fn conditional_arm(
+    pub(in crate::core_erlang::control_flow) fn conditional_arm(
         &mut self,
         block: &Block,
         arm: Option<&ArmFrame>,
@@ -611,7 +615,7 @@ impl CoreErlangGenerator {
     /// this wrapper's `Bind` and tripping the verifier
     /// (`NonLinearVersion`/`UnboundVersion` on a frame nothing else
     /// references).
-    fn conditional_tuple_to_threaded_value(
+    pub(in crate::core_erlang::control_flow) fn conditional_tuple_to_threaded_value(
         &mut self,
         tuple_doc: Document<'static>,
         frame: FrameId,
@@ -752,7 +756,7 @@ impl CoreErlangGenerator {
     /// counter naming instead of `base_state`'s own text). The slot LIST
     /// passed to the helper is [`Self::conditional_result_slots`]: element 2
     /// is the scratch map in every context.
-    fn conditional_baseline_tuple(
+    pub(in crate::core_erlang::control_flow) fn conditional_baseline_tuple(
         &mut self,
         value_doc: Document<'static>,
         base_state: &str,
@@ -1470,6 +1474,13 @@ impl CoreErlangGenerator {
             return Ok(Some(
                 self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span)?,
             ));
+        }
+        // ADR 0131 Phase 2d (BT-3798): a `Dictionary` lookup whose handler
+        // writes an outer local, a producer here (never `needs_threading`).
+        if root_producer {
+            if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
+                return Ok(Some(tv));
+            }
         }
         let Expression::MessageSend {
             receiver,

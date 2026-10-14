@@ -6,10 +6,11 @@
 // runner discovers only `.bt`. The phase that makes these compile drops the
 // `.pending` suffix (and from adr0131local_rebind_pending_test.bt.pending).
 //
-//   o1, o2, o5-o10, s1, seq and the protected-body / statement shapes:
-//     ADR 0131 Phase 0 compile errors (BT-3745: the allow-set error, or §6
-//     for s1's `at:ifAbsent:` block). The `on:do:`/`ensure:` ones move out
-//     with BT-3817 (ADR 0131 Phase 3b).
+//   o1, o2, o5-o10, seq and the protected-body / statement shapes:
+//     ADR 0131 Phase 0 compile errors (BT-3745: the allow-set error). The
+//     `on:do:`/`ensure:` ones move out with BT-3817 (ADR 0131 Phase 3b).
+//   (s1, `Dictionary at:ifAbsent:` whose handler writes, moved to the
+//   compiled fixture with BT-3798, ADR 0131 Phase 2d.)
 //   (o3, o12, o13, s7, seqArg, seqRecv and the conditional-arm statement
 //   shapes moved to the compiled fixture with BT-3738, ADR 0131 Phase 3a.)
 //
@@ -19,17 +20,6 @@
 Object subclass: Adr0131LocalRebindClassPending
 
   classState: n = 0
-
-  class s1 =>
-    t := 0
-    d := #{#a => 1}
-    r := d
-      at: #k
-      ifAbsent: [
-        t := t + 1
-        0
-      ]
-    #[r, t]
 
   // BT-3753: statement-position shapes that answered wrong, raised or failed
   // to compile before; each is an ADR 0131 Phase 0 compile error now.

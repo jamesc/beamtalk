@@ -31,6 +31,54 @@ at_if_absent_block_not_called_when_present_test() ->
     ).
 
 %%% ============================================================================
+%%% lookup_for_threading/3 (ADR 0131 Phase 2d, BT-3798)
+%%% ============================================================================
+
+lookup_for_threading_found_test() ->
+    ?assertEqual(
+        {ok, 1}, beamtalk_map:lookup_for_threading(#{a => 1}, 'at:ifAbsent:', a)
+    ).
+
+lookup_for_threading_missing_test() ->
+    ?assertEqual(error, beamtalk_map:lookup_for_threading(#{a => 1}, 'at:ifAbsent:', b)),
+    ?assertEqual(error, beamtalk_map:lookup_for_threading(#{}, 'at:ifAbsent:', a)).
+
+lookup_for_threading_nil_value_is_found_test() ->
+    %% A stored nil is a present key, not an absent one.
+    ?assertEqual(
+        {ok, nil}, beamtalk_map:lookup_for_threading(#{a => nil}, 'at:ifAbsent:', a)
+    ).
+
+lookup_for_threading_value_type_instance_is_not_a_dictionary_test() ->
+    %% A value-type instance is a tagged map, not a Dictionary.
+    Point = #{'$beamtalk_class' => 'Point', x => 1},
+    assert_type_error(
+        'Point', fun() -> beamtalk_map:lookup_for_threading(Point, 'at:ifAbsent:', x) end
+    ).
+
+lookup_for_threading_non_map_receivers_test() ->
+    assert_type_error('List', fun() ->
+        beamtalk_map:lookup_for_threading([], 'at:ifAbsent:', a)
+    end),
+    assert_type_error('Integer', fun() ->
+        beamtalk_map:lookup_for_threading(3, 'at:ifAbsent:', a)
+    end),
+    assert_type_error('Symbol', fun() ->
+        beamtalk_map:lookup_for_threading(nope, 'at:ifAbsent:', a)
+    end).
+
+assert_type_error(Class, Fun) ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = Class, selector = 'at:ifAbsent:'
+            }
+        },
+        Fun()
+    ).
+
+%%% ============================================================================
 %%% do/2
 %%% ============================================================================
 
