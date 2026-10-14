@@ -369,6 +369,151 @@ live_class_entries_skips_class_dying_mid_call_test() ->
         pg:leave(beamtalk_classes, Pid)
     end.
 
+%% BT-3820 regression: two class processes whose class-side handlers each run
+%% `live_class_entries/0` concurrently must not deadlock. Both handlers are held
+%% at a barrier until both are inside their `class_method_call`, so each is
+%% occupied serving a call when it asks the registry for the other's name. If
+%% `live_class_entries/0` reads names with `gen_server:call(Pid, class_name)`,
+%% each handler waits on the other's (busy) mailbox until the 5s call timeout
+%% (`{timeout, {gen_server, call, [_, class_name]}}`, swallowed by the registry's
+%% `exit:_ -> false` filter) and the peer is silently missing from the result.
+live_class_entries_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        beamtalk_class_registry:ensure_pg_started(),
+        Coord = self(),
+        NameA = 'BT3820DeadlockA',
+        NameB = 'BT3820DeadlockB',
+        Probe = fun(_ClassSelf) ->
+            Coord ! {in_handler, self()},
+            receive
+                {go, Me} when Me =:= self() -> ok
+            after 10000 -> exit(barrier_timeout)
+            end,
+            [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()]
+        end,
+        Info = fun() ->
+            #{
+                superclass => none,
+                module => bt3820_no_module,
+                class_methods => #{bt3820Probe => #{block => Probe, arity => 1}}
+            }
+        end,
+        {ok, PidA} = beamtalk_object_class:start_link(NameA, Info()),
+        {ok, PidB} = beamtalk_object_class:start_link(NameB, Info()),
+        try
+            Callers = [
+                spawn_link(fun() ->
+                    Coord ! {result, P, beamtalk_class_dispatch:class_send(P, bt3820Probe, [])}
+                end)
+             || P <- [PidA, PidB]
+            ],
+            %% Wait until both class processes are inside their handlers, then release.
+            InHandler = [
+                receive
+                    {in_handler, H} -> H
+                after 10000 -> error(handler_not_entered)
+                end
+             || _ <- Callers
+            ],
+            [H ! {go, H} || H <- InHandler],
+            Start = erlang:monotonic_time(millisecond),
+            Results = [
+                receive
+                    {result, P, Names} -> {P, Names}
+                after 15000 -> error({no_result, P})
+                end
+             || P <- [PidA, PidB]
+            ],
+            Elapsed = erlang:monotonic_time(millisecond) - Start,
+            lists:foreach(
+                fun({_P, Names}) ->
+                    ?assert(lists:member(NameA, Names)),
+                    ?assert(lists:member(NameB, Names))
+                end,
+                Results
+            ),
+            %% Far below the 5s gen_server:call timeout the deadlock would burn.
+            ?assert(Elapsed < 4000)
+        after
+            [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
+        end
+    end}.
+
+%% BT-3820 review: a pg member that died but that pg has not yet dropped must be
+%% filtered, not crash `live_class_entries/0` / `user_classes/0`. `pg` is
+%% suspended so the stale membership is deterministic rather than a race.
+live_class_entries_skips_dead_pg_member_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = pg:join(beamtalk_classes, Pid),
+    ok = sys:suspend(pg),
+    try
+        Ref = monitor(process, Pid),
+        exit(Pid, kill),
+        receive
+            {'DOWN', Ref, process, Pid, _} -> ok
+        end,
+        ?assert(lists:member(Pid, beamtalk_class_registry:all_classes())),
+        ?assertNot(
+            lists:member(Pid, [P || {_, _, P} <- beamtalk_class_registry:live_class_entries()])
+        ),
+        ?assertNot(
+            lists:member(Pid, [
+                P
+             || {beamtalk_object, _, _, P} <- beamtalk_class_registry:user_classes()
+            ])
+        )
+    after
+        ok = sys:resume(pg)
+    end.
+
+%% BT-3820 review: `class_identity/1` (what `live_class_entries/0` and
+%% `user_classes/0` filter pg members through) must *skip* -- never crash on, nor
+%% message -- a dead pid pg has not yet dropped, a remote pid, and a live pid that
+%% has not registered (the window inside `init/1` between `pg:join` and the
+%% identity writes). A `true = ...` match here would raise `badmatch`, which the
+%% callers' `exit:_` filter does not catch.
+class_identity_skips_unregistered_dead_and_remote_pids_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    %% Dead pid.
+    Dead = spawn(fun() -> ok end),
+    Ref = monitor(process, Dead),
+    receive
+        {'DOWN', Ref, process, Dead, _} -> ok
+    end,
+    ?assertEqual(skip, beamtalk_class_registry:class_identity(Dead)),
+    %% Live pid with no reverse-index row (stands in for the init/1 window).
+    Live = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual(skip, beamtalk_class_registry:class_identity(Live))
+    after
+        Live ! stop
+    end,
+    %% Remote pid (external term format, different node).
+    Remote = binary_to_term(
+        <<131, 88, 100, 0, 12, "other@nohost", 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 1>>
+    ),
+    ?assertNotEqual(node(), node(Remote)),
+    ?assertEqual(skip, beamtalk_class_registry:class_identity(Remote)),
+    %% A genuinely registered class resolves.
+    ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+    {ok, Pid} = beamtalk_object_class:start_link('BT3820IdentityClass', ClassInfo),
+    try
+        ?assertMatch(
+            {ok, 'BT3820IdentityClass', _}, beamtalk_class_registry:class_identity(Pid)
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
 %%% ============================================================================
 %%% loaded-class name index tests
 %%% ============================================================================

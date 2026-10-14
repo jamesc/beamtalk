@@ -628,7 +628,7 @@ format_test_error(Class, Reason, Stacktrace) ->
     attach_timeout_diagnostics(<<Msg/binary, ST/binary>>).
 
 -doc """
-TODO(BT-3820): append the class-call timeout dump recorded in this process by
+TODO(BT-3828): append the class-call timeout dump recorded in this process by
 `beamtalk_object_class:module_name/1`, if any (taken once). The BUnit job log
 shows only the failure message, so a timeout that is wrapped before it reaches
 the runner (`ensure_wrapped`, `on:do:`, bare `#beamtalk_error{}` clauses) must
@@ -793,7 +793,7 @@ instance map after setUp, so test methods can access `self.suiteFixture`.
 -spec run_test_method(atom(), atom(), atom(), map(), term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
-    %% TODO(BT-3820): a class-call timeout dump left in this process by an
+    %% TODO(BT-3828): a class-call timeout dump left in this process by an
     %% earlier test must not be attached to this test's failure.
     _ = beamtalk_object_class:take_timeout_diagnostics(),
     %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner

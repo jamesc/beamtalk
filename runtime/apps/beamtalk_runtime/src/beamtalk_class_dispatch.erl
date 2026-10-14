@@ -725,7 +725,7 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                 {reply, Result, _NewState} ->
                     Result;
                 {error, #beamtalk_error{kind = does_not_understand}} ->
-                    ClassName = gen_server:call(Pid, class_name),
+                    ClassName = beamtalk_object_class:class_name_safe(Pid),
                     Error = beamtalk_error:new(
                         does_not_understand,
                         ClassName,
