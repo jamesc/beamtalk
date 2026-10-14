@@ -82,6 +82,10 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     forget_class_state_snapshot/1
 ]).
 
+-ifdef(TEST).
+-export([class_identity/1]).
+-endif.
+
 -export_type([
     class_entry/0,
     user_class_entry/0
@@ -111,11 +115,12 @@ Returns a list of {Name, ModuleName, Pid} tuples for all registered class
 processes that are still alive. Dead processes (noproc, timeout) are silently
 filtered out. Returns [] if the pg process group is not running.
 
-Sends no messages to class processes (BT-3820): name and module come from the
+Sends no messages to local class processes (BT-3820): name and module come from the
 metadata ETS rows (`class_name_safe/1`, `module_name_safe/1`), and a dead local
-pid is dropped with `is_process_alive/1`. Only local classes are returned
-(ADR 0126: the class registry is node-local; remote pg members are skipped, not
-queried). This upholds the class-process
+pid is dropped with `is_process_alive/1`. Only local, fully registered classes are
+returned for local members (a class still inside `init/1` is skipped until it
+finishes registering); remote pg members are resolved by call as before, see
+`class_identity/1`. This upholds the class-process
 invariant (a class process never makes a blocking call into another class
 process while handling a call); this function runs inside class handlers
 (protocol conformance, process navigation).
@@ -127,20 +132,14 @@ live_class_entries() ->
         ClassPids = all_classes(),
         lists:filtermap(
             fun(Pid) ->
-                try
-                    %% BT-3820: ETS-backed reads only. A class process runs
-                    %% class-side methods that reach this function (protocol
-                    %% conformance, process navigation); a `gen_server:call`
-                    %% per class here deadlocks two such classes against each
-                    %% other until the 5s call timeout.
-                    true = is_live_class_pid(Pid),
-                    Name = beamtalk_object_class:class_name_safe(Pid),
-                    Mod = beamtalk_object_class:module_name_safe(Pid),
-                    {true, {Name, Mod, Pid}}
-                catch
-                    %% noproc/timeout, or the class process dying mid-call
-                    %% (exits with its real termination reason).
-                    exit:_ -> false
+                %% BT-3820: ETS-backed reads only. A class process runs
+                %% class-side methods that reach this function (protocol
+                %% conformance, process navigation); a `gen_server:call`
+                %% per class here deadlocks two such classes against each
+                %% other until the 5s call timeout.
+                case class_identity(Pid) of
+                    {ok, Name, Mod} -> {true, {Name, Mod, Pid}};
+                    skip -> false
                 end
             end,
             ClassPids
@@ -153,16 +152,51 @@ live_class_entries() ->
             []
     end.
 
-%% A pg member counts only if it is a local, alive process. Remote class pids
-%% are excluded: ADR 0126 keeps the class registry node-local (a class ref
-%% crossing nodes is re-resolved by name against the receiving node's registry,
-%% never used as a remote pid), and the ETS metadata this reads is node-local, so
-%% a remote member could only be named via a blocking call. The ETS reverse index
-%% outlives an untrappable `kill`, so liveness is checked explicitly rather than
-%% inferred from a successful name lookup.
--spec is_live_class_pid(pid()) -> boolean().
-is_live_class_pid(Pid) ->
-    node(Pid) =:= node() andalso is_process_alive(Pid).
+%% Resolve a pg member's `{Name, Module}`. `skip` for a pid that is not a live,
+%% fully registered class.
+%%
+%% Local pids are resolved from the ETS metadata only (never a message), and
+%% skipped when:
+%%   * dead but not yet dropped by pg, including one killed untrappably whose
+%%     reverse-index row survives for auto-restart recovery;
+%%   * inside `beamtalk_object_class:init/1`'s window between `pg:join` and the
+%%     identity writes (`sync_identity/6`, then `record_class_pid/2`) -- it
+%%     appears once registration completes.
+%% Liveness is best-effort: a class that dies right after the check is still
+%% reported, exactly as a class dying right after the old call-based read.
+%%
+%% Remote pids DO appear (pg's default scope spans a connected cluster, and the
+%% distribution snapshot walks them), so they keep the pre-BT-3820 behaviour:
+%% the node-local ETS rows cannot name them, so `class_name_safe/1` /
+%% `module_name_safe/1` fall back to a `gen_server:call` and an exit (nodedown,
+%% noproc, timeout) filters the member out. The class-process no-blocking-call
+%% invariant is therefore enforced for local classes only; a cross-node call
+%% cannot form a cycle among this node's class processes unless the peer runs
+%% the same walk against us concurrently (tracked in BT-3826).
+-spec class_identity(pid()) -> {ok, class_name(), module()} | skip.
+class_identity(Pid) when node(Pid) =:= node() ->
+    case is_process_alive(Pid) of
+        false ->
+            skip;
+        true ->
+            case class_name_for_pid(Pid) of
+                not_found ->
+                    skip;
+                {ok, Name} ->
+                    case beamtalk_class_metadata:lookup_module(Name) of
+                        {ok, Mod} -> {ok, Name, Mod};
+                        not_found -> skip
+                    end
+            end
+    end;
+class_identity(Pid) ->
+    try
+        Name = beamtalk_object_class:class_name_safe(Pid),
+        {ok, Name, beamtalk_object_class:module_name_safe(Pid)}
+    catch
+        %% noconnection/noproc/timeout, or the class dying mid-call.
+        exit:_ -> skip
+    end.
 
 -doc """
 Return all loaded user classes (those with a source file recorded).
@@ -179,21 +213,17 @@ user_classes() ->
         ClassPids = all_classes(),
         lists:filtermap(
             fun(Pid) ->
-                try
-                    true = is_live_class_pid(Pid),
-                    ClassName = beamtalk_object_class:class_name_safe(Pid),
-                    ModuleName = beamtalk_object_class:module_name_safe(Pid),
-                    case beamtalk_reflection:source_file_from_module(ModuleName) of
-                        nil ->
-                            false;
-                        _SourceFile ->
-                            ClassTag = class_object_tag(ClassName),
-                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
-                    end
-                catch
-                    %% noproc/timeout, or the class process dying mid-call
-                    %% (exits with its real termination reason).
-                    exit:_ -> false
+                case class_identity(Pid) of
+                    skip ->
+                        false;
+                    {ok, ClassName, ModuleName} ->
+                        case beamtalk_reflection:source_file_from_module(ModuleName) of
+                            nil ->
+                                false;
+                            _SourceFile ->
+                                ClassTag = class_object_tag(ClassName),
+                                {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+                        end
                 end
             end,
             ClassPids

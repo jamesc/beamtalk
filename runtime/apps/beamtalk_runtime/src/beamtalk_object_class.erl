@@ -405,10 +405,11 @@ same caveat as `module_name_safe/1` applies to an untrappable `kill`.
 
 Stale-name behaviour: the reverse index is kept for a class process that
 crashed without running `terminate/2` (auto-restart recovery), so for such a
-pid this returns the old name instead of exiting `noproc`. Callers that then
-act by *name* (`classRemoveFromSystem`, `classRenameTo`, `classReload`, ...)
-operate on the restarted class of that name, not the dead pid. Callers that
-need a liveness guarantee must check `is_process_alive/1` themselves.
+pid this returns the old name instead of exiting `noproc` — but only until the
+restart, which deletes the dead pid's row (after which this exits `noproc`).
+Callers acting by *name* in that window (`classRemoveFromSystem`,
+`classRenameTo`, `classReload`, ...) may find no class registered under it.
+Callers needing a liveness guarantee must check `is_process_alive/1`.
 """.
 -spec class_name_safe(pid()) -> class_name().
 class_name_safe(ClassPid) when ClassPid =:= self() ->

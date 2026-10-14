@@ -439,6 +439,81 @@ live_class_entries_no_cross_class_deadlock_test_() ->
         end
     end}.
 
+%% BT-3820 review: a pg member that died but that pg has not yet dropped must be
+%% filtered, not crash `live_class_entries/0` / `user_classes/0`. `pg` is
+%% suspended so the stale membership is deterministic rather than a race.
+live_class_entries_skips_dead_pg_member_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = pg:join(beamtalk_classes, Pid),
+    ok = sys:suspend(pg),
+    try
+        Ref = monitor(process, Pid),
+        exit(Pid, kill),
+        receive
+            {'DOWN', Ref, process, Pid, _} -> ok
+        end,
+        ?assert(lists:member(Pid, beamtalk_class_registry:all_classes())),
+        ?assertNot(
+            lists:member(Pid, [P || {_, _, P} <- beamtalk_class_registry:live_class_entries()])
+        ),
+        ?assertNot(
+            lists:member(Pid, [
+                P
+             || {beamtalk_object, _, _, P} <- beamtalk_class_registry:user_classes()
+            ])
+        )
+    after
+        ok = sys:resume(pg)
+    end.
+
+%% BT-3820 review: `class_identity/1` (what `live_class_entries/0` and
+%% `user_classes/0` filter pg members through) must *skip* -- never crash on, nor
+%% message -- a dead pid pg has not yet dropped, a remote pid, and a live pid that
+%% has not registered (the window inside `init/1` between `pg:join` and the
+%% identity writes). A `true = ...` match here would raise `badmatch`, which the
+%% callers' `exit:_` filter does not catch.
+class_identity_skips_unregistered_dead_and_remote_pids_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    %% Dead pid.
+    Dead = spawn(fun() -> ok end),
+    Ref = monitor(process, Dead),
+    receive
+        {'DOWN', Ref, process, Dead, _} -> ok
+    end,
+    ?assertEqual(skip, beamtalk_class_registry:class_identity(Dead)),
+    %% Live pid with no reverse-index row (stands in for the init/1 window).
+    Live = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual(skip, beamtalk_class_registry:class_identity(Live))
+    after
+        Live ! stop
+    end,
+    %% Remote pid (external term format, different node).
+    Remote = binary_to_term(
+        <<131, 88, 100, 0, 12, "other@nohost", 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 1>>
+    ),
+    ?assertNotEqual(node(), node(Remote)),
+    ?assertEqual(skip, beamtalk_class_registry:class_identity(Remote)),
+    %% A genuinely registered class resolves.
+    ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+    {ok, Pid} = beamtalk_object_class:start_link('BT3820IdentityClass', ClassInfo),
+    try
+        ?assertMatch(
+            {ok, 'BT3820IdentityClass', _}, beamtalk_class_registry:class_identity(Pid)
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
 %%% ============================================================================
 %%% loaded-class name index tests
 %%% ============================================================================
