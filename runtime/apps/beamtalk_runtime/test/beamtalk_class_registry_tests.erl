@@ -1738,6 +1738,55 @@ bt3826_conforms_to_no_cross_class_deadlock_test_() ->
         end
     end}.
 
+%% The miss path: a selector the *other* class does not define falls through the
+%% local check to the module probe (`module_name_safe/1`) and up the hierarchy.
+%% Every step of `has_method/2` / `canUnderstand:` / `conforms_to/2` must stay
+%% message-free there too, not only on a hit.
+bt3826_has_method_miss_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Site = fun(Other) ->
+            {
+                beamtalk_behaviour_intrinsics:classCanUnderstandFromName(Other, bt3826Missing),
+                beamtalk_object_class:has_method(
+                    beamtalk_class_registry:whereis_class(Other), bt3826Missing
+                ),
+                beamtalk_object_class:has_method_local(
+                    beamtalk_class_registry:whereis_class(Other), bt3826Missing
+                )
+            }
+        end,
+        Results = bt3826_two_busy_classes("Miss", #{}, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) -> ?assertEqual({ok, {false, false, false}}, Outcome) end,
+            Results
+        )
+    end}.
+
+%% A runtime class-method fun (ADR 0084) shadows the compiled method, and the
+%% supervisor-config read must report what dispatch would.
+bt3826_supervisor_config_honours_runtime_override_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Name = 'BT3826OverrideSup',
+    {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+        superclass => none,
+        module => beamtalk_bt3826_config_fixture,
+        class_methods => #{}
+    }),
+    try
+        Obj = beamtalk_class_registry:resolve_class_object(Name),
+        ?assertEqual(
+            {oneForAll, #{maxRestarts => 7, window => 42}},
+            beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Obj)
+        ),
+        ok = beamtalk_object_class:put_class_method(Pid, strategy, fun(_ClassSelf) -> restForOne end),
+        ?assertEqual(
+            {restForOne, #{maxRestarts => 7, window => 42}},
+            beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Obj)
+        )
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
 %% The published reflection facts follow the class through hot-patching, so the
 %% ETS-backed readers never disagree with the class process's own state.
 bt3826_reflection_follows_class_mutation_test() ->

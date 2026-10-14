@@ -856,7 +856,7 @@ has_method_local(ClassPid, Selector) ->
 probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
     case local_method_defined(ClassPid, Selector) of
         false ->
-            case module_name(ClassPid) of
+            case module_name_safe(ClassPid) of
                 undefined ->
                     false;
                 ModuleName ->

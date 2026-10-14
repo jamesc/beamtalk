@@ -1051,14 +1051,61 @@ class_config_value(ClassName, Selector) ->
             %% `call_class_method_direct/4` probes with `function_exported/3`,
             %% which is false for a module that is not loaded yet.
             _ = code:ensure_loaded(Module),
-            call_class_method_direct(
-                ClassName,
-                Module,
-                beamtalk_class_dispatch:class_method_fun_name(Selector),
-                make_init_class_self(ClassName, Module)
-            );
+            FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
+            ClassSelf = make_init_class_self(ClassName, Module),
+            %% Dispatch lets a runtime class-method fun (ADR 0084, installed via
+            %% `put_class_method`) shadow a compiled method, so honour the same
+            %% precedence: the nearest definer in the chain wins.
+            case runtime_class_method_fun(ClassName, FunName, Selector, 0) of
+                {ok, Fun} ->
+                    beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> Fun(ClassSelf) end);
+                none ->
+                    call_class_method_direct(ClassName, Module, FunName, ClassSelf)
+            end;
         not_found ->
             error({class_not_registered, ClassName})
+    end.
+
+%% The runtime fun that dispatch would pick for `Selector`, if a runtime fun is
+%% the nearest definer: walks from `ClassName` upward and stops, with `none`, at
+%% the first class whose compiled module exports the method (a compiled method
+%% on the same class is shadowed by that class's own runtime fun, so the runtime
+%% fun is checked first at each level).
+-spec runtime_class_method_fun(atom(), atom(), atom(), non_neg_integer()) ->
+    {ok, fun()} | none.
+runtime_class_method_fun(_ClassName, _FunName, _Selector, Depth) when Depth > 30 ->
+    none;
+runtime_class_method_fun(ClassName, FunName, Selector, Depth) ->
+    case beamtalk_class_metadata:has_runtime_class_methods(ClassName) of
+        true ->
+            case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+                {ok, #{block := Fun}} when is_function(Fun, 1) -> {ok, Fun};
+                _ -> compiled_or_super(ClassName, FunName, Selector, Depth)
+            end;
+        false ->
+            compiled_or_super(ClassName, FunName, Selector, Depth)
+    end.
+
+-spec compiled_or_super(atom(), atom(), atom(), non_neg_integer()) -> {ok, fun()} | none.
+compiled_or_super(ClassName, FunName, Selector, Depth) ->
+    LevelDefinesCompiled =
+        case beamtalk_class_metadata:lookup_module(ClassName) of
+            {ok, Mod} ->
+                _ = code:ensure_loaded(Mod),
+                erlang:function_exported(Mod, FunName, 1);
+            not_found ->
+                false
+        end,
+    case LevelDefinesCompiled of
+        true ->
+            none;
+        false ->
+            case beamtalk_class_metadata:lookup_superclass(ClassName) of
+                {ok, Super} when Super =/= none ->
+                    runtime_class_method_fun(Super, FunName, Selector, Depth + 1);
+                _ ->
+                    none
+            end
     end.
 
 -doc """

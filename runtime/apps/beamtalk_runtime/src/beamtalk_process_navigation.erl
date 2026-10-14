@@ -1354,18 +1354,25 @@ supervisor_strategy(ClassPid) ->
 %% class process and can deadlock two busy classes against each other. The
 %% compiled method is invoked in this process instead
 %% (`beamtalk_supervisor:class_config_value/2`, the call `static_init/2` makes).
-%% Only a caller that is NOT a class process may fall back to `class_send/3`, for
-%% a class whose method exists only as a runtime fun (no compiled export).
+%% A runtime class-method fun (ADR 0084) that shadows the compiled method is
+%% honoured in-process too, so the snapshot reports what dispatch would. Only
+%% when there is no in-process definition at all may a caller that is NOT a class
+%% process fall back to `class_send/3`.
 -spec supervisor_class_config(pid(), atom()) -> term().
 supervisor_class_config(ClassPid, Selector) ->
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     try
         beamtalk_supervisor:class_config_value(ClassName, Selector)
     catch
-        Class:Reason:Stack ->
+        %% Only "no in-process definition of this method" falls back; any other
+        %% failure is the config method itself failing and must not be re-run
+        %% through `class_send/3`.
+        error:{Reason, _} = Err when
+            Reason =:= class_not_registered; Reason =:= supervisor_init_method_not_found
+        ->
             case get(beamtalk_class_name) of
                 undefined -> beamtalk_object_class:class_send(ClassPid, Selector, []);
-                _InClassProcess -> erlang:raise(Class, Reason, Stack)
+                _InClassProcess -> erlang:error(Err)
             end
     end.
 
