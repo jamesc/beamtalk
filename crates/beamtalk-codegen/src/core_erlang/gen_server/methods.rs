@@ -1090,7 +1090,12 @@ impl CoreErlangGenerator {
                             if let Some(threaded_vars) = self
                                 .threaded_locals_of(value)
                                 .and_then(ThreadedLocals::into_lowered)
-                                .filter(|_| producer.is_none())
+                                .filter(|_| {
+                                    producer.is_none()
+                                        && !self.inline_control_flow_needs_threading(
+                                            value.unwrap_parens(),
+                                        )
+                                })
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
@@ -1768,7 +1773,14 @@ impl CoreErlangGenerator {
                         // Every other `ControlFlowWithMutations` shape (loops,
                         // list-ops) still returns a raw tuple `Document` here,
                         // unpacked by the manual `Tuple`/`Bind` pair below.
-                        if self.inline_control_flow_needs_threading(expr.unwrap_parens()) {
+                        //
+                        // ADR 0131 Phase 3: that conditional is a local-threading
+                        // producer, so its prelude also carries one
+                        // `LocalRebind` per threaded local; only the raw tuple
+                        // path below re-reads its locals from the new state.
+                        let inline_conditional =
+                            self.inline_control_flow_needs_threading(expr.unwrap_parens());
+                        if inline_conditional {
                             let expr_str = self.expression_doc(expr)?;
                             self.finish_precompiled_scope(scope)?;
                             let seq_var = self.fresh_temp_var("seq");
@@ -1821,6 +1833,7 @@ impl CoreErlangGenerator {
                         if let Some(threaded_vars) = self
                             .threaded_locals_of(expr)
                             .and_then(ThreadedLocals::into_lowered)
+                            .filter(|_| !inline_conditional)
                         {
                             for var in &threaded_vars {
                                 let core_var = self
@@ -2554,7 +2567,17 @@ impl CoreErlangGenerator {
         };
         let direct = assign
             .is_some_and(|(_, value)| self.construct_tuple_locals(value.unwrap_parens()).is_some());
+        // ADR 0131 Phase 3 (BT-3738): a method-body statement that is itself a
+        // conditional producer (`c ifTrue: [t := t + 1]`, `x ifNil: [...]`,
+        // `c and: [...]`) is lowered through the producer too, in a class or
+        // value-type method, so its locals come back through `LocalRebind`s.
+        let conditional_statement = assign.is_none()
+            && !matches!(expr, Expression::Return { .. })
+            && self
+                .conditional_producer_locals(expr.unwrap_parens())
+                .is_some();
         if !direct
+            && !conditional_statement
             && !self.statement_has_local_producer(expr)
             && !self.statement_has_value_type_producer(expr)
         {

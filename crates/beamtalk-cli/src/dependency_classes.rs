@@ -326,6 +326,13 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
             return None;
         }
     };
+    // Exclude `stubs/` — those contain `declare native:` blocks that are a
+    // hard error outside the stubs-registry pipeline (ADR 0075).
+    let stubs_dir = dep_root.join("stubs");
+    let files: Vec<_> = files
+        .into_iter()
+        .filter(|f| !f.starts_with(&stubs_dir))
+        .collect();
 
     let fingerprint = DepFingerprint::of(&files);
     let cache = class_info_cache();

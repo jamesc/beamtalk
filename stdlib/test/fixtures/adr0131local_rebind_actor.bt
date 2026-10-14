@@ -182,3 +182,54 @@ Actor subclass: Adr0131LocalRebindActor
     t := 0
     #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
     t
+
+  // ADR 0131 Phase 3 (BT-3738): conditionals as local-threading producers
+  o3 =>
+    t := 0
+    r := (4 =:= 5
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]) + 1
+    #[r, t]
+
+  o12: c =>
+    t := 0
+    self.n := (c
+      ifTrue: [2]
+      ifFalse: [
+        t := t + 1
+        1
+      ]) + 1
+    #[self.n, t]
+
+  // BT-3748 review: the §1a shape with the threading construct nested inside
+  // the right operand (an argument of a send, the receiver of a binary send)
+  // rather than the operand itself. Source order reads `t` first: #[1, 1].
+  seqArg: flag =>
+    t := 0
+    r := t + (0
+      max: (flag
+        ifTrue: [
+          t := t + 1
+          1
+        ]
+        ifFalse: [0]))
+    #[r, t]
+
+  seqRecv: flag =>
+    t := 0
+    r := t + ((flag
+      ifTrue: [
+        t := t + 1
+        1
+      ]
+      ifFalse: [0]) + 0)
+    #[r, t]
+
+  // A loop in a conditional arm.
+  stArmWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t

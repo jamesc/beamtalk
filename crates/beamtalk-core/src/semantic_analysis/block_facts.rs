@@ -1468,6 +1468,198 @@ pub fn operand_producer_writes(
     (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
+/// ADR 0131 Phase 3 (BT-3738): the literal arm blocks of a conditional
+/// (`ifTrue:` … `ifNil:ifNotNil:`, `and:`/`or:`) whose every block position
+/// holds a block literal, in source order, or `None` for any other send.
+///
+/// A conditional with a non-literal arm (`c ifTrue: aBlock`) is not inlined
+/// by codegen (the arm is a closure value), so it is not a producer.
+#[must_use]
+pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
+    let construct = local_threading_construct(expr)?;
+    if construct.family != LocalThreadingFamily::Conditional {
+        return None;
+    }
+    let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() else {
+        return None;
+    };
+    (!arguments.is_empty() && arguments.iter().all(|a| matches!(a, Expression::Block(_))))
+        .then_some(construct.blocks)
+}
+
+/// The kind of method body a method-root local-threading producer sits in
+/// (ADR 0131 §2's frame modes). The rules for which conditionals are
+/// producers depend on it ([`conditional_arms_lower_as_producer`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootMethodKind {
+    /// An actor instance method: `State` is a family, so a conditional's
+    /// scratch map continues it.
+    Actor,
+    /// A class-side method: no `State`, the scratch map is private.
+    Class,
+    /// An instance method of a non-actor class: no `State`, the scratch map
+    /// is private, and a field write is a second family.
+    ValueType,
+}
+
+/// ADR 0131 Phase 3 (BT-3738): whether the arms of a conditional can be
+/// lowered by the conditional producer in a method of kind `kind`.
+///
+/// In a class or value-type method a conditional's scratch map is private
+/// (a fresh map seeded with the construct's own locals, ADR 0131 §3), and each
+/// arm is a `BranchArm` frame (§2): a loop or fold in an arm rebinds its
+/// locals into the arm by a `LocalRebind`, which is a producer at one of the
+/// arm statement's [`loop_body_producer_sites`] (narrowed by
+/// [`is_loop_body_producer_site`], the rule a loop body uses), and so is a
+/// nested conditional that is itself such a producer. A construct in
+/// an arm that writes an outer local, or a local the arm itself defines, and
+/// is not such a producer would rebuild the arm's `StateAcc` from scratch and
+/// drop its other keys: the conditional is not a producer then, and keeps its
+/// statement lowering. In a value-type method an arm that writes a field
+/// carries a second family the producer's tuple does not. An actor method has
+/// neither restriction: its `State` map is continued, never rebuilt.
+///
+/// `bound_outside` is the scope at the conditional; the names the arms assign
+/// are bound inside them. One rule, read by the Phase 0 check and by codegen's
+/// producer predicate.
+#[must_use]
+pub fn conditional_arms_lower_as_producer(
+    arms: &[&Block],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    if kind == RootMethodKind::Actor {
+        return true;
+    }
+    let mut assigned: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for arm in arms {
+        for stmt in &arm.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Assignment { target, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        assigned.insert(id.name.to_string());
+                    }
+                }
+                Expression::DestructureAssignment { pattern, .. } => {
+                    let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                    assigned.extend(ids.into_iter().map(|id| id.name.to_string()));
+                }
+                _ => {}
+            });
+        }
+    }
+    let arm_bound = |name: &str| bound_outside(name) || assigned.contains(name);
+    for arm in arms {
+        for stmt in &arm.body {
+            if !arm_statement_lowers(&stmt.expression, kind, &arm_bound) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// [`conditional_arms_lower_as_producer`] for one arm statement.
+fn arm_statement_lowers(
+    stmt: &Expression,
+    kind: RootMethodKind,
+    arm_bound: &dyn Fn(&str) -> bool,
+) -> bool {
+    let ctx = LoopBodyContext::new(stmt, false, false, false).in_arm();
+    let sites: std::collections::HashSet<Span> = loop_body_producer_sites(stmt)
+        .into_iter()
+        .filter(|site| is_loop_body_producer_site(site, &ctx))
+        .map(Expression::span)
+        .collect();
+    // The producers of the statement: constructs at its sites that are
+    // loop/fold producers. A construct inside one is its own frame's business.
+    let mut producers: Vec<Span> = Vec::new();
+    crate::ast_walker::walk_expression(stmt, &mut |e| {
+        if sites.contains(&e.span())
+            && (operand_producer_writes(e, arm_bound).is_some()
+                || conditional_producer_writes(e, arm_bound, kind).is_some())
+        {
+            producers.push(e.span());
+        }
+    });
+    let inside_producer = |span: Span| {
+        producers
+            .iter()
+            .any(|p| p.start() <= span.start() && span.end() <= p.end())
+    };
+    let mut ok = true;
+    crate::ast_walker::walk_expression(stmt, &mut |e| {
+        // (`local_threading_construct` peels parentheses, so a `Parenthesized`
+        // node would be judged as its construct, with a span wider than the
+        // producer's own.)
+        if matches!(e, Expression::Parenthesized { .. }) {
+            return;
+        }
+        if let Some(construct) = local_threading_construct(e) {
+            if !inside_producer(e.span())
+                && !construct_outer_local_writes(&construct, arm_bound).is_empty()
+            {
+                ok = false;
+            }
+        }
+        if kind == RootMethodKind::ValueType {
+            if let Expression::Assignment { target, .. } = e {
+                if is_self_field_target(target) {
+                    ok = false;
+                }
+            }
+        }
+    });
+    ok
+}
+
+/// ADR 0131 Phase 3 (BT-3738): the threaded set of a conditional that
+/// codegen lowers as a local-threading producer at a method-root site
+/// ([`sequenced_operand_sites`], a method-body assignment's whole value, a
+/// method-body `^` value), or `None` when `expr` is not one.
+///
+/// The conditional counterpart of [`operand_producer_writes`], with the same
+/// agreement rule: the construct writes an outer local, and the set its
+/// arms pack (`threaded_today_block_writes` over [`conditional_arm_blocks`])
+/// is the whole set ([`construct_outer_local_writes`]), so no write is
+/// dropped. Read by the Phase 0 allow-set check; codegen's producer applies
+/// the same rule through `threaded_locals_of` (`ThreadedLocals::lowered ==
+/// ThreadedLocals::names`).
+#[must_use]
+pub fn conditional_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+    kind: RootMethodKind,
+) -> Option<Vec<OuterLocalWrite>> {
+    let arms = conditional_arm_blocks(expr)?;
+    if !conditional_arms_lower_as_producer(&arms, kind, bound_outside) {
+        return None;
+    }
+    let construct = local_threading_construct(expr)?;
+    let names = |writes: &[OuterLocalWrite]| {
+        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.into_iter().map(str::to_string).collect::<Vec<_>>()
+    };
+    let all = construct_outer_local_writes(&construct, bound_outside);
+    let today = threaded_today_block_writes(&arms, bound_outside);
+    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
+}
+
+/// ADR 0131 Phase 3 (BT-3738): [`operand_producer_writes`] or
+/// [`conditional_producer_writes`]: the threaded set of a local-threading
+/// producer at a method-root site, whichever family it is.
+#[must_use]
+pub fn root_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+    kind: RootMethodKind,
+) -> Option<Vec<OuterLocalWrite>> {
+    operand_producer_writes(expr, bound_outside)
+        .or_else(|| conditional_producer_writes(expr, bound_outside, kind))
+}
+
 /// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
 /// statement `stmt` that codegen's sequencing rule (ADR 0118 §Decision 3,
 /// `threaded_expression`) compiles ahead of their parent and splices into
@@ -1563,7 +1755,9 @@ pub fn loop_body_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     let mut sites = loop_body_operand_sites(stmt);
     let inner = stmt.unwrap_parens();
-    if producer_body_block(inner).is_some() {
+    // (A conditional statement is a site too, but only in an arm frame:
+    // [`is_loop_body_producer_site`] drops it in a loop or fold body.)
+    if producer_body_block(inner).is_some() || conditional_arm_blocks(inner).is_some() {
         sites.push(inner);
     }
     sites
@@ -1581,6 +1775,10 @@ pub fn is_value_bearing_site(statement: Span, site: &Expression) -> bool {
 /// What the loop-body site rule ([`is_loop_body_producer_site`]) reads off the
 /// current statement of a loop or fold body and the frames around it.
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "one flag per fact the site rule reads"
+)]
 pub struct LoopBodyContext {
     /// The statement, without parentheses.
     pub statement: Span,
@@ -1594,9 +1792,22 @@ pub struct LoopBodyContext {
     pub outer_fold: bool,
     /// Whether the method is an actor instance method.
     pub in_actor: bool,
+    /// ADR 0131 Phase 3 (BT-3738): whether the innermost enclosing frame is
+    /// an arm of a conditional that is a local-threading producer
+    /// (`BranchArm`, [`conditional_arms_lower_as_producer`]) rather than a
+    /// loop or fold body. A nested conditional is a producer in an arm frame,
+    /// not in a loop body.
+    pub arm: bool,
 }
 
 impl LoopBodyContext {
+    /// This context for a statement of an arm frame ([`Self::arm`]).
+    #[must_use]
+    pub fn in_arm(mut self) -> Self {
+        self.arm = true;
+        self
+    }
+
     /// The context of the statement `stmt` of a frame body.
     #[must_use]
     pub fn new(stmt: &Expression, innermost_fold: bool, outer_fold: bool, in_actor: bool) -> Self {
@@ -1613,6 +1824,7 @@ impl LoopBodyContext {
             innermost_fold,
             outer_fold,
             in_actor,
+            arm: false,
         }
     }
 }
@@ -1656,6 +1868,13 @@ pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> b
         if matches!(selector.name().as_str(), "detect:" | "detect:ifNone:") {
             return false;
         }
+    }
+    // ADR 0131 Phase 3 (BT-3738): a conditional is a producer at a method-root
+    // site and in an arm of a conditional that is one (`ctx.arm`). In a loop or
+    // fold body it keeps its statement lowering (the loop frame's lowering of a
+    // conditional's `LocalRebind`s is a later step).
+    if conditional_arm_blocks(site).is_some() && !ctx.arm {
+        return false;
     }
     !is_actor_fold_value_site(site, ctx)
 }

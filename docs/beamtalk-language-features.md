@@ -763,7 +763,7 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work in actor instance methods (ADR 0041 Tier 2); elsewhere a stored closure that writes an outer local has no way to return the write and is a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
+**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work in actor instance methods (ADR 0041 Tier 2); elsewhere a stored closure that writes an outer local has no way to return the write and is a compile error. A block that writes an outer local and escapes the method (returned, stored in a field, or placed in a collection literal) is also a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
 
 ```beamtalk
 // ❌ ERROR: field assignment inside stored closure
@@ -2795,7 +2795,44 @@ count := CvA ap: [count + 1]
 10 timesRepeat: [count := count + 1]
 ```
 
-Until ADR 0131's later phases make every local-threading construct thread its writes in every position, a construct whose blocks write an outer local is also rejected outside the positions that work today, with an error naming the construct, the position and [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (for example `(items collect: [:x | count := count + x]) size` in a class method). As a statement it is accepted unless it is one of the statement shapes that lose the write today ([BT-3753](https://linear.app/beamtalk/issue/BT-3753)): most constructs nested in a conditional arm, a protected body or a loop body of a class or value-type method (for example `flag ifTrue: [items do: [:x | count := count + x]]`), `eachWithIndex:`, `do:separatedBy:`, `keysAndValuesDo:`, `ifNil:`, `and:`/`or:` and `anySatisfy:` statements in class and value-type methods (and `[...] value` in a class method), a `detect:ifNone:` statement whose `ifNone:` block writes, and a construct nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
+**A block that escapes the method is also a compile error** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block that writes an outer local and escapes the method without being sent — returned via `^`, implicit last expression, stored in a field or class variable, or placed in a collection literal — is rejected at compile time:
+
+```text
+error: block writes outer local `count`, but it is returned from the method and nothing can return the write
+  = help: once the method returns, no later call of the block can hand `count` back:
+          keep the state in a field (`self.count := self.count + 1`) or return the new value
+          from the block and assign it where the block is called
+```
+
+```beamtalk
+// ❌ ERROR: escaping stateful block
+makeCounter =>
+    count := 0
+    ^[count := count + 1]      // returned — compile error
+
+// ❌ ERROR: stored in a field
+storeBlock =>
+    count := 0
+    self.block := [count := count + 1]
+
+// ❌ ERROR: placed in a collection literal
+listOfBlocks =>
+    count := 0
+    #([count := count + 1])
+```
+
+**Actor self-send exemption** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). In an actor instance method, a `self` send with a state-writing block argument is accepted only when the callee is a `sealed` method of the *same* class that provably threads the block — direct `b value` invocations as statements, assignments, or returns in the callee's body, the bare callable form of a collection HOM (`#(1) do: b`), or forwarding to another such method. Inherited, non-sealed, overridable, or otherwise unverifiable callees are a compile error.
+
+**Local-threading producers** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) Phase 2). Many positions that previously rejected a construct whose block writes an outer local now accept it. The following are local-threading producers that answer their value and keep their writes:
+
+- **Method-body operand positions** — `r := xs collect: [:x | count := count + x]`, `#[xs do: [...], t]`, `^xs do: [...]` (BT-3795, BT-3796)
+- **Nested loop/fold bodies** — `items do: [:x | result := xs collect: [:y | t := t + y]]` (BT-3793)
+- **`do:` as a producer** — `do:` whose block writes an outer local answers `nil` and keeps its writes (BT-3796)
+- **`detect:ifNone:` handler** — a `detect:ifNone:` whose `ifNone:` handler writes an outer local (BT-3794)
+- **REPL operand positions** — `(xs collect: [:x | t := t + x]) size` at the REPL (BT-3795)
+- **Field-write values** — `self.f := xs collect: [:x | t := t + x]` in class and actor methods (BT-3795)
+
+Positions that remain rejected (tracked for future phases): constructs inside a block, a conditional's receiver, a cascade, a field-write value in a value type, value-bearing producer positions inside actor fold bodies, `^xs do: [...]` inside a conditional arm, handler or closure in class/value-type methods ([BT-3813](https://linear.app/beamtalk/issue/BT-3813)), and constructs nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

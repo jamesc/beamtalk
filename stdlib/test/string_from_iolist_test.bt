@@ -25,3 +25,9 @@ TestCase subclass: StringFromIolistTest
 
   testFromIolistWithNonIolistRaisesTypeError =>
     self should: [String fromIolist: 42] raise: #type_error
+
+  testFromIolistWithOverMaxUnicodeCodepointRaisesTypeError =>
+    // Code point 1114112 (0x110000) is one above U+10FFFF (max Unicode).
+    // iolist_to_binary rejects integers > 255, and unicode:characters_to_binary
+    // rejects invalid code points, so fromIolist: must raise type_error.
+    self should: [String fromIolist: #(1114112)] raise: #type_error

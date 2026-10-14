@@ -209,9 +209,9 @@ fn test_value_type_field_write_in_nested_loop_is_compile_error() {
 #[test]
 fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
     // This construct's deliberate boundary: the LAST-position conditional path
-    // (`emit_vt_conditional_case_to_var`) and the assignment-RHS path
-    // (`emit_vt_conditional_assign_rhs`) thread outer LOCALS only, never
-    // `Self` — routing a field write into either would silently drop it
+    // (`emit_vt_conditional_case_to_var`) and the assignment-RHS path (a
+    // conditional producer since ADR 0131 Phase 3) thread outer LOCALS only,
+    // never `Self` — routing a field write into either would silently drop it
     // (last position) or emit an `erlc`-rejected reference to a branch-scoped
     // `Self{N}` (assign RHS). Both are strictly worse than a clean
     // diagnostic, so

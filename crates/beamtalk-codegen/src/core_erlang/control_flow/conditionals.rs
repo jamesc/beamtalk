@@ -51,9 +51,10 @@
 //! `State{N}` chain managed by the method body generator.
 
 use super::super::gen_server::BodyExprKind;
+use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, FrameId, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    self, BindOp, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, ThreadedValue,
+    ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
@@ -313,6 +314,29 @@ impl CoreErlangGenerator {
     }
 }
 
+/// The ADR 0131 §2 `BranchArm` frame of an arm of a conditional that is a
+/// local-threading producer in a class or value-type method.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ArmFrame {
+    /// The locals the construct threads: the keys its seeded `StateAcc`
+    /// carries ([`CoreErlangGenerator::branch_threaded_locals`] over every arm).
+    pub(in crate::core_erlang) threads: Vec<String>,
+}
+
+/// Where a conditional's scratch map — element 2 of its result tuple, the
+/// `StateAcc` its arms thread their locals through — starts (ADR 0131 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ScratchStart {
+    /// Continue the enclosing scratch map: the actor `State` (an actor
+    /// instance method, where element 2 is adopted as the next `State`
+    /// version), or the `StateAcc` of the enclosing loop or arm frame.
+    Continue,
+    /// A fresh `maps:new()` seeded with only the construct's own threaded
+    /// locals: the root of a class or value-type method, which has no `State`
+    /// to continue.
+    Fresh,
+}
+
 impl CoreErlangGenerator {
     /// Seeds the `__local__` keys for the outer locals a conditional's
     /// branches thread, returning `(seed_doc, base_state_var)`.
@@ -337,13 +361,32 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         outer_state: &str,
     ) -> (Document<'static>, String) {
+        self.seed_scratch_locals(blocks, ScratchStart::Continue, outer_state)
+    }
+
+    /// [`Self::seed_conditional_locals`] with the scratch map's start chosen
+    /// by `scratch` (ADR 0131 §3): [`ScratchStart::Continue`] seeds the keys
+    /// into `outer_state` (the actor `State`, or the enclosing frame's
+    /// `StateAcc`); [`ScratchStart::Fresh`] seeds them into a new empty map,
+    /// so the construct's result tuple carries only its own threaded locals
+    /// and no `State` variable needs to exist (a class method, a value-type
+    /// method).
+    pub(in crate::core_erlang::control_flow) fn seed_scratch_locals(
+        &mut self,
+        blocks: &[&Block],
+        scratch: ScratchStart,
+        outer_state: &str,
+    ) -> (Document<'static>, String) {
         let threaded = self.branch_threaded_locals(blocks);
-        if threaded.is_empty() {
+        if threaded.is_empty() && scratch == ScratchStart::Continue {
             return (Document::Nil, outer_state.to_string());
         }
 
         let seeded_state = self.fresh_temp_var("SeededState");
-        let mut chain: Document<'static> = leaf::var(outer_state.to_string());
+        let mut chain: Document<'static> = match scratch {
+            ScratchStart::Continue => leaf::var(outer_state.to_string()),
+            ScratchStart::Fresh => Document::Str("call 'maps':'new'()"),
+        };
         // Fold from the last var inward so the emitted nesting reads naturally.
         for var in threaded.iter().rev() {
             let core_var = self
@@ -445,12 +488,116 @@ impl CoreErlangGenerator {
         self.threaded_expression(receiver, frame)
     }
 
+    /// Whether a conditional in `frame` is lowered as a local-threading
+    /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
+    /// `frame` is the method root or a registered `BranchArm` frame
+    /// ([`Self::is_conditional_producer_frame`]), and it is not the REPL. The one
+    /// predicate for both the arm frames and the `LocalRebind`s.
+    fn lowers_as_conditional_producer(&self, frame: FrameId, producer: bool) -> bool {
+        producer && self.is_conditional_producer_frame(frame) && !self.is_repl_mode()
+    }
+
+    /// The `BranchArm` frame the arms of a conditional producer are lowered
+    /// as (ADR 0131 §2): the construct's seeded set, for a conditional
+    /// producer at the method root or in another conditional producer's arm (a
+    /// registered `BranchArm` frame). `producer` says whether the construct is
+    /// one ([`Self::conditional_producer_locals`]): a conditional the Phase 0
+    /// check does not name as a producer keeps the legacy arm, as do the arms of
+    /// a conditional in a loop or fold body and of the REPL
+    /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
+    /// unpack their own tuples).
+    fn conditional_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
+        self.lowers_as_conditional_producer(self.current_frame(), producer)
+            .then(|| ArmFrame {
+                threads: self.branch_threaded_locals(blocks),
+            })
+    }
+
+    /// One arm of a conditional producer: a `BranchArm` frame
+    /// ([`Self::generate_conditional_arm`]) when `arm` is given, else the
+    /// legacy arm.
+    fn conditional_arm(
+        &mut self,
+        block: &Block,
+        arm: Option<&ArmFrame>,
+    ) -> Result<(Document<'static>, usize)> {
+        match arm {
+            Some(arm) => self.generate_conditional_arm(block, arm),
+            None => self.generate_conditional_branch_inline(block),
+        }
+    }
+
+    /// ADR 0131 §3: whether a conditional producer in `frame` keeps its scratch
+    /// map private. True at the method root of a method that has no `State`
+    /// family to continue (a class method, a value-type method): the
+    /// construct's result tuple is `{Value, Scratch}` where `Scratch` is a
+    /// fresh map seeded from `maps:new()` with only the construct's own
+    /// threaded locals, and its locals come back through `LocalRebind`s. No
+    /// `State` variable is referenced, because none exists there.
+    ///
+    /// Not private: an actor instance method (`State` is an eligible family,
+    /// [`Self::eligible_families`]: element 2 *is* the next `State` version),
+    /// the REPL (its `State` is the bindings map), and a non-root frame of a
+    /// non-actor method (a loop body, whose own `StateAcc` the construct
+    /// continues: a loop or fold frame's consumer re-reads its own locals). A
+    /// conditional in a registered `BranchArm` frame is not at the method root
+    /// either, and continues the arm's `StateAcc`.
+    pub(in crate::core_erlang) fn conditional_has_private_scratch(&self, frame: FrameId) -> bool {
+        frame == FrameId::ROOT
+            && !self.is_repl_mode()
+            && !self.eligible_families().contains(&VersionPrefix::State)
+    }
+
+    /// Where a conditional producer in `frame` starts its scratch map.
+    pub(in crate::core_erlang) fn conditional_scratch(&self, frame: FrameId) -> ScratchStart {
+        if self.conditional_has_private_scratch(frame) {
+            ScratchStart::Fresh
+        } else {
+            ScratchStart::Continue
+        }
+    }
+
+    /// ADR 0122 Decision 2 / ADR 0131 §3: the families a conditional's result
+    /// tuple hands back to `frame`, taken from context
+    /// ([`Self::eligible_families`]) rather than hard-coded: `[State]` in an
+    /// actor instance method (and in a non-root frame, which continues its
+    /// own scratch map, see [`Self::conditional_has_private_scratch`]), and
+    /// none at the root of a class method or a value-type method. A value-type
+    /// `SelfVt` family is not carried by a conditional's tuple: a conditional
+    /// whose arms write a field keeps its own statement lowering
+    /// (`generate_vt_conditional_open`) and is not a producer
+    /// (`beamtalk_core::semantic_analysis::block_facts::conditional_arms_lower_as_producer`).
+    fn conditional_families(&self, frame: FrameId) -> ThreadedFamilies {
+        if self.conditional_has_private_scratch(frame) {
+            ThreadedFamilies::default()
+        } else {
+            ThreadedFamilies::from_matches(&[VersionPrefix::State])
+        }
+    }
+
+    /// The slot list of a conditional's result tuple past the value: always
+    /// the scratch map at element 2 (ADR 0122 §"State already fits"), whether
+    /// the context adopts it as the `State` family or keeps it private.
+    fn conditional_result_slots() -> ThreadedFamilies {
+        ThreadedFamilies::from_matches(&[VersionPrefix::State])
+    }
+
     /// ADR 0118 phase 4: wraps a `_tuple` builder's raw
     /// `{Value, NewState}` case-expression `Document` — the shape every
     /// `generate_*_with_mutations_tuple` builder below still produces
     /// internally — as a [`ThreadedValue`] per §Decision 2: prelude
     /// `[Statement(let CF = <case…> in), Bind(State_{n+1} ← element(2,
     /// CF))]`, value `element(1, CF)`.
+    ///
+    /// ADR 0131 §1/§2 (Phase 3): at the method root or in a registered
+    /// `BranchArm` frame the prelude also carries one `LocalRebind` per local
+    /// the construct threads (`arms`' threaded set), lowered by that frame: the
+    /// construct is a local-threading producer. In a class or value-type method
+    /// the scratch map is private ([`Self::conditional_has_private_scratch`])
+    /// and there is no `State` `Bind`; in an actor instance method the `State`
+    /// `Bind` comes first and each rebind reads through it. In a loop or fold
+    /// frame the prelude is the legacy one: the frame's consumer re-reads its
+    /// own locals.
     ///
     /// `frame` MUST be captured by the caller via
     /// [`CoreErlangGenerator::current_frame`] BEFORE building `tuple_doc` —
@@ -464,57 +611,115 @@ impl CoreErlangGenerator {
     /// this wrapper's `Bind` and tripping the verifier
     /// (`NonLinearVersion`/`UnboundVersion` on a frame nothing else
     /// references).
+    fn conditional_tuple_to_threaded_value(
+        &mut self,
+        tuple_doc: Document<'static>,
+        frame: FrameId,
+        span: Span,
+        arms: &[&Block],
+        tail: ProducerTail,
+        producer: bool,
+    ) -> ThreadedValue {
+        let carrier = self.fresh_temp_var("CF");
+        let value = ValueRef::Doc(docvec![
+            "call 'erlang':'element'(1, ",
+            leaf::var(carrier.clone()),
+            ")",
+        ]);
+        // The method root and a registered `BranchArm` frame lower the
+        // construct's `LocalRebind`s; a loop or fold frame's consumer re-reads
+        // its own locals.
+        let rebinds_locals = self.lowers_as_conditional_producer(frame, producer);
+        let locals = if rebinds_locals {
+            self.branch_threaded_locals(arms)
+        } else {
+            Vec::new()
+        };
+        let family_binds = self.extract_state_family(&carrier, frame, span);
+        if !rebinds_locals {
+            let mut prelude = vec![ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(carrier.clone()), " = ", tuple_doc, " in "],
+                span,
+            )];
+            prelude.extend(family_binds);
+            return ThreadedValue { prelude, value };
+        }
+        let enclosing = self
+            .rebind_frame_of(frame)
+            .unwrap_or_else(|_| RebindFrame::implicit_root());
+        let prelude = self.construct_rebind_prelude(
+            &enclosing,
+            &carrier,
+            tuple_doc,
+            &locals,
+            tail,
+            family_binds,
+            frame,
+            span,
+        );
+        ThreadedValue { prelude, value }
+    }
+
+    /// [`Self::conditional_tuple_to_threaded_value`] for a construct that
+    /// threads no outer local of its own (`match:`, an ADR 0128 opaque fold):
+    /// actor instance methods only, so its scratch map is always the `State`
+    /// family.
     fn control_flow_tuple_to_threaded_value(
         &mut self,
         tuple_doc: Document<'static>,
         frame: FrameId,
         span: Span,
-    ) -> ThreadedValue {
-        let tuple_var = self.fresh_temp_var("CF");
-        let mut prelude = vec![ThreadedStmt::Statement(
-            docvec![
-                "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                tuple_doc,
-                " in "
-            ],
+    ) -> Result<ThreadedValue> {
+        if self.conditional_has_private_scratch(frame) {
+            return Err(CodeGenError::Internal(
+                "a match: or opaque-callable fold producer was reached at the root of a method \
+                 with no State family (ADR 0131 §3)"
+                    .to_string(),
+            ));
+        }
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
             span,
-        )];
-        prelude.extend(self.extract_state_family(&tuple_var, frame, span));
-        let value = ValueRef::Doc(docvec![
-            "call 'erlang':'element'(1, ",
-            leaf::var(tuple_var),
-            ")",
-        ]);
-        ThreadedValue { prelude, value }
+            &[],
+            ProducerTail::Rebind,
+            true,
+        ))
     }
 
     /// ADR 0122 Decision 3/BT-3514: this construct's post-merge `[State]`
-    /// extraction — the `Bind` half [`Self::control_flow_tuple_to_threaded_value`]
-    /// used to hand-roll (`State_{n+1} <- element(2, CF)`) — routed through
-    /// the shared [`family_slots::extract_family_slots`] instead. `step`
-    /// mints the family's fresh successor version FIRST (exactly as the
-    /// hand-rolled version did: `next_state_var()` before reading
-    /// `state_version()`), matching every other `extract_family_slots`
-    /// caller's "caller mints `target` itself" contract. `base_arity` is
-    /// always `1` here — every `_tuple` builder's own value occupies element
-    /// 1, `State` is the sole family and always occupies element 2 (ADR 0122
-    /// §"State already fits": "element 2 of the same result tuple the other
-    /// families are appended to").
+    /// extraction — the `Bind` half the producer used to hand-roll
+    /// (`State_{n+1} <- element(2, CF)`) — routed through the shared
+    /// [`family_slots::extract_family_slots`] instead. `step` mints the
+    /// family's fresh successor version FIRST (exactly as the hand-rolled
+    /// version did: `next_state_var()` before reading `state_version()`),
+    /// matching every other `extract_family_slots` caller's "caller mints
+    /// `target` itself" contract. `base_arity` is always `1` here — every
+    /// `_tuple` builder's own value occupies element 1, `State` is the sole
+    /// family and always occupies element 2 (ADR 0122 §"State already fits":
+    /// "element 2 of the same result tuple the other families are appended
+    /// to").
+    ///
+    /// The families come from context ([`Self::conditional_families`]): none
+    /// at the root of a class or value-type method, where no `State` version
+    /// is minted at all.
     fn extract_state_family(
         &mut self,
         tuple_var: &str,
         frame: FrameId,
         span: Span,
     ) -> Vec<ThreadedStmt> {
+        let families = self.conditional_families(frame);
+        if families.as_slice().is_empty() {
+            return Vec::new();
+        }
         let source_version = self.state_version();
         let _ = self.next_state_var();
         let target_version = self.state_version();
         family_slots::extract_family_slots(
             tuple_var,
             1,
-            &Self::actor_conditional_families(),
+            &families,
             |_| {
                 FamilyVersionStep::new(
                     VersionedVar::new(VersionPrefix::State, source_version, frame),
@@ -525,20 +730,7 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// ADR 0122 Decision 2/BT-3514: the Actor conditional's own
-    /// [`ThreadedFamilies`] — always exactly `[State]` (ADR 0122 §Context,
-    /// "State already fits": an Actor instance method's `StateAcc` threads
-    /// through unconditionally, never as a function of a specific block's
-    /// mutations, so "in a slot-list model it is the trivial case: the
-    /// predicate is always true"). All six `generate_*_with_mutations`
-    /// producers below, plus [`Self::extract_state_family`], build this same
-    /// value rather than re-deriving `[VersionPrefix::State]` at each call
-    /// site.
-    fn actor_conditional_families() -> ThreadedFamilies {
-        ThreadedFamilies::from_matches(&[VersionPrefix::State])
-    }
-
-    /// ADR 0122 Decision 3/BT-3514: this Actor conditional's own
+    /// ADR 0122 Decision 3/BT-3514: this conditional's own
     /// non-taken-arm / absent-block-passthrough tuple — `{<value_doc>,
     /// <base_state>}` — through the shared
     /// [`family_slots::append_baseline_family_slots`] helper with `[State]`,
@@ -559,11 +751,9 @@ impl CoreErlangGenerator {
     /// VERBATIM regardless of `version`, rather than through a numbered
     /// `VersionPrefix::State` [`VersionedVar`] (which would render via
     /// `RenderCtx`'s loop-context-dependent `State{N}`/`StateAcc{N}`
-    /// counter naming instead of `base_state`'s own text). The family LIST
-    /// passed to the helper is still `[State]` (`Self::actor_conditional_families`) —
-    /// matching ADR 0122's "State already fits" designation — only the
-    /// RENDER for this particular slot's value uses the verbatim-name path
-    /// already established for exactly this "pre-minted name" situation.
+    /// counter naming instead of `base_state`'s own text). The slot LIST
+    /// passed to the helper is [`Self::conditional_result_slots`]: element 2
+    /// is the scratch map in every context.
     fn conditional_baseline_tuple(
         &mut self,
         value_doc: Document<'static>,
@@ -578,7 +768,7 @@ impl CoreErlangGenerator {
         let ctx = threaded_ir::RenderCtx::new(self);
         family_slots::append_baseline_family_slots(
             base,
-            &Self::actor_conditional_families(),
+            &Self::conditional_result_slots(),
             |_| slot.clone(),
             &ctx,
         )
@@ -600,11 +790,22 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let tuple_doc = self.generate_if_true_with_mutations_tuple(receiver, block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_if_true_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -617,6 +818,8 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -626,7 +829,8 @@ impl CoreErlangGenerator {
         let outer_state = self.current_state_var();
         // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         // ADR 0111 Addendum 5: `generate_conditional_branch_inline`
         // now builds, `verify()`s, and `render()`s this arm's real per-frame
@@ -635,7 +839,7 @@ impl CoreErlangGenerator {
         // that used to run here is gone; `NonLinearVersion`/`UnboundVersion`
         // are live checks against the real IR now.
         let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -671,11 +875,22 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let tuple_doc = self.generate_if_false_with_mutations_tuple(receiver, block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_if_false_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// Generates inline code for `flag ifFalse: [block]` in actor context
@@ -688,6 +903,8 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -697,13 +914,14 @@ impl CoreErlangGenerator {
         let outer_state = self.current_state_var();
         // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -739,11 +957,22 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let tuple_doc = self.generate_and_with_mutations_tuple(receiver, block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_and_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// generates inline code for `flag and: [block]` in actor
@@ -765,6 +994,8 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -774,10 +1005,11 @@ impl CoreErlangGenerator {
         let outer_state = self.current_state_var();
         // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -813,11 +1045,22 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let tuple_doc = self.generate_or_with_mutations_tuple(receiver, block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_or_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// generates inline code for `flag or: [block]` in actor
@@ -836,6 +1079,8 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -845,10 +1090,11 @@ impl CoreErlangGenerator {
         let outer_state = self.current_state_var();
         // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -886,12 +1132,27 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         true_block: &Block,
         false_block: &Block,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = false_block.span;
         let frame = self.current_frame();
-        let tuple_doc =
-            self.generate_if_true_if_false_with_mutations_tuple(receiver, true_block, false_block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc = self.generate_if_true_if_false_with_mutations_tuple(
+            receiver,
+            true_block,
+            false_block,
+            scratch,
+            producer,
+        )?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[true_block, false_block],
+            tail,
+            producer,
+        ))
     }
 
     /// Generates inline code for `flag ifTrue: [t_block] ifFalse: [f_block]` in actor context
@@ -903,6 +1164,8 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         true_block: &Block,
         false_block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -914,15 +1177,16 @@ impl CoreErlangGenerator {
         // write a given local (and the post-conditional extraction) still sees the
         // `__local__` key.
         let (seed_doc, base_state) =
-            self.seed_conditional_locals(&[true_block, false_block], &outer_state);
+            self.seed_scratch_locals(&[true_block, false_block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[true_block, false_block], producer);
 
         // True branch
         let (true_branch_doc, _true_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(true_block))?;
+            self.with_branch_context(|this| this.conditional_arm(true_block, arm_frame.as_ref()))?;
 
         // False branch (reset to same initial state)
         let (false_branch_doc, _false_final) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
+            self.with_branch_context(|this| this.conditional_arm(false_block, arm_frame.as_ref()))?;
 
         // ADR 0111 Addendum 5: the true/false arms are sibling
         // with_branch_context frames — each `generate_conditional_branch_inline`
@@ -978,14 +1242,23 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         nil_block: Option<&Block>,
         not_nil_block: Option<&Block>,
+        tail: ProducerTail,
+        producer: bool,
     ) -> Result<ThreadedValue> {
         let span = not_nil_block
             .or(nil_block)
             .map_or_else(|| receiver.unwrap_parens().span(), |b| b.span);
         let frame = self.current_frame();
-        let tuple_doc =
-            self.generate_nil_conditional_with_mutations_tuple(receiver, nil_block, not_nil_block)?;
-        Ok(self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+            receiver,
+            nil_block,
+            not_nil_block,
+            scratch,
+            producer,
+        )?;
+        let arms: Vec<&Block> = nil_block.into_iter().chain(not_nil_block).collect();
+        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &arms, tail, producer))
     }
 
     /// Generates inline code for the nil-testing conditional family in
@@ -1007,7 +1280,14 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         nil_block: Option<&Block>,
         not_nil_block: Option<&Block>,
+        scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
+        // The REPL assembler (and `lower_repl_construct_tuple` for an operand)
+        // unpacks the `{Result, Bindings}` tuple this compiles to.
+        if self.is_repl_mode() {
+            self.set_repl_loop_mutated(true);
+        }
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
         let recv_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
@@ -1020,14 +1300,15 @@ impl CoreErlangGenerator {
         let mut seed_blocks: Vec<&Block> = Vec::new();
         seed_blocks.extend(nil_block);
         seed_blocks.extend(not_nil_block);
-        let (seed_doc, base_state) = self.seed_conditional_locals(&seed_blocks, &outer_state);
+        let (seed_doc, base_state) = self.seed_scratch_locals(&seed_blocks, scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&seed_blocks, producer);
 
         // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let nil_arm = if let Some(block) = nil_block {
             let (branch_doc, _branch_final) =
-                self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+                self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
             docvec![
                 "let StateAcc = ",
                 leaf::var(base_state.clone()),
@@ -1048,7 +1329,7 @@ impl CoreErlangGenerator {
                     // Bind the block parameter to the receiver value (already bound to obj_var)
                     this.bind_var(&param.name, &obj_var);
                 }
-                let result = this.generate_conditional_branch_inline(block);
+                let result = this.conditional_arm(block, arm_frame.as_ref());
                 this.pop_scope();
                 result
             })?;
@@ -1161,15 +1442,55 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Option<ThreadedValue>> {
+        self.inline_control_flow_producer_with(expr, ProducerTail::Rebind)
+    }
+
+    /// [`Self::inline_control_flow_producer`] with the tail of the construct's
+    /// locals chosen by the caller (ADR 0131 §2): `Rebind` rebinds every
+    /// threaded local; `Discard` is the method root's last expression, whose
+    /// rebinds nothing can observe.
+    ///
+    /// A conditional that is a root local-threading producer
+    /// ([`Self::conditional_producer_locals`]) is lowered even when the
+    /// statement-position gate ([`Self::inline_control_flow_needs_threading`],
+    /// read+write analysis) would not inline it: a write-only arm
+    /// (`c ifTrue: [t := 5]`) threads `t` all the same.
+    pub(in crate::core_erlang) fn inline_control_flow_producer_with(
+        &mut self,
+        expr: &Expression,
+        tail: ProducerTail,
+    ) -> Result<Option<ThreadedValue>> {
         let expr = expr.unwrap_parens();
-        if !self.inline_control_flow_needs_threading(expr) {
+        let root_producer_locals = if self.is_conditional_producer_frame(self.current_frame()) {
+            self.conditional_producer_locals(expr)
+        } else {
+            None
+        };
+        let lowered = self.lower_inline_control_flow(expr, tail, root_producer_locals.is_some())?;
+        #[cfg(test)]
+        if let (Some(_), Some(locals)) = (&lowered, &root_producer_locals) {
+            super::super::threaded_expr::fault::record_producer(expr.span(), locals);
+        }
+        Ok(lowered)
+    }
+
+    /// [`Self::inline_control_flow_producer_with`] once `expr` is
+    /// paren-unwrapped; `root_producer` says it is a conditional local-threading
+    /// producer ([`Self::conditional_producer_locals`]).
+    fn lower_inline_control_flow(
+        &mut self,
+        expr: &Expression,
+        tail: ProducerTail,
+        root_producer: bool,
+    ) -> Result<Option<ThreadedValue>> {
+        if !root_producer && !self.inline_control_flow_needs_threading(expr) {
             return Ok(None);
         }
         if let Some(tuple_doc) = self.opaque_callable_fold_tuple_doc(expr)? {
             let span = expr.span();
             let frame = self.current_frame();
             return Ok(Some(
-                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span),
+                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span)?,
             ));
         }
         if let Expression::Match { value, arms, .. } = expr {
@@ -1177,7 +1498,7 @@ impl CoreErlangGenerator {
             let frame = self.current_frame();
             let tuple_doc = self.generate_match(value, arms)?;
             return Ok(Some(
-                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span),
+                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span)?,
             ));
         }
         let Expression::MessageSend {
@@ -1194,16 +1515,16 @@ impl CoreErlangGenerator {
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         let tv = match (sel.as_str(), arguments.as_slice()) {
             ("and:", [Expression::Block(block)]) => {
-                self.generate_and_with_mutations(receiver, block)?
+                self.generate_and_with_mutations(receiver, block, tail, root_producer)?
             }
             ("or:", [Expression::Block(block)]) => {
-                self.generate_or_with_mutations(receiver, block)?
+                self.generate_or_with_mutations(receiver, block, tail, root_producer)?
             }
             ("ifTrue:", [Expression::Block(block)]) => {
-                self.generate_if_true_with_mutations(receiver, block)?
+                self.generate_if_true_with_mutations(receiver, block, tail, root_producer)?
             }
             ("ifFalse:", [Expression::Block(block)]) => {
-                self.generate_if_false_with_mutations(receiver, block)?
+                self.generate_if_false_with_mutations(receiver, block, tail, root_producer)?
             }
             (
                 "ifTrue:ifFalse:",
@@ -1211,15 +1532,29 @@ impl CoreErlangGenerator {
                     Expression::Block(true_block),
                     Expression::Block(false_block),
                 ],
-            ) => {
-                self.generate_if_true_if_false_with_mutations(receiver, true_block, false_block)?
-            }
-            ("ifNotNil:", [Expression::Block(block)]) => {
-                self.generate_nil_conditional_with_mutations(receiver, None, Some(block))?
-            }
-            ("ifNil:", [Expression::Block(block)]) => {
-                self.generate_nil_conditional_with_mutations(receiver, Some(block), None)?
-            }
+            ) => self.generate_if_true_if_false_with_mutations(
+                receiver,
+                true_block,
+                false_block,
+                tail,
+                root_producer,
+            )?,
+            ("ifNotNil:", [Expression::Block(block)]) => self
+                .generate_nil_conditional_with_mutations(
+                    receiver,
+                    None,
+                    Some(block),
+                    tail,
+                    root_producer,
+                )?,
+            ("ifNil:", [Expression::Block(block)]) => self
+                .generate_nil_conditional_with_mutations(
+                    receiver,
+                    Some(block),
+                    None,
+                    tail,
+                    root_producer,
+                )?,
             (
                 "ifNil:ifNotNil:",
                 [
@@ -1237,6 +1572,8 @@ impl CoreErlangGenerator {
                 receiver,
                 Some(nil_block),
                 Some(not_nil_block),
+                tail,
+                root_producer,
             )?,
             _ => return Ok(None),
         };
@@ -1643,10 +1980,52 @@ impl CoreErlangGenerator {
     /// mode's rendering is a transparent pass-through (`render_threaded`'s
     /// `ThreadingMode::StateAcc(_) => render(body, ctx)` arm), so wrapping
     /// changes zero bytes versus rendering `stmts` directly.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_conditional_branch_inline(
         &mut self,
         block: &Block,
+    ) -> Result<(Document<'static>, usize)> {
+        self.generate_conditional_arm_statements(block, None)
+    }
+
+    /// ADR 0131 §2 (Phase 3): one arm of a conditional that is a
+    /// local-threading producer in a class or value-type method, lowered as a
+    /// `BranchArm` frame. Registers the arm's [`RebindFrame`] (its `threads`
+    /// are the construct's seeded set), and the arm statements' producer
+    /// sites (the rule a loop body uses, `with_body_producer_sites`), so a
+    /// loop or fold in the arm is a producer whose `LocalRebind`s are lowered
+    /// by this frame: a `Put` into the arm's seeded `StateAcc` for a local the
+    /// construct threads, a plain `let` for any other.
+    ///
+    /// Must be called inside [`Self::with_branch_context`] (the frame is
+    /// [`Self::current_branch_frame`]).
+    pub(in crate::core_erlang) fn generate_conditional_arm(
+        &mut self,
+        block: &Block,
+        arm: &ArmFrame,
+    ) -> Result<(Document<'static>, usize)> {
+        let frame = self.current_branch_frame();
+        let rebind = RebindFrame {
+            frame,
+            kind: RebindFrameKind::BranchArm,
+            threads: arm.threads.clone(),
+        };
+        let body = super::super::util::collect_body_exprs(&block.body);
+        self.with_rebind_frame(rebind, |this| {
+            this.with_body_producer_sites(&body, false, true, |this| {
+                this.generate_conditional_arm_statements(block, Some(arm))
+            })
+        })
+    }
+
+    /// The arm lowering behind [`Self::generate_conditional_branch_inline`]
+    /// (`arm: None`, the legacy arm: its nested constructs unpack their own
+    /// tuples) and [`Self::generate_conditional_arm`] (`arm: Some`, a
+    /// `BranchArm` frame whose nested producers rebind by it).
+    #[allow(clippy::too_many_lines)]
+    fn generate_conditional_arm_statements(
+        &mut self,
+        block: &Block,
+        arm: Option<&ArmFrame>,
     ) -> Result<(Document<'static>, usize)> {
         let frame = self.current_branch_frame();
         self.push_scope();
@@ -1657,7 +2036,7 @@ impl CoreErlangGenerator {
         if body.is_empty() {
             let final_version = self.state_version();
             self.pop_scope();
-            return Ok(self.verify_and_render_branch_arm(
+            return Ok(self.render_branch_arm(
                 vec![ThreadedStmt::Return(
                     ValueRef::Literal("'nil'"),
                     VersionedVar::new(VersionPrefix::State, final_version, frame),
@@ -1666,6 +2045,7 @@ impl CoreErlangGenerator {
                 frame,
                 final_version,
                 block.span,
+                arm,
             ));
         }
 
@@ -2127,6 +2507,26 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // ADR 0131 Phase 3: a loop or fold that is itself the statement of
+                // a `BranchArm` frame is a local-threading producer there. Its
+                // prelude (the construct tuple and one `LocalRebind` per local,
+                // lowered by this arm) is spliced, so the arm's `StateAcc` keeps
+                // every other key it carries.
+                BodyExprKind::ControlFlowWithMutations
+                    if arm.is_some() && self.local_producer_locals(expr).is_some() =>
+                {
+                    let tv = self.threaded_expression(expr, frame)?;
+                    stmts.extend(tv.prelude);
+                    let value_doc = self.threaded_value_doc(&tv.value);
+                    let var = self.fresh_temp_var(if is_last { "BranchResult" } else { "seq" });
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(var.clone()), " = ", value_doc, " in "],
+                        span,
+                    ));
+                    if is_last {
+                        last_result = Some(ValueRef::Var(var));
+                    }
+                }
                 // C10
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
@@ -2380,7 +2780,7 @@ impl CoreErlangGenerator {
         ));
 
         self.pop_scope();
-        Ok(self.verify_and_render_branch_arm(stmts, frame, final_version, block.span))
+        Ok(self.render_branch_arm(stmts, frame, final_version, block.span, arm))
     }
 
     /// ADR 0111 Addendum 5 (rebind idiom, shared by C6/C8/
@@ -2431,6 +2831,38 @@ impl CoreErlangGenerator {
         final_version: usize,
         span: Span,
     ) -> (Document<'static>, usize) {
+        self.render_branch_arm(stmts, frame, final_version, span, None)
+    }
+
+    /// [`Self::verify_and_render_branch_arm`] for a conditional arm: with an
+    /// [`ArmFrame`] the arm is a [`ThreadedStmt::BranchArm`] node recording the
+    /// construct's seeded `threads` (ADR 0131 §2), so the verifier reads the
+    /// frame's rebind shapes off the node; without one it is the legacy
+    /// `Threaded` wrapper, which threads nothing of its own.
+    fn render_branch_arm(
+        &mut self,
+        stmts: Vec<ThreadedStmt>,
+        frame: FrameId,
+        final_version: usize,
+        span: Span,
+        arm: Option<&ArmFrame>,
+    ) -> (Document<'static>, usize) {
+        if let Some(arm) = arm {
+            let wrapper = vec![threaded_ir::build_branch_arm(
+                frame,
+                arm.threads.clone(),
+                stmts,
+            )];
+            let errors = self.verify_threaded_ir(&wrapper);
+            self.report_threaded_ir_verify_errors(
+                &errors,
+                "conditional branch arm ThreadedIr must be well-formed",
+                span,
+            );
+            let mut ctx = threaded_ir::RenderCtx::new(self);
+            let doc = threaded_ir::render(&wrapper, &mut ctx);
+            return (doc, final_version);
+        }
         let produces = if final_version > 0 {
             vec![VersionedVar::new(
                 VersionPrefix::State,

@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): see fixtures/adr0131cond_non_producer_actor.bt.
+// An actor conditional whose arms write a field (or send to `self`) but no
+// outer local is not a local-threading producer; a loop or fold in its arm that
+// writes only a local of the arm keeps answering right.
+
+TestCase subclass: Adr0131CondNonProducerTest
+
+  testDoInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) doInArm: true) equals: #[3, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) doInArm: false) equals: #[0, 0]
+
+  testToDoInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) toDoInArm: true) equals: #[3, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) toDoInArm: false) equals: #[0, 0]
+
+  testInjectInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) injectInArm: true) equals: #[6, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) injectInArm: false) equals: #[0, 0]
+
+  testWhileInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) whileInArm: true) equals: #[2, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) whileInArm: false) equals: #[0, 0]
+
+  testCollectInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) collectInArm: true) equals: #[5, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) collectInArm: false) equals: #[0, 0]
+
+  testSelfSendInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) selfSendInArm: true) equals: #[3, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) selfSendInArm: false) equals: #[0, 0]
+
+  testNestedInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) nestedInArm: true) equals: #[3, 2]
+    self assert: ((Adr0131CondNonProducerActor spawn) nestedInArm: false) equals: #[0, 0]
+
+  testNilInArm =>
+    self assert: ((Adr0131CondNonProducerActor spawn) nilInArm: nil) equals: #[3, 1]
+    self assert: ((Adr0131CondNonProducerActor spawn) nilInArm: 7) equals: #[7, 0]

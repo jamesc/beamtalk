@@ -77,11 +77,11 @@ pub(super) use build::{
 // phases that lower inside those frames (`#[cfg(test)]` for the same reason
 // as `AccParam`/`CloseContext` below).
 pub(super) use build::{
-    ThreadedLocalSlot, build_construct_tuple, build_discard_locals, build_local_threading_prelude,
-    opaque_escapes, stepping_local_rebinds,
+    ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
+    build_local_threading_prelude, opaque_escapes, stepping_local_rebinds,
 };
 #[cfg(test)]
-pub(super) use build::{build_branch_arm, build_local_rebind, build_method_body};
+pub(super) use build::{build_local_rebind, build_method_body};
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;

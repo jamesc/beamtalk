@@ -557,7 +557,6 @@ pub(in crate::core_erlang) fn build_method_body(
 
 /// Builds a [`ThreadedStmt::BranchArm`] frame node. `threads` is the set the
 /// arm's closer packs into its seeded `StateAcc` (`seed_conditional_locals`).
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_branch_arm(
     frame: FrameId,
     threads: Vec<String>,

@@ -1,0 +1,549 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): the statement-position matrix cells that
+// answered wrong, raised or failed to compile before conditionals became
+// local-threading producers (`adr0131_statement_probes.tsv`, verdict `bad` or
+// `over`, now `ok`). Each method is one cell of the matrix: a construct
+// (`kind`) writing the method-level local `t` (`target`) inside a block role
+// (`container`), in a class, value-type or actor method. `c` is the
+// condition. The expected answers are in stdlib/test/adr0131cond_matrix_test.bt.
+
+Value subclass: Adr0131CondMatrixValue
+  field: n = 0
+
+  plain => 0
+
+  armDirectAnd: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        c
+          and: [
+            t := t + 1
+            true
+          ]
+      ]
+    t
+
+  armDirectCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2) collect: [:x | t := t + x]
+      ]
+    t
+
+  armDirectDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2) do: [:e | t := t + e]
+      ]
+    t
+
+  armDirectIfNil: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        nil ifNil: [t := t + 1]
+      ]
+    t
+
+  armDirectIfTrue: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        c ifTrue: [t := t + 1]
+      ]
+    t
+
+  armDirectInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+      ]
+    t
+
+  armDirectTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        2 timesRepeat: [t := t + 1]
+      ]
+    t
+
+  armDirectToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        1 to: 2 do: [:i | t := t + i]
+      ]
+    t
+
+  armDirectWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        [t < 2] whileTrue: [t := t + 1]
+      ]
+    t
+
+  armOuterAnd: c =>
+    t := 0
+    c
+      ifTrue: [
+        c
+          and: [
+            t := t + 1
+            true
+          ]
+      ]
+    t
+
+  armOuterCollect: c =>
+    t := 0
+    c ifTrue: [#(1, 2) collect: [:x | t := t + x]]
+    t
+
+  armOuterDo: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  armOuterIfNil: c =>
+    t := 0
+    c ifTrue: [nil ifNil: [t := t + 1]]
+    t
+
+  armOuterIfTrue: c =>
+    t := 0
+    c ifTrue: [c ifTrue: [t := t + 1]]
+    t
+
+  armOuterInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+      ]
+    t
+
+  armOuterTimes: c =>
+    t := 0
+    c ifTrue: [2 timesRepeat: [t := t + 1]]
+    t
+
+  armOuterToDo: c =>
+    t := 0
+    c ifTrue: [1 to: 2 do: [:i | t := t + i]]
+    t
+
+  armOuterWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  armSelfsendDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            t := t + e
+            self plain
+          ]
+      ]
+    t
+
+  armSelfsendIfTrue: c =>
+    t := 0
+    c
+      ifTrue: [
+        c
+          ifTrue: [
+            t := t + 1
+            self plain
+          ]
+      ]
+    t
+
+  armSelfsendInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            self plain
+            a + x
+          ]
+      ]
+    t
+
+  armSelfsendToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        1
+          to: 2
+          do: [:i |
+            t := t + i
+            self plain
+          ]
+      ]
+    t
+
+  armSelfsendWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [t < 2]
+          whileTrue: [
+            t := t + 1
+            self plain
+          ]
+      ]
+    t
+
+  armNLDirectAnd: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        c
+          and: [
+            t := t + 1
+            true
+          ]
+        5
+      ]
+    t
+
+  armNLDirectCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2) collect: [:x | t := t + x]
+        5
+      ]
+    t
+
+  armNLDirectDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2) do: [:e | t := t + e]
+        5
+      ]
+    t
+
+  armNLDirectIfNil: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        nil ifNil: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLDirectIfTrue: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        c ifTrue: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLDirectInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        5
+      ]
+    t
+
+  armNLDirectTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        2 timesRepeat: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLDirectToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        1 to: 2 do: [:i | t := t + i]
+        5
+      ]
+    t
+
+  armNLDirectWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 0
+        [t < 2] whileTrue: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLOuterAnd: c =>
+    t := 0
+    c
+      ifTrue: [
+        c
+          and: [
+            t := t + 1
+            true
+          ]
+        5
+      ]
+    t
+
+  armNLOuterCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2) collect: [:x | t := t + x]
+        5
+      ]
+    t
+
+  armNLOuterDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2) do: [:e | t := t + e]
+        5
+      ]
+    t
+
+  armNLOuterIfNil: c =>
+    t := 0
+    c
+      ifTrue: [
+        nil ifNil: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLOuterIfTrue: c =>
+    t := 0
+    c
+      ifTrue: [
+        c ifTrue: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLOuterInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        5
+      ]
+    t
+
+  armNLOuterTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        2 timesRepeat: [t := t + 1]
+        5
+      ]
+    t
+
+  armNLOuterToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        1 to: 2 do: [:i | t := t + i]
+        5
+      ]
+    t
+
+  armNLOuterWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [t < 2] whileTrue: [t := t + 1]
+        5
+      ]
+    t
+
+  iterArmDirectCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2) collect: [:x | t := t + x]
+          ]
+      ]
+    t
+
+  iterArmDirectDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2) do: [:e | t := t + e]
+          ]
+      ]
+    t
+
+  iterArmDirectInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+          ]
+      ]
+    t
+
+  iterArmDirectTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            2 timesRepeat: [t := t + 1]
+          ]
+      ]
+    t
+
+  iterArmDirectToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            1 to: 2 do: [:i | t := t + i]
+          ]
+      ]
+    t
+
+  iterArmDirectWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            [t < 2] whileTrue: [t := t + 1]
+          ]
+      ]
+    t
+
+  iterArmOuterCollect: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | #(1, 2) collect: [:x | t := t + x]]]
+    t
+
+  iterArmOuterDo: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | #(1, 2) do: [:e | t := t + e]]]
+    t
+
+  iterArmOuterInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+          ]
+      ]
+    t
+
+  iterArmOuterTimes: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | 2 timesRepeat: [t := t + 1]]]
+    t
+
+  iterArmOuterToDo: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | 1 to: 2 do: [:i | t := t + i]]]
+    t
+
+  iterArmOuterWhile: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]]
+    t
+
+  topOuterAnd: c =>
+    t := 0
+    c
+      and: [
+        t := t + 1
+        true
+      ]
+    t
+
+  topOuterIfNil: _c =>
+    t := 0
+    nil ifNil: [t := t + 1]
+    t

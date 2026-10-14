@@ -537,23 +537,28 @@ fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
 #[test]
 fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
     // BT-3796: `do:` answers the `{nil, StateAcc}` carrier in class and
-    // value-type methods, which only a producer site unpacks. A `^` inside an
-    // arm, handler or closure is not one (the carrier was returned raw, and
-    // before this change `do:` answered a plain `nil` there), so the shape is
-    // a Phase 0 error; the keyed `do:` forms still answer `nil` and stay
+    // value-type methods, which only a producer site unpacks. A `^` inside a
+    // handler or closure is not one (the carrier was returned raw, and before
+    // this change `do:` answered a plain `nil` there), so the shape is a
+    // Phase 0 error; the keyed `do:` forms still answer `nil` and stay
     // accepted (`keyedDoReturnedInArm` in `adr0131do_producer_test.bt`).
-    for body in [
-        "c ifTrue: [^#(1, 2) do: [:x | t := t + x]]\nt",
-        "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt",
-    ] {
-        for src in [in_class(body), in_value(body)] {
-            let diags = of_category(
-                &adr0131_diagnostics_with(&src, &["c"]),
-                DiagnosticCategory::UnmigratedLocalThreading,
-            )
-            .len();
-            assert_eq!(diags, 1, "{src}");
-        }
+    //
+    // BT-3738 (ADR 0131 Phase 3): the arm of a conditional is a `BranchArm`
+    // frame whose statements are producer sites, so `c ifTrue: [^xs do: ...]`
+    // is lowered as a producer and answers `nil` (BT-3813's arm case; the
+    // handler case below is still BT-3813).
+    let in_arm = "c ifTrue: [^#(1, 2) do: [:x | t := t + x]]\nt";
+    for src in [in_class(in_arm), in_value(in_arm), in_actor(in_arm)] {
+        assert!(adr0131_diagnostics_with(&src, &["c"]).is_empty(), "{src}");
+    }
+    let body = "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt";
+    for src in [in_class(body), in_value(body)] {
+        let diags = of_category(
+            &adr0131_diagnostics_with(&src, &["c"]),
+            DiagnosticCategory::UnmigratedLocalThreading,
+        )
+        .len();
+        assert_eq!(diags, 1, "{src}");
     }
     let keyed = "c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]\nt";
     for src in [in_class(keyed), in_value(keyed)] {
@@ -745,6 +750,7 @@ fn adr0131_probe_matrix_pins() {
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
     };
+    let mut moved = Vec::new();
     for context in ["class", "value", "actor"] {
         let compiled = format!("adr0131local_rebind_{context}.bt");
         let diags = adr0131_diagnostics(&read(&compiled));
@@ -757,20 +763,27 @@ fn adr0131_probe_matrix_pins() {
         let class = &module.classes[0];
         let methods = class.methods.iter().chain(class.class_methods.iter());
         let mut count = 0;
+        let mut accepted = Vec::new();
         for method in methods {
             count += 1;
-            assert!(
-                diags
-                    .iter()
-                    .any(|d| method.span.start() <= d.span.start()
-                        && d.span.end() <= method.span.end()),
-                "{pending}: `{}` is no longer rejected by an ADR 0131 diagnostic; \
-                 move it (and its test) out of the pending files",
-                method.selector.name()
-            );
+            if !diags
+                .iter()
+                .any(|d| method.span.start() <= d.span.start() && d.span.end() <= method.span.end())
+            {
+                accepted.push(method.selector.name().to_string());
+            }
+        }
+        if !accepted.is_empty() {
+            moved.push(format!("{pending}: {accepted:?}"));
         }
         assert!(count > 0, "{pending} has no methods");
     }
+    assert!(
+        moved.is_empty(),
+        "no longer rejected by an ADR 0131 diagnostic; move them (and their tests) out of \
+         the pending files:\n{}",
+        moved.join("\n")
+    );
 }
 
 /// ADR 0131 §6 is permanent for s4 in class and value-type methods (a
@@ -907,9 +920,6 @@ fn producer_operand_sites_are_accepted_in_every_method_context() {
 #[test]
 fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
     for body in [
-        // Inside an arm: the construct's frame is not the method root, and an
-        // arm is not a loop or fold body (BT-3793 only accepts those).
-        "true ifTrue: [r := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
         // A conditional's receiver is threaded by the conditional (Phase 3).
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\nt",
         // Under a cascade.
@@ -1065,14 +1075,14 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 
 #[test]
 fn deny_set_nested_statement_names_the_enclosing_block() {
-    let src = in_class("4 > 3 ifTrue: [#(1, 2) do: [:e | t := t + e]]\nt");
+    let src = in_class("4 > 3 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]\nt");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
-        "`do:` writes outer local `t`, but as a statement inside a conditional arm in a \
-         class method the write is not threaded back yet (BT-3743)"
+        "`detect:ifNone:` writes outer local `t`, but as a statement inside a conditional arm \
+         in a class method the write is not threaded back yet (BT-3743)"
     );
     assert!(
         p0[0]
