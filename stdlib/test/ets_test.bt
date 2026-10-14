@@ -98,3 +98,120 @@ TestCase subclass: EtsTest
     self assert: (bag at: "key") equals: "second"
     self assert: bag size equals: 1
     bag delete
+
+  // === BT-3831: bulk reads, snapshot, ifPresent, atomic updates ===
+  testValues =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    self assert: self.table values asSet equals: #(1, 2) asSet
+
+  testValuesEmpty => self assert: self.table values equals: #()
+
+  testKeysAndValuesDo =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    seen := Ets new: #etsTestSeenKv type: #set
+    self.table keysAndValuesDo: [:k :v | seen at: k put: v]
+    self assert: seen asDictionary equals: #{"a" => 1, "b" => 2}
+    seen delete
+
+  testAsDictionarySnapshot =>
+    self.table at: "a" put: 1
+    snap := self.table asDictionary
+    self.table at: "a" put: 99
+    self assert: snap equals: #{"a" => 1}
+    self assert: (self.table at: "a") equals: 99
+
+  testAtIfPresent =>
+    self.table at: "n" put: 2
+    self assert: (self.table at: "n" ifPresent: [:v | v * 10]) equals: 20
+    self assert: (self.table at: "zz" ifPresent: [:v | v * 10]) equals: nil
+
+  testIncrementCreatesMissingKey =>
+    self assert: (self.table at: "hits" increment: 1) equals: 1
+    self assert: (self.table at: "hits" increment: 5) equals: 6
+    self assert: (self.table at: "hits") equals: 6
+
+  testIncrementNonIntegerArgumentRaises =>
+    self should: [self.table at: "hits" increment: "x"] raise: #type_error
+
+  testIncrementNonIntegerStoredValueRaises =>
+    self.table at: "s" put: "str"
+    self should: [self.table at: "s" increment: 1] raise: #type_error
+
+  testUpdateMissingKeyGetsNil =>
+    self assert: (self.table at: "k" update: [:old |
+      old isNil ifTrue: [1] ifFalse: [2]
+    ]) equals: 1
+    self assert: (self.table at: "k") equals: 1
+
+  testUpdateExistingKey =>
+    self.table at: "k" put: 10
+    self assert: (self.table at: "k" update: [:old | old + 1]) equals: 11
+    self assert: (self.table at: "k") equals: 11
+
+  testUpdateRaisingBlockWritesNothing =>
+    self.table at: "k" put: 10
+    self should: [
+      self.table at: "k" update: [:old | old / 0]
+    ] raise: #type_error
+    self assert: (self.table at: "k") equals: 10
+
+  testAtomicUpdatesRejectBagTables =>
+    bag := Ets new: #etsTestBagAtomic type: #bag
+    self should: [bag at: "k" increment: 1] raise: #unsupported_table_type
+    self should: [bag at: "k" update: [:o | 1]] raise: #unsupported_table_type
+    bag delete
+
+  testOrderedSetAtomicUpdates =>
+    ordered := Ets new: #etsTestOrderedAtomic type: #orderedSet
+    ordered at: "k" increment: 2
+    self assert: (ordered at: "k" update: [:o | o * 5]) equals: 10
+    ordered delete
+
+  testConcurrentIncrementIsAtomic =>
+    blocks := (1 to: 20) asList collect: [:i |
+      [1 to: 50 do: [:j | (Ets named: #etsTest) at: "n" increment: 1]]
+    ]
+    Parallel all: blocks
+    self assert: (self.table at: "n") equals: 1000
+
+  testConcurrentUpdateIsAtomic =>
+    blocks := (1 to: 20) asList
+      collect: [:i |
+        [
+          1
+            to: 50
+            do: [:j |
+              (Ets named: #etsTest) at: "n" update: [:o |
+                o isNil ifTrue: [1] ifFalse: [o + 1]
+              ]
+            ]
+        ]
+      ]
+    Parallel all: blocks
+    self assert: (self.table at: "n") equals: 1000
+
+  testIsEmptyNotEmpty =>
+    self assert: self.table isEmpty
+    self deny: self.table notEmpty
+    self.table at: "a" put: 1
+    self deny: self.table isEmpty
+    self assert: self.table notEmpty
+
+  testIncludesAndDo =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    self assert: (self.table includes: 2)
+    self deny: (self.table includes: 3)
+    seen := Ets new: #etsTestSeenDo type: #set
+    self.table do: [:v | seen at: v put: true]
+    self assert: seen size equals: 2
+    seen delete
+
+  testRemoveAll =>
+    self.table at: "a" put: 1
+    self.table removeAll
+    self assert: self.table size equals: 0
+    self.table at: "b" put: 2
+    self assert: self.table size equals: 1

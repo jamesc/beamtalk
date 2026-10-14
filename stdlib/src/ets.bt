@@ -155,6 +155,64 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
       key: key
       block: block
 
+  /// Look up a key; if present, evaluate the block with the value and
+  /// answer its result, otherwise answer `nil`.
+  ///
+  /// Works on every table type; for `#bag` and `#duplicateBag` the block
+  /// receives the first stored value (same as `at:`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "n" put: 2
+  /// cache at: "n" ifPresent: [:v | v * 10]    // => 20
+  /// cache at: "zz" ifPresent: [:v | v * 10]   // => nil
+  /// ```
+  at: key :: K ifPresent: block :: Block(V, R) -> R | Nil =>
+    (Erlang beamtalk_ets)
+      ifPresent: self
+      key: key
+      block: block
+
+  /// Atomically add `n` to the Integer stored at `key` and answer the new
+  /// value. A missing key starts at 0, so this creates it.
+  ///
+  /// Backed by `ets:update_counter/4`, so concurrent callers never lose an
+  /// update. Supported on `#set` and `#orderedSet` only; `#bag` and
+  /// `#duplicateBag` raise `unsupported_table_type`. A non-Integer `n` or a
+  /// non-Integer stored value raises `type_error`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counters at: "hits" increment: 1    // => 1
+  /// counters at: "hits" increment: 5    // => 6
+  /// ```
+  at: key :: K increment: n :: Integer -> Integer =>
+    (Erlang beamtalk_ets)
+      incrementAt: self
+      key: key
+      by: n
+
+  /// Atomic read-modify-write. Evaluates `block` with the current value
+  /// (`nil` if the key is missing), stores the block's result and answers it.
+  ///
+  /// Implemented as an optimistic compare-and-swap loop: if another process
+  /// changes the key meanwhile, the block is re-run with the new value. So
+  /// **the block must be free of side effects** — it may run more than once.
+  /// A block that raises propagates the error and writes nothing. Retries are
+  /// bounded; exhaustion raises `update_contention`. Supported on `#set` and
+  /// `#orderedSet` only; `#bag` and `#duplicateBag` raise
+  /// `unsupported_table_type`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "list" update: [:old | old isNil ifTrue: [#(1)] ifFalse: [old , #(2)]]
+  /// ```
+  at: key :: K update: block :: Block(V | Nil, V) -> V =>
+    (Erlang beamtalk_ets)
+      updateAt: self
+      key: key
+      block: block
+
   /// Return `true` if the table contains an entry for `key`.
   ///
   /// ## Examples
@@ -182,6 +240,78 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// cache keys    // => #("key1", "key2")
   /// ```
   keys -> List(K) => self delegate
+
+  /// Return all values as a `List` (a point-in-time read).
+  ///
+  /// Order is unspecified for `#set`, `#bag`, `#duplicateBag`; key order for
+  /// `#orderedSet`. Bag tables yield one value per stored entry.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache values    // => #(1, 2)
+  /// ```
+  values -> List(V) => self delegate
+
+  /// Evaluate `block` with each key and value of a snapshot taken up front
+  /// (the block may modify the table). Returns `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache keysAndValuesDo: [:k :v | Transcript show: k]
+  /// ```
+  keysAndValuesDo: block :: Block(K, V, Object) -> Nil => self delegate
+
+  /// Take a point-in-time snapshot as an immutable `Dictionary`.
+  ///
+  /// For `#bag` and `#duplicateBag` tables, only one value per key survives.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache asDictionary    // => #{"a" => 1}
+  /// ```
+  asDictionary -> Dictionary(K, V) => self delegate
+
+  /// Return `true` if the table has no entries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache isEmpty    // => true
+  /// ```
+  isEmpty -> Boolean => self size =:= 0
+
+  /// Return `true` if the table has at least one entry.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache notEmpty    // => false
+  /// ```
+  notEmpty -> Boolean => self size > 0
+
+  /// Return `true` if any entry holds `value`. Scans a snapshot of the
+  /// values.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache includes: 42    // => true or false
+  /// ```
+  includes: value :: V -> Boolean => self values includes: value
+
+  /// Evaluate `block` with each value of a snapshot. Returns `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache do: [:v | Transcript show: v]
+  /// ```
+  do: block :: Block(V, Object) -> Nil =>
+    self keysAndValuesDo: [:k :v | block value: v]
+
+  /// Remove every entry but keep the table. Returns `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache removeAll
+  /// ```
+  removeAll -> Nil => self delegate
 
   /// Return the number of entries in the table.
   ///

@@ -746,3 +746,82 @@ duplicate_bag_insert_upsert_test() ->
             _:_ -> ok
         end)
     end.
+
+%%% ============================================================================
+%%% BT-3831: values, snapshot, ifPresent, atomic updates
+%%% ============================================================================
+
+bt3831_values_snapshot_test() ->
+    with_table(bt3831_snap, fun(T) ->
+        beamtalk_ets:insert(T, a, 1),
+        beamtalk_ets:insert(T, b, 2),
+        ?assertEqual([1, 2], lists:sort(beamtalk_ets:values(T))),
+        ?assertEqual(#{a => 1, b => 2}, beamtalk_ets:asDictionary(T)),
+        Self = self(),
+        beamtalk_ets:keysAndValuesDo(T, fun(K, V) -> Self ! {kv, K, V} end),
+        ?assertEqual(
+            ok,
+            receive
+                {kv, a, 1} -> ok
+            after 100 -> timeout
+            end
+        )
+    end).
+
+bt3831_if_present_test() ->
+    with_table(bt3831_ip, fun(T) ->
+        beamtalk_ets:insert(T, k, 2),
+        ?assertEqual(20, beamtalk_ets:ifPresent(T, k, fun(V) -> V * 10 end)),
+        ?assertEqual(nil, beamtalk_ets:ifPresent(T, z, fun(V) -> V end))
+    end).
+
+bt3831_increment_test() ->
+    with_table(bt3831_inc, fun(T) ->
+        ?assertEqual(1, beamtalk_ets:incrementAt(T, c, 1)),
+        ?assertEqual(6, beamtalk_ets:incrementAt(T, c, 5)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}}, beamtalk_ets:incrementAt(T, c, x)
+        ),
+        beamtalk_ets:insert(T, s, <<"str">>),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}}, beamtalk_ets:incrementAt(T, s, 1)
+        )
+    end).
+
+bt3831_update_test() ->
+    with_table(bt3831_upd, fun(T) ->
+        ?assertEqual(1, beamtalk_ets:updateAt(T, k, fun(nil) -> 1 end)),
+        ?assertEqual(2, beamtalk_ets:updateAt(T, k, fun(O) -> O + 1 end)),
+        ?assertError(_, beamtalk_ets:updateAt(T, k, fun(_) -> error(boom) end)),
+        ?assertEqual(2, beamtalk_ets:lookup(T, k))
+    end).
+
+bt3831_update_contention_gives_up_test() ->
+    with_table(bt3831_cont, fun(T) ->
+        beamtalk_ets:insert(T, k, 0),
+        %% The block mutates the key itself, so every CAS attempt conflicts.
+        Block = fun(O) ->
+            ets:insert(bt3831_cont, {k, O + 1}),
+            O
+        end,
+        ?assertError(
+            #{error := #beamtalk_error{kind = update_contention}},
+            beamtalk_ets:updateAt(T, k, Block)
+        )
+    end).
+
+bt3831_bag_rejected_test() ->
+    (catch ets:delete(bt3831_bag)),
+    T = beamtalk_ets:'new:type:'(bt3831_bag, bag),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = unsupported_table_type}},
+            beamtalk_ets:incrementAt(T, k, 1)
+        ),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unsupported_table_type}},
+            beamtalk_ets:updateAt(T, k, fun(_) -> 1 end)
+        )
+    after
+        ets:delete(bt3831_bag)
+    end.

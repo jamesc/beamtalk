@@ -56,6 +56,9 @@ Ets objects are represented as tagged maps:
 %% e.g. `lookup: self key: key` → selector `lookup:key:` → function `lookup/2`
 -export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2]).
 -export([keys/1, tableSize/1, deleteTable/1]).
+-export([
+    removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
+]).
 
 %% `at/2` is a same-named alias for `self delegate` on `at:` to reach —
 %% kept separate from `lookup/2` (the FFI-proxy shim name above) purely so
@@ -331,6 +334,208 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
+
+%%% ============================================================================
+%%% Bulk Reads, Conditional Lookup and Atomic Updates (BT-3831)
+%%% ============================================================================
+
+-define(MAX_UPDATE_RETRIES, 1000).
+
+-doc "Remove every entry, keeping the table. Returns nil.".
+-spec removeAll(t()) -> nil.
+removeAll(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+    try
+        ets:delete_all_objects(TableName),
+        nil
+    catch
+        error:badarg -> stale_table_error('removeAll', TableName)
+    end;
+removeAll(_Self) ->
+    beamtalk_error:raise_type_error('Ets', 'removeAll', <<"Receiver must be an Ets instance">>).
+
+-doc """
+Return all values as a List. A point-in-time `ets:tab2list/1` read: order is
+unspecified for set/bag tables and key order for orderedSet. Bag tables yield
+one value per stored entry.
+""".
+-spec values(t()) -> list().
+values(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+    [V || {_K, V} <- entries(TableName, 'values')];
+values(_Self) ->
+    beamtalk_error:raise_type_error('Ets', 'values', <<"Receiver must be an Ets instance">>).
+
+-doc """
+Evaluate Block(Key, Value) for every entry of a snapshot taken up front, so
+the block may freely modify the table. Returns nil.
+""".
+-spec keysAndValuesDo(t(), function()) -> nil.
+keysAndValuesDo(#{'$beamtalk_class' := 'Ets', table := TableName}, Block) when
+    is_function(Block, 2)
+->
+    lists:foreach(fun({K, V}) -> Block(K, V) end, entries(TableName, 'keysAndValuesDo:')),
+    nil;
+keysAndValuesDo(#{'$beamtalk_class' := 'Ets'}, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'keysAndValuesDo:', <<"Argument must be a two-argument Block">>
+    );
+keysAndValuesDo(_Self, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'keysAndValuesDo:', <<"Receiver must be an Ets instance">>
+    ).
+
+-doc """
+Snapshot the table into an immutable Dictionary (an Erlang map). For bag
+tables, the last entry read for a key wins.
+""".
+-spec asDictionary(t()) -> map().
+asDictionary(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+    maps:from_list(entries(TableName, 'asDictionary'));
+asDictionary(_Self) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'asDictionary', <<"Receiver must be an Ets instance">>
+    ).
+
+-doc "If Key is present evaluate Block(Value) and answer its result, else nil.".
+-spec ifPresent(t(), Key :: term(), function()) -> term().
+ifPresent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+    is_function(Block, 1)
+->
+    %% Block runs in the `of` branch so its own badarg is not a stale table.
+    try ets:lookup(TableName, Key) of
+        [{_K, Value} | _] -> Block(Value);
+        [] -> nil
+    catch
+        error:badarg -> stale_table_error('at:ifPresent:', TableName)
+    end;
+ifPresent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:ifPresent:', <<"Third argument must be a one-argument Block">>
+    );
+ifPresent(_Self, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:ifPresent:', <<"Receiver must be an Ets instance">>
+    ).
+
+-doc """
+Atomically add N to the integer stored at Key (missing key starts at 0) via
+`ets:update_counter/4`. Answers the new value. set/orderedSet only.
+""".
+-spec incrementAt(t(), Key :: term(), integer()) -> integer().
+incrementAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, N) when is_integer(N) ->
+    require_unique_keys(TableName, 'at:increment:'),
+    try
+        ets:update_counter(TableName, Key, {2, N}, {Key, 0})
+    catch
+        error:badarg ->
+            case ets:whereis(TableName) of
+                undefined ->
+                    stale_table_error('at:increment:', TableName);
+                _ ->
+                    beamtalk_error:raise_type_error(
+                        'Ets', 'at:increment:', <<"Stored value must be an Integer">>
+                    )
+            end
+    end;
+incrementAt(#{'$beamtalk_class' := 'Ets'}, _Key, _N) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:increment:', <<"Increment must be an Integer">>
+    );
+incrementAt(_Self, _Key, _N) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:increment:', <<"Receiver must be an Ets instance">>
+    ).
+
+-doc """
+Atomic read-modify-write via an optimistic compare-and-swap loop. Block gets
+the current value (nil if missing) and answers the new value, which is stored
+and answered. Block may run more than once under contention and must be free
+of side effects. A raising Block propagates and writes nothing. Retries are
+bounded; exhaustion raises `update_contention`. set/orderedSet only.
+""".
+-spec updateAt(t(), Key :: term(), function()) -> term().
+updateAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+    is_function(Block, 1)
+->
+    require_unique_keys(TableName, 'at:update:'),
+    update_loop(TableName, Key, Block, ?MAX_UPDATE_RETRIES);
+updateAt(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:update:', <<"Second argument must be a one-argument Block">>
+    );
+updateAt(_Self, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'at:update:', <<"Receiver must be an Ets instance">>
+    ).
+
+-spec update_loop(atom(), term(), function(), non_neg_integer()) -> term().
+update_loop(TableName, Key, _Block, 0) ->
+    beamtalk_error:raise(
+        beamtalk_error:with_details(
+            beamtalk_error:new(
+                update_contention,
+                'Ets',
+                'at:update:',
+                <<"Gave up after repeated conflicting concurrent updates">>
+            ),
+            #{table => TableName, key => Key}
+        )
+    );
+update_loop(TableName, Key, Block, Retries) ->
+    try ets:lookup(TableName, Key) of
+        [] ->
+            New = Block(nil),
+            %% insert_new fails if another writer created the key meanwhile.
+            case ets:insert_new(TableName, {Key, New}) of
+                true -> New;
+                false -> update_loop(TableName, Key, Block, Retries - 1)
+            end;
+        [{_K, Old}] ->
+            New = Block(Old),
+            %% Match on key and the exact old value (`=:=` via guard) so a
+            %% concurrent change makes the replace a no-op.
+            MS = [{{Key, '$1'}, [{'=:=', '$1', {const, Old}}], [{{{const, Key}, {const, New}}}]}],
+            case ets:select_replace(TableName, MS) of
+                1 -> New;
+                0 -> update_loop(TableName, Key, Block, Retries - 1)
+            end
+    catch
+        error:badarg ->
+            case ets:whereis(TableName) of
+                undefined -> stale_table_error('at:update:', TableName);
+                %% badarg from the table op for another reason, or the Block's own.
+                _ -> erlang:raise(error, badarg, [])
+            end
+    end.
+
+-doc "Raise a structured error unless the table holds one entry per key.".
+-spec require_unique_keys(atom(), atom()) -> ok.
+require_unique_keys(TableName, Selector) ->
+    case ets:info(TableName, type) of
+        T when T =:= set; T =:= ordered_set ->
+            ok;
+        undefined ->
+            stale_table_error(Selector, TableName);
+        Other ->
+            beamtalk_error:raise(
+                beamtalk_error:with_details(
+                    beamtalk_error:new(
+                        unsupported_table_type,
+                        'Ets',
+                        Selector,
+                        <<"Atomic updates are supported on #set and #orderedSet tables only">>
+                    ),
+                    #{table_type => Other}
+                )
+            )
+    end.
+
+-spec entries(atom(), atom()) -> [{term(), term()}].
+entries(TableName, Selector) ->
+    try
+        ets:tab2list(TableName)
+    catch
+        error:badarg -> stale_table_error(Selector, TableName)
+    end.
 
 %%% ============================================================================
 %%% FFI Shims
