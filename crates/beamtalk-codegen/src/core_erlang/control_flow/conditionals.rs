@@ -567,10 +567,12 @@ impl CoreErlangGenerator {
     /// actor instance method (and in a non-root frame, which continues its
     /// own scratch map, see [`Self::conditional_has_private_scratch`]), and
     /// none at the root of a class method or a value-type method. A value-type
-    /// `SelfVt` family is not carried by a conditional's tuple: a conditional
-    /// whose arms write a field keeps its own statement lowering
-    /// (`generate_vt_conditional_open`) and is not a producer
-    /// (`beamtalk_core::semantic_analysis::block_facts::conditional_arms_lower_as_producer`).
+    /// `SelfVt` family is not carried by THIS tuple: a conditional whose arms
+    /// write a field is not a local-threading producer
+    /// (`beamtalk_core::semantic_analysis::block_facts::conditional_arms_lower_as_producer`)
+    /// but has its own producer, `vt_conditional_value_producer` (BT-3821),
+    /// whose tuple carries the arms' value, outer locals and `Self`
+    /// (`lower_vt_conditional`).
     fn conditional_families(&self, frame: FrameId) -> ThreadedFamilies {
         if self.conditional_has_private_scratch(frame) {
             ThreadedFamilies::default()

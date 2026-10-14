@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3821: a loop in value position inside a value-type (TestCase) method whose body writes a
+// field. Every case asserts the field AFTER the loop, so a body write that compiles but is
+// lost (the `erlc`-clean silent drop) fails here rather than slipping past the codegen corpus.
+//
+// Counted (`timesRepeat:`, `to:do:`) and `whileTrue:` loops thread `Self` through their own
+// result tuple in every position. `do:` / `collect:` / `inject:into:` bodies cannot write a field
+// of a value type at all, statement position included (their accumulator has no `Self` slot);
+// that is a separate, pre-existing gap and is not exercised here.
+
+TestCase subclass: ValueTypeLoopFieldBodyValuePositionTest
+  field: n = 0
+  field: m = 0
+
+  take: x => x
+
+  testAssignedTimesRepeatThenRead =>
+    c := 3 timesRepeat: [self.m := self.m + 1]
+    self assert: self.m equals: 3
+    self assert: c equals: nil
+
+  testTimesRepeatAsSendArgument =>
+    self take: (3 timesRepeat: [self.m := self.m + 1])
+    self assert: self.m equals: 3
+
+  testToDoAsSendArgument =>
+    self take: (1 to: 4 do: [:i | self.m := self.m + i])
+    self assert: self.m equals: 10
+
+  testAssignedWhileTrue =>
+    i := 0
+    c := [i < 3]
+      whileTrue: [
+        self.m := self.m + 2
+        i := i + 1
+      ]
+    self assert: self.m equals: 6
+    self assert: i equals: 3
+    self assert: c equals: nil
+
+  testLoopAnswersIntoFieldWrite =>
+    self.n := (3 timesRepeat: [self.m := self.m + 1])
+    self assert: self.m equals: 3
+    self assert: self.n equals: nil
+
+  testLoopReceiverFieldWriteAndBodyWrite =>
+    c := (self.n := 3) timesRepeat: [self.m := self.m + 1]
+    self assert: self.n equals: 3
+    self assert: self.m equals: 3
+    self assert: c equals: nil

@@ -1,0 +1,181 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3821: a conditional whose ARMS write a field, used in value position inside a value-type
+// (TestCase) method, answers the taken arm's value AND rebinds `Self` for every later
+// statement. The value-type lowering used to reject these (`FieldAssignmentInUnsupportedBlock`)
+// because the arms' `Self` rebinds lived inside the conditional's closed operand document.
+// Every case asserts the field AFTER the conditional, so a write that compiles but is lost
+// fails here rather than slipping past the codegen corpus (which only proves `erlc` accepts it).
+
+TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
+  field: n = 0
+  field: m = 0
+
+  take: x => x
+
+  take: x with: y => x + y
+
+  bareLast => (self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0]
+
+  returned => ^(self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0]
+
+  returnedAfterEarlyExit =>
+    #(1) do: [:e | e]
+    ^(self.n := 5) > 3 ifTrue: [self.m := 7] ifFalse: [0]
+
+  earlyExitInArm =>
+    r := self take: (self.n > 3 ifTrue: [^11] ifFalse: [self.m := 2])
+    r + self.m
+
+  testSendArgTakenArmWritesField =>
+    r := self take: (((self.n := 5) > 3) ifTrue: [self.m := 1] ifFalse: [0])
+    self assert: r equals: 1
+    self assert: self.m equals: 1
+    self assert: self.n equals: 5
+    self assert: r + self.m equals: 2
+
+  testSendArgOtherArmDoesNotWrite =>
+    r := self take: (((self.n := 1) > 3) ifTrue: [self.m := 1] ifFalse: [0])
+    self assert: r equals: 0
+    self assert: self.m equals: 0
+    self assert: self.n equals: 1
+
+  testBothArmsWrite =>
+    r := self take: (self.n > 3 ifTrue: [self.m := 1] ifFalse: [self.m := 2])
+    self assert: r equals: 2
+    self assert: self.m equals: 2
+
+  testAssignedRhs =>
+    c := ((self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0])
+    self assert: c equals: 1
+    self assert: self.m equals: 1
+
+  testAssignedRhsWithoutParenthesisedReceiverWrite =>
+    c := self.n > 3 ifTrue: [self.m := 1] ifFalse: [self.m := 9]
+    self assert: c equals: 9
+    self assert: self.m equals: 9
+
+  testIfTrueOnlyAnswersNilWhenNotTaken =>
+    r := self take: (self.n > 3 ifTrue: [self.m := 1])
+    self assert: r equals: nil
+    self assert: self.m equals: 0
+
+  testIfFalseOnlyAnswersArmValue =>
+    r := self take: (self.n > 3 ifFalse: [self.m := 4])
+    self assert: r equals: 4
+    self assert: self.m equals: 4
+
+  testArmValueIsLastStatementNotTheWrite =>
+    r := self
+      take: (self.n >= 0
+        ifTrue: [
+          self.m := 3
+          self.m + 10
+        ]
+        ifFalse: [0])
+    self assert: r equals: 13
+    self assert: self.m equals: 3
+
+  testArmReadsItsOwnEarlierWrite =>
+    r := self
+      take: (self.n >= 0
+        ifTrue: [
+          self.m := 3
+          self.n := self.m * 2
+          self.n
+        ]
+        ifFalse: [0])
+    self assert: r equals: 6
+    self assert: self.m equals: 3
+    self assert: self.n equals: 6
+
+  testEmptyArmAnswersNil =>
+    r := self take: (self.n > 3 ifTrue: [self.m := 1] ifFalse: [])
+    self assert: r equals: nil
+    self assert: self.m equals: 0
+
+  testBinaryOperand =>
+    r := 1 + (self.n >= 0 ifTrue: [self.m := 4] ifFalse: [0])
+    self assert: r equals: 5
+    self assert: self.m equals: 4
+
+  testSecondOperandOfTwoKeywordArgs =>
+    r := self take: 10 with: (self.n >= 0 ifTrue: [self.m := 4] ifFalse: [0])
+    self assert: r equals: 14
+    self assert: self.m equals: 4
+
+  testOperandBeforeConditionalSeesEarlierState =>
+    self.m := 1
+    r := self take: self.m with: (self.n >= 0 ifTrue: [
+      self.m := 5
+    ] ifFalse: [0])
+    self assert: r equals: 6
+    self assert: self.m equals: 5
+
+  testFieldWriteRhs =>
+    self.m := (self.n >= 0 ifTrue: [self.n := 7] ifFalse: [0])
+    self assert: self.m equals: 7
+    self assert: self.n equals: 7
+
+  testStringInterpolation =>
+    s := "v={self.n >= 0 ifTrue: [self.m := 4] ifFalse: [0]}"
+    self assert: s equals: "v=4"
+    self assert: self.m equals: 4
+
+  testListLiteralElement =>
+    xs := #(1, (self.n >= 0 ifTrue: [self.m := 2] ifFalse: [0]), self.m)
+    self assert: xs equals: #(1, 2, 2)
+
+  testBareLastStatementIsTheMethodValueAndKeepsTheWrite =>
+    self assert: self bareLast equals: 1
+
+  testReturnedValueAndWrite => self assert: self returned equals: 1
+
+  testReturnedAfterEarlyExitBlock =>
+    self assert: self returnedAfterEarlyExit equals: 7
+
+  testEarlyExitInsideAnArm =>
+    self.n := 9
+    self assert: self earlyExitInArm equals: 11
+
+  testNonLocalReturnNotTakenAnswersTheArmValuePlusTheWrite =>
+    self assert: self earlyExitInArm equals: 4
+
+  // NOT TESTED HERE (about the arms-write-a-local-and-a-field case, not the test below):
+  // such an operand is lowered by codegen (`conditional_field_and_local_arms` in the
+  // codegen corpus) but still refused by the front-end ADR 0131 allow-set check
+  // (BT-3743), so it has no runtime test. The test below is the local-only-arm case.
+  testLocalOnlyArmWithFieldWriteReceiver =>
+    t := 0
+    r := self take: (((self.n := 5) > 3) ifTrue: [t := t + 1] ifFalse: [0])
+    self assert: r equals: 1
+    self assert: t equals: 1
+    self assert: self.n equals: 5
+
+  testTwoConditionalsInOneStatement =>
+    r := self take: (self.n >= 0 ifTrue: [
+      self.m := 1
+    ] ifFalse: [
+      0
+    ]) with: (self.m >= 1 ifTrue: [self.n := self.m + 10] ifFalse: [0])
+    self assert: r equals: 12
+    self assert: self.m equals: 1
+    self assert: self.n equals: 11
+
+  testConditionalReceiverOfAConditional =>
+    r := self
+      take: ((self.n >= 0
+        ifTrue: [
+          self.m := 1
+          true
+        ]
+        ifFalse: [false]) ifTrue: [self.n := self.m + 4] ifFalse: [0])
+    self assert: r equals: 5
+    self assert: self.m equals: 1
+    self assert: self.n equals: 5
+
+  testInsideAnInlinedBlockValue =>
+    x := [self take: (self.n >= 0 ifTrue: [self.m := 6] ifFalse: [0])] value
+    self assert: x equals: 6
+    self assert: self.m equals: 6

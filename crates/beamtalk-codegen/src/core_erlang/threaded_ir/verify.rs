@@ -261,6 +261,20 @@ pub(in crate::core_erlang) enum VerifyError {
     /// do: [:e | 0])` is `0 + 1`. The fix is `sequence_children`'s snapshot
     /// of such a sibling to a `Tmp`; see [`verify_sibling_reads`].
     LocalReadAfterSiblingRebind { local: String, at: Span },
+
+    /// BT-3821: a [`ThreadedStmt::ConstructTuple`] declares that its arms or
+    /// body advanced `family` (`families`), but no `Direct` [`ThreadedStmt::Bind`]
+    /// of that family follows it in the same frame before anything else does.
+    /// The construct's `Self`/`State` rebind lives inside its tuple and dies
+    /// with the carrier: every later statement reads the pre-construct
+    /// version, so the write is silently lost (`self take: (c ifTrue:
+    /// [self.m := 1] ifFalse: [0])` then `self.m`). Applies to every
+    /// construct in every frame, whatever the scope kind.
+    ConstructFamilyDropped {
+        family: VersionPrefix,
+        carrier: String,
+        at: Span,
+    },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -554,6 +568,8 @@ impl VerifyWalk<'_> {
             carrier: &'s str,
             threads: &'s [String],
             pending: Vec<&'s str>,
+            /// BT-3821: declared families whose merge `Bind` has not been seen.
+            pending_families: Vec<VersionPrefix>,
             at: Span,
         }
         fn close(open: &mut Option<Open<'_>>, dropped: &mut Vec<VerifyError>) {
@@ -561,6 +577,13 @@ impl VerifyWalk<'_> {
                 dropped.extend(o.pending.into_iter().map(|local| {
                     VerifyError::ThreadedLocalDropped {
                         local: local.to_string(),
+                        carrier: o.carrier.to_string(),
+                        at: o.at,
+                    }
+                }));
+                dropped.extend(o.pending_families.into_iter().map(|family| {
+                    VerifyError::ConstructFamilyDropped {
+                        family,
                         carrier: o.carrier.to_string(),
                         at: o.at,
                     }
@@ -575,6 +598,7 @@ impl VerifyWalk<'_> {
                 ThreadedStmt::ConstructTuple {
                     carrier,
                     threads,
+                    families,
                     span,
                     ..
                 } => {
@@ -583,6 +607,7 @@ impl VerifyWalk<'_> {
                         carrier,
                         threads,
                         pending: threads.iter().map(String::as_str).collect(),
+                        pending_families: families.clone(),
                         at: *span,
                     });
                 }
@@ -610,7 +635,12 @@ impl VerifyWalk<'_> {
                     op: BindOp::Direct(_),
                     ..
                 } if open.is_some()
-                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) => {}
+                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) =>
+                {
+                    if let Some(o) = open.as_mut() {
+                        o.pending_families.retain(|f| *f != target.prefix);
+                    }
+                }
                 ThreadedStmt::DiscardLocals { carrier, .. }
                     if discard_ok && open.as_ref().is_some_and(|o| o.carrier == carrier) =>
                 {
