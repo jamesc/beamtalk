@@ -557,7 +557,7 @@ call_block(Block, Args, Selector) ->
 
 -doc """
 Raise a structured error if the key contains an atom ETS match specs read as a
-pattern variable (`'_'` or `'$N'`), since the CAS embeds the key in a match head.
+pattern variable (`'_'` or `'$N'`) or a map (matched as a subset), since the CAS embeds the key in a match head.
 """.
 -spec require_plain_key(term(), atom()) -> ok.
 require_plain_key(Key, Selector) ->
@@ -566,7 +566,9 @@ require_plain_key(Key, Selector) ->
             ok;
         true ->
             beamtalk_error:raise_type_error(
-                'Ets', Selector, <<"Keys containing #_ or #$N symbols are not supported">>
+                'Ets',
+                Selector,
+                <<"Keys containing #_ or #$N symbols, or Dictionaries, are not supported">>
             )
     end.
 
@@ -583,7 +585,8 @@ has_match_variable(A) when is_atom(A) ->
 has_match_variable(T) when is_tuple(T) -> has_match_variable(tuple_to_list(T));
 has_match_variable([H | T]) ->
     has_match_variable(H) orelse has_match_variable(T);
-has_match_variable(M) when is_map(M) -> has_match_variable(maps:to_list(M));
+%% A map in a match head matches any superset map, so it is not an exact key.
+has_match_variable(M) when is_map(M) -> true;
 has_match_variable(_) ->
     false.
 

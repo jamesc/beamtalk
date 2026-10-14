@@ -899,3 +899,14 @@ bt3831_block_badarg_keeps_reason_and_stacktrace_test() ->
                 ?assertMatch(#{reason := badarg, stacktrace := [_ | _]}, Details)
         end
     end).
+
+bt3831_update_map_key_rejected_test() ->
+    with_table(bt3831_mapkey, fun(T) ->
+        beamtalk_ets:insert(T, #{a => 1}, 0),
+        beamtalk_ets:insert(T, #{a => 1, b => 2}, 0),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:updateAt(T, #{a => 1}, fun(O) -> O + 1 end)
+        ),
+        ?assertEqual(0, beamtalk_ets:lookup(T, #{a => 1, b => 2}))
+    end).
