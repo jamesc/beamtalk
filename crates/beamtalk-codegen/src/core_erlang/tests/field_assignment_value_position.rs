@@ -514,6 +514,14 @@ fn value_type_field_assignment_in_construct_operands_and_block_values_compiles()
         "#[a, b] := #[(self.n := 5), 2].\n    a + self.n",
         "((self.n := 5) > 3) ifTrue: [self.m := 1] ifFalse: [self.m := 2].\n    self.m + self.n",
         "(self.n := 5) timesRepeat: [self.m := self.m + 1].\n    self.m",
+        // A `^` value whose receiver holds a field write, in a method with a non-local return.
+        "#(1) do: [:e | ^ e].\n    ^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
+        "^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
+        // A `^` inside a spliced block body.
+        "[self.n := 5. ^ 3] value.\n    self.n",
+        "#(1) do: [:e | ^ e].\n    [self.n := 5. ^ 3] value.\n    self.n",
+        // A construct nested in a spliced block body keeps its open-chain builder.
+        "c := true.\n    [self.n := 5. c ifTrue: [self.m := 9]. 7] value.\n    self.n + self.m",
     ];
     for (i, body) in methods.iter().enumerate() {
         let src = format!("{VT_HEADER}\n  probe{i} =>\n    {body}\n");

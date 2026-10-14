@@ -90,6 +90,8 @@ pub(crate) fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str)
 /// Whether `erlc` can be invoked. [`assert_compiles_through_erlc`] silently passes without
 /// it, so a test whose verdict depends on `erlc` rejecting generated code must check this
 /// before asserting that a case which only fails at `erlc` is still failing.
+/// Any error other than "not found" (e.g. a permissions failure) counts as available, so the
+/// failure surfaces in `assert_compiles_through_erlc` instead of silently skipping the check.
 pub(crate) fn erlc_available() -> bool {
     match std::process::Command::new("erlc").arg("-v").output() {
         Ok(_) => true,

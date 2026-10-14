@@ -17,6 +17,17 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
 
   lastValue => self take: (self.n := 9)
 
+  blockEarlyExit =>
+    [
+      self.n := 5
+      ^3
+    ] value
+    99
+
+  conditionalReturn =>
+    #(1) do: [:e | e]
+    ^((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]
+
   testSendArgThenRead =>
     r := self take: (self.n := 5)
     self assert: r equals: 5
@@ -89,3 +100,19 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
     (self.n := 3) timesRepeat: [self.m := self.m + 1]
     self assert: self.m equals: 3
     self assert: self.n equals: 3
+
+  testBlockValueEarlyReturnExitsTheMethod =>
+    self assert: self blockEarlyExit equals: 3
+
+  testReturnedConditionalWithFieldWriteReceiver =>
+    self assert: self conditionalReturn equals: 1
+
+  testConstructNestedInBlockValueBody =>
+    c := true
+    [
+      self.n := 5
+      c ifTrue: [self.m := 9]
+      7
+    ] value
+    self assert: self.n equals: 5
+    self assert: self.m equals: 9

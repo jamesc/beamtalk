@@ -993,7 +993,35 @@ impl CoreErlangGenerator {
                 !super::block_analysis::analyze_block(block)
                     .field_writes
                     .is_empty()
+                    // The block's value is its last statement's: a construct
+                    // there (its value is not recoverable from its open chain)
+                    // keeps the existing path.
+                    && super::util::collect_body_exprs(&block.body)
+                        .last()
+                        .is_none_or(|last| self.vt_block_stmt_is_threadable(last))
             })
+    }
+
+    /// BT-3816: whether a statement of an inlined block body is lowered through
+    /// `threaded_expression` (a plain expression, a field assignment, a local
+    /// assignment of one, a nested field-writing block value) rather than an
+    /// open-chain construct builder.
+    fn vt_block_stmt_is_threadable(&self, stmt: &Expression) -> bool {
+        match self.classify_vt_body_expr(stmt) {
+            VtBodyExprKind::Pure
+            | VtBodyExprKind::FieldAssignment
+            | VtBodyExprKind::EarlyReturn => true,
+            VtBodyExprKind::LocalAssignment => match stmt {
+                Expression::Assignment { value, .. } => {
+                    matches!(self.classify_vt_body_expr(value), VtBodyExprKind::Pure)
+                }
+                _ => false,
+            },
+            VtBodyExprKind::BlockWithCapturedMutations(_) => {
+                self.is_vt_field_writing_block_value(stmt)
+            }
+            _ => false,
+        }
     }
 
     /// BT-3816: the producer lowering of an inlined `[body] value` send whose
@@ -1038,6 +1066,17 @@ impl CoreErlangGenerator {
         let mut value = ValueRef::Literal("'nil'");
         for (i, stmt) in body.iter().enumerate() {
             let is_last = i + 1 == body.len();
+            let kind = self.classify_vt_body_expr(stmt);
+            if !self.vt_block_stmt_is_threadable(stmt) {
+                // A loop / conditional / `on:do:` statement thread `Self` through
+                // their own open chains, which render a Document: keep them
+                // opaque statements (`is_vt_field_writing_block_value` has
+                // checked the block's value is not one).
+                let mut parts = Vec::new();
+                self.emit_vt_body_expr(stmt, &kind, 1, false, false, &mut parts)?;
+                prelude.push(ThreadedStmt::Statement(Document::Vec(parts), stmt.span()));
+                continue;
+            }
             let local_target = match stmt {
                 Expression::Assignment { target, value, .. } => match target.as_ref() {
                     Expression::Identifier(id) => Some((id.name.as_str(), value.as_ref())),
@@ -1057,9 +1096,6 @@ impl CoreErlangGenerator {
                     stmt.span(),
                 ));
                 self.bind_var(name, &core_var);
-                if captured.iter().any(|m| m == name) {
-                    rebound.push((name.to_string(), core_var.clone()));
-                }
                 if is_last {
                     value = ValueRef::Var(core_var);
                 }
@@ -1076,6 +1112,13 @@ impl CoreErlangGenerator {
                         stmt.span(),
                     ));
                 }
+            }
+        }
+        // A captured outer local the body (re)bound stays rebound after the
+        // block's scope is popped.
+        for name in &captured {
+            if let Some(core_var) = self.lookup_var(name) {
+                rebound.push((name.clone(), core_var.clone()));
             }
         }
         self.pop_scope();
@@ -1461,6 +1504,9 @@ impl CoreErlangGenerator {
                         ));
                         break;
                     }
+                    // BT-3816: a conditional / loop `^` value whose receiver holds a
+                    // field write is sequenced ahead of the return.
+                    let operands = self.hoist_vt_operand_producers(value, &mut body_parts)?;
                     if has_nlr {
                         // NLR methods return {Result, Self{N}} tuple so
                         // the normal and NLR catch paths produce the same shape.
@@ -1484,6 +1530,9 @@ impl CoreErlangGenerator {
                             body_parts.push(Document::Str("    "));
                         }
                         body_parts.push(expr_doc);
+                    }
+                    if let Some(scope) = operands {
+                        self.finish_precompiled_scope(scope)?;
                     }
                 }
                 break;
