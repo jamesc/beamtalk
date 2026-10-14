@@ -888,3 +888,14 @@ bt3831_keys_and_values_do_badarg_runs_once_test() ->
             end
         )
     end).
+
+bt3831_block_badarg_keeps_reason_and_stacktrace_test() ->
+    with_table(bt3831_details, fun(T) ->
+        beamtalk_ets:insert(T, k, 1),
+        try beamtalk_ets:ifPresent(T, k, fun(_) -> erlang:error(badarg) end) of
+            _ -> ?assert(false)
+        catch
+            error:#{error := #beamtalk_error{details = Details}} ->
+                ?assertMatch(#{reason := badarg, stacktrace := [_ | _]}, Details)
+        end
+    end).
