@@ -5,6 +5,11 @@
 type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// Ets — shared in-memory table for actor state sharing.
 ///
+/// `Ets` is not a `Collection`, but it `uses: Enumerable(V)`: iteration and
+/// query methods (`do:`, `select:`, `collect:`, `inject:into:`, …) run over a
+/// snapshot of the values. `size`, `isEmpty` and `isNotEmpty` are answered
+/// directly from the table without copying it.
+///
 /// Wraps OTP ets tables with a Beamtalk-friendly API. Tables are named and
 /// public by default, enabling cross-actor reads and writes without
 /// message-passing overhead.
@@ -43,6 +48,7 @@ type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// ```
 typed Object subclass: Ets(K, V) native: beamtalk_ets
   handleScope: #node
+  uses: Enumerable(V) excluding: #(#size, #isEmpty, #isNotEmpty)
 
   // Inline-FFI exceptions (ADR 0101 / BT-2731): `at:`, `at:put:` and
   // `at:ifAbsent:` share the first keyword `at`, and `at:put:`/`at:ifAbsent:`
@@ -252,6 +258,11 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```
   values -> List(V) => self delegate
 
+  /// The values as a `List` snapshot — the one method `Enumerable` requires.
+  /// Gives `Ets` `do:`, `inject:into:`, `select:`, `collect:`, `detect:ifNone:`,
+  /// `anySatisfy:` and `count:` over a point-in-time copy of the values.
+  elements -> List(V) => self values
+
   /// Evaluate `block` with each key and value of a snapshot taken up front
   /// (the block may modify the table). Returns `nil`.
   ///
@@ -283,9 +294,9 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   ///
   /// ## Examples
   /// ```beamtalk
-  /// cache notEmpty    // => false
+  /// cache isNotEmpty    // => false
   /// ```
-  notEmpty -> Boolean => self size > 0
+  isNotEmpty -> Boolean => self size > 0
 
   /// Return `true` if any entry holds `value`. Scans a snapshot of the
   /// values.
@@ -295,15 +306,6 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// cache includes: 42    // => true or false
   /// ```
   includes: value :: V -> Boolean => self values includes: value
-
-  /// Evaluate `block` with each value of a snapshot. Returns `nil`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// cache do: [:v | Transcript show: v]
-  /// ```
-  do: block :: Block(V, Object) -> Nil =>
-    self keysAndValuesDo: [:k :v | block value: v]
 
   /// Remove every entry but keep the table. Returns `nil`.
   ///

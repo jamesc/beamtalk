@@ -192,12 +192,12 @@ TestCase subclass: EtsTest
     Parallel all: blocks
     self assert: (self.table at: "n") equals: 1000
 
-  testIsEmptyNotEmpty =>
+  testIsEmptyIsNotEmpty =>
     self assert: self.table isEmpty
-    self deny: self.table notEmpty
+    self deny: self.table isNotEmpty
     self.table at: "a" put: 1
     self deny: self.table isEmpty
-    self assert: self.table notEmpty
+    self assert: self.table isNotEmpty
 
   testIncludesAndDo =>
     self.table at: "a" put: 1
@@ -215,3 +215,17 @@ TestCase subclass: EtsTest
     self assert: self.table size equals: 0
     self.table at: "b" put: 2
     self assert: self.table size equals: 1
+
+  testEnumerableProtocol =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    self.table at: "c" put: 3
+    self assert: (self.table inject: 0 into: [:acc :v | acc + v]) equals: 6
+    self assert: (self.table select: [:v | v > 1]) asSet equals: #(2, 3) asSet
+    self assert: (self.table collect: [:v |
+      v * 2
+    ]) asSet equals: #(2, 4, 6) asSet
+    self assert: (self.table detect: [:v | v > 2] ifNone: [nil]) equals: 3
+    self assert: (self.table anySatisfy: [:v | v > 2])
+    self assert: (self.table count: [:v | v > 1]) equals: 2
+    self assert: self.table size equals: 3
