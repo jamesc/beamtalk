@@ -2554,7 +2554,10 @@ impl CoreErlangGenerator {
         };
         let direct = assign
             .is_some_and(|(_, value)| self.construct_tuple_locals(value.unwrap_parens()).is_some());
-        if !direct && !self.statement_has_local_producer(expr) {
+        if !direct
+            && !self.statement_has_local_producer(expr)
+            && !self.statement_has_value_type_producer(expr)
+        {
             return Ok(None);
         }
         let Some((var_name, value)) = assign else {

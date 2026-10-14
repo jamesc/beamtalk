@@ -33,6 +33,24 @@ use beamtalk_core::source_analysis::Span;
 /// lint stays quiet about the tuple).
 type CascadeSelfMessage<'e> = (&'e MessageSelector, &'e [Expression], Span);
 
+/// Which effects [`CoreErlangGenerator::subexpr_needs_prelude`]'s probe counts
+/// as needing a prelude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreludeProbe {
+    /// Everything `threaded_expression` produces a prelude for, including a
+    /// class-side in-place effect (a class-variable write or a same-class
+    /// self-send, ADR 0130), which must pin its evaluation order against its
+    /// siblings.
+    Sequencing,
+    /// As [`Self::Sequencing`] without the class-side effects: they thread
+    /// nothing, so they do not make a conditional need its mutation-threaded
+    /// form.
+    Threading,
+    /// BT-3816: only a field assignment in value position (the value-type
+    /// method body's `Self` rebind).
+    FieldWrites,
+}
+
 /// Builds a versioned Core Erlang variable name.
 ///
 /// Returns `prefix` when `version == 0`, otherwise `prefix{version}`
@@ -369,6 +387,12 @@ impl CoreErlangGenerator {
             });
         }
 
+        // BT-3816: an inlined `[... self.f := ...] value` splices its body's
+        // `Self` rebinds into the caller's statement sequence.
+        if let Some(tv) = self.vt_inline_block_value_producer(inner, frame)? {
+            return Ok(tv);
+        }
+
         if self.is_prelude_producer(inner) {
             let Expression::MessageSend {
                 selector,
@@ -449,7 +473,7 @@ impl CoreErlangGenerator {
             // computed `classMethods:` map value) is a producer too: its
             // hoisted `State` rebinds must reach the consumer's statement
             // sequence, not stay nested in the cascade's value expression.
-            if self.cascade_operands_need_prelude(receiver, messages, true) {
+            if self.cascade_operands_need_prelude(receiver, messages, PreludeProbe::Sequencing) {
                 let (prelude, value) = self.generate_cascade_parts(receiver, messages)?;
                 return Ok(ThreadedValue {
                     prelude,
@@ -835,16 +859,19 @@ impl CoreErlangGenerator {
     /// instead — so none of these residual shapes ever need a prelude
     /// here.
     pub(super) fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
-        self.subexpr_needs_prelude_with(expr, true)
+        self.subexpr_needs_prelude_with(expr, PreludeProbe::Sequencing)
     }
 
-    /// [`Self::subexpr_needs_prelude`], with `class_effects` saying whether a
-    /// class-side in-place effect (a class-variable write or a same-class
-    /// self-send, ADR 0130) counts as needing a prelude. It does for
-    /// sequencing, which must pin its evaluation order against its siblings;
-    /// it does not for the question "does this conditional need its
-    /// mutation-threaded form?", because such an effect threads nothing.
-    fn subexpr_needs_prelude_with(&self, expr: &Expression, class_effects: bool) -> bool {
+    /// BT-3816: whether the value-position expression `expr` holds a field
+    /// assignment ([`PreludeProbe::FieldWrites`]) — the only producer the
+    /// value-type method body lowers through `threaded_expression`.
+    pub(super) fn subexpr_has_field_write_producer(&self, expr: &Expression) -> bool {
+        self.subexpr_needs_prelude_with(expr, PreludeProbe::FieldWrites)
+    }
+
+    /// [`Self::subexpr_needs_prelude`], with `probe` saying which effects count
+    /// as needing a prelude ([`PreludeProbe`]).
+    fn subexpr_needs_prelude_with(&self, expr: &Expression, probe: PreludeProbe) -> bool {
         let inner = expr.unwrap_parens();
         if Self::is_trivial_subexpr(inner) {
             return false;
@@ -865,14 +892,17 @@ impl CoreErlangGenerator {
         if self.precompiled_subexprs_contains(inner) {
             return false;
         }
+        // BT-3816: the value-type body lowering asks only about field writes;
+        // every other producer below has its own value-type path.
+        let all_producers = probe != PreludeProbe::FieldWrites;
         // ADR 0131 Phase 2: mirrors `threaded_expression`'s
         // `local_threading_producer` branch.
-        if self.local_producer_locals(inner).is_some() {
+        if all_producers && self.local_producer_locals(inner).is_some() {
             return true;
         }
         // ADR 0118 phase 4: mirrors `threaded_expression`'s new
         // inline-control-flow producer branch — see its doc comment.
-        if self.inline_control_flow_needs_threading(inner) {
+        if all_producers && self.inline_control_flow_needs_threading(inner) {
             return true;
         }
         // ADR 0118 phase 5b: mirrors `threaded_expression`'s
@@ -881,7 +911,10 @@ impl CoreErlangGenerator {
         // a prelude regardless of nesting depth (a message argument, a
         // binary operand, a cascade message, ...). A pure predicate check
         // (not the mutating producer call itself) so this stays a probe.
-        if self.in_class_method() && class_effects && self.is_class_side_effect(inner) {
+        if self.in_class_method()
+            && probe == PreludeProbe::Sequencing
+            && self.is_class_side_effect(inner)
+        {
             return true;
         }
         if self.is_prelude_producer(inner) {
@@ -891,10 +924,14 @@ impl CoreErlangGenerator {
         if self.is_field_assignment(inner) {
             return true;
         }
+        // BT-3816: mirrors `threaded_expression`'s inlined-block-value producer.
+        if self.is_vt_field_writing_block_value(inner) {
+            return true;
+        }
         if let Some(children) = Self::sequenced_send_children(inner) {
             return children
                 .iter()
-                .any(|child| self.subexpr_needs_prelude_with(child, class_effects));
+                .any(|child| self.subexpr_needs_prelude_with(child, probe));
         }
         // ADR 0118 phase 1b: mirrors `threaded_expression`'s own cases
         // exactly, for the same reason phase 1a's version of this
@@ -903,16 +940,14 @@ impl CoreErlangGenerator {
         if let Some(children) = Self::literal_container_children(inner) {
             return children
                 .iter()
-                .any(|child| self.subexpr_needs_prelude_with(child, class_effects));
+                .any(|child| self.subexpr_needs_prelude_with(child, probe));
         }
         if let Some(value) = Self::single_sequenced_child(inner) {
-            return self.subexpr_needs_prelude_with(value, class_effects);
+            return self.subexpr_needs_prelude_with(value, probe);
         }
         if let Expression::StringInterpolation { segments, .. } = inner {
             return segments.iter().any(|seg| match seg {
-                StringSegment::Interpolation(e) => {
-                    self.subexpr_needs_prelude_with(e, class_effects)
-                }
+                StringSegment::Interpolation(e) => self.subexpr_needs_prelude_with(e, probe),
                 StringSegment::Literal(_) => false,
             });
         }
@@ -920,10 +955,11 @@ impl CoreErlangGenerator {
             receiver, messages, ..
         } = inner
         {
-            return self
-                .cascade_self_dispatch_messages(receiver, messages)
-                .is_some()
-                || self.cascade_operands_need_prelude(receiver, messages, class_effects);
+            return (all_producers
+                && self
+                    .cascade_self_dispatch_messages(receiver, messages)
+                    .is_some())
+                || self.cascade_operands_need_prelude(receiver, messages, probe);
         }
         false
     }
@@ -939,7 +975,7 @@ impl CoreErlangGenerator {
         &self,
         receiver: &Expression,
         messages: &[CascadeMessage],
-        class_effects: bool,
+        probe: PreludeProbe,
     ) -> bool {
         let (underlying, first_args): (&Expression, &[Expression]) = match receiver {
             Expression::MessageSend {
@@ -952,7 +988,7 @@ impl CoreErlangGenerator {
         std::iter::once(underlying)
             .chain(first_args.iter())
             .chain(messages.iter().flat_map(|m| m.arguments.iter()))
-            .any(|e| self.subexpr_needs_prelude_with(e, class_effects))
+            .any(|e| self.subexpr_needs_prelude_with(e, probe))
     }
 
     /// ADR 0118 phase 0: `true` if compiling `expr`
@@ -980,7 +1016,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        self.subexpr_needs_prelude_with(expr, false)
+        self.subexpr_needs_prelude_with(expr, PreludeProbe::Threading)
     }
 
     /// The `State` variable a consumer must continue from once it has

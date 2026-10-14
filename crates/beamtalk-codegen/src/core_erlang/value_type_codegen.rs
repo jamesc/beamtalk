@@ -894,6 +894,234 @@ impl CoreErlangGenerator {
 
     // ── Unified value-type method body classification ─────────
 
+    /// BT-3816: sequences the operands of a value-type body statement that
+    /// hold a field assignment ahead of the statement.
+    ///
+    /// The threading constructs (`do:` and the other loops and folds, the
+    /// conditionals, `on:do:`/`ensure:`, a captured-mutation block value) are
+    /// lowered by their own open-chain builders, each of which compiles its
+    /// receiver and non-block arguments with a plain `expression_doc`. A field
+    /// assignment there (`((self.n := 5) > 3) ifTrue: [...]`,
+    /// `(self.n := 3) timesRepeat: [...]`) would scope its `Self{N}` rebind
+    /// away. The operands that hold one are lowered through
+    /// [`Self::sequence_children`] instead — the sequencing rule
+    /// `lower_local_threading_construct` applies to a loop's own operands —
+    /// and their prelude is pushed to `body_parts` ahead of the statement,
+    /// which then reads each operand's value from its temp
+    /// (`precompiled_subexprs`). The returned scope must be closed with
+    /// `finish_precompiled_scope` once the statement is emitted. `None`, with
+    /// nothing pushed, when no operand holds a field assignment.
+    fn hoist_vt_operand_producers(
+        &mut self,
+        expr: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<Option<super::sequencing::PrecompiledScope>> {
+        if self.context != CodeGenContext::ValueType || self.in_class_method() {
+            return Ok(None);
+        }
+        // `x := <construct>`: the construct is the assignment's value.
+        let construct = match expr.unwrap_parens() {
+            Expression::Assignment { target, value, .. }
+                if matches!(target.as_ref(), Expression::Identifier(_)) =>
+            {
+                value.unwrap_parens()
+            }
+            other => other,
+        };
+        let children = match construct {
+            // `{a, b} := <value>`: the value is evaluated before the bindings.
+            Expression::DestructureAssignment { value, .. } => vec![value.as_ref()],
+            _ => match Self::sequenced_send_children(construct) {
+                Some(children) => children,
+                // A conditional send is opaque to the sequencing rule; its
+                // receiver is its only operand (the arms are blocks).
+                None => match construct {
+                    Expression::MessageSend { receiver, .. } => vec![receiver.as_ref()],
+                    _ => return Ok(None),
+                },
+            },
+        };
+        if !children
+            .iter()
+            .any(|child| self.subexpr_has_field_write_producer(child))
+        {
+            return Ok(None);
+        }
+        let (prelude, scope) = self.sequence_children(&children, FrameId::ROOT)?;
+        let doc = self.verified_root_prelude_doc(&prelude, expr.span());
+        body_parts.push(docvec!["    ", doc, "\n"]);
+        Ok(Some(scope))
+    }
+
+    /// BT-3816: the literal block and arguments of an inlined
+    /// `[body] value` / `value:` / `value:value:` / `value:value:value:` send.
+    fn literal_block_value_parts(expr: &Expression) -> Option<(&Block, &[Expression])> {
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if !selector
+            .well_known()
+            .is_some_and(WellKnownSelector::is_block_value)
+        {
+            return None;
+        }
+        let Expression::Block(block) = receiver.as_ref() else {
+            return None;
+        };
+        (block.parameters.len() == arguments.len()).then_some((block, arguments.as_slice()))
+    }
+
+    /// BT-3816: whether `expr` is an inlined literal-block `value` send, in a
+    /// value-type instance method, whose block writes a field. The block body
+    /// is spliced into the enclosing statement sequence, so its `Self{N}`
+    /// rebinds must reach the statements after it: such a send is a producer
+    /// ([`Self::vt_inline_block_value_producer`]), mirrored by
+    /// `subexpr_needs_prelude`.
+    pub(in crate::core_erlang) fn is_vt_field_writing_block_value(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        self.context == CodeGenContext::ValueType
+            && !self.in_class_method()
+            && Self::literal_block_value_parts(expr).is_some_and(|(block, _)| {
+                !super::block_analysis::analyze_block(block)
+                    .field_writes
+                    .is_empty()
+            })
+    }
+
+    /// BT-3816: the producer lowering of an inlined `[body] value` send whose
+    /// block writes a field ([`Self::is_vt_field_writing_block_value`]): the
+    /// block body is spliced into the caller's statement sequence as
+    /// statements of its own, each lowered through
+    /// [`Self::threaded_expression`], so a field assignment anywhere in the
+    /// body (`[self take: (self.n := 5)] value`) is a real `Self` `Bind` the
+    /// statements after the send read. The block's value is its last
+    /// expression. Parameters are bound to the arguments in a scope of their
+    /// own; a captured outer local the block writes stays rebound after it,
+    /// as in [`Self::generate_vt_block_value_open`].
+    pub(in crate::core_erlang) fn vt_inline_block_value_producer(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<Option<super::threaded_ir::ThreadedValue>> {
+        use super::threaded_ir::{ThreadedStmt, ThreadedValue, ValueRef};
+        if !self.is_vt_field_writing_block_value(expr) {
+            return Ok(None);
+        }
+        let Some((block, arguments)) = Self::literal_block_value_parts(expr) else {
+            return Ok(None);
+        };
+        let children: Vec<&Expression> = arguments.iter().collect();
+        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+        self.push_scope();
+        for (param, arg) in block.parameters.iter().zip(arguments) {
+            let arg_var = self.fresh_temp_var(&param.name);
+            let arg_doc = self.expression_doc(arg)?;
+            prelude.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(arg_var.clone()), " = ", arg_doc, " in "],
+                arg.span(),
+            ));
+            self.bind_var(&param.name, &arg_var);
+        }
+        self.finish_precompiled_scope(scope)?;
+
+        let captured = Self::captured_mutations_for_block(block);
+        let body = super::util::collect_body_exprs(&block.body);
+        let mut rebound: Vec<(String, String)> = Vec::new();
+        let mut value = ValueRef::Literal("'nil'");
+        for (i, stmt) in body.iter().enumerate() {
+            let is_last = i + 1 == body.len();
+            let local_target = match stmt {
+                Expression::Assignment { target, value, .. } => match target.as_ref() {
+                    Expression::Identifier(id) => Some((id.name.as_str(), value.as_ref())),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((name, rhs)) = local_target {
+                let tv = self.threaded_expression(rhs, frame)?;
+                prelude.extend(tv.prelude);
+                let core_var = self
+                    .lookup_var(name)
+                    .map_or_else(|| Self::to_core_erlang_var(name), String::clone);
+                let rhs_doc = self.threaded_value_doc(&tv.value);
+                prelude.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(core_var.clone()), " = ", rhs_doc, " in "],
+                    stmt.span(),
+                ));
+                self.bind_var(name, &core_var);
+                if captured.iter().any(|m| m == name) {
+                    rebound.push((name.to_string(), core_var.clone()));
+                }
+                if is_last {
+                    value = ValueRef::Var(core_var);
+                }
+            } else {
+                let tv = self.threaded_expression(stmt, frame)?;
+                prelude.extend(tv.prelude);
+                if is_last {
+                    value = tv.value;
+                } else {
+                    let tmp = self.fresh_temp_var("seq");
+                    let doc = self.threaded_value_doc(&tv.value);
+                    prelude.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(tmp), " = ", doc, " in "],
+                        stmt.span(),
+                    ));
+                }
+            }
+        }
+        self.pop_scope();
+        for (name, core_var) in &rebound {
+            self.bind_var(name, core_var);
+        }
+        Ok(Some(ThreadedValue { prelude, value }))
+    }
+
+    /// BT-3816: whether the value-type instance-method body statement `stmt`
+    /// holds a `Self`-rebinding producer — a field assignment in value
+    /// position (`self take: (self.n := 5)`, `^ (self.n := 5)`, `c := (self.n
+    /// := 5)`, `self.m := (self.n := 5)`, a binary / list / interpolation /
+    /// cascade operand) — so the statement must be lowered through
+    /// [`Self::threaded_expression`] and its prelude spliced into the method
+    /// body (`lower_root_statement_with_producer`). Compiled as a plain closed
+    /// sub-expression instead, the `Self{N}` rebind is scoped away and every
+    /// later statement reads an unbound or stale `Self`: the
+    /// `StateEffectEscapesExpression { prefix: SelfVt }` verifier finding.
+    ///
+    /// The statement being itself a field or local assignment is not a
+    /// producer (the body lowering owns those shapes); only its right-hand side
+    /// is probed. The loop / fold / conditional / `on:do:` statement kinds
+    /// thread `Self` through their own open chains and are not probed here.
+    /// `false` outside a value-type instance method.
+    pub(in crate::core_erlang) fn statement_has_value_type_producer(
+        &self,
+        stmt: &Expression,
+    ) -> bool {
+        if self.context != CodeGenContext::ValueType || self.in_class_method() {
+            return false;
+        }
+        match stmt.unwrap_parens() {
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                self.subexpr_has_field_write_producer(value)
+            }
+            Expression::DestructureAssignment { .. } => false,
+            other => {
+                matches!(
+                    self.classify_vt_body_expr(other),
+                    VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations(_)
+                ) && self.subexpr_has_field_write_producer(other)
+            }
+        }
+    }
+
     /// Classify a value-type body expression for Self-threading dispatch.
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment,
@@ -1176,7 +1404,9 @@ impl CoreErlangGenerator {
                 {
                     let doc = self.verified_root_prelude_doc(&stmts, expr.span());
                     body_parts.push(docvec!["    ", doc, "\n"]);
-                    if is_last {
+                    if is_last && matches!(kind, VtBodyExprKind::FieldAssignment) {
+                        body_parts.push(self.vt_updated_self_tail(has_nlr));
+                    } else if is_last {
                         body_parts.push(self.threading_result_tail(
                             &result_var,
                             None,
@@ -1202,7 +1432,9 @@ impl CoreErlangGenerator {
                                 super::threaded_expr::ProducerTail::Discard,
                                 super::threaded_ir::FrameId::ROOT,
                             )?)
-                        } else if self.statement_has_local_producer(expr) {
+                        } else if self.statement_has_local_producer(expr)
+                            || self.statement_has_value_type_producer(expr)
+                        {
                             let tv =
                                 self.threaded_expression(value, super::threaded_ir::FrameId::ROOT)?;
                             Some((tv.prelude, tv.value))
@@ -1257,10 +1489,33 @@ impl CoreErlangGenerator {
                 break;
             }
 
+            let operands = self.hoist_vt_operand_producers(expr, &mut body_parts)?;
             self.emit_vt_body_expr(expr, &kind, i, is_last, has_nlr, &mut body_parts)?;
+            if let Some(scope) = operands {
+                self.finish_precompiled_scope(scope)?;
+            }
         }
 
         Ok(body_parts)
+    }
+
+    /// The tail of a method whose last statement is a field assignment: the
+    /// updated `Self`, not the assigned value (`{Self{N}, Self{N}}` when the
+    /// method has a non-local return, so the normal and NLR catch paths
+    /// produce the same shape).
+    fn vt_updated_self_tail(&self, has_nlr: bool) -> Document<'static> {
+        let final_self = self.current_self_var();
+        if has_nlr {
+            docvec![
+                "    {",
+                leaf::var(final_self.clone()),
+                ", ",
+                leaf::var(final_self),
+                "}\n",
+            ]
+        } else {
+            docvec!["    ", leaf::var(final_self), "\n"]
+        }
     }
 
     /// Emit code for a single classified value-type body expression.
@@ -1289,19 +1544,7 @@ impl CoreErlangGenerator {
                 let doc = self.generate_vt_field_assignment_open(expr)?;
                 body_parts.push(doc);
                 if is_last {
-                    let final_self = self.current_self_var();
-                    if has_nlr {
-                        // NLR methods return {Self{N}, Self{N}} tuple.
-                        body_parts.push(docvec![
-                            "    {",
-                            leaf::var(final_self.clone()),
-                            ", ",
-                            leaf::var(final_self),
-                            "}\n",
-                        ]);
-                    } else {
-                        body_parts.push(docvec!["    ", leaf::var(final_self), "\n"]);
-                    }
+                    body_parts.push(self.vt_updated_self_tail(has_nlr));
                 }
             }
             VtBodyExprKind::LocalAssignment => {

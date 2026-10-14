@@ -116,8 +116,10 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// established backfill technique, generalized from "backfill everything
 /// before the one Bind under test" to "backfill exactly the gaps between
 /// this body's real Binds": walk the IR in order, tracking the last
-/// `State`-prefix version produced at [`FrameId::ROOT`], and insert a
-/// synthetic `Direct('_')` `Bind` chain for any versions an opaque
+/// `State`-prefix version produced at [`FrameId::ROOT`] (BT-3816: and the
+/// value-type `SelfVt` one, which `generate_vt_field_assignment_open` and the
+/// other value-type open-chain builders advance the same invisible way), and
+/// insert a synthetic `Direct('_')` `Bind` chain for any versions an opaque
 /// statement consumed. The backfill is verification-fixture-only — the real
 /// IR (and therefore [`render`]'s output) is untouched.
 ///
@@ -155,7 +157,13 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
     frame: FrameId,
 ) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
-    let mut last_state_version = 0usize;
+    // The actor `State` and the value-type `Self` are the two root-frame
+    // families whose versions an opaque statement can advance unrecorded
+    // (BT-3816: `generate_vt_field_assignment_open`'s `Self{N}`).
+    let mut last_versions = [
+        (VersionPrefix::State, 0usize),
+        (VersionPrefix::SelfVt, 0usize),
+    ];
     for stmt in ir {
         // ADR 0131 §2: a `MapPut` `LocalRebind` is a `State` version step
         // exactly like a `Bind`'s (`RebindLowering::version_step`), so the
@@ -168,14 +176,16 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
             _ => None,
         };
         if let Some((target, source)) = step {
-            backfill_opaque_version_gap(
-                &mut fixture,
-                &VersionPrefix::State,
-                target,
-                source,
-                frame,
-                &mut last_state_version,
-            );
+            for (prefix, last_version) in &mut last_versions {
+                backfill_opaque_version_gap(
+                    &mut fixture,
+                    prefix,
+                    target,
+                    source,
+                    frame,
+                    last_version,
+                );
+            }
         }
         fixture.push(stmt.clone());
     }

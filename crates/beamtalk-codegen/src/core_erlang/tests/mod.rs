@@ -87,6 +87,16 @@ pub(crate) fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str)
     // tmp_dir is dropped here, auto-cleaning .core and .beam files
 }
 
+/// Whether `erlc` can be invoked. [`assert_compiles_through_erlc`] silently passes without
+/// it, so a test whose verdict depends on `erlc` rejecting generated code must check this
+/// before asserting that a case which only fails at `erlc` is still failing.
+pub(crate) fn erlc_available() -> bool {
+    match std::process::Command::new("erlc").arg("-v").output() {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this

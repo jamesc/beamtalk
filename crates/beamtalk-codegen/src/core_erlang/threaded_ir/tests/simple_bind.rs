@@ -157,6 +157,26 @@ fn verify_body_with_opaque_version_gaps_backfills_gap_from_opaque_statement() {
 }
 
 #[test]
+fn verify_body_with_opaque_version_gaps_backfills_a_value_type_self_gap() {
+    // BT-3816: a value-type body's earlier statements are opaque Documents that advance
+    // `Self` (`generate_vt_field_assignment_open`), so the first real `SelfVt` Bind of a
+    // producer prelude spliced after them reads a version with no producer in the IR.
+    let span = span();
+    let ir = vec![ThreadedStmt::Bind {
+        target: VersionedVar::new(VersionPrefix::SelfVt, 3, FrameId::ROOT),
+        source: VersionedVar::new(VersionPrefix::SelfVt, 2, FrameId::ROOT),
+        op: BindOp::Direct(ValueRef::Literal("'_'")),
+        span,
+    }];
+    let errors = verify_body_with_opaque_version_gaps(&ir, ScopeKind::ValueType);
+    assert_eq!(
+        errors,
+        Vec::new(),
+        "backfilled Self gap should leave no UnboundVersion, got: {errors:?}"
+    );
+}
+
+#[test]
 fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version() {
     let span = span();
     // Two real Binds both target State1 from State0 — a genuine
