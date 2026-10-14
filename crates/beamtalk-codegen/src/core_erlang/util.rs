@@ -339,6 +339,17 @@ impl CoreErlangGenerator {
         let inner = expr.unwrap_parens();
         let span = inner.span();
 
+        // BT-3821: a child an enclosing `sequence_children` already compiled ahead
+        // (its prelude spliced into that caller's own) is read back here, never
+        // threaded a second time: a producer that threads its operand itself (the
+        // inline-control-flow conditional's receiver) sees the sequenced value.
+        if let Some(doc) = self.take_precompiled_subexpr(inner) {
+            return Ok(ThreadedValue {
+                prelude: Vec::new(),
+                value: ValueRef::Doc(doc),
+            });
+        }
+
         // ADR 0131 §1 (Phase 2): a loop or fold at a sequenced operand site
         // of the method body that writes an outer local is a producer: its
         // construct tuple's threaded locals are rebound in the prelude,
@@ -347,19 +358,10 @@ impl CoreErlangGenerator {
             return Ok(tv);
         }
 
-        // BT-3816: a value-type conditional whose receiver holds a field write
-        // (`self take: (((self.n := 5) > 3) ifTrue: [1] ifFalse: [2])`): the
-        // receiver is sequenced ahead, the conditional then reads its temp.
-        if self.context == CodeGenContext::ValueType && !self.in_class_method() {
-            if let Some(receiver) = Self::conditional_send_receiver(inner)
-                .filter(|r| self.subexpr_has_field_write_producer(r))
-            {
-                let receiver = [receiver];
-                let (mut prelude, scope) = self.sequence_children(&receiver, frame)?;
-                let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
-                self.finish_precompiled_scope(scope)?;
-                return Ok(ThreadedValue { prelude, value });
-            }
+        // BT-3816 / BT-3821: a value-type conditional whose arms or receiver write a
+        // field splices its `Self` rebinds into the caller's statement sequence.
+        if let Some(tv) = self.vt_conditional_operand(expr, frame)? {
+            return Ok(tv);
         }
 
         // ADR 0118 phase 4: an inline-threaded control-flow
@@ -519,6 +521,54 @@ impl CoreErlangGenerator {
         let mut prelude = Vec::new();
         let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
         Ok(ThreadedValue { prelude, value })
+    }
+
+    /// The value-type conditional cases of [`Self::threaded_expression`]
+    /// (`None` outside a value-type instance method, and for any other
+    /// expression): a conditional whose field writes the caller's statement
+    /// sequence must see.
+    ///
+    /// - BT-3821: a conditional whose ARMS write a field (`self take: (c ifTrue:
+    ///   [self.m := 1] ifFalse: [0])`): its `Self` merge `Bind` and its value are
+    ///   spliced into the caller's statement sequence
+    ///   ([`Self::vt_conditional_value_producer`]).
+    /// - BT-3816: a conditional whose receiver holds a field write (`self take:
+    ///   (((self.n := 5) > 3) ifTrue: [1] ifFalse: [2])`): the receiver is
+    ///   sequenced ahead, the conditional then reads its temp. The arms may still
+    ///   need threading of their own (an outer local): compiled as a plain
+    ///   document, their stateful blocks were dispatched as closures
+    ///   (`erlc`-clean, wrong at runtime) and the local lost. The
+    ///   inline-control-flow producer lowers the conditional over the sequenced
+    ///   receiver instead — the receiver is already registered, so the producer
+    ///   reads its temp back (the top of `threaded_expression`) rather than
+    ///   re-threading its field write into a closed document that would scope the
+    ///   `Self` rebind away.
+    fn vt_conditional_operand(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<Option<ThreadedValue>> {
+        if self.context != CodeGenContext::ValueType || self.in_class_method() {
+            return Ok(None);
+        }
+        let inner = expr.unwrap_parens();
+        if let Some(tv) = self.vt_conditional_value_producer(inner, frame)? {
+            return Ok(Some(tv));
+        }
+        let Some(receiver) = Self::conditional_send_receiver(inner)
+            .filter(|r| self.subexpr_has_field_write_producer(r))
+        else {
+            return Ok(None);
+        };
+        let (mut prelude, scope) = self.sequence_children(&[receiver], frame)?;
+        let value = if let Some(tv) = self.inline_control_flow_producer(inner)? {
+            prelude.extend(tv.prelude);
+            tv.value
+        } else {
+            self.generate_expression_as_value(expr, inner.span(), &mut prelude)?
+        };
+        self.finish_precompiled_scope(scope)?;
+        Ok(Some(ThreadedValue { prelude, value }))
     }
 
     /// BT-3809: the one lowering of an Actor self-send *statement* with its
@@ -950,6 +1000,12 @@ impl CoreErlangGenerator {
         }
         // BT-3803: mirrors `threaded_expression`'s field-assignment producer.
         if self.is_field_assignment(inner) {
+            return true;
+        }
+        // BT-3821: mirrors `threaded_expression`'s field-writing-arms
+        // conditional producer, for every probe: its prelude carries the `Self`
+        // merge `Bind` whatever the consumer is sequencing.
+        if self.is_vt_field_conditional_producer(inner) {
             return true;
         }
         // BT-3816: mirrors `threaded_expression`'s conditional-receiver branch

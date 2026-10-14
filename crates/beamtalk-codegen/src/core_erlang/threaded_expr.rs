@@ -105,6 +105,9 @@ pub(super) mod fault {
         /// The producer records a frame other than the one enclosing it
         /// (`LocalRebindFrameMismatch`).
         WrongFrame,
+        /// BT-3821: a value-type conditional producer omits the merge `Bind` of
+        /// the `Self` family its arms advanced (`ConstructFamilyDropped`).
+        DropFamilyBind,
     }
 
     thread_local! {

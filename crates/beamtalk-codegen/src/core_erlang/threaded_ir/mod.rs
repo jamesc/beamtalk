@@ -78,7 +78,8 @@ pub(super) use build::{
 // as `AccParam`/`CloseContext` below).
 pub(super) use build::{
     ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
-    build_local_threading_prelude, opaque_escapes, stepping_local_rebinds,
+    build_family_construct_tuple, build_local_threading_prelude, opaque_escapes,
+    stepping_local_rebinds,
 };
 #[cfg(test)]
 pub(super) use build::{build_local_rebind, build_method_body};

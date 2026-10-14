@@ -756,6 +756,130 @@ fn a_rebind_its_construct_does_not_thread_is_dropped_at_every_level() {
     assert_eq!(verify(&ir), vec![dropped("t")]);
 }
 
+// ── ConstructFamilyDropped (BT-3821) ─────────────────────────────────────
+
+fn family_dropped(family: VersionPrefix) -> VerifyError {
+    VerifyError::ConstructFamilyDropped {
+        family,
+        carrier: CARRIER.to_string(),
+        at: span(),
+    }
+}
+
+/// A construct whose arms advanced `families`, as a value-type conditional
+/// producer declares it.
+fn family_construct(families: &[VersionPrefix]) -> ThreadedStmt {
+    build_family_construct_tuple(CARRIER, tuple_doc(), Vec::new(), families.to_vec(), span())
+}
+
+/// The merge `Bind`s `extract_family_slots` builds for `families`, from
+/// version 0 to 1 (a conditional's `{Value, Self}` tuple: base arity 1).
+fn merge_binds(frame: FrameId, families: &[VersionPrefix]) -> Vec<ThreadedStmt> {
+    extract_family_slots(
+        CARRIER,
+        1,
+        &ThreadedFamilies::from_matches(families),
+        |prefix| {
+            FamilyVersionStep::new(
+                VersionedVar::new(prefix.clone(), 0, frame),
+                VersionedVar::new(prefix.clone(), 1, frame),
+            )
+        },
+        span(),
+    )
+}
+
+#[test]
+fn a_family_the_arms_advanced_but_nothing_merges_is_dropped() {
+    // BT-3821: `self take: (c ifTrue: [self.m := 1] ifFalse: [0])` — the arms'
+    // `Self` rebind lives inside the tuple; with no merge `Bind` every later
+    // statement reads the pre-conditional `Self`.
+    let tuple = family_construct(&[VersionPrefix::SelfVt]);
+    let read_first = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![tuple.clone(), read_value()],
+    )];
+    assert_eq!(
+        verify(&read_first),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+    let frame_ends = vec![build_method_body(FrameId::ROOT, Vec::new(), vec![tuple])];
+    assert_eq!(
+        verify(&frame_ends),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+}
+
+#[test]
+fn a_family_merged_straight_after_the_tuple_passes() {
+    let mut body = vec![family_construct(&[VersionPrefix::SelfVt])];
+    body.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::SelfVt]));
+    body.push(read_value());
+    assert_eq!(
+        verify(&[build_method_body(FrameId::ROOT, Vec::new(), body)]),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_merge_of_another_family_does_not_satisfy_the_declared_one() {
+    let mut body = vec![family_construct(&[VersionPrefix::SelfVt])];
+    body.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::State]));
+    body.push(read_value());
+    assert_eq!(
+        verify(&[build_method_body(FrameId::ROOT, Vec::new(), body)]),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+}
+
+#[test]
+fn a_merge_after_an_intervening_statement_is_too_late() {
+    let mut body = vec![family_construct(&[VersionPrefix::SelfVt]), read_value()];
+    body.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::SelfVt]));
+    assert_eq!(
+        verify(&[build_method_body(FrameId::ROOT, Vec::new(), body)]),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+}
+
+#[test]
+fn every_declared_family_needs_its_own_merge() {
+    let both = [VersionPrefix::State, VersionPrefix::SelfVt];
+    let mut body = vec![family_construct(&both)];
+    body.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::State]));
+    body.push(read_value());
+    assert_eq!(
+        verify(&[build_method_body(FrameId::ROOT, Vec::new(), body)]),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+}
+
+#[test]
+fn a_construct_that_declares_no_family_needs_no_merge() {
+    let ir = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![family_construct(&[]), read_value()],
+    )];
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn a_dropped_family_is_reported_in_every_frame_kind() {
+    // The rule is per construct, not per scope: a loop-body frame and a branch
+    // arm report it exactly as the method root does.
+    let frame = FrameId::new(1);
+    let tuple = family_construct(&[VersionPrefix::SelfVt]);
+    let in_loop = vec![state_acc_node(frame, vec![tuple.clone()])];
+    assert_eq!(
+        verify(&in_loop),
+        vec![family_dropped(VersionPrefix::SelfVt)]
+    );
+    let in_arm = vec![build_branch_arm(frame, Vec::new(), vec![tuple])];
+    assert_eq!(verify(&in_arm), vec![family_dropped(VersionPrefix::SelfVt)]);
+}
+
 // ── LocalRebindModeMismatch / LocalRebindFrameMismatch (ADR 0131 §4) ─────
 
 /// A prelude for `slot` lowered against `enclosing`, but with the producer
