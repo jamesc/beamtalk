@@ -29,41 +29,9 @@ setup() ->
     end.
 
 teardown(_) ->
-    %% Clean up all registered class processes
-    Members =
-        try
-            pg:get_members(beamtalk_classes)
-        catch
-            _:_ -> []
-        end,
-
-    lists:foreach(
-        fun
-            (Pid) when is_pid(Pid) ->
-                case is_process_alive(Pid) of
-                    true ->
-                        case process_info(Pid, registered_name) of
-                            {registered_name, Name} when Name =/= [] ->
-                                try
-                                    unregister(Name)
-                                catch
-                                    _:_ -> ok
-                                end;
-                            _ ->
-                                ok
-                        end,
-                        exit(Pid, kill);
-                    false ->
-                        ok
-                end;
-            (_) ->
-                ok
-        end,
-        Members
-    ),
-
-    timer:sleep(50),
-    ok.
+    %% Clean up all registered class processes (BT-3815: unwatched first so
+    %% beamtalk_class_monitor cannot resurrect them mid-teardown).
+    beamtalk_test_class_teardown:stop_pg_class_processes().
 
 %%====================================================================
 %% Bootstrap Tests

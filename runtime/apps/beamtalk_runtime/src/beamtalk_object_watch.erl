@@ -69,6 +69,13 @@ so the dispatch path stops paying for it.
   itself unsubscribed. This is harmless for a refresh-trigger stream — a
   consumer must tolerate an `{object_changed, Pid, _}` for a pid it no longer
   tracks (ignore it).
+* **Death cleanup is eventually consistent (BT-3818).** When a watched actor
+  or the last subscriber dies, the entry leaves `?WATCHED_TABLE` only once the
+  server processes the monitor `'DOWN'`. Signals from different senders are not
+  ordered, so a `sys:get_state/1` round trip issued after the death does not
+  guarantee the `'DOWN'` was handled; `is_watched/1` may briefly stay `true`
+  for a dead pid. Harmless (a stray publish to a dead actor is a no-op), so
+  there is no synchronous barrier; tests must poll for the cleanup.
 * **Reliable refresh-trigger delivery.** Pushes use a plain send. An earlier
   `nosuspend` send was abandoned: it silently drops whenever the dist link to the
   subscriber would suspend the sender (a busy buffer, or a link still being
