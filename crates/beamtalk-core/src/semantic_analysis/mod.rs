@@ -559,8 +559,10 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// ADR 0131 (BT-3754): only the outer-local threading compile errors for
 /// `module` — §6 ([`DiagnosticCategory::Tier2BlockNoReturnChannel`]) and the
 /// Phase 0 allow-set ([`DiagnosticCategory::UnmigratedLocalThreading`]) —
-/// exactly as [`analyse_full`] reports them, against `hierarchy` and with no
-/// REPL-known variables.
+/// as [`analyse_full`] reports them, against `hierarchy` and with no
+/// REPL-known variables, except that it has no type map: a lookup receiver is
+/// judged non-`Dictionary` only syntactically (`self`/`super`), so a typed one
+/// (`cache :: Ets`) is rejected by [`analyse_full`] alone.
 ///
 /// For `beamtalk-lint`'s `dead_assignment` pass, which must not warn about
 /// a write these errors already reject: it asks this function rather than
@@ -571,7 +573,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 #[must_use]
 pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    validators::check_local_threading(module, hierarchy, &[], &mut diagnostics);
+    validators::check_local_threading(module, hierarchy, None, &[], &mut diagnostics);
     diagnostics
 }
 
@@ -1030,6 +1032,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_local_threading(
         module,
         &result.class_hierarchy,
+        Some(&result.type_map),
         known_vars,
         &mut result.diagnostics,
     );

@@ -149,6 +149,16 @@ TestCase subclass: Adr0131LocalRebindTest
   testVtReturnInjectValue =>
     self assert: ((Adr0131LocalRebindValue new) vtReturnInject) equals: 3
 
+  // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler
+  // writes compiles in every context (s1); the rest of its matrix is
+  // adr0131lookup_test.bt.
+  testS1Class => self assert: (Adr0131LocalRebindClass s1) equals: #[0, 1]
+
+  testS1Value => self assert: ((Adr0131LocalRebindValue new) s1) equals: #[0, 1]
+
+  testS1Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) s1) equals: #[0, 1]
+
   // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes
   // compiles in every context (s2 and the statement form).
   testS2Class => self assert: (Adr0131LocalRebindClass s2) equals: #[0, 1]

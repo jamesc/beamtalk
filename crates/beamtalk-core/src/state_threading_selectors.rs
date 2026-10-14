@@ -373,22 +373,98 @@ pub fn is_counted_loop_selector(sel: &str) -> bool {
     matches!(sel, "timesRepeat:" | "to:do:" | "to:by:do:")
 }
 
+/// One row of [`LOOKUP_SHAPES`]: a block-taking lookup selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LookupShape {
+    /// The selector.
+    pub selector: &'static str,
+    /// The 0-based indices of its block arguments.
+    pub block_args: &'static [usize],
+    /// Whether the lookup is a local-threading producer for a `Dictionary`
+    /// receiver (ADR 0131 Phase 2d, BT-3798): codegen lowers it inline, guarded
+    /// by a runtime receiver check, and its handler block is an arm frame.
+    /// Only a selector `Dictionary` itself implements can be: the lowering
+    /// answers what the primitive answers.
+    pub dictionary_inline: bool,
+}
+
 /// ADR 0131 §1: the block-taking lookup selectors — a send that runs one of
 /// its block literal arguments only when a key (or element) is missing or
-/// present. Returns the 0-based indices of those block arguments, empty for
-/// any other selector.
+/// present. The ONE table of them: [`lookup_block_arg_indices`] and
+/// [`lookup_shape`] read it, core's `local_threading_construct` and
+/// `conditional_arm_blocks` read those, and the Phase 0 check and codegen's
+/// lowering read those, so the diagnostic and the lowering cannot accept
+/// different sends.
 ///
-/// None of them is threaded today: codegen compiles their blocks as
+/// The receiver type is unknown at compile time: the selector is implemented
+/// by the `Dictionary` primitive (`primitives/dictionary.rs`), by stdlib
+/// methods that call `block value` themselves (`Ets at:ifAbsent:`) and by any
+/// user class, and an inline lowering is valid only for the first. ADR 0131
+/// Phase 2d (BT-3798) therefore lowers a [`LookupShape::dictionary_inline`]
+/// lookup inline behind a runtime guard (`beamtalk_map:lookup_for_threading/3`):
+/// a `Dictionary` receiver takes the inline path, any other receiver (a
+/// value-type instance is also a map, but tagged) raises a structured
+/// `#beamtalk_error{}` when the handler writes an outer local.
+///
+/// `Dictionary` implements `at:ifAbsent:` only. The other four rows are not
+/// `dictionary_inline`: there is no `Dictionary` behaviour for an inline
+/// lowering to answer, so they stay rejected at compile time (ADR 0131 §6)
+/// when their block writes an outer local. Flipping a row is the whole change
+/// once `Dictionary` gains the selector (the
+/// `dictionary_inline_rows_are_dictionary_selectors` test pins the invariant
+/// against the class hierarchy).
+pub const LOOKUP_SHAPES: &[LookupShape] = &[
+    LookupShape {
+        selector: "at:ifAbsent:",
+        block_args: &[1],
+        dictionary_inline: true,
+    },
+    LookupShape {
+        selector: "at:ifAbsentPut:",
+        block_args: &[1],
+        dictionary_inline: false,
+    },
+    LookupShape {
+        selector: "at:ifPresent:",
+        block_args: &[1],
+        dictionary_inline: false,
+    },
+    LookupShape {
+        selector: "at:ifPresent:ifAbsent:",
+        block_args: &[1, 2],
+        dictionary_inline: false,
+    },
+    LookupShape {
+        selector: "removeKey:ifAbsent:",
+        block_args: &[1],
+        dictionary_inline: false,
+    },
+];
+
+/// The [`LOOKUP_SHAPES`] row of `sel`, or `None` for any other selector.
+#[must_use]
+pub fn lookup_shape(sel: &str) -> Option<&'static LookupShape> {
+    LOOKUP_SHAPES.iter().find(|row| row.selector == sel)
+}
+
+/// The 0-based indices of the block arguments of the lookup selector `sel`
+/// ([`LOOKUP_SHAPES`]), empty for any other selector.
+///
+/// None of the lookups is threaded unless its row is
+/// [`LookupShape::dictionary_inline`]: codegen compiles the others' blocks as
 /// closures, and the §6 check rejects a block that writes an outer local
-/// there. ADR 0131 phase 2 makes them producers. `detect:ifNone:` is not
-/// listed: it is a fold ([`is_state_threading_keyword_selector`]).
+/// there. `detect:ifNone:` is not listed: it is a fold
+/// ([`is_state_threading_keyword_selector`]).
 #[must_use]
 pub fn lookup_block_arg_indices(sel: &str) -> &'static [usize] {
-    match sel {
-        "at:ifAbsent:" | "at:ifAbsentPut:" | "at:ifPresent:" | "removeKey:ifAbsent:" => &[1],
-        "at:ifPresent:ifAbsent:" => &[1, 2],
-        _ => &[],
-    }
+    lookup_shape(sel).map_or(&[], |row| row.block_args)
+}
+
+/// Whether `sel` is a lookup that codegen lowers inline for a `Dictionary`
+/// receiver ([`LookupShape::dictionary_inline`]).
+#[must_use]
+pub fn is_dictionary_inline_lookup(sel: &str) -> bool {
+    lookup_shape(sel).is_some_and(|row| row.dictionary_inline)
 }
 
 /// ADR 0131 §5: `Result tryDo:`, a catch-boundary construct. Keyed on the
@@ -412,6 +488,31 @@ mod tests {
             .next()
             .expect("one expression")
             .expression
+    }
+
+    #[test]
+    fn dictionary_inline_rows_are_dictionary_selectors() {
+        // BT-3798: the inline lowering answers what the `Dictionary` primitive
+        // answers, so a row is `dictionary_inline` exactly when `Dictionary`
+        // implements the selector. When `Dictionary` gains `at:ifPresent:` (or
+        // another row), this fails until the row is flipped and the lowering
+        // gives it its own result shape.
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+        for row in LOOKUP_SHAPES {
+            assert_eq!(
+                hierarchy.find_method("Dictionary", row.selector).is_some(),
+                row.dictionary_inline,
+                "{}",
+                row.selector
+            );
+            assert_eq!(lookup_block_arg_indices(row.selector), row.block_args);
+            assert_eq!(
+                is_dictionary_inline_lookup(row.selector),
+                row.dictionary_inline
+            );
+        }
+        assert!(lookup_shape("at:put:").is_none());
+        assert!(lookup_block_arg_indices("at:put:").is_empty());
     }
 
     #[test]

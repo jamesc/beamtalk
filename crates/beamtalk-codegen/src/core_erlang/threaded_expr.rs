@@ -724,6 +724,11 @@ impl CoreErlangGenerator {
             // map whole (`lower_repl_construct_tuple`), threading no local of
             // its own, exactly as a REPL loop or fold is.
             conditional_arm_blocks(expr)?;
+            // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
+            // only; the REPL keeps the §6 rejection (the Phase 0 check agrees).
+            if beamtalk_core::semantic_analysis::block_facts::lookup_arm_blocks(expr).is_some() {
+                return None;
+            }
             return self.threaded_locals_of(expr).map(|_| Vec::new());
         }
         let kind = self.root_method_kind()?;

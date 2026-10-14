@@ -16,6 +16,7 @@ use crate::ast::{
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
 };
+use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::Span;
 use std::collections::HashSet;
 
@@ -1043,7 +1044,7 @@ impl OuterWriteWalker<'_> {
                 .map(|c| c.blocks)
                 .unwrap_or_default(),
             NestedBlocks::ProducersThreadedToday => local_threading_construct(send)
-                .filter(|c| c.family.is_threaded_today())
+                .filter(LocalThreadingConstruct::is_threaded_today)
                 .map(|c| c.blocks)
                 .unwrap_or_default(),
         };
@@ -1161,7 +1162,7 @@ impl OuterWriteWalker<'_> {
 /// [`local_threading_construct`]). Codegen lowers each family with its own
 /// generator. The families not threaded yet are still recognized, so the
 /// phase that makes one a producer only flips
-/// [`Self::is_threaded_today`].
+/// [`LocalThreadingConstruct::is_threaded_today`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalThreadingFamily {
     /// `whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`, the
@@ -1180,27 +1181,16 @@ pub enum LocalThreadingFamily {
     /// `value`/`value:`… sent to a block literal.
     BlockValue,
     /// A block-taking lookup selector
-    /// ([`crate::state_threading_selectors::lookup_block_arg_indices`]).
-    /// Not threaded yet (ADR 0131 phase 2).
+    /// ([`crate::state_threading_selectors::LOOKUP_SHAPES`]). Threaded only
+    /// for the rows that are
+    /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)
+    /// (ADR 0131 Phase 2d, BT-3798): see
+    /// [`LocalThreadingConstruct::is_threaded_today`].
     Lookup,
     /// `Result tryDo:` (ADR 0131 §5, Phase 4): a catch-boundary construct
     /// whose block literal compiles to a Tier 2 `fun(StateAcc)` and is a
     /// producer through [`exception_producer_writes`], like `on:do:`.
     TryDo,
-}
-
-impl LocalThreadingFamily {
-    /// Whether codegen threads this family's outer-local writes back today.
-    /// A family that answers `false` compiles its blocks as closures. Neither
-    /// the Phase 0 allow-set check nor codegen's tuple builders act on it
-    /// yet, and a nested one adds nothing to an enclosing construct's
-    /// [`threaded_today_block_writes`] (it does add to
-    /// [`construct_outer_local_writes`]). (`tryDo:` joined with ADR 0131
-    /// Phase 4, BT-3750.)
-    #[must_use]
-    pub fn is_threaded_today(self) -> bool {
-        !matches!(self, Self::Lookup)
-    }
 }
 
 /// ADR 0131 §1: a local-threading construct. It is a send whose literal
@@ -1215,6 +1205,23 @@ pub struct LocalThreadingConstruct<'a> {
     pub family: LocalThreadingFamily,
     /// The construct's block literals, receiver first.
     pub blocks: Vec<&'a Block>,
+}
+
+impl LocalThreadingConstruct<'_> {
+    /// Whether codegen threads this construct's outer-local writes back today
+    /// (every family but a lookup, whose selector must be
+    /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)).
+    /// The one predicate the nested-construct walks ([`threaded_today_block_writes`])
+    /// and the Phase 0 check filter on.
+    #[must_use]
+    pub fn is_threaded_today(&self) -> bool {
+        match self.family {
+            LocalThreadingFamily::Lookup => {
+                crate::state_threading_selectors::is_dictionary_inline_lookup(&self.selector)
+            }
+            _ => true,
+        }
+    }
 }
 
 /// ADR 0131 §1 (BT-3745, BT-3746): the one recognizer for a local-threading
@@ -1357,7 +1364,7 @@ pub fn threaded_block_writes(
 }
 
 /// [`threaded_block_writes`] closed only over nested constructs whose
-/// family [`LocalThreadingFamily::is_threaded_today`]: the writes today's
+/// construct [`LocalThreadingConstruct::is_threaded_today`]: the writes today's
 /// lowering threads back. Codegen's tuple builders pack this set; ADR 0131
 /// phases 2-4 grow it until it is [`threaded_block_writes`].
 #[must_use]
@@ -1511,9 +1518,21 @@ fn packed_writes_agree(
 ///
 /// A conditional with a non-literal arm (`c ifTrue: aBlock`) is not inlined
 /// by codegen (the arm is a closure value), so it is not a producer.
+///
+/// ADR 0131 Phase 2d (BT-3798): a [`dictionary_inline`] lookup
+/// (`d at: k ifAbsent: [...]`) is a conditional in this sense: its handler is
+/// an arm that runs only when the key is missing, lowered by the same
+/// producer (a `BranchArm` frame, seeded set, `LocalRebind`s) behind a
+/// runtime receiver guard. Its arm blocks are its handler blocks
+/// ([`lookup_arm_blocks`]).
+///
+/// [`dictionary_inline`]: crate::state_threading_selectors::LookupShape::dictionary_inline
 #[must_use]
 pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     let construct = local_threading_construct(expr)?;
+    if construct.family == LocalThreadingFamily::Lookup {
+        return lookup_arm_blocks(expr);
+    }
     if construct.family != LocalThreadingFamily::Conditional {
         return None;
     }
@@ -1522,6 +1541,106 @@ pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     };
     (!arguments.is_empty() && arguments.iter().all(|a| matches!(a, Expression::Block(_))))
         .then_some(construct.blocks)
+}
+
+/// ADR 0131 Phase 2d (BT-3798 review): whether the receiver of a lookup send
+/// is statically known NOT to be a `Dictionary`, so the send can only ever
+/// reach another class's `at:ifAbsent:` and the runtime guard
+/// (`beamtalk_map:lookup_for_threading/3`) would raise on every call, even when
+/// the key is present. Such a send keeps its §6 compile error instead of
+/// becoming a producer; the guard is for receivers whose class is not known
+/// (unannotated, `Dynamic`, or a class that may hold a `Dictionary`).
+///
+/// The one rule the Phase 0 check reads (codegen lowers every send core's
+/// [`lookup_arm_blocks`] names and never sees a program Phase 0 rejects, so it
+/// needs no copy of it). A receiver is statically non-`Dictionary` when it is
+///
+/// - `super`, or `self` where `self_is_dictionary` is false (the enclosing
+///   class is not `Dictionary` or a subclass, or the method is class-side, whose
+///   `self` is the class object);
+/// - of an inferred type `ty` that is a known class (or the metatype of one)
+///   that is neither `Dictionary`, a subclass of it, nor one of its ancestors
+///   (`Object`, `Collection`, … may hold a `Dictionary`), or a union of such.
+#[must_use]
+pub fn lookup_receiver_statically_not_dictionary(
+    receiver: &Expression,
+    ty: Option<&InferredType>,
+    self_is_dictionary: bool,
+    hierarchy: &crate::semantic_analysis::ClassHierarchy,
+) -> bool {
+    match receiver.unwrap_parens() {
+        Expression::Super(_) => return !self_is_dictionary,
+        Expression::Identifier(id) if id.name == "self" => return !self_is_dictionary,
+        _ => {}
+    }
+    ty.is_some_and(|ty| excludes(ty, hierarchy))
+}
+
+/// Whether `name` is a known class that can never hold a `Dictionary`.
+fn class_excludes_dictionary(
+    name: &str,
+    hierarchy: &crate::semantic_analysis::ClassHierarchy,
+) -> bool {
+    hierarchy.has_class(name)
+        && name != "Dictionary"
+        && !hierarchy
+            .superclass_chain(name)
+            .iter()
+            .any(|c| c == "Dictionary")
+        && !hierarchy
+            .superclass_chain("Dictionary")
+            .iter()
+            .any(|c| c == name)
+}
+/// [`class_excludes_dictionary`] over an inferred type.
+fn excludes(ty: &InferredType, hierarchy: &crate::semantic_analysis::ClassHierarchy) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. } => class_excludes_dictionary(class_name, hierarchy),
+        InferredType::Meta { .. } => true,
+        InferredType::Union { members, .. } => members.iter().all(|m| excludes(m, hierarchy)),
+        _ => false,
+    }
+}
+
+/// ADR 0131 Phase 2d (BT-3798): the handler blocks of a lookup send that
+/// codegen lowers inline for a `Dictionary` receiver (a
+/// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)
+/// row of [`crate::state_threading_selectors::LOOKUP_SHAPES`]), in source
+/// order, or `None` for any other send.
+///
+/// The lowering needs every handler position to hold a block literal that takes
+/// no parameters (the handler of `at:ifAbsent:` is called with none), every
+/// other argument to be an ordinary value (a block literal there is a key that
+/// is a block value, not a handler), and a receiver that is not itself a block
+/// literal. Anything else keeps the closure lowering, which the §6 check
+/// rejects when its block writes an outer local.
+#[must_use]
+pub fn lookup_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
+    let construct = local_threading_construct(expr)?;
+    if construct.family != LocalThreadingFamily::Lookup {
+        return None;
+    }
+    let shape = crate::state_threading_selectors::lookup_shape(&construct.selector)?;
+    if !shape.dictionary_inline {
+        return None;
+    }
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let handler_is_arm = |i: usize| matches!(arguments.get(i), Some(Expression::Block(b)) if b.parameters.is_empty());
+    let values_are_not_blocks = arguments
+        .iter()
+        .enumerate()
+        .all(|(i, a)| shape.block_args.contains(&i) || !matches!(a, Expression::Block(_)));
+    (!matches!(receiver.as_ref(), Expression::Block(_))
+        && values_are_not_blocks
+        && shape.block_args.iter().all(|&i| handler_is_arm(i)))
+    .then_some(construct.blocks)
 }
 
 /// ADR 0131 Phase 3b (BT-3817): the literal blocks of an `on:do:` / `ensure:`
@@ -3590,9 +3709,11 @@ mod tests {
                 local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
             assert_eq!(construct.family, family, "{src}");
             assert_eq!(construct.blocks.len(), blocks, "{src}");
+            // Only a lookup differs from its family: four of the five lookups
+            // are not implemented by `Dictionary`.
             assert_eq!(
-                family.is_threaded_today(),
-                !matches!(family, Lookup),
+                construct.is_threaded_today(),
+                !src.contains("ifAbsentPut:"),
                 "{src}"
             );
         }
@@ -3653,7 +3774,7 @@ mod tests {
         );
         // A nested construct that is not threaded today is in the set, but
         // not in the part threaded today.
-        let src = "#(1) do: [:x | d at: #k ifAbsent: [t := 1]]";
+        let src = "#(1) do: [:x | d at: #k ifAbsentPut: [t := 1]]";
         assert_eq!(threaded_set(src, &["t"]), vec!["t"]);
         let expr = parse_first_expr(src);
         let construct = local_threading_construct(&expr).expect("construct");

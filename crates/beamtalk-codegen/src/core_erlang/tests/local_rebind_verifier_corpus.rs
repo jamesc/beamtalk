@@ -274,3 +274,90 @@ fn an_exception_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
 fn an_exception_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
     assert_exception_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2d (BT-3798): the same checks on `Dictionary at:ifAbsent:`
+// producers, at the method root and in the frames they sit in (a conditional
+// arm, a protected body, the handler of another lookup).
+// ---------------------------------------------------------------------------
+
+/// The §1a probe shape with a lookup as the right operand, at the method root
+/// and as a statement of each frame kind.
+fn lookup_programs() -> Vec<String> {
+    let mut out = Vec::new();
+    for (frame, stmt) in [
+        (
+            "{s}",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+        ("{s}", "r := t + (#{#a => 1} at: #k ifAbsent: [t := 9])"),
+        (
+            "(u < 3) ifTrue: [{s}]",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "[{s}] on: Error do: [:e | 0]",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "#{#a => 1} at: #j ifAbsent: [{s}. 0]",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+    ] {
+        let body = format!(
+            "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
+            frame.replace("{s}", stmt)
+        );
+        out.push(format!(
+            "Object subclass: LookupCorpusClass\n  class go =>\n{body}"
+        ));
+        out.push(format!(
+            "Value subclass: LookupCorpusValue\n  go =>\n{body}"
+        ));
+        out.push(format!(
+            "Actor subclass: LookupCorpusActor\n  state: n = 0\n\n  go =>\n{body}"
+        ));
+    }
+    out
+}
+
+fn assert_lookup_reports(fault: LocalRebindFault, error: &str) {
+    for src in lookup_programs() {
+        let report = verifier_report(&src, fault)
+            .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
+        assert!(
+            report.contains(error),
+            "{fault:?} should be reported as {error}, got: {report}\n{src}"
+        );
+    }
+}
+
+#[test]
+fn the_unbroken_lookup_producer_compiles_and_calls_the_guard() {
+    for src in lookup_programs() {
+        let code = codegen(&src);
+        assert!(code.contains("let _Tmp"), "{src}\n{code}");
+        assert!(
+            code.contains("'beamtalk_map':'lookup_for_threading'"),
+            "{src}\n{code}"
+        );
+    }
+}
+
+#[test]
+fn a_lookup_sibling_read_in_place_is_local_read_after_sibling_rebind() {
+    assert_lookup_reports(
+        LocalRebindFault::SkipSiblingSnapshot,
+        "LocalReadAfterSiblingRebind",
+    );
+}
+
+#[test]
+fn a_lookup_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
+    assert_lookup_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+}
+
+#[test]
+fn a_lookup_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
+    assert_lookup_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+}

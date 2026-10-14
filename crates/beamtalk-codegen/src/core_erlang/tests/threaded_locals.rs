@@ -87,7 +87,12 @@ fn repl_returns_the_bindings_the_construct_writes() {
 fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
     let generator = make_generator(CodeGenContext::ValueType, &["t", "d"]);
     for (src, family) in [
-        ("d at: #k ifAbsent: [t := 1]", LocalThreadingFamily::Lookup),
+        // `Dictionary` implements `at:ifAbsent:` only (BT-3798): the other
+        // lookup rows are not lowered.
+        (
+            "d at: #k ifAbsentPut: [t := 1]",
+            LocalThreadingFamily::Lookup,
+        ),
         ("[t := t + 1] value", LocalThreadingFamily::BlockValue),
         ("[t := t + 1. t < 3] whileTrue", LocalThreadingFamily::Loop),
         (
@@ -100,6 +105,13 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
         assert_eq!(set.names, vec!["t"], "{src}");
         assert_eq!(set.clone().into_lowered(), None, "{src}");
     }
+    // BT-3798: `Dictionary at:ifAbsent:` packs its handler's writes.
+    let set = threaded(&generator, "d at: #k ifAbsent: [t := 1]").expect("lookup");
+    assert_eq!(
+        set.construct,
+        ThreadedConstruct::Inline(LocalThreadingFamily::Lookup)
+    );
+    assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]));
     // `eachWithIndex:` is lowered in an actor's own fold.
     let actor = make_generator(CodeGenContext::Actor, &["t"]);
     let set = threaded(&actor, "#(1) eachWithIndex: [:x :i | t := i]").expect("set");
@@ -112,7 +124,7 @@ fn a_nested_construct_not_threaded_today_is_in_names_but_not_lowered() {
     // lowering does not thread a lookup selector's block yet (BT-3798), so it
     // packs nothing.
     let generator = make_generator(CodeGenContext::ValueType, &["t", "d"]);
-    let set = threaded(&generator, "#(1) do: [:x | d at: #k ifAbsent: [t := 1]]").expect("set");
+    let set = threaded(&generator, "#(1) do: [:x | d at: #k ifAbsentPut: [t := 1]]").expect("set");
     assert_eq!(set.names, vec!["t"]);
     assert!(set.lowered.is_empty());
 }
@@ -172,10 +184,8 @@ fn tier2_value_call_on_a_block_valued_local_is_recognized() {
     assert_eq!(set.construct, ThreadedConstruct::Tier2Value);
     assert_eq!(set.names, vec!["t"]);
     assert!(set.lowered.is_empty());
-    let set = threaded(&generator, "#(1) do: b").expect("opaque fold");
-    assert_eq!(set.construct, ThreadedConstruct::OpaqueFold);
-    // ADR 0128: an opaque fold threads only in actor instance context.
-    generator.context = CodeGenContext::ValueType;
+    // BT-3798: a collection HOM over a Tier 2 local is not a construct (a
+    // stored block passed to a HOM is never promoted to Tier 2).
     assert!(threaded(&generator, "#(1) do: b").is_none());
     // A local that is not a Tier 2 block is not a construct.
     assert!(threaded(&generator, "c value").is_none());

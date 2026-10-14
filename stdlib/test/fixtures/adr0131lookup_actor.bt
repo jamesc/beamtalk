@@ -1,0 +1,365 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes
+// an outer local is a local-threading producer, actor-instance-method column. The handler is
+// lowered inline (a `BranchArm` frame) behind a runtime receiver guard
+// (`beamtalk_map:lookup_for_threading/3`), so the send is a producer in every
+// operand position and as a statement. The other columns are
+// adr0131lookup_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131lookup_test.bt.
+
+Actor subclass: Adr0131LookupActor
+  state: n = 0
+
+  base => #{#a => 1}
+
+  key => #k
+
+  bumpKey =>
+    self.n := self.n + 1
+    #k
+
+  bumpBase =>
+    self.n := self.n + 10
+    #{#a => 1}
+
+  // A handler that writes `t`, as the whole value of an assignment (s1).
+  s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // The handler does not run when the key is present: `t` is unchanged.
+  found =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #a
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // A stored `nil` is a hit, not a miss: the handler does not run.
+  foundNil =>
+    t := 0
+    d := #{#k => nil}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        5
+      ]
+    #[r, t]
+
+  // An empty dictionary runs the handler.
+  emptyDictionary =>
+    t := 0
+    d := #{}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        5
+      ]
+    #[r, t]
+
+  // The same lookup as a statement.
+  statement =>
+    t := 0
+    d := #{#a => 1}
+    d at: #k ifAbsent: [t := t + 1]
+    t
+
+  // A handler that only writes (never reads) the local.
+  writeOnly =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := 7
+        0
+      ]
+    #[r, t]
+
+  // A handler writing two locals.
+  twoLocals =>
+    t := 0
+    u := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        u := u + 2
+        0
+      ]
+    #[r, t, u]
+
+  // A handler-writing lookup as an argument, after a read of `t`.
+  argument =>
+    t := 0
+    d := #{#a => 1}
+    r := 1 + (d
+      at: #k
+      ifAbsent: [
+        t := t + 4
+        5
+      ])
+    #[r, t]
+
+  // A handler-writing lookup as a binary operand after a read of `t`: the read sees the old value.
+  leftRead =>
+    t := 0
+    d := #{#a => 1}
+    r := t + (d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        5
+      ])
+    #[r, t]
+
+  // A handler-writing lookup as the left operand of a `^` value that reads `t` afterwards.
+  returned =>
+    t := 0
+    d := #{#a => 1}
+    ^(d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        5
+      ]) + t
+
+  // A handler-writing lookup as the last expression of the method.
+  last =>
+    t := 0
+    d := #{#a => 1}
+    d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        3
+      ]
+
+  // A parenthesised handler-writing lookup statement.
+  parenthesised =>
+    t := 0
+    d := #{#a => 1}
+    (d at: #k ifAbsent: [t := t + 1])
+    t
+
+  // The assignment target is the local the handler writes: the assigned value wins.
+  assignsTarget =>
+    t := 0
+    d := #{#a => 1}
+    t := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        9
+      ]
+    t
+
+  // Two handler-writing lookups in a row, as statements.
+  twice =>
+    t := 0
+    d := #{#a => 1}
+    d at: #k ifAbsent: [t := t + 1]
+    d at: #j ifAbsent: [t := t + 10]
+    t
+
+  // Two handler-writing lookups as the operands of one expression.
+  bothOperands =>
+    t := 0
+    d := #{#a => 1}
+    r := (d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        1
+      ]) + (d
+      at: #j
+      ifAbsent: [
+        t := t + 10
+        2
+      ])
+    #[r, t]
+
+  // The key is read before the handler runs and writes the local it reads.
+  keyReadsLocal =>
+    t := 5
+    d := #{0 => 7}
+    r := d
+      at: t
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // The receiver is a self-send.
+  receiverSelfSend =>
+    t := 0
+    r := (self base)
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // The key is a self-send.
+  keySelfSend =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: (self key)
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // A handler-writing lookup in an arm of a conditional producer.
+  armMissing: flag =>
+    t := 0
+    d := #{#a => 1}
+    r := nil
+    flag
+      ifTrue: [
+        r := d
+          at: #k
+          ifAbsent: [
+            t := t + 1
+            0
+          ]
+      ]
+    #[r, t]
+
+  // A handler-writing lookup in the protected body of an `on:do:` producer.
+  onDoBody =>
+    t := 0
+    d := #{#a => 1}
+    r := [
+      d
+        at: #k
+        ifAbsent: [
+          t := t + 1
+          0
+        ]
+    ] on: Error do: [:e | -1]
+    #[r, t]
+
+  // A handler-writing lookup in the handler of another.
+  nestedLookup =>
+    t := 0
+    d := #{#a => 1}
+    e := #{#a => 2}
+    r := d
+      at: #k
+      ifAbsent: [
+        e
+          at: #z
+          ifAbsent: [
+            t := t + 1
+            4
+          ]
+      ]
+    #[r, t]
+
+  // The handler holds a loop that writes `t`.
+  handlerHoldsLoop =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        #(1, 2) do: [:x | t := t + x]
+        0
+      ]
+    #[r, t]
+
+  // The handler holds a fold that writes `t`.
+  handlerHoldsFold =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+      ]
+    #[r, t]
+
+  // The handler returns from the method; a hit continues.
+  earlyReturn: key =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: key
+      ifAbsent: [
+        t := t + 1
+        ^t
+      ]
+    #[r, t]
+
+  // The receiver is whatever the caller passes: only a Dictionary can run the handler inline.
+  lookupIn: receiver =>
+    t := 0
+    r := receiver
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t]
+
+  // The key is a self-send that mutates a field.
+  keyBumpsState =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: (self bumpKey)
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t, self.n]
+
+  // The receiver is a self-send that mutates a field, and so is the key.
+  receiverBumpsState =>
+    t := 0
+    r := (self bumpBase)
+      at: (self bumpKey)
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
+    #[r, t, self.n]
+
+  // The handler reads a field and writes a local.
+  fieldReadInHandler =>
+    t := 0
+    d := #{#a => 1}
+    self.n := 4
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + self.n
+        0
+      ]
+    #[r, t, self.n]

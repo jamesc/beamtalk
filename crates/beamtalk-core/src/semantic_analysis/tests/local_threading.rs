@@ -822,6 +822,11 @@ fn adr0131_probe_matrix_pins() {
         let compiled = format!("adr0131local_rebind_{context}.bt");
         let diags = adr0131_diagnostics(&read(&compiled));
         assert!(diags.is_empty(), "{compiled}: {diags:?}");
+        // (The actor column has no pending fixture left: its last shape, s1,
+        // moved to the compiled fixture with BT-3798.)
+        if context == "actor" {
+            continue;
+        }
 
         let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
         let src = read(&pending);
@@ -1785,5 +1790,205 @@ fn match_arm_binding_its_own_local_or_the_match_value_is_accepted() {
             let diags = adr0131_diagnostics(&src);
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 2d (BT-3798): `Dictionary at:ifAbsent:` as a producer
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dictionary_lookup_handler_write_is_a_producer_in_every_method_context() {
+    // A statement, an assignment's value, an operand, a `^` value and the last
+    // expression, with the handler reading and write-only, and the lookup
+    // parenthesised.
+    for body in [
+        "d := #{#a => 1}\nd at: #k ifAbsent: [t := t + 1]\nt",
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [t := 7. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := 1 + (d at: #k ifAbsent: [t := t + 1. 5])\n#[r, t]",
+        "d := #{#a => 1}\nr := t + (d at: #k ifAbsent: [t := t + 1. 5])\n#[r, t]",
+        "d := #{#a => 1}\n^(d at: #k ifAbsent: [t := t + 1. 5]) + t",
+        "d := #{#a => 1}\n(d at: #k ifAbsent: [t := t + 1])\nt",
+        "d := #{#a => 1}\nd at: #k ifAbsent: [t := t + 1. 3]",
+        // The key and receiver are ordinary operands.
+        "d := #{#a => 1}\nr := d at: t ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        // In an arm of a conditional producer and a protected body.
+        "d := #{#a => 1}\nr := nil\n(t < 3) ifTrue: [r := d at: #k ifAbsent: [t := t + 1. 0]]\n#[r, t]",
+        "d := #{#a => 1}\nr := [d at: #k ifAbsent: [t := t + 1. 0]] on: Error do: [:e | -1]\n#[r, t]",
+        // The handler holds a loop, a conditional and another lookup.
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [#(1, 2) do: [:x | t := t + x]. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [(t < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [d at: #z ifAbsent: [t := t + 1. 4]]\n#[r, t]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
+    for body in [
+        // A parenthesised handler is a block value.
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: ([t := t + 1. 0])\n#[r, t]",
+        // A block key is a block value too.
+        "d := #{#a => 1}\nr := d at: [t := t + 1. #k] ifAbsent: [0]\n#[r, t]",
+        // The handler takes a parameter: the primitive calls it with none.
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [:x | t := t + 1. 0]\n#[r, t]",
+        // A cascade message is never inlined.
+        "d := #{#a => 1}\nd at: #k ifAbsent: [t := t + 1]; yourself\nt",
+        // In the body of a loop or fold: the lookup producer lowers at the
+        // method root and in arm frames only.
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #k ifAbsent: [t := t + x]]\nt",
+        "d := #{#a => 1}\n1 to: 2 do: [:i | r := d at: #k ifAbsent: [t := t + i. 0]]\nt",
+        // In a closure.
+        "d := #{#a => 1}\nb := [d at: #k ifAbsent: [t := t + 1. 0]]\nb value",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(!diags.is_empty(), "{src}");
+        }
+    }
+}
+
+#[test]
+fn lookup_selectors_that_dictionary_does_not_implement_stay_rejected() {
+    // `Dictionary` implements `at:ifAbsent:` only (pinned against the class
+    // hierarchy by `dictionary_inline_rows_are_dictionary_selectors`), so the
+    // other four rows have no behaviour to lower: a handler that writes an
+    // outer local is a §6 error in every context and position.
+    for body in [
+        "d := #{#a => 1}\nr := d at: #k ifAbsentPut: [t := t + 1. 0]\n#[r, t]",
+        "d := #{#a => 1}\nd at: #k ifPresent: [:v | t := t + v]\nt",
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d removeKey: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert_eq!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+                1,
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dictionary_lookup_is_not_a_producer_at_the_repl() {
+    // The REPL threads its bindings map through its own lowering, which has no
+    // lookup row: the §6 error stays.
+    let known = ["t", "d"];
+    for src in [
+        "d at: #k ifAbsent: [t := t + 1. 0]\n",
+        "r := d at: #k ifAbsent: [t := t + 1. 0]\n",
+        "1 + (d at: #k ifAbsent: [t := t + 1. 0])\n",
+    ] {
+        let diags = adr0131_diagnostics_with(src, &known);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn dictionary_lookup_that_writes_no_outer_local_is_not_judged() {
+    for body in [
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifAbsent: [m := 1. m + 1]\n#[r, t]",
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #k ifAbsent: [m := x. m]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn lookup_on_a_receiver_statically_known_not_to_be_a_dictionary_keeps_the_section6_error() {
+    // BT-3798 review: the runtime guard would raise on every call, so the
+    // compile-time error stays for `self`/`super` and for an inferred type
+    // that is a known class other than Dictionary.
+    let own = "  at: key ifAbsent: block => block value\n";
+    for (header, body) in [
+        // `self` in a class that defines its own `at:ifAbsent:`.
+        (
+            format!("Value subclass: Own\n{own}\n  probe =>\n    t := 0"),
+            "r := self at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        // `super`.
+        (
+            format!("Value subclass: Own\n{own}\n  probe =>\n    t := 0"),
+            "r := super at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        // `self` of an actor.
+        (
+            format!("Actor subclass: Own\n  state: n = 0\n\n{own}\n  probe =>\n    t := 0"),
+            "r := self at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        // A parameter typed with a class that is not a Dictionary.
+        (
+            "Value subclass: Own\n  probe: cache :: Ets =>\n    t := 0".to_string(),
+            "r := cache at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe: xs :: List =>\n    t := 0".to_string(),
+            "xs at: 1 ifAbsent: [t := t + 1]\nt",
+        ),
+        // A class object.
+        (
+            "Value subclass: Own\n  probe =>\n    t := 0".to_string(),
+            "r := Own at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+    ] {
+        let src = format!("{header}\n{}\n", indent(body));
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn lookup_on_a_receiver_that_may_be_a_dictionary_stays_a_producer() {
+    // Unknown, Dynamic, an ancestor of Dictionary and Dictionary itself keep
+    // the producer and its runtime guard.
+    for (header, body) in [
+        (
+            "Value subclass: Own\n  probe: d =>\n    t := 0",
+            "r := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe: d :: Dictionary =>\n    t := 0",
+            "r := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe: d :: Object =>\n    t := 0",
+            "r := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe: d :: Collection =>\n    t := 0",
+            "r := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe: d :: Dictionary | Ets =>\n    t := 0",
+            "r := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "Value subclass: Own\n  probe =>\n    t := 0",
+            "r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+    ] {
+        let src = format!("{header}\n{}\n", indent(body));
+        let diags = adr0131_diagnostics(&src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
     }
 }

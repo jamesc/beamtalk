@@ -187,6 +187,7 @@ mod late_reconcile_conformance;
 mod local_producer_agreement;
 mod local_producer_agreement_conditional;
 mod local_producer_agreement_exception;
+mod local_producer_agreement_lookup;
 mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
 mod loop_body_self_send_operand_corpus;

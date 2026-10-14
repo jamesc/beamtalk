@@ -12,7 +12,7 @@
 //
 // The shapes that do not compile in a class method today are in
 // adr0131local_rebind_class_pending.bt.pending, so this module compiles: o3,
-// o12 and s2 (codegen failures before BT-3745), and o1, o2, o5-o10, o13, s1,
+// o12 and s2 (codegen failures before BT-3745), and o1, o2, o5-o10, o13,
 // s7 and seq (ADR 0131 Phase 0 compile errors since BT-3745). o4 and s9 moved
 // here when ADR 0131 Phase 2 (BT-3749) made loops and folds local-threading
 // producers. s4 is a permanent ADR 0131 §6 error and is pinned only in the
@@ -93,6 +93,18 @@ Object subclass: Adr0131LocalRebindClass
         t := t + 1
         false
       ]) size
+    #[r, t]
+
+  // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes.
+  class s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
     #[r, t]
 
   // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes.

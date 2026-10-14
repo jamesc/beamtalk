@@ -12,8 +12,9 @@
 //
 // Every shape compiled in an actor instance method before BT-3745. Since
 // BT-3745 (ADR 0131 Phase 0b) the ones that crashed or answered wrong (o1-o4,
-// o6-o10, o12, s1, s2, s9, seq) are compile errors and live in
-// adr0131local_rebind_actor_pending.bt.pending, so this module compiles. o4
+// o6-o10, o12, s1, s2, s9, seq) were compile errors, kept in an inert pending
+// fixture until each moved back here; the last (s1) did with BT-3798 (ADR 0131
+// Phase 2d), so no actor shape is pending. o4
 // and s9 moved back when ADR 0131 Phase 2 (BT-3749) made loops and folds
 // local-threading producers.
 
@@ -165,6 +166,18 @@ Actor subclass: Adr0131LocalRebindActor
         t := t + 1
         false
       ]) size
+    #[r, t]
+
+  // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes.
+  s1 =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifAbsent: [
+        t := t + 1
+        0
+      ]
     #[r, t]
 
   // BT-3794 (ADR 0131 Phase 2c): `detect:ifNone:` whose handler writes.

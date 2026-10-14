@@ -220,8 +220,10 @@ t := 0
 // => 0
 
 // PIN-BUG BT-3743: the Tier 2 block reached the native `at:ifAbsent:`;
-// since BT-3745 it is an ADR 0131 §6 compile error until `at:ifAbsent:`
-// becomes a producer (phase 2). Correct answer: 0.
+// since BT-3745 it is an ADR 0131 §6 compile error. BT-3798 (ADR 0131 Phase
+// 2d) made a `Dictionary` lookup a producer in class, value-type and actor
+// methods; the REPL keeps the error (its bindings-map lowering has no lookup
+// row). Correct answer: 0.
 r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
 // => ERROR: block writes outer local `t`, but `at:ifAbsent:` cannot return the write
 
