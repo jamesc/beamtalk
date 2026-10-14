@@ -43,7 +43,7 @@
 //!   the ones that answer right today. Anywhere else it is an error naming the
 //!   construct, the position and BT-3743.
 
-use crate::ast::{Block, Expression, ExpressionStatement, Identifier, MessageSelector, Module};
+use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LoopBodyContext, OuterLocalWrite, RootMethodKind, captured_local_mutations,
@@ -1121,12 +1121,6 @@ impl<'d> Walker<'d> {
             Expression::Parenthesized { expression, .. } => self.expr(expression, position),
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
-                    if position == Position::MatchArm
-                        && self.context != Repl
-                        && self.is_bound(&id.name)
-                    {
-                        self.report_match_arm_write(id, expr.span());
-                    }
                     self.operand(value, Position::AssignValue { nested });
                     self.define(&id.name);
                     let top_statement = self.top_level(position) == TopLevel::Statement;
@@ -1258,6 +1252,9 @@ impl<'d> Walker<'d> {
                     let (ids, _) =
                         crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                     self.scope.push(ids.into_iter().map(|id| id.name).collect());
+                    if self.context != Repl {
+                        self.report_match_arm_writes(arm);
+                    }
                     if let Some(guard) = &arm.guard {
                         self.operand(guard, Position::MatchArm);
                     }
@@ -1697,20 +1694,59 @@ impl<'d> Walker<'d> {
 
     /// A `match:` arm that assigns an outer local. The arm is an expression,
     /// not a block, so no construct threads its write back to the method
-    /// (BT-3817): compiling it would drop the write silently.
-    fn report_match_arm_write(&mut self, target: &Identifier, span: Span) {
-        let name = &target.name;
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!("a `match:` arm writes outer local `{name}`, but `match:` cannot return the write"),
-                span,
-            )
-            .with_hint(format!(
-                "bind the arm's value instead: `{name} := subject match: [pattern -> newValue; ...]`, \
-                 or use `ifTrue:`/`ifNil:` for a branch that writes `{name}`"
-            ))
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
+    /// (BT-3817): compiling it would drop the write silently. Walks the whole
+    /// arm (guard and body) without entering a nested block literal, whose
+    /// writes are the constructs' own business; the arm's pattern variables
+    /// (the innermost scope frame, already pushed) are the arm's own.
+    fn report_match_arm_writes(&mut self, arm: &MatchArm) {
+        let Some((own, outer)) = self.scope.split_last() else {
+            return;
+        };
+        let roots: Vec<&Expression> = arm.guard.iter().chain([&arm.body]).collect();
+        let mut block_spans: Vec<Span> = Vec::new();
+        for root in &roots {
+            crate::ast_walker::walk_expression(root, &mut |e| {
+                if let Expression::Block(b) = e {
+                    block_spans.push(b.span);
+                }
+            });
+        }
+        let mut found: Vec<(EcoString, Span)> = Vec::new();
+        for root in &roots {
+            crate::ast_walker::walk_expression(root, &mut |e| {
+                let Expression::Assignment { target, .. } = e else {
+                    return;
+                };
+                let Expression::Identifier(id) = target.as_ref() else {
+                    return;
+                };
+                let span = e.span();
+                let in_block = block_spans
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end());
+                if !in_block
+                    && !own.contains(&id.name)
+                    && outer.iter().any(|f| f.contains(&id.name))
+                {
+                    found.push((id.name.clone(), span));
+                }
+            });
+        }
+        for (name, span) in found {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "a `match:` arm writes outer local `{name}`, but `match:` cannot return the write"
+                    ),
+                    span,
+                )
+                .with_hint(format!(
+                    "bind the arm's value instead: `{name} := subject match: [pattern -> newValue; ...]`, \
+                     or use `ifTrue:`/`ifNil:` for a branch that writes `{name}`"
+                ))
+                .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+            );
+        }
     }
 
     fn report_literal(&mut self, block: &Block, selector: &str) {

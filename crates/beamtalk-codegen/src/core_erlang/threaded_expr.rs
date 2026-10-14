@@ -781,16 +781,14 @@ impl CoreErlangGenerator {
             return None;
         }
         let Some(set) = self.threaded_locals_of(expr) else {
-            // No outer local is written: a value-type `on:do:`/`ensure:` that
-            // writes only `self.field` still threads the `Self` family, so it
-            // is a producer with no `LocalRebind`s.
-            return (kind
-                == beamtalk_core::semantic_analysis::block_facts::RootMethodKind::ValueType
-                && !self
-                    .exception_construct_threaded_families(expr)
-                    .as_slice()
-                    .is_empty())
-            .then(Vec::new);
+            // No outer local is written: the core rule alone decides whether a
+            // field-only value-type exception is a producer (an empty set).
+            return beamtalk_core::semantic_analysis::block_facts::exception_producer_writes(
+                expr,
+                &|name| self.binds_threadable_local(name),
+                kind,
+            )
+            .map(|_| Vec::new());
         };
         (set.lowered == set.names).then_some(set.lowered)
     }

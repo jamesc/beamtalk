@@ -98,3 +98,45 @@ fn every_exception_frame_site_the_core_rule_accepts_is_lowered_by_the_producer()
         "only {checked} exception frame sites compared"
     );
 }
+
+/// Exceptions that write a field of a value type: the `Self` family rides the
+/// construct's result tuple. With no outer local written the core rule names a
+/// producer with an empty set (codegen reads that same rule), with one it
+/// names the locals as usual.
+const VT_FIELD_EXCEPTIONS: &[&str] = &[
+    "[self.total := 1] on: Error do: [:e | nil]",
+    "[self.total := 1] ensure: [nil]",
+    "[nil] ensure: [self.total := 1]",
+    "[nil] on: Error do: [:e | self.total := 1]",
+    "[s := 0. #(1, 2) do: [:e | s := s + e]. self.total := s] on: Error do: [:e | nil]",
+    "[t := t + 1. self.total := t] ensure: [nil]",
+    "[self.total := 1] on: Error do: [:e | t := t + 1]",
+];
+
+/// Positions for [`VT_FIELD_EXCEPTIONS`]: a statement, the last expression, an
+/// assignment's value and an operand (a field write nested in another block is
+/// a `FieldAssignmentInUnsupportedBlock` error in a value type).
+const VT_FIELD_POSITIONS: &[&str] = &["{c}\nt", "{c}", "r := {c}\n#[r, t]", "r := ({c})\nt"];
+
+#[test]
+fn field_writing_value_type_exceptions_agree_with_the_core_rule() {
+    let mut checked = 0;
+    for construct in VT_FIELD_EXCEPTIONS {
+        for position in VT_FIELD_POSITIONS {
+            let mut body = String::new();
+            for line in format!(
+                "t := 0\nu := 0\ns := 0\nr := 0\n{}",
+                position.replace("{c}", construct)
+            )
+            .lines()
+            {
+                body.push_str("    ");
+                body.push_str(line);
+                body.push('\n');
+            }
+            let src = format!("Value subclass: AgreeValue\n  field: total = 0\n\n  go =>\n{body}");
+            checked += check_conditional_agreement(&src).unwrap_or(0);
+        }
+    }
+    assert!(checked > 10, "only {checked} field-writing sites compared");
+}

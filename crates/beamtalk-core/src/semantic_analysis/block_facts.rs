@@ -1457,14 +1457,26 @@ pub fn operand_producer_writes(
     if packed.is_empty() {
         return None;
     }
+    packed_writes_agree(&construct, &packed, bound_outside)
+}
+
+/// The agreement tail of every producer rule: the construct's threaded set
+/// ([`construct_outer_local_writes`]) is not empty and equals the set its
+/// `packed` blocks pack (`threaded_today_block_writes`), so no write is dropped.
+/// Returns the construct's set, or `None` when the rule fails.
+fn packed_writes_agree(
+    construct: &LocalThreadingConstruct<'_>,
+    packed: &[&Block],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Option<Vec<OuterLocalWrite>> {
     let names = |writes: &[OuterLocalWrite]| {
         let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
         names.into_iter().map(str::to_string).collect::<Vec<_>>()
     };
-    let all = construct_outer_local_writes(&construct, bound_outside);
-    let today = threaded_today_block_writes(&packed, bound_outside);
+    let all = construct_outer_local_writes(construct, bound_outside);
+    let today = threaded_today_block_writes(packed, bound_outside);
     (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
@@ -1699,15 +1711,7 @@ pub fn conditional_producer_writes(
         return None;
     }
     let construct = local_threading_construct(expr)?;
-    let names = |writes: &[OuterLocalWrite]| {
-        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
-        names.sort_unstable();
-        names.dedup();
-        names.into_iter().map(str::to_string).collect::<Vec<_>>()
-    };
-    let all = construct_outer_local_writes(&construct, bound_outside);
-    let today = threaded_today_block_writes(&arms, bound_outside);
-    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
+    packed_writes_agree(&construct, &arms, bound_outside)
 }
 
 /// ADR 0131 Phase 3b (BT-3817): the threaded set of an `on:do:`/`ensure:` that
@@ -1734,15 +1738,29 @@ pub fn exception_producer_writes(
         return None;
     }
     let construct = local_threading_construct(expr)?;
-    let names = |writes: &[OuterLocalWrite]| {
-        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
-        names.sort_unstable();
-        names.dedup();
-        names.into_iter().map(str::to_string).collect::<Vec<_>>()
-    };
-    let all = construct_outer_local_writes(&construct, bound_outside);
-    let today = threaded_today_block_writes(&arms, bound_outside);
-    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
+    if construct_outer_local_writes(&construct, bound_outside).is_empty() {
+        // No outer local is written. A value-type exception that writes only
+        // `self.field` still threads the `Self` family (its result tuple's
+        // trailing slot, ADR 0122), so it is a producer with an empty set and
+        // no `LocalRebind`s; anything else is not a producer.
+        return (kind == RootMethodKind::ValueType && arms_write_self_field(&arms)).then(Vec::new);
+    }
+    packed_writes_agree(&construct, &arms, bound_outside)
+}
+
+/// Whether any statement of `arms` assigns a `self.field`.
+fn arms_write_self_field(arms: &[&Block]) -> bool {
+    let mut found = false;
+    for arm in arms {
+        for stmt in &arm.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Assignment { target, .. } = e {
+                    found |= is_self_field_target(target);
+                }
+            });
+        }
+    }
+    found
 }
 
 /// ADR 0131 Phase 3 (BT-3738): [`operand_producer_writes`],

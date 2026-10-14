@@ -1680,11 +1680,27 @@ fn match_arm_writing_an_outer_local_is_a_structured_error_in_every_context() {
 }
 
 #[test]
+fn match_arm_write_nested_in_an_expression_is_an_error() {
+    let nested = "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt";
+    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
 fn match_arm_binding_its_own_local_or_the_match_value_is_accepted() {
     for body in [
         "t := #a match: [#a -> 5; _ -> 0]\nt",
         "#a match: [#a -> (m := 1); _ -> 0]\nt",
         "#a match: [#a -> (t + 1); _ -> 0]",
+        // The arm rebinds its own pattern variable.
+        "3 match: [x -> (x := x + 1)]\nt",
+        "#(1, 2) match: [{a, b} -> (a := a + b)]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);

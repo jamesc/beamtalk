@@ -147,6 +147,19 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
     out
 }
 
+/// Every `on:do:`/`ensure:` in the method body, by span.
+fn exception_spans(body: &[ExpressionStatement]) -> HashSet<Span> {
+    let mut out = HashSet::new();
+    for stmt in body {
+        beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if exception_arm_blocks(e).is_some() {
+                out.insert(Expression::span(e.unwrap_parens()));
+            }
+        });
+    }
+    out
+}
+
 /// Compares the core rule and codegen for one program, both ways. Returns
 /// `None` for a program the Phase 0 checks reject (nothing is compiled or
 /// compared), else the number of producer sites compared.
@@ -180,11 +193,15 @@ pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
         generate_module_with_warnings(&module, CodegenOptions::new("agree"))
     });
     assert!(generated.is_ok(), "{src}: {:?}", generated.err());
+    let conditionals = conditional_spans(&method.body);
+    // A field-only value-type `on:do:`/`ensure:` is a producer with an empty
+    // set (the core rule's `Some(vec![])`), so an exception's empty record
+    // counts; for anything else an empty record is no producer.
+    let exceptions = exception_spans(&method.body);
     let lowered: HashMap<Span, Vec<String>> = records
         .into_iter()
-        .filter(|(_, names)| !names.is_empty())
+        .filter(|(span, names)| !names.is_empty() || exceptions.contains(span))
         .collect();
-    let conditionals = conditional_spans(&method.body);
     let mut checked = 0;
     for (span, names) in &expected {
         assert_eq!(
