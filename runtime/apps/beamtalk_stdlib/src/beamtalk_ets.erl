@@ -402,7 +402,7 @@ ifPresent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
 ->
     %% Block runs in the `of` branch so its own badarg is not a stale table.
     try ets:lookup(TableName, Key) of
-        [{_K, Value} | _] -> Block(Value);
+        [{_K, Value} | _] -> call_block(Block, Value, 'at:ifPresent:');
         [] -> nil
     catch
         error:badarg -> stale_table_error('at:ifPresent:', TableName)
@@ -457,6 +457,7 @@ updateAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 1)
 ->
     require_unique_keys(TableName, 'at:update:'),
+    require_plain_key(Key, 'at:update:'),
     update_loop(TableName, Key, Block, ?MAX_UPDATE_RETRIES);
 updateAt(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error(
@@ -481,31 +482,97 @@ update_loop(TableName, Key, _Block, 0) ->
         )
     );
 update_loop(TableName, Key, Block, Retries) ->
-    try ets:lookup(TableName, Key) of
+    case guarded(TableName, 'at:update:', fun() -> ets:lookup(TableName, Key) end) of
         [] ->
-            New = Block(nil),
+            New = call_block(Block, nil, 'at:update:'),
             %% insert_new fails if another writer created the key meanwhile.
-            case ets:insert_new(TableName, {Key, New}) of
+            case
+                guarded(TableName, 'at:update:', fun() -> ets:insert_new(TableName, {Key, New}) end)
+            of
                 true -> New;
                 false -> update_loop(TableName, Key, Block, Retries - 1)
             end;
-        [{_K, Old}] ->
-            New = Block(Old),
-            %% Match on key and the exact old value (`=:=` via guard) so a
-            %% concurrent change makes the replace a no-op.
-            MS = [{{Key, '$1'}, [{'=:=', '$1', {const, Old}}], [{{{const, Key}, {const, New}}}]}],
-            case ets:select_replace(TableName, MS) of
+        [{StoredKey, Old}] ->
+            New = call_block(Block, Old, 'at:update:'),
+            %% Match the key as stored (an orderedSet may hold 1 for lookup 1.0)
+            %% and the exact old value, so a concurrent change makes the
+            %% replace a no-op.
+            MS = [
+                {
+                    {StoredKey, '$1'},
+                    [{'=:=', '$1', {const, Old}}],
+                    [{{{const, StoredKey}, {const, New}}}]
+                }
+            ],
+            case guarded(TableName, 'at:update:', fun() -> ets:select_replace(TableName, MS) end) of
                 1 -> New;
                 0 -> update_loop(TableName, Key, Block, Retries - 1)
             end
+    end.
+
+-doc """
+Run an ETS operation, mapping a `badarg` to a stale-table error when the table
+is gone. Any other `badarg` becomes a structured `type_error`, so a raw
+`badarg` never escapes to the FFI proxy's charlist retry (which would re-run
+the operation under a different key).
+""".
+-spec guarded(atom(), atom(), fun(() -> term())) -> term().
+guarded(TableName, Selector, Fun) ->
+    try
+        Fun()
     catch
         error:badarg ->
             case ets:whereis(TableName) of
-                undefined -> stale_table_error('at:update:', TableName);
-                %% badarg from the table op for another reason, or the Block's own.
-                _ -> erlang:raise(error, badarg, [])
+                undefined ->
+                    stale_table_error(Selector, TableName);
+                _ ->
+                    beamtalk_error:raise_type_error(
+                        'Ets', Selector, <<"Key or value cannot be stored in this table">>
+                    )
             end
     end.
+
+-doc "Call a user Block, converting a raw `badarg` into a structured error.".
+-spec call_block(function(), term(), atom()) -> term().
+call_block(Block, Arg, Selector) ->
+    try
+        Block(Arg)
+    catch
+        error:badarg ->
+            beamtalk_error:raise_type_error('Ets', Selector, <<"Block raised badarg">>)
+    end.
+
+-doc """
+Raise a structured error if the key contains an atom ETS match specs read as a
+pattern variable (`'_'` or `'$N'`), since the CAS embeds the key in a match head.
+""".
+-spec require_plain_key(term(), atom()) -> ok.
+require_plain_key(Key, Selector) ->
+    case has_match_variable(Key) of
+        false ->
+            ok;
+        true ->
+            beamtalk_error:raise_type_error(
+                'Ets', Selector, <<"Keys containing #_ or #$N symbols are not supported">>
+            )
+    end.
+
+-spec has_match_variable(term()) -> boolean().
+has_match_variable('_') ->
+    true;
+has_match_variable(A) when is_atom(A) ->
+    case atom_to_list(A) of
+        [$$ | Digits] ->
+            Digits =/= [] andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Digits);
+        _ ->
+            false
+    end;
+has_match_variable(T) when is_tuple(T) -> has_match_variable(tuple_to_list(T));
+has_match_variable([H | T]) ->
+    has_match_variable(H) orelse has_match_variable(T);
+has_match_variable(M) when is_map(M) -> has_match_variable(maps:to_list(M));
+has_match_variable(_) ->
+    false.
 
 -doc "Raise a structured error unless the table holds one entry per key.".
 -spec require_unique_keys(atom(), atom()) -> ok.

@@ -825,3 +825,39 @@ bt3831_bag_rejected_test() ->
     after
         ets:delete(bt3831_bag)
     end.
+
+bt3831_block_badarg_writes_nothing_test() ->
+    with_table(bt3831_badarg, fun(T) ->
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:updateAt(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
+        ),
+        ?assertEqual([], ets:tab2list(bt3831_badarg)),
+        beamtalk_ets:insert(T, <<"k">>, 1),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:ifPresent(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
+        )
+    end).
+
+bt3831_update_ordered_set_float_key_test() ->
+    (catch ets:delete(bt3831_ord)),
+    T = beamtalk_ets:'new:type:'(bt3831_ord, orderedSet),
+    try
+        beamtalk_ets:insert(T, 1, 10),
+        ?assertEqual(11, beamtalk_ets:updateAt(T, 1.0, fun(O) -> O + 1 end))
+    after
+        ets:delete(bt3831_ord)
+    end.
+
+bt3831_update_wildcard_key_rejected_test() ->
+    with_table(bt3831_wild, fun(T) ->
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:updateAt(T, '_', fun(_) -> 1 end)
+        ),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:updateAt(T, {'$1', x}, fun(_) -> 1 end)
+        )
+    end).
