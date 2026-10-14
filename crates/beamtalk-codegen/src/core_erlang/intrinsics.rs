@@ -1899,6 +1899,7 @@ impl CoreErlangGenerator {
                                 Some(block),
                                 None,
                                 ScratchStart::Continue,
+                                false,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -1951,6 +1952,7 @@ impl CoreErlangGenerator {
                                 None,
                                 Some(block),
                                 ScratchStart::Continue,
+                                false,
                             )?;
                             return Ok(Some(doc));
                         }
@@ -2002,6 +2004,7 @@ impl CoreErlangGenerator {
                                 Some(nil_block),
                                 Some(not_nil_block),
                                 ScratchStart::Continue,
+                                false,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -2062,6 +2065,7 @@ impl CoreErlangGenerator {
                                 Some(nil_block),
                                 Some(not_nil_block),
                                 ScratchStart::Continue,
+                                false,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -2770,6 +2774,10 @@ impl CoreErlangGenerator {
     ///
     /// - Returns `Ok(Some(doc))` generating `{Result, NewState}` tuple when mutations detected
     /// - Returns `Ok(None)` otherwise (fall through to `beamtalk_message_dispatch:send`)
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one arm per conditional selector, each with its load-bearing rationale comment"
+    )]
     pub(in crate::core_erlang) fn try_generate_boolean_protocol(
         &mut self,
         receiver: &Expression,
@@ -2829,12 +2837,14 @@ impl CoreErlangGenerator {
                                     receiver,
                                     block,
                                     ScratchStart::Continue,
+                                    false,
                                 )?
                             } else {
                                 self.generate_or_with_mutations_tuple(
                                     receiver,
                                     block,
                                     ScratchStart::Continue,
+                                    false,
                                 )?
                             };
                             return Ok(Some(doc));
@@ -2873,6 +2883,7 @@ impl CoreErlangGenerator {
                             receiver,
                             block,
                             ScratchStart::Continue,
+                            false,
                         )?;
                         return Ok(Some(doc));
                     }
@@ -2893,6 +2904,7 @@ impl CoreErlangGenerator {
                             receiver,
                             block,
                             ScratchStart::Continue,
+                            false,
                         )?;
                         return Ok(Some(doc));
                     }
@@ -2917,6 +2929,7 @@ impl CoreErlangGenerator {
                             true_block,
                             false_block,
                             ScratchStart::Continue,
+                            false,
                         )?;
                         return Ok(Some(doc));
                     }

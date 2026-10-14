@@ -207,11 +207,6 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
     out
 }
 
-/// Programs where a producer was lowered inside an arm of a conditional the
-/// core rule does not name (the arm-frame registration would be wrong there).
-static NON_PRODUCER_WITH_LOWERED_ARM_PRODUCER: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 /// Compares the core rule and codegen for one program, both ways; a program
 /// the Phase 0 checks reject is skipped. Returns the number of producer sites
 /// compared.
@@ -250,19 +245,6 @@ fn check_conditional_agreement(src: &str) -> usize {
         .filter(|(_, names)| !names.is_empty())
         .collect();
     let conditionals = conditional_spans(&method.body);
-    // How many conditionals the rule does not name hold a loop or fold in an arm
-    // (the case an arm frame registered for a non-producer would matter in).
-    for (cond, arms) in &conditionals {
-        if !expected.contains_key(cond)
-            && lowered.keys().any(|s| {
-                arms.iter()
-                    .any(|a| a.start() <= s.start() && s.end() <= a.end())
-            })
-        {
-            NON_PRODUCER_WITH_LOWERED_ARM_PRODUCER
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
     let mut checked = 0;
     for (span, names) in &expected {
         assert_eq!(
@@ -333,13 +315,13 @@ fn every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     assert!(checked > 300, "only {checked} arm frame sites compared");
 }
 
-/// Actor conditionals that are NOT necessarily producers: an arm that writes a
-/// field or sends to `self`, with a loop or fold writing `t` in an arm, nested
-/// conditionals, and a handler-writing lookup (a set that may not be fully
-/// packed). Codegen registers an arm frame for a conditional whenever its
-/// `_tuple` builder runs in a producer frame, so the Phase 0 check and codegen
-/// must agree on which of these are producers and how their arms lower
-/// (BT-3738 review): [`check_conditional_agreement`] compares both ways.
+/// Actor conditionals the core rule does not name as producers (the arm writes a
+/// field or sends to `self` and writes no outer local, or holds a lookup whose
+/// writes are not fully packed), with loops and folds in their arms. The
+/// invariant [`check_conditional_agreement`] checks: codegen registers
+/// `BranchArm` frames only for a conditional the core rule names, so a loop or
+/// fold in the arm of any other conditional is judged and lowered by the legacy
+/// rows, never by an arm frame.
 const ACTOR_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [self.n := 1. #(1) do: [:e | t := t + e]]",
     "(s < 3) ifTrue: [self.n := 1. 1 to: 2 do: [:i | t := t + i]]",
@@ -364,6 +346,39 @@ const ACTOR_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [self.n := 1. m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
 ];
 
+/// The same, in every method context: conditionals with no outer-local write
+/// whose arms hold a loop or fold writing only a local of the arm, nested in
+/// another arm, and with a self-send. No field write (a value type cannot write
+/// one, ADR 0042).
+const NON_PRODUCER_CONDITIONALS: &[&str] = &[
+    "(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
+    "(s < 3) ifTrue: [m := 0. 1 to: 2 do: [:i | m := m + i]. m] ifFalse: [0]",
+    "(s < 3) ifTrue: [m := 0. #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. m]",
+    "(s < 3) ifTrue: [m := 0. [m < 2] whileTrue: [m := m + 1]. m]",
+    "(s < 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size + m]",
+    "(s < 3) ifTrue: [self go. m := 0. #(1, 2) do: [:e | m := m + e]. m]",
+    "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m]]",
+    "s ifNil: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifNotNil: [:v | v]",
+    "(s < 3) and: [m := 0. #(1, 2) do: [:e | m := m + e]. true]",
+];
+
+#[test]
+fn conditionals_that_are_not_producers_agree_with_the_core_rule_in_every_context() {
+    let mut checked = 0;
+    for construct in NON_PRODUCER_CONDITIONALS {
+        for position in POSITIONS
+            .iter()
+            .chain(CONDITIONAL_POSITIONS)
+            .filter(|p| !p.contains("super") && !p.contains(".blk"))
+        {
+            for src in sources(construct, position) {
+                checked += check_conditional_agreement(&src);
+            }
+        }
+    }
+    assert!(checked > 0, "no accepted program compared");
+}
+
 #[test]
 fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
     let mut checked = 0;
@@ -381,8 +396,4 @@ fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
         }
     }
     assert!(checked > 0, "no accepted program compared");
-    eprintln!(
-        "NONPRODUCER-COUNT {}",
-        NON_PRODUCER_WITH_LOWERED_ARM_PRODUCER.load(std::sync::atomic::Ordering::Relaxed)
-    );
 }

@@ -331,11 +331,6 @@ pub(in crate::core_erlang) enum ScratchStart {
     /// instance method, where element 2 is adopted as the next `State`
     /// version), or the `StateAcc` of the enclosing loop or arm frame.
     Continue,
-    /// [`Self::Continue`] for a conditional that is a local-threading producer
-    /// (ADR 0131 Phase 3): its arms are `BranchArm` frames. Only a producer
-    /// registers arm frames, so the Phase 0 check, which judges the arms of a
-    /// non-producer by the legacy rows, and codegen read one predicate.
-    ContinueFrames,
     /// A fresh `maps:new()` seeded with only the construct's own threaded
     /// locals: the root of a class or value-type method, which has no `State`
     /// to continue.
@@ -383,15 +378,13 @@ impl CoreErlangGenerator {
         outer_state: &str,
     ) -> (Document<'static>, String) {
         let threaded = self.branch_threaded_locals(blocks);
-        if threaded.is_empty() && scratch != ScratchStart::Fresh {
+        if threaded.is_empty() && scratch == ScratchStart::Continue {
             return (Document::Nil, outer_state.to_string());
         }
 
         let seeded_state = self.fresh_temp_var("SeededState");
         let mut chain: Document<'static> = match scratch {
-            ScratchStart::Continue | ScratchStart::ContinueFrames => {
-                leaf::var(outer_state.to_string())
-            }
+            ScratchStart::Continue => leaf::var(outer_state.to_string()),
             ScratchStart::Fresh => Document::Str("call 'maps':'new'()"),
         };
         // Fold from the last var inward so the emitted nesting reads naturally.
@@ -498,14 +491,14 @@ impl CoreErlangGenerator {
     /// The `BranchArm` frame the arms of a conditional producer are lowered
     /// as (ADR 0131 §2): the construct's seeded set, for a conditional
     /// producer at the method root or in another conditional producer's arm (a
-    /// registered `BranchArm` frame). `scratch` says whether the construct is a
-    /// producer ([`ScratchStart::Continue`] is not): a conditional the Phase 0
+    /// registered `BranchArm` frame). `producer` says whether the construct is
+    /// one ([`Self::conditional_producer_locals`]): a conditional the Phase 0
     /// check does not name as a producer keeps the legacy arm, as do the arms of
     /// a conditional in a loop or fold body and of the REPL
     /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
     /// unpack their own tuples).
-    fn conditional_arm_frame(&self, blocks: &[&Block], scratch: ScratchStart) -> Option<ArmFrame> {
-        (scratch != ScratchStart::Continue
+    fn conditional_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
+        (producer
             && self.is_conditional_producer_frame(self.current_frame())
             && !self.is_repl_mode())
         .then(|| ArmFrame {
@@ -549,19 +542,9 @@ impl CoreErlangGenerator {
     }
 
     /// Where a conditional producer in `frame` starts its scratch map.
-    ///
-    /// `producer` says the construct is a conditional local-threading producer
-    /// ([`Self::conditional_producer_locals`]): only then do its arms become
-    /// `BranchArm` frames in a context that continues a scratch map.
-    pub(in crate::core_erlang) fn conditional_scratch(
-        &self,
-        frame: FrameId,
-        producer: bool,
-    ) -> ScratchStart {
+    pub(in crate::core_erlang) fn conditional_scratch(&self, frame: FrameId) -> ScratchStart {
         if self.conditional_has_private_scratch(frame) {
             ScratchStart::Fresh
-        } else if producer {
-            ScratchStart::ContinueFrames
         } else {
             ScratchStart::Continue
         }
@@ -628,6 +611,7 @@ impl CoreErlangGenerator {
         span: Span,
         arms: &[&Block],
         tail: ProducerTail,
+        producer: bool,
     ) -> ThreadedValue {
         let carrier = self.fresh_temp_var("CF");
         let value = ValueRef::Doc(docvec![
@@ -638,7 +622,8 @@ impl CoreErlangGenerator {
         // The method root and a registered `BranchArm` frame lower the
         // construct's `LocalRebind`s; a loop or fold frame's consumer re-reads
         // its own locals.
-        let rebinds_locals = self.is_conditional_producer_frame(frame) && !self.is_repl_mode();
+        let rebinds_locals =
+            producer && self.is_conditional_producer_frame(frame) && !self.is_repl_mode();
         let locals = if rebinds_locals {
             self.branch_threaded_locals(arms)
         } else {
@@ -692,6 +677,7 @@ impl CoreErlangGenerator {
             span,
             &[],
             ProducerTail::Rebind,
+            true,
         ))
     }
 
@@ -803,9 +789,17 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
-        let tuple_doc = self.generate_if_true_with_mutations_tuple(receiver, block, scratch)?;
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_if_true_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -819,6 +813,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -829,7 +824,7 @@ impl CoreErlangGenerator {
         // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], scratch);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         // ADR 0111 Addendum 5: `generate_conditional_branch_inline`
         // now builds, `verify()`s, and `render()`s this arm's real per-frame
@@ -879,9 +874,17 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
-        let tuple_doc = self.generate_if_false_with_mutations_tuple(receiver, block, scratch)?;
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_if_false_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// Generates inline code for `flag ifFalse: [block]` in actor context
@@ -895,6 +898,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -905,7 +909,7 @@ impl CoreErlangGenerator {
         // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], scratch);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
@@ -952,9 +956,17 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
-        let tuple_doc = self.generate_and_with_mutations_tuple(receiver, block, scratch)?;
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_and_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// generates inline code for `flag and: [block]` in actor
@@ -977,6 +989,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -987,7 +1000,7 @@ impl CoreErlangGenerator {
         // seed threaded outer-locals so the non-taken (false) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], scratch);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
@@ -1031,9 +1044,17 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = block.span;
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
-        let tuple_doc = self.generate_or_with_mutations_tuple(receiver, block, scratch)?;
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail))
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc =
+            self.generate_or_with_mutations_tuple(receiver, block, scratch, producer)?;
+        Ok(self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &[block],
+            tail,
+            producer,
+        ))
     }
 
     /// generates inline code for `flag or: [block]` in actor
@@ -1053,6 +1074,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         block: &Block,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -1063,7 +1085,7 @@ impl CoreErlangGenerator {
         // seed threaded outer-locals so the non-taken (true) branch and
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], scratch);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
@@ -1109,12 +1131,13 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = false_block.span;
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
+        let scratch = self.conditional_scratch(frame);
         let tuple_doc = self.generate_if_true_if_false_with_mutations_tuple(
             receiver,
             true_block,
             false_block,
             scratch,
+            producer,
         )?;
         Ok(self.conditional_tuple_to_threaded_value(
             tuple_doc,
@@ -1122,6 +1145,7 @@ impl CoreErlangGenerator {
             span,
             &[true_block, false_block],
             tail,
+            producer,
         ))
     }
 
@@ -1135,6 +1159,7 @@ impl CoreErlangGenerator {
         true_block: &Block,
         false_block: &Block,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -1147,7 +1172,7 @@ impl CoreErlangGenerator {
         // `__local__` key.
         let (seed_doc, base_state) =
             self.seed_scratch_locals(&[true_block, false_block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[true_block, false_block], scratch);
+        let arm_frame = self.conditional_arm_frame(&[true_block, false_block], producer);
 
         // True branch
         let (true_branch_doc, _true_final) =
@@ -1218,15 +1243,16 @@ impl CoreErlangGenerator {
             .or(nil_block)
             .map_or_else(|| receiver.unwrap_parens().span(), |b| b.span);
         let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame, producer);
+        let scratch = self.conditional_scratch(frame);
         let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
             receiver,
             nil_block,
             not_nil_block,
             scratch,
+            producer,
         )?;
         let arms: Vec<&Block> = nil_block.into_iter().chain(not_nil_block).collect();
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &arms, tail))
+        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &arms, tail, producer))
     }
 
     /// Generates inline code for the nil-testing conditional family in
@@ -1249,6 +1275,7 @@ impl CoreErlangGenerator {
         nil_block: Option<&Block>,
         not_nil_block: Option<&Block>,
         scratch: ScratchStart,
+        producer: bool,
     ) -> Result<Document<'static>> {
         // The REPL assembler (and `lower_repl_construct_tuple` for an operand)
         // unpacks the `{Result, Bindings}` tuple this compiles to.
@@ -1268,7 +1295,7 @@ impl CoreErlangGenerator {
         seed_blocks.extend(nil_block);
         seed_blocks.extend(not_nil_block);
         let (seed_doc, base_state) = self.seed_scratch_locals(&seed_blocks, scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&seed_blocks, scratch);
+        let arm_frame = self.conditional_arm_frame(&seed_blocks, producer);
 
         // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
         // matching comment — real per-frame verify() now runs inside
