@@ -1731,11 +1731,12 @@ impl CoreErlangGenerator {
                 // BT-3821: a method-root conditional the producer admits
                 // (`is_vt_field_conditional_producer`) never reaches this arm —
                 // `lower_root_statement_with_producer` lowers it first, in last
-                // position too. What does is one the producer declines (inside a
-                // loop body, or with a non-literal branch argument): non-last,
-                // `generate_vt_conditional_open`'s `Self` slot handles it; in
-                // LAST position it deliberately falls through to the ordinary
-                // last-expression path, which reproduces the
+                // position too. Only a conditional with a non-literal branch
+                // argument still gets here (a loop / branch / exception frame never
+                // does: those shapes are rejected earlier, see
+                // `generate_vt_conditional_open`): non-last, that is the statement
+                // form; in LAST position it deliberately falls through to the
+                // ordinary last-expression path, which reproduces the
                 // `FieldAssignmentInUnsupportedBlock` diagnostic — see
                 // `is_conditional_with_vt_self_field_threading`'s doc comment
                 // for why a clean compile error is the right answer there
@@ -2970,8 +2971,9 @@ impl CoreErlangGenerator {
     /// which carries the arms' value and their `Self` merge into the caller's
     /// statement sequence. What still reaches `generate_vt_conditional_open`
     /// through `VtBodyExprKind::ConditionalWithSelfFieldThreading`, and keeps
-    /// the clean rejection, is a conditional the producer declines: inside a
-    /// loop body, or with a non-literal branch argument.
+    /// the clean rejection, is a conditional with a non-literal branch argument.
+    /// A conditional in a loop / branch / exception frame never gets that far: those
+    /// shapes are rejected earlier, so the statement form is method-root only.
     ///
     /// Only reports conditionals with NO outer-local mutation of their own:
     /// a mixed one (locals AND a field write) is already
@@ -3978,8 +3980,7 @@ impl CoreErlangGenerator {
         let mut preamble: Vec<Document<'static>> = Vec::new();
         // BT-3821: in value position the arm's value is its last statement's
         // (`nil` for an empty block); the statement form discards it.
-        let mut arm_value: Option<Document<'static>> =
-            capture_value.then_some(Document::Str("'nil'"));
+        let mut arm_value: Option<Document<'static>> = capture_value.then_some(leaf::atom("nil"));
         let last_index = body.len().checked_sub(1);
         for (i, body_expr) in body.iter().enumerate() {
             let is_value_stmt = capture_value && Some(i) == last_index;
@@ -4081,7 +4082,7 @@ impl CoreErlangGenerator {
             preamble: Vec::new(),
             local_values: Self::resolve_mutation_value_docs(cg, all_mutations),
             self_mutated_version: None,
-            value: capture_value.then_some(Document::Str("'nil'")),
+            value: capture_value.then_some(leaf::atom("nil")),
         }
     }
 
