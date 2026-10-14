@@ -1073,7 +1073,11 @@ impl CoreErlangGenerator {
                 // opaque statements (`is_vt_field_writing_block_value` has
                 // checked the block's value is not one).
                 let mut parts = Vec::new();
+                let operands = self.hoist_vt_operand_producers(stmt, &mut parts)?;
                 self.emit_vt_body_expr(stmt, &kind, 1, false, false, &mut parts)?;
+                if let Some(scope) = operands {
+                    self.finish_precompiled_scope(scope)?;
+                }
                 prelude.push(ThreadedStmt::Statement(Document::Vec(parts), stmt.span()));
                 continue;
             }

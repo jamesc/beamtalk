@@ -313,6 +313,15 @@ const VT_POSITIONS: &[(&str, &str)] = &[
         "cascade_argument",
         "Object classBuilder name: #A; superclass: EXPR",
     ),
+    // A conditional whose receiver is EXPR, in value position.
+    (
+        "conditional_wrapping_arg",
+        "self take: (EXPR > 3 ifTrue: [1] ifFalse: [2])",
+    ),
+    (
+        "conditional_wrapping_field_rhs",
+        "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
+    ),
 ];
 
 /// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
@@ -518,6 +527,7 @@ fn value_type_field_assignment_in_construct_operands_and_block_values_compiles()
         "#(1) do: [:e | ^ e].\n    ^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
         "^ ((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]",
         // A `^` inside a spliced block body.
+        "[self.m := 1. ((self.n := 5) > 3) ifTrue: [self.m := 2]. 7] value.\n    self.n",
         "[self.n := 5. ^ 3] value.\n    self.n",
         "#(1) do: [:e | ^ e].\n    [self.n := 5. ^ 3] value.\n    self.n",
         // A construct nested in a spliced block body keeps its open-chain builder.

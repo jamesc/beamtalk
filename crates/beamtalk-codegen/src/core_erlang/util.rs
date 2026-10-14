@@ -347,6 +347,23 @@ impl CoreErlangGenerator {
             return Ok(tv);
         }
 
+        // BT-3816: a value-type conditional whose receiver holds a field write
+        // (`self take: (((self.n := 5) > 3) ifTrue: [1] ifFalse: [2])`): the
+        // receiver is sequenced ahead, the conditional then reads its temp.
+        if self.context == CodeGenContext::ValueType
+            && !self.in_class_method()
+            && Self::conditional_send_receiver(inner)
+                .is_some_and(|receiver| self.subexpr_has_field_write_producer(receiver))
+        {
+            let receiver = Self::conditional_send_receiver(inner)
+                .into_iter()
+                .collect::<Vec<_>>();
+            let (mut prelude, scope) = self.sequence_children(&receiver, frame)?;
+            let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
+            self.finish_precompiled_scope(scope)?;
+            return Ok(ThreadedValue { prelude, value });
+        }
+
         // ADR 0118 phase 4: an inline-threaded control-flow
         // construct — `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`,
         // the nil-conditional family, or `match:` — that needs mutation
@@ -789,6 +806,19 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
+    /// The receiver of a conditional send (`ifTrue:`, `and:`, ...), the one
+    /// operand the sequencing rule leaves to the conditional's own lowering.
+    pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
+        let Expression::MessageSend {
+            receiver, selector, ..
+        } = expr
+        else {
+            return None;
+        };
+        beamtalk_core::state_threading_selectors::is_conditional_selector(selector.name().as_str())
+            .then_some(receiver.as_ref())
+    }
+
     /// The children the sequencing rule applies to when `expr` (already
     /// paren-unwrapped) is a message send it covers: the receiver, then
     /// every non-block argument, in evaluation order. `None` for anything
@@ -923,6 +953,13 @@ impl CoreErlangGenerator {
         // BT-3803: mirrors `threaded_expression`'s field-assignment producer.
         if self.is_field_assignment(inner) {
             return true;
+        }
+        // BT-3816: mirrors `threaded_expression`'s conditional-receiver branch
+        // (a conditional send is otherwise opaque to the sequencing rule).
+        if probe == PreludeProbe::FieldWrites {
+            if let Some(receiver) = Self::conditional_send_receiver(inner) {
+                return self.subexpr_needs_prelude_with(receiver, probe);
+            }
         }
         // BT-3816: mirrors `threaded_expression`'s inlined-block-value producer.
         if self.is_vt_field_writing_block_value(inner) {
