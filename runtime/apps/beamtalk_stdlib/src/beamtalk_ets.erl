@@ -42,7 +42,7 @@ Ets objects are represented as tagged maps:
 | `tableSize:`       | Number of entries                            |
 | `deleteTable:`     | Destroy the table                            |
 | `values:`          | All values as a List (snapshot)              |
-| `keysAndValuesDo:` | Iterate a snapshot of key/value pairs        |
+| `keysAndValuesDo:block:` | Iterate a snapshot of key/value pairs        |
 | `asDictionary:`    | Snapshot into an immutable Dictionary        |
 | `ifPresent:key:block:` | Evaluate block with the value if present |
 | `incrementAt:key:by:` | Atomic integer add (set/orderedSet)       |
@@ -536,7 +536,7 @@ guarded(TableName, Selector, Fun) ->
                     stale_table_error(Selector, TableName);
                 _ ->
                     beamtalk_error:raise_type_error(
-                        'Ets', Selector, <<"Key or value cannot be stored in this table">>
+                        'Ets', Selector, <<"ETS operation rejected its arguments">>
                     )
             end
     end.

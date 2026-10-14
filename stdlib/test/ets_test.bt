@@ -153,8 +153,8 @@ TestCase subclass: EtsTest
   testUpdateRaisingBlockWritesNothing =>
     self.table at: "k" put: 10
     self should: [
-      self.table at: "k" update: [:old | old / 0]
-    ] raise: #type_error
+      self.table at: "k" update: [:old | self error: "boom"]
+    ] raise: #user_error
     self assert: (self.table at: "k") equals: 10
 
   testAtomicUpdatesRejectBagTables =>
