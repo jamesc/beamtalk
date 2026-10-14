@@ -1706,6 +1706,38 @@ bt3826_process_navigation_config_no_cross_class_deadlock_test_() ->
         )
     end}.
 
+%% `beamtalk_protocol_registry:conforms_to/2` (what `conformingClasses` runs
+%% inside class handlers): instance-side `classCanUnderstandFromName/2` plus the
+%% class-side chain check.
+bt3826_conforms_to_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        beamtalk_protocol_registry:init(),
+        Proto = 'BT3826Proto',
+        ok = beamtalk_protocol_registry:register_protocol(#{
+            name => Proto,
+            required_methods => [#{selector => bt3826Foo, arity => 0}],
+            required_class_methods => [#{selector => bt3826Probe, arity => 1}],
+            type_params => [],
+            extending => undefined
+        }),
+        Extra = #{
+            instance_methods => #{bt3826Foo => #{block => fun() -> ok end, arity => 0}}
+        },
+        Site = fun(Other) ->
+            beamtalk_protocol_registry:invalidate_conforms_cache(),
+            beamtalk_protocol_registry:conforms_to(Other, Proto)
+        end,
+        try
+            Results = bt3826_two_busy_classes("Conforms", Extra, Site),
+            lists:foreach(
+                fun({_Name, Outcome}) -> ?assertEqual({ok, true}, Outcome) end,
+                Results
+            )
+        after
+            beamtalk_protocol_registry:unregister_protocol(Proto)
+        end
+    end}.
+
 %% The published reflection facts follow the class through hot-patching, so the
 %% ETS-backed readers never disagree with the class process's own state.
 bt3826_reflection_follows_class_mutation_test() ->

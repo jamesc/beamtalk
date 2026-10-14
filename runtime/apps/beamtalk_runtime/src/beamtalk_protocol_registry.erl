@@ -78,7 +78,10 @@ See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
 the ancestor chain via `classCanUnderstandFromName/2`, which is a
 `gen_server:call` per level — measured at 59-135 µs/call on a live 109-class
 workspace (`docs/internal/adr-0115-phase1-spike-findings.md` §3), four orders
-of magnitude above the ETS lookups around it. Results are cached in a second
+of magnitude above the ETS lookups around it. (Since BT-3826 the walk reads the
+ETS-published class metadata instead, so it no longer sends any message to a
+class process -- required because it runs inside class handlers -- but the cache
+still skips the repeated hierarchy walk.) Results are cached in a second
 ETS table (`beamtalk_protocol_conforms_cache`) keyed by `{ClassName,
 ProtocolName}`, so a repeated pair is an ETS lookup with no `gen_server:call`
 at all.
@@ -1003,28 +1006,27 @@ class_has_class_method(ClassName, Selector) ->
             check_class_extension(MetaclassTag, Selector)
     end.
 
--doc "Walk the superclass chain checking local class methods maps.".
+-doc """
+Walk the superclass chain checking local class-method selectors.
+
+Reads each level from the unified class metadata (`lookup_methods/1`,
+`lookup_superclass/1`), never from the class process (BT-3826):
+`conforming_classes/1` and `conforms_to/2` run inside class handlers, and a
+`gen_server:call` per level deadlocks two busy classes against each other.
+""".
 -spec class_has_class_method_in_chain(atom(), atom()) -> boolean().
+class_has_class_method_in_chain(none, _Selector) ->
+    false;
 class_has_class_method_in_chain(ClassName, Selector) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
+    case beamtalk_class_metadata:lookup_methods(ClassName) of
+        not_found ->
             false;
-        ClassPid ->
-            try
-                ClassMethods = beamtalk_object_class:local_class_methods(ClassPid),
-                case lists:member(Selector, ClassMethods) of
-                    true ->
-                        true;
-                    false ->
-                        %% Walk superclass chain
-                        case beamtalk_object_class:superclass(ClassPid) of
-                            none -> false;
-                            SuperName -> class_has_class_method_in_chain(SuperName, Selector)
-                        end
+        {ok, _Module, ClassMethods} ->
+            lists:member(Selector, ClassMethods) orelse
+                case beamtalk_class_metadata:lookup_superclass(ClassName) of
+                    not_found -> false;
+                    {ok, SuperName} -> class_has_class_method_in_chain(SuperName, Selector)
                 end
-            catch
-                _:_ -> false
-            end
     end.
 
 -doc """
