@@ -178,6 +178,12 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 
 -export_type([scope/0, node_map/0]).
 
+-ifdef(TEST).
+%% BT-3826 regression test: the no-cross-class-deadlock test drives the
+%% supervisor-config read from inside class handlers.
+-export([supervisor_config/2]).
+-endif.
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -1332,7 +1338,7 @@ supervisor_strategy(ClassPid) ->
             true ->
                 simpleOneForOne;
             false ->
-                case beamtalk_object_class:class_send(ClassPid, strategy, []) of
+                case supervisor_class_config(ClassPid, strategy) of
                     S when is_atom(S) -> S;
                     _ -> nil
                 end
@@ -1341,11 +1347,33 @@ supervisor_strategy(ClassPid) ->
         _:_ -> nil
     end.
 
+%% Read a Supervisor class's nullary configuration method (BT-3826).
+%%
+%% The snapshot walk runs inside a class method, i.e. in a class process, so a
+%% `class_send/3` to the supervisor's class would be a blocking call into another
+%% class process and can deadlock two busy classes against each other. The
+%% compiled method is invoked in this process instead
+%% (`beamtalk_supervisor:class_config_value/2`, the call `static_init/2` makes).
+%% Only a caller that is NOT a class process may fall back to `class_send/3`, for
+%% a class whose method exists only as a runtime fun (no compiled export).
+-spec supervisor_class_config(pid(), atom()) -> term().
+supervisor_class_config(ClassPid, Selector) ->
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    try
+        beamtalk_supervisor:class_config_value(ClassName, Selector)
+    catch
+        Class:Reason:Stack ->
+            case get(beamtalk_class_name) of
+                undefined -> beamtalk_object_class:class_send(ClassPid, Selector, []);
+                _InClassProcess -> erlang:raise(Class, Reason, Stack)
+            end
+    end.
+
 -spec supervisor_restart_intensity(pid()) -> map() | nil.
 supervisor_restart_intensity(ClassPid) ->
     try
-        Max = beamtalk_object_class:class_send(ClassPid, maxRestarts, []),
-        Window = beamtalk_object_class:class_send(ClassPid, restartWindow, []),
+        Max = supervisor_class_config(ClassPid, maxRestarts),
+        Window = supervisor_class_config(ClassPid, restartWindow),
         #{maxRestarts => Max, window => Window}
     catch
         _:_ -> nil

@@ -1686,6 +1686,26 @@ bt3826_return_type_no_cross_class_deadlock_test_() ->
         )
     end}.
 
+%% `beamtalk_process_navigation`'s supervisor strategy / restart-intensity read
+%% (formerly `class_send(strategy | maxRestarts | restartWindow)`).
+bt3826_process_navigation_config_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{module => beamtalk_bt3826_config_fixture},
+        Site = fun(Other) ->
+            Obj = beamtalk_class_registry:resolve_class_object(Other),
+            beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Obj)
+        end,
+        Results = bt3826_two_busy_classes("NavConfig", Extra, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) ->
+                ?assertEqual(
+                    {ok, {oneForAll, #{maxRestarts => 7, window => 42}}}, Outcome
+                )
+            end,
+            Results
+        )
+    end}.
+
 %% The published reflection facts follow the class through hot-patching, so the
 %% ETS-backed readers never disagree with the class process's own state.
 bt3826_reflection_follows_class_mutation_test() ->

@@ -63,7 +63,8 @@ functions that call OTP APIs from the caller's process context.
     start_dynamic_child/2,
     start_dynamic_child/3,
     start_dynamic_child/4,
-    startChild/3
+    startChild/3,
+    class_config_value/2
 ]).
 
 -include("beamtalk.hrl").
@@ -1030,6 +1031,35 @@ make_init_class_self(ClassName, Module) ->
     ClassPid = beamtalk_class_registry:whereis_class(ClassName),
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     {beamtalk_object, ClassTag, Module, ClassPid}.
+
+-doc """
+Read a nullary class-side configuration method (`strategy`, `maxRestarts`,
+`restartWindow`, ...) of a Supervisor class **in the calling process**, without
+messaging the class gen_server (BT-3826).
+
+For callers that may themselves be running inside a class process (the
+`ProcessNavigation` snapshot is a class method): a `class_send` from there is a
+blocking call into another class, which deadlocks two busy classes against each
+other. This is the same direct call `static_init/2` / `dynamic_init/2` make, so
+it answers exactly what the supervisor was configured with. Raises if the class
+is not registered or no ancestor defines the method.
+""".
+-spec class_config_value(atom(), atom()) -> term().
+class_config_value(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, Module} ->
+            %% `call_class_method_direct/4` probes with `function_exported/3`,
+            %% which is false for a module that is not loaded yet.
+            _ = code:ensure_loaded(Module),
+            call_class_method_direct(
+                ClassName,
+                Module,
+                beamtalk_class_dispatch:class_method_fun_name(Selector),
+                make_init_class_self(ClassName, Module)
+            );
+        not_found ->
+            error({class_not_registered, ClassName})
+    end.
 
 -doc """
 Call a class method directly by invoking the module function, bypassing the class
