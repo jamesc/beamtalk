@@ -1,0 +1,364 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): a conditional (`ifTrue:` ... `ifNil:ifNotNil:`,
+// `and:`/`or:`) that writes an outer local is a local-threading producer at
+// the method root, whatever position it sits in (statement, last expression,
+// an assignment's value, an operand), and each of its arms is a `BranchArm`
+// frame: a loop, fold or nested conditional in an arm rebinds its locals into
+// the arm's own scratch map. In a class or value-type method the scratch map
+// is private (no `State` family exists there); in an actor instance method it
+// continues `State`. The columns are
+// adr0131cond_producer_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131cond_producer_test.bt.
+
+Value subclass: Adr0131CondProducerValue
+  field: n = 0
+
+  plain => 0
+
+  stA: c =>
+    t := 0
+    c ifTrue: [t := 5]
+    t
+
+  stB: c =>
+    t := 0
+    c ifTrue: [t := t + 1] ifFalse: [t := t + 10]
+    t
+
+  stC: x =>
+    t := 0
+    x ifNil: [t := t + 1]
+    t
+
+  stD: c =>
+    t := 0
+    c
+      and: [
+        t := t + 1
+        true
+      ]
+    t
+
+  last: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 1
+        7
+      ]
+      ifFalse: [8]
+
+  assign: c =>
+    t := 0
+    r := c
+      ifTrue: [
+        t := 1
+        2
+      ]
+      ifFalse: [3]
+    #[r, t]
+
+  assignNil: x =>
+    t := 0
+    r := x
+      ifNil: [
+        t := 1
+        2
+      ]
+    #[r, t]
+
+  operand: c =>
+    t := 0
+    r := (c
+      ifTrue: [
+        t := t + 1
+        2
+      ]
+      ifFalse: [3]) + 1
+    #[r, t]
+
+  ret: c =>
+    t := 0
+    ^(c
+      ifTrue: [
+        t := t + 1
+        2
+      ]
+      ifFalse: [3]) + 1
+
+  retDirect: c =>
+    t := 0
+    ^c
+      ifTrue: [
+        t := t + 1
+        2
+      ]
+      ifFalse: [3]
+
+  nilOperand: x =>
+    t := 0
+    r := (x
+      ifNil: [
+        t := t + 1
+        2
+      ]
+      ifNotNil: [:v | v]) + 1
+    #[r, t]
+
+  andOperand: c =>
+    t := 0
+    r := (c
+      and: [
+        t := t + 1
+        true
+      ]) printString size
+    #[r, t]
+
+  orOperand: c =>
+    t := 0
+    r := (c
+      or: [
+        t := t + 1
+        true
+      ]) printString size
+    #[r, t]
+
+  writeOnlyOperand: c =>
+    t := 0
+    r := (c
+      ifTrue: [
+        t := 9
+        2
+      ]
+      ifFalse: [3]) + 1
+    #[r, t]
+
+  twoLocals: c =>
+    t := 0
+    u := 0
+    r := (c
+      ifTrue: [
+        t := t + 1
+        u := 5
+        2
+      ]
+      ifFalse: [
+        u := 6
+        3
+      ]) + 1
+    #[r, t, u]
+
+  seqRead: c =>
+    t := 0
+    r := t + (c
+      ifTrue: [
+        t := t + 1
+        2
+      ]
+      ifFalse: [3])
+    #[r, t]
+
+  stmtOperand: c =>
+    t := 0
+    r := ((c
+      ifTrue: [
+        t := t + 1
+        2
+      ]
+      ifFalse: [3]) printString)
+    #[r, t]
+
+  nested: c =>
+    t := 0
+    r := (c
+      ifTrue: [
+        (c
+          ifTrue: [
+            t := t + 1
+            1
+          ]
+          ifFalse: [2]) + 1
+      ]
+      ifFalse: [3]) + 1
+    #[r, t]
+
+  emptyArm: c =>
+    t := 0
+    r := (c ifTrue: [t := t + 1] ifFalse: []) isNil
+    #[r, t]
+
+  selfSendCls: c =>
+    t := 0
+    r := (c
+      ifTrue: [
+        t := t + 1
+        self plain
+      ]
+      ifFalse: [1]) + 1
+    #[r, t]
+
+  armDo: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:x | t := t + x]]
+    t
+
+  armDoVal: c =>
+    t := 0
+    r := c
+      ifTrue: [
+        #(1, 2) do: [:x | t := t + x]
+        5
+      ]
+      ifFalse: [6]
+    #[r, t]
+
+  armToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        1 to: 3 do: [:i | t := t + i]
+        t := t + 100
+      ]
+    t
+
+  armCollect: c =>
+    t := 0
+    r := c ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size] ifFalse: [0]
+    #[r, t]
+
+  armInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        s := #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + 1
+            a + x
+          ]
+        t := t + s
+      ]
+    t
+
+  armLocalOnly: c =>
+    hits := 0
+    r := c
+      ifTrue: [
+        hits := hits + 1
+        n := 0
+        #(1, 2, 3)
+          collect: [:i |
+            n := n + 1
+            i * n
+          ]
+      ]
+      ifFalse: [#()]
+    #[r, hits]
+
+  armWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        i := 0
+        [i < 3]
+          whileTrue: [
+            i := i + 1
+            t := t + 1
+          ]
+      ]
+    t
+
+  armTimes: c =>
+    t := 0
+    c ifTrue: [3 timesRepeat: [t := t + 2]]
+    t
+
+  armTwo: c =>
+    t := 0
+    u := 0
+    c
+      ifTrue: [
+        #(1, 2) do: [:x | t := t + x]
+        #(1, 2, 3) do: [:y | u := u + y]
+      ]
+    #[t, u]
+
+  armBoth: c =>
+    t := 0
+    u := 0
+    c ifTrue: [
+      #(1, 2) do: [:x | t := t + x]
+    ] ifFalse: [#(1, 2, 3) do: [:y | u := u + y]]
+    #[t, u]
+
+  armOperand: c =>
+    t := 0
+    c
+      ifTrue: [
+        r := (#(1, 2) collect: [:x | t := t + x]) size
+        t := t + r
+      ]
+    t
+
+  armReturn: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2) do: [:x | t := t + x]
+        ^t
+      ]
+    99
+
+  armReturnDo: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  armNil: x =>
+    t := 0
+    x ifNil: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  armNotNil: x =>
+    t := 0
+    r := x
+      ifNotNil: [:v |
+        #(1, 2) do: [:e | t := t + e + v]
+        v
+      ]
+    #[r, t]
+
+  armAnd: c =>
+    t := 0
+    r := c
+      and: [
+        #(1, 2) do: [:e | t := t + e]
+        true
+      ]
+    #[r, t]
+
+  armOr: c =>
+    t := 0
+    r := c
+      or: [
+        #(1, 2) do: [:e | t := t + e]
+        true
+      ]
+    #[r, t]
+
+  armMixed: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := t + 1
+        #(1, 2) do: [:x | t := t + x]
+        t := t * 2
+      ]
+    t
+
+  armInArm: c =>
+    t := 0
+    c ifTrue: [c ifTrue: [t := t + 1]]
+    t

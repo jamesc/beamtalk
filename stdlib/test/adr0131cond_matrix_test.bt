@@ -1,0 +1,668 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): the statement-position matrix cells that
+// answered wrong, raised or failed to compile before conditionals became
+// local-threading producers (`adr0131_statement_probes.tsv`, verdict `bad` or
+// `over`, now `ok`). Each method is one cell of the matrix: a construct
+// (`kind`) writing the method-level local `t` (`target`) inside a block role
+// (`container`), in a class, value-type or actor method. `c` is the
+// condition. The expected answers are in stdlib/test/adr0131cond_matrix_test.bt.
+
+TestCase subclass: Adr0131CondMatrixTest
+
+  testClassArmCvarDo =>
+    self assert: (Adr0131CondMatrixClass armCvarDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarDo: false) equals: 0
+
+  testClassArmCvarIfTrue =>
+    self assert: (Adr0131CondMatrixClass armCvarIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armCvarIfTrue: false) equals: 0
+
+  testClassArmCvarInject =>
+    self assert: (Adr0131CondMatrixClass armCvarInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarInject: false) equals: 0
+
+  testClassArmCvarToDo =>
+    self assert: (Adr0131CondMatrixClass armCvarToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarToDo: false) equals: 0
+
+  testClassArmCvarWhile =>
+    self assert: (Adr0131CondMatrixClass armCvarWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armCvarWhile: false) equals: 0
+
+  testClassArmCvarOuterDo =>
+    self assert: (Adr0131CondMatrixClass armCvarOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarOuterDo: false) equals: 0
+
+  testClassArmCvarOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armCvarOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armCvarOuterIfTrue: false) equals: 0
+
+  testClassArmCvarOuterInject =>
+    self assert: (Adr0131CondMatrixClass armCvarOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarOuterInject: false) equals: 0
+
+  testClassArmCvarOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armCvarOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armCvarOuterToDo: false) equals: 0
+
+  testClassArmCvarOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armCvarOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armCvarOuterWhile: false) equals: 0
+
+  testClassArmDirectAnd =>
+    self assert: (Adr0131CondMatrixClass armDirectAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armDirectAnd: false) equals: 0
+
+  testClassArmDirectCollect =>
+    self assert: (Adr0131CondMatrixClass armDirectCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armDirectCollect: false) equals: 0
+
+  testClassArmDirectDo =>
+    self assert: (Adr0131CondMatrixClass armDirectDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armDirectDo: false) equals: 0
+
+  testClassArmDirectIfNil =>
+    self assert: (Adr0131CondMatrixClass armDirectIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armDirectIfNil: false) equals: 0
+
+  testClassArmDirectIfTrue =>
+    self assert: (Adr0131CondMatrixClass armDirectIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armDirectIfTrue: false) equals: 0
+
+  testClassArmDirectInject =>
+    self assert: (Adr0131CondMatrixClass armDirectInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armDirectInject: false) equals: 0
+
+  testClassArmDirectTimes =>
+    self assert: (Adr0131CondMatrixClass armDirectTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armDirectTimes: false) equals: 0
+
+  testClassArmDirectToDo =>
+    self assert: (Adr0131CondMatrixClass armDirectToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armDirectToDo: false) equals: 0
+
+  testClassArmDirectWhile =>
+    self assert: (Adr0131CondMatrixClass armDirectWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armDirectWhile: false) equals: 0
+
+  testClassArmOuterAnd =>
+    self assert: (Adr0131CondMatrixClass armOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armOuterAnd: false) equals: 0
+
+  testClassArmOuterCollect =>
+    self assert: (Adr0131CondMatrixClass armOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armOuterCollect: false) equals: 0
+
+  testClassArmOuterDo =>
+    self assert: (Adr0131CondMatrixClass armOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armOuterDo: false) equals: 0
+
+  testClassArmOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass armOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armOuterIfNil: false) equals: 0
+
+  testClassArmOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armOuterIfTrue: false) equals: 0
+
+  testClassArmOuterInject =>
+    self assert: (Adr0131CondMatrixClass armOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armOuterInject: false) equals: 0
+
+  testClassArmOuterTimes =>
+    self assert: (Adr0131CondMatrixClass armOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armOuterTimes: false) equals: 0
+
+  testClassArmOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armOuterToDo: false) equals: 0
+
+  testClassArmOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armOuterWhile: false) equals: 0
+
+  testClassArmSelfsendDo =>
+    self assert: (Adr0131CondMatrixClass armSelfsendDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armSelfsendDo: false) equals: 0
+
+  testClassArmSelfsendIfTrue =>
+    self assert: (Adr0131CondMatrixClass armSelfsendIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armSelfsendIfTrue: false) equals: 0
+
+  testClassArmSelfsendInject =>
+    self assert: (Adr0131CondMatrixClass armSelfsendInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armSelfsendInject: false) equals: 0
+
+  testClassArmSelfsendToDo =>
+    self assert: (Adr0131CondMatrixClass armSelfsendToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armSelfsendToDo: false) equals: 0
+
+  testClassArmSelfsendWhile =>
+    self assert: (Adr0131CondMatrixClass armSelfsendWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armSelfsendWhile: false) equals: 0
+
+  testClassArmAndOuterAnd =>
+    self assert: (Adr0131CondMatrixClass armAndOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armAndOuterAnd: false) equals: 0
+
+  testClassArmAndOuterCollect =>
+    self assert: (Adr0131CondMatrixClass armAndOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armAndOuterCollect: false) equals: 0
+
+  testClassArmAndOuterDo =>
+    self assert: (Adr0131CondMatrixClass armAndOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armAndOuterDo: false) equals: 0
+
+  testClassArmAndOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass armAndOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armAndOuterIfNil: false) equals: 0
+
+  testClassArmAndOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armAndOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armAndOuterIfTrue: false) equals: 0
+
+  testClassArmAndOuterInject =>
+    self assert: (Adr0131CondMatrixClass armAndOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armAndOuterInject: false) equals: 0
+
+  testClassArmAndOuterTimes =>
+    self assert: (Adr0131CondMatrixClass armAndOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armAndOuterTimes: false) equals: 0
+
+  testClassArmAndOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armAndOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armAndOuterToDo: false) equals: 0
+
+  testClassArmAndOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armAndOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armAndOuterWhile: false) equals: 0
+
+  testClassArmNLDirectAnd =>
+    self assert: (Adr0131CondMatrixClass armNLDirectAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLDirectAnd: false) equals: 0
+
+  testClassArmNLDirectCollect =>
+    self assert: (Adr0131CondMatrixClass armNLDirectCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLDirectCollect: false) equals: 0
+
+  testClassArmNLDirectDo =>
+    self assert: (Adr0131CondMatrixClass armNLDirectDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLDirectDo: false) equals: 0
+
+  testClassArmNLDirectIfNil =>
+    self assert: (Adr0131CondMatrixClass armNLDirectIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLDirectIfNil: false) equals: 0
+
+  testClassArmNLDirectIfTrue =>
+    self assert: (Adr0131CondMatrixClass armNLDirectIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLDirectIfTrue: false) equals: 0
+
+  testClassArmNLDirectInject =>
+    self assert: (Adr0131CondMatrixClass armNLDirectInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLDirectInject: false) equals: 0
+
+  testClassArmNLDirectTimes =>
+    self assert: (Adr0131CondMatrixClass armNLDirectTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNLDirectTimes: false) equals: 0
+
+  testClassArmNLDirectToDo =>
+    self assert: (Adr0131CondMatrixClass armNLDirectToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLDirectToDo: false) equals: 0
+
+  testClassArmNLDirectWhile =>
+    self assert: (Adr0131CondMatrixClass armNLDirectWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNLDirectWhile: false) equals: 0
+
+  testClassArmNLOuterAnd =>
+    self assert: (Adr0131CondMatrixClass armNLOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLOuterAnd: false) equals: 0
+
+  testClassArmNLOuterCollect =>
+    self assert: (Adr0131CondMatrixClass armNLOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLOuterCollect: false) equals: 0
+
+  testClassArmNLOuterDo =>
+    self assert: (Adr0131CondMatrixClass armNLOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLOuterDo: false) equals: 0
+
+  testClassArmNLOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass armNLOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLOuterIfNil: false) equals: 0
+
+  testClassArmNLOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armNLOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNLOuterIfTrue: false) equals: 0
+
+  testClassArmNLOuterInject =>
+    self assert: (Adr0131CondMatrixClass armNLOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLOuterInject: false) equals: 0
+
+  testClassArmNLOuterTimes =>
+    self assert: (Adr0131CondMatrixClass armNLOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNLOuterTimes: false) equals: 0
+
+  testClassArmNLOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armNLOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNLOuterToDo: false) equals: 0
+
+  testClassArmNLOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armNLOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNLOuterWhile: false) equals: 0
+
+  testClassArmNilOuterAnd =>
+    self assert: (Adr0131CondMatrixClass armNilOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNilOuterAnd: false) equals: 0
+
+  testClassArmNilOuterCollect =>
+    self assert: (Adr0131CondMatrixClass armNilOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNilOuterCollect: false) equals: 3
+
+  testClassArmNilOuterDo =>
+    self assert: (Adr0131CondMatrixClass armNilOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNilOuterDo: false) equals: 3
+
+  testClassArmNilOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass armNilOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNilOuterIfNil: false) equals: 1
+
+  testClassArmNilOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armNilOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armNilOuterIfTrue: false) equals: 0
+
+  testClassArmNilOuterInject =>
+    self assert: (Adr0131CondMatrixClass armNilOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNilOuterInject: false) equals: 3
+
+  testClassArmNilOuterTimes =>
+    self assert: (Adr0131CondMatrixClass armNilOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNilOuterTimes: false) equals: 2
+
+  testClassArmNilOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armNilOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armNilOuterToDo: false) equals: 3
+
+  testClassArmNilOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armNilOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armNilOuterWhile: false) equals: 2
+
+  testClassArmTFOuterAnd =>
+    self assert: (Adr0131CondMatrixClass armTFOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armTFOuterAnd: false) equals: 0
+
+  testClassArmTFOuterCollect =>
+    self assert: (Adr0131CondMatrixClass armTFOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armTFOuterCollect: false) equals: 0
+
+  testClassArmTFOuterDo =>
+    self assert: (Adr0131CondMatrixClass armTFOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armTFOuterDo: false) equals: 0
+
+  testClassArmTFOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass armTFOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armTFOuterIfNil: false) equals: 0
+
+  testClassArmTFOuterIfTrue =>
+    self assert: (Adr0131CondMatrixClass armTFOuterIfTrue: true) equals: 1
+    self assert: (Adr0131CondMatrixClass armTFOuterIfTrue: false) equals: 0
+
+  testClassArmTFOuterInject =>
+    self assert: (Adr0131CondMatrixClass armTFOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armTFOuterInject: false) equals: 0
+
+  testClassArmTFOuterTimes =>
+    self assert: (Adr0131CondMatrixClass armTFOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armTFOuterTimes: false) equals: 0
+
+  testClassArmTFOuterToDo =>
+    self assert: (Adr0131CondMatrixClass armTFOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass armTFOuterToDo: false) equals: 0
+
+  testClassArmTFOuterWhile =>
+    self assert: (Adr0131CondMatrixClass armTFOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass armTFOuterWhile: false) equals: 0
+
+  testClassIterArmDirectCollect =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmDirectCollect: false) equals: 0
+
+  testClassIterArmDirectDo =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmDirectDo: false) equals: 0
+
+  testClassIterArmDirectInject =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmDirectInject: false) equals: 0
+
+  testClassIterArmDirectTimes =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass iterArmDirectTimes: false) equals: 0
+
+  testClassIterArmDirectToDo =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmDirectToDo: false) equals: 0
+
+  testClassIterArmDirectWhile =>
+    self assert: (Adr0131CondMatrixClass iterArmDirectWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass iterArmDirectWhile: false) equals: 0
+
+  testClassIterArmOuterCollect =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterCollect: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmOuterCollect: false) equals: 0
+
+  testClassIterArmOuterDo =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmOuterDo: false) equals: 0
+
+  testClassIterArmOuterInject =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterInject: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmOuterInject: false) equals: 0
+
+  testClassIterArmOuterTimes =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterTimes: true) equals: 2
+    self assert: (Adr0131CondMatrixClass iterArmOuterTimes: false) equals: 0
+
+  testClassIterArmOuterToDo =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterToDo: true) equals: 3
+    self assert: (Adr0131CondMatrixClass iterArmOuterToDo: false) equals: 0
+
+  testClassIterArmOuterWhile =>
+    self assert: (Adr0131CondMatrixClass iterArmOuterWhile: true) equals: 2
+    self assert: (Adr0131CondMatrixClass iterArmOuterWhile: false) equals: 0
+
+  testClassTopOuterAnd =>
+    self assert: (Adr0131CondMatrixClass topOuterAnd: true) equals: 1
+    self assert: (Adr0131CondMatrixClass topOuterAnd: false) equals: 0
+
+  testClassTopOuterIfNil =>
+    self assert: (Adr0131CondMatrixClass topOuterIfNil: true) equals: 1
+    self assert: (Adr0131CondMatrixClass topOuterIfNil: false) equals: 1
+
+  testValueArmDirectAnd =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectAnd: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armDirectAnd: false) equals: 0
+
+  testValueArmDirectCollect =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armDirectCollect: false) equals: 0
+
+  testValueArmDirectDo =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armDirectDo: false) equals: 0
+
+  testValueArmDirectIfNil =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectIfNil: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armDirectIfNil: false) equals: 0
+
+  testValueArmDirectIfTrue =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectIfTrue: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armDirectIfTrue: false) equals: 0
+
+  testValueArmDirectInject =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armDirectInject: false) equals: 0
+
+  testValueArmDirectTimes =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armDirectTimes: false) equals: 0
+
+  testValueArmDirectToDo =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armDirectToDo: false) equals: 0
+
+  testValueArmDirectWhile =>
+    self assert: ((Adr0131CondMatrixValue new) armDirectWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armDirectWhile: false) equals: 0
+
+  testValueArmOuterAnd =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterAnd: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armOuterAnd: false) equals: 0
+
+  testValueArmOuterCollect =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armOuterCollect: false) equals: 0
+
+  testValueArmOuterDo =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armOuterDo: false) equals: 0
+
+  testValueArmOuterIfNil =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterIfNil: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armOuterIfNil: false) equals: 0
+
+  testValueArmOuterIfTrue =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterIfTrue: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armOuterIfTrue: false) equals: 0
+
+  testValueArmOuterInject =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armOuterInject: false) equals: 0
+
+  testValueArmOuterTimes =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armOuterTimes: false) equals: 0
+
+  testValueArmOuterToDo =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armOuterToDo: false) equals: 0
+
+  testValueArmOuterWhile =>
+    self assert: ((Adr0131CondMatrixValue new) armOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armOuterWhile: false) equals: 0
+
+  testValueArmSelfsendDo =>
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendDo: false) equals: 0
+
+  testValueArmSelfsendIfTrue =>
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendIfTrue: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendIfTrue: false) equals: 0
+
+  testValueArmSelfsendInject =>
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendInject: false) equals: 0
+
+  testValueArmSelfsendToDo =>
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendToDo: false) equals: 0
+
+  testValueArmSelfsendWhile =>
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armSelfsendWhile: false) equals: 0
+
+  testValueArmNLDirectAnd =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectAnd: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectAnd: false) equals: 0
+
+  testValueArmNLDirectCollect =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectCollect: false) equals: 0
+
+  testValueArmNLDirectDo =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectDo: false) equals: 0
+
+  testValueArmNLDirectIfNil =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectIfNil: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectIfNil: false) equals: 0
+
+  testValueArmNLDirectIfTrue =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectIfTrue: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectIfTrue: false) equals: 0
+
+  testValueArmNLDirectInject =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectInject: false) equals: 0
+
+  testValueArmNLDirectTimes =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectTimes: false) equals: 0
+
+  testValueArmNLDirectToDo =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectToDo: false) equals: 0
+
+  testValueArmNLDirectWhile =>
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armNLDirectWhile: false) equals: 0
+
+  testValueArmNLOuterAnd =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterAnd: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterAnd: false) equals: 0
+
+  testValueArmNLOuterCollect =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterCollect: false) equals: 0
+
+  testValueArmNLOuterDo =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterDo: false) equals: 0
+
+  testValueArmNLOuterIfNil =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterIfNil: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterIfNil: false) equals: 0
+
+  testValueArmNLOuterIfTrue =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterIfTrue: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterIfTrue: false) equals: 0
+
+  testValueArmNLOuterInject =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterInject: false) equals: 0
+
+  testValueArmNLOuterTimes =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterTimes: false) equals: 0
+
+  testValueArmNLOuterToDo =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterToDo: false) equals: 0
+
+  testValueArmNLOuterWhile =>
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) armNLOuterWhile: false) equals: 0
+
+  testValueIterArmDirectCollect =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectCollect: false) equals: 0
+
+  testValueIterArmDirectDo =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectDo: false) equals: 0
+
+  testValueIterArmDirectInject =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectInject: false) equals: 0
+
+  testValueIterArmDirectTimes =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectTimes: false) equals: 0
+
+  testValueIterArmDirectToDo =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectToDo: false) equals: 0
+
+  testValueIterArmDirectWhile =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) iterArmDirectWhile: false) equals: 0
+
+  testValueIterArmOuterCollect =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterCollect: false) equals: 0
+
+  testValueIterArmOuterDo =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterDo: false) equals: 0
+
+  testValueIterArmOuterInject =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterInject: false) equals: 0
+
+  testValueIterArmOuterTimes =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterTimes: false) equals: 0
+
+  testValueIterArmOuterToDo =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterToDo: false) equals: 0
+
+  testValueIterArmOuterWhile =>
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixValue new) iterArmOuterWhile: false) equals: 0
+
+  testValueTopOuterAnd =>
+    self assert: ((Adr0131CondMatrixValue new) topOuterAnd: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) topOuterAnd: false) equals: 0
+
+  testValueTopOuterIfNil =>
+    self assert: ((Adr0131CondMatrixValue new) topOuterIfNil: true) equals: 1
+    self assert: ((Adr0131CondMatrixValue new) topOuterIfNil: false) equals: 1
+
+  testActorArmCvarWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) armCvarWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) armCvarWhile: false) equals: 0
+
+  testActorArmCvarOuterWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) armCvarOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) armCvarOuterWhile: false) equals: 0
+
+  testActorArmOuterWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) armOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) armOuterWhile: false) equals: 0
+
+  testActorArmSelfsendWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) armSelfsendWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) armSelfsendWhile: false) equals: 0
+
+  testActorArmNLOuterWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) armNLOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) armNLOuterWhile: false) equals: 0
+
+  testActorIterArmDirectCollect =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectCollect: false) equals: 0
+
+  testActorIterArmDirectDo =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectDo: false) equals: 0
+
+  testActorIterArmDirectInject =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectInject: false) equals: 0
+
+  testActorIterArmDirectTimes =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectTimes: false) equals: 0
+
+  testActorIterArmDirectToDo =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectToDo: false) equals: 0
+
+  testActorIterArmDirectWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmDirectWhile: false) equals: 0
+
+  testActorIterArmOuterCollect =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterCollect: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterCollect: false) equals: 0
+
+  testActorIterArmOuterDo =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterDo: false) equals: 0
+
+  testActorIterArmOuterInject =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterInject: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterInject: false) equals: 0
+
+  testActorIterArmOuterTimes =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterTimes: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterTimes: false) equals: 0
+
+  testActorIterArmOuterToDo =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterToDo: true) equals: 3
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterToDo: false) equals: 0
+
+  testActorIterArmOuterWhile =>
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterWhile: true) equals: 2
+    self assert: ((Adr0131CondMatrixActor spawn) iterArmOuterWhile: false) equals: 0

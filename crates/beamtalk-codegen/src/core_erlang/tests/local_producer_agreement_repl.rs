@@ -11,12 +11,13 @@
 //! unpacked.
 
 use super::local_producer_agreement::CONSTRUCTS;
+use super::local_producer_agreement_conditional::CONDITIONALS;
 use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
-    construct_outer_local_writes, local_threading_construct, operand_producer_writes,
-    producer_body_block, repl_operand_sites,
+    RootMethodKind, conditional_arm_blocks, construct_outer_local_writes,
+    local_threading_construct, producer_body_block, repl_operand_sites, root_producer_writes,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -70,10 +71,23 @@ const REPL_POSITIONS: &[&str] = &[
 /// `beamtalk-repl` agreement test and by the REPL protocol cases.
 #[test]
 fn every_repl_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+    check_repl_agreement(CONSTRUCTS, 100);
+}
+
+/// ADR 0131 Phase 3 (BT-3738): the same, for conditionals. A conditional at an
+/// operand site of a REPL input that writes a binding is a producer that adopts
+/// the bindings map whole (`conditional_producer_writes` for the core rule,
+/// `ifNil:` and its relatives included).
+#[test]
+fn every_repl_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+    check_repl_agreement(CONDITIONALS, 100);
+}
+
+fn check_repl_agreement(constructs: &[&str], least_named: usize) {
     let known = ["t", "u", "s", "r"];
     let bound = |name: &str| known.contains(&name);
     let (mut rule_named_total, mut rejected_total) = (0, 0);
-    for construct in CONSTRUCTS {
+    for construct in constructs {
         for position in REPL_POSITIONS {
             let src = format!("{}\n", position.replace("{c}", construct));
             let (module, parse_diags) = parse(lex_with_eof(&src));
@@ -101,14 +115,16 @@ fn every_repl_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
             let mut writes_a_binding: HashSet<Span> = HashSet::new();
             for stmt in &statements {
                 for site in repl_operand_sites(stmt) {
-                    if let Some(writes) = operand_producer_writes(site, &bound) {
+                    if let Some(writes) = root_producer_writes(site, &bound, RootMethodKind::Actor)
+                    {
                         let mut names: Vec<String> =
                             writes.into_iter().map(|w| w.name.to_string()).collect();
                         names.sort();
                         names.dedup();
                         rule_named.insert(Expression::span(site), names);
                     }
-                    if producer_body_block(site).is_some()
+                    if (producer_body_block(site).is_some()
+                        || conditional_arm_blocks(site).is_some())
                         && local_threading_construct(site).is_some_and(|c| {
                             !construct_outer_local_writes(&c, &|_| true).is_empty()
                         })
@@ -160,7 +176,7 @@ fn every_repl_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
         }
     }
     assert!(
-        rule_named_total > 100 && rejected_total > 20,
+        rule_named_total > least_named && rejected_total > 20,
         "{rule_named_total} REPL sites the rule names compared, {rejected_total} programs rejected"
     );
 }

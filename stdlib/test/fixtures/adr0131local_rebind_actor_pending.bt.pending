@@ -14,6 +14,7 @@
 // `adr0131_probe_matrix_pins` in beamtalk-core checks that.
 
 Actor subclass: Adr0131LocalRebindActorPending
+
   state: n = 0
 
   o1 =>
@@ -30,16 +31,6 @@ Actor subclass: Adr0131LocalRebindActorPending
       t := t + 1
       1
     ] ensure: [t := t + 1]) + 1
-    #[r, t]
-
-  o3 =>
-    t := 0
-    r := (4 =:= 5
-      ifTrue: [2]
-      ifFalse: [
-        t := t + 1
-        1
-      ]) + 1
     #[r, t]
 
   o6: cond =>
@@ -102,16 +93,6 @@ Actor subclass: Adr0131LocalRebindActorPending
       ]
     0
 
-  o12: c =>
-    t := 0
-    self.n := (c
-      ifTrue: [2]
-      ifFalse: [
-        t := t + 1
-        1
-      ]) + 1
-    #[self.n, t]
-
   s1 =>
     t := 0
     d := #{#a => 1}
@@ -131,27 +112,8 @@ Actor subclass: Adr0131LocalRebindActorPending
     ] on: Error do: [:e | 0])
     #[r, t]
 
-  // BT-3748 review: the §1a shape with the threading construct nested inside
-  // the right operand (an argument of a send, the receiver of a binary send)
-  // rather than the operand itself. Source order reads `t` first: #[1, 1].
-  seqArg: flag =>
-    t := 0
-    r := t + (0 max: (flag ifTrue: [t := t + 1. 1] ifFalse: [0]))
-    #[r, t]
-
-  seqRecv: flag =>
-    t := 0
-    r := t + ((flag ifTrue: [t := t + 1. 1] ifFalse: [0]) + 0)
-    #[r, t]
-
   // BT-3753: statement-position shapes that answered wrong, raised or failed
   // to compile before; each is an ADR 0131 Phase 0 compile error now.
-
-  // A loop in a conditional arm.
-  stArmWhile: c =>
-    t := 0
-    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
-    t
 
   // A `do:` in an `on:do:` body.
   stProtectedDo =>

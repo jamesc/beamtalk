@@ -1,0 +1,180 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): the statement-position matrix cells that
+// answered wrong, raised or failed to compile before conditionals became
+// local-threading producers (`adr0131_statement_probes.tsv`, verdict `bad` or
+// `over`, now `ok`). Each method is one cell of the matrix: a construct
+// (`kind`) writing the method-level local `t` (`target`) inside a block role
+// (`container`), in a class, value-type or actor method. `c` is the
+// condition. The expected answers are in stdlib/test/adr0131cond_matrix_test.bt.
+
+Actor subclass: Adr0131CondMatrixActor
+  state: n = 0
+
+  plain => 0
+
+  armCvarWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [t < 2]
+          whileTrue: [
+            t := t + 1
+            self.n := 1
+          ]
+      ]
+    t
+
+  armCvarOuterWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        self.n := 1
+        [t < 2] whileTrue: [t := t + 1]
+      ]
+    t
+
+  armOuterWhile: c =>
+    t := 0
+    c ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  armSelfsendWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [t < 2]
+          whileTrue: [
+            t := t + 1
+            self plain
+          ]
+      ]
+    t
+
+  armNLOuterWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [t < 2] whileTrue: [t := t + 1]
+        5
+      ]
+    t
+
+  iterArmDirectCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2) collect: [:x | t := t + x]
+          ]
+      ]
+    t
+
+  iterArmDirectDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2) do: [:e | t := t + e]
+          ]
+      ]
+    t
+
+  iterArmDirectInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+          ]
+      ]
+    t
+
+  iterArmDirectTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            2 timesRepeat: [t := t + 1]
+          ]
+      ]
+    t
+
+  iterArmDirectToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            1 to: 2 do: [:i | t := t + i]
+          ]
+      ]
+    t
+
+  iterArmDirectWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            [t < 2] whileTrue: [t := t + 1]
+          ]
+      ]
+    t
+
+  iterArmOuterCollect: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | #(1, 2) collect: [:x | t := t + x]]]
+    t
+
+  iterArmOuterDo: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | #(1, 2) do: [:e | t := t + e]]]
+    t
+
+  iterArmOuterInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            #(1, 2)
+              inject: 0
+              into: [:a :x |
+                t := t + x
+                a + x
+              ]
+          ]
+      ]
+    t
+
+  iterArmOuterTimes: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | 2 timesRepeat: [t := t + 1]]]
+    t
+
+  iterArmOuterToDo: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | 1 to: 2 do: [:i | t := t + i]]]
+    t
+
+  iterArmOuterWhile: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]]
+    t

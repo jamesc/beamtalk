@@ -22,6 +22,7 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
+use super::control_flow::ScratchStart;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -1890,13 +1891,14 @@ impl CoreErlangGenerator {
                 // check as `ifNotNil:` below — a self-send or field mutation
                 // inside the `ifNil:` block must not be lost to a plain
                 // closure.
-                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                if self.nil_conditional_inlines() {
                     if let Expression::Block(block) = &arguments[0] {
                         if self.conditional_needs_mutation_threading(receiver, &[block]) {
                             let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
                                 receiver,
                                 Some(block),
                                 None,
+                                ScratchStart::Continue,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -1933,7 +1935,7 @@ impl CoreErlangGenerator {
                 // When in actor context or loop body, check if the block
                 // contains field mutations. If so, generate inline state-threaded code
                 // instead of a closure to ensure mutations persist correctly.
-                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                if self.nil_conditional_inlines() {
                     if let Expression::Block(block) = &arguments[0] {
                         // inline when a nested list op mutates an outer local (see IfTrue).
                         // also inline for a self-send receiver (see IfTrue above).
@@ -1948,6 +1950,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 None,
                                 Some(block),
+                                ScratchStart::Continue,
                             )?;
                             return Ok(Some(doc));
                         }
@@ -1985,7 +1988,7 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
-                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                if self.nil_conditional_inlines() {
                     if let (Expression::Block(nil_block), Expression::Block(not_nil_block)) =
                         (&arguments[0], &arguments[1])
                     {
@@ -1998,6 +2001,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 Some(nil_block),
                                 Some(not_nil_block),
+                                ScratchStart::Continue,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -2044,7 +2048,7 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
-                if self.context == CodeGenContext::Actor || self.in_loop_body {
+                if self.nil_conditional_inlines() {
                     if let (Expression::Block(not_nil_block), Expression::Block(nil_block)) =
                         (&arguments[0], &arguments[1])
                     {
@@ -2057,6 +2061,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 Some(nil_block),
                                 Some(not_nil_block),
+                                ScratchStart::Continue,
                             )?;
                             return Ok(Some(tuple_doc));
                         }
@@ -2820,9 +2825,17 @@ impl CoreErlangGenerator {
                                 self.set_repl_loop_mutated(true);
                             }
                             let doc = if kw == "and:" {
-                                self.generate_and_with_mutations_tuple(receiver, block)?
+                                self.generate_and_with_mutations_tuple(
+                                    receiver,
+                                    block,
+                                    ScratchStart::Continue,
+                                )?
                             } else {
-                                self.generate_or_with_mutations_tuple(receiver, block)?
+                                self.generate_or_with_mutations_tuple(
+                                    receiver,
+                                    block,
+                                    ScratchStart::Continue,
+                                )?
                             };
                             return Ok(Some(doc));
                         }
@@ -2856,7 +2869,11 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_true_with_mutations_tuple(receiver, block)?;
+                        let doc = self.generate_if_true_with_mutations_tuple(
+                            receiver,
+                            block,
+                            ScratchStart::Continue,
+                        )?;
                         return Ok(Some(doc));
                     }
                 }
@@ -2872,7 +2889,11 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_false_with_mutations_tuple(receiver, block)?;
+                        let doc = self.generate_if_false_with_mutations_tuple(
+                            receiver,
+                            block,
+                            ScratchStart::Continue,
+                        )?;
                         return Ok(Some(doc));
                     }
                 }
@@ -2895,6 +2916,7 @@ impl CoreErlangGenerator {
                             receiver,
                             true_block,
                             false_block,
+                            ScratchStart::Continue,
                         )?;
                         return Ok(Some(doc));
                     }
@@ -2904,6 +2926,17 @@ impl CoreErlangGenerator {
         }
 
         Ok(None)
+    }
+
+    /// Whether a nil-testing conditional (`ifNil:`, `ifNotNil:`, the two-arm
+    /// forms) whose block needs threading compiles inline to a
+    /// `{Result, NewState}` tuple rather than to a closure: in an actor
+    /// method, in a loop body and (ADR 0131 Phase 3, BT-3738) at the REPL,
+    /// whose bindings map is the threaded state
+    /// (`generate_nil_conditional_with_mutations_tuple` sets
+    /// `repl_loop_mutated` there, as the boolean family does).
+    fn nil_conditional_inlines(&self) -> bool {
+        self.context == CodeGenContext::Actor || self.in_loop_body || self.is_repl_mode()
     }
 
     /// The shared "does this

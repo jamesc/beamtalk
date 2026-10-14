@@ -1,0 +1,249 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3738 (ADR 0131 Phase 3): a conditional (`ifTrue:` ... `ifNil:ifNotNil:`,
+// `and:`/`or:`) that writes an outer local is a local-threading producer at
+// the method root, whatever position it sits in (statement, last expression,
+// an assignment's value, an operand), and each of its arms is a `BranchArm`
+// frame: a loop, fold or nested conditional in an arm rebinds its locals into
+// the arm's own scratch map. In a class or value-type method the scratch map
+// is private (no `State` family exists there); in an actor instance method it
+// continues `State`. The columns are
+// adr0131cond_producer_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131cond_producer_test.bt.
+
+TestCase subclass: Adr0131CondProducerTest
+
+  testStA0 =>
+    self assert: #[Adr0131CondProducerClass stA: true, (Adr0131CondProducerValue new) stA: true, (Adr0131CondProducerActor spawn) stA: true] equals: #[5, 5, 5]
+
+  testStA1 =>
+    self assert: #[Adr0131CondProducerClass stA: false, (Adr0131CondProducerValue new) stA: false, (Adr0131CondProducerActor spawn) stA: false] equals: #[0, 0, 0]
+
+  testStB0 =>
+    self assert: #[Adr0131CondProducerClass stB: true, (Adr0131CondProducerValue new) stB: true, (Adr0131CondProducerActor spawn) stB: true] equals: #[1, 1, 1]
+
+  testStB1 =>
+    self assert: #[Adr0131CondProducerClass stB: false, (Adr0131CondProducerValue new) stB: false, (Adr0131CondProducerActor spawn) stB: false] equals: #[10, 10, 10]
+
+  testStC0 =>
+    self assert: #[Adr0131CondProducerClass stC: nil, (Adr0131CondProducerValue new) stC: nil, (Adr0131CondProducerActor spawn) stC: nil] equals: #[1, 1, 1]
+
+  testStC1 =>
+    self assert: #[Adr0131CondProducerClass stC: 5, (Adr0131CondProducerValue new) stC: 5, (Adr0131CondProducerActor spawn) stC: 5] equals: #[0, 0, 0]
+
+  testStD0 =>
+    self assert: #[Adr0131CondProducerClass stD: true, (Adr0131CondProducerValue new) stD: true, (Adr0131CondProducerActor spawn) stD: true] equals: #[1, 1, 1]
+
+  testStD1 =>
+    self assert: #[Adr0131CondProducerClass stD: false, (Adr0131CondProducerValue new) stD: false, (Adr0131CondProducerActor spawn) stD: false] equals: #[0, 0, 0]
+
+  testLast0 =>
+    self assert: #[Adr0131CondProducerClass last: true, (Adr0131CondProducerValue new) last: true, (Adr0131CondProducerActor spawn) last: true] equals: #[7, 7, 7]
+
+  testLast1 =>
+    self assert: #[Adr0131CondProducerClass last: false, (Adr0131CondProducerValue new) last: false, (Adr0131CondProducerActor spawn) last: false] equals: #[8, 8, 8]
+
+  testAssign0 =>
+    self assert: #[Adr0131CondProducerClass assign: true, (Adr0131CondProducerValue new) assign: true, (Adr0131CondProducerActor spawn) assign: true] equals: #[#[2, 1], #[2, 1], #[2, 1]]
+
+  testAssign1 =>
+    self assert: #[Adr0131CondProducerClass assign: false, (Adr0131CondProducerValue new) assign: false, (Adr0131CondProducerActor spawn) assign: false] equals: #[#[3, 0], #[3, 0], #[3, 0]]
+
+  testAssignNil0 =>
+    self assert: #[Adr0131CondProducerClass assignNil: nil, (Adr0131CondProducerValue new) assignNil: nil, (Adr0131CondProducerActor spawn) assignNil: nil] equals: #[#[2, 1], #[2, 1], #[2, 1]]
+
+  testAssignNil1 =>
+    self assert: #[Adr0131CondProducerClass assignNil: 5, (Adr0131CondProducerValue new) assignNil: 5, (Adr0131CondProducerActor spawn) assignNil: 5] equals: #[#[5, 0], #[5, 0], #[5, 0]]
+
+  testOperand0 =>
+    self assert: #[Adr0131CondProducerClass operand: true, (Adr0131CondProducerValue new) operand: true, (Adr0131CondProducerActor spawn) operand: true] equals: #[#[3, 1], #[3, 1], #[3, 1]]
+
+  testOperand1 =>
+    self assert: #[Adr0131CondProducerClass operand: false, (Adr0131CondProducerValue new) operand: false, (Adr0131CondProducerActor spawn) operand: false] equals: #[#[4, 0], #[4, 0], #[4, 0]]
+
+  testRet0 =>
+    self assert: #[Adr0131CondProducerClass ret: true, (Adr0131CondProducerValue new) ret: true, (Adr0131CondProducerActor spawn) ret: true] equals: #[3, 3, 3]
+
+  testRet1 =>
+    self assert: #[Adr0131CondProducerClass ret: false, (Adr0131CondProducerValue new) ret: false, (Adr0131CondProducerActor spawn) ret: false] equals: #[4, 4, 4]
+
+  testRetDirect0 =>
+    self assert: #[Adr0131CondProducerClass retDirect: true, (Adr0131CondProducerValue new) retDirect: true, (Adr0131CondProducerActor spawn) retDirect: true] equals: #[2, 2, 2]
+
+  testRetDirect1 =>
+    self assert: #[Adr0131CondProducerClass retDirect: false, (Adr0131CondProducerValue new) retDirect: false, (Adr0131CondProducerActor spawn) retDirect: false] equals: #[3, 3, 3]
+
+  testNilOperand0 =>
+    self assert: #[Adr0131CondProducerClass nilOperand: nil, (Adr0131CondProducerValue new) nilOperand: nil, (Adr0131CondProducerActor spawn) nilOperand: nil] equals: #[#[3, 1], #[3, 1], #[3, 1]]
+
+  testNilOperand1 =>
+    self assert: #[Adr0131CondProducerClass nilOperand: 5, (Adr0131CondProducerValue new) nilOperand: 5, (Adr0131CondProducerActor spawn) nilOperand: 5] equals: #[#[6, 0], #[6, 0], #[6, 0]]
+
+  testAndOperand0 =>
+    self assert: #[Adr0131CondProducerClass andOperand: true, (Adr0131CondProducerValue new) andOperand: true, (Adr0131CondProducerActor spawn) andOperand: true] equals: #[#[4, 1], #[4, 1], #[4, 1]]
+
+  testAndOperand1 =>
+    self assert: #[Adr0131CondProducerClass andOperand: false, (Adr0131CondProducerValue new) andOperand: false, (Adr0131CondProducerActor spawn) andOperand: false] equals: #[#[5, 0], #[5, 0], #[5, 0]]
+
+  testOrOperand0 =>
+    self assert: #[Adr0131CondProducerClass orOperand: true, (Adr0131CondProducerValue new) orOperand: true, (Adr0131CondProducerActor spawn) orOperand: true] equals: #[#[4, 0], #[4, 0], #[4, 0]]
+
+  testOrOperand1 =>
+    self assert: #[Adr0131CondProducerClass orOperand: false, (Adr0131CondProducerValue new) orOperand: false, (Adr0131CondProducerActor spawn) orOperand: false] equals: #[#[4, 1], #[4, 1], #[4, 1]]
+
+  testWriteOnlyOperand0 =>
+    self assert: #[Adr0131CondProducerClass writeOnlyOperand: true, (Adr0131CondProducerValue new) writeOnlyOperand: true, (Adr0131CondProducerActor spawn) writeOnlyOperand: true] equals: #[#[3, 9], #[3, 9], #[3, 9]]
+
+  testWriteOnlyOperand1 =>
+    self assert: #[Adr0131CondProducerClass writeOnlyOperand: false, (Adr0131CondProducerValue new) writeOnlyOperand: false, (Adr0131CondProducerActor spawn) writeOnlyOperand: false] equals: #[#[4, 0], #[4, 0], #[4, 0]]
+
+  testTwoLocals0 =>
+    self assert: #[Adr0131CondProducerClass twoLocals: true, (Adr0131CondProducerValue new) twoLocals: true, (Adr0131CondProducerActor spawn) twoLocals: true] equals: #[#[3, 1, 5], #[3, 1, 5], #[3, 1, 5]]
+
+  testTwoLocals1 =>
+    self assert: #[Adr0131CondProducerClass twoLocals: false, (Adr0131CondProducerValue new) twoLocals: false, (Adr0131CondProducerActor spawn) twoLocals: false] equals: #[#[4, 0, 6], #[4, 0, 6], #[4, 0, 6]]
+
+  testSeqRead0 =>
+    self assert: #[Adr0131CondProducerClass seqRead: true, (Adr0131CondProducerValue new) seqRead: true, (Adr0131CondProducerActor spawn) seqRead: true] equals: #[#[2, 1], #[2, 1], #[2, 1]]
+
+  testSeqRead1 =>
+    self assert: #[Adr0131CondProducerClass seqRead: false, (Adr0131CondProducerValue new) seqRead: false, (Adr0131CondProducerActor spawn) seqRead: false] equals: #[#[3, 0], #[3, 0], #[3, 0]]
+
+  testStmtOperand0 =>
+    self assert: #[Adr0131CondProducerClass stmtOperand: true, (Adr0131CondProducerValue new) stmtOperand: true, (Adr0131CondProducerActor spawn) stmtOperand: true] equals: #[#["2", 1], #["2", 1], #["2", 1]]
+
+  testStmtOperand1 =>
+    self assert: #[Adr0131CondProducerClass stmtOperand: false, (Adr0131CondProducerValue new) stmtOperand: false, (Adr0131CondProducerActor spawn) stmtOperand: false] equals: #[#["3", 0], #["3", 0], #["3", 0]]
+
+  testNested0 =>
+    self assert: #[Adr0131CondProducerClass nested: true, (Adr0131CondProducerValue new) nested: true, (Adr0131CondProducerActor spawn) nested: true] equals: #[#[3, 1], #[3, 1], #[3, 1]]
+
+  testNested1 =>
+    self assert: #[Adr0131CondProducerClass nested: false, (Adr0131CondProducerValue new) nested: false, (Adr0131CondProducerActor spawn) nested: false] equals: #[#[4, 0], #[4, 0], #[4, 0]]
+
+  testEmptyArm0 =>
+    self assert: #[Adr0131CondProducerClass emptyArm: true, (Adr0131CondProducerValue new) emptyArm: true, (Adr0131CondProducerActor spawn) emptyArm: true] equals: #[#[false, 1], #[false, 1], #[false, 1]]
+
+  testEmptyArm1 =>
+    self assert: #[Adr0131CondProducerClass emptyArm: false, (Adr0131CondProducerValue new) emptyArm: false, (Adr0131CondProducerActor spawn) emptyArm: false] equals: #[#[true, 0], #[true, 0], #[true, 0]]
+
+  testSelfSendCls0 =>
+    self assert: #[Adr0131CondProducerClass selfSendCls: true, (Adr0131CondProducerValue new) selfSendCls: true, (Adr0131CondProducerActor spawn) selfSendCls: true] equals: #[#[1, 1], #[1, 1], #[1, 1]]
+
+  testSelfSendCls1 =>
+    self assert: #[Adr0131CondProducerClass selfSendCls: false, (Adr0131CondProducerValue new) selfSendCls: false, (Adr0131CondProducerActor spawn) selfSendCls: false] equals: #[#[2, 0], #[2, 0], #[2, 0]]
+
+  testArmDo0 =>
+    self assert: #[Adr0131CondProducerClass armDo: true, (Adr0131CondProducerValue new) armDo: true, (Adr0131CondProducerActor spawn) armDo: true] equals: #[3, 3, 3]
+
+  testArmDo1 =>
+    self assert: #[Adr0131CondProducerClass armDo: false, (Adr0131CondProducerValue new) armDo: false, (Adr0131CondProducerActor spawn) armDo: false] equals: #[0, 0, 0]
+
+  testArmDoVal0 =>
+    self assert: #[Adr0131CondProducerClass armDoVal: true, (Adr0131CondProducerValue new) armDoVal: true, (Adr0131CondProducerActor spawn) armDoVal: true] equals: #[#[5, 3], #[5, 3], #[5, 3]]
+
+  testArmDoVal1 =>
+    self assert: #[Adr0131CondProducerClass armDoVal: false, (Adr0131CondProducerValue new) armDoVal: false, (Adr0131CondProducerActor spawn) armDoVal: false] equals: #[#[6, 0], #[6, 0], #[6, 0]]
+
+  testArmToDo0 =>
+    self assert: #[Adr0131CondProducerClass armToDo: true, (Adr0131CondProducerValue new) armToDo: true, (Adr0131CondProducerActor spawn) armToDo: true] equals: #[106, 106, 106]
+
+  testArmToDo1 =>
+    self assert: #[Adr0131CondProducerClass armToDo: false, (Adr0131CondProducerValue new) armToDo: false, (Adr0131CondProducerActor spawn) armToDo: false] equals: #[0, 0, 0]
+
+  testArmCollect0 =>
+    self assert: #[Adr0131CondProducerClass armCollect: true, (Adr0131CondProducerValue new) armCollect: true, (Adr0131CondProducerActor spawn) armCollect: true] equals: #[#[2, 3], #[2, 3], #[2, 3]]
+
+  testArmCollect1 =>
+    self assert: #[Adr0131CondProducerClass armCollect: false, (Adr0131CondProducerValue new) armCollect: false, (Adr0131CondProducerActor spawn) armCollect: false] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  testArmInject0 =>
+    self assert: #[Adr0131CondProducerClass armInject: true, (Adr0131CondProducerValue new) armInject: true, (Adr0131CondProducerActor spawn) armInject: true] equals: #[5, 5, 5]
+
+  testArmInject1 =>
+    self assert: #[Adr0131CondProducerClass armInject: false, (Adr0131CondProducerValue new) armInject: false, (Adr0131CondProducerActor spawn) armInject: false] equals: #[0, 0, 0]
+
+  testArmLocalOnly0 =>
+    self assert: #[Adr0131CondProducerClass armLocalOnly: true, (Adr0131CondProducerValue new) armLocalOnly: true, (Adr0131CondProducerActor spawn) armLocalOnly: true] equals: #[#[#(1, 4, 9), 1], #[#(1, 4, 9), 1], #[#(1, 4, 9), 1]]
+
+  testArmLocalOnly1 =>
+    self assert: #[Adr0131CondProducerClass armLocalOnly: false, (Adr0131CondProducerValue new) armLocalOnly: false, (Adr0131CondProducerActor spawn) armLocalOnly: false] equals: #[#[#(), 0], #[#(), 0], #[#(), 0]]
+
+  testArmWhile0 =>
+    self assert: #[Adr0131CondProducerClass armWhile: true, (Adr0131CondProducerValue new) armWhile: true, (Adr0131CondProducerActor spawn) armWhile: true] equals: #[3, 3, 3]
+
+  testArmWhile1 =>
+    self assert: #[Adr0131CondProducerClass armWhile: false, (Adr0131CondProducerValue new) armWhile: false, (Adr0131CondProducerActor spawn) armWhile: false] equals: #[0, 0, 0]
+
+  testArmTimes0 =>
+    self assert: #[Adr0131CondProducerClass armTimes: true, (Adr0131CondProducerValue new) armTimes: true, (Adr0131CondProducerActor spawn) armTimes: true] equals: #[6, 6, 6]
+
+  testArmTimes1 =>
+    self assert: #[Adr0131CondProducerClass armTimes: false, (Adr0131CondProducerValue new) armTimes: false, (Adr0131CondProducerActor spawn) armTimes: false] equals: #[0, 0, 0]
+
+  testArmTwo0 =>
+    self assert: #[Adr0131CondProducerClass armTwo: true, (Adr0131CondProducerValue new) armTwo: true, (Adr0131CondProducerActor spawn) armTwo: true] equals: #[#[3, 6], #[3, 6], #[3, 6]]
+
+  testArmTwo1 =>
+    self assert: #[Adr0131CondProducerClass armTwo: false, (Adr0131CondProducerValue new) armTwo: false, (Adr0131CondProducerActor spawn) armTwo: false] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  testArmBoth0 =>
+    self assert: #[Adr0131CondProducerClass armBoth: true, (Adr0131CondProducerValue new) armBoth: true, (Adr0131CondProducerActor spawn) armBoth: true] equals: #[#[3, 0], #[3, 0], #[3, 0]]
+
+  testArmBoth1 =>
+    self assert: #[Adr0131CondProducerClass armBoth: false, (Adr0131CondProducerValue new) armBoth: false, (Adr0131CondProducerActor spawn) armBoth: false] equals: #[#[0, 6], #[0, 6], #[0, 6]]
+
+  testArmOperand0 =>
+    self assert: #[Adr0131CondProducerClass armOperand: true, (Adr0131CondProducerValue new) armOperand: true, (Adr0131CondProducerActor spawn) armOperand: true] equals: #[5, 5, 5]
+
+  testArmOperand1 =>
+    self assert: #[Adr0131CondProducerClass armOperand: false, (Adr0131CondProducerValue new) armOperand: false, (Adr0131CondProducerActor spawn) armOperand: false] equals: #[0, 0, 0]
+
+  testArmReturn0 =>
+    self assert: #[Adr0131CondProducerClass armReturn: true, (Adr0131CondProducerValue new) armReturn: true, (Adr0131CondProducerActor spawn) armReturn: true] equals: #[3, 3, 3]
+
+  testArmReturn1 =>
+    self assert: #[Adr0131CondProducerClass armReturn: false, (Adr0131CondProducerValue new) armReturn: false, (Adr0131CondProducerActor spawn) armReturn: false] equals: #[99, 99, 99]
+
+  testArmReturnDo0 =>
+    self assert: #[Adr0131CondProducerClass armReturnDo: true, (Adr0131CondProducerValue new) armReturnDo: true, (Adr0131CondProducerActor spawn) armReturnDo: true] equals: #[nil, nil, nil]
+
+  testArmReturnDo1 =>
+    self assert: #[Adr0131CondProducerClass armReturnDo: false, (Adr0131CondProducerValue new) armReturnDo: false, (Adr0131CondProducerActor spawn) armReturnDo: false] equals: #[0, 0, 0]
+
+  testArmNil0 =>
+    self assert: #[Adr0131CondProducerClass armNil: nil, (Adr0131CondProducerValue new) armNil: nil, (Adr0131CondProducerActor spawn) armNil: nil] equals: #[3, 3, 3]
+
+  testArmNil1 =>
+    self assert: #[Adr0131CondProducerClass armNil: 5, (Adr0131CondProducerValue new) armNil: 5, (Adr0131CondProducerActor spawn) armNil: 5] equals: #[0, 0, 0]
+
+  testArmNotNil0 =>
+    self assert: #[Adr0131CondProducerClass armNotNil: nil, (Adr0131CondProducerValue new) armNotNil: nil, (Adr0131CondProducerActor spawn) armNotNil: nil] equals: #[#[nil, 0], #[nil, 0], #[nil, 0]]
+
+  testArmNotNil1 =>
+    self assert: #[Adr0131CondProducerClass armNotNil: 5, (Adr0131CondProducerValue new) armNotNil: 5, (Adr0131CondProducerActor spawn) armNotNil: 5] equals: #[#[5, 13], #[5, 13], #[5, 13]]
+
+  testArmAnd0 =>
+    self assert: #[Adr0131CondProducerClass armAnd: true, (Adr0131CondProducerValue new) armAnd: true, (Adr0131CondProducerActor spawn) armAnd: true] equals: #[#[true, 3], #[true, 3], #[true, 3]]
+
+  testArmAnd1 =>
+    self assert: #[Adr0131CondProducerClass armAnd: false, (Adr0131CondProducerValue new) armAnd: false, (Adr0131CondProducerActor spawn) armAnd: false] equals: #[#[false, 0], #[false, 0], #[false, 0]]
+
+  testArmOr0 =>
+    self assert: #[Adr0131CondProducerClass armOr: true, (Adr0131CondProducerValue new) armOr: true, (Adr0131CondProducerActor spawn) armOr: true] equals: #[#[true, 0], #[true, 0], #[true, 0]]
+
+  testArmOr1 =>
+    self assert: #[Adr0131CondProducerClass armOr: false, (Adr0131CondProducerValue new) armOr: false, (Adr0131CondProducerActor spawn) armOr: false] equals: #[#[true, 3], #[true, 3], #[true, 3]]
+
+  testArmMixed0 =>
+    self assert: #[Adr0131CondProducerClass armMixed: true, (Adr0131CondProducerValue new) armMixed: true, (Adr0131CondProducerActor spawn) armMixed: true] equals: #[8, 8, 8]
+
+  testArmMixed1 =>
+    self assert: #[Adr0131CondProducerClass armMixed: false, (Adr0131CondProducerValue new) armMixed: false, (Adr0131CondProducerActor spawn) armMixed: false] equals: #[0, 0, 0]
+
+  testArmInArm0 =>
+    self assert: #[Adr0131CondProducerClass armInArm: true, (Adr0131CondProducerValue new) armInArm: true, (Adr0131CondProducerActor spawn) armInArm: true] equals: #[1, 1, 1]
+
+  testArmInArm1 =>
+    self assert: #[Adr0131CondProducerClass armInArm: false, (Adr0131CondProducerValue new) armInArm: false, (Adr0131CondProducerActor spawn) armInArm: false] equals: #[0, 0, 0]

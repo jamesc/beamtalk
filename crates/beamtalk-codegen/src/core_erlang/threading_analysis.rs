@@ -329,7 +329,7 @@ impl CoreErlangGenerator {
     /// The scope predicate every threaded-set walk uses: `name` is bound
     /// outside the construct (any name in the REPL, whose set is the
     /// bindings the construct writes).
-    fn binds_threadable_local(&self, name: &str) -> bool {
+    pub(in crate::core_erlang) fn binds_threadable_local(&self, name: &str) -> bool {
         self.is_repl_mode() || self.lookup_var(name).is_some()
     }
 

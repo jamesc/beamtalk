@@ -32,7 +32,7 @@
 //! this one does not.
 //!
 //! The codegen property draws [`Shapes::all()`], `local_touch` included
-//! (BT-3767): `local_touch`'s failures (BT-3738) show only when the program is
+//! (BT-3767): `local_touch`'s failures (BT-3817) show only when the program is
 //! executed, and in-process codegen passes for it, so only the BEAM property
 //! leaves it out.
 //!

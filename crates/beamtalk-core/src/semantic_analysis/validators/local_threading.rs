@@ -46,12 +46,12 @@
 use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
-    EscapeShape, LoopBodyContext, OuterLocalWrite, captured_local_mutations,
-    construct_outer_local_writes, escape_sites, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_safe_value_family_selector, is_threaded_frame_body,
-    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, producer_body_block, repl_operand_sites, sequenced_operand_sites,
-    stored_block_var_uses,
+    EscapeShape, LoopBodyContext, OuterLocalWrite, RootMethodKind, captured_local_mutations,
+    conditional_arm_blocks, conditional_producer_writes, construct_outer_local_writes,
+    escape_sites, is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
+    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -353,17 +353,12 @@ struct Allowed {
 /// grow it as each producer lands, and phase 5 (BT-3751) deletes the check.
 /// Add a row only for a combination that answers right today.
 const ALLOW_SET: &[Allowed] = &[
-    // `r := <construct>` in the method body (s3, s5, and the per-context
-    // passes of the ADR's second probe table).
+    // `r := <construct>` in the method body (s3, and the per-context passes of
+    // the ADR's second probe table). A conditional is not here since ADR 0131
+    // Phase 3 (BT-3738): in a class or value-type method it is accepted only as
+    // a local-threading producer (`root_producer_writes`), the one lowering.
     Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            ListOp,
-            DetectIfNoneSearch,
-            IfTrue,
-            Exception,
-        ],
+        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch, Exception],
         position: Position::AssignValue { nested: false },
         contexts: &[Class, ValueType],
     },
@@ -396,6 +391,7 @@ const ALLOW_SET: &[Allowed] = &[
             DetectIfNone,
             Enumeration,
             IfTrue,
+            IfNil,
             AndOr,
             BlockValue,
         ],
@@ -620,7 +616,6 @@ const fn deny(
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
     deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
-    deny(None, None, None, None, None, None, &[Repl], &[IfNil]),
     deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
@@ -842,6 +837,19 @@ struct FrameSites {
     statement: LoopBodyContext,
     /// Whether the frame is a fold's ([`is_fold_frame_body`]).
     fold: bool,
+    /// Whether the frame is an arm of a conditional that is a local-threading
+    /// producer (ADR 0131 Phase 3): a `BranchArm`, not a loop or fold body.
+    arm: bool,
+}
+
+/// What kind of threaded frame body a block operand is about to be walked as
+/// ([`Walker::pending_frame_body`]).
+#[derive(Debug, Clone, Copy)]
+struct FrameBody {
+    /// A fold's body ([`is_fold_frame_body`]).
+    fold: bool,
+    /// An arm of a conditional producer (ADR 0131 Phase 3).
+    arm: bool,
 }
 
 struct Walker<'d> {
@@ -886,7 +894,7 @@ struct Walker<'d> {
     frame_sites: Vec<Option<FrameSites>>,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
-    pending_frame_body: Option<bool>,
+    pending_frame_body: Option<FrameBody>,
     /// The actor self-send callees of the enclosing class that thread a Tier 2
     /// block argument ([`threading_callees`]).
     callees: &'d HashSet<(EcoString, usize)>,
@@ -1036,6 +1044,9 @@ impl<'d> Walker<'d> {
                 self.operand_sites = sites.into_iter().map(Expression::span).collect();
             } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
                 frame.statement = LoopBodyContext::new(&stmt.expression, false, false, false);
+                if frame.arm {
+                    frame.statement = frame.statement.in_arm();
+                }
                 frame.sites = loop_body_producer_sites(&stmt.expression)
                     .into_iter()
                     .map(Expression::span)
@@ -1051,8 +1062,9 @@ impl<'d> Walker<'d> {
             self.report_escaping_literal(block, shape);
         }
         let frame_body = self.pending_frame_body.take();
-        self.frame_sites.push(frame_body.map(|fold| FrameSites {
-            fold,
+        self.frame_sites.push(frame_body.map(|body| FrameSites {
+            fold: body.fold,
+            arm: body.arm,
             ..FrameSites::default()
         }));
         self.block_in_frame(block, container);
@@ -1158,12 +1170,24 @@ impl<'d> Walker<'d> {
                 };
                 let receiver_role = role(receiver, true);
                 self.operand_in(receiver, Position::Receiver, receiver_role);
+                // ADR 0131 Phase 3 (BT-3738): the arms of a conditional that is
+                // a local-threading producer are `BranchArm` frames, so a loop
+                // or fold in an arm is a producer there (codegen's
+                // `generate_conditional_arm`).
+                let arm_frames = self.is_arm_frame_conditional(expr, position);
                 for arg in arguments {
                     let arg_role = role(arg, false);
                     self.pending_frame_body = match arg {
                         Expression::Block(b) if is_threaded_frame_body(expr, b) => {
-                            Some(is_fold_frame_body(expr, b))
+                            Some(FrameBody {
+                                fold: is_fold_frame_body(expr, b),
+                                arm: false,
+                            })
                         }
+                        Expression::Block(_) if arm_frames => Some(FrameBody {
+                            fold: false,
+                            arm: true,
+                        }),
                         _ => None,
                     };
                     self.operand_in(arg, Position::Argument, arg_role);
@@ -1308,6 +1332,50 @@ impl<'d> Walker<'d> {
         );
     }
 
+    /// Whether `expr` is a conditional that is a local-threading producer at
+    /// the method root (an operand site, an assignment's whole value or a
+    /// method-body statement), whose arms are therefore `BranchArm` frames
+    /// (ADR 0131 §2, Phase 3). The REPL keeps its own conditional lowering.
+    fn is_arm_frame_conditional(&self, expr: &Expression, position: Position) -> bool {
+        let Some(kind) = self.root_method_kind() else {
+            return false;
+        };
+        let producer = conditional_producer_writes(expr, &|name| self.is_bound(name), kind);
+        if self.depth == 0 {
+            return (self.operand_sites.contains(&expr.span()) || position == Position::Statement)
+                && producer.is_some();
+        }
+        // A conditional nested in an arm frame is a producer there, so its own
+        // arms are frames too.
+        producer.is_some() && self.arm_frame_conditional_producer(expr)
+    }
+
+    /// The [`RootMethodKind`] of the method being walked, `None` in the REPL.
+    fn root_method_kind(&self) -> Option<RootMethodKind> {
+        match self.context {
+            Class => Some(RootMethodKind::Class),
+            ValueType => Some(RootMethodKind::ValueType),
+            Actor => Some(RootMethodKind::Actor),
+            Repl => None,
+        }
+    }
+
+    /// Whether `expr`, a conditional at a site of the innermost frame, is a
+    /// local-threading producer in that frame: the frame is an arm of a
+    /// conditional producer (`FrameSites::arm`) and `expr` is a conditional
+    /// producer ([`conditional_producer_writes`]) at one of the statement's
+    /// sites. Always `false` in a loop or fold body.
+    fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
+        let Some(kind) = self.root_method_kind() else {
+            return false;
+        };
+        self.frame_sites
+            .last()
+            .and_then(Option::as_ref)
+            .is_some_and(|frame| frame.arm && frame.sites.contains(&expr.span()))
+            && conditional_producer_writes(expr, &|name| self.is_bound(name), kind).is_some()
+    }
+
     /// The Phase 0 allow-set check for a construct at `position`.
     fn check_construct(&mut self, expr: &Expression, position: Position) {
         let Some(construct) =
@@ -1325,10 +1393,26 @@ impl<'d> Walker<'d> {
         // wherever it sits there. Phase 2d (BT-3795): and at an operand site
         // of a REPL input (`repl_operand_sites`), whose root frame threads the
         // bindings map.
-        if self.depth == 0
-            && self.operand_sites.contains(&expr.span())
-            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
-        {
+        //
+        // ADR 0131 Phase 3 (BT-3738): a conditional with a block-literal arm
+        // that writes an outer local is one too (`root_producer_writes`), at an
+        // operand site, as an assignment's whole value, and as a method-body
+        // statement (the statement lowering of a class or value-type method
+        // routes it through the producer as well). The REPL keeps its own
+        // conditional lowering.
+        let bound = |name: &str| self.is_bound(name);
+        let root_producer = match self.context {
+            // The REPL's conditionals at an operand site (`repl_operand_sites`)
+            // are producers that adopt the bindings map whole.
+            Repl | Actor => root_producer_writes(expr, &bound, RootMethodKind::Actor),
+            Class => root_producer_writes(expr, &bound, RootMethodKind::Class),
+            ValueType => root_producer_writes(expr, &bound, RootMethodKind::ValueType),
+        };
+        let root_site = self.operand_sites.contains(&expr.span())
+            || (position == Position::Statement
+                && self.context != Repl
+                && conditional_arm_blocks(expr).is_some());
+        if self.depth == 0 && root_site && root_producer.is_some() {
             return;
         }
         // ADR 0131 Phase 2b (BT-3793): in the body of a loop or fold that
@@ -1354,7 +1438,8 @@ impl<'d> Walker<'d> {
                 .last()
                 .and_then(Option::as_ref)
                 .is_some_and(|frame| frame.sites.contains(&expr.span()))
-            && operand_producer_writes(expr, &|name| self.is_bound(name)).is_some();
+            && (operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
+                || self.arm_frame_conditional_producer(expr));
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
         if frame_site && is_loop_body_producer_site(expr, &ctx) {
