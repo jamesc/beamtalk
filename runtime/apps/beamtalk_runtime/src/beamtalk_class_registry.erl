@@ -113,7 +113,9 @@ filtered out. Returns [] if the pg process group is not running.
 
 Sends no messages to class processes (BT-3820): name and module come from the
 metadata ETS rows (`class_name_safe/1`, `module_name_safe/1`), and a dead local
-pid is dropped with `is_process_alive/1`. This upholds the class-process
+pid is dropped with `is_process_alive/1`. Only local classes are returned
+(ADR 0126: the class registry is node-local; remote pg members are skipped, not
+queried). This upholds the class-process
 invariant (a class process never makes a blocking call into another class
 process while handling a call); this function runs inside class handlers
 (protocol conformance, process navigation).
@@ -151,13 +153,16 @@ live_class_entries() ->
             []
     end.
 
-%% A pg member is live if it is remote (not checkable locally; the name lookup
-%% then falls back to a call, whose exit filters it) or a local alive process.
-%% The ETS reverse index outlives an untrappable `kill`, so liveness is checked
-%% explicitly rather than inferred from a successful name lookup.
+%% A pg member counts only if it is a local, alive process. Remote class pids
+%% are excluded: ADR 0126 keeps the class registry node-local (a class ref
+%% crossing nodes is re-resolved by name against the receiving node's registry,
+%% never used as a remote pid), and the ETS metadata this reads is node-local, so
+%% a remote member could only be named via a blocking call. The ETS reverse index
+%% outlives an untrappable `kill`, so liveness is checked explicitly rather than
+%% inferred from a successful name lookup.
 -spec is_live_class_pid(pid()) -> boolean().
 is_live_class_pid(Pid) ->
-    node(Pid) =/= node() orelse is_process_alive(Pid).
+    node(Pid) =:= node() andalso is_process_alive(Pid).
 
 -doc """
 Return all loaded user classes (those with a source file recorded).

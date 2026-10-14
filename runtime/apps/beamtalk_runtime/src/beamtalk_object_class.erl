@@ -402,6 +402,13 @@ class process is busy serving a long class-side call (BT-3820). This resolves
 the name via `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse
 lookup, no message send), falling back to `class_name/1` only on a miss. The
 same caveat as `module_name_safe/1` applies to an untrappable `kill`.
+
+Stale-name behaviour: the reverse index is kept for a class process that
+crashed without running `terminate/2` (auto-restart recovery), so for such a
+pid this returns the old name instead of exiting `noproc`. Callers that then
+act by *name* (`classRemoveFromSystem`, `classRenameTo`, `classReload`, ...)
+operate on the restarted class of that name, not the dead pid. Callers that
+need a liveness guarantee must check `is_process_alive/1` themselves.
 """.
 -spec class_name_safe(pid()) -> class_name().
 class_name_safe(ClassPid) when ClassPid =:= self() ->
@@ -428,7 +435,7 @@ module_name(ClassPid) ->
 `gen_server:call(ClassPid, Request)` that, on a timeout exit, records what the
 class process is doing before re-raising the original exit unchanged.
 
-TODO(BT-3820): temporary diagnostics. `ProcessNavigationTest
+TODO(BT-3828): temporary diagnostics. `ProcessNavigationTest
 testDefaultIsProcessNavigation` times out in CI on a 5s `module_name` call to a
 class process that is idle in every local run; the bare `{timeout, {gen_server,
 call, ...}}` exit says nothing about *why* it did not answer. Remove once the
@@ -461,7 +468,7 @@ timeout_diagnostics_key() -> '$beamtalk_class_call_timeout_diagnostics'.
 
 -doc """
 Return and clear the timeout dump recorded by the calling process, or
-`undefined` (TODO(BT-3820): remove with the diagnostics).
+`undefined` (TODO(BT-3828): remove with the diagnostics).
 """.
 -spec take_timeout_diagnostics() -> binary() | undefined.
 take_timeout_diagnostics() ->

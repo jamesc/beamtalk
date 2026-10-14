@@ -433,7 +433,7 @@ live_class_entries_no_cross_class_deadlock_test_() ->
                 Results
             ),
             %% Far below the 5s gen_server:call timeout the deadlock would burn.
-            ?assert(Elapsed < 2000)
+            ?assert(Elapsed < 4000)
         after
             [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
         end

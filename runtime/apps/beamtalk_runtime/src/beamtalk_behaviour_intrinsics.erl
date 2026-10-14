@@ -788,7 +788,7 @@ classRemoveFromSystemByName(ClassName) ->
             ),
             beamtalk_error:raise(Error1);
         ClassPid ->
-            Module = beamtalk_object_class:module_name(ClassPid),
+            Module = beamtalk_object_class:module_name_safe(ClassPid),
             %% Safety: refuse to remove stdlib classes
             case is_stdlib_module_name(Module) of
                 true ->
@@ -2507,7 +2507,9 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
 -spec rename_selector(#beamtalk_object{}, atom(), atom()) -> renamed | absent.
 rename_selector(Self, OldSelector, NewSelector) ->
     ok = require_method_capability(
-        'renameSelector:to:', gen_server:call(erlang:element(4, Self), class_name), OldSelector
+        'renameSelector:to:',
+        beamtalk_object_class:class_name_safe(erlang:element(4, Self)),
+        OldSelector
     ),
     case classIncludesSelector(Self, OldSelector) of
         false ->
