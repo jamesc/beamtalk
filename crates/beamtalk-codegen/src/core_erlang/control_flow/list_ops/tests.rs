@@ -2479,9 +2479,8 @@ fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
 fn test_collect_nested_in_direct_params_loop() {
     // collect: with a local mutation nested inside a direct-params to:do:
     // loop. The outer loop sets in_direct_params_loop=true, which causes
-    // generate_list_collect_with_mutations to hit the tuple-acc + in_direct_params_loop
-    // branch (basic_ops.rs lines 302-360): StateAcc repack is skipped and the result
-    // list is stored in direct_params_list_op_result for the outer loop to consume.
+    // generate_list_collect_with_mutations to hit the tuple-acc path, which is a
+    // local-threading producer in the loop frame (ADR 0131).
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",

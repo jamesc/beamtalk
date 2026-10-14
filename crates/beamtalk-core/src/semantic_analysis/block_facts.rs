@@ -2119,7 +2119,12 @@ pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> boo
 ///   search block is dropped by the `collect:` and nested `do:` frames around
 ///   it, and in an actor by every frame (measured, BT-3793). They keep their
 ///   statement-position rows; the short-circuit question is BT-3805.
+/// - A `Dictionary` lookup is a producer in an arm frame but not in a loop or
+///   fold body (ADR 0131 §6).
 /// - [`is_actor_fold_value_site`].
+///
+/// A conditional or an `on:do:`/`ensure:` is a producer in a loop or fold body
+/// (ADR 0131 Phase 3b/3c, BT-3817/BT-3822) wherever the frame has a site for it.
 #[must_use]
 pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
     if let Expression::MessageSend { selector, .. } = site.unwrap_parens() {
@@ -2127,16 +2132,18 @@ pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> b
             return false;
         }
     }
-    // ADR 0131 Phase 3 (BT-3738): a conditional is a producer at a method-root
-    // site and in an arm of a conditional that is one (`ctx.arm`). In a loop or
-    // fold body it keeps its statement lowering (the loop frame's lowering of a
-    // conditional's `LocalRebind`s is a later step).
+    // ADR 0131 Phase 3 (BT-3738) / Phase 3c (BT-3822): a conditional is a
+    // producer at a method-root site, in an arm of a conditional that is one
+    // (`ctx.arm`) and in a loop or fold body (the frame lowers its
+    // `LocalRebind`s by the frame's mode, ADR 0131 §2), like an
+    // `on:do:`/`ensure:` (Phase 3b, BT-3817). Whether a given conditional is a
+    // producer is `conditional_producer_writes`'s question, not the site's.
     //
-    // ADR 0131 Phase 3b (BT-3817): an `on:do:`/`ensure:` is a producer in a loop
-    // or fold body too (the producer lowers its protected body, handler and
-    // cleanup as `BranchArm` frames of their own and rebinds its locals by the
-    // enclosing frame's mode, ADR 0131 §2).
-    if conditional_arm_blocks(site).is_some() && !ctx.arm {
+    // A `Dictionary` lookup (Phase 2d) is the exception: it is a conditional in
+    // the core rule's eyes, but it lowers at the method root and in `BranchArm`
+    // frames only (ADR 0131 §6), so in a loop or fold body it keeps its
+    // allow-set row.
+    if lookup_arm_blocks(site).is_some() && !ctx.arm {
         return false;
     }
     !is_actor_fold_value_site(site, ctx)

@@ -574,29 +574,32 @@ fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
 }
 
 #[test]
-fn a_loop_nested_in_an_actor_fold_through_an_arm_or_closure_is_rejected() {
-    // BT-3796: codegen's `in_fold_frame` crosses an arm or closure between a
-    // fold and a nested loop, as `local_producer_sites` does (the validator's
+fn a_loop_nested_in_an_actor_fold_through_a_closure_is_rejected() {
+    // BT-3796: codegen's `in_fold_frame` crosses a closure between a fold and a
+    // nested loop, as `local_producer_sites` does (the validator's
     // `frame_sites` stop being all frames there), so the nested loop is judged
-    // by the rows, not as a frame site. In an actor each of these is a Phase 0
-    // error and so never reaches the narrowing; the agreement test's arm and
-    // closure two-level FRAMES pin that the two sides agree on the rest. The
-    // class and value-type answer is `armLoopInFoldStatement` in
-    // `adr0131loop_body_producer_test.bt`.
+    // by the rows, not as a frame site. In an actor it is a Phase 0 error and
+    // so never reaches the narrowing; the agreement test's closure two-level
+    // FRAMES pin that the two sides agree on the rest.
+    //
+    // ADR 0131 Phase 3c (BT-3822): an arm between the two is a `BranchArm`
+    // frame now (the conditional is a producer in the fold body), so the loop in
+    // it is a frame site in every context: `armLoopInFoldStatement` and
+    // `armLoopInFoldAssigned` in `adr0131loop_body_producer_test.bt` pin the
+    // answers.
+    let body = "r := 0\n#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]] value: k]\n#[t, r]";
+    assert!(
+        !adr0131_diagnostics(&in_actor(body)).is_empty(),
+        "an actor accepted {body}"
+    );
     for body in [
         "r := 0\n#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]]]\n#[t, r]",
-        "r := 0\n#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]] value: k]\n#[t, r]",
         "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]\nt",
         "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | #(1, 2) do: [:x | t := t + x]]]]\nt",
     ] {
-        assert!(
-            !adr0131_diagnostics(&in_actor(body)).is_empty(),
-            "an actor accepted {body}"
-        );
-    }
-    let accepted = "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]\nt";
-    for src in [in_class(accepted), in_value(accepted)] {
-        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        }
     }
 }
 
@@ -627,9 +630,10 @@ fn allow_set_field_assignment_in_class_method_is_an_error() {
 #[test]
 fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
-    // local needs the loop to thread it on.
+    // local needs the loop to thread it on. A construct that is not a
+    // local-threading producer in the body keeps the error.
     let src = in_class(
-        "r := 0\n#(1, 2) do: [:x | r := x > 1 ifTrue: [t := t + x. 1] ifFalse: [0]]\n#[r, t]",
+        "r := 0\n#(1, 2) do: [:x | r := #(1, 2) eachWithIndex: [:y :i | t := t + y]]\n#[r, t]",
     );
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
@@ -639,6 +643,21 @@ fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
         "{}",
         p0[0].message
     );
+}
+
+#[test]
+fn a_conditional_assigned_in_a_loop_body_is_a_producer_in_class_and_value_methods() {
+    // ADR 0131 Phase 3c (BT-3822): the conditional is a local-threading
+    // producer at the assignment's whole value in a loop body
+    // (`conditionalAssignedInDoBody` in adr0131loop_body_producer_test.bt). An
+    // actor's fold frame does not lower a value-bearing site
+    // (`is_actor_fold_value_site`), so the actor keeps the error.
+    let body =
+        "r := 0\n#(1, 2) do: [:x | r := x > 1 ifTrue: [t := t + x. 1] ifFalse: [0]]\n#[r, t]";
+    for src in [in_class(body), in_value(body)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+    }
+    assert!(!adr0131_diagnostics(&in_actor(body)).is_empty());
 }
 
 #[test]
@@ -1382,10 +1401,13 @@ fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
 #[test]
 fn loop_body_producer_accept_stops_where_codegen_does() {
     for (body, expect_error) in [
-        // An arm between the frame and the construct.
+        // ADR 0131 Phase 3c (BT-3822): an arm between the frame and the
+        // construct is a `BranchArm` frame (the conditional is a producer in
+        // the loop body), so the construct is a frame site in every context
+        // (`whileInArmInToDo` in adr0131loop_body_producer_test.bt).
         (
             "s := 0\n1 to: 3 do: [:i | true ifTrue: [[s < i] whileTrue: [s := s + 1]]]\ns",
-            [true, true, true],
+            [false, false, false],
         ),
         // A closure between the frame and the construct.
         (

@@ -380,3 +380,24 @@ Value subclass: Adr0131LoopBodyProducerValue
     t := 0
     #(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]
     t
+
+  // BT-3822 (ADR 0131 Phase 3c): an arm between a letrec loop and a nested loop.
+  whileInArmInToDo =>
+    s := 0
+    1 to: 3 do: [:i | i > 0 ifTrue: [[s < i] whileTrue: [s := s + 1]]]
+    s
+
+  // BT-3822: a conditional assigned in a fold body is a producer.
+  conditionalAssignedInDoBody =>
+    t := 0
+    r := 0
+    #(1, 2)
+      do: [:x |
+        r := x > 1
+          ifTrue: [
+            t := t + x
+            1
+          ]
+          ifFalse: [0]
+      ]
+    #[r, t]

@@ -25,11 +25,6 @@ pub(in crate::core_erlang) struct LoopMode {
     /// `append_repack_stateacc_doc` step and return just the result value (not
     /// `{Result, StateAcc}`), since there is no `StateAcc` variable in scope.
     pub(in crate::core_erlang) in_direct_params_loop: bool,
-    /// When a list op in direct-params mode generates an open let-chain
-    /// (omitting the trailing result expression), it stores the result variable name
-    /// here so the caller can append `let AssignedVar = <result_var> in` separately.
-    /// `None` when no list op result is pending.
-    pub(in crate::core_erlang) direct_params_list_op_result: Option<String>,
     /// Map of actor field name → Core Erlang variable name for fields
     /// that have been pre-extracted before a hybrid/full-extract letrec loop.
     ///
