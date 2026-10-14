@@ -3279,17 +3279,15 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        // The frame the caller is lowering in: the method root, or — for a conditional the
-        // producer declines inside a loop body — that body's own branch frame, so the
-        // `Bind`s and `LocalRebind`s recorded here are judged against the frame that
-        // actually encloses them.
-        let frame = self.current_frame();
-        let Some(lowered) = self.lower_vt_conditional(expr, frame, false)? else {
+        // Always the method root. This statement form is only reachable there: the producer's
+        // gate (`is_vt_field_conditional_producer`) declines a conditional in a loop / branch /
+        // exception frame, and every such shape is rejected before it gets here
+        // (`field_writing_arm_conditionals_in_non_root_frames_are_rejected_not_internal_errors`
+        // pins the outcome per shape). Lowering it in another frame would need that frame's
+        // `RebindFrame` registered (`rebind_frame_of`), which a class-method loop body does not.
+        let Some(lowered) = self.lower_vt_conditional(expr, FrameId::ROOT, false)? else {
             return Ok(Document::Nil);
         };
-        if frame != FrameId::ROOT {
-            return Ok(self.threaded_prelude_doc(&lowered.prelude));
-        }
         // A method-root prelude like the producer's: verified (`ConstructFamilyDropped`
         // included) before it is flattened to text.
         Ok(self.verified_root_prelude_doc(&lowered.prelude, expr.span()))

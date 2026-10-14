@@ -163,9 +163,13 @@ fn field_writing_arm_conditionals_in_non_root_frames_are_rejected_not_internal_e
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
+            // Pinned, not merely "not a failure": today every one is a structured
+            // rejection, so a regression to a miscompile (or to an accidental compile
+            // whose writes nobody has checked) fails here. If one starts compiling,
+            // move it to the must-compile positions with a runtime test.
             assert!(
-                !matches!(vt_outcome(&src), VtOutcome::Fails(_)),
-                "{shape_name} / {position_name} must compile or be rejected cleanly:\n{src}"
+                matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
+                "{shape_name} / {position_name} is expected to be a clean rejection:\n{src}"
             );
             checked += 1;
         }
