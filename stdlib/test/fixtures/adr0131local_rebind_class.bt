@@ -200,3 +200,106 @@ Object subclass: Adr0131LocalRebindClass
           ]
       ]
     t
+
+  // ADR 0131 Phase 3b (BT-3817): `on:do:`/`ensure:` as local-threading producers
+  // (o1, o2, o5-o10, seq and the protected-body `do:`).
+  class o1 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+    #[r, t]
+
+  class o2 =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] ensure: [t := t + 1]) + 1
+    #[r, t]
+
+  class o5 =>
+    t := 0
+    self.n := [
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]
+    #[self.n, t]
+
+  class o6: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^#[([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]), t]
+      ]
+    #[0, t]
+
+  class o7: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+      7
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  class o8: c =>
+    t := 0
+    r := [
+      c
+        ifTrue: [2]
+        ifFalse: [
+          ([
+            t := t + 1
+            1
+          ] on: Error do: [:e | 0]) + 1
+        ]
+    ] on: Error do: [:x | 3]
+    #[r, t]
+
+  // o9: o1's operand as the method's last expression.
+  class o9 =>
+    t := 0
+    ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + 1
+
+  // o10: o1's operand as a `^` value inside an arm.
+  class o10: cond =>
+    t := 0
+    cond
+      ifTrue: [
+        ^([
+          t := t + 1
+          1
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    0
+
+  class seq =>
+    t := 0
+    r := t + ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  // A `do:` in an `on:do:` body.
+  class stProtectedDo =>
+    t := 0
+    [
+      #(1, 2) do: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t

@@ -43,15 +43,16 @@
 //!   the ones that answer right today. Anywhere else it is an error naming the
 //!   construct, the position and BT-3743.
 
-use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector, Module};
+use crate::ast::{Block, Expression, ExpressionStatement, Identifier, MessageSelector, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LoopBodyContext, OuterLocalWrite, RootMethodKind, captured_local_mutations,
     conditional_arm_blocks, conditional_producer_writes, construct_outer_local_writes,
-    escape_sites, is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
-    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
+    escape_sites, exception_arm_blocks, exception_producer_writes, is_actor_fold_value_site,
+    is_fold_frame_body, is_loop_body_producer_site, is_safe_value_family_selector,
+    is_threaded_frame_body, local_threading_construct, loop_body_producer_sites,
+    operand_producer_writes, outer_local_writes, producer_body_block, repl_operand_sites,
+    root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -358,7 +359,7 @@ const ALLOW_SET: &[Allowed] = &[
     // Phase 3 (BT-3738): in a class or value-type method it is accepted only as
     // a local-threading producer (`root_producer_writes`), the one lowering.
     Allowed {
-        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch, Exception],
+        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch],
         position: Position::AssignValue { nested: false },
         contexts: &[Class, ValueType],
     },
@@ -374,7 +375,6 @@ const ALLOW_SET: &[Allowed] = &[
             IfTrue,
             IfNil,
             AndOr,
-            Exception,
         ],
         position: Position::AssignValue { nested: false },
         contexts: &[Actor],
@@ -393,6 +393,7 @@ const ALLOW_SET: &[Allowed] = &[
             IfTrue,
             IfNil,
             AndOr,
+            Exception,
             BlockValue,
         ],
         position: Position::AssignValue { nested: false },
@@ -423,7 +424,6 @@ const ALLOW_SET: &[Allowed] = &[
             IfTrue,
             IfNil,
             AndOr,
-            Exception,
         ],
         position: Position::FieldAssignValue { nested: false },
         contexts: &[Actor],
@@ -438,7 +438,6 @@ const ALLOW_SET: &[Allowed] = &[
             ListOp,
             DetectIfNoneSearch,
             IfTrue,
-            Exception,
         ],
         position: Position::ReturnValue { nested: false },
         contexts: &[Class],
@@ -460,7 +459,6 @@ const ALLOW_SET: &[Allowed] = &[
             IfTrue,
             IfNil,
             AndOr,
-            Exception,
             BlockValue,
         ],
         position: Position::ReturnValue { nested: false },
@@ -468,12 +466,13 @@ const ALLOW_SET: &[Allowed] = &[
     },
     // `^<construct>` inside a block (a non-local return). `Do` is not here
     // (BT-3796): it is a producer now and its closed form answers the
-    // `{nil, StateAcc}` carrier, which only a producer site unpacks; a `^`
-    // inside an arm, handler or closure is not one, so the carrier would be
-    // returned raw. The keyed `do:` forms still answer a plain `nil`.
-    // Temporary narrowing (BT-3813): `c ifTrue: [^xs do: [...]]` used to
-    // compile and answer `nil`; BT-3813 lowers it by unpacking element 1 at
-    // the nested `^`, after which `Do` returns to this row.
+    // `{nil, StateAcc}` carrier, which only a producer site unpacks. A `^` in
+    // an arm of a conditional or the protected body, handler or cleanup of an
+    // `on:do:`/`ensure:` producer is one (a `BranchArm` frame's statement,
+    // ADR 0131 Phase 3 / 3b, BT-3813's arm and handler cases), so it never
+    // reaches this row; a `^` inside any other closure is not, and its
+    // carrier would be returned raw (BT-3813's remaining closure case). The
+    // keyed `do:` forms still answer a plain `nil`.
     Allowed {
         kinds: &[KeyedDo],
         position: Position::ReturnValue { nested: true },
@@ -1122,6 +1121,12 @@ impl<'d> Walker<'d> {
             Expression::Parenthesized { expression, .. } => self.expr(expression, position),
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
+                    if position == Position::MatchArm
+                        && self.context != Repl
+                        && self.is_bound(&id.name)
+                    {
+                        self.report_match_arm_write(id, expr.span());
+                    }
                     self.operand(value, Position::AssignValue { nested });
                     self.define(&id.name);
                     let top_statement = self.top_level(position) == TopLevel::Statement;
@@ -1169,12 +1174,24 @@ impl<'d> Walker<'d> {
                     _ => Container::Other,
                 };
                 let receiver_role = role(receiver, true);
-                self.operand_in(receiver, Position::Receiver, receiver_role);
                 // ADR 0131 Phase 3 (BT-3738): the arms of a conditional that is
                 // a local-threading producer are `BranchArm` frames, so a loop
                 // or fold in an arm is a producer there (codegen's
-                // `generate_conditional_arm`).
+                // `generate_conditional_arm`). Phase 3b (BT-3817): so are the
+                // protected body (the receiver block), handler and cleanup of an
+                // `on:do:`/`ensure:` producer.
                 let arm_frames = self.is_arm_frame_conditional(expr, position);
+                self.pending_frame_body = match receiver.as_ref() {
+                    Expression::Block(_) if arm_frames && exception_arm_blocks(expr).is_some() => {
+                        Some(FrameBody {
+                            fold: false,
+                            arm: true,
+                        })
+                    }
+                    _ => None,
+                };
+                self.operand_in(receiver, Position::Receiver, receiver_role);
+                self.pending_frame_body = None;
                 for arg in arguments {
                     let arg_role = role(arg, false);
                     self.pending_frame_body = match arg {
@@ -1332,15 +1349,18 @@ impl<'d> Walker<'d> {
         );
     }
 
-    /// Whether `expr` is a conditional that is a local-threading producer at
-    /// the method root (an operand site, an assignment's whole value or a
-    /// method-body statement), whose arms are therefore `BranchArm` frames
-    /// (ADR 0131 §2, Phase 3). The REPL keeps its own conditional lowering.
+    /// Whether `expr` is a conditional or an `on:do:`/`ensure:` that is a
+    /// local-threading producer at the method root (an operand site, an
+    /// assignment's whole value or a method-body statement), whose arms are
+    /// therefore `BranchArm` frames (ADR 0131 §2, Phase 3 and 3b). The REPL
+    /// keeps its own lowering.
     fn is_arm_frame_conditional(&self, expr: &Expression, position: Position) -> bool {
         let Some(kind) = self.root_method_kind() else {
             return false;
         };
-        let producer = conditional_producer_writes(expr, &|name| self.is_bound(name), kind);
+        let bound = |name: &str| self.is_bound(name);
+        let producer = conditional_producer_writes(expr, &bound, kind)
+            .or_else(|| exception_producer_writes(expr, &bound, kind));
         if self.depth == 0 {
             return (self.operand_sites.contains(&expr.span()) || position == Position::Statement)
                 && producer.is_some();
@@ -1360,20 +1380,29 @@ impl<'d> Walker<'d> {
         }
     }
 
-    /// Whether `expr`, a conditional at a site of the innermost frame, is a
-    /// local-threading producer in that frame: the frame is an arm of a
-    /// conditional producer (`FrameSites::arm`) and `expr` is a conditional
-    /// producer ([`conditional_producer_writes`]) at one of the statement's
-    /// sites. Always `false` in a loop or fold body.
+    /// Whether `expr`, a conditional or `on:do:`/`ensure:` at a site of the
+    /// innermost frame, is a local-threading producer in that frame: a
+    /// conditional ([`conditional_producer_writes`]) only in an arm of a
+    /// conditional or exception producer (`FrameSites::arm`), an `on:do:`/
+    /// `ensure:` ([`exception_producer_writes`]) in any threaded frame, a loop
+    /// or fold body included (ADR 0131 Phase 3b), at one of the statement's
+    /// sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
         let Some(kind) = self.root_method_kind() else {
             return false;
         };
+        let bound = |name: &str| self.is_bound(name);
         self.frame_sites
             .last()
             .and_then(Option::as_ref)
-            .is_some_and(|frame| frame.arm && frame.sites.contains(&expr.span()))
-            && conditional_producer_writes(expr, &|name| self.is_bound(name), kind).is_some()
+            .is_some_and(|frame| frame.sites.contains(&expr.span()) && frame.arm)
+            && conditional_producer_writes(expr, &bound, kind).is_some()
+            || self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| frame.sites.contains(&expr.span()))
+                && exception_producer_writes(expr, &bound, kind).is_some()
     }
 
     /// The Phase 0 allow-set check for a construct at `position`.
@@ -1411,7 +1440,8 @@ impl<'d> Walker<'d> {
         let root_site = self.operand_sites.contains(&expr.span())
             || (position == Position::Statement
                 && self.context != Repl
-                && conditional_arm_blocks(expr).is_some());
+                && (conditional_arm_blocks(expr).is_some()
+                    || exception_arm_blocks(expr).is_some()));
         if self.depth == 0 && root_site && root_producer.is_some() {
             return;
         }
@@ -1663,6 +1693,24 @@ impl<'d> Walker<'d> {
                 self.report_local(&id.name, &sel, arg.span());
             }
         }
+    }
+
+    /// A `match:` arm that assigns an outer local. The arm is an expression,
+    /// not a block, so no construct threads its write back to the method
+    /// (BT-3817): compiling it would drop the write silently.
+    fn report_match_arm_write(&mut self, target: &Identifier, span: Span) {
+        let name = &target.name;
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!("a `match:` arm writes outer local `{name}`, but `match:` cannot return the write"),
+                span,
+            )
+            .with_hint(format!(
+                "bind the arm's value instead: `{name} := subject match: [pattern -> newValue; ...]`, \
+                 or use `ifTrue:`/`ifNil:` for a branch that writes `{name}`"
+            ))
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
     }
 
     fn report_literal(&mut self, block: &Block, selector: &str) {

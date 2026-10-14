@@ -19,76 +19,6 @@
 
 TestCase subclass: Adr0131LocalRebindPendingTest
 
-
-  testO1Class =>
-    self assert: (Adr0131LocalRebindClassPending o1) equals: #[2, 1]
-
-  testO1Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o1) equals: #[2, 1]
-
-  testO1Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o1) equals: #[2, 1]
-
-  testO2Class =>
-    self assert: (Adr0131LocalRebindClassPending o2) equals: #[2, 2]
-
-  testO2Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o2) equals: #[2, 2]
-
-  testO2Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o2) equals: #[2, 2]
-
-  testO5Class =>
-    self assert: (Adr0131LocalRebindClassPending o5) equals: #[1, 1]
-
-  testO5Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o5) equals: #[1, 1]
-
-  testO6Class =>
-    self assert: (Adr0131LocalRebindClassPending o6: true) equals: #[1, 1]
-
-  testO6Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o6: true) equals: #[1, 1]
-
-  testO6Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o6: true) equals: #[1, 1]
-
-  testO7Class =>
-    self assert: (Adr0131LocalRebindClassPending o7: false) equals: #[7, 1]
-
-  testO7Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o7: false) equals: #[7, 1]
-
-  testO7Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o7: false) equals: #[7, 1]
-
-  testO8Class =>
-    self assert: (Adr0131LocalRebindClassPending o8: false) equals: #[2, 1]
-
-  testO8Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o8: false) equals: #[2, 1]
-
-  testO8Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o8: false) equals: #[2, 1]
-
-  testO9Class =>
-    self assert: (Adr0131LocalRebindClassPending o9) equals: 2
-
-  testO9Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o9) equals: 2
-
-  testO9Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o9) equals: 2
-
-  testO10Class =>
-    self assert: (Adr0131LocalRebindClassPending o10: true) equals: 2
-
-  testO10Value =>
-    self assert: ((Adr0131LocalRebindValuePending new) o10: true) equals: 2
-
-  testO10Actor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) o10: true) equals: 2
-
   testS1Class =>
     self assert: (Adr0131LocalRebindClassPending s1) equals: #[0, 1]
 
@@ -98,26 +28,8 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testS1Actor =>
     self assert: ((Adr0131LocalRebindActorPending spawn) s1) equals: #[0, 1]
 
-  testSeqClass =>
-    self assert: (Adr0131LocalRebindClassPending seq) equals: #[1, 1]
-
-  testSeqValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) seq) equals: #[1, 1]
-
-  testSeqActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) seq) equals: #[1, 1]
-
   // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
   // error today), with their ADR Expected answers.
-
-  testStProtectedDoClass =>
-    self assert: (Adr0131LocalRebindClassPending stProtectedDo) equals: 3
-
-  testStProtectedDoValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stProtectedDo) equals: 3
-
-  testStProtectedDoActor =>
-    self assert: ((Adr0131LocalRebindActorPending spawn) stProtectedDo) equals: 3
 
   testStEachWithIndexClass =>
     self assert: (Adr0131LocalRebindClassPending stEachWithIndex) equals: 3

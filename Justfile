@@ -1405,7 +1405,8 @@ test-metamorphic *ARGS: build-stdlib
 # CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
 # The nightly `class-var-corpus` job in .github/workflows/fuzz.yml runs this
 # recipe with a larger budget. `local_touch` (an outer local mutated inside a
-# protected block) is excluded from the BEAM draw until BT-3817 is fixed;
+# protected block) is excluded from the BEAM draw until ADR 0131 Phase 4
+# (`tryDo:`, BT-3750) and Phase 5a (BT-3751) enable it;
 # `just test-class-var-corpus-local-touch` measures it.
 # Measure the in-process failure rate with:
 #   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
@@ -1414,10 +1415,12 @@ test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48
     cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
     cargo test -p beamtalk-codegen --test class_var_agreement
 
-# BT-3817: the `local_touch` shape (an outer local mutated inside a protected
-# block) fails today, so its property is `#[ignore]`d; this recipe measures it.
+# ADR 0131 (BT-3817 made `on:do:`/`ensure:` producers): the `local_touch`
+# shape (an outer local mutated inside a protected block) still fails for the
+# `tryDo:` programs (Phase 4, BT-3750), so its property is `#[ignore]`d until
+# Phase 5a (BT-3751) enables it; this recipe measures it.
 test-class-var-corpus-local-touch $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48"): build-stdlib
-    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until BT-3817)..."
+    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until ADR 0131 Phases 4 and 5a)..."
     cargo test -p beamtalk-cli --test cli class_var_agreement_local_touch -- --ignored --nocapture
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
@@ -1535,11 +1538,11 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #     workspace, built only by manual setup (see the module doc comment in
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
 #   - class_var_agreement_local_touch: `#[ignore]`d on purpose because it is
-#     EXPECTED to fail until BT-3817 lands (run it via
+#     EXPECTED to fail until ADR 0131 Phases 4 and 5a (BT-3750, BT-3751) land (run it via
 #     `just test-class-var-corpus-local-touch`). The `--ignored` pass runs every
 #     ignored test, so without this skip the coverage job fails on every push
 #     to `main` (BT-3733). Remove the skip together with the `#[ignore]` when
-#     BT-3817 enables the `local_touch` shape.
+#     BT-3751 enables the `local_touch` shape.
 #   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
 #     set; it is run by hand to print a generated program (BT-3733).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \

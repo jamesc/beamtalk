@@ -619,7 +619,7 @@ impl CoreErlangGenerator {
         arms: &[&Block],
         tail: ProducerTail,
         producer: bool,
-    ) -> ThreadedValue {
+    ) -> Result<ThreadedValue> {
         let carrier = self.fresh_temp_var("CF");
         let value = ValueRef::Doc(docvec![
             "call 'erlang':'element'(1, ",
@@ -642,11 +642,9 @@ impl CoreErlangGenerator {
                 span,
             )];
             prelude.extend(family_binds);
-            return ThreadedValue { prelude, value };
+            return Ok(ThreadedValue { prelude, value });
         }
-        let enclosing = self
-            .rebind_frame_of(frame)
-            .unwrap_or_else(|_| RebindFrame::implicit_root());
+        let enclosing = self.rebind_frame_of(frame)?;
         let prelude = self.construct_rebind_prelude(
             &enclosing,
             &carrier,
@@ -657,7 +655,7 @@ impl CoreErlangGenerator {
             frame,
             span,
         );
-        ThreadedValue { prelude, value }
+        Ok(ThreadedValue { prelude, value })
     }
 
     /// [`Self::conditional_tuple_to_threaded_value`] for a construct that
@@ -677,14 +675,14 @@ impl CoreErlangGenerator {
                     .to_string(),
             ));
         }
-        Ok(self.conditional_tuple_to_threaded_value(
+        self.conditional_tuple_to_threaded_value(
             tuple_doc,
             frame,
             span,
             &[],
             ProducerTail::Rebind,
             true,
-        ))
+        )
     }
 
     /// ADR 0122 Decision 3/BT-3514: this construct's post-merge `[State]`
@@ -798,14 +796,7 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let tuple_doc =
             self.generate_if_true_with_mutations_tuple(receiver, block, scratch, producer)?;
-        Ok(self.conditional_tuple_to_threaded_value(
-            tuple_doc,
-            frame,
-            span,
-            &[block],
-            tail,
-            producer,
-        ))
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
     /// Generates inline code for `flag ifTrue: [block]` in actor context
@@ -883,14 +874,7 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let tuple_doc =
             self.generate_if_false_with_mutations_tuple(receiver, block, scratch, producer)?;
-        Ok(self.conditional_tuple_to_threaded_value(
-            tuple_doc,
-            frame,
-            span,
-            &[block],
-            tail,
-            producer,
-        ))
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
     /// Generates inline code for `flag ifFalse: [block]` in actor context
@@ -965,14 +949,7 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let tuple_doc =
             self.generate_and_with_mutations_tuple(receiver, block, scratch, producer)?;
-        Ok(self.conditional_tuple_to_threaded_value(
-            tuple_doc,
-            frame,
-            span,
-            &[block],
-            tail,
-            producer,
-        ))
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
     /// generates inline code for `flag and: [block]` in actor
@@ -1053,14 +1030,7 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let tuple_doc =
             self.generate_or_with_mutations_tuple(receiver, block, scratch, producer)?;
-        Ok(self.conditional_tuple_to_threaded_value(
-            tuple_doc,
-            frame,
-            span,
-            &[block],
-            tail,
-            producer,
-        ))
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
     /// generates inline code for `flag or: [block]` in actor
@@ -1145,14 +1115,14 @@ impl CoreErlangGenerator {
             scratch,
             producer,
         )?;
-        Ok(self.conditional_tuple_to_threaded_value(
+        self.conditional_tuple_to_threaded_value(
             tuple_doc,
             frame,
             span,
             &[true_block, false_block],
             tail,
             producer,
-        ))
+        )
     }
 
     /// Generates inline code for `flag ifTrue: [t_block] ifFalse: [f_block]` in actor context
@@ -1258,7 +1228,7 @@ impl CoreErlangGenerator {
             producer,
         )?;
         let arms: Vec<&Block> = nil_block.into_iter().chain(not_nil_block).collect();
-        Ok(self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &arms, tail, producer))
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &arms, tail, producer)
     }
 
     /// Generates inline code for the nil-testing conditional family in
@@ -2839,7 +2809,7 @@ impl CoreErlangGenerator {
     /// construct's seeded `threads` (ADR 0131 §2), so the verifier reads the
     /// frame's rebind shapes off the node; without one it is the legacy
     /// `Threaded` wrapper, which threads nothing of its own.
-    fn render_branch_arm(
+    pub(in crate::core_erlang) fn render_branch_arm(
         &mut self,
         stmts: Vec<ThreadedStmt>,
         frame: FrameId,

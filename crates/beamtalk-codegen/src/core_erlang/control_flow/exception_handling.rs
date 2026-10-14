@@ -52,17 +52,20 @@ use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
+use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
     self, BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
-    RenderCtx, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    RebindFrame, RebindFrameKind, RenderCtx, ThreadedStmt, TryRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
+use super::conditionals::ArmFrame;
 use super::family_slots;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{join, leaf};
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, MessageSelector};
 
 /// ADR 0122 / BT-3506: an arm's (or the construct's own) contribution to the
 /// trailing family slot — the family this construct threads (`SelfVt`)
@@ -89,6 +92,21 @@ struct ExceptionArm {
     result_var: String,
     state_version: usize,
     family_mutated_version: FamilySlot,
+}
+
+/// ADR 0131 §2 (Phase 3b): how an arm that does not inherit its locals
+/// lexically is entered. `ensure:`'s success-path cleanup runs after the try
+/// body, whose writes were made inside the Core Erlang `try` and are not in
+/// scope in its `of` clause: the arm reads the locals the construct threads back
+/// from the `StateAcc` the try body returned, through `LocalRebind`s of a
+/// construct tuple (the try body's result, `tuple_var`).
+struct ArmEntry {
+    /// The variable bound to the try body's `{Result, StateAcc[, Family]}`
+    /// tuple.
+    tuple_var: String,
+    /// The locals the construct threads ([`CoreErlangGenerator::branch_threaded_locals`]
+    /// over the try and cleanup blocks).
+    locals: Vec<String>,
 }
 
 impl CoreErlangGenerator {
@@ -186,9 +204,10 @@ impl CoreErlangGenerator {
         body: &Block,
         families: &ThreadedFamilies,
         outer_version: usize,
+        frame: Option<&ArmFrame>,
     ) -> Result<(String, usize, FamilySlot)> {
         let seed = self.seed_exception_arm_family(families, outer_version);
-        let arm = self.generate_exception_body_with_threading(body, families)?;
+        let arm = self.generate_exception_body_with_threading(body, families, frame, None)?;
         let slot = Self::exception_family_slot(families, outer_version, &arm);
         docs.push(seed);
         docs.push(arm.doc);
@@ -517,17 +536,7 @@ impl CoreErlangGenerator {
         ex_class: &Expression,
         handler: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate protected block arity (must be 0-arg)
-        validate_block_arity_exact(
-            receiver,
-            0,
-            "on:do:",
-            "Fix: The protected block must take no arguments:\n\
-             \x20 [riskyOperation] on: Exception do: [:e | handle error]",
-        )?;
-        // Validate handler block arity (must be 0 or 1-arg)
-        // Returns true if handler takes an argument, false for 0-arg
-        let handler_takes_arg = validate_on_do_handler(handler, "on:do:")?;
+        let handler_takes_arg = Self::validate_on_do_blocks(receiver, handler)?;
 
         // Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
@@ -545,7 +554,12 @@ impl CoreErlangGenerator {
             if let (Expression::Block(recv_block), Expression::Block(handler_block)) =
                 (receiver, handler)
             {
-                return self.generate_on_do_with_mutations(recv_block, ex_class, handler_block);
+                return self.generate_on_do_with_mutations(
+                    recv_block,
+                    ex_class,
+                    handler_block,
+                    false,
+                );
             }
         }
 
@@ -592,6 +606,83 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// Validates the arities of an `on:do:`'s protected block (0) and handler (0
+    /// or 1), returning whether the handler takes the exception. The one
+    /// validation shared by [`Self::generate_on_do`] and the producer
+    /// ([`Self::exception_producer_tuple_doc`]).
+    fn validate_on_do_blocks(receiver: &Expression, handler: &Expression) -> Result<bool> {
+        // Validate protected block arity (must be 0-arg)
+        validate_block_arity_exact(
+            receiver,
+            0,
+            "on:do:",
+            "Fix: The protected block must take no arguments:\n\
+             \x20 [riskyOperation] on: Exception do: [:e | handle error]",
+        )?;
+        // Validate handler block arity (must be 0 or 1-arg)
+        // Returns true if handler takes an argument, false for 0-arg
+        validate_on_do_handler(handler, "on:do:")
+    }
+
+    /// Validates the arity of an `ensure:`'s cleanup block (0). Shared by
+    /// [`Self::generate_ensure`] and the producer.
+    fn validate_ensure_cleanup(cleanup: &Expression) -> Result<()> {
+        // Validate cleanup block arity (must be 0-arg)
+        validate_block_arity_exact(
+            cleanup,
+            0,
+            "ensure:",
+            "Fix: The cleanup block must take no arguments:\n\
+             \x20 [operation] ensure: [resource close]",
+        )
+    }
+
+    /// ADR 0131 Phase 3b (BT-3817): the construct tuple `{Result, StateAcc
+    /// [, Self]}` of an `on:do:`/`ensure:` that is a local-threading producer
+    /// ([`Self::exception_producer_locals`]), whose protected body, handler
+    /// and cleanup are `BranchArm` frames. Unlike [`Self::generate_on_do`] it
+    /// always takes the mutation-threading form: the producer's set, not the
+    /// statement-position gate, decides that the construct threads (a
+    /// write-only arm threads `t` all the same).
+    pub(in crate::core_erlang) fn exception_producer_tuple_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        else {
+            return Err(CodeGenError::Internal(
+                "exception producer reached a non-keyword send".to_string(),
+            ));
+        };
+        let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        match (selector.as_str(), receiver.as_ref(), arguments.as_slice()) {
+            (
+                "on:do:",
+                Expression::Block(protected),
+                [ex_class, handler_expr @ Expression::Block(handler)],
+            ) => {
+                Self::validate_on_do_blocks(receiver, handler_expr)?;
+                self.generate_on_do_with_mutations(protected, ex_class, handler, true)
+            }
+            (
+                "ensure:",
+                Expression::Block(protected),
+                [cleanup_expr @ Expression::Block(cleanup)],
+            ) => {
+                Self::validate_ensure_cleanup(cleanup_expr)?;
+                self.generate_ensure_with_mutations(protected, cleanup, true)
+            }
+            _ => Err(CodeGenError::Internal(format!(
+                "exception producer reached `{selector}` with non-literal blocks"
+            ))),
+        }
+    }
+
     /// the real value to seed this construct's `StateAcc` scratch
     /// map from — the actor's own `State` parameter in Actor context
     /// (`current_state_var()`, matching `render_state_prefix`'s bare
@@ -615,7 +706,19 @@ impl CoreErlangGenerator {
     /// value-type context this produced a reference to a nonexistent
     /// variable (`erlc: unbound variable 'State'`).
     fn exception_body_outer_state(&mut self) -> String {
-        if self.in_actor_instance_context() {
+        // ADR 0131 §2 (`MethodBody (REPL)` row): the REPL root threads its
+        // bindings map, so the construct continues it (as a REPL conditional or
+        // loop does) and its element 2 is the next bindings map.
+        //
+        // In an actor instance method it continues `State`, unless the frame it
+        // sits in has no `State` chain (a direct-params or tuple-acc loop body,
+        // ADR 0131 §2): its body has no state effect, so the scratch map is
+        // private there as in a class method.
+        let state_chain = self
+            .rebind_frames
+            .get(&self.current_frame())
+            .is_none_or(|frame| frame.kind.extends_state_chain());
+        if (self.in_actor_instance_context() && state_chain) || self.is_repl_mode() {
             self.current_state_var()
         } else {
             "~{}~".to_string()
@@ -654,10 +757,14 @@ impl CoreErlangGenerator {
         receiver_block: &Block,
         ex_class: &Expression,
         handler_block: &Block,
+        producer: bool,
     ) -> Result<Document<'static>> {
         if self.is_repl_mode() {
             self.set_repl_loop_mutated(true);
         }
+        // ADR 0131 §2 (Phase 3b): a producer's protected body and handler are
+        // `BranchArm` frames whose threads are the seeded set below.
+        let arm = self.exception_arm_frame(&[receiver_block, handler_block], producer);
 
         let ex_class_var = self.fresh_temp_var("ExClass");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
@@ -712,8 +819,13 @@ impl CoreErlangGenerator {
         // snapshot `let`, the `try` and its `of` clause come from the catch
         // boundary node (`on_do_catch_boundary`), which owns both halves.
         let mut try_docs: Vec<Document<'static>> = Vec::new();
-        let (try_result_var, try_final, try_slot) =
-            self.push_exception_arm(&mut try_docs, receiver_block, &families, outer_version)?;
+        let (try_result_var, try_final, try_slot) = self.push_exception_arm(
+            &mut try_docs,
+            receiver_block,
+            &families,
+            outer_version,
+            arm.as_ref(),
+        )?;
         // Return {Result, State[, Family]} from try body; on success the
         // `of` clause passes the tuple through.
         try_docs.push(self.close_exception_result_tuple(
@@ -739,8 +851,13 @@ impl CoreErlangGenerator {
 
         // Generate handler body with state threading (from original StateAcc)
         self.set_self_version(outer_self);
-        let (handler_result_var, handler_final, handler_slot) =
-            self.push_exception_arm(&mut handler_docs, handler_block, &families, outer_version)?;
+        let (handler_result_var, handler_final, handler_slot) = self.push_exception_arm(
+            &mut handler_docs,
+            handler_block,
+            &families,
+            outer_version,
+            arm.as_ref(),
+        )?;
         // Return {Result, State[, Family]} from handler
         handler_docs.push(self.close_exception_result_tuple(
             handler_result_var,
@@ -795,14 +912,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         cleanup: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate cleanup block arity (must be 0-arg)
-        validate_block_arity_exact(
-            cleanup,
-            0,
-            "ensure:",
-            "Fix: The cleanup block must take no arguments:\n\
-             \x20 [operation] ensure: [resource close]",
-        )?;
+        Self::validate_ensure_cleanup(cleanup)?;
 
         // Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
@@ -820,7 +930,7 @@ impl CoreErlangGenerator {
             if let (Expression::Block(recv_block), Expression::Block(cleanup_block)) =
                 (receiver, cleanup)
             {
-                return self.generate_ensure_with_mutations(recv_block, cleanup_block);
+                return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
             }
         }
 
@@ -873,6 +983,92 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// The success path of `ensure:`'s `try ... of`: the cleanup runs after the
+    /// try body, starting from the `StateAcc` the body returned
+    /// (`state_after_try`'s element 2), and answers the try body's result with the
+    /// cleanup's final state (`{Result, StateAcc[, Family]}`). Pushes the `of`
+    /// clause and the cleanup arm onto `docs`.
+    ///
+    /// A local the body wrote must be read back from the returned `StateAcc`: the
+    /// cleanup's own reads of it are otherwise the pre-`try` binding, because a
+    /// binding made inside the `try` is not in scope in its `of` clause
+    /// (BT-3718). The cleanup arm reads the construct's `locals` as
+    /// `LocalRebind`s of the try body's tuple on entry ([`ArmEntry`]), lowered by
+    /// its frame (ADR 0131 §2).
+    #[allow(clippy::too_many_arguments)] // the pieces of one `try ... of` clause
+    fn push_ensure_success_cleanup(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        state_after_try: String,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        outer_version: usize,
+        arm: Option<&ArmFrame>,
+        locals: Vec<String>,
+    ) -> Result<()> {
+        // Extract Result and State from {Result, State} tuple using element/N
+        let result_from_try = self.fresh_temp_var("TryResult");
+        docs.push(docvec![
+            "of ",
+            leaf::var(state_after_try.clone()),
+            " -> let ",
+            leaf::var(result_from_try.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(state_after_try.clone()),
+            ") in let StateAcc = call 'erlang':'element'(2, ",
+            leaf::var(state_after_try.clone()),
+            ") in ",
+        ]);
+        let entry = ArmEntry {
+            tuple_var: state_after_try.clone(),
+            locals,
+        };
+
+        // On the SUCCESS path the cleanup runs after the try body, so
+        // it must see the try body's mutation — but an Erlang binding made
+        // inside `try` is not in scope in the `of` arm, so the try's own
+        // version is unreachable here. Re-seed from the tuple's trailing
+        // slot, shadowing the *unversioned* bare name exactly as the
+        // `StateAcc = element(2, …)` line immediately above shadows `StateAcc`
+        // — and for the same reason: an arm's `ThreadedIr` frame treats
+        // version 0 as its implicit, always-bound entry parameter (see
+        // `check_use` in `threaded_ir/verify.rs`), so a cleanup arm handed a
+        // version > 0 baseline would consume a version its own frame never
+        // produces. Version 0 in, the arm's own version 1, 2, … out.
+        let cleanup_success_baseline = if let Some(prefix) = families.as_slice().first() {
+            let bare = Self::family_bare_var_name(prefix);
+            docs.push(docvec![
+                "let ",
+                leaf::var(bare.to_string()),
+                " = call 'erlang':'element'(3, ",
+                leaf::var(state_after_try),
+                ") in ",
+            ]);
+            self.set_family_version(prefix, 0);
+            0
+        } else {
+            outer_version
+        };
+
+        let cleanup_success_arm = self.generate_exception_body_with_threading(
+            cleanup_block,
+            families,
+            arm,
+            Some(&entry),
+        )?;
+        let cleanup_success_slot =
+            Self::exception_family_slot(families, cleanup_success_baseline, &cleanup_success_arm);
+        docs.push(cleanup_success_arm.doc);
+        // Return try body result with cleanup's final state
+        docs.push(self.close_exception_result_tuple(
+            result_from_try,
+            cleanup_success_arm.state_version,
+            families,
+            &cleanup_success_slot,
+        ));
+        Ok(())
+    }
+
     /// Generates `ensure:` with state mutation threading.
     ///
     /// Inlines receiver (try body) and cleanup block bodies with state threading.
@@ -902,10 +1098,14 @@ impl CoreErlangGenerator {
         &mut self,
         receiver_block: &Block,
         cleanup_block: &Block,
+        producer: bool,
     ) -> Result<Document<'static>> {
         if self.is_repl_mode() {
             self.set_repl_loop_mutated(true);
         }
+        // ADR 0131 §2 (Phase 3b): see `generate_on_do_with_mutations`. The try
+        // body and both cleanup runs are `BranchArm` frames.
+        let arm = self.exception_arm_frame(&[receiver_block, cleanup_block], producer);
 
         let type_var = self.fresh_temp_var("Type");
         let error_var = self.fresh_temp_var("Error");
@@ -942,8 +1142,13 @@ impl CoreErlangGenerator {
         ]];
 
         // Generate try body with state threading
-        let (try_result_var, try_final, try_slot) =
-            self.push_exception_arm(&mut docs, receiver_block, &families, outer_version)?;
+        let (try_result_var, try_final, try_slot) = self.push_exception_arm(
+            &mut docs,
+            receiver_block,
+            &families,
+            outer_version,
+            arm.as_ref(),
+        )?;
         // Return {Result, State[, Family]} from try body
         docs.push(self.close_exception_result_tuple(
             try_result_var,
@@ -953,64 +1158,16 @@ impl CoreErlangGenerator {
         ));
 
         // Success: run cleanup starting from try body's state
-        // Extract Result and State from {Result, State} tuple using element/N
-        let result_from_try = self.fresh_temp_var("TryResult");
-        docs.push(docvec![
-            "of ",
-            leaf::var(state_after_try.clone()),
-            " -> let ",
-            leaf::var(result_from_try.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(state_after_try.clone()),
-            ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(state_after_try.clone()),
-            ") in ",
-        ]);
-        // The cleanup runs after the try body, so a local the body wrote must be
-        // read back from the `StateAcc` the body returned: the cleanup's own
-        // reads of it are otherwise the pre-`try` binding, because a binding made
-        // inside the `try` is not in scope here (BT-3718).
-        let threaded = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
-        docs.extend(self.rebind_threaded_vars_from_state(&threaded, "StateAcc"));
-
-        // On the SUCCESS path the cleanup runs after the try body, so
-        // it must see the try body's mutation — but an Erlang binding made
-        // inside `try` is not in scope in the `of` arm, so the try's own
-        // version is unreachable here. Re-seed from the tuple's trailing
-        // slot, shadowing the *unversioned* bare name exactly as the
-        // `StateAcc = element(2, …)` line immediately above shadows `StateAcc`
-        // — and for the same reason: an arm's `ThreadedIr` frame treats
-        // version 0 as its implicit, always-bound entry parameter (see
-        // `check_use` in `threaded_ir/verify.rs`), so a cleanup arm handed a
-        // version > 0 baseline would consume a version its own frame never
-        // produces. Version 0 in, the arm's own version 1, 2, … out.
-        let cleanup_success_baseline = if let Some(prefix) = families.as_slice().first() {
-            let bare = Self::family_bare_var_name(prefix);
-            docs.push(docvec![
-                "let ",
-                leaf::var(bare.to_string()),
-                " = call 'erlang':'element'(3, ",
-                leaf::var(state_after_try),
-                ") in ",
-            ]);
-            self.set_family_version(prefix, 0);
-            0
-        } else {
-            outer_version
-        };
-
-        let cleanup_success_arm =
-            self.generate_exception_body_with_threading(cleanup_block, &families)?;
-        let cleanup_success_slot =
-            Self::exception_family_slot(&families, cleanup_success_baseline, &cleanup_success_arm);
-        docs.push(cleanup_success_arm.doc);
-        // Return try body result with cleanup's final state
-        docs.push(self.close_exception_result_tuple(
-            result_from_try,
-            cleanup_success_arm.state_version,
+        let entry_locals = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
+        self.push_ensure_success_cleanup(
+            &mut docs,
+            state_after_try,
+            cleanup_block,
             &families,
-            &cleanup_success_slot,
-        ));
+            outer_version,
+            arm.as_ref(),
+            entry_locals,
+        )?;
         // ADR 0122 / BT-3506: the error path below is a SIBLING of the whole
         // `of` arm, not its successor, so it starts again from the
         // construct's own pre-`try` baselines rather than from the success
@@ -1033,7 +1190,13 @@ impl CoreErlangGenerator {
         // re-raises rather than returning a tuple, so it has no trailing
         // slot to carry one (BT-3486/BT-3506). It still gets the version-0
         // arm seed, since its own frame must verify like any other.
-        self.push_exception_arm(&mut docs, cleanup_block, &families, outer_version)?;
+        self.push_exception_arm(
+            &mut docs,
+            cleanup_block,
+            &families,
+            outer_version,
+            arm.as_ref(),
+        )?;
 
         // ADR 0111 Addendum 5: three sibling with_branch_context
         // frames — the try body, the success-path cleanup run, and the
@@ -1326,9 +1489,44 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         families: &ThreadedFamilies,
+        frame: Option<&ArmFrame>,
+        entry: Option<&ArmEntry>,
     ) -> Result<ExceptionArm> {
-        self.with_branch_context(|this| {
-            this.generate_exception_body_with_threading_inner(body, families)
+        self.with_branch_context(|this| match frame {
+            // ADR 0131 §2 (Phase 3b): a `BranchArm` frame of an exception
+            // producer. Registers the arm's `RebindFrame` and the arm
+            // statements' producer sites (the rule a conditional arm uses), so a
+            // loop, fold, conditional or `on:do:` in the arm is a producer whose
+            // `LocalRebind`s this frame lowers.
+            Some(arm) => {
+                let rebind = RebindFrame {
+                    frame: this.current_branch_frame(),
+                    kind: RebindFrameKind::BranchArm,
+                    threads: arm.threads.clone(),
+                };
+                let statements = super::super::util::collect_body_exprs(&body.body);
+                this.with_rebind_frame(rebind, |this| {
+                    this.with_body_producer_sites(&statements, false, true, |this| {
+                        this.generate_exception_body_with_threading_inner(
+                            body,
+                            families,
+                            Some(arm),
+                            entry,
+                        )
+                    })
+                })
+            }
+            None => this.generate_exception_body_with_threading_inner(body, families, None, entry),
+        })
+    }
+
+    /// The `BranchArm` frame shared by the arms of an `on:do:`/`ensure:` that
+    /// is a local-threading producer: the construct's seeded set
+    /// ([`Self::branch_threaded_locals`] over `blocks`). `None` for the legacy
+    /// statement lowering, whose arms are not frames.
+    fn exception_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
+        (producer && !self.is_repl_mode()).then(|| ArmFrame {
+            threads: self.branch_threaded_locals(blocks),
         })
     }
 
@@ -1361,6 +1559,8 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         families: &ThreadedFamilies,
+        arm: Option<&ArmFrame>,
+        entry: Option<&ArmEntry>,
     ) -> Result<ExceptionArm> {
         let frame = self.current_branch_frame();
         // the baseline this arm inherits, for whichever extra family
@@ -1385,6 +1585,31 @@ impl CoreErlangGenerator {
 
         let mut result_var = "'nil'".to_string();
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
+
+        // ADR 0131 §2 (Phase 3b): an arm entered after the try body (the
+        // success-path cleanup of `ensure:`) reads the locals the try body
+        // wrote back from its returned tuple, as `LocalRebind`s lowered by this
+        // arm's frame (a legacy arm, which threads nothing of its own, binds
+        // them with a plain `let`).
+        if let Some(entry) = entry {
+            let enclosing = RebindFrame {
+                frame,
+                kind: RebindFrameKind::BranchArm,
+                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
+            };
+            let carrier = self.fresh_temp_var("ExEntry");
+            let prelude = self.construct_rebind_prelude(
+                &enclosing,
+                &carrier,
+                leaf::var(entry.tuple_var.clone()),
+                &entry.locals,
+                ProducerTail::Rebind,
+                Vec::new(),
+                frame,
+                body.span,
+            );
+            stmts.extend(prelude);
+        }
 
         // BT-3687: `@expect` directives are compile-time-only annotations with no
         // runtime value; lowering one as a statement would emit `let _ =  in`.
@@ -1419,15 +1644,12 @@ impl CoreErlangGenerator {
             self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
             if self.is_field_assignment(expr) {
                 // E1 — same shape/mint-order as C1; reused directly.
-                let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
+                let val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
-                    // Field assignment returns the assigned value
-                    // The val was already bound by lower_field_assignment_bind.
-                    // Use the current state var for the state, and the assigned value as result
-                    // Note: lower_field_assignment_bind binds _ValN = <value>
-                    // We need to capture what was assigned - use nil since field assignment
-                    // semantically returns the value but we don't easily have the var name here
-                    result_var = "'nil'".to_string();
+                    // `:=` evaluates to the assigned value: a block that ends in
+                    // a field write answers it (`lower_field_assignment_bind`
+                    // bound it to `val_var`).
+                    result_var = val_var;
                 }
             } else if self.is_actor_self_send(expr) {
                 let Expression::MessageSend {
@@ -1474,8 +1696,12 @@ impl CoreErlangGenerator {
                 }
             } else if Self::is_local_var_assignment(expr) {
                 // E3 — same shape/mint-order as C2/C3/C4; reused directly.
-                let _val_var =
+                let val_var =
                     self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
+                if is_last {
+                    // As above: the block's value is the assigned value.
+                    result_var = val_var;
+                }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 // E4 — exempt from Bind modeling, same as C5: no state
                 // version is produced or consumed, every binding is plain.
@@ -1510,7 +1736,9 @@ impl CoreErlangGenerator {
                     // Last expression with no direct field assignments.
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
-                    if self.control_flow_has_mutations(expr) {
+                    if self.control_flow_has_mutations(expr)
+                        && !(arm.is_some() && self.local_producer_locals(expr).is_some())
+                    {
                         // E5 — nested mutation construct returns {Result,
                         // State} tuple; C10-last's shape with ExResult
                         // naming. Legacy read the target state name via
@@ -1592,8 +1820,7 @@ impl CoreErlangGenerator {
             (after != before).then_some((prefix, after))
         });
         self.pop_scope();
-        let (doc, _) =
-            self.verify_and_render_branch_arm(stmts, frame, final_state_version, body.span);
+        let (doc, _) = self.render_branch_arm(stmts, frame, final_state_version, body.span, arm);
         Ok(ExceptionArm {
             doc,
             result_var,

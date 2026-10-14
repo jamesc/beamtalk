@@ -1,0 +1,1065 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3817 (ADR 0131 Phase 3b): the statement-position matrix cells that
+// answered wrong, raised or failed to compile before `on:do:`/`ensure:`
+// became local-threading producers (`adr0131_statement_probes.tsv`, verdict
+// `bad`, now `ok`). Each method is one cell of the matrix: a construct
+// (`kind`) writing the method-level local `t` (`target`) inside a block role
+// (`container`), in a class, value-type or actor method. `c` is the
+// condition. The fixtures are stdlib/test/fixtures/adr0131exc_matrix_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131ExcMatrixTest
+
+  testClassArmCvarOnDo =>
+    self assert: (Adr0131ExcMatrixClass armCvarOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armCvarOnDo: false) equals: 0
+
+  testClassArmCvarOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armCvarOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armCvarOuterOnDo: false) equals: 0
+
+  testClassArmDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass armDirectEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armDirectEnsure: false) equals: 0
+
+  testClassArmDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass armDirectOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armDirectOnDo: false) equals: 0
+
+  testClassArmOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass armOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armOuterEnsure: false) equals: 0
+
+  testClassArmOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armOuterOnDo: false) equals: 0
+
+  testClassArmSelfsendOnDo =>
+    self assert: (Adr0131ExcMatrixClass armSelfsendOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armSelfsendOnDo: false) equals: 0
+
+  testClassArmAndOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass armAndOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armAndOuterEnsure: false) equals: 0
+
+  testClassArmAndOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armAndOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armAndOuterOnDo: false) equals: 0
+
+  testClassArmNLDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass armNLDirectEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armNLDirectEnsure: false) equals: 0
+
+  testClassArmNLDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass armNLDirectOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armNLDirectOnDo: false) equals: 0
+
+  testClassArmNLOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass armNLOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armNLOuterEnsure: false) equals: 0
+
+  testClassArmNLOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armNLOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armNLOuterOnDo: false) equals: 0
+
+  testClassArmNilOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass armNilOuterEnsure) equals: 1
+
+  testClassArmNilOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armNilOuterOnDo) equals: 1
+
+  testClassArmTFOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass armTFOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armTFOuterEnsure: false) equals: 0
+
+  testClassArmTFOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass armTFOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass armTFOuterOnDo: false) equals: 0
+
+  testClassEnsOuterCollect =>
+    self assert: (Adr0131ExcMatrixClass ensOuterCollect) equals: 3
+
+  testClassEnsOuterDo =>
+    self assert: (Adr0131ExcMatrixClass ensOuterDo) equals: 3
+
+  testClassEnsOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass ensOuterEnsure) equals: 1
+
+  testClassEnsOuterInject =>
+    self assert: (Adr0131ExcMatrixClass ensOuterInject) equals: 3
+
+  testClassEnsOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass ensOuterOnDo) equals: 1
+
+  testClassEnsOuterTimes =>
+    self assert: (Adr0131ExcMatrixClass ensOuterTimes) equals: 2
+
+  testClassEnsOuterToDo =>
+    self assert: (Adr0131ExcMatrixClass ensOuterToDo) equals: 3
+
+  testClassEnsOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass ensOuterWhile) equals: 2
+
+  testClassEnsBlkDirectDo =>
+    self assert: (Adr0131ExcMatrixClass ensBlkDirectDo) equals: 3
+
+  testClassEnsBlkOuterDo =>
+    self assert: (Adr0131ExcMatrixClass ensBlkOuterDo) equals: 3
+
+  testClassEnsBlkOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass ensBlkOuterWhile) equals: 2
+
+  testClassEnsLastOuterDo =>
+    self assert: (Adr0131ExcMatrixClass ensLastOuterDo) equals: 3
+
+  testClassEnsLastOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass ensLastOuterWhile) equals: 2
+
+  testClassHandlerDirectCollect =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectCollect) equals: 3
+
+  testClassHandlerDirectDo =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectDo) equals: 3
+
+  testClassHandlerDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectEnsure) equals: 1
+
+  testClassHandlerDirectInject =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectInject) equals: 3
+
+  testClassHandlerDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectOnDo) equals: 1
+
+  testClassHandlerDirectTimes =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectTimes) equals: 2
+
+  testClassHandlerDirectToDo =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectToDo) equals: 3
+
+  testClassHandlerDirectWhile =>
+    self assert: (Adr0131ExcMatrixClass handlerDirectWhile) equals: 2
+
+  testClassHandlerOuterCollect =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterCollect) equals: 3
+
+  testClassHandlerOuterDo =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterDo) equals: 3
+
+  testClassHandlerOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterEnsure) equals: 1
+
+  testClassHandlerOuterInject =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterInject) equals: 3
+
+  testClassHandlerOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterOnDo) equals: 1
+
+  testClassHandlerOuterTimes =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterTimes) equals: 2
+
+  testClassHandlerOuterToDo =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterToDo) equals: 3
+
+  testClassHandlerOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass handlerOuterWhile) equals: 2
+
+  testClassIterArmDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass iterArmDirectEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass iterArmDirectEnsure: false) equals: 0
+
+  testClassIterArmDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass iterArmDirectOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass iterArmDirectOnDo: false) equals: 0
+
+  testClassIterArmOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass iterArmOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass iterArmOuterEnsure: false) equals: 0
+
+  testClassIterArmOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass iterArmOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass iterArmOuterOnDo: false) equals: 0
+
+  testClassLoopCvarOnDo =>
+    self assert: (Adr0131ExcMatrixClass loopCvarOnDo) equals: 1
+
+  testClassLoopCvarOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass loopCvarOuterOnDo) equals: 1
+
+  testClassLoopDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass loopDirectEnsure) equals: 1
+
+  testClassLoopDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass loopDirectOnDo) equals: 1
+
+  testClassLoopOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass loopOuterEnsure) equals: 1
+
+  testClassLoopOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass loopOuterOnDo) equals: 1
+
+  testClassLoopSelfsendOnDo =>
+    self assert: (Adr0131ExcMatrixClass loopSelfsendOnDo) equals: 1
+
+  testClassProtCvarDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarDo) equals: 3
+
+  testClassProtCvarInject =>
+    self assert: (Adr0131ExcMatrixClass protCvarInject) equals: 3
+
+  testClassProtCvarOnDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarOnDo) equals: 1
+
+  testClassProtCvarToDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarToDo) equals: 3
+
+  testClassProtCvarWhile =>
+    self assert: (Adr0131ExcMatrixClass protCvarWhile) equals: 2
+
+  testClassProtCvarOuterDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarOuterDo) equals: 3
+
+  testClassProtCvarOuterInject =>
+    self assert: (Adr0131ExcMatrixClass protCvarOuterInject) equals: 3
+
+  testClassProtCvarOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarOuterOnDo) equals: 1
+
+  testClassProtCvarOuterToDo =>
+    self assert: (Adr0131ExcMatrixClass protCvarOuterToDo) equals: 3
+
+  testClassProtCvarOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass protCvarOuterWhile) equals: 2
+
+  testClassProtDirectCollect =>
+    self assert: (Adr0131ExcMatrixClass protDirectCollect) equals: 3
+
+  testClassProtDirectDo =>
+    self assert: (Adr0131ExcMatrixClass protDirectDo) equals: 3
+
+  testClassProtDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass protDirectEnsure) equals: 1
+
+  testClassProtDirectInject =>
+    self assert: (Adr0131ExcMatrixClass protDirectInject) equals: 3
+
+  testClassProtDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass protDirectOnDo) equals: 1
+
+  testClassProtDirectTimes =>
+    self assert: (Adr0131ExcMatrixClass protDirectTimes) equals: 2
+
+  testClassProtDirectToDo =>
+    self assert: (Adr0131ExcMatrixClass protDirectToDo) equals: 3
+
+  testClassProtDirectWhile =>
+    self assert: (Adr0131ExcMatrixClass protDirectWhile) equals: 2
+
+  testClassProtOuterCollect =>
+    self assert: (Adr0131ExcMatrixClass protOuterCollect) equals: 3
+
+  testClassProtOuterDo =>
+    self assert: (Adr0131ExcMatrixClass protOuterDo) equals: 3
+
+  testClassProtOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass protOuterEnsure) equals: 1
+
+  testClassProtOuterInject =>
+    self assert: (Adr0131ExcMatrixClass protOuterInject) equals: 3
+
+  testClassProtOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass protOuterOnDo) equals: 1
+
+  testClassProtOuterTimes =>
+    self assert: (Adr0131ExcMatrixClass protOuterTimes) equals: 2
+
+  testClassProtOuterToDo =>
+    self assert: (Adr0131ExcMatrixClass protOuterToDo) equals: 3
+
+  testClassProtOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass protOuterWhile) equals: 2
+
+  testClassProtSelfsendDo =>
+    self assert: (Adr0131ExcMatrixClass protSelfsendDo) equals: 3
+
+  testClassProtSelfsendInject =>
+    self assert: (Adr0131ExcMatrixClass protSelfsendInject) equals: 3
+
+  testClassProtSelfsendOnDo =>
+    self assert: (Adr0131ExcMatrixClass protSelfsendOnDo) equals: 1
+
+  testClassProtSelfsendToDo =>
+    self assert: (Adr0131ExcMatrixClass protSelfsendToDo) equals: 3
+
+  testClassProtSelfsendWhile =>
+    self assert: (Adr0131ExcMatrixClass protSelfsendWhile) equals: 2
+
+  testClassProtArmDirectAnd =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectAnd: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmDirectAnd: false) equals: 0
+
+  testClassProtArmDirectCollect =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectCollect: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmDirectCollect: false) equals: 0
+
+  testClassProtArmDirectDo =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectDo: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmDirectDo: false) equals: 0
+
+  testClassProtArmDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmDirectEnsure: false) equals: 0
+
+  testClassProtArmDirectIfNil =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectIfNil: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmDirectIfNil: false) equals: 0
+
+  testClassProtArmDirectIfTrue =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectIfTrue: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmDirectIfTrue: false) equals: 0
+
+  testClassProtArmDirectInject =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectInject: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmDirectInject: false) equals: 0
+
+  testClassProtArmDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmDirectOnDo: false) equals: 0
+
+  testClassProtArmDirectTimes =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectTimes: true) equals: 2
+    self assert: (Adr0131ExcMatrixClass protArmDirectTimes: false) equals: 0
+
+  testClassProtArmDirectToDo =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectToDo: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmDirectToDo: false) equals: 0
+
+  testClassProtArmDirectWhile =>
+    self assert: (Adr0131ExcMatrixClass protArmDirectWhile: true) equals: 2
+    self assert: (Adr0131ExcMatrixClass protArmDirectWhile: false) equals: 0
+
+  testClassProtArmOuterAnd =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterAnd: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmOuterAnd: false) equals: 0
+
+  testClassProtArmOuterCollect =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterCollect: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmOuterCollect: false) equals: 0
+
+  testClassProtArmOuterDo =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterDo: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmOuterDo: false) equals: 0
+
+  testClassProtArmOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterEnsure: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmOuterEnsure: false) equals: 0
+
+  testClassProtArmOuterIfNil =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterIfNil: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmOuterIfNil: false) equals: 0
+
+  testClassProtArmOuterIfTrue =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterIfTrue: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmOuterIfTrue: false) equals: 0
+
+  testClassProtArmOuterInject =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterInject: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmOuterInject: false) equals: 0
+
+  testClassProtArmOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterOnDo: true) equals: 1
+    self assert: (Adr0131ExcMatrixClass protArmOuterOnDo: false) equals: 0
+
+  testClassProtArmOuterTimes =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterTimes: true) equals: 2
+    self assert: (Adr0131ExcMatrixClass protArmOuterTimes: false) equals: 0
+
+  testClassProtArmOuterToDo =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterToDo: true) equals: 3
+    self assert: (Adr0131ExcMatrixClass protArmOuterToDo: false) equals: 0
+
+  testClassProtArmOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass protArmOuterWhile: true) equals: 2
+    self assert: (Adr0131ExcMatrixClass protArmOuterWhile: false) equals: 0
+
+  testClassProtLastDirectDo =>
+    self assert: (Adr0131ExcMatrixClass protLastDirectDo) equals: 3
+
+  testClassProtLastOuterDo =>
+    self assert: (Adr0131ExcMatrixClass protLastOuterDo) equals: 3
+
+  testClassProtLastOuterWhile =>
+    self assert: (Adr0131ExcMatrixClass protLastOuterWhile) equals: 2
+
+  testClassTimesCDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass timesCDirectEnsure) equals: 1
+
+  testClassTimesCDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass timesCDirectOnDo) equals: 1
+
+  testClassTimesCOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass timesCOuterEnsure) equals: 1
+
+  testClassTimesCOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass timesCOuterOnDo) equals: 1
+
+  testClassToDoCDirectEnsure =>
+    self assert: (Adr0131ExcMatrixClass toDoCDirectEnsure) equals: 1
+
+  testClassToDoCDirectOnDo =>
+    self assert: (Adr0131ExcMatrixClass toDoCDirectOnDo) equals: 1
+
+  testClassToDoCOuterEnsure =>
+    self assert: (Adr0131ExcMatrixClass toDoCOuterEnsure) equals: 1
+
+  testClassToDoCOuterOnDo =>
+    self assert: (Adr0131ExcMatrixClass toDoCOuterOnDo) equals: 1
+
+  testValueArmDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) armDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armDirectEnsure: false) equals: 0
+
+  testValueArmDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) armDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armDirectOnDo: false) equals: 0
+
+  testValueArmOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) armOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armOuterEnsure: false) equals: 0
+
+  testValueArmOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) armOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armOuterOnDo: false) equals: 0
+
+  testValueArmSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) armSelfsendOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armSelfsendOnDo: false) equals: 0
+
+  testValueArmNLDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) armNLDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armNLDirectEnsure: false) equals: 0
+
+  testValueArmNLDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) armNLDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armNLDirectOnDo: false) equals: 0
+
+  testValueArmNLOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) armNLOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armNLOuterEnsure: false) equals: 0
+
+  testValueArmNLOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) armNLOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) armNLOuterOnDo: false) equals: 0
+
+  testValueEnsBlkDirectDo =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkDirectDo) equals: 3
+
+  testValueEnsBlkOuterCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterCollect) equals: 3
+
+  testValueEnsBlkOuterDo =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterDo) equals: 3
+
+  testValueEnsBlkOuterInject =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterInject) equals: 3
+
+  testValueEnsBlkOuterTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterTimes) equals: 2
+
+  testValueEnsBlkOuterToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterToDo) equals: 3
+
+  testValueEnsBlkOuterWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) ensBlkOuterWhile) equals: 2
+
+  testValueHandlerDirectCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectCollect) equals: 3
+
+  testValueHandlerDirectDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectDo) equals: 3
+
+  testValueHandlerDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectEnsure) equals: 1
+
+  testValueHandlerDirectInject =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectInject) equals: 3
+
+  testValueHandlerDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectOnDo) equals: 1
+
+  testValueHandlerDirectTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectTimes) equals: 2
+
+  testValueHandlerDirectToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectToDo) equals: 3
+
+  testValueHandlerDirectWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerDirectWhile) equals: 2
+
+  testValueHandlerOuterCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterCollect) equals: 3
+
+  testValueHandlerOuterDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterDo) equals: 3
+
+  testValueHandlerOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterEnsure) equals: 1
+
+  testValueHandlerOuterInject =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterInject) equals: 3
+
+  testValueHandlerOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterOnDo) equals: 1
+
+  testValueHandlerOuterTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterTimes) equals: 2
+
+  testValueHandlerOuterToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterToDo) equals: 3
+
+  testValueHandlerOuterWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) handlerOuterWhile) equals: 2
+
+  testValueIterArmDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) iterArmDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) iterArmDirectEnsure: false) equals: 0
+
+  testValueIterArmDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) iterArmDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) iterArmDirectOnDo: false) equals: 0
+
+  testValueIterArmOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) iterArmOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) iterArmOuterEnsure: false) equals: 0
+
+  testValueIterArmOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) iterArmOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) iterArmOuterOnDo: false) equals: 0
+
+  testValueLoopDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) loopDirectEnsure) equals: 1
+
+  testValueLoopDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) loopDirectOnDo) equals: 1
+
+  testValueLoopOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) loopOuterEnsure) equals: 1
+
+  testValueLoopOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) loopOuterOnDo) equals: 1
+
+  testValueLoopSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) loopSelfsendOnDo) equals: 1
+
+  testValueProtDirectCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectCollect) equals: 3
+
+  testValueProtDirectDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectDo) equals: 3
+
+  testValueProtDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectEnsure) equals: 1
+
+  testValueProtDirectInject =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectInject) equals: 3
+
+  testValueProtDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectOnDo) equals: 1
+
+  testValueProtDirectTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectTimes) equals: 2
+
+  testValueProtDirectToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectToDo) equals: 3
+
+  testValueProtDirectWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protDirectWhile) equals: 2
+
+  testValueProtOuterCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterCollect) equals: 3
+
+  testValueProtOuterDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterDo) equals: 3
+
+  testValueProtOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterEnsure) equals: 1
+
+  testValueProtOuterInject =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterInject) equals: 3
+
+  testValueProtOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterOnDo) equals: 1
+
+  testValueProtOuterTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterTimes) equals: 2
+
+  testValueProtOuterToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterToDo) equals: 3
+
+  testValueProtOuterWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protOuterWhile) equals: 2
+
+  testValueProtSelfsendDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protSelfsendDo) equals: 3
+
+  testValueProtSelfsendInject =>
+    self assert: ((Adr0131ExcMatrixValue new) protSelfsendInject) equals: 3
+
+  testValueProtSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protSelfsendOnDo) equals: 1
+
+  testValueProtSelfsendToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protSelfsendToDo) equals: 3
+
+  testValueProtSelfsendWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protSelfsendWhile) equals: 2
+
+  testValueProtArmDirectAnd =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectAnd: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectAnd: false) equals: 0
+
+  testValueProtArmDirectCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectCollect: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectCollect: false) equals: 0
+
+  testValueProtArmDirectDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectDo: false) equals: 0
+
+  testValueProtArmDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectEnsure: false) equals: 0
+
+  testValueProtArmDirectIfNil =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectIfNil: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectIfNil: false) equals: 0
+
+  testValueProtArmDirectIfTrue =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectIfTrue: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectIfTrue: false) equals: 0
+
+  testValueProtArmDirectInject =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectInject: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectInject: false) equals: 0
+
+  testValueProtArmDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectOnDo: false) equals: 0
+
+  testValueProtArmDirectTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectTimes: true) equals: 2
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectTimes: false) equals: 0
+
+  testValueProtArmDirectToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectToDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectToDo: false) equals: 0
+
+  testValueProtArmDirectWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectWhile: true) equals: 2
+    self assert: ((Adr0131ExcMatrixValue new) protArmDirectWhile: false) equals: 0
+
+  testValueProtArmOuterAnd =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterAnd: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterAnd: false) equals: 0
+
+  testValueProtArmOuterCollect =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterCollect: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterCollect: false) equals: 0
+
+  testValueProtArmOuterDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterDo: false) equals: 0
+
+  testValueProtArmOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterEnsure: false) equals: 0
+
+  testValueProtArmOuterIfNil =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterIfNil: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterIfNil: false) equals: 0
+
+  testValueProtArmOuterIfTrue =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterIfTrue: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterIfTrue: false) equals: 0
+
+  testValueProtArmOuterInject =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterInject: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterInject: false) equals: 0
+
+  testValueProtArmOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterOnDo: false) equals: 0
+
+  testValueProtArmOuterTimes =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterTimes: true) equals: 2
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterTimes: false) equals: 0
+
+  testValueProtArmOuterToDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterToDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterToDo: false) equals: 0
+
+  testValueProtArmOuterWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterWhile: true) equals: 2
+    self assert: ((Adr0131ExcMatrixValue new) protArmOuterWhile: false) equals: 0
+
+  testValueProtLastDirectDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protLastDirectDo) equals: 3
+
+  testValueProtLastOuterDo =>
+    self assert: ((Adr0131ExcMatrixValue new) protLastOuterDo) equals: 3
+
+  testValueProtLastOuterWhile =>
+    self assert: ((Adr0131ExcMatrixValue new) protLastOuterWhile) equals: 2
+
+  testValueTimesCDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) timesCDirectEnsure) equals: 1
+
+  testValueTimesCDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) timesCDirectOnDo) equals: 1
+
+  testValueTimesCOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) timesCOuterEnsure) equals: 1
+
+  testValueTimesCOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) timesCOuterOnDo) equals: 1
+
+  testValueToDoCDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) toDoCDirectEnsure) equals: 1
+
+  testValueToDoCDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) toDoCDirectOnDo) equals: 1
+
+  testValueToDoCOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixValue new) toDoCOuterEnsure) equals: 1
+
+  testValueToDoCOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixValue new) toDoCOuterOnDo) equals: 1
+
+  testActorEnsBlkOuterCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterCollect) equals: 3
+
+  testActorEnsBlkOuterDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterDo) equals: 3
+
+  testActorEnsBlkOuterInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterInject) equals: 3
+
+  testActorEnsBlkOuterTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterTimes) equals: 2
+
+  testActorEnsBlkOuterToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterToDo) equals: 3
+
+  testActorEnsBlkOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensBlkOuterWhile) equals: 2
+
+  testActorHandlerDirectCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectCollect) equals: 3
+
+  testActorHandlerDirectDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectDo) equals: 3
+
+  testActorHandlerDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectEnsure) equals: 1
+
+  testActorHandlerDirectInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectInject) equals: 3
+
+  testActorHandlerDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectOnDo) equals: 1
+
+  testActorHandlerDirectTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectTimes) equals: 2
+
+  testActorHandlerDirectToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectToDo) equals: 3
+
+  testActorHandlerDirectWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerDirectWhile) equals: 2
+
+  testActorHandlerOuterCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterCollect) equals: 3
+
+  testActorHandlerOuterDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterDo) equals: 3
+
+  testActorHandlerOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterEnsure) equals: 1
+
+  testActorHandlerOuterInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterInject) equals: 3
+
+  testActorHandlerOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterOnDo) equals: 1
+
+  testActorHandlerOuterTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterTimes) equals: 2
+
+  testActorHandlerOuterToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterToDo) equals: 3
+
+  testActorHandlerOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) handlerOuterWhile) equals: 2
+
+  testActorIterArmDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmDirectEnsure: false) equals: 0
+
+  testActorIterArmDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmDirectOnDo: false) equals: 0
+
+  testActorIterArmOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmOuterEnsure: false) equals: 0
+
+  testActorIterArmOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) iterArmOuterOnDo: false) equals: 0
+
+  testActorIterIterOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterIterOuterEnsure) equals: 1
+
+  testActorIterIterOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) iterIterOuterOnDo) equals: 1
+
+  testActorLoopCvarOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopCvarOnDo) equals: 1
+
+  testActorLoopCvarOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopCvarOuterOnDo) equals: 1
+
+  testActorLoopDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopDirectEnsure) equals: 1
+
+  testActorLoopDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopDirectOnDo) equals: 1
+
+  testActorLoopOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopOuterEnsure) equals: 1
+
+  testActorLoopOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopOuterOnDo) equals: 1
+
+  testActorLoopSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) loopSelfsendOnDo) equals: 1
+
+  testActorProtCvarDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarDo) equals: 3
+
+  testActorProtCvarInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarInject) equals: 3
+
+  testActorProtCvarOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOnDo) equals: 1
+
+  testActorProtCvarToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarToDo) equals: 3
+
+  testActorProtCvarWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarWhile) equals: 2
+
+  testActorProtCvarOuterDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOuterDo) equals: 3
+
+  testActorProtCvarOuterInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOuterInject) equals: 3
+
+  testActorProtCvarOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOuterOnDo) equals: 1
+
+  testActorProtCvarOuterToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOuterToDo) equals: 3
+
+  testActorProtCvarOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protCvarOuterWhile) equals: 2
+
+  testActorProtDirectCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectCollect) equals: 3
+
+  testActorProtDirectDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectDo) equals: 3
+
+  testActorProtDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectEnsure) equals: 1
+
+  testActorProtDirectInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectInject) equals: 3
+
+  testActorProtDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectOnDo) equals: 1
+
+  testActorProtDirectTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectTimes) equals: 2
+
+  testActorProtDirectToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectToDo) equals: 3
+
+  testActorProtDirectWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protDirectWhile) equals: 2
+
+  testActorProtOuterCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterCollect) equals: 3
+
+  testActorProtOuterDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterDo) equals: 3
+
+  testActorProtOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterEnsure) equals: 1
+
+  testActorProtOuterInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterInject) equals: 3
+
+  testActorProtOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterOnDo) equals: 1
+
+  testActorProtOuterTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterTimes) equals: 2
+
+  testActorProtOuterToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterToDo) equals: 3
+
+  testActorProtOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protOuterWhile) equals: 2
+
+  testActorProtSelfsendDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protSelfsendDo) equals: 3
+
+  testActorProtSelfsendInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protSelfsendInject) equals: 3
+
+  testActorProtSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protSelfsendOnDo) equals: 1
+
+  testActorProtSelfsendToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protSelfsendToDo) equals: 3
+
+  testActorProtSelfsendWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protSelfsendWhile) equals: 2
+
+  testActorProtArmDirectCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectCollect: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectCollect: false) equals: 0
+
+  testActorProtArmDirectDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectDo: false) equals: 0
+
+  testActorProtArmDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectEnsure: false) equals: 0
+
+  testActorProtArmDirectInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectInject: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectInject: false) equals: 0
+
+  testActorProtArmDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectOnDo: false) equals: 0
+
+  testActorProtArmDirectTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectTimes: true) equals: 2
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectTimes: false) equals: 0
+
+  testActorProtArmDirectToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectToDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectToDo: false) equals: 0
+
+  testActorProtArmDirectWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectWhile: true) equals: 2
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmDirectWhile: false) equals: 0
+
+  testActorProtArmOuterCollect =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterCollect: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterCollect: false) equals: 0
+
+  testActorProtArmOuterDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterDo: false) equals: 0
+
+  testActorProtArmOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterEnsure: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterEnsure: false) equals: 0
+
+  testActorProtArmOuterInject =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterInject: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterInject: false) equals: 0
+
+  testActorProtArmOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterOnDo: true) equals: 1
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterOnDo: false) equals: 0
+
+  testActorProtArmOuterTimes =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterTimes: true) equals: 2
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterTimes: false) equals: 0
+
+  testActorProtArmOuterToDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterToDo: true) equals: 3
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterToDo: false) equals: 0
+
+  testActorProtArmOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterWhile: true) equals: 2
+    self assert: ((Adr0131ExcMatrixActor spawn) protArmOuterWhile: false) equals: 0
+
+  testActorProtLastOuterWhile =>
+    self assert: ((Adr0131ExcMatrixActor spawn) protLastOuterWhile) equals: 2
+
+  testActorTimesCDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) timesCDirectEnsure) equals: 1
+
+  testActorTimesCDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) timesCDirectOnDo) equals: 1
+
+  testActorTimesCOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) timesCOuterEnsure) equals: 1
+
+  testActorTimesCOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) timesCOuterOnDo) equals: 1
+
+  testActorToDoCCvarOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCCvarOnDo) equals: 1
+
+  testActorToDoCCvarOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCCvarOuterOnDo) equals: 1
+
+  testActorToDoCDirectEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCDirectEnsure) equals: 1
+
+  testActorToDoCDirectOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCDirectOnDo) equals: 1
+
+  testActorToDoCOuterEnsure =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCOuterEnsure) equals: 1
+
+  testActorToDoCOuterOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCOuterOnDo) equals: 1
+
+  testActorToDoCSelfsendOnDo =>
+    self assert: ((Adr0131ExcMatrixActor spawn) toDoCSelfsendOnDo) equals: 1
+
+  testClassNestedInjectKeepsOuterParams =>
+    self assert: Adr0131ExcMatrixClass nestedInjectKeepsOuterParams equals: 8
+
+  testValueNestedInjectKeepsOuterParams =>
+    self assert: (Adr0131ExcMatrixValue new) nestedInjectKeepsOuterParams equals: 8
+
+  testActorNestedInjectKeepsOuterParams =>
+    self assert: ((Adr0131ExcMatrixActor spawn) nestedInjectKeepsOuterParams) equals: 8
+
+  testClassEnsureBlockEndingInAssignAnswersTheValue =>
+    self assert: Adr0131ExcMatrixClass ensureBlockEndingInAssignAnswersTheValue equals: #[5, 5]
+
+  testValueEnsureBlockEndingInAssignAnswersTheValue =>
+    self assert: (Adr0131ExcMatrixValue new) ensureBlockEndingInAssignAnswersTheValue equals: #[5, 5]
+
+  testActorEnsureBlockEndingInAssignAnswersTheValue =>
+    self assert: ((Adr0131ExcMatrixActor spawn) ensureBlockEndingInAssignAnswersTheValue) equals: #[5, 5]
+
+  testClassOnDoBlockEndingInAssignAnswersTheValue =>
+    self assert: Adr0131ExcMatrixClass onDoBlockEndingInAssignAnswersTheValue equals: #[7, 7]
+
+  testValueOnDoBlockEndingInAssignAnswersTheValue =>
+    self assert: (Adr0131ExcMatrixValue new) onDoBlockEndingInAssignAnswersTheValue equals: #[7, 7]
+
+  testActorOnDoBlockEndingInAssignAnswersTheValue =>
+    self assert: ((Adr0131ExcMatrixActor spawn) onDoBlockEndingInAssignAnswersTheValue) equals: #[7, 7]

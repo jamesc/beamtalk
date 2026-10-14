@@ -2831,8 +2831,11 @@ listOfBlocks =>
 - **`detect:ifNone:` handler** — a `detect:ifNone:` whose `ifNone:` handler writes an outer local (BT-3794)
 - **REPL operand positions** — `(xs collect: [:x | t := t + x]) size` at the REPL (BT-3795)
 - **Field-write values** — `self.f := xs collect: [:x | t := t + x]` in class and actor methods (BT-3795)
+- **`on:do:` and `ensure:`** — `[t := t + 1] ensure: [u := u + 1]` in any producer position, in an arm of another producer and in a loop or fold body; the protected body, handler and cleanup are arms of the producer. A raise discards the protected body's writes, and the handler's (or the cleanup's) writes are kept (BT-3817)
 
-Positions that remain rejected (tracked for future phases): constructs inside a block, a conditional's receiver, a cascade, a field-write value in a value type, value-bearing producer positions inside actor fold bodies, `^xs do: [...]` inside a conditional arm, handler or closure in class/value-type methods ([BT-3813](https://linear.app/beamtalk/issue/BT-3813)), and constructs nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
+A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in every method kind; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead (BT-3817).
+
+Positions that remain rejected (tracked for future phases): constructs inside a block, a conditional's receiver, a cascade, a field-write value in a value type, value-bearing producer positions inside actor fold bodies, `^xs do: [...]` inside a closure in class/value-type methods ([BT-3813](https://linear.app/beamtalk/issue/BT-3813)), and constructs nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

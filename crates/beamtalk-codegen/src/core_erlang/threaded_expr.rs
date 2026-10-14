@@ -68,8 +68,7 @@
 
 use super::threaded_ir::{
     self, BindOp, CarrierSlot, FrameId, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
-    ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar,
+    ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -344,6 +343,25 @@ impl CoreErlangGenerator {
                 " in\n",
             ]);
             result_var
+        } else if let Some(locals) = self.exception_producer_locals(expr) {
+            // ADR 0131 §1/§2 (Phase 3b): `on:do:`/`ensure:` is a local-threading
+            // producer too; as the method root's last expression it discards its
+            // locals with an explicit `DiscardLocals`.
+            let (prelude, value) =
+                self.lower_exception_producer(expr, &locals, ProducerTail::Discard, FrameId::ROOT)?;
+            let prelude_doc = self.verified_root_prelude_doc(&prelude, expr.span());
+            let value_doc = self.threaded_value_doc(&value);
+            let result_var = self.fresh_temp_var("ThreadedValue");
+            parts.push(docvec![
+                "    ",
+                prelude_doc,
+                "let ",
+                leaf::var(result_var.clone()),
+                " = ",
+                value_doc,
+                " in\n",
+            ]);
+            result_var
         } else if self.is_conditional_with_vt_local_threading(expr) {
             match self.emit_vt_conditional_case_to_var(expr, &mut parts)? {
                 Some(result_var) => result_var,
@@ -417,7 +435,7 @@ impl CoreErlangGenerator {
         // path for every other `ControlFlowWithMutations` shape (loops,
         // list-ops, exception handlers) that still returns a raw tuple
         // `Document` from `expression_doc`.
-        if self.inline_control_flow_needs_threading(expr.unwrap_parens()) {
+        if self.inline_producer_construct(expr.unwrap_parens()) {
             let result_var = self.fresh_temp_var("Result");
             let result_doc = self.expression_doc(expr)?;
             stmts.push(ThreadedStmt::Statement(
@@ -503,44 +521,6 @@ impl CoreErlangGenerator {
         Ok(true)
     }
 
-    /// Emits a local assignment whose RHS is a read+write conditional or an
-    /// `on:do:`/`ensure:`, binding the target to the construct's logical value
-    /// (tuple element 1) and rebinding any threaded sibling outer-locals from
-    /// element 2 — so both the assigned value and the mutations are visible to
-    /// subsequent statements, rather than the target being bound to the raw
-    /// tuple.
-    ///
-    /// Returns the Core Erlang variable bound to the assignment target, or `None` (without
-    /// mutating `body_parts`) when the RHS is not such a construct, so the caller
-    /// falls back to its generic local-binding path. The RHS is peeled of
-    /// redundant parentheses first.
-    ///
-    /// ADR 0131 Phase 2 (BT-3749): a loop or fold RHS no longer reaches
-    /// here — it is a local-threading producer
-    /// (`lower_root_statement_with_producer`). Phase 3 makes the conditional
-    /// and exception families producers too and deletes this function.
-    ///
-    /// Shared by the value-type instance-method body sequencer and the class-method
-    /// non-last local-var binder, which previously re-derived this branch independently.
-    /// The Actor boundary does not route here — see
-    /// [`Self::emit_actor_threaded_assign_rhs_stmts`].
-    pub(super) fn emit_threaded_assign_rhs(
-        &mut self,
-        var_name: &str,
-        value: &Expression,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<Option<String>> {
-        let rhs = value.unwrap_parens();
-        if self.is_exception_construct_with_vt_local_threading(rhs) {
-            // The assign-RHS mirror of the `lower_threaded_last` case above.
-            // (ADR 0122: see that case's matching comment.)
-            return Ok(Some(
-                self.emit_vt_exception_assign_rhs(var_name, rhs, body_parts)?,
-            ));
-        }
-        Ok(None)
-    }
-
     /// Actor-boundary assign-RHS transform for an inline-threaded conditional
     /// (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `and:`/`or:`, the
     /// nil-conditional family, `match:`) —
@@ -566,7 +546,7 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let span = value.span();
-        if !self.inline_control_flow_needs_threading(value.unwrap_parens()) {
+        if !self.inline_producer_construct(value.unwrap_parens()) {
             return Err(CodeGenError::Internal(
                 "emit_actor_threaded_assign_rhs_stmts: a non-conditional construct must be \
                  lowered by threaded_construct_value"
@@ -697,6 +677,10 @@ impl CoreErlangGenerator {
         if let Some(locals) = self.conditional_producer_locals(inner) {
             return Some(locals);
         }
+        // ADR 0131 Phase 3b (BT-3817): and an `on:do:`/`ensure:`.
+        if let Some(locals) = self.exception_producer_locals(inner) {
+            return Some(locals);
+        }
         beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner)?;
         if self.is_repl_mode() {
             return self.threaded_locals_of(inner).map(|_| Vec::new());
@@ -732,7 +716,7 @@ impl CoreErlangGenerator {
     /// loop or fold body.
     pub(super) fn conditional_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
-            RootMethodKind, conditional_arm_blocks, conditional_arms_lower_as_producer,
+            conditional_arm_blocks, conditional_arms_lower_as_producer,
         };
         if self.is_repl_mode() {
             // The REPL root threads its bindings map: a conditional at an
@@ -742,15 +726,7 @@ impl CoreErlangGenerator {
             conditional_arm_blocks(expr)?;
             return self.threaded_locals_of(expr).map(|_| Vec::new());
         }
-        let kind = if self.in_class_method() {
-            RootMethodKind::Class
-        } else if self.in_actor_instance_context() {
-            RootMethodKind::Actor
-        } else if self.context == super::CodeGenContext::ValueType {
-            RootMethodKind::ValueType
-        } else {
-            return None;
-        };
+        let kind = self.root_method_kind()?;
         let arms = conditional_arm_blocks(expr)?;
         if !conditional_arms_lower_as_producer(&arms, kind, &|name| {
             self.binds_threadable_local(name)
@@ -759,6 +735,99 @@ impl CoreErlangGenerator {
         }
         let set = self.threaded_locals_of(expr)?;
         (set.lowered == set.names).then_some(set.lowered)
+    }
+
+    /// The kind of method body being lowered, `None` outside a class,
+    /// value-type or actor method (the REPL, a legacy workspace block body).
+    fn root_method_kind(
+        &self,
+    ) -> Option<beamtalk_core::semantic_analysis::block_facts::RootMethodKind> {
+        use beamtalk_core::semantic_analysis::block_facts::RootMethodKind;
+        if self.in_class_method() {
+            Some(RootMethodKind::Class)
+        } else if self.in_actor_instance_context() {
+            Some(RootMethodKind::Actor)
+        } else if self.context == super::CodeGenContext::ValueType {
+            Some(RootMethodKind::ValueType)
+        } else {
+            None
+        }
+    }
+
+    /// ADR 0131 Phase 3b (BT-3817): the threaded locals of the `on:do:` /
+    /// `ensure:` `expr` (paren-unwrapped) when it is a local-threading producer
+    /// at the method root or in an arm frame, or `None`.
+    ///
+    /// The codegen half of `beamtalk_core`'s `exception_producer_writes`, which
+    /// the Phase 0 check reads: the protected body and the handler or cleanup are
+    /// block literals (`exception_arm_blocks`), the construct writes an outer
+    /// local, the set its blocks pack is the whole set
+    /// (`ThreadedLocals::lowered == names`, so no write is dropped), and the
+    /// blocks are ones the producer can lower in this kind of method
+    /// (`exception_arms_lower_as_producer`). In the REPL it answers for a
+    /// construct that writes a binding: a producer that adopts the bindings map
+    /// whole (`lower_repl_construct_tuple`) and threads no local of its own.
+    pub(super) fn exception_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            exception_arm_blocks, exception_arms_lower_as_producer,
+        };
+        let arms = exception_arm_blocks(expr)?;
+        if self.is_repl_mode() {
+            return self.threaded_locals_of(expr).map(|_| Vec::new());
+        }
+        let kind = self.root_method_kind()?;
+        if !exception_arms_lower_as_producer(&arms, kind, &|name| self.binds_threadable_local(name))
+        {
+            return None;
+        }
+        let Some(set) = self.threaded_locals_of(expr) else {
+            // No outer local is written: a value-type `on:do:`/`ensure:` that
+            // writes only `self.field` still threads the `Self` family, so it
+            // is a producer with no `LocalRebind`s.
+            return (kind
+                == beamtalk_core::semantic_analysis::block_facts::RootMethodKind::ValueType
+                && !self
+                    .exception_construct_threaded_families(expr)
+                    .as_slice()
+                    .is_empty())
+            .then(Vec::new);
+        };
+        (set.lowered == set.names).then_some(set.lowered)
+    }
+
+    /// Whether `expr` (paren-unwrapped) is an `on:do:`/`ensure:` that
+    /// [`Self::threaded_expression`] lowers as a local-threading producer in the
+    /// frame being lowered: a method root or a registered `BranchArm` frame,
+    /// outside the REPL (whose root adopts the bindings map and lowers its
+    /// constructs itself). The one predicate behind
+    /// [`Self::threaded_expression`]'s exception hook and
+    /// [`Self::subexpr_needs_prelude`]'s probe.
+    pub(super) fn exception_producer_in_frame(&self, expr: &Expression) -> bool {
+        let inner = expr.unwrap_parens();
+        !self.is_repl_mode()
+            && self.is_exception_producer_frame(self.current_frame(), inner)
+            && self.exception_producer_locals(inner).is_some()
+    }
+
+    /// Whether `frame` lowers the rebinds of the `on:do:`/`ensure:` `expr`: the
+    /// method root, a `BranchArm` frame ([`Self::is_conditional_producer_frame`]),
+    /// or the registered frame of a loop or fold body when `expr` is one of that
+    /// body's producer sites (`with_body_producer_sites`, the rule the Phase 0
+    /// check reads).
+    pub(super) fn is_exception_producer_frame(&self, frame: FrameId, expr: &Expression) -> bool {
+        self.is_conditional_producer_frame(frame)
+            || (self.rebind_frames.contains_key(&frame)
+                && self.local_producer_sites.contains(&expr.span()))
+    }
+
+    /// Whether `thread_ahead` has already spliced `expr` (paren-unwrapped) as a
+    /// producer when a consumer compiles it: an inline-threaded conditional or
+    /// `match:` ([`Self::inline_control_flow_needs_threading`]) or an
+    /// `on:do:`/`ensure:` producer ([`Self::exception_producer_in_frame`]).
+    /// `expression_doc` then answers the already-unwrapped value, not a
+    /// `{Value, State}` tuple.
+    pub(super) fn inline_producer_construct(&self, expr: &Expression) -> bool {
+        self.inline_control_flow_needs_threading(expr) || self.exception_producer_in_frame(expr)
     }
 
     /// The outer locals the threading construct `expr` (paren-unwrapped)
@@ -826,6 +895,13 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         let inner = expr.unwrap_parens();
+        // ADR 0131 Phase 3b (BT-3817): an `on:do:`/`ensure:` that is a producer
+        // here lowers its protected body, handler and cleanup as `BranchArm`
+        // frames.
+        if self.exception_producer_in_frame(inner) && self.is_exception_producer_frame(frame, inner)
+        {
+            return self.exception_producer_value(inner, ProducerTail::Rebind, frame);
+        }
         let locals = if self.is_repl_mode() {
             // The REPL root threads no local on its own (see
             // `local_producer_locals`).
@@ -850,6 +926,92 @@ impl CoreErlangGenerator {
             && beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
                 .into_iter()
                 .any(|site| self.local_producer_locals(site).is_some())
+    }
+
+    /// The producer lowering of an `on:do:`/`ensure:` in `frame`
+    /// ([`Self::exception_producer_locals`]), or `Ok(None)` when it is not one
+    /// here.
+    pub(super) fn exception_producer_value(
+        &mut self,
+        expr: &Expression,
+        tail: ProducerTail,
+        frame: FrameId,
+    ) -> Result<Option<ThreadedValue>> {
+        let inner = expr.unwrap_parens();
+        let Some(locals) = self.exception_producer_locals(inner) else {
+            return Ok(None);
+        };
+        let (prelude, value) = self.lower_exception_producer(inner, &locals, tail, frame)?;
+        Ok(Some(ThreadedValue { prelude, value }))
+    }
+
+    /// ADR 0131 §1/§2 (Phase 3b): the local-threading producer for an
+    /// `on:do:`/`ensure:`:
+    ///
+    /// ```text
+    /// prelude: [ ConstructTuple { carrier: CF, doc: <try/catch tuple>, threads },
+    ///            Bind State_{n+1} ← element(2, CF)           (actor instance only),
+    ///            LocalRebind { t ← maps:get('__local__t', …) }, …,
+    ///            Statement(Self ← element(3, CF))             (value-type `SelfVt` only) ]
+    /// value:   element(1, CF)
+    /// ```
+    ///
+    /// The protected body, handler and cleanup are `BranchArm` frames
+    /// (`generate_exception_body_with_threading`) whose threads are the
+    /// construct's seeded set; the catch boundary (`OnDoCatch`, the class-variable
+    /// snapshot and restore of ADR 0130) is untouched. In a class or value-type
+    /// method the scratch map is private (`exception_body_outer_state`), so no
+    /// `State` `Bind` exists; in an actor instance method element 2 is the next
+    /// `State` version and each rebind reads through it.
+    pub(super) fn lower_exception_producer(
+        &mut self,
+        expr: &Expression,
+        locals: &[String],
+        tail: ProducerTail,
+        frame: FrameId,
+    ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
+        #[cfg(test)]
+        fault::record_producer(expr.span(), locals);
+        let span = expr.span();
+        let actor = self.in_actor_instance_context();
+        let enclosing = self.rebind_frame_of(frame)?;
+        let self_families = self.exception_construct_threaded_families(expr);
+        let source_version = self.state_version();
+        let doc = self.exception_producer_tuple_doc(expr)?;
+        let carrier = self.fresh_temp_var("ThreadedResult");
+        let element = |k: i64, carrier: &str| {
+            docvec![
+                "call 'erlang':'element'(",
+                leaf::int_lit(k),
+                ", ",
+                leaf::var(carrier.to_string()),
+                ")",
+            ]
+        };
+        let mut family_binds = Vec::new();
+        if actor && enclosing.kind.extends_state_chain() {
+            let _ = self.next_state_var();
+            family_binds.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
+                span,
+            });
+        }
+        let mut prelude = self.construct_rebind_prelude(
+            &enclosing,
+            &carrier,
+            doc,
+            locals,
+            tail,
+            family_binds,
+            frame,
+            span,
+        );
+        if let Some(rebind) = self.extract_vt_loop_family_slot(&carrier, &self_families, span) {
+            prelude.push(ThreadedStmt::Statement(docvec![rebind, " "], span));
+        }
+        Ok((prelude, ValueRef::Doc(element(1, &carrier))))
     }
 
     /// Lowers the loop or fold `expr` to its construct-tuple prelude (ADR
@@ -1226,14 +1388,7 @@ impl CoreErlangGenerator {
         // frame has no `State` chain to extend: its body has no state effect
         // (`select_direct_params`/`select_tuple_acc`), so the nested
         // construct's `State` is the one already in scope.
-        let state_chain = match &enclosing.kind {
-            RebindFrameKind::MethodBody | RebindFrameKind::BranchArm => true,
-            RebindFrameKind::Loop(mode) => !matches!(
-                mode,
-                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_)
-            ),
-        };
-        if actor && state_chain {
+        if actor && enclosing.kind.extends_state_chain() {
             let _ = self.next_state_var();
             family_binds.push(ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),

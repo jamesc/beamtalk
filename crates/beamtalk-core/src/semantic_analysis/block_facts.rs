@@ -1487,6 +1487,39 @@ pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
         .then_some(construct.blocks)
 }
 
+/// ADR 0131 Phase 3b (BT-3817): the literal blocks of an `on:do:` / `ensure:`
+/// send whose every block position holds a block literal, in source order
+/// (the protected body, then the handler or cleanup), or `None` for any other
+/// send. A construct with a non-literal protected body or handler
+/// (`aBlock on: Error do: aHandler`) is not inlined by codegen, so it is not a
+/// producer.
+#[must_use]
+pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
+    let construct = local_threading_construct(expr)?;
+    if construct.family != LocalThreadingFamily::Exception {
+        return None;
+    }
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let &[handler_index] =
+        crate::state_threading_selectors::state_threaded_block_arg_indices(&construct.selector)
+    else {
+        return None;
+    };
+    match (receiver.as_ref(), arguments.get(handler_index)) {
+        (Expression::Block(protected), Some(Expression::Block(handler))) => {
+            Some(vec![protected, handler])
+        }
+        _ => None,
+    }
+}
+
 /// The kind of method body a method-root local-threading producer sits in
 /// (ADR 0131 §2's frame modes). The rules for which conditionals are
 /// producers depend on it ([`conditional_arms_lower_as_producer`]).
@@ -1511,13 +1544,13 @@ pub enum RootMethodKind {
 /// locals into the arm by a `LocalRebind`, which is a producer at one of the
 /// arm statement's [`loop_body_producer_sites`] (narrowed by
 /// [`is_loop_body_producer_site`], the rule a loop body uses), and so is a
-/// nested conditional that is itself such a producer. A construct in
-/// an arm that writes an outer local, or a local the arm itself defines, and
-/// is not such a producer would rebuild the arm's `StateAcc` from scratch and
-/// drop its other keys: the conditional is not a producer then, and keeps its
-/// statement lowering. In a value-type method an arm that writes a field
-/// carries a second family the producer's tuple does not. An actor method has
-/// neither restriction: its `State` map is continued, never rebuilt.
+/// nested conditional or `on:do:`/`ensure:` that is itself such a producer. A
+/// construct in an arm that writes an outer local, or a local the arm itself
+/// defines, and is not such a producer would rebuild the arm's `StateAcc` from
+/// scratch and drop its other keys: the conditional is not a producer then, and
+/// keeps its statement lowering. In a value-type method an arm that writes a
+/// field carries a second family the producer's tuple does not. An actor method
+/// has neither restriction: its `State` map is continued, never rebuilt.
 ///
 /// `bound_outside` is the scope at the conditional; the names the arms assign
 /// are bound inside them. One rule, read by the Phase 0 check and by codegen's
@@ -1527,6 +1560,34 @@ pub fn conditional_arms_lower_as_producer(
     arms: &[&Block],
     kind: RootMethodKind,
     bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    arms_lower_as_producer(arms, kind, bound_outside, false)
+}
+
+/// ADR 0131 Phase 3b (BT-3817): whether the protected body and handler or
+/// cleanup of an `on:do:`/`ensure:` can be lowered by the exception producer
+/// in a method of kind `kind`. The rule of
+/// [`conditional_arms_lower_as_producer`], except that a value-type arm may
+/// write a field: an exception construct's result tuple carries the `SelfVt`
+/// family in a trailing slot of its own (ADR 0122, BT-3506), which the producer
+/// extracts after the construct.
+#[must_use]
+pub fn exception_arms_lower_as_producer(
+    arms: &[&Block],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    arms_lower_as_producer(arms, kind, bound_outside, true)
+}
+
+/// The one rule behind [`conditional_arms_lower_as_producer`] and
+/// [`exception_arms_lower_as_producer`]; `field_writes_carried` says whether a
+/// value-type arm's field write rides the construct's own tuple.
+fn arms_lower_as_producer(
+    arms: &[&Block],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+    field_writes_carried: bool,
 ) -> bool {
     if kind == RootMethodKind::Actor {
         return true;
@@ -1551,7 +1612,7 @@ pub fn conditional_arms_lower_as_producer(
     let arm_bound = |name: &str| bound_outside(name) || assigned.contains(name);
     for arm in arms {
         for stmt in &arm.body {
-            if !arm_statement_lowers(&stmt.expression, kind, &arm_bound) {
+            if !arm_statement_lowers(&stmt.expression, kind, &arm_bound, field_writes_carried) {
                 return false;
             }
         }
@@ -1564,6 +1625,7 @@ fn arm_statement_lowers(
     stmt: &Expression,
     kind: RootMethodKind,
     arm_bound: &dyn Fn(&str) -> bool,
+    field_writes_carried: bool,
 ) -> bool {
     let ctx = LoopBodyContext::new(stmt, false, false, false).in_arm();
     let sites: std::collections::HashSet<Span> = loop_body_producer_sites(stmt)
@@ -1577,7 +1639,8 @@ fn arm_statement_lowers(
     crate::ast_walker::walk_expression(stmt, &mut |e| {
         if sites.contains(&e.span())
             && (operand_producer_writes(e, arm_bound).is_some()
-                || conditional_producer_writes(e, arm_bound, kind).is_some())
+                || conditional_producer_writes(e, arm_bound, kind).is_some()
+                || exception_producer_writes(e, arm_bound, kind).is_some())
         {
             producers.push(e.span());
         }
@@ -1602,7 +1665,7 @@ fn arm_statement_lowers(
                 ok = false;
             }
         }
-        if kind == RootMethodKind::ValueType {
+        if kind == RootMethodKind::ValueType && !field_writes_carried {
             if let Expression::Assignment { target, .. } = e {
                 if is_self_field_target(target) {
                     ok = false;
@@ -1647,9 +1710,45 @@ pub fn conditional_producer_writes(
     (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
-/// ADR 0131 Phase 3 (BT-3738): [`operand_producer_writes`] or
-/// [`conditional_producer_writes`]: the threaded set of a local-threading
-/// producer at a method-root site, whichever family it is.
+/// ADR 0131 Phase 3b (BT-3817): the threaded set of an `on:do:`/`ensure:` that
+/// codegen lowers as a local-threading producer at a method-root site (or in an
+/// arm frame), or `None` when `expr` is not one.
+///
+/// The exception counterpart of [`conditional_producer_writes`], with the same
+/// agreement rule: the protected body and the handler or cleanup are block
+/// literals ([`exception_arm_blocks`]), the construct writes an outer local, the
+/// set its blocks pack (`threaded_today_block_writes` over them) is the whole
+/// set ([`construct_outer_local_writes`]) so no write is dropped, and the
+/// blocks are ones the producer can lower in this kind of method
+/// ([`exception_arms_lower_as_producer`]). Read by the Phase 0 allow-set check;
+/// codegen's producer applies the same rule through `threaded_locals_of`
+/// (`ThreadedLocals::lowered == ThreadedLocals::names`).
+#[must_use]
+pub fn exception_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+    kind: RootMethodKind,
+) -> Option<Vec<OuterLocalWrite>> {
+    let arms = exception_arm_blocks(expr)?;
+    if !exception_arms_lower_as_producer(&arms, kind, bound_outside) {
+        return None;
+    }
+    let construct = local_threading_construct(expr)?;
+    let names = |writes: &[OuterLocalWrite]| {
+        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.into_iter().map(str::to_string).collect::<Vec<_>>()
+    };
+    let all = construct_outer_local_writes(&construct, bound_outside);
+    let today = threaded_today_block_writes(&arms, bound_outside);
+    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
+}
+
+/// ADR 0131 Phase 3 (BT-3738): [`operand_producer_writes`],
+/// [`conditional_producer_writes`] or [`exception_producer_writes`]: the
+/// threaded set of a local-threading producer at a method-root site, whichever
+/// family it is.
 #[must_use]
 pub fn root_producer_writes(
     expr: &Expression,
@@ -1658,6 +1757,7 @@ pub fn root_producer_writes(
 ) -> Option<Vec<OuterLocalWrite>> {
     operand_producer_writes(expr, bound_outside)
         .or_else(|| conditional_producer_writes(expr, bound_outside, kind))
+        .or_else(|| exception_producer_writes(expr, bound_outside, kind))
 }
 
 /// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
@@ -1757,7 +1857,10 @@ pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     let inner = stmt.unwrap_parens();
     // (A conditional statement is a site too, but only in an arm frame:
     // [`is_loop_body_producer_site`] drops it in a loop or fold body.)
-    if producer_body_block(inner).is_some() || conditional_arm_blocks(inner).is_some() {
+    if producer_body_block(inner).is_some()
+        || conditional_arm_blocks(inner).is_some()
+        || exception_arm_blocks(inner).is_some()
+    {
         sites.push(inner);
     }
     sites
@@ -1873,6 +1976,11 @@ pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> b
     // site and in an arm of a conditional that is one (`ctx.arm`). In a loop or
     // fold body it keeps its statement lowering (the loop frame's lowering of a
     // conditional's `LocalRebind`s is a later step).
+    //
+    // ADR 0131 Phase 3b (BT-3817): an `on:do:`/`ensure:` is a producer in a loop
+    // or fold body too (the producer lowers its protected body, handler and
+    // cleanup as `BranchArm` frames of their own and rebinds its locals by the
+    // enclosing frame's mode, ADR 0131 §2).
     if conditional_arm_blocks(site).is_some() && !ctx.arm {
         return false;
     }
@@ -1991,12 +2099,12 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
         // class-variable write `self.f := V`. Its three consumers (the actor
         // `FieldAssignment`/`FieldAssignmentControlFlow` arms and the class
         // method's `class_method_prelude_producer`) sequence `V` through
-        // `threaded_expression` before the write. Not a loop or fold body
-        // statement (`construct_operands`): a body's field write is lowered by
-        // its frame, which does not splice a prelude.
-        Expression::Assignment { target, value, .. }
-            if !construct_operands && is_self_field_target(target) =>
-        {
+        // `threaded_expression` before the write. ADR 0131 Phase 3b (BT-3817):
+        // also a statement of a loop, fold or arm frame body
+        // (`construct_operands`): the frame's field-write lowering
+        // (`lower_field_assignment_bind`, the class-variable write's
+        // `thread_ahead`) splices the value's prelude ahead of the write too.
+        Expression::Assignment { target, value, .. } if is_self_field_target(target) => {
             site(value, &mut out);
         }
         Expression::Return { value, .. } => site(value, &mut out),

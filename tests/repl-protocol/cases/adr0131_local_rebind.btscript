@@ -31,15 +31,14 @@
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the `on:do:` operand leaked its `{Value, StateAcc}` tuple
-// (o1); since BT-3745 it is an ADR 0131 Phase 0 compile error. Correct
-// answer: 2.
+// o1: the `on:do:` operand leaked its `{Value, StateAcc}` tuple until BT-3745
+// (ADR 0131 Phase 0), was a compile error until ADR 0131 Phase 3b (BT-3817),
+// when `on:do:`/`ensure:` became local-threading producers.
 r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1
-// => ERROR: `on:do:` writes outer local `t`, but as the receiver of a message
+// => 2
 
-// PIN-BUG BT-3743: correct answer 1 (the on:do: body's write is kept).
 t
-// => 0
+// => 1
 
 // o4: `collect:` in receiver position raised before BT-3745 and was a compile
 // error until BT-3795 (ADR 0131 Phase 2d): the REPL root threads the loop's
@@ -47,21 +46,19 @@ t
 (#(1, 2) collect: [:x | t := t + x]) size
 // => 2
 
-// The ADR transcript reads 4 here: its `t` is 1 after o1, which is still a
-// compile error above (the `on:do:` family is Phase 3).
+// The ADR transcript's 4: `t` is 1 after o1.
 t
-// => 3
+// => 4
 
 // PIN-BUG BT-3743: the Tier 2 block reaches `tryDo:`'s arity-0 native (ADR
 // 0131 §5). Correct answer: true.
 (Result tryDo: [t := t + 1. 1 / 0]) isError
 // => ERROR: tryDo: expected a zero-arity block, got: Block/1
 
-// PIN-BUG BT-3743: correct answer 4 (the protected region raised, so its
-// write is discarded). Today 3: o1 above is still a compile error, so its
-// write is missing from the 4.
+// The protected region raised, so its write is discarded (ADR 0131 §"REPL and
+// error examples"): `t` stays 4.
 t
-// => 3
+// => 4
 
 // ===========================================================================
 // o-shapes (operand position)
@@ -71,14 +68,13 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the cleanup block could not see `t`; since BT-3745 it is
-// a compile error. Correct answer: 2.
+// The cleanup block could not see `t` until BT-3745, a compile error until
+// ADR 0131 Phase 3b (BT-3817).
 r := ([t := t + 1. 1] ensure: [t := t + 1]) + 1
-// => ERROR: `ensure:` writes outer local `t`, but as the receiver of a message
+// => 2
 
-// PIN-BUG BT-3743: correct answer 2.
 t
-// => 0
+// => 2
 
 // o3: a read+write conditional as a binary operand.
 t := 0
@@ -98,13 +94,14 @@ t := 0
 // => 0
 
 // PIN-BUG BT-3743: the inner tuple leaked, raised, and the outer handler
-// answered 3 (a silent wrong answer); since BT-3745 it is a compile error.
-// Correct answer: 7.
+// answered 3 (a silent wrong answer) until BT-3745; since then a compile
+// error naming the conditional. The REPL's protected body and conditional
+// arm are not producer frames yet (the compiled contexts answer 7 and 1,
+// `o7*` in adr0131local_rebind_test.bt). Correct answer: 7.
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
-// => ERROR: `on:do:` writes outer local `t`
+// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
 
-// PIN-BUG BT-3743: correct answer 1 (before BT-3745 the outer `on:do:`
-// dropped `t` from the bindings).
+// PIN-BUG BT-3743: correct answer 1.
 t
 // => 0
 
@@ -112,10 +109,10 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: a silent wrong answer (3) before BT-3745, a compile
-// error since. Correct answer: 2.
+// PIN-BUG BT-3743: a silent wrong answer (3) before BT-3745, a compile error
+// since (see o7). Correct answer: 2.
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
-// => ERROR: `on:do:` writes outer local `t`
+// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
 
 // PIN-BUG BT-3743: correct answer 1.
 t
@@ -128,15 +125,15 @@ t := 0
 4 =:= 5 ifFalse: [t := t + 1]
 // => 1
 
-// PIN-BUG BT-3743: unlike the compiled contexts (where o11 passes), an
-// `ensure:` whose body writes a REPL binding cannot see it even as a
-// statement. Correct answer: 2.
+// Unlike the compiled contexts (where o11 passed), an `ensure:` whose body
+// writes a REPL binding could not see it even as a statement
+// (`Undefined variable: t`) until ADR 0131 Phase 3b (BT-3817): the construct
+// now continues the bindings map, and answers its body's value.
 [t := t + 1] ensure: [nil]
-// => ERROR: Undefined variable: t
+// => 2
 
-// PIN-BUG BT-3743: correct answer 2.
 t
-// => 1
+// => 2
 
 // ===========================================================================
 // ADR 0131 §1a: a local read before a sibling rebinds it
@@ -145,15 +142,74 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the right operand leaked its tuple; since BT-3745 it is
-// a compile error. Correct answer: 1 (source order reads `t` as 0 before the
-// right operand writes it).
+// The right operand leaked its tuple until BT-3745, a compile error until ADR
+// 0131 Phase 3b (BT-3817). Source order reads `t` as 0 before the right
+// operand writes it: 1.
 r := t + ([t := t + 1. 1] on: Error do: [:e | 0])
-// => ERROR: `on:do:` writes outer local `t`, but as an argument of a message
+// => 1
 
-// PIN-BUG BT-3743: correct answer 1.
 t
+// => 1
+
+// ===========================================================================
+// ADR 0131 Phase 3b (BT-3817): `on:do:`/`ensure:` as local-threading producers
+// ===========================================================================
+//
+// The REPL root threads its bindings map, which the construct continues: its
+// element 2 is the next bindings map (`lower_repl_construct_tuple`). Each of
+// these was a compile error or answered a leaked tuple or `Undefined variable`
+// before this phase.
+
+// An `on:do:` as an assignment's whole value.
+t := 0
 // => 0
+
+r := [t := t + 1. 1] on: Error do: [:e | 0]
+// => 1
+
+t
+// => 1
+
+// A raise in the protected body runs the handler, and the body's write is
+// discarded (ADR 0131 §"REPL and error examples").
+t := 0
+// => 0
+
+r := [t := t + 1. 1 / 0] on: Error do: [:e | t := t + 10. 5]
+// => 5
+
+t
+// => 10
+
+// An `ensure:` whose cleanup reads the protected body's write.
+t := 0
+// => 0
+
+r := [t := t + 1. 7] ensure: [t := t + 10]
+// => 7
+
+t
+// => 11
+
+// An `on:do:` as a statement.
+t := 0
+// => 0
+
+[t := t + 1] on: Error do: [:e | 0]
+// => 1
+
+t
+// => 1
+
+// An `on:do:` as a binary operand.
+t := 0
+// => 0
+
+r := ([t := t + 2. 3] on: Error do: [:e | 0]) * 2
+// => 6
+
+t
+// => 2
 
 // ===========================================================================
 // s-shapes (assign-RHS and statement position)

@@ -1092,9 +1092,7 @@ impl CoreErlangGenerator {
                                 .and_then(ThreadedLocals::into_lowered)
                                 .filter(|_| {
                                     producer.is_none()
-                                        && !self.inline_control_flow_needs_threading(
-                                            value.unwrap_parens(),
-                                        )
+                                        && !self.inline_producer_construct(value.unwrap_parens())
                                 })
                             {
                                 for var in &threaded_vars {
@@ -1779,7 +1777,7 @@ impl CoreErlangGenerator {
                         // `LocalRebind` per threaded local; only the raw tuple
                         // path below re-reads its locals from the new state.
                         let inline_conditional =
-                            self.inline_control_flow_needs_threading(expr.unwrap_parens());
+                            self.inline_producer_construct(expr.unwrap_parens());
                         if inline_conditional {
                             let expr_str = self.expression_doc(expr)?;
                             self.finish_precompiled_scope(scope)?;
@@ -2571,11 +2569,13 @@ impl CoreErlangGenerator {
         // conditional producer (`c ifTrue: [t := t + 1]`, `x ifNil: [...]`,
         // `c and: [...]`) is lowered through the producer too, in a class or
         // value-type method, so its locals come back through `LocalRebind`s.
+        // ADR 0131 Phase 3b (BT-3817): so is an `on:do:`/`ensure:` statement.
         let conditional_statement = assign.is_none()
             && !matches!(expr, Expression::Return { .. })
-            && self
+            && (self
                 .conditional_producer_locals(expr.unwrap_parens())
-                .is_some();
+                .is_some()
+                || self.exception_producer_in_frame(expr));
         if !direct
             && !conditional_statement
             && !self.statement_has_local_producer(expr)
@@ -2741,19 +2741,6 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                // When the RHS is a threading construct (value-type loop /
-                // foldl list-op yielding `{value, StateAcc}`) or a read+write conditional
-                // (each branch emits `{LogicalValue, Mut1..MutN}`), bind the target to the
-                // logical value and rebind the threaded siblings — rather than binding the
-                // target to the raw tuple. Shared with the value-type instance-method
-                // body sequencer via `emit_threaded_assign_rhs`.
-                let mut parts: Vec<Document<'static>> = Vec::new();
-                if self
-                    .emit_threaded_assign_rhs(&id.name, value, &mut parts)?
-                    .is_some()
-                {
-                    return Ok(Document::Vec(parts));
-                }
                 let var_name = &id.name;
                 let core_var = self
                     .lookup_var(var_name)
