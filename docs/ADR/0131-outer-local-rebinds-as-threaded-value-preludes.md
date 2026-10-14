@@ -16,12 +16,13 @@ Accepted (2026-10-08)
 | 1b | [BT-3747](https://linear.app/beamtalk/issue/BT-3747) | IR nodes `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` | M | |
 | 1c | [BT-3748](https://linear.app/beamtalk/issue/BT-3748) | Verifier checks; `ScopeKind::ValueType`; §1a sequencing amendment | M | |
 | 2 | [BT-3749](https://linear.app/beamtalk/issue/BT-3749) | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors, actor-only opaque folds | M | |
-| 3 | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional/`match:` families from context; `on:do:`/`ensure:` as producers | M | |
+| 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | |
+| 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | |
 | 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
 | 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic; flip every pin | S | |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, status → Implemented | S | |
 
-Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3750 → 3751 → 3752.
+Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3817 → 3750 → 3751 → 3752.
 Alternative D is tracked separately as [BT-3742](https://linear.app/beamtalk/issue/BT-3742).
 
 ## Context

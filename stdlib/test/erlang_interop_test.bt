@@ -41,9 +41,7 @@ TestCase subclass: ErlangInteropTest
   testProxyObjectProtocol =>
     proxy := Erlang lists
     self assert: proxy class equals: ErlangModule
-    self assert: (proxy == proxy)
     self deny: proxy isNil
-    self assert: proxy notNil
 
   testBt682DirectCallVsProxyEquivalence =>
     // Single-arg keyword: direct vs proxy

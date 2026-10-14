@@ -53,7 +53,7 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "1 to: 5 by: 2 do: [:i | t := t + i]",
 ];
 
-const POSITIONS: &[&str] = &[
+pub(super) const POSITIONS: &[&str] = &[
     "r := ({c}) size\n#[r, t]",
     "r := t + ({c})\n#[r, t]",
     "r := #[{c}, t]\nr",
@@ -77,7 +77,7 @@ const POSITIONS: &[&str] = &[
     "self.blk valueWithArguments: ({c})\nt",
 ];
 
-fn sources(construct: &str, position: &str) -> [String; 3] {
+pub(super) fn sources(construct: &str, position: &str) -> [String; 3] {
     let mut body = String::new();
     for line in format!(
         "t := 0\nu := 0\ns := 0\n{}",
@@ -101,7 +101,9 @@ fn sources(construct: &str, position: &str) -> [String; 3] {
 /// The core rule's verdict for every sequenced operand site of the method
 /// body that writes an outer local: its span, and the names it threads when
 /// it is a producer.
-fn core_producers(body: &[beamtalk_core::ast::ExpressionStatement]) -> HashMap<Span, Vec<String>> {
+pub(super) fn core_producers(
+    body: &[beamtalk_core::ast::ExpressionStatement],
+) -> HashMap<Span, Vec<String>> {
     let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
     let mut out = HashMap::new();
     for stmt in body {
@@ -123,7 +125,7 @@ fn core_producers(body: &[beamtalk_core::ast::ExpressionStatement]) -> HashMap<S
 /// statements and those of every loop or fold body nested in them. Codegen
 /// lowers a loop or fold there through the same construct tuple (a method-body
 /// assignment's whole value), which the sites rule does not name.
-fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
+pub(super) fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
     let inner = stmt.unwrap_parens();
     out.insert(Expression::span(inner));
     match inner {
@@ -323,7 +325,7 @@ fn every_field_write_value_site_the_core_rule_accepts_is_lowered_by_the_producer
 /// and a fold inside a letrec loop, where the innermost frame alone does not
 /// tell whether an actor fold encloses the site. The last two put an arm and a
 /// closure between the frame and the construct, where no site exists.
-const FRAMES: &[&str] = &[
+pub(super) const FRAMES: &[&str] = &[
     "1 to: 2 do: [:k | {s}]",
     "#(1, 2) do: [:k | {s}]",
     "2 timesRepeat: [{s}]",
@@ -357,7 +359,7 @@ const FRAMES: &[&str] = &[
 
 /// The statements placed in a frame body, the loop-body counterpart of
 /// [`POSITIONS`].
-const BODY_STATEMENTS: &[&str] = &[
+pub(super) const BODY_STATEMENTS: &[&str] = &[
     // The `Discard` tail: a construct as a body statement, bare and
     // parenthesised.
     "{c}",
@@ -380,7 +382,7 @@ const BODY_STATEMENTS: &[&str] = &[
     "self.blk valueWithArguments: ({c})",
 ];
 
-fn body_sources(frame: &str, construct: &str, statement: &str) -> [String; 3] {
+pub(super) fn body_sources(frame: &str, construct: &str, statement: &str) -> [String; 3] {
     let inner = statement.replace("{c}", construct);
     let frame = frame.replace("{s}", &inner);
     let mut body = String::new();
@@ -405,7 +407,7 @@ fn body_sources(frame: &str, construct: &str, statement: &str) -> [String; 3] {
 /// another included. `outer_fold` says whether a frame enclosing `stmt` is a
 /// fold's; `value_bearing` collects the actor fold-frame value sites the
 /// narrowing drops, which Phase 0 must have rejected.
-fn core_body_producers(
+pub(super) fn core_body_producers(
     stmt: &Expression,
     outer_fold: bool,
     in_actor: bool,

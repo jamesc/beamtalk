@@ -10,9 +10,26 @@ TestCase subclass: StringOperationsTest
     self assert: ("hello" at: 1) equals: "h"
     self assert: ("hello" at: 5) equals: "o"
 
+  testFirst =>
+    self assert: "hello" first equals: "h"
+    self assert: "café" first equals: "c"
+
+  testFirstOnEmptyStringRaisesEmptyCollection =>
+    self should: ["" first] raise: #empty_collection
+
+  testLast =>
+    self assert: "hello" last equals: "o"
+    self assert: "café" last equals: "é"
+
+  testLastOnEmptyStringRaisesEmptyCollection =>
+    self should: ["" last] raise: #empty_collection
+
   testCapitalize =>
     self assert: "hello" capitalize equals: "Hello"
     self assert: "HELLO" capitalize equals: "HELLO"
+
+  testCapitalizeOnEmptyStringReturnsEmpty =>
+    self assert: "" capitalize equals: ""
 
   testReverse => self assert: "hello" reverse equals: "olleh"
 

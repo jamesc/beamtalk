@@ -16,8 +16,8 @@
 
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
-    construct_outer_local_writes, local_threading_construct, producer_body_block,
-    repl_operand_sites,
+    conditional_arm_blocks, construct_outer_local_writes, local_threading_construct,
+    producer_body_block, repl_operand_sites,
 };
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
@@ -47,6 +47,20 @@ const INPUTS: &[&str] = &[
     "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\n#[r, t, u]",
     "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]\nr := r + 1\nr",
     "t := 0\nu := 0\nr := (#(1, 2) collect: [:x | t := t + x]) inject: 0 into: [:a :x | u := u + 1. a + x]",
+    // ADR 0131 Phase 3 (BT-3738): conditionals at an operand site, including
+    // the nil-testing family, as an operand, in an assignment and in a
+    // multi-statement input.
+    "((s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]) + 1",
+    "r := t + (s ifNil: [t := t + 1. 2])",
+    "#[s ifNotNil: [:v | t := t + v. 1], t]",
+    "((s < 3) and: [t := t + 1. true]) printString size",
+    "t := 0\nr := ((s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]) + 1\n#[r, t]",
+    "r := ((s < 3) or: [t := t + 1. true]) printString size\nr := r + ((s < 3) ifTrue: [t := t + 1. 2]) size\nr",
+    // A conditional that is the statement or an assignment's whole value keeps
+    // the assembler's lowering, the nil-testing family included.
+    "r := (s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]\nr",
+    "nil ifNil: [t := t + 1]",
+    "r := nil ifNil: [t := t + 1. 1]\nr",
     // No producer: the statement keeps the assembler's lowering.
     "#(1, 2) do: [:x | t := t + x]",
     "r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
@@ -70,7 +84,7 @@ fn expected_producers(expressions: &[Expression]) -> usize {
         .iter()
         .flat_map(repl_operand_sites)
         .filter(|site| {
-            producer_body_block(site).is_some()
+            (producer_body_block(site).is_some() || conditional_arm_blocks(site).is_some())
                 && local_threading_construct(site)
                     .is_some_and(|c| !construct_outer_local_writes(&c, &|_| true).is_empty())
         })

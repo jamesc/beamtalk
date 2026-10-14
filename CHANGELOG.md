@@ -139,6 +139,19 @@
 - Fix `on:do:` nested in a protected region failing `erlc`, `do:` nested in a loop body with local writes crashing at runtime, and `ensure:` cleanup reading a stale local in class methods (BT-3718, #4187)
 - Fix `inject:into:` inside a loop with a conditional body that threads state (e.g. a self-send in one arm) producing invalid Core Erlang — the inlined fold fun now saves and restores the state version, matching `generate_block_fun` (BT-3737, #4196)
 - **`class-state-abroad` lint now covers cascade messages and late-bound self-sends in inherited methods** — cascade messages after the first (`self log; bump`) are now inspected for class-variable reads and writes (BT-3716, #4176), and a method of an open class (sealed or not) that makes a late-bound `self` send to a non-sealed selector is now flagged when a subclass override could write a class variable (BT-3717, #4181, BT-3736, #4193)
+- **Class variables are per class, own-only everywhere (ADR 0013, ADR 0130; BT-3762, BT-3801, BT-3807, BT-3808)** — a class method may touch only the class variables its own class declares with `classState:`. Reading or writing a variable that only an ancestor declares is a compile error, and the runtime's declared-set check is own-only too: a write-first inherited method (`class reset => self.n := 0`) raises `undeclared_class_variable` instead of silently creating the variable in the subclass, and the class-process read of an undeclared name replies with that error instead of `nil` (#4263, #4268, #4271)
+- **Escaping stateful blocks are a compile error (ADR 0131 §6; BT-3756)** — a block literal that writes an outer local and escapes the method without being sent (returned via `^`, implicit last expression, stored in a field or class variable, placed in a collection literal) is now rejected at compile time. Previously these compiled and raised `Cannot call 'value' on Block ... captures mutable state` at runtime, or silently lost the write (#4265)
+- **Narrower actor self-send exemption for stateful blocks (ADR 0131 §6; BT-3755)** — an actor self-send with a state-writing block argument now requires the callee to be a sealed method of the same class that provably threads the block (direct `b value` invocations, bare callable HOM shapes, or forwarding to another such method). Inherited, non-sealed, or otherwise unverifiable callees are a compile error instead of silently dropping writes (#4261)
+- **`do:` as a local-threading producer (ADR 0131 Phase 2c; BT-3796)** — `do:` whose block writes an outer local now answers `nil` and keeps its writes in method-body operand positions, nested loop/fold bodies, and REPL operand sites. These forms no longer report `UnmigratedLocalThreading`. Note: `^xs do: [...]` inside a conditional arm, handler, or closure in class/value-type methods is now temporarily rejected (BT-3813) (#4270)
+- **Nested loop/fold bodies as local-threading producers (ADR 0131 Phase 2b; BT-3793)** — loops and folds nested inside another loop/fold body now thread their writes correctly (e.g. `items do: [:x | result := xs collect: [:y | t := t + y]]`) instead of being rejected (#4256)
+- **`detect:ifNone:` handler writes as a local-threading producer (ADR 0131 Phase 2c; BT-3794)** — a `detect:ifNone:` whose `ifNone:` handler block writes an outer local is now accepted as a local-threading producer instead of being rejected (#4257)
+- **REPL operand and field-write value producer sites (ADR 0131 Phase 2d; BT-3795)** — loops/folds nested in REPL operand positions (e.g. `(xs collect: [:x | t := t + x]) size`) and in method-body `self.f := V` field-write values now thread their writes instead of being rejected (#4260)
+- Fix self-send statement operands in fold bodies not sequenced — `self take: (self bump) with: (self bump)` inside `do:`/`collect:`/`inject:into:` fold bodies now sequences operands correctly instead of failing `erlc` or silently dropping a state rebind (BT-3809, #4272)
+- Fix field assignment in value position (`Transcript show: (self.n := 5)`) failing `erlc` with an unbound variable — parenthesized field assignments as arguments, binary operands, and interpolation segments now work in all value positions (BT-3803, #4269)
+- Fix cascades with state-mutating computed operands (`classMethods: #{#k => (self bump)}; addClassMethod: ...`) failing `erlc` with an unbound `State` variable — state now threads through cascade operands correctly (BT-3791, #4262)
+- Fix `on:do:`/`ensure:` arm self-sends not routed through the shared sequenced dispatch path, and `super take: (self bump)` silently dropping operand state rebinds (BT-3814, #4275)
+- Fix multi-statement REPL assignment with a whole-value fold (`r := coll inject: 0 into: [:a :x | u := u + 1. a + x]`) binding `r` to a raw `{Value, Bindings}` tuple instead of the value (BT-3800, #4264)
+- Fix innermost scope not winning for class-variable home in a `ClassBuilder` `classMethods:` block nested in a class-side extension — now correctly shows the generic error instead of misleadingly naming the ancestor (BT-3804, #4266)
 
 ### Standard Library
 
@@ -334,6 +347,8 @@
 - Class-variable ABI gate hardening: release-shapes ETS table, improved invalid-meta refusal detail, non-atomic `update_class` gate (BT-3726, #4179)
 - Open-class actor self-send performance: `safe_dispatch/4` passes the caller's `Self` directly, eliminating a `make_self/1` rebuild per send (~45% of send cost removed; backward-compatible with old callers via `function_exported` guard) (BT-3692, #4188)
 - Class-side self-send guard uses one derived flag instead of three `persistent_term` reads (BT-3700, #4189)
+- Workspace store meta reads centralized through `read_meta_autoload` — all `__beamtalk_meta` call sites now go through one function (BT-3792, #4259)
+- Use OTP logger for startup failure in `beamtalk_release_launcher` — startup errors now use structured logging instead of raw `io:format` (#4249)
 
 ### Tooling
 
@@ -537,6 +552,8 @@
 
 ### Internal
 
+- One shared lowering for the hybrid field rebind — deduplicates the hybrid-loop field-rebind lowering into a single function with a `VerifyError::BindFrameMismatch` invariant guard (BT-3811, #4274)
+- `VerifyError::StateEffectEscapesExpression` guard for cascade-operand state rebinds (BT-3802, #4267)
 - **ADR 0131 Phase 1b: `ThreadedIr` nodes for outer-local rebinds** — adds `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody` and `BranchArm` IR nodes with `RebindShape::for_frame` implementing ADR 0131 §2's frame-mode × membership table. All constructors carry `#[allow(dead_code)]`; Phase 2 (`local_threading_producer`) will be the first production caller (BT-3747, #4211).
 - Extract `is_process_alive` and `proc_start_time` helpers into `beamtalk-workspace` crate, eliminating duplicated pid-liveness logic between `beamtalk-cli` and `beamtalk-desktop-broker` (#4194).
 - Fix REPL/MCP inline class definitions not passing the class hierarchy to trailing-expression codegen — defining a sealed facade inline and immediately calling it in the same turn now emits a direct call, matching ADR 0129 §2 (BT-3652, #4101).
