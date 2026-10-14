@@ -7,8 +7,6 @@
 // it; the guard raises a structured error instead.
 
 Value subclass: Adr0131LookupBag
-
   field: n = 0
 
-  at: _key ifAbsent: block =>
-    block value
+  at: _key ifAbsent: block => block value

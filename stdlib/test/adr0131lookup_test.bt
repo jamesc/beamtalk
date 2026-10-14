@@ -102,12 +102,16 @@ TestCase subclass: Adr0131LookupTest
   testDictionaryReceiver =>
     self assert: (Adr0131LookupClass lookupIn: #{#a => 1}) equals: #[0, 1]
     self assert: ((Adr0131LookupValue new) lookupIn: #{#a => 1}) equals: #[0, 1]
-    self assert: ((Adr0131LookupActor spawn) lookupIn: #{#a => 1}) equals: #[0, 1]
+    self assert: ((Adr0131LookupActor spawn) lookupIn: #{
+      #a => 1
+    }) equals: #[0, 1]
 
   testDictionaryReceiverFound =>
     self assert: (Adr0131LookupClass lookupIn: #{#k => 4}) equals: #[4, 0]
     self assert: ((Adr0131LookupValue new) lookupIn: #{#k => 4}) equals: #[4, 0]
-    self assert: ((Adr0131LookupActor spawn) lookupIn: #{#k => 4}) equals: #[4, 0]
+    self assert: ((Adr0131LookupActor spawn) lookupIn: #{
+      #k => 4
+    }) equals: #[4, 0]
 
   // A receiver that is a map but not a Dictionary (a value-type instance
   // with its own `at:ifAbsent:`), and any other receiver, cannot run the
@@ -126,9 +130,7 @@ TestCase subclass: Adr0131LookupTest
 
   testListReceiverRaises =>
     self should: [Adr0131LookupClass lookupIn: #(1, 2)] raise: #type_error
-    self should: [
-      (Adr0131LookupValue new) lookupIn: #(1, 2)
-    ] raise: #type_error
+    self should: [(Adr0131LookupValue new) lookupIn: #(1, 2)] raise: #type_error
     self should: [
       (Adr0131LookupActor spawn) lookupIn: #(1, 2)
     ] raise: #type_error
