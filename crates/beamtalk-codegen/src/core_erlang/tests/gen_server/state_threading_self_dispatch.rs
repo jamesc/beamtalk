@@ -651,6 +651,31 @@ fn bt3415_registering_the_same_subexpression_twice_is_never_silent() {
         .expect_err("the scope still holds the never-consulted first entry");
 }
 
+/// BT-3830: the converse of the never-consulted check — a pre-sequenced child read back more
+/// than once is reported (debug builds hard-fail through the shared verifier helper).
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "PrecompiledSubexprReadMoreThanOnce")]
+fn bt3830_a_pre_sequenced_subexpression_read_twice_is_reported() {
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go => self bump\n\n  internal bump => self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let class = module.classes.first().expect("one class");
+    let expr = &class.methods[0]
+        .body
+        .first()
+        .expect("one statement")
+        .expression;
+    let mut generator = CoreErlangGenerator::new("bt3830_double_read");
+    let mut scope = super::super::sequencing::PrecompiledScope::new();
+    generator
+        .register_precompiled_subexpr(&mut scope, expr, Document::Str("'a'"), false)
+        .expect("registration succeeds");
+    assert!(generator.take_precompiled_subexpr(expr).is_some());
+    assert!(generator.take_precompiled_subexpr(expr).is_some());
+    let _ = generator.finish_precompiled_scope(scope);
+}
+
 #[test]
 fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
     // `self record: (self bumpCount)` — the producer sequences its own

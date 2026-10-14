@@ -24,6 +24,15 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
     #(1) do: [:e | e]
     ^(self.n := 5) > 3 ifTrue: [self.m := 7] ifFalse: [0]
 
+  parenthesisedNonLast =>
+    self.n := 5
+    (self.n > 3 ifTrue: [self.m := 1] ifFalse: [0])
+    self.m
+
+  parenthesisedNonLastNotTaken =>
+    (self.n > 3 ifTrue: [self.m := 1] ifFalse: [0])
+    self.m + 10
+
   earlyExitInArm =>
     r := self take: (self.n > 3 ifTrue: [^11] ifFalse: [self.m := 2])
     r + self.m
@@ -127,8 +136,14 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
     xs := #(1, (self.n >= 0 ifTrue: [self.m := 2] ifFalse: [0]), self.m)
     self assert: xs equals: #(1, 2, 2)
 
-  testBareLastStatementIsTheMethodValueAndKeepsTheWrite =>
-    self assert: self bareLast equals: 1
+  testBareLastStatementIsTheMethodValue => self assert: self bareLast equals: 1
+
+  // BT-3830: a parenthesised NON-last conditional statement still threads its arms' write.
+  testParenthesisedNonLastConditionalKeepsTheWrite =>
+    self assert: self parenthesisedNonLast equals: 1
+
+  testParenthesisedNonLastConditionalNotTakenLeavesTheField =>
+    self assert: self parenthesisedNonLastNotTaken equals: 10
 
   testReturnedValueAndWrite => self assert: self returned equals: 1
 

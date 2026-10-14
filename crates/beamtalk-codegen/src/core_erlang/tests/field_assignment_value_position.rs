@@ -346,6 +346,12 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "conditional_field_arms_bare_statement",
         "EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]",
     ),
+    // BT-3830: the same conditional parenthesised. `is_vt_field_conditional_producer`
+    // unwraps the parens; the body classifier must agree, or a non-last one is rejected.
+    (
+        "conditional_field_arms_parenthesised_statement",
+        "(EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0])",
+    ),
     (
         "conditional_field_arms_into_field_rhs",
         "self.m := (EXPR > 3 ifTrue: [self.n := 1] ifFalse: [0])",

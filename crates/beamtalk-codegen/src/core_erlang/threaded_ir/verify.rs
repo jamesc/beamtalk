@@ -275,6 +275,15 @@ pub(in crate::core_erlang) enum VerifyError {
         carrier: String,
         at: Span,
     },
+
+    /// BT-3830: a child an enclosing sequencing pass compiled ahead
+    /// (`precompiled_subexprs`) was read back `reads` (> 1) times by its
+    /// parent's compile. Its prelude ran once; every read after the first
+    /// re-substitutes the value into a second position (or re-threads it), so
+    /// a state-effecting child dispatches twice. A never-read entry is the
+    /// converse and is a hard `CodeGenError::Internal` in
+    /// `finish_precompiled_scope`.
+    PrecompiledSubexprReadMoreThanOnce { at: Span, reads: u32 },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -644,7 +653,19 @@ impl VerifyWalk<'_> {
                 ThreadedStmt::DiscardLocals { carrier, .. }
                     if discard_ok && open.as_ref().is_some_and(|o| o.carrier == carrier) =>
                 {
-                    open = None;
+                    // The discard legitimately drops the threaded *locals*
+                    // (the method ends), never a declared *family*: its merge
+                    // `Bind` still has to have run, or the tail reads a stale
+                    // `Self`/`State` (BT-3830).
+                    if let Some(o) = open.take() {
+                        dropped.extend(o.pending_families.into_iter().map(|family| {
+                            VerifyError::ConstructFamilyDropped {
+                                family,
+                                carrier: o.carrier.to_string(),
+                                at: o.at,
+                            }
+                        }));
+                    }
                 }
                 _ => close(&mut open, &mut dropped),
             }

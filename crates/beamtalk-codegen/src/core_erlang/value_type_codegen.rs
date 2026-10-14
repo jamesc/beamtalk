@@ -1456,6 +1456,7 @@ impl CoreErlangGenerator {
 
     /// [`Self::generate_vt_body_exprs`] once the method body's local-producer
     /// sites are set (ADR 0131 Phase 2).
+    #[allow(clippy::too_many_lines)]
     fn generate_vt_body_exprs_in_sites(
         &mut self,
         body: &[&Expression],
@@ -1465,8 +1466,18 @@ impl CoreErlangGenerator {
         let body_len = body.len();
 
         for (i, expr) in body.iter().enumerate() {
-            let kind = self.classify_vt_body_expr(expr);
             let is_last = i == body_len - 1;
+            // BT-3830: `is_vt_field_conditional_producer` unwraps parens but
+            // `classify_vt_body_expr` does not. A NON-last parenthesised producer is the
+            // bare statement (its value is discarded either way), so classify and emit the
+            // unwrapped node: both then agree on the statement form, rather than the
+            // classifier calling it `Pure` and the emitter rejecting its field write.
+            let expr = if !is_last && self.is_vt_field_conditional_producer(expr) {
+                expr.unwrap_parens()
+            } else {
+                expr
+            };
+            let kind = self.classify_vt_body_expr(expr);
 
             // ADR 0131 Phase 2: a local-threading producer in this statement
             // rebinds its locals at the method root, so the statement is
@@ -3506,8 +3517,7 @@ impl CoreErlangGenerator {
             })
             .collect();
         let enclosing = self.rebind_frame_of(frame)?;
-        #[allow(unused_mut)]
-        let mut built = build_family_local_threading_prelude(
+        let built = build_family_local_threading_prelude(
             &enclosing,
             result_var,
             case_doc,
@@ -3519,7 +3529,9 @@ impl CoreErlangGenerator {
             |_, _| RebindLowering::Let,
         );
         // BT-3821 fault injection: the last local's rebind is omitted
-        // (`ThreadedLocalDropped` on a real compile).
+        // (`ThreadedLocalDropped` on a real compile). Only test builds mutate `built`.
+        #[cfg(test)]
+        let mut built = built;
         #[cfg(test)]
         if super::threaded_expr::fault::active()
             == Some(super::threaded_expr::fault::LocalRebindFault::DropRebind)
