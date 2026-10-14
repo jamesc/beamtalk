@@ -983,3 +983,8 @@ Actor subclass: Adr0131ExcMatrixActor
     t := 0
     r := [t := 7] on: Error do: [:e | 0]
     #[r, t]
+
+  onDoHandlerEndingInAssignAnswersTheValue =>
+    t := 0
+    r := [Error signal: "x"] on: Error do: [:e | t := 9]
+    #[r, t]

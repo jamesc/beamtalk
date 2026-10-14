@@ -1063,3 +1063,12 @@ TestCase subclass: Adr0131ExcMatrixTest
 
   testActorOnDoBlockEndingInAssignAnswersTheValue =>
     self assert: ((Adr0131ExcMatrixActor spawn) onDoBlockEndingInAssignAnswersTheValue) equals: #[7, 7]
+
+  testClassOnDoHandlerEndingInAssignAnswersTheValue =>
+    self assert: Adr0131ExcMatrixClass onDoHandlerEndingInAssignAnswersTheValue equals: #[9, 9]
+
+  testValueOnDoHandlerEndingInAssignAnswersTheValue =>
+    self assert: (Adr0131ExcMatrixValue new) onDoHandlerEndingInAssignAnswersTheValue equals: #[9, 9]
+
+  testActorOnDoHandlerEndingInAssignAnswersTheValue =>
+    self assert: ((Adr0131ExcMatrixActor spawn) onDoHandlerEndingInAssignAnswersTheValue) equals: #[9, 9]

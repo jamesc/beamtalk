@@ -1706,8 +1706,20 @@ impl<'d> Walker<'d> {
         let mut block_spans: Vec<Span> = Vec::new();
         for root in &roots {
             crate::ast_walker::walk_expression(root, &mut |e| {
-                if let Expression::Block(b) = e {
-                    block_spans.push(b.span);
+                match e {
+                    Expression::Block(b) => block_spans.push(b.span),
+                    // A nested `match:` is judged by its own arms (its pattern
+                    // variables may shadow an outer local); only its subject
+                    // belongs to this arm.
+                    Expression::Match { arms, .. } => {
+                        for nested in arms {
+                            block_spans.push(nested.body.span());
+                            if let Some(guard) = &nested.guard {
+                                block_spans.push(guard.span());
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             });
         }

@@ -140,16 +140,14 @@ pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
     let Expression::Assignment { target, .. } = expr else {
         return None;
     };
-    let Expression::FieldAccess {
-        receiver, field, ..
-    } = target.as_ref()
-    else {
+    let Expression::FieldAccess { field, .. } = target.as_ref() else {
         return None;
     };
-    let Expression::Identifier(recv_id) = receiver.as_ref() else {
-        return None;
-    };
-    (recv_id.name == "self").then(|| field.name.as_str())
+    // The `self.<field>` shape is the core rule's (`is_self_field_target`),
+    // which `exception_producer_writes` reads for a field-only value-type
+    // exception.
+    beamtalk_core::semantic_analysis::block_facts::is_self_field_target(target)
+        .then(|| field.name.as_str())
 }
 
 /// BT-3493: `Some` of the field write nested one level inside a local

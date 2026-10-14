@@ -1693,6 +1693,26 @@ fn match_arm_write_nested_in_an_expression_is_an_error() {
 }
 
 #[test]
+fn nested_match_arms_are_judged_once_by_their_own_scope() {
+    // The write is reported once (by the inner arm), not once per enclosing arm.
+    let nested = "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt";
+    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+    // An inner arm's pattern variable shadows the outer local `x`.
+    let shadow = "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx";
+    for src in [in_class(shadow), in_value(shadow), in_actor(shadow)] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+#[test]
 fn match_arm_binding_its_own_local_or_the_match_value_is_accepted() {
     for body in [
         "t := #a match: [#a -> 5; _ -> 0]\nt",
