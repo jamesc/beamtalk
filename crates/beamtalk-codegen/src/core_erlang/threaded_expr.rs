@@ -714,7 +714,8 @@ impl CoreErlangGenerator {
 
     /// ADR 0131 Phase 3 (BT-3738): the threaded locals of the conditional
     /// `expr` (paren-unwrapped: `ifTrue:` … `ifNil:ifNotNil:`, `and:`/`or:`)
-    /// when it is a local-threading producer at the method root, or `None`.
+    /// when it is a local-threading producer at the method root or in an arm
+    /// of another conditional producer, or `None`.
     ///
     /// The codegen half of `beamtalk_core`'s `conditional_producer_writes`,
     /// which the Phase 0 check reads: every arm is a block literal
@@ -722,12 +723,13 @@ impl CoreErlangGenerator {
     /// set its arms pack is the whole set (`ThreadedLocals::lowered ==
     /// names`, so no write is dropped), and the arms are ones the producer can
     /// lower in this kind of method (`conditional_arms_lower_as_producer`: in a
-    /// class or value-type method no nested construct, and in a value-type
-    /// method no field write). Not in the REPL, whose conditionals
-    /// keep their own lowering. The caller decides the frame: this answers for
-    /// a method-root site, a method-body assignment's whole value or a
-    /// method-body statement, never for a conditional nested in a loop body or
-    /// an arm.
+    /// class or value-type method no nested construct that is not itself a
+    /// producer, and in a value-type method no field write). In the REPL it
+    /// answers for an operand site that writes a binding. The site set decides
+    /// the frame: a method-root site, a method-body assignment's whole value or
+    /// statement, or a statement of a conditional producer's arm
+    /// (`with_body_producer_sites` with `arm`); never a conditional nested in a
+    /// loop or fold body.
     pub(super) fn conditional_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
             RootMethodKind, conditional_arm_blocks, conditional_arms_lower_as_producer,
