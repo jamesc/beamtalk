@@ -88,6 +88,13 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_module/1,
     lookup_methods/1,
     lookup_superclass/1,
+    %% BT-3826: reflection facts a class process would otherwise have to be
+    %% asked for with `gen_server:call` (see `put_reflection/2`).
+    put_reflection/2,
+    lookup_instance_methods/1,
+    lookup_instance_variables/1,
+    lookup_method_return_type/2,
+    lookup_class_method_return_type/2,
     flatten_ancestor_map/2,
     class_var_kinds/1,
     inherited_class_var_kinds/1,
@@ -172,7 +179,16 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% the class methods `compute_direct_call_eligible` (Rust) deemed callable
     %% without the class gen_server. Empty for dynamic classes, classes with
     %% class state, and modules compiled before the key existed.
-    direct_class_methods = #{} :: #{selector() => atom()}
+    direct_class_methods = #{} :: #{selector() => atom()},
+    %% BT-3826: the class process's reflection state, mirrored here so another
+    %% class process (or anything else) can read it without a blocking
+    %% `gen_server:call` into the owning class. Written only by
+    %% `put_reflection/2`; `undefined` until the owning class publishes it
+    %% (`init/1` publishes before the class is observable as registered).
+    instance_methods :: [selector()] | undefined,
+    instance_variables :: [atom()] | undefined,
+    method_return_types :: #{selector() => term()} | undefined,
+    class_method_return_types :: #{selector() => term()} | undefined
 }).
 
 %%====================================================================
@@ -402,6 +418,85 @@ lookup_methods(Name) ->
         {ok, #class_metadata{module = Module, selectors = Selectors}} -> {ok, Module, Selectors};
         not_found -> not_found
     end.
+
+-doc """
+Publish a class's reflection state (BT-3826): local instance-method selectors,
+declared instance variables, and the instance/class-side method return-type
+maps.
+
+These are the facts `Foo methods`, `allInstVarNames`, the protocol-conformance
+walk and the REPL return-type chain walk read from *other* classes. Reading
+them with `gen_server:call` from inside a class handler breaks the invariant
+"a class process never makes a blocking call into another class process while
+handling a call" (two busy classes deadlock until the 5s call timeout), so the
+owning class mirrors them here after every change to its own state
+(`beamtalk_object_class:publish_reflection/1`).
+
+Per-field `ets:update_element/3` on an existing row; never touches the identity
+fields or `has_runtime_class_methods`. A missing row (class torn down) or table
+is a no-op, like `put_direct_class_methods/2`.
+""".
+-spec put_reflection(class_name(), #{
+    instance_methods := [selector()],
+    instance_variables := [atom()],
+    method_return_types := map(),
+    class_method_return_types := map()
+}) -> ok.
+put_reflection(Name, #{
+    instance_methods := InstanceMethods,
+    instance_variables := InstanceVariables,
+    method_return_types := MethodReturnTypes,
+    class_method_return_types := ClassMethodReturnTypes
+}) ->
+    try
+        ets:update_element(?TABLE, Name, [
+            {#class_metadata.instance_methods, InstanceMethods},
+            {#class_metadata.instance_variables, InstanceVariables},
+            {#class_metadata.method_return_types, MethodReturnTypes},
+            {#class_metadata.class_method_return_types, ClassMethodReturnTypes}
+        ]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc "Look up a class's local (non-inherited) instance-method selectors; see `put_reflection/2`.".
+-spec lookup_instance_methods(class_name()) -> {ok, [selector()]} | not_found.
+lookup_instance_methods(Name) ->
+    case field(Name, #class_metadata.instance_methods) of
+        undefined -> not_found;
+        Selectors -> {ok, Selectors}
+    end.
+
+-doc "Look up a class's own declared instance variables (not inherited); see `put_reflection/2`.".
+-spec lookup_instance_variables(class_name()) -> {ok, [atom()]} | not_found.
+lookup_instance_variables(Name) ->
+    case field(Name, #class_metadata.instance_variables) of
+        undefined -> not_found;
+        Fields -> {ok, Fields}
+    end.
+
+-doc """
+Look up the instance-side return type `Name` itself declares for `Selector`
+(no chain walk). `not_found` when the class declares none or has not published.
+""".
+-spec lookup_method_return_type(class_name(), selector()) -> {ok, term()} | not_found.
+lookup_method_return_type(Name, Selector) ->
+    return_type_from(field(Name, #class_metadata.method_return_types), Selector).
+
+-doc "Class-side counterpart of `lookup_method_return_type/2`.".
+-spec lookup_class_method_return_type(class_name(), selector()) -> {ok, term()} | not_found.
+lookup_class_method_return_type(Name, Selector) ->
+    return_type_from(field(Name, #class_metadata.class_method_return_types), Selector).
+
+-spec return_type_from(map() | undefined, selector()) -> {ok, term()} | not_found.
+return_type_from(Types, Selector) when is_map(Types) ->
+    case Types of
+        #{Selector := Type} -> {ok, Type};
+        _ -> not_found
+    end;
+return_type_from(_, _Selector) ->
+    not_found.
 
 -doc """
 Look up a class's superclass.

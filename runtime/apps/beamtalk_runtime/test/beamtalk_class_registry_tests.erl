@@ -1530,3 +1530,179 @@ bt1982_drain_warnings_qualified_no_table_test() ->
 %% cache, so no broadcast is needed when class methods change.
 %%
 %% Test removed: invalidate_subclass_flattened_tables_test
+%%% ============================================================================
+%%% BT-3826: no class-to-class blocking calls inside class handlers
+%%% ============================================================================
+
+%% BT-3826 regression harness. Starts two dynamic classes whose class-side probe
+%% runs `Site(OtherName)` inside the class handler, holding both handlers at a
+%% barrier until both are inside so each is busy serving a call when it reads the
+%% other's state. If `Site` blocks on a `gen_server:call` into the other class,
+%% each handler waits on the other's (busy) mailbox until the 5s call timeout --
+%% the shape of BT-3820's `class_name` deadlock. Returns `[{Name, Outcome}]`
+%% (`{ok, Result}` | `{raised, Class, Reason}`) after asserting both finished far
+%% below the 5s timeout.
+%%
+%% `Extra` is merged into both classes' ClassInfo.
+bt3826_two_busy_classes(Tag, Extra, Site) ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Coord = self(),
+    NameA = list_to_atom("BT3826" ++ Tag ++ "A"),
+    NameB = list_to_atom("BT3826" ++ Tag ++ "B"),
+    Info = fun(Other) ->
+        Probe = fun(_ClassSelf) ->
+            Coord ! {in_handler, self()},
+            receive
+                {go, Me} when Me =:= self() -> ok
+            after 10000 -> exit(barrier_timeout)
+            end,
+            Site(Other)
+        end,
+        maps:merge(
+            #{
+                superclass => none,
+                module => bt3826_no_module,
+                class_methods => #{bt3826Probe => #{block => Probe, arity => 1}}
+            },
+            Extra
+        )
+    end,
+    {ok, PidA} = beamtalk_object_class:start_link(NameA, Info(NameB)),
+    {ok, PidB} = beamtalk_object_class:start_link(NameB, Info(NameA)),
+    try
+        Named = [{NameA, PidA}, {NameB, PidB}],
+        _Callers = [
+            spawn_link(fun() ->
+                Outcome =
+                    try
+                        {ok, beamtalk_class_dispatch:class_send(P, bt3826Probe, [])}
+                    catch
+                        Class:Reason -> {raised, Class, Reason}
+                    end,
+                Coord ! {result, N, Outcome}
+            end)
+         || {N, P} <- Named
+        ],
+        InHandler = [
+            receive
+                {in_handler, H} -> H
+            after 10000 -> error(handler_not_entered)
+            end
+         || _ <- Named
+        ],
+        [H ! {go, H} || H <- InHandler],
+        Start = erlang:monotonic_time(millisecond),
+        Results = [
+            receive
+                {result, N, R} -> {N, R}
+            after 15000 -> error({no_result, N})
+            end
+         || {N, _} <- Named
+        ],
+        Elapsed = erlang:monotonic_time(millisecond) - Start,
+        %% Far below the 5s gen_server:call timeout a deadlock would burn.
+        ?assert(Elapsed < 4000),
+        Results
+    after
+        [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
+    end.
+
+%% Reflection intrinsics (`Foo methods`, `fieldNames`, `allInstVarNames`,
+%% `canUnderstand:`, `Foo class selectors`) read a *different* class's state from
+%% inside a class handler.
+bt3826_reflection_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{
+            instance_methods => #{bt3826Foo => #{block => fun() -> ok end, arity => 0}},
+            fields => [bt3826X, bt3826Y]
+        },
+        Site = fun(Other) ->
+            Obj = beamtalk_class_registry:resolve_class_object(Other),
+            Meta = Obj#beamtalk_object{class = 'Metaclass'},
+            #{
+                methods => beamtalk_behaviour_intrinsics:classLocalMethods(Obj),
+                fields => beamtalk_behaviour_intrinsics:classFieldNames(Obj),
+                all_fields => beamtalk_behaviour_intrinsics:classAllFieldNamesByName(Other),
+                field_kinds => beamtalk_behaviour_intrinsics:classFieldKinds(Obj),
+                includes => beamtalk_behaviour_intrinsics:classIncludesSelector(Obj, bt3826Foo),
+                understands => beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
+                    Other, bt3826Foo
+                ),
+                class_side => beamtalk_behaviour_intrinsics:metaclassLocalClassMethods(Meta),
+                class_side_all => beamtalk_behaviour_intrinsics:metaclassClassMethods(Meta),
+                class_side_has => beamtalk_behaviour_intrinsics:metaclassIncludesSelector(
+                    Meta, bt3826Probe
+                )
+            }
+        end,
+        Results = bt3826_two_busy_classes("Reflect", Extra, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) ->
+                ?assertMatch({ok, #{}}, Outcome),
+                {ok, R} = Outcome,
+                ?assertEqual([bt3826Foo], maps:get(methods, R)),
+                ?assertEqual([bt3826X, bt3826Y], maps:get(fields, R)),
+                ?assertEqual([bt3826X, bt3826Y], maps:get(all_fields, R)),
+                ?assertEqual(#{bt3826X => eager, bt3826Y => eager}, maps:get(field_kinds, R)),
+                ?assert(maps:get(includes, R)),
+                ?assert(maps:get(understands, R)),
+                ?assertEqual([bt3826Probe], maps:get(class_side, R)),
+                ?assertEqual([bt3826Probe], maps:get(class_side_all, R)),
+                ?assert(maps:get(class_side_has, R))
+            end,
+            Results
+        )
+    end}.
+
+%% The published reflection facts follow the class through hot-patching, so the
+%% ETS-backed readers never disagree with the class process's own state.
+bt3826_reflection_follows_class_mutation_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Name = 'BT3826MutationClass',
+    Info = #{
+        superclass => none,
+        module => bt3826_no_module,
+        instance_methods => #{bt3826Foo => #{block => fun() -> ok end, arity => 0}},
+        fields => [bt3826X],
+        method_return_types => #{bt3826Foo => 'Integer'}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(Name, Info),
+    try
+        ?assertEqual([bt3826Foo], beamtalk_object_class:instance_methods_safe(Pid)),
+        ?assertEqual([bt3826X], beamtalk_object_class:instance_variables_safe(Pid)),
+        ?assertEqual(
+            {ok, 'Integer'}, beamtalk_class_registry:get_method_return_type(Name, bt3826Foo)
+        ),
+        %% put_method adds a selector and clears that selector's return type.
+        ok = beamtalk_object_class:put_method(Pid, bt3826Foo, fun(_Self) -> ok end),
+        ok = beamtalk_object_class:put_method(Pid, bt3826Bar, fun(_Self) -> ok end),
+        ?assertEqual(
+            lists:sort([bt3826Foo, bt3826Bar]),
+            lists:sort(beamtalk_object_class:instance_methods_safe(Pid))
+        ),
+        ?assertEqual(
+            lists:sort(gen_server:call(Pid, methods)),
+            lists:sort(beamtalk_object_class:instance_methods_safe(Pid))
+        ),
+        ?assertEqual(
+            {error, not_found}, beamtalk_class_registry:get_method_return_type(Name, bt3826Foo)
+        ),
+        %% put_class_method refreshes the class-side selectors.
+        ok = beamtalk_object_class:put_class_method(Pid, bt3826Make, fun(_ClassSelf) -> ok end),
+        ?assertEqual([bt3826Make], beamtalk_object_class:local_class_method_selectors_safe(Pid)),
+        %% update_class (hot reload) replaces fields and methods.
+        {ok, _} = beamtalk_object_class:update_class(Name, #{
+            instance_methods => #{bt3826Baz => #{block => fun() -> ok end, arity => 0}},
+            fields => [bt3826Z],
+            method_return_types => #{bt3826Baz => 'String'}
+        }),
+        ?assertEqual([bt3826Baz], beamtalk_object_class:instance_methods_safe(Pid)),
+        ?assertEqual([bt3826Z], beamtalk_object_class:instance_variables_safe(Pid)),
+        ?assertEqual(
+            {ok, 'String'}, beamtalk_class_registry:get_method_return_type(Name, bt3826Baz)
+        ),
+        ?assert(beamtalk_object_class:has_method(Pid, bt3826Baz)),
+        ?assertNot(beamtalk_object_class:has_method(Pid, bt3826Foo))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.

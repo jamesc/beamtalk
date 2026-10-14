@@ -55,6 +55,9 @@ and join the `beamtalk_classes` pg group for enumeration.
     take_timeout_diagnostics/0,
     timeout_diagnostics_key/0,
     superclass_safe/1,
+    instance_methods_safe/1,
+    instance_variables_safe/1,
+    local_class_method_selectors_safe/1,
     class_send/3,
     local_call/3,
     set_class_var/3,
@@ -634,6 +637,83 @@ superclass_safe(ClassPid) ->
     end.
 
 -doc """
+Local (non-inherited) instance-method selectors, preferring a message-free read.
+
+`methods/1`'s `gen_server:call(ClassPid, methods)` queues behind whatever
+`ClassPid` is running, so calling it from inside another class's handler
+(`Foo methods`, `allInstVarNames`, the protocol-conformance walk, ...) deadlocks
+two busy classes against each other until the 5s call timeout (BT-3826; the
+invariant is "a class process never makes a blocking call into another class
+process while handling a call"). This reads the selectors the owning class
+published with `publish_reflection/1`.
+
+Falls back to `methods/1` only when there is no row to read -- a remote pid
+(the node-local ETS cannot name it; the cross-node call path is unchanged), or
+a class that has not published yet.
+""".
+-spec instance_methods_safe(pid()) -> [selector()].
+instance_methods_safe(ClassPid) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
+                {ok, Selectors} -> Selectors;
+                not_found -> methods(ClassPid)
+            end;
+        not_found ->
+            methods(ClassPid)
+    end.
+
+-doc """
+Own declared instance variables (not inherited), preferring a message-free read.
+
+Same contract and fallback as `instance_methods_safe/1`, for
+`gen_server:call(ClassPid, instance_variables)`.
+""".
+-spec instance_variables_safe(pid()) -> [atom()].
+instance_variables_safe(ClassPid) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_instance_variables(ClassName) of
+                {ok, Fields} -> Fields;
+                not_found -> instance_variables(ClassPid)
+            end;
+        not_found ->
+            instance_variables(ClassPid)
+    end.
+
+-doc """
+Local (non-inherited) class-side method selectors, preferring a message-free read.
+
+The selectors are the `selectors` field of the unified metadata row that
+`sync_identity/6` keeps current (and `put_class_method` refreshes), the same
+source `beamtalk_class_dispatch` reads -- so unlike `local_class_methods/1` this
+never queues behind the owning class. Falls back to `local_class_methods/1`
+under the same conditions as `instance_methods_safe/1`.
+""".
+-spec local_class_method_selectors_safe(pid()) -> [selector()].
+local_class_method_selectors_safe(ClassPid) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_methods(ClassName) of
+                {ok, _Module, Selectors} -> Selectors;
+                not_found -> local_class_methods(ClassPid)
+            end;
+        not_found ->
+            local_class_methods(ClassPid)
+    end.
+
+%% The class name for a pid, from the node-local reverse index (no message).
+%% `self()` reads the process dictionary, like `class_name_safe/1`.
+-spec reflection_class_name(pid()) -> {ok, class_name()} | not_found.
+reflection_class_name(ClassPid) when ClassPid =:= self() ->
+    case get(beamtalk_class_name) of
+        undefined -> not_found;
+        Name -> {ok, Name}
+    end;
+reflection_class_name(ClassPid) ->
+    beamtalk_class_registry:class_name_for_pid(ClassPid).
+
+-doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
 
 Delegates to beamtalk_class_dispatch.
@@ -774,8 +854,8 @@ has_method_local(ClassPid, Selector) ->
 -spec probe_local_method(pid(), selector(), boolean(), fun((atom()) -> atom())) ->
     boolean().
 probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
-    case gen_server:call(ClassPid, {method, Selector}) of
-        nil ->
+    case local_method_defined(ClassPid, Selector) of
+        false ->
             case module_name(ClassPid) of
                 undefined ->
                     false;
@@ -804,9 +884,31 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                             false
                     end
             end;
-        _MethodInfo ->
+        true ->
             true
     end.
+
+%% Does the class's own instance-method table (compiled or hot-patched) hold
+%% `Selector`? Answered from the published selector list (BT-3826): the old
+%% `gen_server:call(ClassPid, {method, Selector})` made every dispatch-chain
+%% probe a blocking call into the probed class, which a class handler running
+%% `Foo canUnderstand:` / protocol conformance must not do. The call remains
+%% only for a pid with no published row (remote pid, unpublished class).
+-spec local_method_defined(pid(), selector()) -> boolean().
+local_method_defined(ClassPid, Selector) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
+                {ok, Selectors} -> lists:member(Selector, Selectors);
+                not_found -> local_method_defined_by_call(ClassPid, Selector)
+            end;
+        not_found ->
+            local_method_defined_by_call(ClassPid, Selector)
+    end.
+
+-spec local_method_defined_by_call(pid(), selector()) -> boolean().
+local_method_defined_by_call(ClassPid, Selector) ->
+    gen_server:call(ClassPid, {method, Selector}) =/= nil.
 
 -doc "Replace a method with a new function (hot patching).".
 -spec put_method(pid(), selector(), fun()) -> ok.
@@ -1053,6 +1155,7 @@ init({ClassName, ClassInfo}) ->
     %% class-method-call reader never observes a gap between the class
     %% process existing and its snapshot existing.
     beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
+    ok = publish_reflection(State),
 
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
@@ -1341,6 +1444,7 @@ handle_call(
                 NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
             ),
             seed_runtime_class_methods(NewName, ClassMethods),
+            ok = publish_reflection(State#class_state{name = NewName}),
             beamtalk_class_metadata:put_direct_class_methods(
                 NewName, beamtalk_class_metadata:lookup_direct_class_methods(OldName)
             ),
@@ -1489,6 +1593,7 @@ handle_call(
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
+    ok = publish_reflection(NewState),
     notify_hot_patch(NewState),
     %% A hot-patched instance method changes what ClassName (and
     %% every subclass inheriting through it) understands, invalidating any
@@ -1527,6 +1632,7 @@ handle_call(
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
     put_method_xref(ClassName, true, Selector, Source),
+    ok = publish_reflection(NewState),
     notify_hot_patch(NewState),
     %% A hot-patched class-side method changes conforms_to/2's
     %% class-method check (class_has_class_method/2) for ClassName and every
@@ -1543,6 +1649,7 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             {reply, {error, Error}, State};
         ok ->
             NewState = apply_class_info(State, ClassInfo),
+            ok = publish_reflection(NewState),
             %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
             %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
             NewModule = NewState#class_state.module,
@@ -2286,6 +2393,32 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
         MetaMethodInfo
     ),
     {MetaMethodInfo, ReturnTypes}.
+
+-doc """
+Mirror this class's reflection state into its metadata row (BT-3826).
+
+Publishes the local instance-method selectors, declared instance variables and
+both return-type maps, so `instance_methods_safe/1`, `instance_variables_safe/1`,
+`has_method/2` and `beamtalk_class_registry:get_method_return_type/2` can answer
+for this class without a `gen_server:call` -- which, issued from inside another
+class's handler, deadlocks two busy classes against each other. Called after
+every state change to those four fields: `init/1`, `put_method`,
+`put_class_method`, `update_class` and `rename_class`.
+""".
+-spec publish_reflection(#class_state{}) -> ok.
+publish_reflection(#class_state{
+    name = ClassName,
+    instance_methods = InstanceMethods,
+    fields = Fields,
+    method_return_types = MethodReturnTypes,
+    class_method_return_types = ClassMethodReturnTypes
+}) ->
+    beamtalk_class_metadata:put_reflection(ClassName, #{
+        instance_methods => maps:keys(InstanceMethods),
+        instance_variables => Fields,
+        method_return_types => MethodReturnTypes,
+        class_method_return_types => ClassMethodReturnTypes
+    }).
 
 -doc """
 Write a class's identity facts — module, superclass, is_abstract, and local
