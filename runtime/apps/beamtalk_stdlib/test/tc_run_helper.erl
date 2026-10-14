@@ -12,6 +12,28 @@
 new() ->
     #{'$beamtalk_class' => 'FakeTest'}.
 
+%% TODO(BT-3820): record a class-call timeout dump in the test process (as
+%% beamtalk_object_class:module_name/1 does on a timeout), then fail.
+dispatch(testDumpExit, [], _Instance) ->
+    record_dump(),
+    exit(exit_reason);
+dispatch(testDumpError, [], _Instance) ->
+    record_dump(),
+    error(raw_error_reason);
+dispatch(testDumpThrow, [], _Instance) ->
+    record_dump(),
+    throw(thrown_reason);
+dispatch(testDumpBeamtalkError, [], _Instance) ->
+    record_dump(),
+    error(#beamtalk_error{kind = type_error, class = 'TestCase', message = <<"generic error">>});
+dispatch(testDumpAssertFail, [], _Instance) ->
+    record_dump(),
+    error(#beamtalk_error{
+        kind = assertion_failed, class = 'TestCase', message = <<"assert failed">>
+    });
+dispatch(testDumpUndef, [], _Instance) ->
+    record_dump(),
+    nonexistent_module_xyz_bt2391:'nope'();
 dispatch(testPass, [], _Instance) ->
     nil;
 dispatch(testError, [], _Instance) ->
@@ -82,3 +104,7 @@ dispatch(setUp, [], Instance) ->
     Instance;
 dispatch(tearDown, [], _Instance) ->
     nil.
+
+record_dump() ->
+    put(beamtalk_object_class:timeout_diagnostics_key(), <<"[DUMP-FROM-TEST]">>),
+    ok.

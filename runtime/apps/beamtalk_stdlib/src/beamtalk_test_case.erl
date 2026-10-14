@@ -607,27 +607,17 @@ select_frames([First, Second | _] = Frames) ->
 -doc "Format a test failure message combining error description and stacktrace.".
 -spec format_test_error(atom(), term(), list()) -> binary().
 format_test_error(error, Reason, Stacktrace) ->
-    %% TODO(BT-3820): drop any class-call timeout dump; only the exit clause attaches it.
-    _ = beamtalk_object_class:take_timeout_diagnostics(),
     Msg = decode_beam_error(Reason),
     ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
+    attach_timeout_diagnostics(<<Msg/binary, ST/binary>>);
 format_test_error(throw, Reason, Stacktrace) ->
-    _ = beamtalk_object_class:take_timeout_diagnostics(),
     Msg = iolist_to_binary([<<"throw: ">>, decode_beam_error(Reason)]),
     ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
+    attach_timeout_diagnostics(<<Msg/binary, ST/binary>>);
 format_test_error(exit, Reason, Stacktrace) ->
     Msg = iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]),
     ST = format_stacktrace(Stacktrace),
-    %% TODO(BT-3820): temporary -- the BUnit job log shows only the failure
-    %% message, so surface the class-call timeout dump here.
-    Diag =
-        case beamtalk_object_class:take_timeout_diagnostics() of
-            Bin when is_binary(Bin) -> Bin;
-            undefined -> <<>>
-        end,
-    <<Msg/binary, ST/binary, Diag/binary>>;
+    attach_timeout_diagnostics(<<Msg/binary, ST/binary>>);
 %% Erlang only supports error/throw/exit as exception classes, so this
 %% clause is never reached in practice — retained for exhaustiveness.
 format_test_error(Class, Reason, Stacktrace) ->
@@ -635,7 +625,21 @@ format_test_error(Class, Reason, Stacktrace) ->
     ReasonBin = decode_beam_error(Reason),
     Msg = <<ClassBin/binary, ": ", ReasonBin/binary>>,
     ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>.
+    attach_timeout_diagnostics(<<Msg/binary, ST/binary>>).
+
+-doc """
+TODO(BT-3820): append the class-call timeout dump recorded in this process by
+`beamtalk_object_class:module_name/1`, if any (taken once). The BUnit job log
+shows only the failure message, so a timeout that is wrapped before it reaches
+the runner (`ensure_wrapped`, `on:do:`, bare `#beamtalk_error{}` clauses) must
+still carry it.
+""".
+-spec attach_timeout_diagnostics(binary()) -> binary().
+attach_timeout_diagnostics(FailMsg) ->
+    case beamtalk_object_class:take_timeout_diagnostics() of
+        Diag when is_binary(Diag) -> <<FailMsg/binary, Diag/binary>>;
+        undefined -> FailMsg
+    end.
 
 -doc """
 Ensure the test method location appears in the failure message.
@@ -834,17 +838,18 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 %% an unwrapped record directly.
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg}:TestST0 ->
                     ST0 = format_stacktrace(TestST0),
-                    FailMsg0 = <<AssertMsg/binary, ST0/binary>>,
+                    FailMsg0 = attach_timeout_diagnostics(<<AssertMsg/binary, ST0/binary>>),
                     {fail, MethodName, ensure_test_context(FailMsg0, Module, MethodName, TestST0)};
                 error:#beamtalk_error{message = ErrMsg}:TestST1 ->
                     ST1 = format_stacktrace(TestST1),
-                    FailMsg1 = <<ErrMsg/binary, ST1/binary>>,
+                    FailMsg1 = attach_timeout_diagnostics(<<ErrMsg/binary, ST1/binary>>),
                     {fail, MethodName, ensure_test_context(FailMsg1, Module, MethodName, TestST1)};
                 error:undef:TestST ->
-                    #{error := #beamtalk_error{message = FailMsg}} =
+                    #{error := #beamtalk_error{message = FailMsg0}} =
                         beamtalk_exception_handler:ensure_wrapped(
                             error, undef, TestST
                         ),
+                    FailMsg = attach_timeout_diagnostics(FailMsg0),
                     {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
                 error:TestReason:TestST ->
                     FailMsg = format_test_error(error, TestReason, TestST),

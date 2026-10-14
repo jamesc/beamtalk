@@ -469,30 +469,31 @@ take_timeout_diagnostics() ->
 
 -spec record_timeout_diagnostics(pid(), term(), list()) -> ok.
 record_timeout_diagnostics(ClassPid, Request, Stack) ->
-    try
-        Diagnostics = #{
-            request => Request,
-            class_pid => ClassPid,
-            caller => self(),
-            caller_stacktrace => lists:sublist(Stack, 8),
-            blocked_chain => timeout_blocked_chain(ClassPid, 3)
-        },
-        Text0 = unicode:characters_to_binary(
-            io_lib:format("~n  [BT-3820 class call timeout] ~P", [Diagnostics, 40])
-        ),
-        %% Bounded to 6000 characters (graphemes, not bytes) on a valid UTF-8 boundary.
-        Text = unicode:characters_to_binary(string:slice(Text0, 0, 6000)),
-        %% Log the bounded text, never the raw map (mailbox messages, stack args).
-        ?LOG_ERROR(#{
-            msg => "class process call timed out",
-            diagnostics => Text,
-            domain => [beamtalk, runtime]
-        }),
-        put(timeout_diagnostics_key(), Text),
-        ok
-    catch
-        _:_ -> ok
-    end.
+    Text =
+        try
+            Diagnostics = #{
+                request => Request,
+                class_pid => ClassPid,
+                caller => self(),
+                caller_stacktrace => lists:sublist(Stack, 8),
+                blocked_chain => timeout_blocked_chain(ClassPid, 3)
+            },
+            Text0 = unicode:characters_to_binary(
+                io_lib:format("~n  [BT-3820 class call timeout] ~P", [Diagnostics, 40])
+            ),
+            %% Bounded to 6000 characters (graphemes, not bytes) on a valid UTF-8 boundary.
+            unicode:characters_to_binary(string:slice(Text0, 0, 6000))
+        catch
+            _:_ -> <<"[BT-3820] diagnostics unformattable">>
+        end,
+    %% Log the bounded text, never the raw map (mailbox messages, stack args).
+    ?LOG_ERROR(#{
+        msg => "class process call timed out",
+        diagnostics => Text,
+        domain => [beamtalk, runtime]
+    }),
+    put(timeout_diagnostics_key(), Text),
+    ok.
 
 -spec timeout_blocked_chain(term(), non_neg_integer()) -> [term()].
 timeout_blocked_chain(_Pid, 0) ->
@@ -515,7 +516,9 @@ timeout_blocked_chain(Pid, Depth) when is_pid(Pid), node(Pid) =:= node() ->
         Info ->
             QueueLen = proplists:get_value(message_queue_len, Info, 0),
             Head = mailbox_head(Pid, QueueLen),
-            Targets = [T || {process, T} <- proplists:get_value(monitors, Info, []), is_pid(T)],
+            Targets = lists:sublist(
+                [T || {process, T} <- proplists:get_value(monitors, Info, []), is_pid(T)], 5
+            ),
             [
                 {Pid, [{mailbox_head, Head} | proplists:delete(monitors, Info)]}
                 | lists:append([timeout_blocked_chain(T, Depth - 1) || T <- Targets])
