@@ -53,6 +53,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     module_name/1,
     module_name_safe/1,
     take_timeout_diagnostics/0,
+    timeout_diagnostics_key/0,
     superclass_safe/1,
     class_send/3,
     local_call/3,
@@ -484,7 +485,10 @@ record_timeout_diagnostics(ClassPid, Request, Stack) ->
         Text = unicode:characters_to_binary(
             io_lib:format("~n  [BT-3820 class call timeout] ~P", [Diagnostics, 40])
         ),
-        put(timeout_diagnostics_key(), binary:part(Text, 0, min(byte_size(Text), 6000))),
+        put(
+            timeout_diagnostics_key(),
+            unicode:characters_to_binary(string:slice(Text, 0, 6000))
+        ),
         ok
     catch
         _:_ -> ok

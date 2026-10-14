@@ -607,10 +607,13 @@ select_frames([First, Second | _] = Frames) ->
 -doc "Format a test failure message combining error description and stacktrace.".
 -spec format_test_error(atom(), term(), list()) -> binary().
 format_test_error(error, Reason, Stacktrace) ->
+    %% TODO(BT-3820): drop any class-call timeout dump; only the exit clause attaches it.
+    _ = beamtalk_object_class:take_timeout_diagnostics(),
     Msg = decode_beam_error(Reason),
     ST = format_stacktrace(Stacktrace),
     <<Msg/binary, ST/binary>>;
 format_test_error(throw, Reason, Stacktrace) ->
+    _ = beamtalk_object_class:take_timeout_diagnostics(),
     Msg = iolist_to_binary([<<"throw: ">>, decode_beam_error(Reason)]),
     ST = format_stacktrace(Stacktrace),
     <<Msg/binary, ST/binary>>;
@@ -786,6 +789,9 @@ instance map after setUp, so test methods can access `self.suiteFixture`.
 -spec run_test_method(atom(), atom(), atom(), map(), term()) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
+    %% TODO(BT-3820): a class-call timeout dump left in this process by an
+    %% earlier test must not be attached to this test's failure.
+    _ = beamtalk_object_class:take_timeout_diagnostics(),
     %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
     %% worker, no home entry
     try
