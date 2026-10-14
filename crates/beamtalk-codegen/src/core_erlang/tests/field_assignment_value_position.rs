@@ -318,10 +318,31 @@ const VT_POSITIONS: &[(&str, &str)] = &[
         "conditional_wrapping_arg",
         "self take: (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
+    // The conditional's arms write fields too: threaded or cleanly rejected, never lost.
+    (
+        "conditional_wrapping_arg_with_field_arms",
+        "self take: (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0])",
+    ),
+    (
+        "conditional_wrapping_assigned_with_field_arms",
+        "c := (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]). c",
+    ),
+    (
+        "assigned_loop_receiver",
+        "c := EXPR timesRepeat: [self.m := self.m + 1]. c",
+    ),
     (
         "conditional_wrapping_field_rhs",
         "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
+];
+
+/// Positions whose own construct writes fields in a conditional arm or loop body, which the
+/// value-type lowering rejects with a structured diagnostic instead of threading (BT-3821).
+const VT_REJECTABLE_POSITIONS: &[&str] = &[
+    "conditional_wrapping_arg_with_field_arms",
+    "conditional_wrapping_assigned_with_field_arms",
+    "assigned_loop_receiver",
 ];
 
 /// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
@@ -428,13 +449,14 @@ fn value_type_field_assignment_value_position_corpus() {
     // Statement-level shapes cannot be rejected: every unpinned case of one must compile.
     let mut must_compile = 0usize;
     let mut must_compile_compiled = 0usize;
-    for (shape_name, shape, may_reject) in VT_SHAPES {
+    for (shape_name, shape, shape_may_reject) in VT_SHAPES {
         for (i, (position_name, position)) in VT_POSITIONS.iter().enumerate() {
             let stmt = position.replace("EXPR", "(self.n := 5)");
             let src = format!(
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
+            let may_reject = *shape_may_reject || VT_REJECTABLE_POSITIONS.contains(position_name);
             let name = format!("{shape_name} / {position_name}");
             let pinned = VT_PINNED_FAILURES.contains(&name.as_str());
             if !may_reject && !pinned {

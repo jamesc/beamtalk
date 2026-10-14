@@ -935,9 +935,9 @@ impl CoreErlangGenerator {
                 Some(children) => children,
                 // A conditional send is opaque to the sequencing rule; its
                 // receiver is its only operand (the arms are blocks).
-                None => match construct {
-                    Expression::MessageSend { receiver, .. } => vec![receiver.as_ref()],
-                    _ => return Ok(None),
+                None => match Self::conditional_send_receiver(construct) {
+                    Some(receiver) => vec![receiver],
+                    None => return Ok(None),
                 },
             },
         };

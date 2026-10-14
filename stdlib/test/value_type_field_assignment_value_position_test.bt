@@ -103,6 +103,7 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
 
   testBlockValueEarlyReturnExitsTheMethod =>
     self assert: self blockEarlyExit equals: 3
+    self assert: self.n equals: 0
 
   testReturnedConditionalWithFieldWriteReceiver =>
     self assert: self conditionalReturn equals: 1

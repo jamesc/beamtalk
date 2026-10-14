@@ -137,7 +137,14 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
 ) -> Vec<VerifyError> {
-    verify_in_scope(&backfill_opaque_version_gaps(ir, FrameId::ROOT), scope)
+    verify_in_scope(
+        &backfill_opaque_version_gaps(
+            ir,
+            FrameId::ROOT,
+            &[VersionPrefix::State, VersionPrefix::SelfVt],
+        ),
+        scope,
+    )
 }
 
 /// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:
@@ -155,15 +162,16 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
     ir: &[ThreadedStmt],
     frame: FrameId,
+    families: &[VersionPrefix],
 ) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
-    // The actor `State` and the value-type `Self` are the two root-frame
-    // families whose versions an opaque statement can advance unrecorded
-    // (BT-3816: `generate_vt_field_assignment_open`'s `Self{N}`).
-    let mut last_versions = [
-        (VersionPrefix::State, 0usize),
-        (VersionPrefix::SelfVt, 0usize),
-    ];
+    // `families` are the families whose versions an opaque statement can
+    // advance unrecorded in this body. A method body passes `State` and
+    // `SelfVt` (BT-3816: `generate_vt_field_assignment_open`'s `Self{N}`); a
+    // loop/fold body at a non-root frame passes `State` only, so a real
+    // `SelfVt` `UnboundVersion` there is still reported.
+    let mut last_versions: Vec<(VersionPrefix, usize)> =
+        families.iter().map(|p| (p.clone(), 0usize)).collect();
     for stmt in ir {
         // ADR 0131 §2: a `MapPut` `LocalRebind` is a `State` version step
         // exactly like a `Bind`'s (`RebindLowering::version_step`), so the

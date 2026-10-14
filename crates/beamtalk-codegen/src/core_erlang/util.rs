@@ -350,18 +350,16 @@ impl CoreErlangGenerator {
         // BT-3816: a value-type conditional whose receiver holds a field write
         // (`self take: (((self.n := 5) > 3) ifTrue: [1] ifFalse: [2])`): the
         // receiver is sequenced ahead, the conditional then reads its temp.
-        if self.context == CodeGenContext::ValueType
-            && !self.in_class_method()
-            && Self::conditional_send_receiver(inner)
-                .is_some_and(|receiver| self.subexpr_has_field_write_producer(receiver))
-        {
-            let receiver = Self::conditional_send_receiver(inner)
-                .into_iter()
-                .collect::<Vec<_>>();
-            let (mut prelude, scope) = self.sequence_children(&receiver, frame)?;
-            let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
-            self.finish_precompiled_scope(scope)?;
-            return Ok(ThreadedValue { prelude, value });
+        if self.context == CodeGenContext::ValueType && !self.in_class_method() {
+            if let Some(receiver) = Self::conditional_send_receiver(inner)
+                .filter(|r| self.subexpr_has_field_write_producer(r))
+            {
+                let receiver = [receiver];
+                let (mut prelude, scope) = self.sequence_children(&receiver, frame)?;
+                let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
+                self.finish_precompiled_scope(scope)?;
+                return Ok(ThreadedValue { prelude, value });
+            }
         }
 
         // ADR 0118 phase 4: an inline-threaded control-flow
