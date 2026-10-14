@@ -210,9 +210,10 @@ pg_group_membership_test_() ->
 %% BT-3810 regression guard: stopping a class that `beamtalk_class_monitor` is
 %% watching (every class started via `start/2` while the runtime tree is up)
 %% must not let the monitor resurrect it. The class's ETS metadata is left in
-%% place on purpose, so without the unwatch in beamtalk_test_class_teardown:stop_class_process/1 the
-%% monitor's eager restart succeeds and the class reappears under its
-%% registered name, which is how 'Counter' leaked into methods_test_/0.
+%% place on purpose, so without the unwatch in
+%% beamtalk_test_class_teardown:stop_class_process/1 the monitor's eager
+%% restart succeeds and the class reappears under its registered name, which
+%% is how 'Counter' leaked into methods_test_/0.
 stopped_watched_class_is_not_resurrected_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
