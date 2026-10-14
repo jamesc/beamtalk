@@ -2995,7 +2995,7 @@ put_method_reindexes_xref_test_() ->
 %% BT-3820: name/module lookups that must not queue behind a busy class
 %%====================================================================
 
-%% TODO(BT-3820): `module_name/1` records what the class process is doing on a
+%% TODO(BT-3828): `module_name/1` records what the class process is doing on a
 %% timeout (for the BUnit failure message) and always re-raises the original
 %% exit unchanged; the dump is bounded and local-only.
 module_name_timeout_diagnostics_reraise_original_exit_test_() ->

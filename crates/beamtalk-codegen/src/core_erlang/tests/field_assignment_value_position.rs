@@ -283,7 +283,7 @@ fn field_assignment_value_position_corpus() {
 // premise that they cannot write fields.) A plain `Value subclass:` reports the
 // immutability error instead; that is the one true exclusion.
 
-const VT_HEADER: &str = "TestCase subclass: FieldAssignVtProbe
+pub(super) const VT_HEADER: &str = "TestCase subclass: FieldAssignVtProbe
   field: n = 0
   field: m = 0
 
@@ -293,7 +293,7 @@ const VT_HEADER: &str = "TestCase subclass: FieldAssignVtProbe
 
 /// Positions valid for a value type (no actor self-send `bump`: a value-type self-send is a
 /// plain call that threads nothing).
-const VT_POSITIONS: &[(&str, &str)] = &[
+pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
     ("self_send_arg", "self take: EXPR"),
     ("binary_left", "EXPR + 1"),
     ("binary_right", "1 + EXPR"),
@@ -318,7 +318,10 @@ const VT_POSITIONS: &[(&str, &str)] = &[
         "conditional_wrapping_arg",
         "self take: (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
-    // The conditional's arms write fields too: threaded or cleanly rejected, never lost.
+    // BT-3821: the conditional's ARMS write fields too, in every value position. The arms'
+    // `Self` rebinds are merged into the caller's statement sequence
+    // (`vt_conditional_value_producer`), so each must compile in every statement-level shape;
+    // the `ConstructFamilyDropped` verifier invariant covers the merge.
     (
         "conditional_wrapping_arg_with_field_arms",
         "self take: (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0])",
@@ -328,8 +331,76 @@ const VT_POSITIONS: &[(&str, &str)] = &[
         "c := (EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]). c",
     ),
     (
+        "conditional_field_arms_binary_operand",
+        "1 + (EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0])",
+    ),
+    (
+        "conditional_field_arms_one_armed",
+        "self take: (EXPR > 3 ifTrue: [self.m := 4])",
+    ),
+    (
+        "conditional_field_arms_returned",
+        "^ EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]",
+    ),
+    (
+        "conditional_field_arms_bare_statement",
+        "EXPR > 3 ifTrue: [self.m := 1] ifFalse: [0]",
+    ),
+    (
+        "conditional_field_arms_into_field_rhs",
+        "self.m := (EXPR > 3 ifTrue: [self.n := 1] ifFalse: [0])",
+    ),
+    (
+        "conditional_field_arms_second_operand",
+        "self take: self.n with: (EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0])",
+    ),
+    (
+        "conditional_field_arms_list_element",
+        "#(1, (EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0]), self.m)",
+    ),
+    (
+        "conditional_field_arms_interpolated",
+        "\"v={EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0]}\"",
+    ),
+    // The arms rebind an outer local as well as writing a field.
+    (
+        "conditional_field_and_local_arms",
+        "t := 0. self take: (EXPR > 3 ifTrue: [t := t + 1. self.m := t] ifFalse: [0]). t",
+    ),
+    // The arms only thread an outer local, over a receiver holding a field write (a bot
+    // suggestion on BT-3816: the inline-control-flow producer must still lower the arms once
+    // the receiver is sequenced).
+    (
+        "conditional_local_arms_field_receiver",
+        "t := 0. self take: (EXPR > 3 ifTrue: [t := t + 1] ifFalse: [0]). t",
+    ),
+    (
+        "conditional_local_read_write_arms_field_receiver",
+        "t := 1. self take: (EXPR > 3 ifTrue: [t := t * 2] ifFalse: [t := t + 1]). t",
+    ),
+    // A conditional that is the receiver of another conditional whose arms write.
+    (
+        "conditional_field_arms_as_receiver",
+        "self take: ((EXPR > 3 ifTrue: [self.m := 1. true] ifFalse: [false]) ifTrue: [self.n := 2] ifFalse: [0])",
+    ),
+    // Loops in value position: counted and `whileTrue:` loops thread `Self` through their own
+    // tuple (`do:` / `collect:` / `inject:into:` bodies cannot write a field in a value type
+    // in any position, see `VT_UNSUPPORTED_FIELD_WRITING_BODIES`).
+    (
         "assigned_loop_receiver",
         "c := EXPR timesRepeat: [self.m := self.m + 1]. c",
+    ),
+    (
+        "loop_as_send_argument",
+        "self take: (EXPR timesRepeat: [self.m := self.m + 1])",
+    ),
+    (
+        "assigned_to_do_loop",
+        "c := 1 to: EXPR do: [:i | self.m := self.m + i]. c",
+    ),
+    (
+        "assigned_while_loop_then_operand",
+        "i := 0. c := [i < 2] whileTrue: [self.m := self.m + 1. i := i + 1]. c + EXPR",
     ),
     (
         "conditional_wrapping_field_rhs",
@@ -337,12 +408,14 @@ const VT_POSITIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Positions whose own construct writes fields in a conditional arm or loop body, which the
-/// value-type lowering rejects with a structured diagnostic instead of threading (BT-3821).
-const VT_REJECTABLE_POSITIONS: &[&str] = &[
-    "conditional_wrapping_arg_with_field_arms",
-    "conditional_wrapping_assigned_with_field_arms",
-    "assigned_loop_receiver",
+/// Loop-shaped constructs whose BODY writes a field are rejected in every position of a value
+/// type, statement position included: their accumulator has no `Self` slot yet. A gap separate
+/// from BT-3821's value-position threading, pinned so a fix flips it.
+const VT_UNSUPPORTED_FIELD_WRITING_BODIES: &[&str] = &[
+    "self take: (#(1, 2) do: [:e | self.m := e])",
+    "xs := #(1, 2) collect: [:e | self.m := e]. xs",
+    "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
+    "#(1, 2) do: [:e | self.m := e]",
 ];
 
 /// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
@@ -350,7 +423,7 @@ const VT_REJECTABLE_POSITIONS: &[&str] = &[
 /// body is either threaded or rejected (`ValueSelf*` errors); both are fine. The statement-level
 /// shapes (`may_reject == false`) have no such escape: every case must compile. What is never
 /// fine is an `erlc` failure, a verifier failure or any other error.
-const VT_SHAPES: &[(&str, &str, bool)] = &[
+pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
     ("then_read", "    STMT.\n    self.n\n", false),
     ("last_statement", "    STMT\n", false),
     (
@@ -386,8 +459,9 @@ const VT_SHAPES: &[(&str, &str, bool)] = &[
     ("block_value", "    [STMT] value.\n    self.n\n", false),
 ];
 
-enum VtOutcome {
-    Compiles,
+pub(super) enum VtOutcome {
+    /// Compiled through `erlc`; carries the generated Core Erlang.
+    Compiles(String),
     /// A structured value-type diagnostic: the construct is rejected, not miscompiled.
     RejectedCleanly,
     Fails(String),
@@ -399,7 +473,7 @@ enum VtOutcome {
 /// `report_threaded_ir_verify_errors` (caught here), a release build only attaches an
 /// `internal:` warning, which `generate_module_surfacing_verifier` returns and this reports.
 /// `erlc` rejection is a failure only when `erlc` exists (see [`erlc_available`]).
-fn vt_outcome(src: &str) -> VtOutcome {
+pub(super) fn vt_outcome(src: &str) -> VtOutcome {
     use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -428,12 +502,52 @@ fn vt_outcome(src: &str) -> VtOutcome {
             }))
             .is_ok()
             {
-                VtOutcome::Compiles
+                VtOutcome::Compiles(code)
             } else {
                 VtOutcome::Fails("erlc rejected the generated Core Erlang".to_string())
             }
         }
     }
+}
+
+/// BT-3821: whether every field `probe{index}` writes (`self.n :=`, `self.m :=`) is written in
+/// the generated Core Erlang of that function (`'maps':'put'('<field>'`). A conditional or loop
+/// whose arm / body write is lowered into a closed operand and dropped still compiles; this
+/// catches that class without running the module. Never tautological: a `Compiles` case only
+/// reaches it after the verifier and `erlc` accepted the output.
+fn written_fields_survive(src: &str, index: usize, code: &str) -> Result<(), String> {
+    // A template can splice a multi-statement position (`c := EXPR. c`) into a parenthesised
+    // shape (`((STMT) > 3)`), which is not a program: its statements parse to something else
+    // and "the method writes `self.m`" is no longer a statement about the generated function.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (_, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    if diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+    {
+        return Ok(());
+    }
+    let method_header = format!("  probe{index} =>");
+    let method_src = src.split_once(&method_header).map_or("", |(_, rest)| rest);
+    let fn_header = format!("'probe{index}'/1 = fun");
+    let fn_code = code.split_once(&fn_header).map_or("", |(_, rest)| {
+        // The function ends at the next top-level definition (column-0 quoted name).
+        rest.split("\n'").next().unwrap_or(rest)
+    });
+    if fn_code.is_empty() {
+        return Err(format!("no generated function for probe{index}"));
+    }
+    for field in ["n", "m"] {
+        if method_src.contains(&format!("self.{field} :="))
+            && !fn_code.contains(&format!("'maps':'put'('{field}'"))
+        {
+            return Err(format!(
+                "the method writes `self.{field}` but its generated function has no \
+                 `maps:put('{field}'`: the write was dropped"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// PIN-BUG list: `shape / position` cases that fail today, each citing an open issue. The corpus
@@ -456,17 +570,25 @@ fn value_type_field_assignment_value_position_corpus() {
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
-            let may_reject = *shape_may_reject || VT_REJECTABLE_POSITIONS.contains(position_name);
+            let may_reject = *shape_may_reject;
             let name = format!("{shape_name} / {position_name}");
             let pinned = VT_PINNED_FAILURES.contains(&name.as_str());
             if !may_reject && !pinned {
                 must_compile += 1;
             }
             match vt_outcome(&src) {
-                VtOutcome::Compiles => {
+                VtOutcome::Compiles(code) => {
                     compiled += 1;
                     if !may_reject && !pinned {
                         must_compile_compiled += 1;
+                    }
+                    // `erlc`-clean is not enough: a write the lowering silently drops
+                    // still compiles. Every field the method writes must survive as a
+                    // `maps:put` in the generated function (the runtime half is
+                    // `stdlib/test/value_type_conditional_field_arms_value_position_test.bt`).
+                    if let Err(why) = written_fields_survive(&src, i, &code) {
+                        failing.push(name.clone());
+                        details.push(format!("{name}: {why}\n{src}"));
                     }
                 }
                 VtOutcome::RejectedCleanly => {}
@@ -507,6 +629,23 @@ fn value_type_field_assignment_value_position_corpus() {
         compiled >= must_compile && compiled > 0,
         "only {compiled} value-type cases compiled"
     );
+}
+
+/// `do:` / `collect:` / `inject:into:` bodies that write a field are not threaded in a value type
+/// at all (their accumulator has no `Self` slot), statement position included: a gap separate
+/// from BT-3821's value-position conditional threading. They must stay a structured rejection
+/// (never a silently dropped write); the day one compiles, this fails and the entry moves to
+/// [`VT_POSITIONS`].
+#[test]
+fn field_writing_fold_bodies_stay_a_structured_rejection() {
+    for body in VT_UNSUPPORTED_FIELD_WRITING_BODIES {
+        let src = format!("{VT_HEADER}\n  probe =>\n    {body}\n    self.n\n");
+        assert!(
+            matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
+            "`{body}` is expected to be rejected with a structured diagnostic; if it now \
+             compiles, move it into VT_POSITIONS:\n{src}"
+        );
+    }
 }
 
 /// The BT-3816 repro verbatim: the `Self1` rebind of `(self.n := 5)` must reach the read after it.
@@ -558,7 +697,7 @@ fn value_type_field_assignment_in_construct_operands_and_block_values_compiles()
     for (i, body) in methods.iter().enumerate() {
         let src = format!("{VT_HEADER}\n  probe{i} =>\n    {body}\n");
         assert!(
-            matches!(vt_outcome(&src), VtOutcome::Compiles),
+            matches!(vt_outcome(&src), VtOutcome::Compiles(_)),
             "value-type case {i} must compile:\n{src}"
         );
     }

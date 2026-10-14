@@ -12,7 +12,7 @@
 new() ->
     #{'$beamtalk_class' => 'FakeTest'}.
 
-%% TODO(BT-3820): record a class-call timeout dump in the test process (as
+%% TODO(BT-3828): record a class-call timeout dump in the test process (as
 %% beamtalk_object_class:module_name/1 does on a timeout), then fail.
 dispatch(testDumpExit, [], _Instance) ->
     record_dump(),

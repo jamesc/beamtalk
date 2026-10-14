@@ -21,7 +21,11 @@ use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
 use super::spec_codegen;
-use super::threaded_ir::{FrameId, RenderCtx, VersionPrefix, VersionedVar, render};
+use super::threaded_ir::{
+    CarrierSlot, FrameId, RebindLowering, RenderCtx, ThreadedLocalSlot, ThreadedStmt,
+    ThreadedValue, ValueRef, VersionPrefix, VersionedVar, build_family_construct_tuple,
+    build_family_local_threading_prelude,
+};
 use super::util::ClassIdentity;
 use super::value_accessors::{
     AutoSlotMethods, compute_auto_slot_methods, has_opaque_native_representation,
@@ -96,6 +100,21 @@ struct VtBranchPieces {
     /// started from — the input to the trailing `Self{N}` tuple slot both
     /// arms must agree on.
     self_mutated_version: Option<usize>,
+    /// BT-3821: the arm's own value (its last statement's), when the conditional
+    /// is lowered in value position ([`CoreErlangGenerator::lower_vt_conditional`]
+    /// with `capture_value`); `None` for the statement form, which discards it.
+    value: Option<Document<'static>>,
+}
+
+/// BT-3821: a value-type conditional lowered to its [`ThreadedStmt`] prelude
+/// ([`CoreErlangGenerator::lower_vt_conditional`]) — the one lowering the
+/// statement form ([`CoreErlangGenerator::generate_vt_conditional_open`]
+/// renders it) and the value-position producer
+/// ([`CoreErlangGenerator::vt_conditional_value_producer`] splices it) share.
+struct VtConditionalLowered {
+    prelude: Vec<ThreadedStmt>,
+    /// The conditional's own value, `element(1, <carrier>)`, when requested.
+    value: Option<ValueRef>,
 }
 
 /// the `SelfVt` version number live immediately
@@ -1020,6 +1039,13 @@ impl CoreErlangGenerator {
             VtBodyExprKind::BlockWithCapturedMutations(_) => {
                 self.is_vt_field_writing_block_value(stmt)
             }
+            // BT-3821: a conditional whose arms write a field is a producer
+            // ([`Self::vt_conditional_value_producer`]): its value and `Self`
+            // merge splice into the sequence like any other threadable statement.
+            VtBodyExprKind::ConditionalWithLocalThreading
+            | VtBodyExprKind::ConditionalWithSelfFieldThreading => {
+                self.is_vt_field_conditional_producer(stmt)
+            }
             _ => false,
         }
     }
@@ -1038,8 +1064,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
         frame: FrameId,
-    ) -> Result<Option<super::threaded_ir::ThreadedValue>> {
-        use super::threaded_ir::{ThreadedStmt, ThreadedValue, ValueRef};
+    ) -> Result<Option<ThreadedValue>> {
         if !self.is_vt_field_writing_block_value(expr) {
             return Ok(None);
         }
@@ -1160,6 +1185,10 @@ impl CoreErlangGenerator {
                 self.subexpr_has_field_write_producer(value)
             }
             Expression::DestructureAssignment { .. } => false,
+            // BT-3821: a statement that IS a conditional whose arms write a field
+            // is a producer itself, in last position too (where it is the method's
+            // value and its arms' `Self` merge must still reach the returned `Self`).
+            other if self.is_vt_field_conditional_producer(other) => true,
             other => {
                 matches!(
                     self.classify_vt_body_expr(other),
@@ -1444,7 +1473,11 @@ impl CoreErlangGenerator {
             // lowered through `threaded_expression` with its prelude spliced
             // (`lower_root_statement_with_producer`, shared with class
             // methods).
-            if !matches!(kind, VtBodyExprKind::EarlyReturn) {
+            // BT-3821: a NON-LAST bare field-writing-arm conditional keeps its statement
+            // form (`generate_vt_conditional_open`, arms' values discarded); only its
+            // value positions are the producer's.
+            let statement_form = !is_last && self.is_vt_field_conditional_producer(expr);
+            if !matches!(kind, VtBodyExprKind::EarlyReturn) && !statement_form {
                 let mut stmts = Vec::new();
                 if let Some(result_var) =
                     self.lower_root_statement_with_producer(expr, &mut stmts)?
@@ -1673,12 +1706,16 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::ConditionalWithSelfFieldThreading => {
-                // non-last, this is exactly the shape
-                // `generate_vt_conditional_open`'s new `Self` slot handles.
-                // In LAST position it deliberately falls through to the
+                // BT-3821: a method-root conditional the producer admits
+                // (`is_vt_field_conditional_producer`) never reaches this arm —
+                // `lower_root_statement_with_producer` lowers it first, in last
+                // position too. Only a conditional with a non-literal branch
+                // argument still gets here (a loop / branch / exception frame never
+                // does: those shapes are rejected earlier, see
+                // `generate_vt_conditional_open`): non-last, that is the statement
+                // form; in LAST position it deliberately falls through to the
                 // ordinary last-expression path, which reproduces the
-                // `FieldAssignmentInUnsupportedBlock` diagnostic
-                // — see
+                // `FieldAssignmentInUnsupportedBlock` diagnostic — see
                 // `is_conditional_with_vt_self_field_threading`'s doc comment
                 // for why a clean compile error is the right answer there
                 // rather than a half-threaded one.
@@ -2819,13 +2856,19 @@ impl CoreErlangGenerator {
     /// the assignment-RHS path, now a conditional producer), which does not
     /// thread `Self` — a field write reaching it would be silently dropped
     /// (last position) or, as an assign RHS, emit an `erlc`-rejected reference
-    /// to a branch-scoped `Self{N}`, both strictly worse than the clean
-    /// `FieldAssignmentInUnsupportedBlock` diagnostic those shapes produce
-    /// today (confirmed empirically). This is
-    /// scoped to the NON-LAST statement position — the shape its repros
-    /// cover, and the only one `generate_vt_conditional_open` (the sole
-    /// consumer of this predicate, via
-    /// `VtBodyExprKind::ConditionalWithSelfFieldThreading`) handles.
+    /// to a branch-scoped `Self{N}`, both strictly worse than a clean
+    /// `FieldAssignmentInUnsupportedBlock` diagnostic.
+    ///
+    /// BT-3821: the shapes that diagnostic used to cover — the last position, an
+    /// assignment right-hand side, an operand — are now lowered by
+    /// [`Self::vt_conditional_value_producer`] (gated by
+    /// [`Self::is_vt_field_conditional_producer`], which reads THIS predicate),
+    /// which carries the arms' value and their `Self` merge into the caller's
+    /// statement sequence. What still reaches `generate_vt_conditional_open`
+    /// through `VtBodyExprKind::ConditionalWithSelfFieldThreading`, and keeps
+    /// the clean rejection, is a conditional with a non-literal branch argument.
+    /// A conditional in a loop / branch / exception frame never gets that far: those
+    /// shapes are rejected earlier, so the statement form is method-root only.
     ///
     /// Only reports conditionals with NO outer-local mutation of their own:
     /// a mixed one (locals AND a field write) is already
@@ -3125,74 +3168,196 @@ impl CoreErlangGenerator {
     /// - After the case, variables are rebound via `element/N` extraction
     ///
     /// This makes the updated locals visible to all subsequent method body expressions.
+    ///
+    /// BT-3821: renders [`Self::lower_vt_conditional`]'s prelude, the same lowering
+    /// [`Self::vt_conditional_value_producer`] splices for the conditional in value
+    /// position, with the arms' values discarded.
     pub(in crate::core_erlang) fn generate_vt_conditional_open(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        let (receiver, selector_name, arguments) = match expr {
-            Expression::MessageSend {
-                receiver,
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } => {
-                let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                (receiver.as_ref(), sel, arguments)
-            }
-            _ => return Ok(Document::Nil),
+        // Always the method root. This statement form is only reachable there: the producer's
+        // gate (`is_vt_field_conditional_producer`) declines a conditional in a loop / branch /
+        // exception frame, and every such shape is rejected before it gets here
+        // (`field_writing_arm_conditionals_in_non_root_frames_are_rejected_not_internal_errors`
+        // pins the outcome per shape). Lowering it in another frame would need that frame's
+        // `RebindFrame` registered (`rebind_frame_of`), which a class-method loop body does not.
+        let Some(lowered) = self.lower_vt_conditional(expr, FrameId::ROOT, false)? else {
+            return Ok(Document::Nil);
         };
+        // A method-root prelude like the producer's: verified (`ConstructFamilyDropped`
+        // included) before it is flattened to text.
+        Ok(self.verified_root_prelude_doc(&lowered.prelude, expr.span()))
+    }
 
-        // Collect all outer-scope mutations across all block arguments.
-        let mut all_mutations: Vec<String> = Vec::new();
-        for arg in arguments {
-            if let Expression::Block(block) = arg {
-                for var in self.outer_scope_mutations_in_block(block) {
-                    if !all_mutations.contains(&var) {
-                        all_mutations.push(var);
-                    }
-                }
-            }
+    /// BT-3821: whether `expr` is a value-type `ifTrue:`/`ifFalse:`/
+    /// `ifTrue:ifFalse:` whose every branch argument is a literal block
+    /// (the shape [`Self::lower_vt_conditional`] inlines), whatever its arms do.
+    fn vt_conditional_has_literal_arms(expr: &Expression) -> bool {
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        matches!(
+            (sel.as_str(), arguments.as_slice()),
+            ("ifTrue:" | "ifFalse:", [Expression::Block(_)])
+                | (
+                    "ifTrue:ifFalse:",
+                    [Expression::Block(_), Expression::Block(_)]
+                )
+        )
+    }
+
+    /// BT-3821: whether `expr` (paren-unwrapped) is a value-type conditional
+    /// whose arms write a field (`Self`) and that lowers as a *producer* in
+    /// value position ([`Self::vt_conditional_value_producer`]): in a value-type
+    /// instance method, outside every loop body (whose own frame threads `Self`
+    /// through the loop's accumulator), with literal-block arms.
+    ///
+    /// The one gate [`CoreErlangGenerator::threaded_expression`]'s producer and
+    /// `subexpr_needs_prelude`'s mirror of it share.
+    pub(in crate::core_erlang) fn is_vt_field_conditional_producer(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        let expr = expr.unwrap_parens();
+        self.context == CodeGenContext::ValueType
+            && !self.in_class_method()
+            // The method-root frame only: the producer, its probe mirrors and
+            // `statement_has_value_type_producer` all read this one condition.
+            // `current_frame()` is derived from `in_loop_body` (ROOT exactly when it is
+            // unset, the branch frame otherwise), so the loop-body and frame conditions
+            // cannot drift apart: there is one source, not two to keep in step.
+            && self.current_frame() == FrameId::ROOT
+            && Self::vt_conditional_has_literal_arms(expr)
+            && self.is_conditional_with_vt_self_field_threading(expr)
+    }
+
+    /// BT-3821: the producer lowering of a value-type conditional whose arms
+    /// write a field, in value position (`self take: (c ifTrue: [self.m := 1]
+    /// ifFalse: [0])`, `x := c ifTrue: [self.m := 1] ifFalse: [0]`, a `^`
+    /// value, an operand of any sequenced parent).
+    ///
+    /// **Invariant** (every frame the gate admits): the conditional's `Self`
+    /// merge `Bind` — `Self{N+1} <- element(k, <carrier>)` — and its value
+    /// `element(1, <carrier>)` are in the *caller's* statement sequence, never
+    /// inside the closed operand document, so the statements after the
+    /// conditional read the merged `Self`. The construct declares the `Self`
+    /// family its arms advanced ([`ThreadedStmt::ConstructTuple`]'s
+    /// `families`); the verifier reports `ConstructFamilyDropped` if the merge
+    /// `Bind` does not follow.
+    ///
+    /// The receiver evaluates before either arm and may itself hold a field
+    /// write, so it is sequenced first ([`Self::sequence_children`]); the
+    /// arms' baseline `Self` is the version live after it.
+    pub(in crate::core_erlang) fn vt_conditional_value_producer(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<Option<ThreadedValue>> {
+        if !self.is_vt_field_conditional_producer(expr) {
+            return Ok(None);
         }
-        // a branch whose only mutation is `self.field:=...` has
-        // no outer-scope LOCAL mutation, but still needs this inline-`case`
-        // treatment — without it the block falls through to the generic Tier
-        // 1 closure path, which rejects a field write outright
-        // (`FieldAssignmentInUnsupportedBlock`).
-        let threads_self = arguments.iter().any(|arg| match arg {
-            Expression::Block(block) => self.block_writes_vt_self_field(block),
-            _ => false,
-        });
-        // BT-3522: `threads_self` (and the branch-arm `Self{N}` merge it
-        // gates) covers a write that is a BARE TOP-LEVEL STATEMENT of a
-        // branch block — the base case this site was built for. A write
-        // nested one level deeper (inside a further `ifTrue:` within the
-        // branch, a nested loop/exception body, ...) mints a `Self{N}` that
-        // dies with its own nested scope, so no branch tuple can name it.
-        // Before this check that shape was a SILENT DROP at this call site:
-        // with no outer-local mutation to carry either, the early return
-        // below erased the whole conditional from the emitted method body
-        // (`Document::Nil`), and `is_conditional_with_vt_self_field_threading`
-        // — which since BT-3522 shares `on:do:`/`ensure:`'s own recursive
-        // `exception_construct_families` detector — routes MORE of exactly
-        // that shape here than it used to. Reuses the same per-statement
-        // rejection `exception_handling.rs` applies to its own arms (root
-        // skipped when the statement IS the carried top-level write), so
-        // both sites produce one diagnostic from one rule.
+        // The gate admits the method-root frame only; a caller threading it into any
+        // other frame disagrees with the probe mirrors, which would mis-sequence.
+        if frame != FrameId::ROOT {
+            return Err(CodeGenError::Internal(format!(
+                "a value-type conditional producer was asked to lower in frame {frame:?}, \
+                 but its gate admits only the method root"
+            )));
+        }
+        let Some(receiver) = Self::conditional_send_receiver(expr) else {
+            return Ok(None);
+        };
+        let (mut prelude, scope) = self.sequence_children(&[receiver], frame)?;
+        let lowered = self.lower_vt_conditional(expr, frame, true)?;
+        self.finish_precompiled_scope(scope)?;
+        let Some(VtConditionalLowered {
+            prelude: case_prelude,
+            value: Some(value),
+        }) = lowered
+        else {
+            return Err(CodeGenError::Internal(
+                "is_vt_field_conditional_producer accepted a conditional \
+                 lower_vt_conditional did not lower to a value"
+                    .to_string(),
+            ));
+        };
+        prelude.extend(case_prelude);
+        Ok(Some(ThreadedValue { prelude, value }))
+    }
+
+    /// BT-3821: lowers a value-type `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// whose arms mutate an outer local and/or write a field (`Self`) to its
+    /// [`ThreadedStmt`] prelude, in `frame`:
+    ///
+    /// ```text
+    /// Statement   let Cond = <receiver> in
+    /// ConstructTuple CondResult = case Cond of <true> -> <arm> <false> -> <arm> end
+    ///                             (families: [SelfVt] when an arm wrote a field)
+    /// Bind        Self{N+1} <- element(k, CondResult)        (the Self merge)
+    /// Statement   let <local> = element(i, CondResult) in …  (one per outer local)
+    /// ```
+    ///
+    /// Each arm returns `{[Value,] local…, Self}`: the arm's own value first when
+    /// `capture_value` (the value position), then the outer locals it may have
+    /// rebound, then the `Self` family slot both arms agree on. The returned
+    /// `value` is `element(1, CondResult)`; `None` for the statement form, which
+    /// discards the arms' values.
+    ///
+    /// `Ok(None)`, with nothing minted, when `expr` is not such a conditional.
+    /// The receiver is compiled as-is: a caller whose receiver holds a field
+    /// write has sequenced it ahead (`hoist_vt_operand_producers`,
+    /// [`Self::vt_conditional_value_producer`]).
+    #[allow(clippy::too_many_lines)]
+    fn lower_vt_conditional(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        capture_value: bool,
+    ) -> Result<Option<VtConditionalLowered>> {
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return Ok(None);
+        };
+        let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        if !Self::vt_conditional_has_literal_arms(expr) {
+            return Ok(None);
+        }
+        let span = expr.span();
+        // Outer locals any arm rebinds, and whether an arm writes a field: a branch
+        // whose only mutation is `self.field := ...` still needs this inline-`case`
+        // (the generic Tier 1 closure path rejects a field write outright).
+        let all_mutations = self.vt_conditional_outer_mutations(arguments);
+        let threads_self = arguments.iter().any(
+            |arg| matches!(arg, Expression::Block(block) if self.block_writes_vt_self_field(block)),
+        );
+        // BT-3522: `threads_self` covers a write that is a BARE TOP-LEVEL STATEMENT of a
+        // branch block. A write nested deeper mints a `Self{N}` that dies with its own
+        // nested scope, so no branch tuple can name it: it was a SILENT DROP (the early
+        // return below erased the conditional). The same per-statement rejection
+        // `exception_handling.rs` applies to its arms turns it into one diagnostic.
         self.reject_nested_vt_conditional_self_field_writes(arguments)?;
         if all_mutations.is_empty() && !threads_self {
-            return Ok(Document::Nil);
+            return Ok(None);
         }
 
         let cond_var = self.fresh_temp_var("Cond");
         let cond_doc = self.expression_doc(receiver)?;
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(docvec![
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = ",
-            cond_doc,
-            " in ",
-        ]);
+        let mut prelude: Vec<ThreadedStmt> = vec![ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(cond_var.clone()), " = ", cond_doc, " in "],
+            span,
+        )];
 
         // capture the `Self` version before generating either arm so both
         // are true siblings (each starts from the same baseline, mirroring
@@ -3208,9 +3373,10 @@ impl CoreErlangGenerator {
             arguments,
             &all_mutations,
             baseline,
+            capture_value,
         )?
         else {
-            return Ok(Document::Vec(docs));
+            return Ok(None);
         };
 
         // `Self` is threaded through the
@@ -3220,39 +3386,152 @@ impl CoreErlangGenerator {
         // actually executed. ADR 0122 / BT-3513: this set of "either arm
         // mutated it" families IS the construct's own `ThreadedFamilies` —
         // the direct successor of the old `VtCondSlots` bool pair.
-        let mut mutated_families = Vec::with_capacity(1);
-        if true_pieces.self_mutated_version.is_some() || false_pieces.self_mutated_version.is_some()
-        {
-            mutated_families.push(VersionPrefix::SelfVt);
-        }
+        let mutated_families: Vec<VersionPrefix> = (true_pieces.self_mutated_version.is_some()
+            || false_pieces.self_mutated_version.is_some())
+        .then_some(VersionPrefix::SelfVt)
+        .into_iter()
+        .collect();
         let families = ThreadedFamilies::from_matches(&mutated_families);
         let true_branch = self.finish_vt_conditional_branch(true_pieces, &families, baseline);
         let false_branch = self.finish_vt_conditional_branch(false_pieces, &families, baseline);
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
-        docs.push(docvec![
-            "let ",
-            leaf::var(result_var.clone()),
-            " = case ",
+        let case_doc = docvec![
+            "case ",
             leaf::var(cond_var),
             " of <'true'> when 'true' -> ",
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
-            " end in ",
-        ]);
+            " end"
+        ];
 
-        self.rebind_vt_conditional_mutations(
-            &mut docs,
-            &all_mutations,
+        // The value occupies element 1 of the tuple when requested, shifting
+        // every local and the family slot up by one.
+        let value_slots = usize::from(capture_value);
+        let family_binds = self.vt_conditional_family_binds(
             &result_var,
+            all_mutations.len() + value_slots,
             &families,
             baseline,
-            expr.span(),
+            frame,
+            span,
         );
+        if families.as_slice().is_empty() && !capture_value {
+            // Plain local threading (no field write, no value): the case returns the
+            // bare local, or a flat tuple of them, and the rebinds stay statements.
+            prelude.push(build_family_construct_tuple(
+                result_var.clone(),
+                case_doc,
+                Vec::new(),
+                Vec::new(),
+                span,
+            ));
+            prelude.extend(self.vt_conditional_local_rebinds(
+                &all_mutations,
+                &result_var,
+                true,
+                value_slots,
+                span,
+            ));
+        } else {
+            prelude.extend(self.vt_conditional_threaded_merge(
+                &all_mutations,
+                value_slots,
+                &result_var,
+                case_doc,
+                mutated_families,
+                family_binds,
+                frame,
+                span,
+            )?);
+        }
+        let value = capture_value.then(|| {
+            ValueRef::Doc(docvec![
+                "call 'erlang':'element'(1, ",
+                leaf::var(result_var),
+                ")"
+            ])
+        });
+        Ok(Some(VtConditionalLowered { prelude, value }))
+    }
 
-        Ok(Document::Vec(docs))
+    /// The outer-scope locals any literal-block arm of a conditional rebinds, in
+    /// first-seen order.
+    fn vt_conditional_outer_mutations(&self, arguments: &[Expression]) -> Vec<String> {
+        let mut all_mutations: Vec<String> = Vec::new();
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                for var in self.outer_scope_mutations_in_block(block) {
+                    if !all_mutations.contains(&var) {
+                        all_mutations.push(var);
+                    }
+                }
+            }
+        }
+        all_mutations
+    }
+
+    /// BT-3821: the merge of a value-position (or field-writing) conditional's case
+    /// result at the method root: the construct declares the outer locals it threads
+    /// (`all_mutations`) and the `Self` family its arms advanced, so the verifier sees
+    /// one `LocalRebind` per local (`ThreadedLocalDropped`,
+    /// `LocalReadAfterSiblingRebind`) and the family merge `Bind`
+    /// (`ConstructFamilyDropped`). Local `i` sits at tuple position
+    /// `i + value_slots + 1`.
+    #[allow(clippy::too_many_arguments)]
+    fn vt_conditional_threaded_merge(
+        &mut self,
+        all_mutations: &[String],
+        value_slots: usize,
+        result_var: &str,
+        case_doc: Document<'static>,
+        mutated_families: Vec<VersionPrefix>,
+        family_binds: Vec<ThreadedStmt>,
+        frame: FrameId,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Result<Vec<ThreadedStmt>> {
+        let slots: Vec<ThreadedLocalSlot> = all_mutations
+            .iter()
+            .enumerate()
+            .map(|(i, var)| {
+                let value_var = Self::to_core_erlang_var(var);
+                self.bind_var(var, &value_var);
+                ThreadedLocalSlot {
+                    local: var.clone(),
+                    slot: CarrierSlot::Pos(i + value_slots + 1),
+                    value_var,
+                }
+            })
+            .collect();
+        let enclosing = self.rebind_frame_of(frame)?;
+        #[allow(unused_mut)]
+        let mut built = build_family_local_threading_prelude(
+            &enclosing,
+            result_var,
+            case_doc,
+            &slots,
+            mutated_families,
+            family_binds,
+            span,
+            // The method root threads no local of its own: every rebind is a plain `let`.
+            |_, _| RebindLowering::Let,
+        );
+        // BT-3821 fault injection: the last local's rebind is omitted
+        // (`ThreadedLocalDropped` on a real compile).
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::DropRebind)
+        {
+            if let Some(at) = built
+                .iter()
+                .rposition(|stmt| matches!(stmt, ThreadedStmt::LocalRebind { .. }))
+            {
+                built.remove(at);
+            }
+        }
+        Ok(built)
     }
 
     /// BT-3522: rejects a value-type `self.field := ...` write that a
@@ -3303,17 +3582,35 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         all_mutations: &[String],
         baseline: VtCondBaseline,
+        capture_value: bool,
     ) -> Result<Option<(VtBranchPieces, VtBranchPieces)>> {
         let pair = match (selector_name, arguments) {
             ("ifTrue:", [Expression::Block(block), ..]) => {
-                let tb = self.build_vt_conditional_branch_pieces(block, all_mutations, baseline)?;
-                let fb = Self::build_vt_conditional_passthrough_pieces(self, all_mutations);
+                let tb = self.build_vt_conditional_branch_pieces(
+                    block,
+                    all_mutations,
+                    baseline,
+                    capture_value,
+                )?;
+                let fb = Self::build_vt_conditional_passthrough_pieces(
+                    self,
+                    all_mutations,
+                    capture_value,
+                );
                 (tb, fb)
             }
             ("ifFalse:", [Expression::Block(block), ..]) => {
-                let passthrough =
-                    Self::build_vt_conditional_passthrough_pieces(self, all_mutations);
-                let fb = self.build_vt_conditional_branch_pieces(block, all_mutations, baseline)?;
+                let passthrough = Self::build_vt_conditional_passthrough_pieces(
+                    self,
+                    all_mutations,
+                    capture_value,
+                );
+                let fb = self.build_vt_conditional_branch_pieces(
+                    block,
+                    all_mutations,
+                    baseline,
+                    capture_value,
+                )?;
                 (passthrough, fb)
             }
             (
@@ -3324,10 +3621,18 @@ impl CoreErlangGenerator {
                     ..,
                 ],
             ) => {
-                let tb =
-                    self.build_vt_conditional_branch_pieces(true_block, all_mutations, baseline)?;
-                let fb =
-                    self.build_vt_conditional_branch_pieces(false_block, all_mutations, baseline)?;
+                let tb = self.build_vt_conditional_branch_pieces(
+                    true_block,
+                    all_mutations,
+                    baseline,
+                    capture_value,
+                )?;
+                let fb = self.build_vt_conditional_branch_pieces(
+                    false_block,
+                    all_mutations,
+                    baseline,
+                    capture_value,
+                )?;
                 (tb, fb)
             }
             _ => return Ok(None),
@@ -3524,6 +3829,7 @@ impl CoreErlangGenerator {
         block: &beamtalk_core::ast::Block,
         all_mutations: &[String],
         baseline: VtCondBaseline,
+        capture_value: bool,
     ) -> Result<VtBranchPieces> {
         let VtCondBaseline {
             self_vt: self_before,
@@ -3535,10 +3841,15 @@ impl CoreErlangGenerator {
         // from the value live before the `case`), and neither may leak its
         // own in-branch `Self{N+1}` binding — scoped inside that arm's own
         // case clause — out to the code that follows the conditional. The
-        // post-`case` rebind in `rebind_vt_conditional_mutations` is what
+        // post-`case` family merge (`vt_conditional_family_binds`) is what
         // legitimately advances the outer version, exactly once.
         self.set_self_version(self_before);
-        let result = self.build_vt_conditional_branch_pieces_inner(block, all_mutations, baseline);
+        let result = self.build_vt_conditional_branch_pieces_inner(
+            block,
+            all_mutations,
+            baseline,
+            capture_value,
+        );
         self.set_self_version(self_before);
         self.pop_scope();
         result
@@ -3554,6 +3865,7 @@ impl CoreErlangGenerator {
         block: &beamtalk_core::ast::Block,
         all_mutations: &[String],
         baseline: VtCondBaseline,
+        capture_value: bool,
     ) -> Result<VtBranchPieces> {
         let VtCondBaseline {
             self_vt: self_before,
@@ -3561,7 +3873,12 @@ impl CoreErlangGenerator {
         let body = super::util::collect_body_exprs(&block.body);
 
         let mut preamble: Vec<Document<'static>> = Vec::new();
-        for body_expr in &body {
+        // BT-3821: in value position the arm's value is its last statement's
+        // (`nil` for an empty block); the statement form discards it.
+        let mut arm_value: Option<Document<'static>> = capture_value.then_some(leaf::atom("nil"));
+        let last_index = body.len().checked_sub(1);
+        for (i, body_expr) in body.iter().enumerate() {
+            let is_value_stmt = capture_value && Some(i) == last_index;
             if self.is_vt_self_field_assignment(body_expr) {
                 // a value-type `self.field:=...` write. Emitted as
                 // an OPEN let-chain (`let _Val = … in let Self{N} =
@@ -3572,8 +3889,11 @@ impl CoreErlangGenerator {
                 // neither a later statement in this same branch nor the
                 // arm's own return tuple can see it — the compile-time
                 // `unbound variable 'Self1'` failure this construction avoids.
-                let (doc, _val_var) = self.generate_field_assignment_open(body_expr)?;
+                let (doc, val_var) = self.generate_field_assignment_open(body_expr)?;
                 preamble.push(doc);
+                if is_value_stmt {
+                    arm_value = Some(leaf::var(val_var));
+                }
             } else if Self::is_local_var_assignment(body_expr) {
                 if let Expression::Assignment { target, value, .. } = body_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
@@ -3601,8 +3921,18 @@ impl CoreErlangGenerator {
                             value_doc,
                             " in ",
                         ]);
+                        if is_value_stmt {
+                            arm_value = Some(leaf::var(core_var));
+                        }
                     }
                 }
+            } else if is_value_stmt {
+                // The arm's last statement is its value: no `let _seqN` sink.
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(body_expr, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                preamble.push(prelude_doc);
+                arm_value = Some(self.threaded_value_doc(&tv.value));
             } else {
                 let tmp = self.fresh_temp_var("seq");
                 // ADR 0118 phase 5b: mirror the assignment arm
@@ -3630,20 +3960,24 @@ impl CoreErlangGenerator {
             preamble,
             local_values,
             self_mutated_version,
+            value: arm_value,
         })
     }
 
     /// Generates a pass-through arm's pieces: the current (pre-branch) values of all
     /// captured mutations, leaving them unchanged, and no class-var mutation (a
-    /// passthrough arm executes no branch code).
+    /// passthrough arm executes no branch code). In value position
+    /// (`capture_value`) the absent arm's value is `nil`.
     fn build_vt_conditional_passthrough_pieces(
         cg: &Self,
         all_mutations: &[String],
+        capture_value: bool,
     ) -> VtBranchPieces {
         VtBranchPieces {
             preamble: Vec::new(),
             local_values: Self::resolve_mutation_value_docs(cg, all_mutations),
             self_mutated_version: None,
+            value: capture_value.then_some(leaf::atom("nil")),
         }
     }
 
@@ -3668,12 +4002,14 @@ impl CoreErlangGenerator {
     /// *either* sibling arm threads one, both arms must agree on the tuple shape so the
     /// `element/N` extraction after the case is valid regardless of which arm ran.
     ///
-    /// Slot order is fixed: locals, then the family slot —
-    /// [`ThreadedFamilies`]' own canonical order, matching
-    /// [`Self::rebind_vt_conditional_mutations`]'s extraction order.
+    /// Slot order is fixed: the arm's value (value position only, BT-3821),
+    /// locals, then the family slot — [`ThreadedFamilies`]' own canonical
+    /// order, matching [`Self::vt_conditional_local_rebinds`]'s and
+    /// [`Self::vt_conditional_family_binds`]'s extraction order.
     ///
-    /// When `families` is empty, this renders byte-identically to the
-    /// original shape (bare value for one mutation, `{v1, v2,...}` tuple otherwise).
+    /// When `families` is empty (and there is no value slot), this renders
+    /// byte-identically to the original shape (bare value for one mutation,
+    /// `{v1, v2,...}` tuple otherwise).
     ///
     /// ADR 0122 / BT-3513: the hand-rolled `any_self_mutated` arm this
     /// replaced now routes through
@@ -3695,8 +4031,8 @@ impl CoreErlangGenerator {
             preamble,
             local_values,
             self_mutated_version,
+            value,
         } = pieces;
-        let n_locals = local_values.len();
         // this arm's own value for `prefix`: its own mutated version
         // if IT advanced that family's counter, else the baseline (unchanged)
         // version inherited from before the conditional — the same
@@ -3712,16 +4048,19 @@ impl CoreErlangGenerator {
             };
             mutated.unwrap_or_else(|| baseline.version_for(prefix))
         };
-        let return_doc = if families.as_slice().is_empty() && n_locals == 1 {
-            local_values.into_iter().next().unwrap_or(Document::Nil)
+        // BT-3821: in value position the arm's value opens the tuple, ahead of
+        // the locals, so the tuple always has at least one prior element.
+        let elements: Vec<Document<'static>> = value.into_iter().chain(local_values).collect();
+        let return_doc = if families.as_slice().is_empty() && elements.len() == 1 {
+            elements.into_iter().next().unwrap_or(Document::Nil)
         } else {
-            let base = if n_locals == 0 {
+            let base = if elements.is_empty() {
                 // no prior tuple element for `append_family_slots` to open
                 // with (see that function's own doc comment on this
                 // `Document::Nil` convention).
                 Document::Nil
             } else {
-                docvec!["{", join(local_values, &Document::Str(", "))]
+                docvec!["{", join(elements, &Document::Str(", "))]
             };
             let ctx = RenderCtx::new(self);
             family_slots::append_family_slots(
@@ -3734,12 +4073,70 @@ impl CoreErlangGenerator {
         Document::Vec(vec![Document::Vec(preamble), return_doc])
     }
 
-    /// Appends `let VAR = <result_var>` or `let VAR = element(N, <result_var>)` bindings
-    /// to `docs`, updating the scope so subsequent expressions see the new variable
-    /// names. When `families` carries `SelfVt`, also mints and binds a fresh outer
-    /// `Self{N}` from the case result's trailing tuple element, so a value-type
-    /// `self.field := ...` write made inside either arm is visible to code following
-    /// the conditional.
+    /// Rebinds each of `all_mutations` from the case result as a
+    /// `let VAR = <result_var>` or `let VAR = element(N, <result_var>)`
+    /// statement, updating the scope so subsequent expressions see the new
+    /// variable names.
+    ///
+    /// `bare` says the case returns the single local directly rather than in a
+    /// tuple (one mutation, no family slot, no value slot). `slot_offset` is the
+    /// number of tuple elements ahead of the locals (`1` when the arms' value
+    /// opens the tuple, BT-3821).
+    fn vt_conditional_local_rebinds(
+        &mut self,
+        all_mutations: &[String],
+        result_var: &str,
+        bare: bool,
+        slot_offset: usize,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Vec<ThreadedStmt> {
+        if bare && all_mutations.len() == 1 {
+            // Single variable, no family threading: case returns the value directly.
+            let var = &all_mutations[0];
+            let core_var = Self::to_core_erlang_var(var);
+            self.bind_var(var, &core_var);
+            return vec![ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(core_var),
+                    " = ",
+                    leaf::var(result_var.to_string()),
+                    " in ",
+                ],
+                span,
+            )];
+        }
+        // Multiple variables (and/or a threaded family or value): case returns a
+        // tuple, extract with element/N.
+        all_mutations
+            .iter()
+            .enumerate()
+            .map(|(i, var)| {
+                let core_var = Self::to_core_erlang_var(var);
+                self.bind_var(var, &core_var);
+                ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'erlang':'element'(",
+                        leaf::int_lit(i64::try_from(i + slot_offset + 1).unwrap_or(i64::MAX)),
+                        ", ",
+                        leaf::var(result_var.to_string()),
+                        ") in ",
+                    ],
+                    span,
+                )
+            })
+            .collect()
+    }
+
+    /// The merge of each of the conditional's threaded `families` out of the
+    /// case result: one real [`ThreadedStmt::Bind`] per family, in `frame`, so
+    /// a value-type `self.field := ...` write made inside either arm is visible
+    /// to code following the conditional.
+    ///
+    /// `base_arity` is the number of tuple elements ahead of the family slots
+    /// (the locals, plus the value slot in value position).
     ///
     /// ADR 0122 / BT-3513: the trailing-slot pickup this replaced (`next_slot
     /// = all_mutations.len() + 1`, a hand-rolled `element/N` arm) now
@@ -3748,49 +4145,20 @@ impl CoreErlangGenerator {
     /// [`family_slots::extract_family_slots`] itself never performs; see
     /// that function's own doc comment: "a caller mints `target` itself...
     /// BEFORE calling this"), then builds the extraction `Bind`s through
-    /// [`family_slots::extract_family_slots`] and renders them via
-    /// [`render`] — the SAME `let NewCv = element(N, Result) in ` shape,
-    /// just built from typed leaves instead of hand-spliced `Document`s.
-    fn rebind_vt_conditional_mutations(
+    /// [`family_slots::extract_family_slots`] — the SAME `let NewCv =
+    /// element(N, Result) in ` shape, just built from typed leaves instead of
+    /// hand-spliced `Document`s.
+    fn vt_conditional_family_binds(
         &mut self,
-        docs: &mut Vec<Document<'static>>,
-        all_mutations: &[String],
         result_var: &str,
+        base_arity: usize,
         families: &ThreadedFamilies,
         baseline: VtCondBaseline,
+        frame: FrameId,
         span: beamtalk_core::source_analysis::Span,
-    ) {
-        if families.as_slice().is_empty() && all_mutations.len() == 1 {
-            // Single variable, no family threading: case returns the value directly.
-            let var = &all_mutations[0];
-            let core_var = Self::to_core_erlang_var(var);
-            self.bind_var(var, &core_var);
-            docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = ",
-                leaf::var(result_var.to_string()),
-                " in ",
-            ]);
-            return;
-        }
-        // Multiple variables (and/or a threaded family): case returns a tuple,
-        // extract with element/N.
-        for (i, var) in all_mutations.iter().enumerate() {
-            let core_var = Self::to_core_erlang_var(var);
-            self.bind_var(var, &core_var);
-            docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(i + 1).unwrap_or(i64::MAX)),
-                ", ",
-                leaf::var(result_var.to_string()),
-                ") in ",
-            ]);
-        }
+    ) -> Vec<ThreadedStmt> {
         if families.as_slice().is_empty() {
-            return;
+            return Vec::new();
         }
         // mint each family's fresh successor version FIRST (the
         // side-effecting step `family_slots::extract_family_slots` itself
@@ -3821,15 +4189,15 @@ impl CoreErlangGenerator {
                 (
                     prefix.clone(),
                     FamilyVersionStep::new(
-                        VersionedVar::new(prefix.clone(), source_version, FrameId::ROOT),
-                        VersionedVar::new(prefix.clone(), target_version, FrameId::ROOT),
+                        VersionedVar::new(prefix.clone(), source_version, frame),
+                        VersionedVar::new(prefix.clone(), target_version, frame),
                     ),
                 )
             })
             .collect();
         let extraction = family_slots::extract_family_slots(
             result_var,
-            all_mutations.len(),
+            base_arity,
             families,
             |prefix| {
                 steps
@@ -3855,8 +4223,16 @@ impl CoreErlangGenerator {
                 span,
             );
         }
-        let mut ctx = RenderCtx::new(self);
-        docs.push(render(&extraction, &mut ctx));
+        // BT-3821 fault injection: the merge `Bind` the construct declared its family
+        // for is omitted, so the verifier's `ConstructFamilyDropped` is shown to fire
+        // on a real compile (`tests/value_type_conditional_family_verifier_corpus.rs`).
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::DropFamilyBind)
+        {
+            return Vec::new();
+        }
+        extraction
     }
 
     /// Returns true if the class is a non-instantiable primitive type.

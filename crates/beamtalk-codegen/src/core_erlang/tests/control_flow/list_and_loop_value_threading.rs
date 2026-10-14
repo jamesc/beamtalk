@@ -207,17 +207,16 @@ fn test_value_type_field_write_in_nested_loop_is_compile_error() {
 }
 
 #[test]
-fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
-    // This construct's deliberate boundary: the LAST-position conditional path
-    // (`emit_vt_conditional_case_to_var`) and the assignment-RHS path (a
-    // conditional producer since ADR 0131 Phase 3) thread outer LOCALS only,
-    // never `Self` — routing a field write into either would silently drop it
-    // (last position) or emit an `erlc`-rejected reference to a branch-scoped
-    // `Self{N}` (assign RHS). Both are strictly worse than a clean
-    // diagnostic, so
-    // `is_conditional_with_vt_self_field_threading` (and hence
-    // `VtBodyExprKind::ConditionalWithSelfFieldThreading`) is scoped to the
-    // non-last statement position only, and these shapes keep erroring.
+fn test_value_type_field_write_in_last_position_conditional_is_threaded() {
+    // BT-3821: the LAST-position conditional path (`emit_vt_conditional_case_to_var`)
+    // and the assignment-RHS path (a conditional producer since ADR 0131 Phase 3)
+    // thread outer LOCALS only, never `Self` — routing a field write into either
+    // would silently drop it (last position) or emit an `erlc`-rejected reference
+    // to a branch-scoped `Self{N}` (assign RHS). That used to be a clean
+    // `FieldAssignmentInUnsupportedBlock`; a conditional whose arms write a field is
+    // now its own producer (`vt_conditional_value_producer`), which carries the
+    // arm's value and the arms' `Self` merge in its own tuple. The write must be in
+    // the generated function (not dropped), and the method must compile.
     let src = concat!(
         "TestCase subclass: VtCondSelfLast\n",
         "  field: total = 0\n\n",
@@ -226,15 +225,17 @@ fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(&module, CodegenOptions::new("bt@vtcondselflast"));
+    let code = generate_module(&module, CodegenOptions::new("bt@vtcondselflast"))
+        .expect("a value-type field write in a last-position conditional must compile");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "a value-type field write in a LAST-position conditional stays a clean compile \
-         error, not a silent drop. Got: {result:?}"
+        code.contains("'maps':'put'('total'"),
+        "the arm's field write must survive in the generated method. Got:\n{code}"
     );
+    assert!(
+        code.contains("let Self1 = call 'erlang':'element'(2,"),
+        "the arms' Self must be merged out of the tuple, behind the value slot. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@vtcondselflast", &code);
 }
 
 #[test]

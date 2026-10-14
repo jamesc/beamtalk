@@ -455,10 +455,25 @@ pub(in crate::core_erlang) fn build_construct_tuple(
     threads: Vec<String>,
     span: Span,
 ) -> ThreadedStmt {
+    build_family_construct_tuple(carrier, doc, threads, Vec::new(), span)
+}
+
+/// [`build_construct_tuple`] for a construct whose arms advanced the
+/// `families` ([`ThreadedStmt::ConstructTuple`]'s BT-3821 note): the caller
+/// reads them off its arms' version counters, and the verifier requires the
+/// merge `Bind` of each.
+pub(in crate::core_erlang) fn build_family_construct_tuple(
+    carrier: impl Into<String>,
+    doc: Document<'static>,
+    threads: Vec<String>,
+    families: Vec<VersionPrefix>,
+    span: Span,
+) -> ThreadedStmt {
     ThreadedStmt::ConstructTuple {
         carrier: carrier.into(),
         doc,
         threads,
+        families,
         span,
     }
 }
@@ -507,6 +522,32 @@ pub(in crate::core_erlang) fn build_local_threading_prelude(
     locals: &[ThreadedLocalSlot],
     family_binds: Vec<ThreadedStmt>,
     span: Span,
+    lower: impl FnMut(&ThreadedLocalSlot, RebindShape) -> RebindLowering,
+) -> Vec<ThreadedStmt> {
+    build_family_local_threading_prelude(
+        enclosing,
+        carrier,
+        doc,
+        locals,
+        Vec::new(),
+        family_binds,
+        span,
+        lower,
+    )
+}
+
+/// [`build_local_threading_prelude`] for a construct that also declares the
+/// `families` its arms advanced (BT-3821, [`build_family_construct_tuple`]): the
+/// verifier requires `family_binds` to merge each, and one rebind per local.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::core_erlang) fn build_family_local_threading_prelude(
+    enclosing: &RebindFrame,
+    carrier: &str,
+    doc: Document<'static>,
+    locals: &[ThreadedLocalSlot],
+    families: Vec<VersionPrefix>,
+    family_binds: Vec<ThreadedStmt>,
+    span: Span,
     mut lower: impl FnMut(&ThreadedLocalSlot, RebindShape) -> RebindLowering,
 ) -> Vec<ThreadedStmt> {
     let state_first = family_binds.iter().find_map(|stmt| match stmt {
@@ -516,10 +557,11 @@ pub(in crate::core_erlang) fn build_local_threading_prelude(
         _ => None,
     });
     let mut prelude = Vec::with_capacity(1 + family_binds.len() + locals.len());
-    prelude.push(build_construct_tuple(
+    prelude.push(build_family_construct_tuple(
         carrier,
         doc,
         locals.iter().map(|l| l.local.clone()).collect(),
+        families,
         span,
     ));
     prelude.extend(family_binds);

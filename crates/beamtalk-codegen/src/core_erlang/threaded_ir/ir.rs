@@ -817,10 +817,20 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     ///
     /// Built by ADR 0131 Phase 2's local-threading producer
     /// (`lower_local_threading_construct`, BT-3749).
+    ///
+    /// BT-3821: `families` names the `State`/`SelfVt` families the construct's
+    /// own arms or body advanced — read off the arms' version counters, never
+    /// off the extraction that follows — so the verifier
+    /// ([`VerifyError::ConstructFamilyDropped`](super::verify::VerifyError::ConstructFamilyDropped))
+    /// can require the family's merge `Bind` (a `Direct` read of the carrier)
+    /// before the frame moves on. A family advanced inside the tuple's arms
+    /// and not merged is a silent loss: every later statement reads the stale
+    /// pre-construct version. Empty for a construct whose arms advance none.
     ConstructTuple {
         carrier: String,
         doc: Document<'static>,
         threads: Vec<String>,
+        families: Vec<VersionPrefix>,
         span: Span,
     },
 
