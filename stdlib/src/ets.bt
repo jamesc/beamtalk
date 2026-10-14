@@ -207,7 +207,9 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// A block that raises propagates the error and writes nothing. Retries are
   /// bounded; exhaustion raises `update_contention`. Supported on `#set` and
   /// `#orderedSet` only; `#bag` and `#duplicateBag` raise
-  /// `unsupported_table_type`.
+  /// `unsupported_table_type`. Unlike the other `at:` selectors, keys that
+  /// are or contain a `Dictionary`, `#_` or a `#$N` symbol raise `type_error`
+  /// (they cannot be matched exactly by the compare-and-swap).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -274,7 +276,8 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
 
   /// Take a point-in-time snapshot as an immutable `Dictionary`.
   ///
-  /// For `#bag` and `#duplicateBag` tables, only one value per key survives.
+  /// For `#bag` and `#duplicateBag` tables, only one value per key survives:
+  /// the last one read, whereas `at:` answers the first.
   ///
   /// ## Examples
   /// ```beamtalk

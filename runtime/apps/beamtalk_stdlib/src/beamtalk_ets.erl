@@ -41,6 +41,13 @@ Ets objects are represented as tagged maps:
 | `keys:`            | Return all keys as a List                    |
 | `tableSize:`       | Number of entries                            |
 | `deleteTable:`     | Destroy the table                            |
+| `values:`          | All values as a List (snapshot)              |
+| `keysAndValuesDo:` | Iterate a snapshot of key/value pairs        |
+| `asDictionary:`    | Snapshot into an immutable Dictionary        |
+| `ifPresent:key:block:` | Evaluate block with the value if present |
+| `incrementAt:key:by:` | Atomic integer add (set/orderedSet)       |
+| `updateAt:key:block:` | Atomic compare-and-swap update (set/orderedSet) |
+| `removeAll:`       | Remove every entry, keep the table           |
 
 ## References
 
@@ -403,12 +410,9 @@ asDictionary(_Self) ->
 ifPresent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 1)
 ->
-    %% Block runs in the `of` branch so its own badarg is not a stale table.
-    try ets:lookup(TableName, Key) of
+    case guarded(TableName, 'at:ifPresent:', fun() -> ets:lookup(TableName, Key) end) of
         [{_K, Value} | _] -> call_block(Block, [Value], 'at:ifPresent:');
         [] -> nil
-    catch
-        error:badarg -> stale_table_error('at:ifPresent:', TableName)
     end;
 ifPresent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error(
@@ -521,6 +525,8 @@ the operation under a different key).
 """.
 -spec guarded(atom(), atom(), fun(() -> term())) -> term().
 guarded(TableName, Selector, Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is always an internal ETS operation
+    %% closure built in this module, never a Beamtalk block.
     try
         Fun()
     catch
@@ -541,6 +547,8 @@ that keeps the original reason and stacktrace in its details.
 """.
 -spec call_block(function(), [term()], atom()) -> term().
 call_block(Block, Args, Selector) ->
+    %% bt-catcher-audit: not-applicable-reraises - the only catch clause (error:badarg) re-raises
+    %% a structured #beamtalk_error{}; the next boundary restores class variables.
     try
         apply(Block, Args)
     catch
@@ -614,11 +622,7 @@ require_unique_keys(TableName, Selector) ->
 
 -spec entries(atom(), atom()) -> [{term(), term()}].
 entries(TableName, Selector) ->
-    try
-        ets:tab2list(TableName)
-    catch
-        error:badarg -> stale_table_error(Selector, TableName)
-    end.
+    guarded(TableName, Selector, fun() -> ets:tab2list(TableName) end).
 
 %%% ============================================================================
 %%% FFI Shims
