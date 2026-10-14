@@ -2035,8 +2035,7 @@ impl CoreErlangGenerator {
     /// ADR 0131 Phase 2 (BT-3749): at the method root this is the
     /// local-threading producer's job (`lower_root_statement_with_producer`);
     /// the remaining callers are statements inside a conditional branch
-    /// (`build_vt_conditional_branch_value_parts`,
-    /// `build_vt_conditional_value_and_mutations_parts` and the open-branch
+    /// (`build_vt_conditional_branch_value_parts` and the open-branch
     /// builder), branch-arm frames that ADR 0131 Phase 3 (`BranchArm`)
     /// lowers, deleting this.
     ///
@@ -2625,11 +2624,11 @@ impl CoreErlangGenerator {
     /// Deliberately SEPARATE from
     /// [`Self::is_conditional_with_vt_local_threading`] rather than folded
     /// into it: that predicate also routes the LAST-position
-    /// (`emit_vt_conditional_case_to_var`) and assignment-RHS
-    /// (`emit_vt_conditional_assign_rhs`) paths, neither of which threads
-    /// `Self` — a field write reaching either would be silently dropped
-    /// (last position) or emit an `erlc`-rejected reference to a branch-scoped
-    /// `Self{N}` (assign RHS), both strictly worse than the clean
+    /// (`emit_vt_conditional_case_to_var`) path (and, before ADR 0131 Phase 3,
+    /// the assignment-RHS path, now a conditional producer), which does not
+    /// thread `Self` — a field write reaching it would be silently dropped
+    /// (last position) or, as an assign RHS, emit an `erlc`-rejected reference
+    /// to a branch-scoped `Self{N}`, both strictly worse than the clean
     /// `FieldAssignmentInUnsupportedBlock` diagnostic those shapes produce
     /// today (confirmed empirically). This is
     /// scoped to the NON-LAST statement position — the shape its repros

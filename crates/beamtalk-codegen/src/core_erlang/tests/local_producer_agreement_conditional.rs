@@ -207,9 +207,9 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
     out
 }
 
-/// Compares the core rule and codegen for one program, both ways; a program
-/// the Phase 0 checks reject is skipped. Returns the number of producer sites
-/// compared.
+/// Compares the core rule and codegen for one program, both ways. Returns
+/// `None` for a program the Phase 0 checks reject (nothing is compiled or
+/// compared), else the number of producer sites compared.
 fn check_conditional_agreement(src: &str) -> Option<usize> {
     let (module, parse_diags) = parse(lex_with_eof(src));
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
