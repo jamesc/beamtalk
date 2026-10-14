@@ -1352,27 +1352,25 @@ supervisor_strategy(ClassPid) ->
 %% The snapshot walk runs inside a class method, i.e. in a class process, so a
 %% `class_send/3` to the supervisor's class would be a blocking call into another
 %% class process and can deadlock two busy classes against each other. The
-%% compiled method is invoked in this process instead
-%% (`beamtalk_supervisor:class_config_value/2`, the call `static_init/2` makes).
-%% A runtime class-method fun (ADR 0084) that shadows the compiled method is
-%% honoured in-process too, so the snapshot reports what dispatch would. Only
-%% when there is no in-process definition at all may a caller that is NOT a class
-%% process fall back to `class_send/3`.
+%% definition is run in this process instead
+%% (`beamtalk_supervisor:class_config_value/2`), resolved with dispatch's
+%% precedence, so the snapshot reports what a class-side send would answer,
+%% including ADR 0084 runtime overrides. (`static_init/2` / `dynamic_init/2`
+%% configure OTP from the compiled export only; that divergence is tracked in
+%% BT-3832.) Only when there is no in-process definition (`not_found`) may a
+%% caller that is NOT a class process fall back to `class_send/3`; in a class
+%% process that raises. An exception from the method body propagates and is never
+%% re-run through `class_send/3`.
 -spec supervisor_class_config(pid(), atom()) -> term().
 supervisor_class_config(ClassPid, Selector) ->
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
-    try
-        beamtalk_supervisor:class_config_value(ClassName, Selector)
-    catch
-        %% Only "no in-process definition of this method" falls back; any other
-        %% failure is the config method itself failing and must not be re-run
-        %% through `class_send/3`.
-        error:{Reason, _} = Err when
-            Reason =:= class_not_registered; Reason =:= supervisor_init_method_not_found
-        ->
+    case beamtalk_supervisor:class_config_value(ClassName, Selector) of
+        {ok, Value} ->
+            Value;
+        not_found ->
             case get(beamtalk_class_name) of
                 undefined -> beamtalk_object_class:class_send(ClassPid, Selector, []);
-                _InClassProcess -> erlang:error(Err)
+                _InClassProcess -> erlang:error({no_in_process_definition, ClassName, Selector})
             end
     end.
 

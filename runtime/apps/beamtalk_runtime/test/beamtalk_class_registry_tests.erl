@@ -1787,6 +1787,31 @@ bt3826_supervisor_config_honours_runtime_override_test() ->
         gen_server:stop(Pid, normal, 5000)
     end.
 
+%% An error raised from inside a config method body -- even one shaped like the
+%% "no in-process definition" signals -- is the method failing: it must not be
+%% re-run through `class_send/3`.
+bt3826_supervisor_config_body_error_not_rerun_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Calls = counters:new(1, []),
+    persistent_term:put(bt3826_raising_calls, Calls),
+    Name = 'BT3826RaisingSup',
+    {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+        superclass => none,
+        module => beamtalk_bt3826_raising_fixture,
+        class_methods => #{}
+    }),
+    try
+        Obj = beamtalk_class_registry:resolve_class_object(Name),
+        ?assertEqual(
+            {nil, #{maxRestarts => 3, window => 9}},
+            beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Obj)
+        ),
+        ?assertEqual(1, counters:get(Calls, 1))
+    after
+        gen_server:stop(Pid, normal, 5000),
+        persistent_term:erase(bt3826_raising_calls)
+    end.
+
 %% The published reflection facts follow the class through hot-patching, so the
 %% ETS-backed readers never disagree with the class process's own state.
 bt3826_reflection_follows_class_mutation_test() ->
