@@ -2875,3 +2875,83 @@ class_self_direct_ok_test_() ->
             )
         end}
     ]}.
+
+%%====================================================================
+%% BT-3820: not_found fallthrough must not message a stalled class process
+%%====================================================================
+
+%% `class_send_dispatch/3` makes one `class_method_call`; on a miss it used to
+%% make two more 5s-timeout `gen_server:call`s (`class_name`, `module_name`) into
+%% the same class process before falling through to the `Class` chain. The fake
+%% class answers the miss and then stops serving its mailbox, so those calls
+%% would time out. With the ETS-backed lookups the send completes (here with the
+%% expected does_not_understand, `Class` not being registered in this test).
+class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pid_table(),
+            beamtalk_class_metadata:new(),
+            {ok, Pid} = test_stall_after_miss_class:start(),
+            beamtalk_class_registry:record_class_pid(Pid, 'StallAfterMissClass'),
+            beamtalk_class_metadata:insert(
+                'StallAfterMissClass', test_stall_after_miss_class, [], 'Object', false
+            ),
+            Pid
+        end,
+        fun(Pid) ->
+            exit(Pid, kill),
+            ets:delete(beamtalk_class_pids, Pid),
+            beamtalk_class_metadata:delete('StallAfterMissClass')
+        end,
+        fun(Pid) ->
+            [
+                {timeout, 20,
+                    ?_test(begin
+                        Result =
+                            try
+                                beamtalk_class_dispatch:class_send(
+                                    Pid, noSuchInheritedSelector, []
+                                ),
+                                returned
+                            catch
+                                Class:Reason -> {Class, Reason}
+                            end,
+                        %% An `error` (does_not_understand), not an `exit` timeout
+                        %% from a call into the stalled class.
+                        ?assertMatch({error, _}, Result),
+                        {error, Reason1} = Result,
+                        ?assertNotEqual(
+                            nomatch,
+                            string:find(
+                                lists:flatten(io_lib:format("~p", [Reason1])), "does_not_understand"
+                            )
+                        )
+                    end)},
+                {timeout, 20,
+                    ?_test(begin
+                        %% resolve_class_object/1 also answers without messaging the class.
+                        {ok, Pid2} = test_stall_after_miss_class:start(),
+                        beamtalk_class_registry:record_class_pid(Pid2, 'StallResolveClass'),
+                        beamtalk_class_metadata:insert(
+                            'StallResolveClass', test_stall_after_miss_class, [], 'Object', false
+                        ),
+                        ok = sys:suspend(Pid2),
+                        RegName = beamtalk_class_registry:registry_name('StallResolveClass'),
+                        try
+                            true = register(RegName, Pid2),
+                            ?assertMatch(
+                                #beamtalk_object{
+                                    class_mod = test_stall_after_miss_class, pid = Pid2
+                                },
+                                beamtalk_class_registry:resolve_class_object('StallResolveClass')
+                            )
+                        after
+                            catch unregister(RegName),
+                            ok = sys:resume(Pid2),
+                            exit(Pid2, kill),
+                            ets:delete(beamtalk_class_pids, Pid2),
+                            beamtalk_class_metadata:delete('StallResolveClass')
+                        end
+                    end)}
+            ]
+        end}.
