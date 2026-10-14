@@ -244,7 +244,7 @@ remove_class_from_system(ClassName) ->
 
 -spec class_name(pid()) -> atom().
 class_name(Pid) ->
-    beamtalk_object_class:class_name(Pid).
+    beamtalk_object_class:class_name_safe(Pid).
 
 -doc """
 Get the BEAM module name for a class object's pid.

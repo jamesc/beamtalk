@@ -122,7 +122,7 @@ rewritten shape (bare tuple or re-wrapped Result) to the caller.
     | {error, #beamtalk_error{}}.
 startLink(Self) ->
     ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name(ClassPid),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case Module:start_link() of
         {ok, Pid} ->
@@ -230,7 +230,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 -spec current(beamtalk_object()) -> term() | nil.
 current(Self) ->
     ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name(ClassPid),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case whereis(Module) of
         undefined ->
@@ -282,7 +282,7 @@ whichChild(Self, ClassArg) ->
     ClassName = element(2, Self),
     ChildModule = element(3, ClassArg),
     ChildClassPid = element(4, ClassArg),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     with_live_supervisor(ClassName, 'which:', fun() ->
         Children = supervisor:which_children(SupPid),
         case
@@ -350,7 +350,7 @@ terminateChild(Self, Arg) ->
             true ->
                 %% Supervisor case: terminate by class name (the default child id)
                 ChildClassPid = element(4, Arg),
-                ChildId = beamtalk_object_class:class_name(ChildClassPid),
+                ChildId = beamtalk_object_class:class_name_safe(ChildClassPid),
                 handle_terminate_child_result(
                     SupClass,
                     #{child => ChildId},
@@ -445,7 +445,7 @@ startChild(Self) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, startChild, fun() ->
         case supervisor:start_child(SupPid, []) of
@@ -502,7 +502,7 @@ startChild(Self, Args) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, 'startChild:', fun() ->
         case supervisor:start_child(SupPid, [Args]) of
@@ -568,7 +568,7 @@ startChild(Self, Args, Name) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, 'startChild:name:', fun() ->
         case supervisor:start_child(SupPid, [Args, Name]) of
@@ -1136,7 +1136,7 @@ build_child_spec(ClassObj, Mode) when
     case beamtalk_class_registry:is_class_object(ClassObj) of
         true ->
             ChildClassPid = element(4, ClassObj),
-            ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+            ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
             ChildModule = element(3, ClassObj),
             case is_supervisor(ChildClass) of
                 true ->
@@ -1391,7 +1391,7 @@ spec_to_otp(BtSpec, Mode) ->
     ClassObj = lists:nth(1, StartElems),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     OtpStart =
         case is_supervisor(ChildClass) of
             true ->

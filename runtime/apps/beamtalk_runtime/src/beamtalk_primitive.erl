@@ -230,7 +230,7 @@ print_string({beamtalk_future, _} = Future) ->
     print_string(beamtalk_future:await(Future));
 print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
     %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
-    ClassName = beamtalk_object_class:class_name(Pid),
+    ClassName = beamtalk_object_class:class_name_safe(Pid),
     iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
 print_string(#beamtalk_object{class = ClassName} = Obj) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
@@ -337,7 +337,7 @@ display_string(X) when is_list(X) ->
 display_string({beamtalk_future, _} = Future) ->
     display_string(beamtalk_future:await(Future));
 display_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
-    ClassName = beamtalk_object_class:class_name(Pid),
+    ClassName = beamtalk_object_class:class_name_safe(Pid),
     iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
 display_string(#beamtalk_object{class = ClassName} = Obj) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
