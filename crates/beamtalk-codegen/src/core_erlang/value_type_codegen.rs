@@ -3279,11 +3279,19 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        let Some(lowered) = self.lower_vt_conditional(expr, FrameId::ROOT, false)? else {
+        // The frame the caller is lowering in: the method root, or — for a conditional the
+        // producer declines inside a loop body — that body's own branch frame, so the
+        // `Bind`s and `LocalRebind`s recorded here are judged against the frame that
+        // actually encloses them.
+        let frame = self.current_frame();
+        let Some(lowered) = self.lower_vt_conditional(expr, frame, false)? else {
             return Ok(Document::Nil);
         };
-        // The statement form is a method-root prelude like the producer's: verified
-        // (`ConstructFamilyDropped` included) before it is flattened to text.
+        if frame != FrameId::ROOT {
+            return Ok(self.threaded_prelude_doc(&lowered.prelude));
+        }
+        // A method-root prelude like the producer's: verified (`ConstructFamilyDropped`
+        // included) before it is flattened to text.
         Ok(self.verified_root_prelude_doc(&lowered.prelude, expr.span()))
     }
 
@@ -3325,9 +3333,11 @@ impl CoreErlangGenerator {
         let expr = expr.unwrap_parens();
         self.context == CodeGenContext::ValueType
             && !self.in_class_method()
-            // The method-root frame only (`current_frame()` is a loop body's own
-            // branch frame inside one): the producer, its probe mirrors and
+            // The method-root frame only: the producer, its probe mirrors and
             // `statement_has_value_type_producer` all read this one condition.
+            // `current_frame()` is derived from `in_loop_body` (ROOT exactly when it is
+            // unset, the branch frame otherwise), so the loop-body and frame conditions
+            // cannot drift apart: there is one source, not two to keep in step.
             && self.current_frame() == FrameId::ROOT
             && Self::vt_conditional_has_literal_arms(expr)
             && self.is_conditional_with_vt_self_field_threading(expr)
