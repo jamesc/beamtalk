@@ -122,7 +122,7 @@ fn verify_bind_ir_for_test(
 // ── verify_body_with_opaque_version_gaps ──────────────────────────────
 // Pins the whole-Actor-body verification `lower_body_exprs_with_reply`
 // calls once per body: an opaque Statement standing in for a shared
-// multi-module helper (`generate_self_dispatch_call_doc_for`, …) may advance
+// multi-module helper (`emit_super_send_open`, …) may advance
 // `next_state_var`'s counter with no producing Bind of its own in this
 // body's IR — the backfill must close that gap without masking a real
 // regression among the Binds that ARE present.
@@ -137,7 +137,7 @@ fn verify_body_with_opaque_version_gaps_backfills_gap_from_opaque_statement() {
             op: BindOp::Direct(ValueRef::Literal("'_'")),
             span,
         },
-        // Stands in for a shared helper (e.g. `generate_self_dispatch_call_doc_for`)
+        // Stands in for a shared helper (e.g. `emit_super_send_open`)
         // that internally calls `next_state_var()` twice more, advancing
         // State1 -> State3 with no `Bind` of its own in this body's IR.
         ThreadedStmt::Statement(docvec!["<opaque dispatch, mints State2 and State3>"], span),

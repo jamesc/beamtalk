@@ -626,8 +626,9 @@ impl CoreErlangGenerator {
             if self.is_field_assignment(expr) {
                 has_mutations = true;
                 // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
-                // `lower_letrec_body` uses for its field-write statements — `lower_field_assignment_bind`'s doc comment
-                // documents it as byte-identical to
+                // `lower_letrec_body` uses for its field-write statements —
+                // `lower_field_assignment_bind`'s doc comment documents it as
+                // byte-identical to
                 // `generate_field_assignment_open`'s hand-rolled `Document`
                 // (same helper calls, same mint order, including its own
                 // `thread_ahead` step).

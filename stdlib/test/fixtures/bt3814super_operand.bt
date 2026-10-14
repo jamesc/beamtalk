@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3814: a `super` send whose operand is a state-changing self-send must sequence the
+// operand: the dispatch reads the post-operand state and the operand's rebind is kept.
+
+Bt3814SuperBase subclass: Bt3814SuperOperand
+  state: calls = 0
+
+  bump => self.calls := self.calls + 1
+
+  superLast => super addAmount: self bump
+
+  superNonLast =>
+    super addAmount: self bump
+    super addAmount: self bump
+    self.value
+
+  getCalls => self.calls

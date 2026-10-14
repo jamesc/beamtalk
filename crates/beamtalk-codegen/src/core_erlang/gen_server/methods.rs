@@ -644,7 +644,7 @@ impl CoreErlangGenerator {
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
     /// Version steps hidden inside shared multi-module helpers
-    /// (`generate_self_dispatch_call_doc_for`, `emit_super_send_open`,
+    /// (`emit_super_send_open`,
     /// `generate_tier2_self_send_open`, `generate_field_assignment_open`,
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
