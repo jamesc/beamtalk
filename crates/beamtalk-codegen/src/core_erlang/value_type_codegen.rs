@@ -1467,16 +1467,17 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body_len - 1;
-            // BT-3830: `is_vt_field_conditional_producer` unwraps parens but
-            // `classify_vt_body_expr` does not. A NON-last parenthesised producer is the
-            // bare statement (its value is discarded either way), so classify and emit the
-            // unwrapped node: both then agree on the statement form, rather than the
-            // classifier calling it `Pure` and the emitter rejecting its field write.
-            let expr = if !is_last && self.is_vt_field_conditional_producer(expr) {
-                expr.unwrap_parens()
-            } else {
-                expr
-            };
+            // BT-3830: INVARIANT - classification and emission see the same node.
+            // `classify_vt_body_expr` and most of its predicates do not look through
+            // parentheses, while others (`is_vt_field_conditional_producer`) do, so a
+            // parenthesised statement was classified `Pure` while its bare form got a
+            // threading kind: `(t := t + 1)` and `([t < 3] whileTrue: [t := t + 1])` dropped
+            // the local write, `(self.m := 5)` trapped its `Self` rebind in a closed
+            // expression. A NON-last statement's value is discarded, so `(s)` is exactly
+            // `s`: unwrap it once here, for every kind. The last statement is the method
+            // value (a bare last field assignment answers the updated `Self`, a
+            // parenthesised one its value), so it is left as written.
+            let expr = if is_last { expr } else { expr.unwrap_parens() };
             let kind = self.classify_vt_body_expr(expr);
 
             // ADR 0131 Phase 2: a local-threading producer in this statement

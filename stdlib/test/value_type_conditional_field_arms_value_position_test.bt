@@ -33,6 +33,20 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
     (self.n > 3 ifTrue: [self.m := 1] ifFalse: [0])
     self.m + 10
 
+  parenthesisedLocalAssignment =>
+    t := 0
+    (t := t + 1)
+    t
+
+  parenthesisedWhileWritesLocal =>
+    t := 0
+    ([t < 3] whileTrue: [t := t + 1])
+    t
+
+  parenthesisedFieldAssignment =>
+    (self.m := 5)
+    self.m
+
   earlyExitInArm =>
     r := self take: (self.n > 3 ifTrue: [^11] ifFalse: [self.m := 2])
     r + self.m
@@ -144,6 +158,17 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
 
   testParenthesisedNonLastConditionalNotTakenLeavesTheField =>
     self assert: self parenthesisedNonLastNotTaken equals: 10
+
+  // BT-3830: parenthesised NON-last statements lower exactly like their bare form; before the fix
+  // the first two silently dropped the local write and the third lost its field write.
+  testParenthesisedLocalAssignmentKeepsTheWrite =>
+    self assert: self parenthesisedLocalAssignment equals: 1
+
+  testParenthesisedWhileKeepsTheLocalWrite =>
+    self assert: self parenthesisedWhileWritesLocal equals: 3
+
+  testParenthesisedFieldAssignmentKeepsTheWrite =>
+    self assert: self parenthesisedFieldAssignment equals: 5
 
   testReturnedValueAndWrite => self assert: self returned equals: 1
 

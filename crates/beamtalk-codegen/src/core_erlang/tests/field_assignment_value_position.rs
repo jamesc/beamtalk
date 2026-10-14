@@ -708,3 +708,81 @@ fn value_type_field_assignment_in_construct_operands_and_block_values_compiles()
         );
     }
 }
+
+/// BT-3830: a NON-last statement's value is discarded, so `(s)` must lower exactly like `s`.
+///
+/// **Invariant:** the value-type body classifier and emitter see the same node for a
+/// parenthesised non-last statement. Before the fix `classify_vt_body_expr` (which does not look
+/// through parentheses) called these `Pure` while the bare forms got a threading kind:
+/// `(t := t + 1)` and `([t < 3] whileTrue: [t := t + 1])` silently dropped the local write (the
+/// later `t` read the pre-statement value) and `(self.m := 5)` trapped its `Self` rebind in a
+/// closed expression (a verifier finding in debug builds, a lost write in release builds).
+///
+/// Pinned per form: both spellings reach the same outcome AND generate the same function, so the
+/// parenthesised one cannot diverge (silently or otherwise) from the bare one.
+#[test]
+fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
+    fn summary(r: &Result<Option<String>, String>) -> String {
+        match r {
+            Ok(Some(_)) => "compiles".to_string(),
+            Ok(None) => "rejected".to_string(),
+            Err(why) => format!("FAILS ({})", why.lines().next().unwrap_or("")),
+        }
+    }
+
+    // `(form, expected outcome of BOTH spellings)`: `true` compiles, `false` is a clean rejection.
+    let forms: &[(&str, bool)] = &[
+        ("c ifTrue: [self.m := 1] ifFalse: [0]", true),
+        ("c ifTrue: [self.m := 1] ifFalse: [t]", true),
+        ("c ifTrue: [t := t + 1]", true),
+        ("c ifTrue: [t := t + 1. self.m := 1] ifFalse: [0]", true),
+        ("c ifTrue: [t := t + 1] ifFalse: [t := t + 2]", true),
+        ("[self.m := 1] on: Error do: [:e | 0]", true),
+        ("[self.m := 1. t := t + 1] on: Error do: [:e | 0]", true),
+        ("[self.m := 1] ensure: [0]", true),
+        ("#(1, 2) do: [:e | t := t + e]", true),
+        // A field-writing `do:` body is not threaded in a value type at all (see
+        // `VT_UNSUPPORTED_FIELD_WRITING_BODIES`): a structured rejection in both spellings.
+        ("#(1, 2) do: [:e | self.m := e]", false),
+        ("1 to: 3 do: [:i | t := t + i]", true),
+        ("[t < 3] whileTrue: [t := t + 1]", true),
+        ("3 timesRepeat: [t := t + 1]", true),
+        ("#(1, 2) inject: 0 into: [:a :e | t := t + e. a + e]", true),
+        ("self.m := 5", true),
+        ("t := t + 1", true),
+    ];
+    let lower = |k: usize, stmt: &str| {
+        let src = format!(
+            "{VT_HEADER}\n  probe{k} =>\n    t := 0\n    c := self.n >= 0\n    {stmt}\n    t + self.m\n"
+        );
+        match vt_outcome(&src) {
+            VtOutcome::Compiles(code) => {
+                if let Err(why) = written_fields_survive(&src, k, &code) {
+                    return Err(format!("{why}\n{src}"));
+                }
+                let fn_code = code
+                    .split_once(&format!("'probe{k}'/1 = fun"))
+                    .map_or("", |(_, rest)| rest.split("\n'").next().unwrap_or(rest))
+                    .to_string();
+                Ok(Some(fn_code))
+            }
+            VtOutcome::RejectedCleanly => Ok(None),
+            VtOutcome::Fails(why) => Err(format!("{why}\n{src}")),
+        }
+    };
+    let mut problems = Vec::new();
+    for (k, (form, compiles)) in forms.iter().enumerate() {
+        let bare = lower(k, form);
+        let paren = lower(k, &format!("({form})"));
+        match (&bare, &paren) {
+            (Ok(Some(b)), Ok(Some(p))) if *compiles && b == p => {}
+            (Ok(None), Ok(None)) if !*compiles => {}
+            _ => problems.push(format!(
+                "`{form}`: bare {} / parenthesised {}",
+                summary(&bare),
+                summary(&paren)
+            )),
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
