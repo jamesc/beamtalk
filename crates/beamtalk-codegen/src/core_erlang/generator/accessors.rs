@@ -55,6 +55,37 @@ impl CoreErlangGenerator {
         self.repl_context_mut().repl_loop_mutated = value;
     }
 
+    /// Marks `site` as the expression the REPL root unpacks a construct tuple
+    /// from ([`ReplContext::repl_unpack_site`]), returning the previous mark.
+    pub(in crate::core_erlang) fn set_repl_unpack_site(
+        &mut self,
+        site: Option<Span>,
+    ) -> Option<Span> {
+        std::mem::replace(&mut self.repl_context_mut().repl_unpack_site, site)
+    }
+
+    /// The span of the expression the REPL root unpacks a construct tuple from
+    /// when it compiles `expr`: `expr` itself (parentheses peeled), or the
+    /// value of an identifier assignment, which compiles to just its value.
+    pub(in crate::core_erlang) fn repl_unpack_span(expr: &beamtalk_core::ast::Expression) -> Span {
+        use beamtalk_core::ast::Expression;
+        match expr.unwrap_parens() {
+            Expression::Assignment { target, value, .. }
+                if matches!(target.as_ref(), Expression::Identifier(_)) =>
+            {
+                value.unwrap_parens().span()
+            }
+            other => other.span(),
+        }
+    }
+
+    /// Whether `span` is the REPL root's unpack site.
+    pub(in crate::core_erlang) fn is_repl_unpack_site(&self, span: Span) -> bool {
+        self.repl_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.repl_unpack_site == Some(span))
+    }
+
     /// Returns a mutable reference to the REPL context, creating it if absent.
     pub(in crate::core_erlang) fn repl_context_mut(&mut self) -> &mut ReplContext {
         self.repl_context.get_or_insert_with(ReplContext::new)

@@ -567,7 +567,9 @@ fn analyze_expression(
             // context are considered captured from the method scope. This prevents
             // variables introduced within the outer block body (e.g. `newI := i + 1`
             // before an `ifTrue: [^newI]`) from being misclassified as outer captures.
-            if is_inline_propagating_selector(&selector_name) {
+            if is_inline_propagating_selector(&selector_name)
+                || is_result_try_do(receiver, &selector_name)
+            {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
                         propagate_inline_block_writes(block, analysis, ctx);
@@ -839,13 +841,30 @@ fn is_exception_selector_name(selector_name: &str) -> bool {
 /// affect the enclosing scope: `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`
 /// (via [`crate::state_threading_selectors::is_conditional_selector`]), plus
 /// `on:do:`/`ensure:` (their non-receiver block arguments — e.g.
-/// `on:do:`'s handler — are inline for the same reason as the receiver), and
-/// (ADR 0131 Phase 4, BT-3750) `tryDo:`, whose block runs in the enclosing
-/// activation as a frame of its own that threads its writes back.
+/// `on:do:`'s handler — are inline for the same reason as the receiver).
+/// `Result tryDo:` is receiver-dependent: see [`is_result_try_do`].
 fn is_inline_propagating_selector(selector_name: &str) -> bool {
     crate::state_threading_selectors::is_conditional_selector(selector_name)
         || is_exception_selector_name(selector_name)
-        || crate::state_threading_selectors::is_try_do_selector(selector_name)
+}
+
+/// ADR 0131 Phase 4 (BT-3750): whether `receiver selector_name:` is
+/// `Result tryDo:`, the only `tryDo:` that compiles to
+/// `beamtalk_result:'tryDo:'/2` and so threads its block's writes. The one
+/// receiver-aware check [`exception_arm_blocks`] and every analysis that
+/// treats the block as inline read; a `tryDo:` sent to any other receiver is
+/// an ordinary send whose block is a closure.
+#[must_use]
+pub fn is_result_try_do(receiver: &Expression, selector_name: &str) -> bool {
+    crate::state_threading_selectors::is_try_do_selector(selector_name)
+        && matches!(
+            receiver,
+            Expression::ClassReference {
+                name,
+                package: None,
+                ..
+            } if name.name == "Result"
+        )
 }
 
 /// Propagates a nested inline-compiled block's mutation
@@ -1546,15 +1565,10 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
         }
         // Only the `Result` class lowers to `beamtalk_result:'tryDo:'/2`: any
         // other receiver keeps its own `tryDo:` and a dynamic send.
-        LocalThreadingFamily::TryDo => match (receiver.as_ref(), arguments.as_slice()) {
-            (
-                Expression::ClassReference {
-                    name,
-                    package: None,
-                    ..
-                },
-                [Expression::Block(body)],
-            ) if name.name == "Result" => Some(vec![body]),
+        LocalThreadingFamily::TryDo => match arguments.as_slice() {
+            [Expression::Block(body)] if is_result_try_do(receiver, &construct.selector) => {
+                Some(vec![body])
+            }
             _ => None,
         },
         _ => None,
@@ -3507,6 +3521,42 @@ mod tests {
             .into_iter()
             .map(|w| w.name.to_string())
             .collect()
+    }
+
+    #[test]
+    fn only_result_try_do_is_an_exception_producer_and_an_inline_propagating_send() {
+        // ADR 0131 Phase 4 (BT-3750): the one receiver-aware check.
+        let result = parse_first_expr("Result tryDo: [t := t + 1. 1]");
+        assert!(exception_arm_blocks(&result).is_some());
+        assert_eq!(
+            exception_producer_writes(&result, &|n| n == "t", RootMethodKind::Class)
+                .map(|w| w.len()),
+            Some(1)
+        );
+        for src in [
+            "Set tryDo: [t := t + 1. 1]",
+            "r tryDo: [t := t + 1. 1]",
+            "self tryDo: [t := t + 1. 1]",
+        ] {
+            let expr = parse_first_expr(src);
+            assert!(exception_arm_blocks(&expr).is_none(), "{src}");
+            assert!(
+                exception_producer_writes(&expr, &|n| n == "t", RootMethodKind::Class).is_none(),
+                "{src}"
+            );
+            // And its block is a closure: the write is not the enclosing
+            // block's own.
+            let outer = parse_first_expr(&format!("[:k | {src}]"));
+            let Expression::Block(block) = &outer else {
+                panic!("block")
+            };
+            assert!(analyze_block(block).local_writes.is_empty(), "{src}");
+        }
+        let outer = parse_first_expr("[:k | Result tryDo: [t := t + 1. 1]]");
+        let Expression::Block(block) = &outer else {
+            panic!("block")
+        };
+        assert!(analyze_block(block).local_writes.contains("t"));
     }
 
     #[test]

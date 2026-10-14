@@ -746,12 +746,6 @@ fn allow_set_repl_uses_its_own_row() {
 // The ADR 0131 probe matrix (stdlib/test/adr0131local_rebind_test.bt)
 // ---------------------------------------------------------------------------
 
-/// PIN-BUG BT-3743: every method in the inert `*_pending.bt.pending` probe
-/// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
-/// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
-/// compile moves it out of the pending fixture (and its test into
-/// `adr0131local_rebind_test.bt`), which keeps this green; phase 5 (BT-3751)
-/// deletes the allow-set and with it the pending allow-set shapes.
 // ---------------------------------------------------------------------------
 // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` as a local-threading producer
 // ---------------------------------------------------------------------------
@@ -811,6 +805,12 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     assert!(adr0131_diagnostics(&src).is_empty());
 }
 
+/// PIN-BUG BT-3743: every method in the inert `*_pending.bt.pending` probe
+/// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
+/// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
+/// compile moves it out of the pending fixture (and its test into
+/// `adr0131local_rebind_test.bt`), which keeps this green; phase 5 (BT-3751)
+/// deletes the allow-set and with it the pending allow-set shapes.
 #[test]
 fn adr0131_probe_matrix_pins() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");

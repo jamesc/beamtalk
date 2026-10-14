@@ -1091,7 +1091,10 @@ impl CoreErlangGenerator {
         let enclosing = self.repl_loop_mutated();
         self.set_repl_loop_mutated(false);
         let source_version = self.state_version();
-        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr))?;
+        let previous = self.set_repl_unpack_site(Some(Self::repl_unpack_span(expr)));
+        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr));
+        self.set_repl_unpack_site(previous);
+        let doc = doc?;
         let yields_tuple = self.repl_loop_mutated();
         self.set_repl_loop_mutated(enclosing);
         if !yields_tuple {
