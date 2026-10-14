@@ -114,3 +114,61 @@ fn a_dropped_family_merge_is_reported_for_every_field_writing_arm_conditional() 
     }
     assert!(unreported.is_empty(), "{}", unreported.join("\n\n"));
 }
+
+/// Programs whose conditional arms rebind an outer local AND write a field: the construct
+/// declares the local in `threads` and the verifier sees its `LocalRebind`.
+fn mixed_local_and_field_programs() -> Vec<(String, String)> {
+    programs()
+        .into_iter()
+        // `conditional_condition` splices the multi-statement position into parentheses,
+        // which is not a program (no local `t` is ever bound).
+        .filter(|(name, _)| {
+            name.ends_with("conditional_field_and_local_arms")
+                && !name.starts_with("conditional_condition")
+        })
+        .collect()
+}
+
+#[test]
+fn a_dropped_local_rebind_of_a_mixed_conditional_is_reported() {
+    let cases = mixed_local_and_field_programs();
+    assert!(cases.len() >= 4, "only {} mixed cases", cases.len());
+    let mut unreported = Vec::new();
+    for (name, src) in cases {
+        match verifier_report(&src, Some(LocalRebindFault::DropRebind)) {
+            Some(report) if report.contains("ThreadedLocalDropped") => {}
+            other => unreported.push(format!("{name}: {other:?}\n{src}")),
+        }
+    }
+    assert!(unreported.is_empty(), "{}", unreported.join("\n\n"));
+}
+
+/// The producer's gate admits the method-root frame only, and the probe mirrors read the same
+/// gate: inside loop / exception bodies a field-writing-arm conditional is a structured
+/// rejection, never an internal error from a producer asked to lower in another frame.
+#[test]
+fn field_writing_arm_conditionals_in_non_root_frames_are_rejected_not_internal_errors() {
+    use super::field_assignment_value_position::{VtOutcome, vt_outcome};
+    let mut checked = 0;
+    for (shape_name, shape, may_reject) in VT_SHAPES {
+        if !*may_reject {
+            continue;
+        }
+        for (i, (position_name, position)) in VT_POSITIONS.iter().enumerate() {
+            if !has_field_writing_arm(position) {
+                continue;
+            }
+            let stmt = position.replace("EXPR", "(self.n := 5)");
+            let src = format!(
+                "{VT_HEADER}\n  probe{i} =>\n{}",
+                shape.replace("STMT", &stmt)
+            );
+            assert!(
+                !matches!(vt_outcome(&src), VtOutcome::Fails(_)),
+                "{shape_name} / {position_name} must compile or be rejected cleanly:\n{src}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "only {checked} non-root cases checked");
+}

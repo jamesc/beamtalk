@@ -459,7 +459,7 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
     ("block_value", "    [STMT] value.\n    self.n\n", false),
 ];
 
-enum VtOutcome {
+pub(super) enum VtOutcome {
     /// Compiled through `erlc`; carries the generated Core Erlang.
     Compiles(String),
     /// A structured value-type diagnostic: the construct is rejected, not miscompiled.
@@ -473,7 +473,7 @@ enum VtOutcome {
 /// `report_threaded_ir_verify_errors` (caught here), a release build only attaches an
 /// `internal:` warning, which `generate_module_surfacing_verifier` returns and this reports.
 /// `erlc` rejection is a failure only when `erlc` exists (see [`erlc_available`]).
-fn vt_outcome(src: &str) -> VtOutcome {
+pub(super) fn vt_outcome(src: &str) -> VtOutcome {
     use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
