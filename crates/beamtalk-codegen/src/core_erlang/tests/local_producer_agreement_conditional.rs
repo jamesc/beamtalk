@@ -210,7 +210,7 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
 /// Compares the core rule and codegen for one program, both ways; a program
 /// the Phase 0 checks reject is skipped. Returns the number of producer sites
 /// compared.
-fn check_conditional_agreement(src: &str) -> usize {
+fn check_conditional_agreement(src: &str) -> Option<usize> {
     let (module, parse_diags) = parse(lex_with_eof(src));
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     let analysis = analyse_full(&module, AnalysisContext::default());
@@ -225,7 +225,7 @@ fn check_conditional_agreement(src: &str) -> usize {
             )
     });
     if rejected {
-        return 0;
+        return None;
     }
     let class = &module.classes[0];
     let method = class
@@ -281,7 +281,7 @@ fn check_conditional_agreement(src: &str) -> usize {
             );
         }
     }
-    checked
+    Some(checked)
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn every_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     for construct in CONDITIONALS {
         for position in POSITIONS.iter().chain(CONDITIONAL_POSITIONS) {
             for src in sources(construct, position) {
-                checked += check_conditional_agreement(&src);
+                checked += check_conditional_agreement(&src).unwrap_or(0);
             }
         }
     }
@@ -307,7 +307,7 @@ fn every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
         for construct in ARM_CONSTRUCTS {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
-                    checked += check_conditional_agreement(&src);
+                    checked += check_conditional_agreement(&src).unwrap_or(0);
                 }
             }
         }
@@ -364,24 +364,29 @@ const NON_PRODUCER_CONDITIONALS: &[&str] = &[
 
 #[test]
 fn conditionals_that_are_not_producers_agree_with_the_core_rule_in_every_context() {
-    let mut checked = 0;
+    // Programs compiled and compared (not rejected by Phase 0), per context:
+    // class, value type, actor.
+    let mut compiled = [0usize; 3];
     for construct in NON_PRODUCER_CONDITIONALS {
         for position in POSITIONS
             .iter()
             .chain(CONDITIONAL_POSITIONS)
             .filter(|p| !p.contains("super") && !p.contains(".blk"))
         {
-            for src in sources(construct, position) {
-                checked += check_conditional_agreement(&src);
+            for (i, src) in sources(construct, position).iter().enumerate() {
+                compiled[i] += usize::from(check_conditional_agreement(src).is_some());
             }
         }
     }
-    assert!(checked > 0, "no accepted program compared");
+    assert!(
+        compiled.iter().all(|&n| n >= 20),
+        "programs compiled and compared per context (class, value, actor): {compiled:?}"
+    );
 }
 
 #[test]
 fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
-    let mut checked = 0;
+    let mut compiled = 0;
     for construct in ACTOR_NON_PRODUCER_CONDITIONALS {
         // (A `super` send's argument that carries a field write trips the
         // verifier's `StateEffectEscapesExpression` on main as well, a
@@ -392,8 +397,11 @@ fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
             .filter(|p| !p.contains("super"))
         {
             let [_, _, actor] = sources(construct, position);
-            checked += check_conditional_agreement(&actor);
+            compiled += usize::from(check_conditional_agreement(&actor).is_some());
         }
     }
-    assert!(checked > 0, "no accepted program compared");
+    assert!(
+        compiled >= 20,
+        "only {compiled} actor programs compiled and compared"
+    );
 }

@@ -488,6 +488,15 @@ impl CoreErlangGenerator {
         self.threaded_expression(receiver, frame)
     }
 
+    /// Whether a conditional in `frame` is lowered as a local-threading
+    /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
+    /// `frame` is the method root or a registered `BranchArm` frame
+    /// ([`Self::is_conditional_producer_frame`]), and it is not the REPL. The one
+    /// predicate for both the arm frames and the `LocalRebind`s.
+    fn lowers_as_conditional_producer(&self, frame: FrameId, producer: bool) -> bool {
+        producer && self.is_conditional_producer_frame(frame) && !self.is_repl_mode()
+    }
+
     /// The `BranchArm` frame the arms of a conditional producer are lowered
     /// as (ADR 0131 §2): the construct's seeded set, for a conditional
     /// producer at the method root or in another conditional producer's arm (a
@@ -498,12 +507,10 @@ impl CoreErlangGenerator {
     /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
     /// unpack their own tuples).
     fn conditional_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
-        (producer
-            && self.is_conditional_producer_frame(self.current_frame())
-            && !self.is_repl_mode())
-        .then(|| ArmFrame {
-            threads: self.branch_threaded_locals(blocks),
-        })
+        self.lowers_as_conditional_producer(self.current_frame(), producer)
+            .then(|| ArmFrame {
+                threads: self.branch_threaded_locals(blocks),
+            })
     }
 
     /// One arm of a conditional producer: a `BranchArm` frame
@@ -622,8 +629,7 @@ impl CoreErlangGenerator {
         // The method root and a registered `BranchArm` frame lower the
         // construct's `LocalRebind`s; a loop or fold frame's consumer re-reads
         // its own locals.
-        let rebinds_locals =
-            producer && self.is_conditional_producer_frame(frame) && !self.is_repl_mode();
+        let rebinds_locals = self.lowers_as_conditional_producer(frame, producer);
         let locals = if rebinds_locals {
             self.branch_threaded_locals(arms)
         } else {
