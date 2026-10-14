@@ -13,6 +13,7 @@
 use std::fmt::Write as _;
 
 use super::sequencing::PrecompiledScope;
+use super::threaded_expr::ProducerTail;
 use super::threaded_ir::{
     FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
 };
@@ -374,6 +375,16 @@ impl CoreErlangGenerator {
         // ifFalse: [0])`).
         if let Some(tv) = self.inline_control_flow_producer(inner)? {
             return Ok(tv);
+        }
+
+        // ADR 0131 §1 (Phase 3b, BT-3817): an `on:do:`/`ensure:` that writes an
+        // outer local is a producer at the method root and in an arm frame,
+        // whatever position it sits in (its protected body, handler and cleanup
+        // are `BranchArm` frames).
+        if self.exception_producer_in_frame(inner) {
+            if let Some(tv) = self.exception_producer_value(inner, ProducerTail::Rebind, frame)? {
+                return Ok(tv);
+            }
         }
 
         // ADR 0130: a class-method context's own producer — a class-variable
@@ -931,6 +942,10 @@ impl CoreErlangGenerator {
         // ADR 0118 phase 4: mirrors `threaded_expression`'s new
         // inline-control-flow producer branch — see its doc comment.
         if all_producers && self.inline_control_flow_needs_threading(inner) {
+            return true;
+        }
+        // ADR 0131 Phase 3b: mirrors `threaded_expression`'s exception producer.
+        if self.exception_producer_in_frame(inner) {
             return true;
         }
         // ADR 0118 phase 5b: mirrors `threaded_expression`'s

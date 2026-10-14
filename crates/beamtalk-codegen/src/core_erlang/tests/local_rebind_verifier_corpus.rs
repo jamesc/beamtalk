@@ -173,3 +173,84 @@ fn a_map_put_rebind_in_a_direct_params_loop_body_is_local_rebind_mode_mismatch()
         "{report}\n{src}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 3b (BT-3817): the same checks on `on:do:` / `ensure:`
+// producers, at the method root and in the frames they open or sit in (a
+// conditional arm, a loop body, the protected body of another exception).
+// ---------------------------------------------------------------------------
+
+/// The §1a probe shape with an exception as the right operand, at the method
+/// root and as a statement of each frame kind.
+fn exception_programs() -> Vec<String> {
+    let mut out = Vec::new();
+    for (frame, stmt) in [
+        (
+            "{s}",
+            "r := t + ([t := t + 1. 5] on: Error do: [:e | t := 9. 0])",
+        ),
+        ("{s}", "r := t + ([t := t + 1. 5] ensure: [t := t + 10])"),
+        (
+            "(u < 3) ifTrue: [{s}]",
+            "r := t + ([t := t + 1. 5] ensure: [nil])",
+        ),
+        (
+            "1 to: 2 do: [:i | {s}]",
+            "r := t + ([t := t + 1. 5] ensure: [nil])",
+        ),
+        (
+            "[[1] ensure: [nil]. {s}] on: Error do: [:e | 0]",
+            "r := t + ([t := t + 1. 5] on: Error do: [:e | 0])",
+        ),
+    ] {
+        let body = format!(
+            "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
+            frame.replace("{s}", stmt)
+        );
+        out.push(format!(
+            "Object subclass: ExcCorpusClass\n  class go =>\n{body}"
+        ));
+        out.push(format!("Value subclass: ExcCorpusValue\n  go =>\n{body}"));
+        out.push(format!(
+            "Actor subclass: ExcCorpusActor\n  state: n = 0\n\n  go =>\n{body}"
+        ));
+    }
+    out
+}
+
+fn assert_exception_reports(fault: LocalRebindFault, error: &str) {
+    for src in exception_programs() {
+        let report = verifier_report(&src, fault)
+            .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
+        assert!(
+            report.contains(error),
+            "{fault:?} should be reported as {error}, got: {report}\n{src}"
+        );
+    }
+}
+
+#[test]
+fn the_unbroken_exception_producer_compiles_and_snapshots_the_left_operand() {
+    for src in exception_programs() {
+        let code = codegen(&src);
+        assert!(code.contains("let _Tmp"), "{src}\n{code}");
+    }
+}
+
+#[test]
+fn an_exception_sibling_read_in_place_is_local_read_after_sibling_rebind() {
+    assert_exception_reports(
+        LocalRebindFault::SkipSiblingSnapshot,
+        "LocalReadAfterSiblingRebind",
+    );
+}
+
+#[test]
+fn an_exception_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
+    assert_exception_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+}
+
+#[test]
+fn an_exception_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
+    assert_exception_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+}

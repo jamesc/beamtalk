@@ -241,3 +241,79 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testStArmWhileActor =>
     self assert: ((Adr0131LocalRebindActor spawn) stArmWhile: true) equals: 2
+
+  // ADR 0131 Phase 3b (BT-3817): `on:do:`/`ensure:` as local-threading producers.
+  testO1Class => self assert: (Adr0131LocalRebindClass o1) equals: #[2, 1]
+
+  testO1Value => self assert: ((Adr0131LocalRebindValue new) o1) equals: #[2, 1]
+
+  testO1Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o1) equals: #[2, 1]
+
+  testO2Class => self assert: (Adr0131LocalRebindClass o2) equals: #[2, 2]
+
+  testO2Value => self assert: ((Adr0131LocalRebindValue new) o2) equals: #[2, 2]
+
+  testO2Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o2) equals: #[2, 2]
+
+  testO5Class => self assert: (Adr0131LocalRebindClass o5) equals: #[1, 1]
+
+  testO5Value => self assert: ((Adr0131LocalRebindValue new) o5) equals: #[1, 1]
+
+  testO6Class => self assert: (Adr0131LocalRebindClass o6: true) equals: #[1, 1]
+
+  testO6Value =>
+    self assert: ((Adr0131LocalRebindValue new) o6: true) equals: #[1, 1]
+
+  testO6Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o6: true) equals: #[1, 1]
+
+  testO7Class =>
+    self assert: (Adr0131LocalRebindClass o7: false) equals: #[7, 1]
+
+  testO7Value =>
+    self assert: ((Adr0131LocalRebindValue new) o7: false) equals: #[7, 1]
+
+  testO7Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o7: false) equals: #[7, 1]
+
+  testO8Class =>
+    self assert: (Adr0131LocalRebindClass o8: false) equals: #[2, 1]
+
+  testO8Value =>
+    self assert: ((Adr0131LocalRebindValue new) o8: false) equals: #[2, 1]
+
+  testO8Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o8: false) equals: #[2, 1]
+
+  testO9Class => self assert: (Adr0131LocalRebindClass o9) equals: 2
+
+  testO9Value => self assert: ((Adr0131LocalRebindValue new) o9) equals: 2
+
+  testO9Actor => self assert: ((Adr0131LocalRebindActor spawn) o9) equals: 2
+
+  testO10Class => self assert: (Adr0131LocalRebindClass o10: true) equals: 2
+
+  testO10Value =>
+    self assert: ((Adr0131LocalRebindValue new) o10: true) equals: 2
+
+  testO10Actor =>
+    self assert: ((Adr0131LocalRebindActor spawn) o10: true) equals: 2
+
+  testSeqClass => self assert: (Adr0131LocalRebindClass seq) equals: #[1, 1]
+
+  testSeqValue =>
+    self assert: ((Adr0131LocalRebindValue new) seq) equals: #[1, 1]
+
+  testSeqActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) seq) equals: #[1, 1]
+
+  testStProtectedDoClass =>
+    self assert: (Adr0131LocalRebindClass stProtectedDo) equals: 3
+
+  testStProtectedDoValue =>
+    self assert: ((Adr0131LocalRebindValue new) stProtectedDo) equals: 3
+
+  testStProtectedDoActor =>
+    self assert: ((Adr0131LocalRebindActor spawn) stProtectedDo) equals: 3

@@ -140,16 +140,14 @@ pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
     let Expression::Assignment { target, .. } = expr else {
         return None;
     };
-    let Expression::FieldAccess {
-        receiver, field, ..
-    } = target.as_ref()
-    else {
+    let Expression::FieldAccess { field, .. } = target.as_ref() else {
         return None;
     };
-    let Expression::Identifier(recv_id) = receiver.as_ref() else {
-        return None;
-    };
-    (recv_id.name == "self").then(|| field.name.as_str())
+    // The `self.<field>` shape is the core rule's (`is_self_field_target`),
+    // which `exception_producer_writes` reads for a field-only value-type
+    // exception.
+    beamtalk_core::semantic_analysis::block_facts::is_self_field_target(target)
+        .then(|| field.name.as_str())
 }
 
 /// BT-3493: `Some` of the field write nested one level inside a local
@@ -188,17 +186,14 @@ fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method {
         return false;
     }
-    if let Expression::Assignment { target, .. } = expr {
-        if let Expression::FieldAccess {
-            receiver, field, ..
-        } = target.as_ref()
-        {
-            if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                return recv_id.name == "self" && ctx.class_var_names.contains(field.name.as_str());
-            }
-        }
-    }
-    false
+    let Expression::Assignment { target, .. } = expr else {
+        return false;
+    };
+    let Expression::FieldAccess { field, .. } = target.as_ref() else {
+        return false;
+    };
+    beamtalk_core::semantic_analysis::block_facts::is_self_field_target(target)
+        && ctx.class_var_names.contains(field.name.as_str())
 }
 
 /// Checks if an expression is a self-send to a class method,

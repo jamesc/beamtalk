@@ -152,9 +152,13 @@ u
 // => 1
 
 // `on:do:` and `ensure:` that write an outer local as an assignment's whole
-// value are still rejected by the analyser (BT-3743), before codegen.
+// value keep their writes (ADR 0131 Phase 3b, BT-3817). They were rejected by
+// the analyser until then.
 t := 0. u := 0. r := [u := u + 1. 5] on: Error do: [:e | 0]. #[r, u]
-// => ERROR: `on:do:` writes outer local `u`
+// => #[5, 1]
 
 t := 0. u := 0. r := [u := u + 1. 5] ensure: [u := u + 10]
-// => ERROR: `ensure:` writes outer local `u`
+// => 5
+
+u
+// => 11

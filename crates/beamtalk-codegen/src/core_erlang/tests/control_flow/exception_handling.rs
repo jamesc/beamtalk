@@ -102,8 +102,11 @@ fn test_value_type_field_write_only_ensure_is_not_sequenced_away() {
     let code = generate_module(&module, CodegenOptions::new("bt@vtensureselfonly"))
         .expect("a field-write-only value-type ensure: must compile");
 
+    // The construct is a producer: its tuple is bound to a carrier (ADR 0131
+    // §1), never sequenced away as `let _seqN = <construct>`; only the
+    // already-extracted logical value (element 1) is discarded.
     assert!(
-        code.contains("let _ExTuple"),
+        code.contains("let _ThreadedResult") && !code.contains("let _seq1 = let StateAcc"),
         "the construct must be bound as a threading construct, not sequenced away \
          as a discarded `let _seqN`. Got:\n{code}"
     );

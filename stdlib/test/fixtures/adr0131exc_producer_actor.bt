@@ -1,0 +1,478 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer
+// local is a local-threading producer at the method root, whatever position it
+// sits in (statement, last expression, an assignment's value, an operand), in
+// an arm of another producer and in a loop or fold body, and its protected
+// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional
+// or `on:do:` in one of them rebinds its locals into the frame's own scratch
+// map. A raise discards the protected body's writes (ADR 0131 §"REPL and error
+// examples"). The columns are adr0131exc_producer_{class,value,actor}.bt; the
+// expected answers are in stdlib/test/adr0131exc_producer_test.bt.
+
+Actor subclass: Adr0131ExcProducerActor
+  state: n = 0
+
+  stA =>
+    t := 0
+    [t := t + 1] on: Error do: [:e | t := t + 100]
+    t
+
+  stRaise =>
+    t := 0
+    [
+      t := t + 1
+      Error signal: "x"
+    ] on: Error do: [:e | t := t + 100]
+    t
+
+  stEnsure =>
+    t := 0
+    [t := t + 1] ensure: [t := t + 10]
+    t
+
+  stEnsureRaise =>
+    t := 0
+    [
+      [
+        t := t + 1
+        Error signal: "x"
+      ] ensure: [t := t + 10]
+    ] on: Error do: [:e | nil]
+    t
+
+  last =>
+    t := 0
+    [
+      t := t + 1
+      t
+    ] on: Error do: [:e | 0]
+
+  lastRaise =>
+    t := 0
+    [
+      Error signal: "x"
+      1
+    ]
+      on: Error
+      do: [:e |
+        t := 5
+        t + 2
+      ]
+
+  assign =>
+    t := 0
+    r := [
+      t := t + 1
+      2
+    ] on: Error do: [:e | 0]
+    #[r, t]
+
+  assignRaise =>
+    t := 0
+    r := [
+      t := t + 1
+      Error signal: "x"
+      2
+    ]
+      on: Error
+      do: [:e |
+        t := t + 7
+        3
+      ]
+    #[r, t]
+
+  assignValue =>
+    t := 0
+    r := [t := t + 1] on: Error do: [:e | 0]
+    #[r, t]
+
+  assignEnsureValue =>
+    t := 0
+    r := [t := t + 1] ensure: [nil]
+    #[r, t]
+
+  operand =>
+    t := 0
+    r := ([
+      t := t + 1
+      2
+    ] on: Error do: [:e | 0]) + 1
+    #[r, t]
+
+  operandRight =>
+    t := 0
+    r := 10 + ([
+      t := t + 1
+      2
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  operandEnsure =>
+    t := 0
+    r := ([
+      t := t + 1
+      2
+    ] ensure: [t := t + 10]) + 1
+    #[r, t]
+
+  seqRead =>
+    t := 0
+    r := t + ([
+      t := t + 1
+      2
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  seqTwo =>
+    t := 0
+    r := ([
+      t := t + 1
+      1
+    ] on: Error do: [:e | 0]) + ([
+      t := t + 10
+      2
+    ] on: Error do: [:e | 0])
+    #[r, t]
+
+  nestedBody =>
+    t := 0
+    [
+      [t := t + 1] on: Error do: [:e | t := t + 100]
+      t := t + 10
+    ] on: Error do: [:e | t := t + 1000]
+    t
+
+  nestedHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]
+    t
+
+  nestedOperand =>
+    t := 0
+    r := [
+      ([
+        t := t + 1
+        1
+      ] on: Error do: [:e | 0]) + 1
+    ] on: Error do: [:e | 9]
+    #[r, t]
+
+  doInBody =>
+    t := 0
+    [
+      #(1, 2) do: [:x | t := t + x]
+      t := t + 10
+    ] on: Error do: [:e | nil]
+    t
+
+  injectInBody =>
+    t := 0
+    r := [
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          a + x
+        ]
+    ] on: Error do: [:e | 0]
+    #[r, t]
+
+  whileInBody =>
+    t := 0
+    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]
+    t
+
+  toDoInHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]
+    t
+
+  raiseInDo =>
+    t := 0
+    [
+      #(1, 2)
+        do: [:x |
+          t := t + x
+          x > 1 ifTrue: [Error signal: "x"]
+        ]
+    ] on: Error do: [:e | t := t + 100]
+    t
+
+  condInBody: c =>
+    t := 0
+    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]
+    t
+
+  condInHandler: c =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]
+    t
+
+  inLoopBody =>
+    t := 0
+    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]
+    t
+
+  inToDo =>
+    t := 0
+    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]
+    t
+
+  inWhile =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [t := t + 1] on: Error do: [:e | nil]
+      ]
+    t
+
+  inTimes =>
+    t := 0
+    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]
+    t
+
+  inCollect =>
+    t := 0
+    r := #(1, 2)
+      collect: [:x |
+        [
+          t := t + x
+          x * 2
+        ] on: Error do: [:e | 0]
+      ]
+    #[r, t]
+
+  raiseInLoop =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        [
+          t := t + x
+          Error signal: "x"
+        ] on: Error do: [:e | t := t + 10]
+      ]
+    t
+
+  inArm: c =>
+    t := 0
+    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]
+    t
+
+  armOperand: c =>
+    t := 0
+    c
+      ifTrue: [
+        t := ([
+          t := t + 1
+          5
+        ] on: Error do: [:e | 0]) + t
+      ]
+    t
+
+  armEnsure: c =>
+    t := 0
+    c
+      ifTrue: [
+        r := [
+          t := t + 1
+          3
+        ] ensure: [t := t + 10]
+        t := t + r
+      ]
+    t
+
+  returnInBody =>
+    t := 0
+    [
+      t := t + 1
+      ^t
+    ] on: Error do: [:e | 0]
+    9
+
+  returnInArm: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^[
+          t := t + 1
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  returnOperandInArm: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^([
+          t := t + 1
+          7
+        ] on: Error do: [:e | 0]) + t
+      ]
+    t
+
+  writeOnlyOnDo =>
+    t := 0
+    [t := 5] on: Error do: [:e | t := 6]
+    t
+
+  writeOnlyEnsure =>
+    t := 0
+    [t := 5] ensure: [t := t + 1]
+    t
+
+  writeOnlyHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | t := 4]
+    t
+
+  zeroArgHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [t := 4]
+    t
+
+  twoLocals =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      u := u + 2
+    ] on: Error do: [:e | nil]
+    #[t, u]
+
+  blockLocal =>
+    t := 0
+    [
+      m := 3
+      t := t + m
+    ] on: Error do: [:e | nil]
+    t
+
+  ensureReads =>
+    t := 0
+    [
+      t := t + 1
+      t
+    ] ensure: [t := t * 10]
+    t
+
+  ensureTwice =>
+    t := 0
+    [t := t + 1] ensure: [t := t + 10]
+    [t := t + 100] ensure: [t := t + 1000]
+    t
+
+  afterEach =>
+    t := 0
+    [t := t + 1] on: Error do: [:e | nil]
+    a := t
+    [t := t + 1] on: Error do: [:e | nil]
+    #[a, t]
+
+  fieldValueInLoop =>
+    t := 0
+    1
+      to: 2
+      do: [:x |
+        self.n := ([
+          t := t + x
+          x
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    #[self.n, t]
+
+  fieldValueFoldInLoop =>
+    t := 0
+    1
+      to: 2
+      do: [:x |
+        self.n := #(1, 2)
+          inject: 0
+          into: [:a :y |
+            t := t + y
+            a + y
+          ]
+      ]
+    #[self.n, t]
+
+  fieldAssignOnDoInLoop =>
+    t := 0
+    2
+      to: 3
+      do: [:x |
+        self.n := [
+          t := t + 1
+          x
+        ] on: Error do: [:e | 0]
+      ]
+    #[self.n, t]
+
+  fieldValueInCondArm: c =>
+    t := 0
+    self.n := 0
+    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]
+    #[self.n, t]
+
+  fieldValueInArm: c =>
+    t := 0
+    self.n := 0
+    c
+      ifTrue: [
+        self.n := ([
+          t := t + 1
+          5
+        ] on: Error do: [:e | 0]) + 1
+      ]
+    #[self.n, t]
+
+  fieldInBody =>
+    t := 0
+    [
+      self.n := self.n + 1
+      t := t + 1
+    ] on: Error do: [:e | nil]
+    #[self.n, t]
+
+  fieldRaise =>
+    t := 0
+    [
+      self.n := 5
+      t := t + 1
+      Error signal: "x"
+    ] on: Error do: [:e | nil]
+    #[self.n, t]
+
+  fieldFieldAssign =>
+    t := 0
+    self.n := [
+      t := t + 1
+      4
+    ] on: Error do: [:e | 0]
+    #[self.n, t]
+
+  fieldInHandler =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        self.n := self.n + 10
+        t := t + 1
+      ]
+    #[self.n, t]
+
+  fieldInLoop =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        [
+          self.n := self.n + x
+          t := t + x
+        ] on: Error do: [:e | nil]
+      ]
+    #[self.n, t]

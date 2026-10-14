@@ -498,8 +498,10 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 
 #[test]
 fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
-    // o1.
-    let src = in_class("r := ([t := t + 1. 1] on: Error do: [:e | 0]) + 1\n#[r, t]");
+    // o1's operand shape with a construct that is not a producer yet: a
+    // `value` sent to a block literal (an `on:do:` is one since BT-3817, ADR
+    // 0131 Phase 3b).
+    let src = in_class("r := ([t := t + 1. 1] value) + 1\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -507,13 +509,13 @@ fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     assert_eq!(d.severity, Severity::Error);
     assert_eq!(
         d.message.as_str(),
-        "`on:do:` writes outer local `t`, but as the receiver of a message in a class \
+        "`value` writes outer local `t`, but as the receiver of a message in a class \
          method the write is not threaded back yet (BT-3743)"
     );
     assert!(
         d.hint
             .as_deref()
-            .is_some_and(|h| h.contains("in a statement of its own")),
+            .is_some_and(|h| h.contains("as a statement of its own")),
         "{d:?}"
     );
 }
@@ -551,14 +553,19 @@ fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
     for src in [in_class(in_arm), in_value(in_arm), in_actor(in_arm)] {
         assert!(adr0131_diagnostics_with(&src, &["c"]).is_empty(), "{src}");
     }
-    let body = "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt";
-    for src in [in_class(body), in_value(body)] {
-        let diags = of_category(
-            &adr0131_diagnostics_with(&src, &["c"]),
-            DiagnosticCategory::UnmigratedLocalThreading,
-        )
-        .len();
-        assert_eq!(diags, 1, "{src}");
+    //
+    // BT-3817 (ADR 0131 Phase 3b): the protected body, handler and cleanup of an
+    // `on:do:`/`ensure:` that is a producer are `BranchArm` frames too, so a
+    // `^xs do: [...]` in one is lowered the same way (BT-3813's handler case).
+    for body in [
+        "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt",
+        "[nil] on: Error do: [:e | ^#(1, 2) do: [:x | t := t + x]]\nt",
+        "[nil] ensure: [^#(1, 2) do: [:x | t := t + x]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics_with(&src, &["c"]);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
     }
     let keyed = "c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]\nt";
     for src in [in_class(keyed), in_value(keyed)] {
@@ -608,8 +615,9 @@ fn allow_set_do_assignment_is_accepted_in_every_context() {
 
 #[test]
 fn allow_set_field_assignment_in_class_method_is_an_error() {
-    // o5 in a class method: the tuple is stored in the class variable.
-    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := [t := t + 1. 1] on: Error do: [:e | 0]\n    t\n";
+    // o5's shape with a construct that is not a producer yet (an `on:do:` is one
+    // since BT-3817): the tuple would be stored in the class variable.
+    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := #(1, 2) eachWithIndex: [:x :i | t := t + x]\n    t\n";
     let diags = adr0131_diagnostics(src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -1031,8 +1039,6 @@ fn field_write_value_sites_stop_at_returns_assignments_and_blocks() {
         // A write nested in a local assignment's value or another write's.
         "r := (self.n := (#(1, 2) collect: [:x | t := t + x]) size)\nr",
         "self.n := (self.n := (#(1, 2) collect: [:x | t := t + x]) size)\nt",
-        // A write inside a block.
-        "true ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
         // A cascade on the value.
         "self.n := (#(1, 2) collect: [:x | t := t + x]) size; yourself\nt",
     ] {
@@ -1051,6 +1057,31 @@ fn field_write_value_sites_stop_at_returns_assignments_and_blocks() {
                 1,
                 "{src}: {diags:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn field_write_value_sites_include_the_statements_of_an_arm_and_a_loop_body() {
+    // ADR 0131 Phase 3b (BT-3817): the frame's field-write lowering splices the
+    // value's prelude ahead of the write, so a producer in the value of a
+    // field write inside an arm or a loop body is lowered (`fieldValueInArm`,
+    // `fieldValueInLoop` in `adr0131exc_producer_test.bt`).
+    for body in [
+        "true ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
+        "1 to: 2 do: [:i | self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
+    ] {
+        let class = format!(
+            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{}\n",
+            indent(body)
+        );
+        let actor = format!(
+            "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n{}\n",
+            indent(body)
+        );
+        for src in [class, actor] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
 }
@@ -1625,4 +1656,75 @@ fn section6_self_send_help_names_only_the_accepted_forms() {
     assert!(hint.contains("`#(1) do: b`"), "{hint}");
     assert!(hint.contains("`last := b value: e`"), "{hint}");
     assert!(!hint.contains("`inject:into:`"), "{hint}");
+}
+
+// ---------------------------------------------------------------------------
+// BT-3817: a `match:` arm that assigns an outer local
+// ---------------------------------------------------------------------------
+
+#[test]
+fn match_arm_writing_an_outer_local_is_a_structured_error_in_every_context() {
+    let body = "#a match: [#a -> (t := t + 1); _ -> 0]\nt";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let diags = adr0131_diagnostics(&src);
+        let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+        assert_eq!(errors.len(), 1, "{src}: {diags:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("`match:` arm writes outer local `t`"),
+            "{}",
+            errors[0].message
+        );
+    }
+}
+
+#[test]
+fn match_arm_write_nested_in_an_expression_is_an_error() {
+    let nested = "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt";
+    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn nested_match_arms_are_judged_once_by_their_own_scope() {
+    // The write is reported once (by the inner arm), not once per enclosing arm.
+    let nested = "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt";
+    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            1,
+            "{src}: {diags:?}"
+        );
+    }
+    // An inner arm's pattern variable shadows the outer local `x`.
+    let shadow = "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx";
+    for src in [in_class(shadow), in_value(shadow), in_actor(shadow)] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+#[test]
+fn match_arm_binding_its_own_local_or_the_match_value_is_accepted() {
+    for body in [
+        "t := #a match: [#a -> 5; _ -> 0]\nt",
+        "#a match: [#a -> (m := 1); _ -> 0]\nt",
+        "#a match: [#a -> (t + 1); _ -> 0]",
+        // The arm rebinds its own pattern variable.
+        "3 match: [x -> (x := x + 1)]\nt",
+        "#(1, 2) match: [{a, b} -> (a := a + b)]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
 }

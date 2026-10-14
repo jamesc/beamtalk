@@ -642,6 +642,11 @@ impl CoreErlangGenerator {
         let init_code = self.expression_doc(initial)?;
         let lambda_var = self.fresh_temp_var("temp");
         let acc_state_var = self.fresh_temp_var("AccSt");
+        // The fold lambda's item and accumulator parameters are minted per fold:
+        // a fixed `Item`/`Acc` would be shadowed by an `inject:into:` nested in
+        // this one's body that reads this fold's parameter.
+        let item_var = self.fresh_temp_var("Item");
+        let acc_var = self.fresh_temp_var("Acc");
 
         if plan.use_tuple_acc {
             // Tuple-accumulator path.
@@ -661,19 +666,23 @@ impl CoreErlangGenerator {
                 init_code,
                 " in let ",
                 leaf::var(lambda_var.clone()),
-                " = fun (Item, ",
+                " = fun (",
+                leaf::var(item_var.clone()),
+                ", ",
                 leaf::var(acc_state_var.clone()),
-                ") -> let Acc = call 'erlang':'element'(1, ",
+                ") -> let ",
+                leaf::var(acc_var.clone()),
+                " = call 'erlang':'element'(1, ",
                 leaf::var(acc_state_var.clone()),
                 ") in ",
             ]);
 
             self.push_scope();
             if !body.parameters.is_empty() {
-                self.bind_var(&body.parameters[0].name, "Acc");
+                self.bind_var(&body.parameters[0].name, &acc_var);
             }
             if body.parameters.len() >= 2 {
-                self.bind_var(&body.parameters[1].name, "Item");
+                self.bind_var(&body.parameters[1].name, &item_var);
             }
             let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
@@ -760,10 +769,14 @@ impl CoreErlangGenerator {
             init_code,
             " in let ",
             leaf::var(lambda_var.clone()),
-            " = fun (Item, ",
+            " = fun (",
+            leaf::var(item_var.clone()),
+            ", ",
             leaf::var(acc_state_var.clone()),
             ") -> ",
-            "let Acc = call 'erlang':'element'(1, ",
+            "let ",
+            leaf::var(acc_var.clone()),
+            " = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var.clone()),
@@ -772,10 +785,10 @@ impl CoreErlangGenerator {
 
         self.push_scope();
         if !body.parameters.is_empty() {
-            self.bind_var(&body.parameters[0].name, "Acc");
+            self.bind_var(&body.parameters[0].name, &acc_var);
         }
         if body.parameters.len() >= 2 {
-            self.bind_var(&body.parameters[1].name, "Item");
+            self.bind_var(&body.parameters[1].name, &item_var);
         }
         let (body_doc, _) =
             self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlInject, &acc_state_var, 1)?;

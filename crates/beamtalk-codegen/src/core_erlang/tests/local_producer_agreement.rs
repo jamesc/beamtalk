@@ -17,9 +17,10 @@ use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
-    LoopBodyContext, is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_threaded_frame_body, loop_body_producer_sites, operand_producer_writes,
-    sequenced_operand_sites,
+    LoopBodyContext, RootMethodKind, conditional_arm_blocks, conditional_producer_writes,
+    exception_arm_blocks, exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
+    is_loop_body_producer_site, is_threaded_frame_body, loop_body_producer_sites,
+    operand_producer_writes, sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -400,54 +401,146 @@ pub(super) fn body_sources(frame: &str, construct: &str, statement: &str) -> [St
     ]
 }
 
-/// The core rule's verdict for every producer site of every loop or fold
-/// body reachable from `stmt` (`loop_body_producer_sites`, narrowed by the
-/// shared `is_loop_body_producer_site` exactly as the Phase 0 check and
-/// codegen's `with_body_producer_sites` narrow it), frames nested in one
-/// another included. `outer_fold` says whether a frame enclosing `stmt` is a
-/// fold's; `value_bearing` collects the actor fold-frame value sites the
-/// narrowing drops, which Phase 0 must have rejected.
+/// The kind of method body a generated program's `go` is.
+pub(super) fn kind_of(src: &str) -> RootMethodKind {
+    if src.starts_with("Actor") {
+        RootMethodKind::Actor
+    } else if src.starts_with("Value") {
+        RootMethodKind::ValueType
+    } else {
+        RootMethodKind::Class
+    }
+}
+
+/// The names a core-rule verdict threads, sorted and deduplicated.
+pub(super) fn names_of(
+    writes: Vec<beamtalk_core::semantic_analysis::block_facts::OuterLocalWrite>,
+) -> Vec<String> {
+    let mut names: Vec<String> = writes.into_iter().map(|w| w.name.to_string()).collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The core rule's verdict for `site` in a method of kind `kind`, whichever
+/// family it is: a loop or fold ([`operand_producer_writes`]), a conditional
+/// ([`conditional_producer_writes`]) or an `on:do:`/`ensure:`
+/// ([`exception_producer_writes`]).
+pub(super) fn core_site_producer(site: &Expression, kind: RootMethodKind) -> Option<Vec<String>> {
+    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
+    operand_producer_writes(site, &bound)
+        .map(names_of)
+        .or_else(|| core_arm_site_producer(site, kind))
+}
+
+/// [`core_site_producer`] for the constructs that open arm frames only: a
+/// conditional or an `on:do:`/`ensure:`.
+pub(super) fn core_arm_site_producer(
+    site: &Expression,
+    kind: RootMethodKind,
+) -> Option<Vec<String>> {
+    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
+    conditional_producer_writes(site, &bound, kind)
+        .or_else(|| exception_producer_writes(site, &bound, kind))
+        .map(names_of)
+}
+
+/// The frame blocks `construct` opens, as `(block, fold, arm)`: the body of a
+/// loop or fold (`fold` for a fold's), and the arms of a conditional or the
+/// protected body, handler and cleanup of an `on:do:`/`ensure:` when the core
+/// rule names it a producer in a method of kind `kind` (`arm`).
+fn construct_frames(
+    construct: &Expression,
+    kind: RootMethodKind,
+    arms_are_frames: bool,
+) -> Vec<(&beamtalk_core::ast::Block, bool, bool)> {
+    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
+    let inner = construct.unwrap_parens();
+    let mut frames = Vec::new();
+    if let Expression::MessageSend { arguments, .. } = inner {
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                if is_threaded_frame_body(inner, block) {
+                    frames.push((block, is_fold_frame_body(inner, block), false));
+                }
+            }
+        }
+    }
+    if arms_are_frames && conditional_producer_writes(inner, &bound, kind).is_some() {
+        frames.extend(
+            conditional_arm_blocks(inner)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|b| (b, false, true)),
+        );
+    }
+    if arms_are_frames && exception_producer_writes(inner, &bound, kind).is_some() {
+        frames.extend(
+            exception_arm_blocks(inner)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|b| (b, false, true)),
+        );
+    }
+    frames
+}
+
+/// The core rule's verdict for every producer site of every frame reachable
+/// from `stmt`: a loop or fold body, an arm of a conditional producer, or the
+/// protected body, handler or cleanup of an `on:do:`/`ensure:` producer
+/// (`loop_body_producer_sites`, narrowed by the shared
+/// `is_loop_body_producer_site` exactly as the Phase 0 check and codegen's
+/// `with_body_producer_sites` narrow it), frames nested in one another
+/// included. `outer_fold` says whether a frame enclosing `stmt` is a fold's;
+/// `value_bearing` collects the actor fold-frame value sites the narrowing
+/// drops, which Phase 0 must have rejected. `stmt` is a producer site, so a
+/// conditional or exception it is opens arm frames.
 pub(super) fn core_body_producers(
     stmt: &Expression,
     outer_fold: bool,
-    in_actor: bool,
+    kind: RootMethodKind,
     out: &mut HashMap<Span, Vec<String>>,
     value_bearing: &mut HashSet<Span>,
 ) {
-    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
-    let Expression::MessageSend { arguments, .. } = stmt.unwrap_parens() else {
-        return;
-    };
-    for arg in arguments {
-        let Expression::Block(block) = arg else {
-            continue;
-        };
-        if !is_threaded_frame_body(stmt.unwrap_parens(), block) {
-            continue;
-        }
-        let fold = is_fold_frame_body(stmt.unwrap_parens(), block);
+    core_body_producers_in(stmt, true, outer_fold, kind, out, value_bearing);
+}
+
+/// [`core_body_producers`], where `arms_are_frames` says whether a conditional
+/// or exception `stmt` is itself a producer (its arms are frames): a loop-body
+/// statement is not unless it is a producer site of the body, which the site
+/// loop below handles.
+fn core_body_producers_in(
+    stmt: &Expression,
+    arms_are_frames: bool,
+    outer_fold: bool,
+    kind: RootMethodKind,
+    out: &mut HashMap<Span, Vec<String>>,
+    value_bearing: &mut HashSet<Span>,
+) {
+    let in_actor = kind == RootMethodKind::Actor;
+    for (block, fold, arm) in construct_frames(stmt, kind, arms_are_frames) {
         for inner in &block.body {
-            let ctx = LoopBodyContext::new(&inner.expression, fold, outer_fold, in_actor);
+            let mut ctx = LoopBodyContext::new(&inner.expression, fold, outer_fold, in_actor);
+            if arm {
+                ctx = ctx.in_arm();
+            }
             for site in loop_body_producer_sites(&inner.expression) {
-                if let Some(writes) = operand_producer_writes(site, &bound) {
+                if let Some(names) = core_site_producer(site, kind) {
                     if is_actor_fold_value_site(site, &ctx) {
                         value_bearing.insert(Expression::span(site));
                     }
                     if !is_loop_body_producer_site(site, &ctx) {
                         continue;
                     }
-                    let mut names: Vec<String> =
-                        writes.into_iter().map(|w| w.name.to_string()).collect();
-                    names.sort();
-                    names.dedup();
                     out.insert(Expression::span(site), names);
-                    core_body_producers(site, outer_fold || fold, in_actor, out, value_bearing);
+                    core_body_producers(site, outer_fold || fold, kind, out, value_bearing);
                 }
             }
-            core_body_producers(
+            core_body_producers_in(
                 &inner.expression,
+                false,
                 outer_fold || fold,
-                in_actor,
+                kind,
                 out,
                 value_bearing,
             );
@@ -492,12 +585,12 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                         .expect("one method");
                     let mut expected = core_producers(&method.body);
                     let mut value_bearing = HashSet::new();
-                    let in_actor = src.starts_with("Actor");
+                    let kind = kind_of(&src);
                     for stmt in &method.body {
                         core_body_producers(
                             &stmt.expression,
                             false,
-                            in_actor,
+                            kind,
                             &mut expected,
                             &mut value_bearing,
                         );

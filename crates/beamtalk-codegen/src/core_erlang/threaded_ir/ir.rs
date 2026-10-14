@@ -940,6 +940,24 @@ pub(in crate::core_erlang) enum RebindFrameKind {
     Loop(ThreadingMode),
 }
 
+impl RebindFrameKind {
+    /// Whether the frame carries a `State` chain that a construct nested in it
+    /// extends (its tuple's element 2 is the next `State` version in an actor
+    /// instance method): every frame but a direct-params or tuple-acc loop or
+    /// fold, whose body has no state effect (`select_direct_params`,
+    /// `select_tuple_acc`), so the nested construct's `State` is the one
+    /// already in scope.
+    pub(in crate::core_erlang) fn extends_state_chain(&self) -> bool {
+        match self {
+            Self::MethodBody | Self::BranchArm => true,
+            Self::Loop(mode) => !matches!(
+                mode,
+                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_)
+            ),
+        }
+    }
+}
+
 /// The shape ADR 0131 §2's table assigns a [`ThreadedStmt::LocalRebind`]
 /// for one (frame kind × membership) cell — [`RebindLowering`] without its
 /// lowering-time names.

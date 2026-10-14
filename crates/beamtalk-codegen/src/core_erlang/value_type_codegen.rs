@@ -1601,28 +1601,6 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::LocalAssignment => {
-                // a threading construct (value-type loop / foldl list-op
-                // yielding `{value, StateAcc}`) or a read+write conditional as the RHS
-                // threads its mutations through the tuple. Bind the target to the logical
-                // value (element 1) and rebind the threaded siblings from the StateAcc
-                // (element 2), rather than binding the target to the raw tuple.
-                if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = id.name.clone();
-                        if let Some(core_var) =
-                            self.emit_threaded_assign_rhs(&var_name, value, body_parts)?
-                        {
-                            if is_last {
-                                body_parts.push(self.threading_result_tail(
-                                    &core_var,
-                                    None,
-                                    super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
-                                ));
-                            }
-                            return Ok(());
-                        }
-                    }
-                }
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -2407,89 +2385,6 @@ impl CoreErlangGenerator {
         // extract the loop's own trailing slot from element
         // 3 and rebind it, same as the non-last-statement / last-position
         // consumers.
-        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-        }
-
-        Ok(core_var)
-    }
-
-    /// Lowers a value-type/class-method local assignment whose RHS is an
-    /// `on:do:`/`ensure:` construct: binds the target to element 1 (the
-    /// construct's logical result), rebinds each threaded outer local from
-    /// element 2 (`StateAcc` — unlike last position, these must escape to
-    /// later statements), and, when the construct also threads the
-    /// `SelfVt` family
-    /// ([`Self::exception_construct_threaded_families`]), rebinds it from
-    /// element 3 (via [`Self::extract_vt_loop_family_slot`], BT-3512's
-    /// shared extraction helper). The `on:do:`/`ensure:` mirror of
-    /// [`Self::emit_vt_threaded_local_assignment`].
-    ///
-    /// Returns the Core Erlang variable bound to the assignment target.
-    pub(in crate::core_erlang) fn emit_vt_exception_assign_rhs(
-        &mut self,
-        var_name: &str,
-        value: &Expression,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<String> {
-        let families = self.exception_construct_threaded_families(value);
-        let span = value.span();
-        let rhs_doc = self.expression_doc(value)?;
-        let tuple_var = self.fresh_temp_var("AssignExTuple");
-
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            rhs_doc,
-            " in\n",
-        ]);
-
-        let core_var = self
-            .lookup_var(var_name)
-            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(core_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in\n",
-        ]);
-        self.bind_var(var_name, &core_var);
-
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(value)
-            .and_then(ThreadedLocals::into_lowered)
-        {
-            let rebind: Vec<&String> = threaded_vars
-                .iter()
-                .filter(|tl| tl.as_str() != var_name)
-                .collect();
-            if !rebind.is_empty() {
-                let state_var = self.fresh_temp_var("AssignExState");
-                body_parts.push(docvec![
-                    "    let ",
-                    leaf::var(state_var.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in\n",
-                ]);
-                for tl in rebind {
-                    let tl_core = self.fresh_var(tl);
-                    body_parts.push(docvec![
-                        "    let ",
-                        leaf::var(tl_core.clone()),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(tl)),
-                        ", ",
-                        leaf::var(state_var.clone()),
-                        ") in\n",
-                    ]);
-                    self.bind_var(tl, &tl_core);
-                }
-            }
-        }
-
         if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }

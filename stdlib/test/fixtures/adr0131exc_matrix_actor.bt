@@ -1,0 +1,990 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3817 (ADR 0131 Phase 3b): the statement-position matrix cells that
+// answered wrong, raised or failed to compile before `on:do:`/`ensure:`
+// became local-threading producers (`adr0131_statement_probes.tsv`, verdict
+// `bad`, now `ok`). Each method is one cell of the matrix: a construct
+// (`kind`) writing the method-level local `t` (`target`) inside a block role
+// (`container`), in a class, value-type or actor method. `c` is the
+// condition. The expected answers are in stdlib/test/adr0131exc_matrix_test.bt.
+
+Actor subclass: Adr0131ExcMatrixActor
+  state: n = 0
+
+  plain => 0
+
+  ensBlkOuterCollect =>
+    t := 0
+    [nil] ensure: [#(1, 2) collect: [:x | t := t + x]]
+    t
+
+  ensBlkOuterDo =>
+    t := 0
+    [nil] ensure: [#(1, 2) do: [:e | t := t + e]]
+    t
+
+  ensBlkOuterInject =>
+    t := 0
+    [nil]
+      ensure: [
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+      ]
+    t
+
+  ensBlkOuterTimes =>
+    t := 0
+    [nil] ensure: [2 timesRepeat: [t := t + 1]]
+    t
+
+  ensBlkOuterToDo =>
+    t := 0
+    [nil] ensure: [1 to: 2 do: [:i | t := t + i]]
+    t
+
+  ensBlkOuterWhile =>
+    t := 0
+    [nil] ensure: [[t < 2] whileTrue: [t := t + 1]]
+    t
+
+  handlerDirectCollect =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        #(1, 2) collect: [:x | t := t + x]
+        0
+      ]
+    t
+
+  handlerDirectDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        #(1, 2) do: [:e | t := t + e]
+        0
+      ]
+    t
+
+  handlerDirectEnsure =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        [t := t + 1] ensure: [nil]
+        0
+      ]
+    t
+
+  handlerDirectInject =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        0
+      ]
+    t
+
+  handlerDirectOnDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        [t := t + 1] on: Error do: [:e | 0]
+        0
+      ]
+    t
+
+  handlerDirectTimes =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        2 timesRepeat: [t := t + 1]
+        0
+      ]
+    t
+
+  handlerDirectToDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        1 to: 2 do: [:i | t := t + i]
+        0
+      ]
+    t
+
+  handlerDirectWhile =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        t := t + 0
+        [t < 2] whileTrue: [t := t + 1]
+        0
+      ]
+    t
+
+  handlerOuterCollect =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        #(1, 2) collect: [:x | t := t + x]
+        0
+      ]
+    t
+
+  handlerOuterDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        #(1, 2) do: [:e | t := t + e]
+        0
+      ]
+    t
+
+  handlerOuterEnsure =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        [t := t + 1] ensure: [nil]
+        0
+      ]
+    t
+
+  handlerOuterInject =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        #(1, 2)
+          inject: 0
+          into: [:a :x |
+            t := t + x
+            a + x
+          ]
+        0
+      ]
+    t
+
+  handlerOuterOnDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        [t := t + 1] on: Error do: [:e | 0]
+        0
+      ]
+    t
+
+  handlerOuterTimes =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        2 timesRepeat: [t := t + 1]
+        0
+      ]
+    t
+
+  handlerOuterToDo =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        1 to: 2 do: [:i | t := t + i]
+        0
+      ]
+    t
+
+  handlerOuterWhile =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:ex |
+        [t < 2] whileTrue: [t := t + 1]
+        0
+      ]
+    t
+
+  iterArmDirectEnsure: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            [t := t + 1] ensure: [nil]
+          ]
+      ]
+    t
+
+  iterArmDirectOnDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1)
+          do: [:z |
+            t := t + 0
+            [t := t + 1] on: Error do: [:e | 0]
+          ]
+      ]
+    t
+
+  iterArmOuterEnsure: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | [t := t + 1] ensure: [nil]]]
+    t
+
+  iterArmOuterOnDo: c =>
+    t := 0
+    c ifTrue: [#(1) do: [:z | [t := t + 1] on: Error do: [:e | 0]]]
+    t
+
+  iterIterOuterEnsure =>
+    t := 0
+    #(1) do: [:y | #(1) do: [:z | [t := t + 1] ensure: [nil]]]
+    t
+
+  iterIterOuterOnDo =>
+    t := 0
+    #(1) do: [:y | #(1) do: [:z | [t := t + 1] on: Error do: [:e | 0]]]
+    t
+
+  loopCvarOnDo =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        [
+          t := t + 1
+          self.n := 1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  loopCvarOuterOnDo =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        self.n := 1
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  loopDirectEnsure =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        t := t + 0
+        [t := t + 1] ensure: [nil]
+      ]
+    t
+
+  loopDirectOnDo =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        t := t + 0
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  loopOuterEnsure =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        [t := t + 1] ensure: [nil]
+      ]
+    t
+
+  loopOuterOnDo =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  loopSelfsendOnDo =>
+    t := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        [
+          t := t + 1
+          self plain
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protCvarDo =>
+    t := 0
+    [
+      #(1, 2)
+        do: [:e |
+          t := t + e
+          self.n := 1
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarInject =>
+    t := 0
+    [
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          self.n := 1
+          a + x
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOnDo =>
+    t := 0
+    [
+      [
+        t := t + 1
+        self.n := 1
+      ] on: Error do: [:e | 0]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarToDo =>
+    t := 0
+    [
+      1
+        to: 2
+        do: [:i |
+          t := t + i
+          self.n := 1
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarWhile =>
+    t := 0
+    [
+      [t < 2]
+        whileTrue: [
+          t := t + 1
+          self.n := 1
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOuterDo =>
+    t := 0
+    [
+      self.n := 1
+      #(1, 2) do: [:e | t := t + e]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOuterInject =>
+    t := 0
+    [
+      self.n := 1
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          a + x
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOuterOnDo =>
+    t := 0
+    [
+      self.n := 1
+      [t := t + 1] on: Error do: [:e | 0]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOuterToDo =>
+    t := 0
+    [
+      self.n := 1
+      1 to: 2 do: [:i | t := t + i]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protCvarOuterWhile =>
+    t := 0
+    [
+      self.n := 1
+      [t < 2] whileTrue: [t := t + 1]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectCollect =>
+    t := 0
+    [
+      t := t + 0
+      #(1, 2) collect: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectDo =>
+    t := 0
+    [
+      t := t + 0
+      #(1, 2) do: [:e | t := t + e]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectEnsure =>
+    t := 0
+    [
+      t := t + 0
+      [t := t + 1] ensure: [nil]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectInject =>
+    t := 0
+    [
+      t := t + 0
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          a + x
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectOnDo =>
+    t := 0
+    [
+      t := t + 0
+      [t := t + 1] on: Error do: [:e | 0]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectTimes =>
+    t := 0
+    [
+      t := t + 0
+      2 timesRepeat: [t := t + 1]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectToDo =>
+    t := 0
+    [
+      t := t + 0
+      1 to: 2 do: [:i | t := t + i]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protDirectWhile =>
+    t := 0
+    [
+      t := t + 0
+      [t < 2] whileTrue: [t := t + 1]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterCollect =>
+    t := 0
+    [
+      #(1, 2) collect: [:x | t := t + x]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterDo =>
+    t := 0
+    [
+      #(1, 2) do: [:e | t := t + e]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterEnsure =>
+    t := 0
+    [
+      [t := t + 1] ensure: [nil]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterInject =>
+    t := 0
+    [
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          a + x
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterOnDo =>
+    t := 0
+    [
+      [t := t + 1] on: Error do: [:e | 0]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterTimes =>
+    t := 0
+    [
+      2 timesRepeat: [t := t + 1]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterToDo =>
+    t := 0
+    [
+      1 to: 2 do: [:i | t := t + i]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protOuterWhile =>
+    t := 0
+    [
+      [t < 2] whileTrue: [t := t + 1]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protSelfsendDo =>
+    t := 0
+    [
+      #(1, 2)
+        do: [:e |
+          t := t + e
+          self plain
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protSelfsendInject =>
+    t := 0
+    [
+      #(1, 2)
+        inject: 0
+        into: [:a :x |
+          t := t + x
+          self plain
+          a + x
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protSelfsendOnDo =>
+    t := 0
+    [
+      [
+        t := t + 1
+        self plain
+      ] on: Error do: [:e | 0]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protSelfsendToDo =>
+    t := 0
+    [
+      1
+        to: 2
+        do: [:i |
+          t := t + i
+          self plain
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protSelfsendWhile =>
+    t := 0
+    [
+      [t < 2]
+        whileTrue: [
+          t := t + 1
+          self plain
+        ]
+      7
+    ] on: Error do: [:e | 0]
+    t
+
+  protArmDirectCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          #(1, 2) collect: [:x | t := t + x]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          #(1, 2) do: [:e | t := t + e]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectEnsure: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          [t := t + 1] ensure: [nil]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          #(1, 2)
+            inject: 0
+            into: [:a :x |
+              t := t + x
+              a + x
+            ]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectOnDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          [t := t + 1] on: Error do: [:e | 0]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          2 timesRepeat: [t := t + 1]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          1 to: 2 do: [:i | t := t + i]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmDirectWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          t := t + 0
+          [t < 2] whileTrue: [t := t + 1]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterCollect: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          #(1, 2) collect: [:x | t := t + x]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          #(1, 2) do: [:e | t := t + e]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterEnsure: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          [t := t + 1] ensure: [nil]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterInject: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          #(1, 2)
+            inject: 0
+            into: [:a :x |
+              t := t + x
+              a + x
+            ]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterOnDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          [t := t + 1] on: Error do: [:e | 0]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterTimes: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          2 timesRepeat: [t := t + 1]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterToDo: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          1 to: 2 do: [:i | t := t + i]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protArmOuterWhile: c =>
+    t := 0
+    c
+      ifTrue: [
+        [
+          [t < 2] whileTrue: [t := t + 1]
+          7
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  protLastOuterWhile =>
+    t := 0
+    [[t < 2] whileTrue: [t := t + 1]] on: Error do: [:e | 0]
+    t
+
+  timesCDirectEnsure =>
+    t := 0
+    1
+      timesRepeat: [
+        t := t + 0
+        [t := t + 1] ensure: [nil]
+      ]
+    t
+
+  timesCDirectOnDo =>
+    t := 0
+    1
+      timesRepeat: [
+        t := t + 0
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  timesCOuterEnsure =>
+    t := 0
+    1 timesRepeat: [[t := t + 1] ensure: [nil]]
+    t
+
+  timesCOuterOnDo =>
+    t := 0
+    1 timesRepeat: [[t := t + 1] on: Error do: [:e | 0]]
+    t
+
+  toDoCCvarOnDo =>
+    t := 0
+    1
+      to: 1
+      do: [:z |
+        [
+          t := t + 1
+          self.n := 1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  toDoCCvarOuterOnDo =>
+    t := 0
+    1
+      to: 1
+      do: [:z |
+        self.n := 1
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  toDoCDirectEnsure =>
+    t := 0
+    1
+      to: 1
+      do: [:z |
+        t := t + 0
+        [t := t + 1] ensure: [nil]
+      ]
+    t
+
+  toDoCDirectOnDo =>
+    t := 0
+    1
+      to: 1
+      do: [:z |
+        t := t + 0
+        [t := t + 1] on: Error do: [:e | 0]
+      ]
+    t
+
+  toDoCOuterEnsure =>
+    t := 0
+    1 to: 1 do: [:z | [t := t + 1] ensure: [nil]]
+    t
+
+  toDoCOuterOnDo =>
+    t := 0
+    1 to: 1 do: [:z | [t := t + 1] on: Error do: [:e | 0]]
+    t
+
+  toDoCSelfsendOnDo =>
+    t := 0
+    1
+      to: 1
+      do: [:z |
+        [
+          t := t + 1
+          self plain
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  nestedInjectKeepsOuterParams =>
+    t := 0
+    #(1, 2)
+      inject: 0
+      into: [:a :x |
+        #(3, 4) inject: 0 into: [:b :y | t := t + a + x]
+        a + 1
+      ]
+    t
+
+  ensureBlockEndingInAssignAnswersTheValue =>
+    t := 0
+    r := [t := 5] ensure: [nil]
+    #[r, t]
+
+  onDoBlockEndingInAssignAnswersTheValue =>
+    t := 0
+    r := [t := 7] on: Error do: [:e | 0]
+    #[r, t]
+
+  onDoHandlerEndingInAssignAnswersTheValue =>
+    t := 0
+    r := [Error signal: "x"] on: Error do: [:e | t := 9]
+    #[r, t]
