@@ -6,26 +6,63 @@ Accepted (2026-10-08)
 ## Implementation Tracking
 
 **Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743)
-**Status:** Planned
+**Status:** All phases merged. The Phase 0 position diagnostic is retained (see Remaining work at close-out); the ADR's Status line is unchanged.
 
 | Phase | Issue | Description | Size | PR |
 |---|---|---|---|---|
-| 0a | [BT-3744](https://linear.app/beamtalk/issue/BT-3744) | Pin the probe matrix as BUnit, repl-protocol and `local_touch` corpus shapes | S | |
-| 0b | [BT-3745](https://linear.app/beamtalk/issue/BT-3745) | §6 Tier 2 block-value error; one allow-set error for unmigrated shapes | M | |
-| 1a | [BT-3746](https://linear.app/beamtalk/issue/BT-3746) | `threaded_locals_of`: one transitively-closed, REPL-aware recognizer | M | |
-| 1b | [BT-3747](https://linear.app/beamtalk/issue/BT-3747) | IR nodes `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` | M | |
-| 1c | [BT-3748](https://linear.app/beamtalk/issue/BT-3748) | Verifier checks; `ScopeKind::ValueType`; §1a sequencing amendment | M | |
-| 2 | [BT-3749](https://linear.app/beamtalk/issue/BT-3749) | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors, actor-only opaque folds | M | |
-| 2d | [BT-3798](https://linear.app/beamtalk/issue/BT-3798) | `Dictionary at:ifAbsent:` as a producer (a guarded inline lowering); retire the unreachable `OpaqueFold` construct | M | |
-| 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | |
-| 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | |
-| 3c | [BT-3822](https://linear.app/beamtalk/issue/BT-3822) | Conditionals as producers at loop/fold body statements; delete `direct_params_list_op_result`; flip `stLoopArm` | M | |
-| 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
-| 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic (kept: 552 of 733 measured statement shapes still drop writes with it bypassed, retired by [BT-3841](https://linear.app/beamtalk/issue/BT-3841)); flip every pin | S | |
-| 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, status → Implemented | S | |
+| 0a | [BT-3744](https://linear.app/beamtalk/issue/BT-3744) | Pin the probe matrix as BUnit, repl-protocol and `local_touch` corpus shapes | S | [#4209](https://github.com/jamesc/beamtalk/pull/4209) |
+| 0b | [BT-3745](https://linear.app/beamtalk/issue/BT-3745) | §6 Tier 2 block-value error; one allow-set error for unmigrated shapes | M | [#4210](https://github.com/jamesc/beamtalk/pull/4210) |
+| 1a | [BT-3746](https://linear.app/beamtalk/issue/BT-3746) | `threaded_locals_of`: one transitively-closed, REPL-aware recognizer | M | [#4223](https://github.com/jamesc/beamtalk/pull/4223), [#4230](https://github.com/jamesc/beamtalk/pull/4230) |
+| 1b | [BT-3747](https://linear.app/beamtalk/issue/BT-3747) | IR nodes `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` | M | [#4211](https://github.com/jamesc/beamtalk/pull/4211) |
+| 1c | [BT-3748](https://linear.app/beamtalk/issue/BT-3748) | Verifier checks; `ScopeKind::ValueType`; §1a sequencing amendment | M | [#4237](https://github.com/jamesc/beamtalk/pull/4237) |
+| 2 | [BT-3749](https://linear.app/beamtalk/issue/BT-3749) | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors, actor-only opaque folds | M | [#4248](https://github.com/jamesc/beamtalk/pull/4248), [#4256](https://github.com/jamesc/beamtalk/pull/4256), [#4257](https://github.com/jamesc/beamtalk/pull/4257), [#4260](https://github.com/jamesc/beamtalk/pull/4260), [#4264](https://github.com/jamesc/beamtalk/pull/4264), [#4270](https://github.com/jamesc/beamtalk/pull/4270) |
+| 2d | [BT-3798](https://linear.app/beamtalk/issue/BT-3798) | `Dictionary at:ifAbsent:` as a producer (a guarded inline lowering); retire the unreachable `OpaqueFold` construct | M | [#4287](https://github.com/jamesc/beamtalk/pull/4287) |
+| 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | [#4279](https://github.com/jamesc/beamtalk/pull/4279) |
+| 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | [#4285](https://github.com/jamesc/beamtalk/pull/4285) |
+| 3c | [BT-3822](https://linear.app/beamtalk/issue/BT-3822) | Conditionals as producers at loop/fold body statements; delete `direct_params_list_op_result`; flip `stLoopArm` | M | [#4293](https://github.com/jamesc/beamtalk/pull/4293) |
+| 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | [#4289](https://github.com/jamesc/beamtalk/pull/4289) |
+| 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; flip every pin (the allow-set diagnostic is kept: 552 of 733 measured statement shapes still drop writes with it bypassed; see BT-3841) | S | [#4299](https://github.com/jamesc/beamtalk/pull/4299) |
+| 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, known limitations | S | this PR |
+| follow-up | [BT-3841](https://linear.app/beamtalk/issue/BT-3841) | Retire the Phase 0 position diagnostic (`DENY_SET`/`ALLOW_SET`); ADR Status to Implemented | L | open |
 
 Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3817 → 3750 → 3751 → 3752.
 Alternative D is tracked separately as [BT-3742](https://linear.app/beamtalk/issue/BT-3742).
+
+Related fixes that landed inside the epic: [#4232](https://github.com/jamesc/beamtalk/pull/4232) (BT-3753, statement-position shapes added to the Phase 0 check), [#4235](https://github.com/jamesc/beamtalk/pull/4235) (BT-3754, `dead_assignment` lint), [#4261](https://github.com/jamesc/beamtalk/pull/4261) (BT-3755, actor self-send exemption), [#4265](https://github.com/jamesc/beamtalk/pull/4265) (BT-3756, escaping blocks).
+
+### Remaining work at close-out
+
+Every phase above is merged and the user-facing behaviour is documented in `beamtalk-language-features.md` § Control Flow and Mutations. The epic's goal, *no silent wrong answer at any point*, holds. The goal *every position and every context lowers through a producer, so the Phase 0 position diagnostic is gone* does not yet hold. The ADR's Status stays **Accepted** until [BT-3841](https://linear.app/beamtalk/issue/BT-3841) closes. What remains, in priority order, verified against the code on `main` at the time of writing:
+
+1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841): the Phase 0 position diagnostic is retained** (`DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`, message "`X` writes outer local `t`, but as <position> in <context> the write is not threaded back yet (BT-3743)"). Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
+2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833): three legacy write-back paths are still alive**: the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`. The "delete the remaining write-back paths" goal of Phases 3b and 3c is therefore only partly met.
+3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839): lookups and `detect:ifNone:` handler writes in loop or fold bodies are still errors**: `keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]` is a §6 error, and a `detect:ifNone:` handler write inside a counted loop body is an `UnmigratedLocalThreading` error.
+4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823): REPL and `match:` leftovers.** An arm or loop nested inside a REPL `on:do:`/`Result tryDo:` is still a compile error (the o7/o8 REPL pins), because REPL arms are not frames. A `match:` arm that writes an outer local is a compile error rather than `match:` being a producer (the REPL is exempt from that error and unprobed).
+5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
+6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
+7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)**: `Dictionary` does not define `at:ifPresent:`/`at:ifPresent:ifAbsent:` yet, so those handlers are not producers. `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors by decision, since an immutable `Dictionary` has no such behaviour. `Dictionary at:ifAbsent:` is the only lookup producer, and only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
+8. **[BT-3835](https://linear.app/beamtalk/issue/BT-3835)**: a conditional producer's `LocalRebind` in a `StateAcc` fold frame emits a redundant identity `MapPut`.
+9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)**: a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panics the debug verifier with `StateAccLoopWithoutLocals`.
+10. **[BT-3842](https://linear.app/beamtalk/issue/BT-3842)**: Phase 5a review nits (a shared block-scope helper for `arms_lower_as_producer` and `OuterWriteWalker`; a non-`Result` `tryDo:` falls through to a generic internal error).
+
+Two scope notes. `Result tryDo:` is a producer only for a literal `Result` receiver; any other receiver keeps its dynamic send and a writing block is a compile error (§5 implementation note). The `MethodBody` IR node has no production builder: it exists, is verified and rendered, but the non-REPL method root is still the implicit frame (`RebindFrame::implicit_root`) and the REPL root does not construct one either.
+
+### Build-time measurement
+
+Method per ADR 0111 Addendum 7/10: two separate release binaries (`cargo build --release --bin beamtalk`, `CARGO_INCREMENTAL=0`, built from clean target directories), cold `runtime/apps/beamtalk_stdlib/ebin/` before each run, `beamtalk build-stdlib --quiet --warnings-as-errors` (117 files), user CPU from `getrusage(RUSAGE_CHILDREN)`, one unmeasured warm-up per side, then alternating baseline/HEAD per round to spread drift evenly. Baseline is `e50454b4a`, the commit immediately before Phase 0a (#4209); HEAD is `9a504d421` (Phase 5a, #4299), the last code change of the epic (this PR is docs only). Linux, 4 vCPU shared VM, so the noise floor is high (see Addenda 3/6/7).
+
+| | user CPU (s) | wall-clock (s) |
+|---|---|---|
+| baseline, run 1 (mean of 5) | 10.31 (range 10.01-10.79) | 8.35 |
+| HEAD, run 1 (mean of 5) | 10.61 (range 10.31-10.81) | 8.05 |
+| Δ run 1 | **+2.92%** | -3.56% |
+| baseline, run 2 (mean of 10) | 10.20 (range 10.02-10.58) | 7.46 |
+| HEAD, run 2 (mean of 10) | 10.27 (range 9.95-10.59) | 7.32 |
+| Δ run 2 | **+0.61%** | -1.88% |
+| Δ pooled (15 rounds per side) | **+1.4%** | |
+
+The gate is <= 3% user CPU, and both runs are inside it. The first run (the 5-round mean the methodology prescribes) landed at +2.92%, close to the limit, and every one of its five rounds had HEAD at or above baseline; a repeat with 10 rounds measured +0.61%, with overlapping ranges, so the first figure is not reproducible beyond the environment's noise. The honest reading is a small cost of roughly 0.5-1.5% user CPU, not distinguishable from noise at this sample size, and within the gate. Wall-clock is lower on HEAD in both runs, which is noise rather than a speed-up.
+
 
 ## Context
 
@@ -831,7 +868,7 @@ moved. Rejected: the per-position approach has had its chance.
 | 2 | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors and (actor-only) opaque folds, with the §2 per-local lowering rule. Delete the assign-RHS and loop-body rebind paths for them. | o4, s1, s2, s9, corpus `do`/`fold`/`while`/… with `local_touch`. `.core` diffs limited to the listed set. |
 | 3 | Conditionals and `match:` families from context (§3). `on:do:`/`ensure:` as producers. Delete `lower_nested_vt_do` write-back and `rebind_threaded_vars_from_state`. **This is BT-3738.** | o1–o3, o5–o13, s7 in all contexts. |
 | 4 | `beamtalk_result:'tryDo:'/2` and its conformance fixture; codegen arity choice (§5). | `tryDo:` probes. `local_touch` + `try_do` corpus. |
-| 5 | Close-out: `local_touch` into `Shapes::ENABLED`, un-`#[ignore]` both properties, `CV_CORPUS_CASES=500` green, remove Phase 0's allow-set diagnostic, flip every `PIN-BUG`, docs (`beamtalk-language-features.md` "What Works and What Doesn't" and the protected-region rule, `docs/agents/expanded.md` § State-Threading Codegen, `debugging.md` verifier table), build-time measurement. | CI. |
+| 5 | Close-out: `local_touch` into `Shapes::ENABLED`, un-`#[ignore]` both properties, `CV_CORPUS_CASES=500` green, remove Phase 0's allow-set diagnostic (*amended: retained, see Implementation Tracking § Remaining work at close-out; BT-3841*), flip every `PIN-BUG`, docs (`beamtalk-language-features.md` "What Works and What Doesn't" and the protected-region rule, `docs/agents/expanded.md` § State-Threading Codegen, `debugging.md` verifier table), build-time measurement. | CI. |
 
 Phases 2 and 3 land **with** the §2 per-local rule and the §1a sequencing
 fix already in from phase 1; shipping either producer without them would
