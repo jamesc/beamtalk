@@ -599,17 +599,6 @@ pub(crate) fn check_ffi_arity(module: &Module, diagnostics: &mut Vec<Diagnostic>
     });
 }
 
-/// Extracts the Erlang module name from an FFI proxy expression.
-///
-/// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend`
-/// whose receiver is `ClassReference("Erlang")` with a `Unary` selector.
-///
-/// Delegates to the single shared recognizer in
-/// [`crate::ffi_receiver`].
-fn extract_erlang_module(expr: &Expression) -> Option<&str> {
-    crate::ffi_receiver::erlang_module_of_receiver(expr)
-}
-
 /// Derives the Erlang function name from a Beamtalk selector.
 ///
 /// Keyword selectors like `seq:to:` become the first keyword part (`seq`).
@@ -654,7 +643,7 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         ..
     } = expr
     {
-        if let Some(module_name) = extract_erlang_module(receiver) {
+        if let Some(module_name) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
             if let Some(function_name) = erlang_function_name(selector) {
                 let arity = erlang_arity(selector, arguments.len());
 
