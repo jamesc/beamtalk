@@ -1419,7 +1419,8 @@ test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48
 # measure-adr0131-statements` rewrites the tables.
 measure-adr0131-statements: build-stdlib
     @echo "📐 Measuring the ADR 0131 Phase 0 probe cells on a BEAM..."
-    cargo test -p beamtalk-cli --test cli adr0131_ -- --ignored --nocapture --test-threads=1
+    cargo build --workspace --features beamtalk-core/measure-bypass
+    cargo test -p beamtalk-cli --features beamtalk-core/measure-bypass --test cli adr0131_ -- --ignored --nocapture --test-threads=1
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests

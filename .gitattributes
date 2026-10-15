@@ -48,3 +48,6 @@ docs/** linguist-documentation
 
 # Diff display
 *.md diff=markdown
+
+# Checked-in generated tables compared byte-for-byte by tests (BT-3841)
+*.tsv text eol=lf

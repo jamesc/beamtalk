@@ -99,6 +99,7 @@ pub fn container_group(container: &str) -> &'static str {
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "iterIter" => "loop-body",
         "armIter" | "iterArm" | "armLoop" => "arm-loop-mix",
         "val" => "evaluated-block",
+        "armProtIter" | "protIterArm" | "armIterIter" | "armProtArm" => "three-deep",
         _ => "other",
     }
 }
@@ -109,8 +110,9 @@ pub fn container_group(container: &str) -> &'static str {
 #[must_use]
 pub fn container_runs(container: &str) -> i64 {
     match container {
-        "loop" | "timesC" | "toDoC" | "iter" | "coll" | "armIter" | "iterArm" | "armLoop" => 2,
-        "iterIter" => 4,
+        "loop" | "timesC" | "toDoC" | "iter" | "coll" | "armIter" | "iterArm" | "armLoop"
+        | "armProtIter" | "protIterArm" => 2,
+        "iterIter" | "armIterIter" => 4,
         _ => 1,
     }
 }
@@ -427,6 +429,24 @@ pub const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
     ),
     ("protArm", "%c ifTrue: [[S. 7] on: Error do: [:e | 0]]"),
     ("iterIter", "#(1, 2) do: [:y | #(1, 2) do: [:z | S]]"),
+    // Three blocks deep (BT-3841 review): the roles `RIGHT_STATEMENTS` and the
+    // coarse rows must agree on past depth two.
+    (
+        "armProtIter",
+        "#(1, 2) do: [:z | [%c ifTrue: [S]] on: Error do: [:e | 0]]",
+    ),
+    (
+        "protIterArm",
+        "%c ifTrue: [#(1, 2) do: [:z | [S. 7] on: Error do: [:e | 0]]]",
+    ),
+    (
+        "armIterIter",
+        "#(1, 2) do: [:y | #(1, 2) do: [:z | %c ifTrue: [S]]]",
+    ),
+    (
+        "armProtArm",
+        "%c ifTrue: [[%c ifTrue: [S]] on: Error do: [:e | 0]]",
+    ),
     // REPL-only roles.
     ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
 ];

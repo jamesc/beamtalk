@@ -904,7 +904,7 @@ reproducible and every PR moves it:
 - `just measure-adr0131-statements` compiles every probe cell through the real
   `beamtalk test` pipeline with the position check bypassed (debug builds, env
   `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`), runs it on a BEAM and compares it
-  with the ADR-expected answer. The statement matrix is the 2,477 class,
+  with the ADR-expected answer. The statement matrix is the 2,693 class,
   value-type and actor cells of `adr0131_statement_probes.tsv` that are not
   `gap` lines (every looping role runs its body twice); the operand matrix is
   1,404 cells (a construct as the value of an assignment or field assignment, a
@@ -917,21 +917,27 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (595 = 552 wrong + 43 `erlc`), by
-family and method context, with the work each needs:
+Statement cells that do not answer right (663 = 618 wrong + 45 `erlc`; 595 of
+them in the 5a population of 733 plus 68 in the three-deep roles added by the
+BT-3841 review), by family and method context, with the work each needs:
 
 | Family | class | value | actor | total | Classification |
 |---|---|---|---|---|---|
-| `eachWithIndex:` / `do:separatedBy:` | 58 | 44 | 39 | 141 | (a) add to the producer table with their index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
-| `[...] value` as a statement | 54 | 35 | 33 | 122 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
-| `detect:ifNone:` search or handler | 44 | 38 | 38 | 120 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
+| `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with their index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
+| `detect:ifNone:` search or handler | 52 | 46 | 44 | 142 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
+| `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
+| `keysAndValuesDo:` | 40 | 35 | 17 | 92 | (a) the dictionary `do:` producer with key/value parameters |
 | any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
-| `keysAndValuesDo:` | 36 | 31 | 15 | 82 | (a) the dictionary `do:` producer with key/value parameters |
-| `anySatisfy:` / `allSatisfy:` | 18 | 15 | 12 | 45 | (a) BT-3833: a non-producer list-op needs a producer site (an early-exit fold) |
-| **total** | **246** | **199** | **150** | **595** | |
+| `anySatisfy:` / `allSatisfy:` | 20 | 18 | 13 | 51 | (a) BT-3833: a non-producer list-op needs a producer site (an early-exit fold) |
+| **total** | **272** | **226** | **165** | **663** | |
 
 By block role: loop bodies 180, protected bodies 121, arms 85, evaluated
-blocks 85, handlers 57, arm/loop mixes 51, the method body 16.
+blocks 85, three-deep nestings 68, handlers 57, arm/loop mixes 51, the method
+body 16. The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
+rows name the exact depth, and the unfinished families above are rejected past
+depth two unless a row names the exact shape (the review found an `anySatisfy:`
+in an arm in a protected body in a `do:` body that the coarse rows accepted and
+that raises `bad argument` in a value-type method).
 
 Operand cells (1,404): 665 answer right, 675 wrong, 64 `erlc`; Phase 0 accepts
 537, all of them right (zero unsound), and rejects the 739 that do not answer

@@ -1382,14 +1382,24 @@ fn adr0131_statement_probe_pins() {
 /// Cells that answer right but that Phase 0 still rejects, because the facts a
 /// statement position carries cannot tell them from a sibling cell that
 /// answers wrong: a `eachWithIndex:` in an actor `whileTrue:`/`to:do:` body
-/// that also touches state, where the state touch inside the construct's own
-/// block (`cvar`, `selfsend`) is right and the one before it (`cvarOuter`) is
-/// not. PIN-BUG BT-3841: the `Enumeration` producer work (PR 2) deletes them.
+/// that also touches state (the state touch inside the construct's own block,
+/// `cvar` and `selfsend`, is right and the one before it is not), the
+/// `Enumeration`/`KeyedDo`/`detect:ifNone:`/`value` statements of an actor
+/// arm-in-protected-body-in-`do:` role (`armProtIter`) and an `anySatisfy:` in
+/// a value-type arm-in-`do:`-in-`do:` role (`armIterIter`). PIN-BUG BT-3841:
+/// the producer work for those families deletes the entries.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "loop", "cvar", "ewi"),
     ("actor", "loop", "selfsend", "ewi"),
     ("actor", "toDoC", "cvar", "ewi"),
     ("actor", "toDoC", "selfsend", "ewi"),
+    ("actor", "armProtIter", "outer", "dinH"),
+    ("actor", "armProtIter", "outer", "dinS"),
+    ("actor", "armProtIter", "outer", "dsb"),
+    ("actor", "armProtIter", "outer", "ewi"),
+    ("actor", "armProtIter", "outer", "kv"),
+    ("actor", "armProtIter", "outer", "value"),
+    ("value", "armIterIter", "outer", "any"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
@@ -1605,9 +1615,47 @@ fn adr0131_phase0_summary_is_checked_in() {
         return;
     }
     assert!(
-        summary == include_str!("adr0131_phase0_summary.tsv"),
+        summary == include_str!("adr0131_phase0_summary.tsv").replace("\r\n", "\n"),
         "the summary drifted; regenerate with ADR0131_BLESS=1:\n{summary}"
     );
+}
+
+/// BT-3841 review: `RIGHT_STATEMENTS` rows match the block depth exactly (the
+/// matrix nests at most two blocks, and three for the `three-deep` roles), and
+/// the unfinished families (`anySatisfy:`, `detect:ifNone:`, the enumerations,
+/// `keysAndValuesDo:`, a block `value`) are rejected past depth two unless a row
+/// names the exact shape. This arm in a protected body in a `do:` body (depth
+/// 3) answers 4 in a class and an actor method and raises `bad argument` in a
+/// value-type method, measured on a BEAM; the coarse rows used to accept it in
+/// the value-type method, which is now rejected. Depth four stays rejected for
+/// the unfinished families in every context.
+#[test]
+fn unfinished_families_are_rejected_past_the_measured_depth() {
+    let header = |context: &str| match context {
+        "class" => {
+            "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class probe: c =>\n"
+        }
+        "value" => "Value subclass: P\n  plain => 0\n  probe: c =>\n",
+        _ => "Actor subclass: P\n  state: n = 0\n  plain => 0\n  probe: c =>\n",
+    };
+    let source = |context: &str, body: &str| {
+        let lines = body
+            .lines()
+            .fold(String::new(), |acc, l| acc + "    " + l + "\n");
+        format!("{}{lines}", header(context))
+    };
+    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]\nt";
+    assert!(
+        !adr0131_diagnostics(&source("value", depth3)).is_empty(),
+        "the value-type depth-3 shape raises on a BEAM and must be rejected"
+    );
+    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]]\nt";
+    for context in ["class", "value", "actor"] {
+        assert!(
+            !adr0131_diagnostics(&source(context, depth4)).is_empty(),
+            "{context}: depth-4 shape accepted"
+        );
+    }
 }
 
 #[test]

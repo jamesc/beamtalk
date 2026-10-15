@@ -85,7 +85,8 @@ fn cells(matrix: Matrix) -> Vec<Cell> {
 
 /// The raw result of one `beamtalk test` run.
 struct Run {
-    success: bool,
+    /// Killed after [`TIMEOUT`].
+    timed_out: bool,
     text: String,
 }
 
@@ -194,22 +195,35 @@ fn write_package(root: &Path, pkg: &Package) {
         .expect("write test");
 }
 
+/// Longest a package may run before it is killed. A probe whose dropped write
+/// turns a `whileTrue:` into an infinite loop would otherwise hang its whole
+/// batch; a timed-out batch is bisected like one that does not compile, down
+/// to the hanging cell.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
+
 fn run_package(pkg: &Package) -> Run {
     let dir = tempfile::tempdir().expect("tempdir");
     write_package(dir.path(), pkg);
-    let out = cli_common::beamtalk()
+    let result = cli_common::beamtalk()
         .current_dir(dir.path())
         .env(ADR0131_MEASURE_BYPASS_ENV, "1")
+        .timeout(TIMEOUT)
         .args(["test"])
-        .output()
-        .expect("run beamtalk test");
-    Run {
-        success: out.status.success(),
-        text: format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        ),
+        .output();
+    match result {
+        Ok(out) => Run {
+            timed_out: false,
+            text: format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Run {
+            timed_out: true,
+            text: String::new(),
+        },
+        Err(e) => panic!("run beamtalk test: {e}"),
     }
 }
 
@@ -219,9 +233,35 @@ fn failed(text: &str, name: &str) -> bool {
     text.lines().any(|l| l.trim_start().starts_with(&prefix))
 }
 
-/// Whether the package compiled and the runner reported results.
+/// Whether the package compiled and the runner started.
 fn ran(text: &str) -> bool {
     text.contains("Running tests") && !text.contains("internal:") && !text.contains("panicked at")
+}
+
+/// The number directly before `label` in `line`.
+fn number_before(line: &str, label: &str) -> Option<usize> {
+    let end = line.find(label)?;
+    let digits: String = line[..end]
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    digits.parse().ok()
+}
+
+/// The runner's summary line `N file(s), T tests, P passed, F failed (..s)`:
+/// `(T, P, F)`.
+fn summary(text: &str) -> Option<(usize, usize, usize)> {
+    text.lines().find_map(|line| {
+        Some((
+            number_before(line, " tests,")?,
+            number_before(line, " passed,")?,
+            number_before(line, " failed (")?,
+        ))
+    })
 }
 
 /// Measures `cells` (one context), recording each cell's answer in `out`.
@@ -231,7 +271,26 @@ fn measure(matrix: Matrix, cells: &[Cell], out: &Mutex<BTreeMap<Cell, &'static s
     }
     let pkg = render(matrix, cells, CHUNK);
     let run = run_package(&pkg);
-    if ran(&run.text) {
+    if ran(&run.text) && !run.timed_out {
+        // Positive evidence only: the runner must account for every test of
+        // the batch, or the run is an error (a `right` is never inferred from
+        // the absence of a FAIL line).
+        let Some((total, passed, failed_count)) = summary(&run.text) else {
+            panic!(
+                "no test summary line from a run that started:\n{}",
+                run.text
+            );
+        };
+        let reported_failures = pkg.names.iter().filter(|n| failed(&run.text, n)).count();
+        assert!(
+            total == pkg.names.len()
+                && passed + failed_count == total
+                && reported_failures == failed_count,
+            "the runner did not account for the batch ({} tests, summary {total} tests / \
+             {passed} passed / {failed_count} failed, {reported_failures} FAIL lines):\n{}",
+            pkg.names.len(),
+            run.text
+        );
         let mut out = out.lock().expect("lock");
         for (cell, name) in cells.iter().zip(&pkg.names) {
             let answer = if failed(&run.text, name) {
@@ -241,11 +300,11 @@ fn measure(matrix: Matrix, cells: &[Cell], out: &Mutex<BTreeMap<Cell, &'static s
             };
             out.insert(cell.clone(), answer);
         }
-        assert!(
-            run.success || pkg.names.iter().any(|n| failed(&run.text, n)),
-            "a run that ran but reported no failure did not succeed:\n{}",
-            run.text
-        );
+        return;
+    }
+    if run.timed_out && cells.len() == 1 {
+        // A cell that never finishes (a dropped write that loops) is wrong.
+        out.lock().expect("lock").insert(cells[0].clone(), "wrong");
         return;
     }
     if std::env::var_os("ADR0131_MEASURE_VERBOSE").is_some() {
@@ -292,7 +351,27 @@ fn table(matrix: Matrix, answers: &BTreeMap<Cell, &'static str>, order: &[Cell])
     text
 }
 
+/// Asserts the `beamtalk` binary under test was built with the
+/// `measure-bypass` feature: a cell Phase 0 rejects must compile (`just
+/// measure-adr0131-statements` builds it that way).
+fn preflight() {
+    let cell = Cell {
+        context: "class".into(),
+        container: "top".into(),
+        target: "outer".into(),
+        kind: "ewi".into(),
+    };
+    let run = run_package(&render(Matrix::Statement, &[cell], CHUNK));
+    assert!(
+        ran(&run.text) && summary(&run.text).is_some(),
+        "the Phase 0 position check was not bypassed: build with `--features \
+         beamtalk-core/measure-bypass` (use `just measure-adr0131-statements`):\n{}",
+        run.text
+    );
+}
+
 fn run_matrix(matrix: Matrix, file: &str) {
+    preflight();
     let order = cells(matrix);
     assert!(order.len() > 1000, "only {} cells", order.len());
     let answers = Mutex::new(BTreeMap::new());
@@ -344,7 +423,7 @@ fn run_matrix(matrix: Matrix, file: &str) {
         return;
     }
     assert!(
-        measured == matrix.measured_table(),
+        measured == matrix.measured_table().replace("\r\n", "\n"),
         "the measured answers drifted from {file}; re-run with ADR0131_MEASURE_BLESS=1 and \
          review the diff:\n{measured}"
     );
