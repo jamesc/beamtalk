@@ -5072,7 +5072,7 @@ doAllRegisteredOn(_Self, NodeArg) ->
     {ok, atom(), module()} | {error, #beamtalk_error{}}.
 class_self_to_name_and_module(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
     try
-        ClassName = beamtalk_object_class:class_name(ClassPid),
+        ClassName = beamtalk_object_class:class_name_safe(ClassPid),
         Module = beamtalk_object_class:module_name_safe(ClassPid),
         {ok, ClassName, Module}
     catch

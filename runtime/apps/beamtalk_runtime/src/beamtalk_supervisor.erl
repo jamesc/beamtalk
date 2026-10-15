@@ -63,7 +63,8 @@ functions that call OTP APIs from the caller's process context.
     start_dynamic_child/2,
     start_dynamic_child/3,
     start_dynamic_child/4,
-    startChild/3
+    startChild/3,
+    class_config_value/2
 ]).
 
 -include("beamtalk.hrl").
@@ -121,7 +122,7 @@ rewritten shape (bare tuple or re-wrapped Result) to the caller.
     | {error, #beamtalk_error{}}.
 startLink(Self) ->
     ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name(ClassPid),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case Module:start_link() of
         {ok, Pid} ->
@@ -229,7 +230,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 -spec current(beamtalk_object()) -> term() | nil.
 current(Self) ->
     ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name(ClassPid),
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case whereis(Module) of
         undefined ->
@@ -281,7 +282,7 @@ whichChild(Self, ClassArg) ->
     ClassName = element(2, Self),
     ChildModule = element(3, ClassArg),
     ChildClassPid = element(4, ClassArg),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     with_live_supervisor(ClassName, 'which:', fun() ->
         Children = supervisor:which_children(SupPid),
         case
@@ -349,7 +350,7 @@ terminateChild(Self, Arg) ->
             true ->
                 %% Supervisor case: terminate by class name (the default child id)
                 ChildClassPid = element(4, Arg),
-                ChildId = beamtalk_object_class:class_name(ChildClassPid),
+                ChildId = beamtalk_object_class:class_name_safe(ChildClassPid),
                 handle_terminate_child_result(
                     SupClass,
                     #{child => ChildId},
@@ -444,7 +445,7 @@ startChild(Self) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, startChild, fun() ->
         case supervisor:start_child(SupPid, []) of
@@ -501,7 +502,7 @@ startChild(Self, Args) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, 'startChild:', fun() ->
         case supervisor:start_child(SupPid, [Args]) of
@@ -567,7 +568,7 @@ startChild(Self, Args, Name) ->
     SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
     with_live_supervisor(SupClass, 'startChild:name:', fun() ->
         case supervisor:start_child(SupPid, [Args, Name]) of
@@ -1032,6 +1033,57 @@ make_init_class_self(ClassName, Module) ->
     {beamtalk_object, ClassTag, Module, ClassPid}.
 
 -doc """
+Read a nullary class-side configuration method (`strategy`, `maxRestarts`,
+`restartWindow`, ...) of a Supervisor class **in the calling process**, without
+messaging the class gen_server (BT-3826).
+
+For callers that may themselves be running inside a class process (the
+`ProcessNavigation` snapshot is a class method): a `class_send` from there is a
+blocking call into another class, which deadlocks two busy classes against each
+other. The definition is resolved by dispatch's own resolver
+(`beamtalk_class_dispatch:find_class_method_from_class/2`, then a runtime
+class-method fun, ADR 0084, before the compiled export), so the result is what a
+class-side send would answer, including runtime overrides, and a class that does
+not register the selector is `not_found` exactly where a send would not find it.
+
+Note this is a reporting read: `static_init/2` / `dynamic_init/2` still configure
+OTP from the compiled export only (known divergence, tracked in BT-3832).
+
+Returns `{ok, Value}`, or `not_found` when no definition can be run in-process
+(class not registered, or no ancestor defines the method). Exceptions raised by
+the method body itself propagate unchanged.
+""".
+-spec class_config_value(atom(), atom()) -> {ok, term()} | not_found.
+class_config_value(ClassName, Selector) ->
+    %% Same resolution as class-side dispatch (`apply_class_method_in_context/6`):
+    %% the defining class comes from the published selector rows, a runtime
+    %% class-method fun (ADR 0084) for that class shadows the compiled export,
+    %% and the receiver carries the defining module.
+    case beamtalk_class_dispatch:find_class_method_from_class(Selector, ClassName) of
+        {ok, DefiningClass, DefiningModule} ->
+            ClassSelf = make_init_class_self(ClassName, DefiningModule),
+            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+                {ok, #{block := Fun}} when is_function(Fun, 1) ->
+                    {ok, beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> Fun(ClassSelf) end)};
+                _ ->
+                    FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
+                    %% `function_exported/3` is false for a module that is not loaded yet.
+                    _ = code:ensure_loaded(DefiningModule),
+                    case erlang:function_exported(DefiningModule, FunName, 1) of
+                        true ->
+                            {ok,
+                                beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
+                                    erlang:apply(DefiningModule, FunName, [ClassSelf])
+                                end)};
+                        false ->
+                            not_found
+                    end
+            end;
+        not_found ->
+            not_found
+    end.
+
+-doc """
 Call a class method directly by invoking the module function, bypassing the class
 gen_server. Tries the subclass module first, then walks the class hierarchy via
 ETS until the method is found in an ancestor's module.
@@ -1106,7 +1158,7 @@ build_child_spec(ClassObj, Mode) when
     case beamtalk_class_registry:is_class_object(ClassObj) of
         true ->
             ChildClassPid = element(4, ClassObj),
-            ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+            ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
             ChildModule = element(3, ClassObj),
             case is_supervisor(ChildClass) of
                 true ->
@@ -1361,7 +1413,7 @@ spec_to_otp(BtSpec, Mode) ->
     ClassObj = lists:nth(1, StartElems),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     OtpStart =
         case is_supervisor(ChildClass) of
             true ->

@@ -1861,6 +1861,7 @@ mock_class_loop(InstanceMethods, ClassMethods) ->
     end.
 
 cleanup_mock_class(Name, Pid) ->
+    beamtalk_class_metadata:delete(Name),
     RegName = beamtalk_class_registry:registry_name(Name),
     (try
         erlang:unregister(RegName)
@@ -1885,6 +1886,21 @@ spawn_mock_class_with_return_types(Name, InstanceReturnTypes, ClassReturnTypes) 
     after 1000 ->
         error({mock_class_register_timeout, Name})
     end,
+    %% BT-3826: return types are read from the class's published metadata row
+    %% (never by messaging the class process), so publish the mock's.
+    %% A test may have pre-seeded the row's superclass edge; keep it.
+    Super =
+        case beamtalk_class_metadata:lookup_superclass(Name) of
+            {ok, S} -> S;
+            not_found -> none
+        end,
+    beamtalk_class_metadata:merge_identity(Name, undefined, undefined, Super, undefined),
+    ok = beamtalk_class_metadata:put_reflection(Name, #{
+        instance_methods => maps:keys(InstanceReturnTypes),
+        instance_variables => [],
+        method_return_types => InstanceReturnTypes,
+        class_method_return_types => ClassReturnTypes
+    }),
     Pid.
 
 mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->

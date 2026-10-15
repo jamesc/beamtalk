@@ -115,7 +115,7 @@ resolve_with_hierarchy(ClassPid, Selector) ->
                 not_found ->
                     nil;
                 {max_depth_exceeded, CyclePid} ->
-                    CycleClass = beamtalk_object_class:class_name(CyclePid),
+                    CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
                     ?LOG_WARNING(
                         ">> hierarchy walk exceeded ~p levels at ~p",
                         [?MAX_HIERARCHY_DEPTH, CycleClass],

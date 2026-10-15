@@ -229,7 +229,7 @@ Return the local method selectors of the receiver (non-inherited).
 Returns only methods defined directly in this class, not inherited ones.
 Full chain walk for all methods is implemented in Behaviour.methods (pure Beamtalk).
 
-Uses __beamtalk_meta/0 when available; falls back to gen_server
+Uses __beamtalk_meta/0 when available; falls back to the published class metadata (no class-process call, BT-3826)
 for dynamic classes created via beamtalk_class_builder.
 
 When called on a metaclass object (Foo class methods), returns
@@ -238,7 +238,7 @@ user-defined class methods instead of instance methods.
 -spec classLocalMethods(#beamtalk_object{}) -> [atom()].
 classLocalMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% Metaclass receiver — return user-defined class methods.
-    maps:keys(beamtalk_object_class:local_class_methods_map(ClassPid));
+    beamtalk_object_class:local_class_method_selectors_safe(ClassPid);
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
@@ -246,7 +246,7 @@ classLocalMethods(Self) ->
         {ok, Meta} ->
             maps:keys(maps:get(method_info, Meta));
         not_available ->
-            gen_server:call(ClassPid, methods)
+            beamtalk_object_class:instance_methods_safe(ClassPid)
     end.
 
 -doc """
@@ -311,7 +311,7 @@ classAllSuperclasses(Self) ->
 Return all method selectors understood by instances (full inheritance chain).
 
 Uses __beamtalk_meta/0 at each hierarchy level when available;
-falls back to gen_server for dynamic classes.
+falls back to the published class metadata for dynamic classes (BT-3826).
 
 When called on a metaclass object (Foo class allMethods), walks
 the hierarchy collecting user-defined class methods at each level instead
@@ -324,9 +324,7 @@ classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            ClassMethods = maps:keys(
-                beamtalk_object_class:local_class_methods_map(CPid)
-            ),
+            ClassMethods = beamtalk_object_class:local_class_method_selectors_safe(CPid),
             {cont, ordsets:union(A, ordsets:from_list(ClassMethods))}
         end,
         ordsets:new()
@@ -344,7 +342,7 @@ classMethods(Self) ->
                     {ok, Meta} ->
                         maps:keys(maps:get(method_info, Meta));
                     not_available ->
-                        gen_server:call(CPid, methods)
+                        beamtalk_object_class:instance_methods_safe(CPid)
                 end,
             {cont, ordsets:union(A, ordsets:from_list(Methods))}
         end,
@@ -376,7 +374,7 @@ classCanUnderstandFromName(ClassName, Selector) ->
 Return all field names including inherited, in slot order.
 
 Uses __beamtalk_meta/0 at each hierarchy level when available;
-falls back to gen_server for dynamic classes.
+falls back to the published class metadata for dynamic classes (BT-3826).
 """.
 -spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
 classAllFieldNames(Self) ->
@@ -403,7 +401,7 @@ classAllFieldNamesByName(ClassName) ->
                     {ok, Meta} ->
                         maps:get(fields, Meta);
                     not_available ->
-                        gen_server:call(CPid, instance_variables)
+                        beamtalk_object_class:instance_variables_safe(CPid)
                 end,
             {cont, IVars ++ Acc}
         end,
@@ -487,8 +485,8 @@ selector rather than merging it into the instance-side one).
 
 Dynamic classes built via `beamtalk_class_builder` carry no static meta,
 so they answer `'eager'` for every field they report — ClassBuilder has no
-`late`-slot concept — via the same `gen_server:call(ClassPid,
-instance_variables)` fallback `classFieldNames/1` uses.
+`late`-slot concept — via the same
+`beamtalk_object_class:instance_variables_safe/1` fallback `classFieldNames/1` uses.
 """.
 -spec classFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
 classFieldKinds(Self) ->
@@ -498,7 +496,7 @@ classFieldKinds(Self) ->
         {ok, Meta} ->
             maps:get(field_kinds, Meta, #{});
         not_available ->
-            Fields = gen_server:call(ClassPid, instance_variables),
+            Fields = beamtalk_object_class:instance_variables_safe(ClassPid),
             maps:from_list([{F, eager} || F <- Fields])
     end.
 
@@ -530,7 +528,7 @@ class's entry wins.
 
 A dynamic level with no `__beamtalk_meta/0` (ClassBuilder-built) contributes
 `'eager'` for every field *it* reports, via that level's own
-`gen_server:call(ClassPid, instance_variables)` fallback — same degrade as
+`beamtalk_object_class:instance_variables_safe(ClassPid)` fallback — same degrade as
 `classFieldKinds/1`. Returns `#{}` for an unregistered class.
 """.
 -spec classAllFieldKindsByName(atom()) -> #{atom() => eager | late}.
@@ -544,7 +542,7 @@ classAllFieldKindsByName(ClassName) ->
                     {ok, Meta} ->
                         maps:get(field_kinds, Meta, #{});
                     not_available ->
-                        Fields = gen_server:call(CPid, instance_variables),
+                        Fields = beamtalk_object_class:instance_variables_safe(CPid),
                         maps:from_list([{F, eager} || F <- Fields])
                 end,
             {cont, maps:merge(FieldKinds, Acc)}
@@ -565,7 +563,7 @@ of instance methods.
 Uses __beamtalk_meta/0 fast path when available — mirrors the
 fast path already in `classLocalMethods/1` and avoids a gen_server
 round-trip per call, which matters for the bulk iteration done by
-`SystemNavigation implementorsOf:`. Falls back to gen_server for dynamic
+`SystemNavigation implementorsOf:`. Falls back to the published class metadata for dynamic
 classes built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
@@ -579,8 +577,8 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Sel
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(class_method_info, Meta, #{}));
         not_available ->
-            ClassMethods = beamtalk_object_class:local_class_methods_map(ClassPid),
-            maps:is_key(Selector, ClassMethods)
+            ClassMethods = beamtalk_object_class:local_class_method_selectors_safe(ClassPid),
+            lists:member(Selector, ClassMethods)
     end;
 classIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
@@ -589,14 +587,14 @@ classIncludesSelector(Self, Selector) ->
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(method_info, Meta));
         not_available ->
-            LocalMethods = gen_server:call(ClassPid, methods),
+            LocalMethods = beamtalk_object_class:instance_methods_safe(ClassPid),
             lists:member(Selector, LocalMethods)
     end.
 
 -doc """
 Return the names of fields declared in this class (not inherited).
 
-Uses __beamtalk_meta/0 when available; falls back to gen_server
+Uses __beamtalk_meta/0 when available; falls back to the published class metadata (BT-3826)
 for dynamic classes created via beamtalk_class_builder.
 """.
 -spec classFieldNames(#beamtalk_object{}) -> [atom()].
@@ -607,7 +605,7 @@ classFieldNames(Self) ->
         {ok, Meta} ->
             maps:get(fields, Meta);
         not_available ->
-            gen_server:call(ClassPid, instance_variables)
+            beamtalk_object_class:instance_variables_safe(ClassPid)
     end.
 
 -doc """
@@ -3281,7 +3279,7 @@ metaclassAllMethods(Self) ->
                     {ok, Meta} ->
                         maps:keys(maps:get(method_info, Meta));
                     not_available ->
-                        gen_server:call(CPid, methods)
+                        beamtalk_object_class:instance_methods_safe(CPid)
                 end,
             {cont, ordsets:union(A, ordsets:from_list(Methods))}
         end,
@@ -3304,8 +3302,7 @@ metaclassClassMethods(Self) ->
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            ClassMethods = gen_server:call(CPid, get_local_class_methods),
-            Selectors = maps:keys(ClassMethods),
+            Selectors = beamtalk_object_class:local_class_method_selectors_safe(CPid),
             {cont, ordsets:union(A, ordsets:from_list(Selectors))}
         end,
         ordsets:new()
@@ -3321,8 +3318,7 @@ Returns only class methods defined directly on this class.
 -spec metaclassLocalClassMethods(#beamtalk_object{}) -> [atom()].
 metaclassLocalClassMethods(Self) ->
     Pid = erlang:element(4, Self),
-    ClassMethods = gen_server:call(Pid, get_local_class_methods),
-    maps:keys(ClassMethods).
+    beamtalk_object_class:local_class_method_selectors_safe(Pid).
 
 -doc """
 Test whether the selector is defined as a class-side method.
@@ -3333,8 +3329,7 @@ Does NOT check superclasses — local containment only.
 -spec metaclassIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 metaclassIncludesSelector(Self, Selector) ->
     Pid = erlang:element(4, Self),
-    ClassMethods = gen_server:call(Pid, get_local_class_methods),
-    maps:is_key(Selector, ClassMethods).
+    lists:member(Selector, beamtalk_object_class:local_class_method_selectors_safe(Pid)).
 
 -doc """
 Guard for direct Metaclass instantiation — backs `class sealed new`.

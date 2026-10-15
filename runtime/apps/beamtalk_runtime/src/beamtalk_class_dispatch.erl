@@ -35,7 +35,8 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     is_test_execution_selector/1,
     handle_class_method_call/6,
     handle_async_dispatch/5,
-    class_understands_class_selector/2
+    class_understands_class_selector/2,
+    find_class_method_from_class/2
 ]).
 
 -type selector() :: atom().

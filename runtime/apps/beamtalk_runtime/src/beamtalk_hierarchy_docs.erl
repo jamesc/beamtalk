@@ -58,9 +58,9 @@ and — in the cycle case only — logs a `?LOG_WARNING`.
 """.
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
-    ReceiverName = beamtalk_object_class:class_name(ClassPid),
+    ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
-        CurrentName = beamtalk_object_class:class_name(CurrentPid),
+        CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
         case gen_server:call(CurrentPid, {method, Selector}, 5000) of
             nil ->
                 case gen_server:call(CurrentPid, superclass, 5000) of
@@ -80,7 +80,7 @@ find_defining_class(ClassPid, Selector) ->
         {found, DefiningClass} ->
             DefiningClass;
         {max_depth_exceeded, CyclePid} ->
-            CycleClass = beamtalk_object_class:class_name(CyclePid),
+            CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
             ?LOG_WARNING(
                 "find_defining_class: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
                 [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
@@ -102,9 +102,9 @@ method table.
 """.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
-    ReceiverName = beamtalk_object_class:class_name(ClassPid),
+    ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
-        CurrentName = beamtalk_object_class:class_name(CurrentPid),
+        CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
         LocalClassMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
         case maps:is_key(Selector, LocalClassMethods) of
             true ->
@@ -125,7 +125,7 @@ find_defining_class_method(ClassPid, Selector) ->
         {found, DefiningClass} ->
             DefiningClass;
         {max_depth_exceeded, CyclePid} ->
-            CycleClass = beamtalk_object_class:class_name(CyclePid),
+            CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
             ?LOG_WARNING(
                 "find_defining_class_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
                 [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
