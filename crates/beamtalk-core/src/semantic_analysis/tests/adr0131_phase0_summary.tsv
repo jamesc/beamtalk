@@ -1,0 +1,132 @@
+# ADR 0131 Phase 0 measurement summary (BT-3841), generated from the two measured
+# tables by `adr0131_phase0_summary_is_checked_in`; regenerate with
+# `ADR0131_BLESS=1 cargo test -p beamtalk-core --lib adr0131_phase0_summary`.
+# statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
+# statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
+# operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
+statement	block-value	actor	23	25	8
+statement	block-value	class	0	47	7
+statement	block-value	value	3	28	7
+statement	detect-ifnone	actor	36	26	12
+statement	detect-ifnone	class	34	42	2
+statement	detect-ifnone	value	30	36	2
+statement	enumeration	actor	65	39	0
+statement	enumeration	class	32	58	0
+statement	enumeration	value	24	44	0
+statement	evaluated-block	actor	40	13	0
+statement	evaluated-block	class	0	31	5
+statement	evaluated-block	value	0	36	0
+statement	keyed-do	actor	32	15	0
+statement	keyed-do	class	0	36	0
+statement	keyed-do	value	0	31	0
+statement	other	actor	546	0	0
+statement	other	class	543	0	0
+statement	other	value	416	0	0
+statement	satisfy	actor	24	12	0
+statement	satisfy	class	18	18	0
+statement	satisfy	value	16	15	0
+statement-group	arm	block-value	class	10
+statement-group	arm	block-value	value	5
+statement-group	arm	detect-ifnone	class	14
+statement-group	arm	detect-ifnone	value	8
+statement-group	arm	enumeration	class	17
+statement-group	arm	enumeration	value	9
+statement-group	arm	keyed-do	class	7
+statement-group	arm	keyed-do	value	4
+statement-group	arm	satisfy	class	7
+statement-group	arm	satisfy	value	4
+statement-group	arm-loop-mix	block-value	actor	3
+statement-group	arm-loop-mix	block-value	class	5
+statement-group	arm-loop-mix	block-value	value	5
+statement-group	arm-loop-mix	detect-ifnone	actor	4
+statement-group	arm-loop-mix	detect-ifnone	class	4
+statement-group	arm-loop-mix	detect-ifnone	value	4
+statement-group	arm-loop-mix	enumeration	actor	4
+statement-group	arm-loop-mix	enumeration	class	4
+statement-group	arm-loop-mix	enumeration	value	4
+statement-group	arm-loop-mix	keyed-do	actor	2
+statement-group	arm-loop-mix	keyed-do	class	5
+statement-group	arm-loop-mix	keyed-do	value	5
+statement-group	arm-loop-mix	satisfy	class	1
+statement-group	arm-loop-mix	satisfy	value	1
+statement-group	evaluated-block	evaluated-block	actor	13
+statement-group	evaluated-block	evaluated-block	class	36
+statement-group	evaluated-block	evaluated-block	value	36
+statement-group	handler	block-value	actor	4
+statement-group	handler	block-value	class	4
+statement-group	handler	block-value	value	4
+statement-group	handler	detect-ifnone	actor	4
+statement-group	handler	detect-ifnone	class	4
+statement-group	handler	detect-ifnone	value	6
+statement-group	handler	enumeration	actor	4
+statement-group	handler	enumeration	class	4
+statement-group	handler	enumeration	value	6
+statement-group	handler	keyed-do	actor	2
+statement-group	handler	keyed-do	class	4
+statement-group	handler	keyed-do	value	4
+statement-group	handler	satisfy	actor	2
+statement-group	handler	satisfy	class	2
+statement-group	handler	satisfy	value	3
+statement-group	loop-body	block-value	actor	17
+statement-group	loop-body	block-value	class	20
+statement-group	loop-body	block-value	value	14
+statement-group	loop-body	detect-ifnone	actor	18
+statement-group	loop-body	detect-ifnone	class	12
+statement-group	loop-body	detect-ifnone	value	12
+statement-group	loop-body	enumeration	actor	20
+statement-group	loop-body	enumeration	class	15
+statement-group	loop-body	enumeration	value	13
+statement-group	loop-body	keyed-do	actor	7
+statement-group	loop-body	keyed-do	class	11
+statement-group	loop-body	keyed-do	value	11
+statement-group	loop-body	satisfy	actor	6
+statement-group	loop-body	satisfy	class	2
+statement-group	loop-body	satisfy	value	2
+statement-group	method-body	block-value	class	4
+statement-group	method-body	enumeration	class	5
+statement-group	method-body	enumeration	value	3
+statement-group	method-body	keyed-do	class	1
+statement-group	method-body	keyed-do	value	1
+statement-group	method-body	satisfy	class	1
+statement-group	method-body	satisfy	value	1
+statement-group	protected-body	block-value	actor	9
+statement-group	protected-body	block-value	class	11
+statement-group	protected-body	block-value	value	7
+statement-group	protected-body	detect-ifnone	actor	12
+statement-group	protected-body	detect-ifnone	class	10
+statement-group	protected-body	detect-ifnone	value	8
+statement-group	protected-body	enumeration	actor	11
+statement-group	protected-body	enumeration	class	13
+statement-group	protected-body	enumeration	value	9
+statement-group	protected-body	keyed-do	actor	4
+statement-group	protected-body	keyed-do	class	8
+statement-group	protected-body	keyed-do	value	6
+statement-group	protected-body	satisfy	actor	4
+statement-group	protected-body	satisfy	class	5
+statement-group	protected-body	satisfy	value	4
+operand	arg	actor	54	27	19	8	24	3
+operand	arg	class	54	35	19	0	35	0
+operand	arg	value	54	35	19	0	35	0
+operand	assign	actor	54	41	5	8	29	12
+operand	assign	class	54	40	14	0	35	5
+operand	assign	value	54	40	14	0	35	5
+operand	cascade	actor	54	10	44	0	0	10
+operand	cascade	class	54	8	41	5	0	8
+operand	cascade	value	54	10	41	3	0	10
+operand	field	actor	54	37	9	8	27	10
+operand	field	class	54	35	19	0	35	0
+operand	interp	actor	54	10	44	0	0	10
+operand	interp	class	54	8	41	5	0	8
+operand	interp	value	54	10	41	3	0	10
+operand	literal	actor	54	27	19	8	24	3
+operand	literal	class	54	35	19	0	35	0
+operand	literal	value	54	35	19	0	35	0
+operand	match	actor	54	10	44	0	0	10
+operand	match	class	54	8	46	0	0	8
+operand	match	value	54	10	44	0	0	10
+operand	operand	actor	54	27	19	8	24	3
+operand	operand	class	54	35	19	0	35	0
+operand	operand	value	54	35	19	0	35	0
+operand	recv	actor	54	27	19	8	24	3
+operand	recv	class	54	35	19	0	35	0
+operand	recv	value	54	35	19	0	35	0
