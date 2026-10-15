@@ -56,13 +56,12 @@ impl CoreErlangGenerator {
     /// The producer lowering of the lookup send `expr` (paren-unwrapped), or
     /// `Ok(None)` when it is not one core's `lookup_arm_blocks` names. The
     /// caller has already decided the send is a local-threading producer in
-    /// this frame ([`Self::conditional_producer_locals`]) and passes that as
-    /// `producer`, which gates the arm frame and the `LocalRebind`s.
+    /// this frame ([`Self::conditional_producer_locals`]); a lookup is a producer
+    /// only at the method root or in an arm, never at a loop or fold body site.
     pub(in crate::core_erlang) fn generate_lookup_producer(
         &mut self,
         expr: &Expression,
         tail: ProducerTail,
-        producer: bool,
     ) -> Result<Option<ThreadedValue>> {
         let Some(arms) = lookup_arm_blocks(expr) else {
             return Ok(None);
@@ -96,9 +95,8 @@ impl CoreErlangGenerator {
         let span = handler.span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_lookup_tuple(receiver, &selector, key, handler, scratch, producer)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[handler], tail, producer)
+        let tuple_doc = self.generate_lookup_tuple(receiver, &selector, key, handler, scratch)?;
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[handler], tail, true)
             .map(Some)
     }
 
@@ -111,7 +109,6 @@ impl CoreErlangGenerator {
         key: &Expression,
         handler: &Block,
         scratch: ScratchStart,
-        producer: bool,
     ) -> Result<Document<'static>> {
         let frame = self.current_frame();
         // The receiver is evaluated first and its value bound before the key's
@@ -129,7 +126,7 @@ impl CoreErlangGenerator {
         // Seed the construct's own locals so the handler arm, the found path
         // and the post-lookup extraction all see every `__local__` key.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[handler], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[handler], producer);
+        let arm_frame = self.conditional_arm_frame(&[handler], true);
         let (handler_doc, _final) =
             self.with_branch_context(|this| this.conditional_arm(handler, arm_frame.as_ref()))?;
         let found_arm = self.conditional_baseline_tuple(leaf::var(found_var.clone()), &base_state);

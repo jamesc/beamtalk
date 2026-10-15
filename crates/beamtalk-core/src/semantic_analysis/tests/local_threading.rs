@@ -708,6 +708,23 @@ fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
 }
 
 #[test]
+fn detect_if_none_handler_write_in_a_counted_loop_body_is_rejected() {
+    // BT-3822 review: `detect:ifNone:` is not a loop-body producer site, so a
+    // handler that writes an outer local inside a direct-params `to:do:` is
+    // rejected by Phase 0 in every method context (never a silently dropped
+    // write or a leaked tuple).
+    let body = "t := 0\nn := 0\n1 to: 3 do: [:i |\n  n := n + 1\n  \
+                #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]\n]\n#[t, n]";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(
+            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            "{src}: {diags:?}"
+        );
+    }
+}
+
+#[test]
 fn allow_set_detect_if_none_needs_a_literal_search_block() {
     // BT-3794 review: codegen packs the handler's writes only when the search
     // block is a literal (`producer_body_block`). A parenthesised search block

@@ -2960,7 +2960,8 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
 fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() {
     // ADR 0131 section 3: `match:` is a State-family producer. In an actor
     // instance method a loop body holding a `match:` that writes a local (the
-    // loop threads only locals: the direct-params shape) must compile, not hit the "private scratch map" internal error.
+    // loop threads only locals: the direct-params shape) must compile, not hit
+    // the private-scratch internal error in `control_flow_tuple_to_threaded_value`.
     let src = concat!(
         "Actor subclass: MatchLoop\n",
         "  state: x = 0\n\n",
@@ -2973,8 +2974,10 @@ fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() 
         "    count\n",
     );
     let code = codegen(src);
+    // The loop really is direct-params (it rebuilds StateAcc once at exit), so
+    // the success of `codegen` above shows the error branch is not reached.
     assert!(
-        !code.contains("private scratch map"),
-        "match: in an actor loop body must not hit the private-scratch error. Got:\n{code}"
+        code.contains("ExitSA"),
+        "Outer loop should be direct-params (rebuild StateAcc at exit). Got:\n{code}"
     );
 }

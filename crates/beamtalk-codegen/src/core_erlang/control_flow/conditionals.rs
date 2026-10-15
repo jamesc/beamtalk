@@ -1496,7 +1496,7 @@ impl CoreErlangGenerator {
         // ADR 0131 Phase 2d (BT-3798): a `Dictionary` lookup whose handler
         // writes an outer local, a producer here (never `needs_threading`).
         if root_producer {
-            if let Some(tv) = self.generate_lookup_producer(expr, tail, root_producer)? {
+            if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
                 return Ok(Some(tv));
             }
         }
