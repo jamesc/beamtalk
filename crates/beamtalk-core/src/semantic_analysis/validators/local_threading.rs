@@ -276,7 +276,12 @@ pub(crate) enum Position {
     /// BT-3753). `direct` is whether an enclosing block
     /// has a statement `x := ...x...` that reads and writes a local bound
     /// outside it ([`rebinds_outer_local`]): codegen then threads that block
-    /// as a read+write scope.
+    /// as a read+write scope. `inner` is the role of the innermost enclosing
+    /// block (`container` is the outermost): codegen lowers an arm inside a
+    /// `do:` body differently from a `do:` inside an arm (BT-3841). `depth` is
+    /// the number of enclosing blocks; with `container` and `inner` it names the
+    /// whole chain only up to depth 2, which is why [`RIGHT_STATEMENTS`] rows
+    /// match the depth exactly.
     NestedStatement {
         container: Container,
         crosses: bool,
@@ -284,6 +289,8 @@ pub(crate) enum Position {
         deep: bool,
         stateful: bool,
         direct: bool,
+        inner: Container,
+        depth: usize,
     },
     /// `x := <here>`.
     AssignValue { nested: bool },
@@ -532,6 +539,8 @@ impl Denied {
                 deep,
                 stateful,
                 direct,
+                inner: _,
+                depth: _,
             } => {
                 self.container == Some(container)
                     && self.crosses.is_none_or(|c| c == crosses)
@@ -633,8 +642,13 @@ const fn deny(
 /// phases that grow [`ALLOW_SET`] shrink this table. Phase 5a (BT-3751)
 /// re-measured every `bad`/`over` line with the check bypassed (class, value
 /// and actor methods, run on a BEAM): 552 of the 733 answered wrong, 43 failed
-/// to compile and 138 answered right, so the table stays and BT-3841 retires
-/// it as the shapes become producers (the 138 first narrow their coarse rows).
+/// to compile and 138 answered right. BT-3841's first step carved the 138 out
+/// ([`RIGHT_STATEMENTS`]: 134 of them, as 95 position rows; twenty stay rejected, see the pin test's
+/// `KNOWN_OVER_REJECTED`); the 595 that answer wrong or fail stay rejected until
+/// they become producers. The measurement is a checked-in harness
+/// (`just measure-adr0131-statements`, `adr0131_statement_measured.tsv`) and
+/// `adr0131_phase0_agrees_with_measured_answers` asserts, in both directions,
+/// that this table rejects exactly the cells that do not answer right.
 /// Never add a row for a shape an existing test shows answering right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
@@ -699,17 +713,219 @@ const DENY_SET: &[Denied] = &[
     deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
 ];
 
+/// A statement shape (a construct kind at a [`Position::Statement`] or
+/// [`Position::NestedStatement`] position in a method context) that the
+/// BT-3841 measurement found answering right on a BEAM wherever the probe
+/// matrix draws it, though a coarser [`DENY_SET`] row covers it. A row names
+/// every fact of the position, the exact block depth and the outermost and
+/// innermost block roles included (the matrix nests at most two blocks, so
+/// those name the whole chain); a statement whose facts match no row, a
+/// deeper nesting among them, keeps the coarse rows' verdict, so this table
+/// narrows [`DENY_SET`] without widening it past a measurement. Generated from `adr0131_statement_measured.tsv`;
+/// `adr0131_phase0_agrees_with_measured_answers` keeps it honest in both
+/// directions: no cell that answers wrong or fails to compile is accepted,
+/// and every cell that answers right is accepted except the
+/// [`KNOWN_OVER_REJECTED`] ones.
+struct RightStatement {
+    kind: ConstructKind,
+    position: Position,
+    context: MethodContext,
+}
+
+/// A [`RIGHT_STATEMENTS`] row for a [`Position::NestedStatement`]; `flags` are
+/// `crosses`, `last`, `deep`, `stateful` and `direct`, in that order, and
+/// `depth` the exact number of enclosing blocks.
+const fn right(
+    kind: ConstructKind,
+    container: Container,
+    inner: Container,
+    flags: [bool; 5],
+    depth: usize,
+    context: MethodContext,
+) -> RightStatement {
+    RightStatement {
+        kind,
+        position: Position::NestedStatement {
+            container,
+            crosses: flags[0],
+            last: flags[1],
+            deep: flags[2],
+            stateful: flags[3],
+            direct: flags[4],
+            inner,
+            depth,
+        },
+        context,
+    }
+}
+
+/// The measured-right carve-outs of [`DENY_SET`] (see [`RightStatement`]).
+#[rustfmt::skip] // one row per line: a measured table
+const RIGHT_STATEMENTS: &[RightStatement] = &[
+    right(BlockValue, Arm, Arm, [true, false, false, false, false], 1, Actor),
+    right(BlockValue, Arm, Arm, [true, true, false, false, false], 1, Actor),
+    right(BlockValue, Arm, Arm, [true, true, false, true, false], 1, Actor),
+    right(BlockValue, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
+    right(BlockValue, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNone, Arm, Arm, [true, false, false, false, false], 1, Actor),
+    right(DetectIfNone, Arm, Arm, [true, true, false, false, false], 1, Actor),
+    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNone, Handler, Handler, [true, true, false, false, false], 1, Actor),
+    right(DetectIfNone, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNoneSearch, Arm, Arm, [true, false, false, false, false], 1, Actor),
+    right(DetectIfNoneSearch, Arm, Arm, [true, true, false, false, false], 1, Actor),
+    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNoneSearch, Handler, Handler, [true, true, false, false, false], 1, Actor),
+    right(DetectIfNoneSearch, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(Enumeration, Arm, Arm, [true, false, false, false, false], 1, Actor),
+    right(Enumeration, Arm, Arm, [true, true, false, false, false], 1, Actor),
+    right(Enumeration, Arm, Arm, [true, true, false, true, false], 1, Actor),
+    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, Actor),
+    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
+    right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
+    right(Enumeration, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
+    right(KeyedDo, Arm, Arm, [true, false, false, false, false], 1, Actor),
+    right(KeyedDo, Arm, Arm, [true, true, false, false, false], 1, Actor),
+    right(KeyedDo, Arm, DoBody, [true, true, true, false, true], 2, Actor),
+    right(KeyedDo, Handler, Handler, [true, true, false, false, false], 1, Actor),
+    right(KeyedDo, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(KeyedDo, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Actor),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Actor),
+    right(Satisfy, DoBody, Arm, [true, true, true, false, false], 2, Actor),
+    right(Satisfy, DoBody, DoBody, [true, true, false, false, false], 1, Actor),
+    right(Satisfy, DoBody, DoBody, [true, true, true, false, false], 2, Actor),
+    right(Satisfy, Handler, Handler, [true, true, false, false, false], 1, Actor),
+    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Actor),
+    right(Satisfy, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, Class),
+    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Class),
+    right(DetectIfNone, DoBody, Arm, [true, true, true, false, true], 2, Class),
+    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, Class),
+    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, true], 1, Class),
+    right(DetectIfNone, DoBody, DoBody, [true, true, true, false, false], 2, Class),
+    right(DetectIfNone, Handler, Handler, [true, true, false, false, false], 1, Class),
+    right(DetectIfNone, Handler, Handler, [true, true, false, false, true], 1, Class),
+    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
+    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, true], 1, Class),
+    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
+    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, true], 1, Class),
+    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, false], 2, Class),
+    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, Class),
+    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, false, false, false], 1, Class),
+    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, true, false, false], 2, Class),
+    right(DetectIfNoneSearch, Handler, Handler, [true, true, false, false, false], 1, Class),
+    right(DetectIfNoneSearch, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
+    right(DetectIfNoneSearch, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
+    right(Enumeration, Arm, DoBody, [true, true, true, false, false], 2, Class),
+    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, Class),
+    right(Enumeration, CountedLoopBody, CountedLoopBody, [true, true, false, true, false], 1, Class),
+    right(Enumeration, DoBody, DoBody, [true, true, false, false, false], 1, Class),
+    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, Class),
+    right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, Class),
+    right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Class),
+    right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
+    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Class),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Class),
+    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, Class),
+    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, Class),
+    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
+    right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
+    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
+    right(DetectIfNone, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
+    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
+    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
+    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
+    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(DetectIfNoneSearch, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
+    right(DetectIfNoneSearch, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
+    right(Enumeration, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
+    right(Enumeration, CountedLoopBody, CountedLoopBody, [true, true, false, true, false], 1, ValueType),
+    right(Enumeration, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
+    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, ValueType),
+    right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
+    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
+    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
+    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, ValueType),
+    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, ValueType),
+    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
+];
+
+/// Whether `ADR0131_MEASURE_BYPASS_PHASE0` bypasses the Phase 0 position
+/// check ([`DENY_SET`] and [`ALLOW_SET`]), so the measurement harness (`just
+/// measure-adr0131-statements`, BT-3841) can compile the shapes the check
+/// rejects and run them on a BEAM. Only a build with the `measure-bypass`
+/// feature reads it; no other build can turn the check off. It goes with the
+/// check (the last BT-3841 PR deletes both).
+#[cfg(feature = "measure-bypass")]
+fn position_check_bypassed() -> bool {
+    use crate::test_helpers::ADR0131_MEASURE_BYPASS_ENV;
+    static BYPASSED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BYPASSED.get_or_init(|| std::env::var_os(ADR0131_MEASURE_BYPASS_ENV).is_some())
+}
+
+/// Without the `measure-bypass` feature the check cannot be bypassed.
+#[cfg(not(feature = "measure-bypass"))]
+const fn position_check_bypassed() -> bool {
+    false
+}
+
+/// The constructs that still fail somewhere in the statement matrix
+/// (the families of the probe matrix: `anySatisfy:`, `detect:ifNone:`, the
+/// enumerations, `keysAndValuesDo:` and a block `value`). Past the two blocks
+/// the matrix measured them at, only an exact [`RIGHT_STATEMENTS`] row accepts
+/// them (BT-3841: an arm in a protected body in a `do:` body raised in a
+/// value-type method while the coarse rows accepted it).
+const UNFINISHED_FAMILIES: &[ConstructKind] = &[
+    Satisfy,
+    DetectIfNone,
+    DetectIfNoneSearch,
+    Enumeration,
+    KeyedDo,
+    BlockValue,
+];
+
+/// What the coarse rows say about a statement, before the measured carve-outs.
+fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
+    if let Position::NestedStatement { depth, .. } = position {
+        // The REPL rows were measured at depth one only and keep their coarse verdict.
+        if depth >= 3 && context != Repl && UNFINISHED_FAMILIES.contains(&kind) {
+            return false;
+        }
+    }
+    !DENY_SET
+        .iter()
+        .any(|row| row.denies(kind, position, context))
+}
+
 /// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
 /// statement unless [`DENY_SET`] lists it, anything else only if
 /// [`ALLOW_SET`] does.
 pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
     match position {
-        Position::Statement | Position::NestedStatement { .. } => !DENY_SET
-            .iter()
-            .any(|row| row.denies(kind, position, context)),
-        _ => ALLOW_SET.iter().any(|row| {
-            row.position == position && row.kinds.contains(&kind) && row.contexts.contains(&context)
-        }),
+        Position::Statement | Position::NestedStatement { .. } => {
+            position_check_bypassed()
+                || RIGHT_STATEMENTS
+                    .iter()
+                    .any(|r| r.kind == kind && r.position == position && r.context == context)
+                || coarse_allows(kind, position, context)
+        }
+        _ => {
+            position_check_bypassed()
+                || ALLOW_SET.iter().any(|row| {
+                    row.position == position
+                        && row.kinds.contains(&kind)
+                        && row.contexts.contains(&context)
+                })
+        }
     }
 }
 
@@ -1583,6 +1799,8 @@ impl<'d> Walker<'d> {
                 deep: self.depth > 1,
                 stateful: self.outer_stateful,
                 direct: self.direct_blocks.iter().any(|d| *d),
+                inner: self.containers.last().copied().unwrap_or(Container::Other),
+                depth: self.depth,
             },
             Position::AssignValue { nested: true } if !crosses_block => {
                 Position::AssignValue { nested: false }

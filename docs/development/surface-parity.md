@@ -587,6 +587,14 @@ reports the same message at the same span. No operation is surface-specific.
   local-threading construct whose blocks write an outer local sits in a
   position that does not thread the write back yet, including the statement
   positions that lose the write (BT-3753).
+- **Narrowing (BT-3841).** The statement-position half of the temporary
+  check was measured on a BEAM (`just measure-adr0131-statements`, tables
+  `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in
+  `beamtalk-core`'s `semantic_analysis/tests/`) and 134 of the 138 statement shapes the 5a measurement found
+  answering right (95 position rows, none past two nested blocks) in a class, value-type or actor method stopped reporting
+  `UnmigratedLocalThreading` on every surface (CLI, REPL eval and load, LSP,
+  MCP): no new error anywhere, only removed ones. The verdict is the
+  analyser's, so the surfaces change together.
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

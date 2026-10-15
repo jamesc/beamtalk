@@ -893,6 +893,69 @@ new selector table is introduced: the recognizer reuses
 implementation (`protect/1` in the runtime) and a conformance fixture
 across the Rust/Erlang line.
 
+### Phase 0 close-out measurement (BT-3841)
+
+Phase 5a (BT-3751) could not delete the Phase 0 position diagnostic
+(`DENY_SET` / `ALLOW_SET`): with it bypassed, most rejected statement shapes
+answered wrong or failed to compile. BT-3841 retires it as a series of PRs and
+keeps the measurement as a checked-in harness, so every number below is
+reproducible and every PR moves it:
+
+- `just measure-adr0131-statements` compiles every probe cell through the real
+  `beamtalk test` pipeline with the position check bypassed (debug builds, env
+  `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`), runs it on a BEAM and compares it
+  with the ADR-expected answer. The statement matrix is the 2,693 class,
+  value-type and actor cells of `adr0131_statement_probes.tsv` that are not
+  `gap` lines (every looping role runs its body twice); the operand matrix is
+  1,404 cells (a construct as the value of an assignment or field assignment, a
+  receiver, an argument, a binary operand, a cascade part, a literal element, a
+  `match:` subject or an interpolation, in a method body, an arm and a `do:`
+  body). Results: `adr0131_statement_measured.tsv`, `adr0131_operand_measured.tsv`
+  (`right`, `wrong` or `erlc`), summarised in `adr0131_phase0_summary.tsv`.
+- `adr0131_phase0_agrees_with_measured_answers` asserts both directions for the
+  statement matrix (a cell that is not `right` is rejected, a `right` cell is
+  accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
+  direction for the operand matrix.
+
+Statement cells that do not answer right (663 = 618 wrong + 45 `erlc`; 595 of
+them in the 5a population of 733 plus 68 in the three-deep roles added by the
+BT-3841 review), by family and method context, with the work each needs:
+
+| Family | class | value | actor | total | Classification |
+|---|---|---|---|---|---|
+| `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with their index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
+| `detect:ifNone:` search or handler | 52 | 46 | 44 | 142 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
+| `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
+| `keysAndValuesDo:` | 40 | 35 | 17 | 92 | (a) the dictionary `do:` producer with key/value parameters |
+| any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
+| `anySatisfy:` / `allSatisfy:` | 20 | 18 | 13 | 51 | (a) BT-3833: a non-producer list-op needs a producer site (an early-exit fold) |
+| **total** | **272** | **226** | **165** | **663** | |
+
+By block role: loop bodies 180, protected bodies 121, arms 85, evaluated
+blocks 85, three-deep nestings 68, handlers 57, arm/loop mixes 51, the method
+body 16. The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
+rows name the exact depth (none exist past two blocks), and the unfinished families above are rejected past
+depth two unless a row names the exact shape (the review found an `anySatisfy:`
+in an arm in a protected body in a `do:` body that the coarse rows accepted and
+that raises `bad argument` in a value-type method).
+
+Operand cells (1,404): 665 answer right, 675 wrong, 64 `erlc`; Phase 0 accepts
+537, all of them right (zero unsound), and rejects the 739 that do not answer
+right plus 128 that do. By position, the cells that do not answer right:
+assignment 41, field assignment 36, receiver 65, argument 65, binary operand
+65, literal element 65, cascade part 134, interpolation 134, `match:` subject
+134. The first six are (a): the operand sites `sequenced_operand_sites` and
+`repl_operand_sites` already name for some constructs extend to the rest. The
+last three (402 cells) are the likely permanent §6 rejections: a cascade
+shares one receiver across parts, an interpolation builds one binary and a
+`match:` subject is a single expression, so there is no statement boundary for
+a `LocalRebind` prelude to sit on without rewriting the expression; they stay
+compile errors unless the ADR is extended with an ANF hoist for them.
+
+The REPL rows (93 `bad` lines of the probe table) are not measured here
+(BT-3823). Plain stored closures and Erlang FFI arguments are §6 and not part
+of either matrix; `^` positions are not measured (BT-3813).
+
 ## Migration Path
 
 No *correct* program changes behaviour. Programs that today fail at runtime
