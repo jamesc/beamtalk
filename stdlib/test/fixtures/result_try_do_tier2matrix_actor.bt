@@ -53,6 +53,40 @@ Actor subclass: ResultTryDoTier2MatrixActor
       ]
     t
 
+  doTryHeadRead =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  doOnDoHeadRead =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        [
+          t := t + 1
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
   doTryRaise =>
     t := 0
     #(1, 2)
@@ -154,6 +188,42 @@ Actor subclass: ResultTryDoTier2MatrixActor
               ]
             7
           ]
+      ]
+    t
+
+  todoTryHeadRead =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  todoOnDoHeadRead =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        [
+          t := t + 1
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
       ]
     t
 
@@ -259,6 +329,40 @@ Actor subclass: ResultTryDoTier2MatrixActor
               ]
             7
           ]
+      ]
+    t
+
+  timesTryHeadRead =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            t := t + 1
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  timesOnDoHeadRead =>
+    t := 0
+    2
+      timesRepeat: [
+        [
+          t := t + 1
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
       ]
     t
 
@@ -369,6 +473,44 @@ Actor subclass: ResultTryDoTier2MatrixActor
       ]
     t
 
+  whileTryHeadRead =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            t := t + 1
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  whileOnDoHeadRead =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [
+          t := t + 1
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
   whileTryRaise =>
     t := 0
     i := 0
@@ -467,6 +609,34 @@ Actor subclass: ResultTryDoTier2MatrixActor
           ]
         7
       ]
+    t
+
+  onceTryHeadRead =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        #{#a => 1}
+          at: #k
+          ifAbsent: [
+            t := t + 1
+            0
+          ]
+        7
+      ]
+    t
+
+  onceOnDoHeadRead =>
+    t := 0
+    [
+      t := t + 1
+      #{#a => 1}
+        at: #k
+        ifAbsent: [
+          t := t + 1
+          0
+        ]
+    ] on: Error do: [:e | 0]
     t
 
   onceTryRaise =>

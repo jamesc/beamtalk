@@ -18,6 +18,12 @@ TestCase subclass: ResultTryDoTier2MatrixTest
   testDoTryNested =>
     self assert: #[ResultTryDoTier2MatrixClass doTryNested, (ResultTryDoTier2MatrixValue new) doTryNested, (ResultTryDoTier2MatrixActor spawn) doTryNested] equals: #[2, 2, 2]
 
+  testDoTryHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass doTryHeadRead, (ResultTryDoTier2MatrixValue new) doTryHeadRead, (ResultTryDoTier2MatrixActor spawn) doTryHeadRead] equals: #[4, 4, 4]
+
+  testDoOnDoHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass doOnDoHeadRead, (ResultTryDoTier2MatrixValue new) doOnDoHeadRead, (ResultTryDoTier2MatrixActor spawn) doOnDoHeadRead] equals: #[4, 4, 4]
+
   testDoTryRaise =>
     self assert: #[ResultTryDoTier2MatrixClass doTryRaise, (ResultTryDoTier2MatrixValue new) doTryRaise, (ResultTryDoTier2MatrixActor spawn) doTryRaise] equals: #[0, 0, 0]
 
@@ -38,6 +44,12 @@ TestCase subclass: ResultTryDoTier2MatrixTest
 
   testTodoTryNested =>
     self assert: #[ResultTryDoTier2MatrixClass todoTryNested, (ResultTryDoTier2MatrixValue new) todoTryNested, (ResultTryDoTier2MatrixActor spawn) todoTryNested] equals: #[2, 2, 2]
+
+  testTodoTryHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass todoTryHeadRead, (ResultTryDoTier2MatrixValue new) todoTryHeadRead, (ResultTryDoTier2MatrixActor spawn) todoTryHeadRead] equals: #[4, 4, 4]
+
+  testTodoOnDoHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass todoOnDoHeadRead, (ResultTryDoTier2MatrixValue new) todoOnDoHeadRead, (ResultTryDoTier2MatrixActor spawn) todoOnDoHeadRead] equals: #[4, 4, 4]
 
   testTodoTryRaise =>
     self assert: #[ResultTryDoTier2MatrixClass todoTryRaise, (ResultTryDoTier2MatrixValue new) todoTryRaise, (ResultTryDoTier2MatrixActor spawn) todoTryRaise] equals: #[0, 0, 0]
@@ -60,6 +72,12 @@ TestCase subclass: ResultTryDoTier2MatrixTest
   testTimesTryNested =>
     self assert: #[ResultTryDoTier2MatrixClass timesTryNested, (ResultTryDoTier2MatrixValue new) timesTryNested, (ResultTryDoTier2MatrixActor spawn) timesTryNested] equals: #[2, 2, 2]
 
+  testTimesTryHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass timesTryHeadRead, (ResultTryDoTier2MatrixValue new) timesTryHeadRead, (ResultTryDoTier2MatrixActor spawn) timesTryHeadRead] equals: #[4, 4, 4]
+
+  testTimesOnDoHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass timesOnDoHeadRead, (ResultTryDoTier2MatrixValue new) timesOnDoHeadRead, (ResultTryDoTier2MatrixActor spawn) timesOnDoHeadRead] equals: #[4, 4, 4]
+
   testTimesTryRaise =>
     self assert: #[ResultTryDoTier2MatrixClass timesTryRaise, (ResultTryDoTier2MatrixValue new) timesTryRaise, (ResultTryDoTier2MatrixActor spawn) timesTryRaise] equals: #[0, 0, 0]
 
@@ -81,6 +99,12 @@ TestCase subclass: ResultTryDoTier2MatrixTest
   testWhileTryNested =>
     self assert: #[ResultTryDoTier2MatrixClass whileTryNested, (ResultTryDoTier2MatrixValue new) whileTryNested, (ResultTryDoTier2MatrixActor spawn) whileTryNested] equals: #[2, 2, 2]
 
+  testWhileTryHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass whileTryHeadRead, (ResultTryDoTier2MatrixValue new) whileTryHeadRead, (ResultTryDoTier2MatrixActor spawn) whileTryHeadRead] equals: #[4, 4, 4]
+
+  testWhileOnDoHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass whileOnDoHeadRead, (ResultTryDoTier2MatrixValue new) whileOnDoHeadRead, (ResultTryDoTier2MatrixActor spawn) whileOnDoHeadRead] equals: #[4, 4, 4]
+
   testWhileTryRaise =>
     self assert: #[ResultTryDoTier2MatrixClass whileTryRaise, (ResultTryDoTier2MatrixValue new) whileTryRaise, (ResultTryDoTier2MatrixActor spawn) whileTryRaise] equals: #[0, 0, 0]
 
@@ -101,6 +125,12 @@ TestCase subclass: ResultTryDoTier2MatrixTest
 
   testOnceTryNested =>
     self assert: #[ResultTryDoTier2MatrixClass onceTryNested, (ResultTryDoTier2MatrixValue new) onceTryNested, (ResultTryDoTier2MatrixActor spawn) onceTryNested] equals: #[1, 1, 1]
+
+  testOnceTryHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass onceTryHeadRead, (ResultTryDoTier2MatrixValue new) onceTryHeadRead, (ResultTryDoTier2MatrixActor spawn) onceTryHeadRead] equals: #[2, 2, 2]
+
+  testOnceOnDoHeadRead =>
+    self assert: #[ResultTryDoTier2MatrixClass onceOnDoHeadRead, (ResultTryDoTier2MatrixValue new) onceOnDoHeadRead, (ResultTryDoTier2MatrixActor spawn) onceOnDoHeadRead] equals: #[2, 2, 2]
 
   testOnceTryRaise =>
     self assert: #[ResultTryDoTier2MatrixClass onceTryRaise, (ResultTryDoTier2MatrixValue new) onceTryRaise, (ResultTryDoTier2MatrixActor spawn) onceTryRaise] equals: #[0, 0, 0]

@@ -179,7 +179,7 @@ impl CoreErlangGenerator {
                         .threaded_locals_of(site)
                         .is_some_and(|set| !set.lowered.is_empty())
                 });
-            loop_or_fold || Self::statement_catch_boundary_writes(stmt, &body_defined)
+            loop_or_fold || self.statement_catch_boundary_writes(stmt, &body_defined)
         })
     }
 
@@ -192,6 +192,7 @@ impl CoreErlangGenerator {
     /// itself is not the enclosing construct's to thread (`body_defined`, the
     /// same filter as the loop-and-fold scan above).
     fn statement_catch_boundary_writes(
+        &self,
         stmt: &beamtalk_core::ast::ExpressionStatement,
         body_defined: &std::collections::HashSet<&str>,
     ) -> bool {
@@ -220,7 +221,11 @@ impl CoreErlangGenerator {
                     .blocks
                     .iter()
                     .flat_map(|block| {
-                        Self::body_introduced_locals(block, &std::collections::HashSet::new())
+                        // (`t := t + 1` at the head of a block reads `t` from
+                        // outside: it rebinds the outer local, it does not
+                        // introduce one.)
+                        let reads = self.block_profile_or_analyze(block).captured_reads;
+                        Self::body_introduced_locals(block, &reads)
                     })
                     .collect();
                 !construct_outer_local_writes(&c, &|name| {
