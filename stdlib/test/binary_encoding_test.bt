@@ -88,14 +88,14 @@ TestCase subclass: BinaryEncodingTest
   testFromBase64TypeErrorOnNonString =>
     // fromBase64: with a non-String argument raises type_error
     @expect type
-    self should: [Binary fromBase64: 42] raise: #type_error // => _
+    self should: [Binary fromBase64: 42] raise: #type_error  // => _
 
   testFromBase64UrlTypeErrorOnNonString =>
     // fromBase64Url: with a non-String argument raises type_error
     @expect type
-    self should: [Binary fromBase64Url: 42] raise: #type_error // => _
+    self should: [Binary fromBase64Url: 42] raise: #type_error  // => _
 
   testFromHexTypeErrorOnNonString =>
     // fromHex: with a non-String argument raises type_error
     @expect type
-    self should: [Binary fromHex: 42] raise: #type_error // => _
+    self should: [Binary fromHex: 42] raise: #type_error  // => _
