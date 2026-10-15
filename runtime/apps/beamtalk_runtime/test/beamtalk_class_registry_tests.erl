@@ -1570,9 +1570,12 @@ bt3826_two_busy_classes(Tag, Extra, Site) ->
             #{
                 superclass => none,
                 module => bt3826_no_module,
-                class_methods => #{bt3826Probe => #{block => Probe, arity => 1}}
+                class_methods => maps:merge(
+                    maps:get(class_methods, Extra, #{}),
+                    #{bt3826Probe => #{block => Probe, arity => 1}}
+                )
             },
-            Extra
+            maps:remove(class_methods, Extra)
         )
     end,
     {ok, PidA} = beamtalk_object_class:start_link(NameA, Info(NameB)),
@@ -1614,6 +1617,15 @@ bt3826_two_busy_classes(Tag, Extra, Site) ->
     after
         [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
     end.
+
+%% The config class methods registered the way a compiled class registers them
+%% (selector => `#{arity => N}`; the function is `Module:class_<sel>/1`).
+bt3826_config_class_methods() ->
+    #{
+        strategy => #{arity => 0},
+        maxRestarts => #{arity => 0},
+        restartWindow => #{arity => 0}
+    }.
 
 %% Reflection intrinsics (`Foo methods`, `fieldNames`, `allInstVarNames`,
 %% `canUnderstand:`, `Foo class selectors`) read a *different* class's state from
@@ -1690,7 +1702,10 @@ bt3826_return_type_no_cross_class_deadlock_test_() ->
 %% (formerly `class_send(strategy | maxRestarts | restartWindow)`).
 bt3826_process_navigation_config_no_cross_class_deadlock_test_() ->
     {timeout, 30, fun() ->
-        Extra = #{module => beamtalk_bt3826_config_fixture},
+        Extra = #{
+            module => beamtalk_bt3826_config_fixture,
+            class_methods => bt3826_config_class_methods()
+        },
         Site = fun(Other) ->
             Obj = beamtalk_class_registry:resolve_class_object(Other),
             beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Obj)
@@ -1770,7 +1785,7 @@ bt3826_supervisor_config_honours_runtime_override_test() ->
     {ok, Pid} = beamtalk_object_class:start_link(Name, #{
         superclass => none,
         module => beamtalk_bt3826_config_fixture,
-        class_methods => #{}
+        class_methods => bt3826_config_class_methods()
     }),
     try
         Obj = beamtalk_class_registry:resolve_class_object(Name),
@@ -1798,7 +1813,7 @@ bt3826_supervisor_config_body_error_not_rerun_test() ->
     {ok, Pid} = beamtalk_object_class:start_link(Name, #{
         superclass => none,
         module => beamtalk_bt3826_raising_fixture,
-        class_methods => #{}
+        class_methods => bt3826_config_class_methods()
     }),
     try
         Obj = beamtalk_class_registry:resolve_class_object(Name),
@@ -1861,6 +1876,22 @@ bt3826_reflection_follows_class_mutation_test() ->
         ),
         ?assert(beamtalk_object_class:has_method(Pid, bt3826Baz)),
         ?assertNot(beamtalk_object_class:has_method(Pid, bt3826Foo))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% A class that does not register the selector is not_found, exactly where a real
+%% class-side send would not find it (no ad-hoc export probing).
+bt3826_supervisor_config_unregistered_selector_not_found_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Name = 'BT3826UnregisteredSup',
+    {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+        superclass => none,
+        module => beamtalk_bt3826_config_fixture,
+        class_methods => #{}
+    }),
+    try
+        ?assertEqual(not_found, beamtalk_supervisor:class_config_value(Name, strategy))
     after
         gen_server:stop(Pid, normal, 5000)
     end.

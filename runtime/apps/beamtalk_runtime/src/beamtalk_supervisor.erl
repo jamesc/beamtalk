@@ -1040,10 +1040,11 @@ messaging the class gen_server (BT-3826).
 For callers that may themselves be running inside a class process (the
 `ProcessNavigation` snapshot is a class method): a `class_send` from there is a
 blocking call into another class, which deadlocks two busy classes against each
-other. The definition is resolved with the precedence dispatch uses (the nearest
-definer in the superclass chain; on one class a runtime class-method fun,
-ADR 0084, shadows the compiled export), so the result is what a class-side send
-would answer, including runtime overrides.
+other. The definition is resolved by dispatch's own resolver
+(`beamtalk_class_dispatch:find_class_method_from_class/2`, then a runtime
+class-method fun, ADR 0084, before the compiled export), so the result is what a
+class-side send would answer, including runtime overrides, and a class that does
+not register the selector is `not_found` exactly where a send would not find it.
 
 Note this is a reporting read: `static_init/2` / `dynamic_init/2` still configure
 OTP from the compiled export only (known divergence, tracked in BT-3832).
@@ -1054,73 +1055,32 @@ the method body itself propagate unchanged.
 """.
 -spec class_config_value(atom(), atom()) -> {ok, term()} | not_found.
 class_config_value(ClassName, Selector) ->
-    case beamtalk_class_metadata:lookup_module(ClassName) of
-        {ok, Module} ->
-            FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
-            case config_definition(ClassName, FunName, Selector, 0) of
-                {runtime, Fun} ->
-                    ClassSelf = make_init_class_self(ClassName, Module),
+    %% Same resolution as class-side dispatch (`apply_class_method_in_context/6`):
+    %% the defining class comes from the published selector rows, a runtime
+    %% class-method fun (ADR 0084) for that class shadows the compiled export,
+    %% and the receiver carries the defining module.
+    case beamtalk_class_dispatch:find_class_method_from_class(Selector, ClassName) of
+        {ok, DefiningClass, DefiningModule} ->
+            ClassSelf = make_init_class_self(ClassName, DefiningModule),
+            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+                {ok, #{block := Fun}} when is_function(Fun, 1) ->
                     {ok, beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> Fun(ClassSelf) end)};
-                {compiled, DefiningModule} ->
-                    ClassSelf = make_init_class_self(ClassName, Module),
-                    {ok,
-                        beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
-                            erlang:apply(DefiningModule, FunName, [ClassSelf])
-                        end)};
-                none ->
-                    not_found
+                _ ->
+                    FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
+                    %% `function_exported/3` is false for a module that is not loaded yet.
+                    _ = code:ensure_loaded(DefiningModule),
+                    case erlang:function_exported(DefiningModule, FunName, 1) of
+                        true ->
+                            {ok,
+                                beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
+                                    erlang:apply(DefiningModule, FunName, [ClassSelf])
+                                end)};
+                        false ->
+                            not_found
+                    end
             end;
         not_found ->
             not_found
-    end.
-
-%% The definition dispatch would pick for `Selector`, walking from `ClassName`
-%% upward: at each level a runtime fun is checked before the compiled export
-%% (it shadows it); the first level with either wins.
--spec config_definition(atom(), atom(), atom(), non_neg_integer()) ->
-    {runtime, fun()} | {compiled, module()} | none.
-config_definition(_ClassName, _FunName, _Selector, Depth) when Depth > 30 ->
-    none;
-config_definition(ClassName, FunName, Selector, Depth) ->
-    RuntimeFun =
-        case beamtalk_class_metadata:has_runtime_class_methods(ClassName) of
-            true ->
-                case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
-                    {ok, #{block := Fun}} when is_function(Fun, 1) -> {ok, Fun};
-                    _ -> none
-                end;
-            false ->
-                none
-        end,
-    case RuntimeFun of
-        {ok, F} ->
-            {runtime, F};
-        none ->
-            case compiled_export(ClassName, FunName) of
-                {ok, Mod} ->
-                    {compiled, Mod};
-                none ->
-                    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                        {ok, Super} when Super =/= none ->
-                            config_definition(Super, FunName, Selector, Depth + 1);
-                        _ ->
-                            none
-                    end
-            end
-    end.
-
--spec compiled_export(atom(), atom()) -> {ok, module()} | none.
-compiled_export(ClassName, FunName) ->
-    case beamtalk_class_metadata:lookup_module(ClassName) of
-        {ok, Mod} ->
-            %% `function_exported/3` is false for a module that is not loaded yet.
-            _ = code:ensure_loaded(Mod),
-            case erlang:function_exported(Mod, FunName, 1) of
-                true -> {ok, Mod};
-                false -> none
-            end;
-        not_found ->
-            none
     end.
 
 -doc """

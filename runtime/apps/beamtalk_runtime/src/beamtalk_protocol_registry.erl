@@ -1013,6 +1013,11 @@ Reads each level from the unified class metadata (`lookup_methods/1`,
 `lookup_superclass/1`), never from the class process (BT-3826):
 `conforming_classes/1` and `conforms_to/2` run inside class handlers, and a
 `gen_server:call` per level deadlocks two busy classes against each other.
+
+Caveat (same as `beamtalk_object_class:module_name_safe/1`): a class process
+killed with an untrappable `kill` skips `terminate/2`, so its metadata row
+survives until the auto-restart cleans it; until then it is treated as still
+defining its methods.
 """.
 -spec class_has_class_method_in_chain(atom(), atom()) -> boolean().
 class_has_class_method_in_chain(none, _Selector) ->

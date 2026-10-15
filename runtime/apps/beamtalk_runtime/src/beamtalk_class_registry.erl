@@ -1379,7 +1379,9 @@ get_class_method_return_type(ClassName, Selector) ->
 %% call into another class there deadlocks two busy classes against each other
 %% until the 5s timeout. A class with no live process is "not in this class" and
 %% the walk continues to its superclass, as before; only local classes are
-%% reachable by `whereis_class/1`, so there is no remote-pid path here.
+%% reachable by `whereis_class/1`, so there is no remote-pid path here. As with
+%% `module_name_safe/1`, a class killed with an untrappable `kill` keeps its ETS
+%% row until the restart cleans it, so it is read as still declaring its types.
 -spec walk_return_type(
     atom(),
     atom(),
