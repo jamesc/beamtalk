@@ -397,7 +397,6 @@ const ALLOW_SET: &[Allowed] = &[
             CountedLoop,
             ListOp,
             DetectIfNoneSearch,
-            Satisfy,
             Enumeration,
             IfTrue,
             IfNil,
@@ -632,8 +631,8 @@ const fn deny(
 /// Never add a row for a shape an existing test shows answering right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Class], &[Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
-    deny(None, None, None, None, None, None, &[ValueType], &[Satisfy, Enumeration, IfNil, AndOr]),
+    deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[ValueType], &[Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
@@ -765,14 +764,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
     right(Enumeration, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(Satisfy, DoBody, Arm, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, DoBody, DoBody, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, DoBody, DoBody, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Actor),
-    right(Satisfy, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, Class),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Class),
     right(DetectIfNone, DoBody, Arm, [true, true, true, false, true], 2, Class),
@@ -801,11 +792,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Class),
     right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Class),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Class),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, Class),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, Class),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
     right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
@@ -826,11 +812,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
     right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, ValueType),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, ValueType),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
 ];
 
 /// Whether `ADR0131_MEASURE_BYPASS_PHASE0` bypasses the Phase 0 position
@@ -875,7 +856,7 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// `producer_body_arg_index`. [`DENY_SET`] does not judge them any more, except
 /// in a `[...] value` body (still unfinished) or past two nested blocks, where
 /// the chain is unmeasured, and in the REPL.
-const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo];
+const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy];
 
 /// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
 /// described by the position and holds only frames the producer lowers: at
@@ -1704,6 +1685,32 @@ impl<'d> Walker<'d> {
         let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
         let selector = construct.selector;
+        // BT-3841: a keyed iteration on a statically non-`Dictionary` receiver
+        // keeps the permanent §6 error whether its block writes an outer local
+        // or, in an actor instance method, object state (a field write or a
+        // self-send): the receiver's own method would run the block as a closure,
+        // which can return neither. Only an actor method inlines a state-only
+        // keyed block (`needs_mutation_threading` threads the actor `State`);
+        // a class or value-type method dispatches it normally, so there the
+        // block is accepted unless it writes an outer local.
+        if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
+            && self.receiver_is_not_dictionary(expr)
+        {
+            if let Some((_, body)) = producer_body_block(expr) {
+                let hint = format!(
+                    "`{selector}` runs the block inline only for a `Dictionary` receiver; this \
+                     receiver is not one, so it would call its own `{selector}` with a closure. \
+                     Compute the new value without writing it from the block, or iterate a \
+                     `Dictionary` (`asDictionary`)"
+                );
+                if !writes.is_empty() {
+                    self.report_literal_with_hint(body, &selector, hint);
+                } else if self.context == Actor && touches_state(body, false) {
+                    self.report_state_literal(body, &selector, hint);
+                }
+            }
+            return;
+        }
         let Some(first) = writes.first().cloned() else {
             return;
         };
@@ -1711,28 +1718,6 @@ impl<'d> Walker<'d> {
         // statically known not to be a `Dictionary` would only ever raise at
         // run time (the guard), so it keeps its §6 compile error.
         if is_lookup && self.receiver_is_not_dictionary(expr) {
-            return;
-        }
-        // BT-3841: the same rule for `keysAndValuesDo:`/`doWithKey:`, whose
-        // dictionary fold is inlined for a `Dictionary` receiver only (`Ets`
-        // and any class that defines the selector run their own method with a
-        // closure that cannot return the write). The §1 block-send exemption
-        // does not cover them, so the permanent §6 error is reported here.
-        if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
-            && self.receiver_is_not_dictionary(expr)
-        {
-            if let Some((_, body)) = producer_body_block(expr) {
-                self.report_literal_with_hint(
-                    body,
-                    &selector,
-                    format!(
-                        "`{selector}` runs the block inline only for a `Dictionary` receiver; \
-                         this receiver is not one, so it would call its own `{selector}` with \
-                         a closure. Compute the new value without writing it from the block, \
-                         or iterate a `Dictionary` (`asDictionary`)"
-                    ),
-                );
-            }
             return;
         }
         // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
@@ -2171,6 +2156,19 @@ impl<'d> Walker<'d> {
             return;
         };
         self.push_literal(block, selector, &write, hint);
+    }
+
+    /// [`Self::push_literal`] for a block that writes object state (a field or
+    /// a class variable) rather than an outer local.
+    fn report_state_literal(&mut self, block: &Block, selector: &str, hint: String) {
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!("block writes object state, but `{selector}` cannot return the write"),
+                block.span,
+            )
+            .with_hint(hint)
+            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
+        );
     }
 
     fn push_literal(

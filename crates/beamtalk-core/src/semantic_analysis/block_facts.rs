@@ -1548,9 +1548,10 @@ pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
 /// statically known NOT to be a `Dictionary`, so the send can only ever reach
 /// another class's method of that name (`Ets`, a user class) and the runtime
 /// guard (`beamtalk_map:lookup_for_threading/3`, `pairs_for_threading/2`) would
-/// raise on every call, even when the key is present. Such a send keeps its §6 compile error instead of
-/// becoming a producer; the guard is for receivers whose class is not known
-/// (unannotated, `Dynamic`, or a class that may hold a `Dictionary`).
+/// raise on every call (for a lookup, even when the key is present). Such a
+/// send keeps its §6 compile error instead of becoming a producer; the guard is
+/// for receivers whose class is not known (unannotated, `Dynamic`, or a class
+/// that may hold a `Dictionary`).
 ///
 /// The one rule the Phase 0 check reads for both families (codegen lowers every
 /// send core's [`lookup_arm_blocks`] or keyed-iteration rule names and never sees a program Phase 0 rejects, so it

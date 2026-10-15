@@ -1,0 +1,503 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `anySatisfy:` / `allSatisfy:` as local-threading producers in a class method, a
+// value-type method and an actor method. The fixtures are
+// fixtures/adr0131satisfy_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131SatisfyTest
+
+  testClassTopAny => self assert: (Adr0131SatisfyClass topAny) equals: 3
+
+  testClassInArmAny =>
+    self assert: (Adr0131SatisfyClass inArmAny: true) equals: 3
+    self assert: (Adr0131SatisfyClass inArmAny: false) equals: 0
+
+  testClassInArmElseAny =>
+    self assert: (Adr0131SatisfyClass inArmElseAny: true) equals: 100
+    self assert: (Adr0131SatisfyClass inArmElseAny: false) equals: 3
+
+  testClassInDoAny => self assert: (Adr0131SatisfyClass inDoAny) equals: 6
+
+  testClassInToDoAny => self assert: (Adr0131SatisfyClass inToDoAny) equals: 6
+
+  testClassInTimesAny => self assert: (Adr0131SatisfyClass inTimesAny) equals: 6
+
+  testClassInWhileAny => self assert: (Adr0131SatisfyClass inWhileAny) equals: 6
+
+  testClassInOnDoAny => self assert: (Adr0131SatisfyClass inOnDoAny) equals: 3
+
+  testClassInEnsureAny =>
+    self assert: (Adr0131SatisfyClass inEnsureAny) equals: 3
+
+  testClassInHandlerAny =>
+    self assert: (Adr0131SatisfyClass inHandlerAny) equals: 3
+
+  testClassInArmInDoAny =>
+    self assert: (Adr0131SatisfyClass inArmInDoAny: true) equals: 6
+    self assert: (Adr0131SatisfyClass inArmInDoAny: false) equals: 0
+
+  testClassReturnInArmAny =>
+    self assert: (Adr0131SatisfyClass returnInArmAny: true) equals: false
+    self assert: (Adr0131SatisfyClass returnInArmAny: false) equals: 0
+
+  testClassAssignedAny =>
+    self assert: (Adr0131SatisfyClass assignedAny) equals: #[false, 3]
+
+  testClassTopAll => self assert: (Adr0131SatisfyClass topAll) equals: 3
+
+  testClassInArmAll =>
+    self assert: (Adr0131SatisfyClass inArmAll: true) equals: 3
+    self assert: (Adr0131SatisfyClass inArmAll: false) equals: 0
+
+  testClassInArmElseAll =>
+    self assert: (Adr0131SatisfyClass inArmElseAll: true) equals: 100
+    self assert: (Adr0131SatisfyClass inArmElseAll: false) equals: 3
+
+  testClassInDoAll => self assert: (Adr0131SatisfyClass inDoAll) equals: 6
+
+  testClassInToDoAll => self assert: (Adr0131SatisfyClass inToDoAll) equals: 6
+
+  testClassInTimesAll => self assert: (Adr0131SatisfyClass inTimesAll) equals: 6
+
+  testClassInWhileAll => self assert: (Adr0131SatisfyClass inWhileAll) equals: 6
+
+  testClassInOnDoAll => self assert: (Adr0131SatisfyClass inOnDoAll) equals: 3
+
+  testClassInEnsureAll =>
+    self assert: (Adr0131SatisfyClass inEnsureAll) equals: 3
+
+  testClassInHandlerAll =>
+    self assert: (Adr0131SatisfyClass inHandlerAll) equals: 3
+
+  testClassInArmInDoAll =>
+    self assert: (Adr0131SatisfyClass inArmInDoAll: true) equals: 6
+    self assert: (Adr0131SatisfyClass inArmInDoAll: false) equals: 0
+
+  testClassReturnInArmAll =>
+    self assert: (Adr0131SatisfyClass returnInArmAll: true) equals: true
+    self assert: (Adr0131SatisfyClass returnInArmAll: false) equals: 0
+
+  testClassAssignedAll =>
+    self assert: (Adr0131SatisfyClass assignedAll) equals: #[true, 3]
+
+  testClassTopAnyHit => self assert: (Adr0131SatisfyClass topAnyHit) equals: 3
+
+  testClassInArmAnyHit =>
+    self assert: (Adr0131SatisfyClass inArmAnyHit: true) equals: 3
+    self assert: (Adr0131SatisfyClass inArmAnyHit: false) equals: 0
+
+  testClassInArmElseAnyHit =>
+    self assert: (Adr0131SatisfyClass inArmElseAnyHit: true) equals: 100
+    self assert: (Adr0131SatisfyClass inArmElseAnyHit: false) equals: 3
+
+  testClassInDoAnyHit => self assert: (Adr0131SatisfyClass inDoAnyHit) equals: 6
+
+  testClassInToDoAnyHit =>
+    self assert: (Adr0131SatisfyClass inToDoAnyHit) equals: 6
+
+  testClassInTimesAnyHit =>
+    self assert: (Adr0131SatisfyClass inTimesAnyHit) equals: 6
+
+  testClassInWhileAnyHit =>
+    self assert: (Adr0131SatisfyClass inWhileAnyHit) equals: 6
+
+  testClassInOnDoAnyHit =>
+    self assert: (Adr0131SatisfyClass inOnDoAnyHit) equals: 3
+
+  testClassInEnsureAnyHit =>
+    self assert: (Adr0131SatisfyClass inEnsureAnyHit) equals: 3
+
+  testClassInHandlerAnyHit =>
+    self assert: (Adr0131SatisfyClass inHandlerAnyHit) equals: 3
+
+  testClassInArmInDoAnyHit =>
+    self assert: (Adr0131SatisfyClass inArmInDoAnyHit: true) equals: 6
+    self assert: (Adr0131SatisfyClass inArmInDoAnyHit: false) equals: 0
+
+  testClassReturnInArmAnyHit =>
+    self assert: (Adr0131SatisfyClass returnInArmAnyHit: true) equals: true
+    self assert: (Adr0131SatisfyClass returnInArmAnyHit: false) equals: 0
+
+  testClassAssignedAnyHit =>
+    self assert: (Adr0131SatisfyClass assignedAnyHit) equals: #[true, 3]
+
+  testClassTopAllMiss => self assert: (Adr0131SatisfyClass topAllMiss) equals: 3
+
+  testClassInArmAllMiss =>
+    self assert: (Adr0131SatisfyClass inArmAllMiss: true) equals: 3
+    self assert: (Adr0131SatisfyClass inArmAllMiss: false) equals: 0
+
+  testClassInArmElseAllMiss =>
+    self assert: (Adr0131SatisfyClass inArmElseAllMiss: true) equals: 100
+    self assert: (Adr0131SatisfyClass inArmElseAllMiss: false) equals: 3
+
+  testClassInDoAllMiss =>
+    self assert: (Adr0131SatisfyClass inDoAllMiss) equals: 6
+
+  testClassInToDoAllMiss =>
+    self assert: (Adr0131SatisfyClass inToDoAllMiss) equals: 6
+
+  testClassInTimesAllMiss =>
+    self assert: (Adr0131SatisfyClass inTimesAllMiss) equals: 6
+
+  testClassInWhileAllMiss =>
+    self assert: (Adr0131SatisfyClass inWhileAllMiss) equals: 6
+
+  testClassInOnDoAllMiss =>
+    self assert: (Adr0131SatisfyClass inOnDoAllMiss) equals: 3
+
+  testClassInEnsureAllMiss =>
+    self assert: (Adr0131SatisfyClass inEnsureAllMiss) equals: 3
+
+  testClassInHandlerAllMiss =>
+    self assert: (Adr0131SatisfyClass inHandlerAllMiss) equals: 3
+
+  testClassInArmInDoAllMiss =>
+    self assert: (Adr0131SatisfyClass inArmInDoAllMiss: true) equals: 6
+    self assert: (Adr0131SatisfyClass inArmInDoAllMiss: false) equals: 0
+
+  testClassReturnInArmAllMiss =>
+    self assert: (Adr0131SatisfyClass returnInArmAllMiss: true) equals: false
+    self assert: (Adr0131SatisfyClass returnInArmAllMiss: false) equals: 0
+
+  testClassAssignedAllMiss =>
+    self assert: (Adr0131SatisfyClass assignedAllMiss) equals: #[false, 3]
+
+  testValueTopAny => self assert: ((Adr0131SatisfyValue new) topAny) equals: 3
+
+  testValueInArmAny =>
+    self assert: ((Adr0131SatisfyValue new) inArmAny: true) equals: 3
+    self assert: ((Adr0131SatisfyValue new) inArmAny: false) equals: 0
+
+  testValueInArmElseAny =>
+    self assert: ((Adr0131SatisfyValue new) inArmElseAny: true) equals: 100
+    self assert: ((Adr0131SatisfyValue new) inArmElseAny: false) equals: 3
+
+  testValueInDoAny => self assert: ((Adr0131SatisfyValue new) inDoAny) equals: 6
+
+  testValueInToDoAny =>
+    self assert: ((Adr0131SatisfyValue new) inToDoAny) equals: 6
+
+  testValueInTimesAny =>
+    self assert: ((Adr0131SatisfyValue new) inTimesAny) equals: 6
+
+  testValueInWhileAny =>
+    self assert: ((Adr0131SatisfyValue new) inWhileAny) equals: 6
+
+  testValueInOnDoAny =>
+    self assert: ((Adr0131SatisfyValue new) inOnDoAny) equals: 3
+
+  testValueInEnsureAny =>
+    self assert: ((Adr0131SatisfyValue new) inEnsureAny) equals: 3
+
+  testValueInHandlerAny =>
+    self assert: ((Adr0131SatisfyValue new) inHandlerAny) equals: 3
+
+  testValueInArmInDoAny =>
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAny: true) equals: 6
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAny: false) equals: 0
+
+  testValueReturnInArmAny =>
+    self assert: ((Adr0131SatisfyValue new) returnInArmAny: true) equals: false
+    self assert: ((Adr0131SatisfyValue new) returnInArmAny: false) equals: 0
+
+  testValueAssignedAny =>
+    self assert: ((Adr0131SatisfyValue new) assignedAny) equals: #[false, 3]
+
+  testValueTopAll => self assert: ((Adr0131SatisfyValue new) topAll) equals: 3
+
+  testValueInArmAll =>
+    self assert: ((Adr0131SatisfyValue new) inArmAll: true) equals: 3
+    self assert: ((Adr0131SatisfyValue new) inArmAll: false) equals: 0
+
+  testValueInArmElseAll =>
+    self assert: ((Adr0131SatisfyValue new) inArmElseAll: true) equals: 100
+    self assert: ((Adr0131SatisfyValue new) inArmElseAll: false) equals: 3
+
+  testValueInDoAll => self assert: ((Adr0131SatisfyValue new) inDoAll) equals: 6
+
+  testValueInToDoAll =>
+    self assert: ((Adr0131SatisfyValue new) inToDoAll) equals: 6
+
+  testValueInTimesAll =>
+    self assert: ((Adr0131SatisfyValue new) inTimesAll) equals: 6
+
+  testValueInWhileAll =>
+    self assert: ((Adr0131SatisfyValue new) inWhileAll) equals: 6
+
+  testValueInOnDoAll =>
+    self assert: ((Adr0131SatisfyValue new) inOnDoAll) equals: 3
+
+  testValueInEnsureAll =>
+    self assert: ((Adr0131SatisfyValue new) inEnsureAll) equals: 3
+
+  testValueInHandlerAll =>
+    self assert: ((Adr0131SatisfyValue new) inHandlerAll) equals: 3
+
+  testValueInArmInDoAll =>
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAll: true) equals: 6
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAll: false) equals: 0
+
+  testValueReturnInArmAll =>
+    self assert: ((Adr0131SatisfyValue new) returnInArmAll: true) equals: true
+    self assert: ((Adr0131SatisfyValue new) returnInArmAll: false) equals: 0
+
+  testValueAssignedAll =>
+    self assert: ((Adr0131SatisfyValue new) assignedAll) equals: #[true, 3]
+
+  testValueTopAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) topAnyHit) equals: 3
+
+  testValueInArmAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inArmAnyHit: true) equals: 3
+    self assert: ((Adr0131SatisfyValue new) inArmAnyHit: false) equals: 0
+
+  testValueInArmElseAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inArmElseAnyHit: true) equals: 100
+    self assert: ((Adr0131SatisfyValue new) inArmElseAnyHit: false) equals: 3
+
+  testValueInDoAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inDoAnyHit) equals: 6
+
+  testValueInToDoAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inToDoAnyHit) equals: 6
+
+  testValueInTimesAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inTimesAnyHit) equals: 6
+
+  testValueInWhileAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inWhileAnyHit) equals: 6
+
+  testValueInOnDoAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inOnDoAnyHit) equals: 3
+
+  testValueInEnsureAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inEnsureAnyHit) equals: 3
+
+  testValueInHandlerAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inHandlerAnyHit) equals: 3
+
+  testValueInArmInDoAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAnyHit: true) equals: 6
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAnyHit: false) equals: 0
+
+  testValueReturnInArmAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) returnInArmAnyHit: true) equals: true
+    self assert: ((Adr0131SatisfyValue new) returnInArmAnyHit: false) equals: 0
+
+  testValueAssignedAnyHit =>
+    self assert: ((Adr0131SatisfyValue new) assignedAnyHit) equals: #[true, 3]
+
+  testValueTopAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) topAllMiss) equals: 3
+
+  testValueInArmAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inArmAllMiss: true) equals: 3
+    self assert: ((Adr0131SatisfyValue new) inArmAllMiss: false) equals: 0
+
+  testValueInArmElseAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inArmElseAllMiss: true) equals: 100
+    self assert: ((Adr0131SatisfyValue new) inArmElseAllMiss: false) equals: 3
+
+  testValueInDoAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inDoAllMiss) equals: 6
+
+  testValueInToDoAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inToDoAllMiss) equals: 6
+
+  testValueInTimesAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inTimesAllMiss) equals: 6
+
+  testValueInWhileAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inWhileAllMiss) equals: 6
+
+  testValueInOnDoAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inOnDoAllMiss) equals: 3
+
+  testValueInEnsureAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inEnsureAllMiss) equals: 3
+
+  testValueInHandlerAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inHandlerAllMiss) equals: 3
+
+  testValueInArmInDoAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAllMiss: true) equals: 6
+    self assert: ((Adr0131SatisfyValue new) inArmInDoAllMiss: false) equals: 0
+
+  testValueReturnInArmAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) returnInArmAllMiss: true) equals: false
+    self assert: ((Adr0131SatisfyValue new) returnInArmAllMiss: false) equals: 0
+
+  testValueAssignedAllMiss =>
+    self assert: ((Adr0131SatisfyValue new) assignedAllMiss) equals: #[false, 3]
+
+  testActorTopAny => self assert: ((Adr0131SatisfyActor spawn) topAny) equals: 3
+
+  testActorInArmAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmAny: true) equals: 3
+    self assert: ((Adr0131SatisfyActor spawn) inArmAny: false) equals: 0
+
+  testActorInArmElseAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAny: true) equals: 100
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAny: false) equals: 3
+
+  testActorInDoAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inDoAny) equals: 6
+
+  testActorInToDoAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inToDoAny) equals: 6
+
+  testActorInTimesAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inTimesAny) equals: 6
+
+  testActorInWhileAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inWhileAny) equals: 6
+
+  testActorInOnDoAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inOnDoAny) equals: 3
+
+  testActorInEnsureAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inEnsureAny) equals: 3
+
+  testActorInHandlerAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inHandlerAny) equals: 3
+
+  testActorInArmInDoAny =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAny: true) equals: 6
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAny: false) equals: 0
+
+  testActorReturnInArmAny =>
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAny: true) equals: false
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAny: false) equals: 0
+
+  testActorAssignedAny =>
+    self assert: ((Adr0131SatisfyActor spawn) assignedAny) equals: #[false, 3]
+
+  testActorTopAll => self assert: ((Adr0131SatisfyActor spawn) topAll) equals: 3
+
+  testActorInArmAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmAll: true) equals: 3
+    self assert: ((Adr0131SatisfyActor spawn) inArmAll: false) equals: 0
+
+  testActorInArmElseAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAll: true) equals: 100
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAll: false) equals: 3
+
+  testActorInDoAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inDoAll) equals: 6
+
+  testActorInToDoAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inToDoAll) equals: 6
+
+  testActorInTimesAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inTimesAll) equals: 6
+
+  testActorInWhileAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inWhileAll) equals: 6
+
+  testActorInOnDoAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inOnDoAll) equals: 3
+
+  testActorInEnsureAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inEnsureAll) equals: 3
+
+  testActorInHandlerAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inHandlerAll) equals: 3
+
+  testActorInArmInDoAll =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAll: true) equals: 6
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAll: false) equals: 0
+
+  testActorReturnInArmAll =>
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAll: true) equals: true
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAll: false) equals: 0
+
+  testActorAssignedAll =>
+    self assert: ((Adr0131SatisfyActor spawn) assignedAll) equals: #[true, 3]
+
+  testActorTopAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) topAnyHit) equals: 3
+
+  testActorInArmAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmAnyHit: true) equals: 3
+    self assert: ((Adr0131SatisfyActor spawn) inArmAnyHit: false) equals: 0
+
+  testActorInArmElseAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAnyHit: true) equals: 100
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAnyHit: false) equals: 3
+
+  testActorInDoAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inDoAnyHit) equals: 6
+
+  testActorInToDoAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inToDoAnyHit) equals: 6
+
+  testActorInTimesAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inTimesAnyHit) equals: 6
+
+  testActorInWhileAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inWhileAnyHit) equals: 6
+
+  testActorInOnDoAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inOnDoAnyHit) equals: 3
+
+  testActorInEnsureAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inEnsureAnyHit) equals: 3
+
+  testActorInHandlerAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inHandlerAnyHit) equals: 3
+
+  testActorInArmInDoAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAnyHit: true) equals: 6
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAnyHit: false) equals: 0
+
+  testActorReturnInArmAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAnyHit: true) equals: true
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAnyHit: false) equals: 0
+
+  testActorAssignedAnyHit =>
+    self assert: ((Adr0131SatisfyActor spawn) assignedAnyHit) equals: #[true, 3]
+
+  testActorTopAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) topAllMiss) equals: 3
+
+  testActorInArmAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmAllMiss: true) equals: 3
+    self assert: ((Adr0131SatisfyActor spawn) inArmAllMiss: false) equals: 0
+
+  testActorInArmElseAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAllMiss: true) equals: 100
+    self assert: ((Adr0131SatisfyActor spawn) inArmElseAllMiss: false) equals: 3
+
+  testActorInDoAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inDoAllMiss) equals: 6
+
+  testActorInToDoAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inToDoAllMiss) equals: 6
+
+  testActorInTimesAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inTimesAllMiss) equals: 6
+
+  testActorInWhileAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inWhileAllMiss) equals: 6
+
+  testActorInOnDoAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inOnDoAllMiss) equals: 3
+
+  testActorInEnsureAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inEnsureAllMiss) equals: 3
+
+  testActorInHandlerAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inHandlerAllMiss) equals: 3
+
+  testActorInArmInDoAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAllMiss: true) equals: 6
+    self assert: ((Adr0131SatisfyActor spawn) inArmInDoAllMiss: false) equals: 0
+
+  testActorReturnInArmAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAllMiss: true) equals: false
+    self assert: ((Adr0131SatisfyActor spawn) returnInArmAllMiss: false) equals: 0
+
+  testActorAssignedAllMiss =>
+    self assert: ((Adr0131SatisfyActor spawn) assignedAllMiss) equals: #[false, 3]

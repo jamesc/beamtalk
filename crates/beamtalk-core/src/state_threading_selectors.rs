@@ -318,11 +318,13 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 /// selector or arity.
 ///
 /// `keysAndValuesDo:`/`doWithKey:` join the table with BT-3841 (their dictionary
-/// fold answers the same `{nil, StateAcc}` carrier as `do:`).
+/// fold answers the same `{nil, StateAcc}` carrier as `do:`), and
+/// `anySatisfy:`/`allSatisfy:` (their fold answers `{Bool, StateAcc}` and does not
+/// short-circuit when the block writes).
 ///
 /// Not listed, deliberately: `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
 /// `inject:into:` whose spans are the original send's, so a site keyed on the
-/// original has no producer to lower it) and `anySatisfy:`/`allSatisfy:`.
+/// original has no producer to lower it).
 ///
 /// The body block is the one whose outer-local writes the construct packs
 /// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
@@ -337,7 +339,8 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
-            | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:",
+            | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:" | "anySatisfy:"
+            | "allSatisfy:",
             1,
         )
         | ("detect:ifNone:", 2) => Some(0),

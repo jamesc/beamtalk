@@ -1,0 +1,635 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `anySatisfy:` / `allSatisfy:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131satisfy_test.bt. The block runs for every element
+// (the fold does not short-circuit, as in an actor method since ADR 0041): a
+// predicate that answers true early still runs its writes for the rest.
+// `c` is the condition of the arm shapes.
+
+Object subclass: Adr0131SatisfyClass
+
+  class topAny =>
+    t := 0
+    #(1, 2)
+      anySatisfy: [:v |
+        t := t + v
+        false
+      ]
+    t
+
+  class inArmAny: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inArmElseAny: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inDoAny =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inToDoAny =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inTimesAny =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inWhileAny =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inOnDoAny =>
+    t := 0
+    [
+      #(1, 2)
+        anySatisfy: [:v |
+          t := t + v
+          false
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureAny =>
+    t := 0
+    [
+      #(1, 2)
+        anySatisfy: [:v |
+          t := t + v
+          false
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerAny =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inArmInDoAny: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              anySatisfy: [:v |
+                t := t + v
+                false
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmAny: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class assignedAny =>
+    t := 0
+    r := #(1, 2)
+      anySatisfy: [:v |
+        t := t + v
+        false
+      ]
+    #[r, t]
+
+  class topAll =>
+    t := 0
+    #(1, 2)
+      allSatisfy: [:v |
+        t := t + v
+        true
+      ]
+    t
+
+  class inArmAll: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmElseAll: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inDoAll =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inToDoAll =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inTimesAll =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inWhileAll =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inOnDoAll =>
+    t := 0
+    [
+      #(1, 2)
+        allSatisfy: [:v |
+          t := t + v
+          true
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureAll =>
+    t := 0
+    [
+      #(1, 2)
+        allSatisfy: [:v |
+          t := t + v
+          true
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerAll =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmInDoAll: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              allSatisfy: [:v |
+                t := t + v
+                true
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmAll: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class assignedAll =>
+    t := 0
+    r := #(1, 2)
+      allSatisfy: [:v |
+        t := t + v
+        true
+      ]
+    #[r, t]
+
+  class topAnyHit =>
+    t := 0
+    #(1, 2)
+      anySatisfy: [:v |
+        t := t + v
+        true
+      ]
+    t
+
+  class inArmAnyHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmElseAnyHit: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inDoAnyHit =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inToDoAnyHit =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inTimesAnyHit =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inWhileAnyHit =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inOnDoAnyHit =>
+    t := 0
+    [
+      #(1, 2)
+        anySatisfy: [:v |
+          t := t + v
+          true
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureAnyHit =>
+    t := 0
+    [
+      #(1, 2)
+        anySatisfy: [:v |
+          t := t + v
+          true
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerAnyHit =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmInDoAnyHit: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              anySatisfy: [:v |
+                t := t + v
+                true
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmAnyHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          anySatisfy: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class assignedAnyHit =>
+    t := 0
+    r := #(1, 2)
+      anySatisfy: [:v |
+        t := t + v
+        true
+      ]
+    #[r, t]
+
+  class topAllMiss =>
+    t := 0
+    #(1, 2)
+      allSatisfy: [:v |
+        t := t + v
+        false
+      ]
+    t
+
+  class inArmAllMiss: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inArmElseAllMiss: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inDoAllMiss =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inToDoAllMiss =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inTimesAllMiss =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inWhileAllMiss =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inOnDoAllMiss =>
+    t := 0
+    [
+      #(1, 2)
+        allSatisfy: [:v |
+          t := t + v
+          false
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureAllMiss =>
+    t := 0
+    [
+      #(1, 2)
+        allSatisfy: [:v |
+          t := t + v
+          false
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerAllMiss =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class inArmInDoAllMiss: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              allSatisfy: [:v |
+                t := t + v
+                false
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmAllMiss: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          allSatisfy: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class assignedAllMiss =>
+    t := 0
+    r := #(1, 2)
+      allSatisfy: [:v |
+        t := t + v
+        false
+      ]
+    #[r, t]
