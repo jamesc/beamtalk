@@ -591,7 +591,7 @@ reports the same message at the same span. No operation is surface-specific.
   check was measured on a BEAM (`just measure-adr0131-statements`, tables
   `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in
   `beamtalk-core`'s `semantic_analysis/tests/`) and 134 of the 138 statement shapes the 5a measurement found
-  answering right (101 position rows with the three-deep roles) in a class, value-type or actor method stopped reporting
+  answering right (95 position rows, none past two nested blocks) in a class, value-type or actor method stopped reporting
   `UnmigratedLocalThreading` on every surface (CLI, REPL eval and load, LSP,
   MCP): no new error anywhere, only removed ones. The verdict is the
   analyser's, so the surfaces change together.

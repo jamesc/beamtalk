@@ -1386,7 +1386,10 @@ fn adr0131_statement_probe_pins() {
 /// `cvar` and `selfsend`, is right and the one before it is not), the
 /// `Enumeration`/`KeyedDo`/`detect:ifNone:`/`value` statements of an actor
 /// arm-in-protected-body-in-`do:` role (`armProtIter`) and an `anySatisfy:` in
-/// a value-type arm-in-`do:`-in-`do:` role (`armIterIter`). PIN-BUG BT-3841:
+/// a value-type arm-in-`do:`-in-`do:` role (`armIterIter`), and the three-deep
+/// `anySatisfy:`/enumeration cells generally: no `RIGHT_STATEMENTS` row exists
+/// past depth two, because a row keyed on the outermost and innermost roles
+/// would also accept every unmeasured middle role. PIN-BUG BT-3841:
 /// the producer work for those families deletes the entries.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "loop", "cvar", "ewi"),
@@ -1400,6 +1403,15 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "kv"),
     ("actor", "armProtIter", "outer", "value"),
     ("value", "armIterIter", "outer", "any"),
+    ("actor", "armProtIter", "outer", "any"),
+    ("actor", "armIterIter", "outer", "any"),
+    ("actor", "armProtArm", "outer", "any"),
+    ("actor", "armProtArm", "outer", "dsb"),
+    ("actor", "armProtArm", "outer", "ewi"),
+    ("actor", "armProtArm", "outer", "kv"),
+    ("actor", "armProtArm", "outer", "value"),
+    ("class", "armProtIter", "outer", "any"),
+    ("class", "armIterIter", "outer", "any"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
@@ -1655,6 +1667,42 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
             !adr0131_diagnostics(&source(context, depth4)).is_empty(),
             "{context}: depth-4 shape accepted"
         );
+    }
+}
+
+/// BT-3841 review: unmeasured middle roles of a three-block nesting stay
+/// rejected for the unfinished families, whatever the outermost and innermost
+/// roles are (no `RIGHT_STATEMENTS` row exists past depth two).
+#[test]
+fn unmeasured_three_deep_chains_stay_rejected() {
+    for (context, src) in [
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[t := t + 1] value]]] on: Error do: [:e | 0]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[t := t + 1] value]]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]]]\nt",
+            ),
+        ),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
     }
 }
 

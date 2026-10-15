@@ -4320,10 +4320,10 @@ actor	armProtIter	outer	and	ok
 actor	protIterArm	outer	and	ok
 actor	armIterIter	outer	and	ok
 actor	armProtArm	outer	and	ok
-actor	armProtIter	outer	any	ok
+actor	armProtIter	outer	any	over
 actor	protIterArm	outer	any	bad
-actor	armIterIter	outer	any	ok
-actor	armProtArm	outer	any	ok
+actor	armIterIter	outer	any	over
+actor	armProtArm	outer	any	over
 actor	armProtIter	outer	collect	ok
 actor	protIterArm	outer	collect	ok
 actor	armIterIter	outer	collect	ok
@@ -4343,7 +4343,7 @@ actor	armProtArm	outer	do	ok
 actor	armProtIter	outer	dsb	over
 actor	protIterArm	outer	dsb	bad
 actor	armIterIter	outer	dsb	bad
-actor	armProtArm	outer	dsb	ok
+actor	armProtArm	outer	dsb	over
 actor	armProtIter	outer	ensure	ok
 actor	protIterArm	outer	ensure	ok
 actor	armIterIter	outer	ensure	ok
@@ -4351,7 +4351,7 @@ actor	armProtArm	outer	ensure	ok
 actor	armProtIter	outer	ewi	over
 actor	protIterArm	outer	ewi	bad
 actor	armIterIter	outer	ewi	bad
-actor	armProtArm	outer	ewi	ok
+actor	armProtArm	outer	ewi	over
 actor	armProtIter	outer	ifNil	ok
 actor	protIterArm	outer	ifNil	ok
 actor	armIterIter	outer	ifNil	ok
@@ -4367,7 +4367,7 @@ actor	armProtArm	outer	inject	ok
 actor	armProtIter	outer	kv	over
 actor	protIterArm	outer	kv	bad
 actor	armIterIter	outer	kv	bad
-actor	armProtArm	outer	kv	ok
+actor	armProtArm	outer	kv	over
 actor	armProtIter	outer	onDo	ok
 actor	protIterArm	outer	onDo	ok
 actor	armIterIter	outer	onDo	ok
@@ -4383,7 +4383,7 @@ actor	armProtArm	outer	toDo	ok
 actor	armProtIter	outer	value	over
 actor	protIterArm	outer	value	bad
 actor	armIterIter	outer	value	bad
-actor	armProtArm	outer	value	ok
+actor	armProtArm	outer	value	over
 actor	armProtIter	outer	while	ok
 actor	protIterArm	outer	while	ok
 actor	armIterIter	outer	while	ok
@@ -4464,9 +4464,9 @@ class	armProtIter	outer	and	ok
 class	protIterArm	outer	and	ok
 class	armIterIter	outer	and	ok
 class	armProtArm	outer	and	ok
-class	armProtIter	outer	any	ok
+class	armProtIter	outer	any	over
 class	protIterArm	outer	any	bad
-class	armIterIter	outer	any	ok
+class	armIterIter	outer	any	over
 class	armProtArm	outer	any	bad
 class	armProtIter	outer	collect	ok
 class	protIterArm	outer	collect	ok

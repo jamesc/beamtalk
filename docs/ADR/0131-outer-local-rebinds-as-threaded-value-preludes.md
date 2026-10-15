@@ -934,7 +934,7 @@ BT-3841 review), by family and method context, with the work each needs:
 By block role: loop bodies 180, protected bodies 121, arms 85, evaluated
 blocks 85, three-deep nestings 68, handlers 57, arm/loop mixes 51, the method
 body 16. The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
-rows name the exact depth, and the unfinished families above are rejected past
+rows name the exact depth (none exist past two blocks), and the unfinished families above are rejected past
 depth two unless a row names the exact shape (the review found an `anySatisfy:`
 in an arm in a protected body in a `do:` body that the coarse rows accepted and
 that raises `bad argument` in a value-type method).

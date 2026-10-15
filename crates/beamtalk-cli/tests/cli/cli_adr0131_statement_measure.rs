@@ -201,29 +201,72 @@ fn write_package(root: &Path, pkg: &Package) {
 /// to the hanging cell.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
 
+/// The `beamtalk` command of [`cli_common::beamtalk`] as a `std` command (the
+/// harness needs its own process group and a kill it controls; `assert_cmd`'s
+/// timeout kills only the direct child and leaves the BEAM holding the pipes).
+fn std_command(dir: &Path) -> std::process::Command {
+    let tuned = cli_common::beamtalk();
+    let mut cmd = std::process::Command::new(tuned.get_program());
+    cmd.args(tuned.get_args());
+    for (key, value) in tuned.get_envs() {
+        match value {
+            Some(value) => cmd.env(key, value),
+            None => cmd.env_remove(key),
+        };
+    }
+    cmd.current_dir(dir)
+        .env(ADR0131_MEASURE_BYPASS_ENV, "1")
+        .arg("test");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd
+}
+
+/// Kills `child` and, on Unix, its whole process group (the BEAM it started).
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: `kill(2)` on the negated pid of the group this harness
+        // created with `process_group(0)`.
+        unsafe {
+            libc::kill(
+                -i32::try_from(child.id()).unwrap_or(i32::MAX),
+                libc::SIGKILL,
+            );
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn run_package(pkg: &Package) -> Run {
     let dir = tempfile::tempdir().expect("tempdir");
     write_package(dir.path(), pkg);
-    let result = cli_common::beamtalk()
-        .current_dir(dir.path())
-        .env(ADR0131_MEASURE_BYPASS_ENV, "1")
-        .timeout(TIMEOUT)
-        .args(["test"])
-        .output();
-    match result {
-        Ok(out) => Run {
-            timed_out: false,
-            text: format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            ),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Run {
-            timed_out: true,
-            text: String::new(),
-        },
-        Err(e) => panic!("run beamtalk test: {e}"),
+    let out_path = dir.path().join("out.txt");
+    let err_path = dir.path().join("err.txt");
+    let mut child = std_command(dir.path())
+        .stdout(std::fs::File::create(&out_path).expect("stdout file"))
+        .stderr(std::fs::File::create(&err_path).expect("stderr file"))
+        .spawn()
+        .expect("run beamtalk test");
+    let started = std::time::Instant::now();
+    let timed_out = loop {
+        if child.try_wait().expect("wait").is_some() {
+            break false;
+        }
+        if started.elapsed() > TIMEOUT {
+            kill_tree(&mut child);
+            break true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    let read = |path: &Path| std::fs::read_to_string(path).unwrap_or_default();
+    Run {
+        timed_out,
+        text: format!("{}\n{}", read(&out_path), read(&err_path)),
     }
 }
 

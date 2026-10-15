@@ -643,7 +643,7 @@ const fn deny(
 /// re-measured every `bad`/`over` line with the check bypassed (class, value
 /// and actor methods, run on a BEAM): 552 of the 733 answered wrong, 43 failed
 /// to compile and 138 answered right. BT-3841's first step carved the 138 out
-/// ([`RIGHT_STATEMENTS`]: 134 of them, as part of 101 position rows; eleven stay rejected, see the pin test's
+/// ([`RIGHT_STATEMENTS`]: 134 of them, as 95 position rows; twenty stay rejected, see the pin test's
 /// `KNOWN_OVER_REJECTED`); the 595 that answer wrong or fail stay rejected until
 /// they become producers. The measurement is a checked-in harness
 /// (`just measure-adr0131-statements`, `adr0131_statement_measured.tsv`) and
@@ -765,7 +765,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(BlockValue, Arm, Arm, [true, false, false, false, false], 1, Actor),
     right(BlockValue, Arm, Arm, [true, true, false, false, false], 1, Actor),
     right(BlockValue, Arm, Arm, [true, true, false, true, false], 1, Actor),
-    right(BlockValue, Arm, Arm, [true, true, true, false, false], 3, Actor),
     right(BlockValue, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
     right(BlockValue, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(DetectIfNone, Arm, Arm, [true, false, false, false, false], 1, Actor),
@@ -781,7 +780,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Arm, Arm, [true, false, false, false, false], 1, Actor),
     right(Enumeration, Arm, Arm, [true, true, false, false, false], 1, Actor),
     right(Enumeration, Arm, Arm, [true, true, false, true, false], 1, Actor),
-    right(Enumeration, Arm, Arm, [true, true, true, false, false], 3, Actor),
     right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, Actor),
     right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
@@ -789,16 +787,13 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
     right(KeyedDo, Arm, Arm, [true, false, false, false, false], 1, Actor),
     right(KeyedDo, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(KeyedDo, Arm, Arm, [true, true, true, false, false], 3, Actor),
     right(KeyedDo, Arm, DoBody, [true, true, true, false, true], 2, Actor),
     right(KeyedDo, Handler, Handler, [true, true, false, false, false], 1, Actor),
     right(KeyedDo, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(KeyedDo, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, Arm, Arm, [true, true, true, false, false], 3, Actor),
     right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Actor),
     right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Actor),
     right(Satisfy, DoBody, Arm, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, DoBody, Arm, [true, true, true, false, false], 3, Actor),
     right(Satisfy, DoBody, DoBody, [true, true, false, false, false], 1, Actor),
     right(Satisfy, DoBody, DoBody, [true, true, true, false, false], 2, Actor),
     right(Satisfy, Handler, Handler, [true, true, false, false, false], 1, Actor),
@@ -836,7 +831,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Class),
     right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, Class),
     right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, Class),
-    right(Satisfy, DoBody, Arm, [true, true, true, false, false], 3, Class),
     right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
@@ -902,7 +896,8 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// What the coarse rows say about a statement, before the measured carve-outs.
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
     if let Position::NestedStatement { depth, .. } = position {
-        if depth >= 3 && UNFINISHED_FAMILIES.contains(&kind) {
+        // The REPL rows were measured at depth one only and keep their coarse verdict.
+        if depth >= 3 && context != Repl && UNFINISHED_FAMILIES.contains(&kind) {
             return false;
         }
     }
