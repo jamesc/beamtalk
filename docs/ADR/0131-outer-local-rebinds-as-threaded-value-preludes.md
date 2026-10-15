@@ -902,7 +902,8 @@ keeps the measurement as a checked-in harness, so every number below is
 reproducible and every PR moves it:
 
 - `just measure-adr0131-statements` compiles every probe cell through the real
-  `beamtalk test` pipeline with the position check bypassed (debug builds, env
+  `beamtalk test` pipeline with the position check bypassed (a build with the
+  `beamtalk-core/measure-bypass` cargo feature reads env
   `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`), runs it on a BEAM and compares it
   with the ADR-expected answer. The statement matrix is the 2,693 class,
   value-type and actor cells of `adr0131_statement_probes.tsv` that are not
@@ -934,10 +935,12 @@ BT-3841 review), by family and method context, with the work each needs:
 By block role: loop bodies 180, protected bodies 121, arms 85, evaluated
 blocks 85, three-deep nestings 68, handlers 57, arm/loop mixes 51, the method
 body 16. The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
-rows name the exact depth (none exist past two blocks), and the unfinished families above are rejected past
-depth two unless a row names the exact shape (the review found an `anySatisfy:`
-in an arm in a protected body in a `do:` body that the coarse rows accepted and
-that raises `bad argument` in a value-type method).
+rows name the exact depth and none may name a shape past two blocks. The
+unfinished families above are rejected past depth two in class, value-type and
+actor methods (the review found an `anySatisfy:` in an arm in a protected body
+in a `do:` body that the coarse rows accepted and that raises `bad argument` in
+a value-type method); the REPL keeps its coarse rows, unmeasured past depth
+one, until BT-3823.
 
 Operand cells (1,404): 665 answer right, 675 wrong, 64 `erlc`; Phase 0 accepts
 537, all of them right (zero unsound), and rejects the 739 that do not answer

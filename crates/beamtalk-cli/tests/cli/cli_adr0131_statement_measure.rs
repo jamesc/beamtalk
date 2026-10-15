@@ -9,7 +9,8 @@
 //! per block role, per method context, per write target). This harness
 //! compiles every class, value-type and actor cell that is not a `gap` line
 //! through the real `beamtalk test` pipeline with the Phase 0 statement check
-//! bypassed (`BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`, debug builds only),
+//! bypassed (`BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`, read only by a build with the
+//! `beamtalk-core/measure-bypass` cargo feature),
 //! runs it on a BEAM, and records the answer in
 //! `adr0131_statement_measured.tsv`:
 //!

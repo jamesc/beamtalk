@@ -880,10 +880,13 @@ const fn position_check_bypassed() -> bool {
 
 /// The constructs that still fail somewhere in the statement matrix
 /// (the families of the probe matrix: `anySatisfy:`, `detect:ifNone:`, the
-/// enumerations, `keysAndValuesDo:` and a block `value`). Past the two blocks
-/// the matrix measured them at, only an exact [`RIGHT_STATEMENTS`] row accepts
-/// them (BT-3841: an arm in a protected body in a `do:` body raised in a
-/// value-type method while the coarse rows accepted it).
+/// enumerations, `keysAndValuesDo:` and a block `value`). They are rejected
+/// past two nested blocks in class, value-type and actor methods; no
+/// [`RIGHT_STATEMENTS`] row may name a deeper shape (a row keyed on the
+/// outermost and innermost roles would accept every unmeasured middle role,
+/// and `is_allowed` reads the rows before this gate). BT-3841: an arm in a
+/// protected body in a `do:` body raised in a value-type method while the
+/// coarse rows accepted it.
 const UNFINISHED_FAMILIES: &[ConstructKind] = &[
     Satisfy,
     DetectIfNone,
@@ -896,7 +899,9 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// What the coarse rows say about a statement, before the measured carve-outs.
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
     if let Position::NestedStatement { depth, .. } = position {
-        // The REPL rows were measured at depth one only and keep their coarse verdict.
+        // The REPL rows are unmeasured past depth one (BT-3823) and keep the
+        // coarse rows' verdict, which may accept unmeasured three-deep shapes
+        // until BT-3823 measures them.
         if depth >= 3 && context != Repl && UNFINISHED_FAMILIES.contains(&kind) {
             return false;
         }
@@ -2402,6 +2407,25 @@ mod tests {
     fn deny_set_rows_are_non_empty() {
         for row in DENY_SET {
             assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
+        }
+    }
+
+    /// BT-3841 review: `is_allowed` reads `RIGHT_STATEMENTS` before the depth
+    /// gate, so a row past two blocks would silently reopen the hole.
+    #[test]
+    fn right_statements_name_at_most_two_nested_blocks() {
+        for row in RIGHT_STATEMENTS {
+            match row.position {
+                Position::NestedStatement { depth, .. } => {
+                    assert!(
+                        (1..=2).contains(&depth),
+                        "{:?} {:?}",
+                        row.kind,
+                        row.position
+                    );
+                }
+                other => panic!("a RIGHT_STATEMENTS row is nested: {other:?}"),
+            }
         }
     }
 
