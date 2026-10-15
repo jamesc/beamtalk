@@ -126,6 +126,9 @@ pub(crate) enum ConstructKind {
     Exception,
     /// `value`/`value:`… sent to a block literal.
     BlockValue,
+    /// `Result tryDo:` (ADR 0131 §5, Phase 4): a producer wherever
+    /// [`exception_producer_writes`] says so, and in no other position.
+    TryDo,
     /// A lookup selector whose handler is lowered inline for a `Dictionary`
     /// receiver (`at:ifAbsent:`, ADR 0131 Phase 2d, BT-3798). Never judged by
     /// the allow-set: it is accepted exactly where it is a producer
@@ -138,7 +141,7 @@ impl ConstructKind {
     /// `detect:ifNone:` send's `ifNone:` handler block writes an outer local
     /// (the case that fails today, s2), as opposed to only its search block.
     fn of(selector: &str, handler_writes: bool) -> Self {
-        use crate::state_threading_selectors::is_exception_selector;
+        use crate::state_threading_selectors::{is_exception_selector, is_try_do_selector};
         match selector {
             "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "repeat" => Self::Loop,
             "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
@@ -152,6 +155,7 @@ impl ConstructKind {
             "detect:ifNone:" if handler_writes => Self::DetectIfNone,
             "detect:ifNone:" => Self::DetectIfNoneSearch,
             s if is_exception_selector(s) => Self::Exception,
+            s if is_try_do_selector(s) => Self::TryDo,
             s if crate::state_threading_selectors::lookup_shape(s).is_some() => Self::Lookup,
             s if s.starts_with("value") => Self::BlockValue,
             _ => Self::ListOp,
@@ -176,6 +180,7 @@ impl fmt::Display for ConstructKind {
             Self::AndOr => "`and:`/`or:`",
             Self::Exception => "exception handler",
             Self::BlockValue => "block evaluation",
+            Self::TryDo => "`tryDo:` block",
             Self::Lookup => "lookup",
         })
     }
@@ -223,6 +228,9 @@ impl Container {
             Loop => Self::LoopBody,
             CountedLoop => Self::CountedLoopBody,
             BlockValue => Self::EvaluatedBlock,
+            // A `tryDo:` block is a protected body: the block of a catch
+            // boundary, lowered like an `on:do:`'s (ADR 0131 Phase 4).
+            TryDo => Self::ProtectedBody,
             Do | KeyedDo | Enumeration => Self::DoBody,
             ListOp | Satisfy | DetectIfNone | DetectIfNoneSearch => Self::ListOpBody,
         }
@@ -233,7 +241,7 @@ impl fmt::Display for Container {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Arm => "a conditional arm",
-            Self::ProtectedBody => "a protected body (`on:do:`/`ensure:`)",
+            Self::ProtectedBody => "a protected body (`on:do:`/`ensure:`/`Result tryDo:`)",
             Self::Handler => "an exception handler or `ensure:` block",
             Self::LoopBody => "a loop",
             Self::CountedLoopBody => "a counted loop",
@@ -336,7 +344,7 @@ impl fmt::Display for Position {
 
 use ConstructKind::{
     AndOr, BlockValue, CountedLoop, DetectIfNone, DetectIfNoneSearch, Do, Enumeration, Exception,
-    IfNil, IfTrue, KeyedDo, ListOp, Lookup, Loop, Satisfy,
+    IfNil, IfTrue, KeyedDo, ListOp, Lookup, Loop, Satisfy, TryDo,
 };
 use Container::{
     Arm, CountedLoopBody, DoBody, EvaluatedBlock, Handler, ListOpBody, LoopBody, ProtectedBody,
@@ -1585,7 +1593,10 @@ impl<'d> Walker<'d> {
         // bindings map and is not shaped by it.
         let producer_shape =
             kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
-        if !actor_value_site && producer_shape && is_allowed(kind, position, self.context) {
+        if !actor_value_site
+            && producer_shape
+            && self.allowed_beyond_producers(kind, position, root_producer.is_some())
+        {
             return;
         }
         let hint = self.construct_hint(&selector, kind, position, &first.name);
@@ -1613,6 +1624,35 @@ impl<'d> Walker<'d> {
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
+    }
+
+    /// Whether the allow-set accepts `kind` at `position` once the producer
+    /// checks of [`Self::check_construct`] have not (`root_producer`: the core
+    /// rule names it a producer at a method root or REPL site).
+    ///
+    /// `tryDo:` has no allow-set row and no statement position that works other
+    /// than as a producer (ADR 0131 Phase 4, BT-3750): a Tier 2 block reaching
+    /// the arity-0 native raises, so anything the producer checks did not
+    /// accept is rejected. The REPL root is the exception: it compiles a
+    /// `tryDo:` that is the statement or the whole value of an assignment to the
+    /// `{Value, Bindings}` tuple its assembler unpacks
+    /// (`repl_try_do_tier2_send`).
+    fn allowed_beyond_producers(
+        &self,
+        kind: ConstructKind,
+        position: Position,
+        root_producer: bool,
+    ) -> bool {
+        if kind != TryDo {
+            return is_allowed(kind, position, self.context);
+        }
+        root_producer
+            && self.context == Repl
+            && self.depth == 0
+            && matches!(
+                position,
+                Position::Statement | Position::AssignValue { nested: false }
+            )
     }
 
     /// Whether the receiver of the lookup send `expr` is statically known not
@@ -1704,7 +1744,12 @@ impl<'d> Walker<'d> {
             inlined && self.context == Actor && is_self_send && top != TopLevel::None;
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
         // send of a §1 selector (`local_threading_construct`).
-        let construct_send = inlined && is_section1_selector(&sel);
+        // (`tryDo:` is a §1 construct only sent to the `Result` class: any other
+        // receiver takes the ordinary §6 path, actor self-send exemption and
+        // callee check included.)
+        let construct_send = inlined
+            && (is_section1_selector(&sel)
+                || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
         // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup
         // accepted as a producer at this position (`check_construct`); a
         // block in any other argument position is a key that is a block value.
@@ -2090,8 +2135,9 @@ fn section6_help(name: &str, selector: &str) -> String {
 
 /// ADR 0131 §6: a §1 construct selector, whose literal block arguments are
 /// inlined (so their outer-local writes have a way back): a state-threading
-/// selector, the conditional family, `on:do:`/`ensure:`, or `tryDo:` (keyed
-/// on the selector, not on the receiver being spelled `Result`, ADR 0131 §5).
+/// selector, the conditional family or `on:do:`/`ensure:`. (`tryDo:` is a §1
+/// construct only when sent to the `Result` class, `is_result_try_do`, which
+/// the call site checks with the receiver; ADR 0131 §5.)
 fn is_section1_selector(selector: &str) -> bool {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threading_keyword_selector,
@@ -2099,7 +2145,6 @@ fn is_section1_selector(selector: &str) -> bool {
     is_state_threading_keyword_selector(selector)
         || is_conditional_selector(selector)
         || is_exception_selector(selector)
-        || crate::state_threading_selectors::is_try_do_selector(selector)
 }
 
 /// Whether a block literal *receiver* of `selector` is inlined: a block

@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3750 (ADR 0131 Phase 4): the fixture behind
+// stdlib/test/result_try_do_tier2test.bt, the Rust <-> Erlang conformance
+// check for `Result tryDo:`.
+//
+// Codegen picks the arity of the native: a block that writes no outer local is
+// a Tier 1 `fun()` and reaches `beamtalk_result:'tryDo:'/1`; a block that
+// writes one is a Tier 2 `fun(StateAcc)` and reaches `'tryDo:'/2`. Each pair
+// of methods below runs the SAME block body (a class-variable write, then the
+// raise or the value) through both arities, the Tier 2 one with an extra local
+// write, and answers what the test compares: the Result, the class-variable
+// state, and (Tier 2 only) the local.
+
+Object subclass: ResultTryDoTier2Fixture
+  classState: n = 0
+
+  // --- non-raising path ----------------------------------------------------
+  class tier1Ok =>
+    self.n := 1
+    r := Result
+      tryDo: [
+        self.n := self.n + 10
+        7
+      ]
+    #[r isOk, r value, self.n]
+
+  class tier2Ok =>
+    self.n := 1
+    t := 0
+    r := Result
+      tryDo: [
+        self.n := self.n + 10
+        t := t + 1
+        7
+      ]
+    #[r isOk, r value, self.n]
+
+  class tier2OkLocal =>
+    self.n := 1
+    t := 0
+    Result
+      tryDo: [
+        self.n := self.n + 10
+        t := t + 1
+        7
+      ]
+    t
+
+  // --- raising path --------------------------------------------------------
+  class tier1Raise =>
+    self.n := 1
+    r := Result
+      tryDo: [
+        self.n := self.n + 10
+        Error signal: "boom"
+      ]
+    #[r isError, r error class, r error message, self.n]
+
+  class tier2Raise =>
+    self.n := 1
+    t := 0
+    r := Result
+      tryDo: [
+        self.n := self.n + 10
+        t := t + 1
+        Error signal: "boom"
+      ]
+    #[r isError, r error class, r error message, self.n]
+
+  class tier2RaiseLocal =>
+    self.n := 1
+    t := 0
+    Result
+      tryDo: [
+        self.n := self.n + 10
+        t := t + 1
+        Error signal: "boom"
+      ]
+    t
+
+  // --- local write kept across a prior success, discarded by a later raise ---
+  class tier2Sequence =>
+    t := 0
+    Result tryDo: [t := t + 1]
+    Result
+      tryDo: [
+        t := t + 100
+        Error signal: "boom"
+      ]
+    Result tryDo: [t := t + 10]
+    t
+
+  // --- `^` is control flow, not an error: it leaves tryDo: untouched ---------
+  class tier2NonLocalReturn =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        ^t + 41
+      ]
+    -1
+
+  // --- a Dictionary lookup producer nested in the block (BT-3798) -------------
+  class tier2Lookup =>
+    t := 0
+    Result
+      tryDo: [
+        #{#a => 1} at: #k ifAbsent: [t := t + 1]
+        7
+      ]
+    t

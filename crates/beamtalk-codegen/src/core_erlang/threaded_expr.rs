@@ -772,20 +772,21 @@ impl CoreErlangGenerator {
     /// local, the set its blocks pack is the whole set
     /// (`ThreadedLocals::lowered == names`, so no write is dropped), and the
     /// blocks are ones the producer can lower in this kind of method
-    /// (`exception_arms_lower_as_producer`). In the REPL it answers for a
+    /// (`exception_send_lowers_as_producer`). In the REPL it answers for a
     /// construct that writes a binding: a producer that adopts the bindings map
     /// whole (`lower_repl_construct_tuple`) and threads no local of its own.
     pub(super) fn exception_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
-            exception_arm_blocks, exception_arms_lower_as_producer,
+            exception_arm_blocks, exception_send_lowers_as_producer,
         };
         let arms = exception_arm_blocks(expr)?;
         if self.is_repl_mode() {
             return self.threaded_locals_of(expr).map(|_| Vec::new());
         }
         let kind = self.root_method_kind()?;
-        if !exception_arms_lower_as_producer(&arms, kind, &|name| self.binds_threadable_local(name))
-        {
+        if !exception_send_lowers_as_producer(expr, &arms, kind, &|name| {
+            self.binds_threadable_local(name)
+        }) {
             return None;
         }
         let Some(set) = self.threaded_locals_of(expr) else {
@@ -1112,7 +1113,10 @@ impl CoreErlangGenerator {
         let enclosing = self.repl_loop_mutated();
         self.set_repl_loop_mutated(false);
         let source_version = self.state_version();
-        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr))?;
+        let previous = self.set_repl_unpack_site(Some(Self::repl_unpack_span(expr)));
+        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr));
+        self.set_repl_unpack_site(previous);
+        let doc = doc?;
         let yields_tuple = self.repl_loop_mutated();
         self.set_repl_loop_mutated(enclosing);
         if !yields_tuple {

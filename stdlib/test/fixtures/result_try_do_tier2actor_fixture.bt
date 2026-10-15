@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3750 (ADR 0131 Phase 4): the actor-side pins for
+// stdlib/test/result_try_do_tier2test.bt. A `Result tryDo:` whose block writes
+// an outer local, in the body of an actor loop, with a `Dictionary` lookup
+// producer (BT-3798) or a protected body nested in the block.
+
+Actor subclass: ResultTryDoTier2ActorFixture
+  state: n = 0
+
+  lookupInLoop =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            #{#a => 1} at: #k ifAbsent: [t := t + 1]
+            7
+          ]
+      ]
+    t
+
+  lookupBehindOnDoInLoop =>
+    t := 0
+    #(1, 2) do: [:k |
+      [#{#a => 1} at: #k ifAbsent: [t := t + 1]] on: Error do: [:e | 0]
+    ]
+    t
+
+  raisingInLoop =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            Error signal: "boom"
+          ]
+      ]
+    t

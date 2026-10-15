@@ -649,8 +649,11 @@ impl CoreErlangGenerator {
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
     ///
-    /// Classification happens exactly once (`classify_body_expr`, Phase 1);
-    /// the mutating control-flow arms consume that decision via
+    /// Classification happens exactly once per statement (`classify_body_expr`),
+    /// interleaved with lowering: just before a statement is lowered, so the
+    /// locals bound by the statements before it are live in scope (a catch
+    /// boundary in a loop body is judged against that scope, ADR 0131 Phase 4,
+    /// BT-3840). The mutating control-flow arms consume that decision via
     /// `emit_actor_threaded_last_stmts`/`emit_actor_threaded_assign_rhs_stmts`,
     /// which never decline — the earlier `verify_routing_invariant`
     /// call sites (and `VerifyError::RoutingMismatch`) are deleted because
@@ -705,26 +708,25 @@ impl CoreErlangGenerator {
         self.tier2_local_var_captured_mutations.clear();
         self.prescan_tier2_local_vars(body);
 
-        // Phase 1: classify every expression upfront.  Classification is
-        // stateless w.r.t. codegen state (state_version, variable bindings),
-        // so pre-computing is safe and separates "what" from "how".
-        let plan: Vec<BodyExprKind> = body
-            .iter()
-            .map(|expr| {
+        // Classify and lower each expression to ThreadedStmts, in order.
+        let mut stmts: Vec<ThreadedStmt> = Vec::with_capacity(body.len());
+        let body_len = body.len();
+
+        for (i, expr) in body.iter().enumerate() {
+            // Classified here, just before the statement is lowered, so the
+            // locals bound by the statements before it are live in scope: a
+            // loop's threaded set (`threaded_locals_of`) is decided against
+            // that scope, and an upfront pass would not see it (ADR 0131
+            // Phase 4, BT-3840). Classification reads no state a lowering of
+            // an earlier statement changes other than that scope.
+            let kind = {
                 let kind = self.classify_body_expr(expr);
                 if matches!(&kind, BodyExprKind::EarlyReturn) && !supports_early_return {
                     BodyExprKind::Pure
                 } else {
                     kind
                 }
-            })
-            .collect();
-
-        // Phase 2: lower each (expression, kind) pair to ThreadedStmts.
-        let mut stmts: Vec<ThreadedStmt> = Vec::with_capacity(body.len());
-        let body_len = body.len();
-
-        for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
+            };
             let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
             let span = expr.span();

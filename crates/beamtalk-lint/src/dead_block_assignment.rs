@@ -36,7 +36,7 @@
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
 //!   table does not thread (a `whileTrue:` condition, BT-3782; `eachWithIndex:` /
-//!   `do:separatedBy:` outside an actor, `tryDo:` until ADR 0131 Phase 4),
+//!   `do:separatedBy:` outside an actor),
 //!   which crashes or loses the write at runtime today. As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
@@ -61,7 +61,7 @@ use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use beamtalk_core::semantic_analysis::block_facts::outer_local_writes;
+use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
 use beamtalk_core::semantic_analysis::{
     extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
 };
@@ -185,8 +185,9 @@ enum BlockPosition<'s> {
     Value,
     /// The receiver of `selector` (`[...] value`, `[...] ensure: [...]`).
     Receiver(&'s str),
-    /// The argument at this index of `selector`.
-    Arg(&'s str, usize),
+    /// The argument at this index of `selector`; the flag says whether the
+    /// send is `Result tryDo:` ([`is_result_try_do`]).
+    Arg(&'s str, usize, bool),
 }
 
 impl BlockPosition<'_> {
@@ -198,8 +199,11 @@ impl BlockPosition<'_> {
         match self {
             BlockPosition::Value => false,
             BlockPosition::Receiver(selector) => table::is_state_threaded_block_receiver(selector),
-            BlockPosition::Arg(selector, index) => {
-                table::is_state_threaded_block_arg(selector, index)
+            // ADR 0131 Phase 4 (BT-3750): the block of `Result tryDo:` is
+            // threaded back by the exception producer, not by the shared
+            // table's inline arms.
+            BlockPosition::Arg(selector, index, result_try_do) => {
+                table::is_state_threaded_block_arg(selector, index) || (index == 0 && result_try_do)
             }
         }
     }
@@ -241,7 +245,8 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
             } else {
                 walk_expr(receiver, scope, out);
             }
-            walk_msg_args(&selector, arguments, scope, out);
+            let result_try_do = is_result_try_do(receiver, &selector);
+            walk_msg_args(&selector, result_try_do, arguments, scope, out);
         }
 
         Cascade {
@@ -249,7 +254,7 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
         } => {
             walk_expr(receiver, scope, out);
             for msg in messages {
-                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, out);
+                walk_msg_args(&msg.selector.name(), false, &msg.arguments, scope, out);
             }
         }
 
@@ -326,13 +331,19 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
 /// Walk message arguments, checking each block literal by its position.
 fn walk_msg_args(
     selector: &str,
+    result_try_do: bool,
     arguments: &[Expression],
     scope: &mut LintScope,
     out: &mut Out<'_>,
 ) {
     for (i, arg) in arguments.iter().enumerate() {
         if let Expression::Block(block) = arg {
-            enter_block(block, BlockPosition::Arg(selector, i), scope, out);
+            enter_block(
+                block,
+                BlockPosition::Arg(selector, i, result_try_do),
+                scope,
+                out,
+            );
         } else {
             walk_expr(arg, scope, out);
         }
@@ -947,6 +958,8 @@ sealed typed Value subclass: Foo
             ("[x := x + 1] value", Neither),
             ("[x := 1] on: Error do: [:e | x := 2]", Neither),
             ("[nil] ensure: [x := 2]", Neither),
+            // ADR 0131 Phase 4 (BT-3750): `tryDo:` is a local-threading producer.
+            ("Result tryDo: [x := x + 1. 1]", Neither),
             ("blk := [:t | t := 1. t]", Neither),
             // §6: a block value that reaches a send with no return channel.
             ("self customLoop: [x := x + 1]", CompileError),
@@ -978,8 +991,6 @@ sealed typed Value subclass: Foo
             ("[i := i + 1. i < 3] whileTrue: [nil]", Either),
             ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),
             ("#(1, 2) do: [:e | nil] separatedBy: [x := x + 1]", Either),
-            // Raises a type_error today (PIN-BUG BT-3743, ADR 0131 Phase 4).
-            ("Result tryDo: [x := x + 1. 1]", Either),
         ];
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,

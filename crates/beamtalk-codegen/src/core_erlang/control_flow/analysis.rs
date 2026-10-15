@@ -661,8 +661,11 @@ impl CoreErlangGenerator {
         // still found, instead of stopping here (the previous behavior,
         // which silently dropped such a mutation from the outer loop's own
         // threaded-locals computation).
+        // ADR 0131 Phase 4 (BT-3750): and `tryDo:`, whose block is a frame of
+        // its own that a list-op's cross-scope write can hide behind.
         if beamtalk_core::state_threading_selectors::is_exception_selector(&sel)
             || beamtalk_core::state_threading_selectors::is_conditional_selector(&sel)
+            || beamtalk_core::semantic_analysis::block_facts::is_result_try_do(receiver, &sel)
         {
             let mut blocks: Vec<&beamtalk_core::ast::Block> = Vec::new();
             if beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {

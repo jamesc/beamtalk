@@ -87,7 +87,6 @@ fn repl_returns_the_bindings_the_construct_writes() {
 fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
     let generator = make_generator(CodeGenContext::ValueType, &["t", "d"]);
     for (src, family) in [
-        ("Result tryDo: [t := t + 1]", LocalThreadingFamily::TryDo),
         // `Dictionary` implements `at:ifAbsent:` only (BT-3798): the other
         // lookup rows are not lowered.
         (
@@ -122,11 +121,35 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
 #[test]
 fn a_nested_construct_not_threaded_today_is_in_names_but_not_lowered() {
     // ADR 0131 §1: the closure covers every nested producer, but today's
-    // lowering does not thread a `tryDo:` block yet (BT-3743), so it packs nothing.
-    let generator = make_generator(CodeGenContext::ValueType, &["t"]);
-    let set = threaded(&generator, "#(1) do: [:x | Result tryDo: [t := 1]]").expect("set");
+    // lowering does not thread a lookup selector's block yet (BT-3798), so it
+    // packs nothing.
+    let generator = make_generator(CodeGenContext::ValueType, &["t", "d"]);
+    let set = threaded(&generator, "#(1) do: [:x | d at: #k ifAbsentPut: [t := 1]]").expect("set");
     assert_eq!(set.names, vec!["t"]);
     assert!(set.lowered.is_empty());
+}
+
+#[test]
+fn try_do_is_a_construct_whose_block_is_lowered() {
+    // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` packs its block's writes into
+    // the `__local__` keys of the scratch map `'tryDo:'/2` threads, alone and
+    // nested in a loop.
+    for context in [CodeGenContext::Actor, CodeGenContext::ValueType] {
+        let generator = make_generator(context, &["t"]);
+        for src in [
+            "Result tryDo: [t := t + 1]",
+            "#(1) do: [:x | Result tryDo: [t := t + 1]]",
+        ] {
+            let set = threaded(&generator, src).unwrap_or_else(|| panic!("{src}: no set"));
+            assert_eq!(set.names, vec!["t"], "{src}");
+            assert_eq!(set.lowered, vec!["t"], "{src}");
+        }
+        let set = threaded(&generator, "Result tryDo: [t := t + 1]").expect("set");
+        assert_eq!(
+            set.construct,
+            ThreadedConstruct::Inline(LocalThreadingFamily::TryDo)
+        );
+    }
 }
 
 #[test]

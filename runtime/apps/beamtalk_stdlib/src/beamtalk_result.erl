@@ -19,6 +19,10 @@ Provides two entry points:
   Evaluates a block (Erlang fun), catching any exception and returning
   it as a `Result error:`.
 
+- `tryDo:/2` — The Tier 2 twin of `tryDo:/1` (ADR 0131 §5). Evaluates a
+  stateful block (`fun(StateAcc) -> {Value, StateAcc1}`) that writes outer
+  locals, answering `{Result, StateAcc}` so codegen can rebind them.
+
 Result tagged maps have the form:
 ```
 #{
@@ -43,6 +47,7 @@ Field names match the `state:` declarations in `stdlib/src/result.bt`.
     'makeError:'/1,
     'fromTuple:'/1,
     'tryDo:'/1,
+    'tryDo:'/2,
     'unwrapError:'/2
 ]).
 
@@ -239,6 +244,57 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
         selector = 'tryDo:',
         message =
             <<"tryDo: expected a zero-arity block, got: ",
+                (beamtalk_primitive:print_string(Block))/binary>>,
+        hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
+        details = #{got => Block}
+    }).
+
+-doc """
+Implements `Result tryDo: block` for a Tier 2 (stateful) block — ADR 0131 §5.
+
+`Block` is the `fun(StateAcc) -> {Value, StateAcc1}` that codegen emits for a
+block literal that writes outer locals. Codegen calls this instead of
+`'tryDo:'/1` when the argument to `tryDo:` is such a literal, and treats the
+`{Result, StateAcc}` answer as a local-threading construct tuple.
+
+It is the same catch boundary as `'tryDo:'/1` — `protect/1` restores the
+class-variable map on a raise, `^` passes through, the exception is wrapped by
+`ensure_wrapped/3` — so the Tier 1 and Tier 2 paths share one implementation of
+it rather than a copy across the Rust/Erlang line.
+
+- On success the answer is `{Result ok: Value, StateAcc1}`: the block's local
+  writes are kept.
+- On a raise the answer is `{Result error: Exception, StateAcc}` with the
+  **entry** `StateAcc`: the block's local writes are discarded, exactly as its
+  class-variable writes are (`protect/1`) and as `on:do:` does.
+
+## Examples (Erlang)
+```erlang
+{Ok, #{n := 1}} = beamtalk_result:'tryDo:'(fun(S) -> {7, S#{n => 1}} end, #{n => 0}).
+{Err, #{n := 0}} = beamtalk_result:'tryDo:'(fun(S) -> _ = S#{n => 1}, error(boom) end, #{n => 0}).
+```
+""".
+-spec 'tryDo:'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
+'tryDo:'(Block, StateAcc) when is_function(Block, 1) ->
+    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
+    try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
+        {Value, StateAcc1} ->
+            {from_tagged_tuple({ok, Value}), StateAcc1}
+    catch
+        %% Non-local returns (^ inside blocks) use throw({'$bt_nlr', ...}).
+        throw:NLR when ?IS_NLR(NLR) ->
+            throw(NLR);
+        Class:Reason:Stack ->
+            ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
+            {from_tagged_tuple({error, ExObj}), StateAcc}
+    end;
+'tryDo:'(Block, _StateAcc) ->
+    beamtalk_error:raise(#beamtalk_error{
+        kind = type_error,
+        class = 'Result',
+        selector = 'tryDo:',
+        message =
+            <<"tryDo: expected a one-argument stateful block, got: ",
                 (beamtalk_primitive:print_string(Block))/binary>>,
         hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
         details = #{got => Block}

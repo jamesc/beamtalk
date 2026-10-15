@@ -782,6 +782,107 @@ fn allow_set_repl_uses_its_own_row() {
 // The ADR 0131 probe matrix (stdlib/test/adr0131local_rebind_test.bt)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` as a local-threading producer
+// ---------------------------------------------------------------------------
+
+#[test]
+fn try_do_is_a_producer_in_every_position_of_every_method_context() {
+    for body in [
+        // statement, last expression, assignment value, operand
+        "Result tryDo: [t := t + 1. 1]\nt",
+        "Result tryDo: [t := t + 1. 1]",
+        "r := Result tryDo: [t := t + 1. 1]\n#[r isOk, t]",
+        "r := (Result tryDo: [t := t + 1. 1]) valueOr: 0\n#[r, t]",
+        "r := t + ((Result tryDo: [t := t + 1. 1]) valueOr: 0)\n#[r, t]",
+        // a write-only block, two locals, and a nested producer
+        "Result tryDo: [t := 5]\nt",
+        "Result tryDo: [t := t + 1. u := u + 1. 1]\n#[t, u]",
+        "Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]\nt",
+        // in the frames of other producers
+        "#(1, 2) do: [:k | Result tryDo: [t := t + k. 1]]\nt",
+        "(t < 3) ifTrue: [Result tryDo: [t := t + 1. 1]]\nt",
+        "[Result tryDo: [t := t + 1. 1]] on: Error do: [:e | 0]\nt",
+    ] {
+        let body = format!("u := 0\n{body}");
+        for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
+    // A `tryDo:` whose Tier 2 block reaches the arity-0 native raises, so
+    // wherever the producer does not lower it the write is a compile error:
+    // inside a closure, as the argument of a send that does not sequence its
+    // operands, and on a receiver other than the `Result` class.
+    for body in [
+        "CvA ap: [Result tryDo: [t := t + 1. 1]]\nt",
+        "blk := [Result tryDo: [t := t + 1. 1]]\nblk value\nt",
+        "r := Set tryDo: [t := t + 1. 1]\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                diags.iter().any(|d| d.severity == Severity::Error),
+                "{src}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_try_do_sent_to_another_receiver_takes_the_ordinary_section6_path() {
+    // Only `Result tryDo:` is a §1 construct. An actor's own `tryDo:` taking
+    // the block is a plain `self` send: the BT-3755 exemption and callee check
+    // apply to it like any other.
+    let actor = |callee: &str| {
+        format!(
+            "Actor subclass: Ac\n  state: n = 0\n\n{callee}\n\n  probe =>\n    t := 0\n    self tryDo: [t := t + 1]\n    t\n"
+        )
+    };
+    let threading = actor("  sealed tryDo: b => b value");
+    assert!(adr0131_diagnostics(&threading).is_empty(), "{threading}");
+    let non_threading = actor("  sealed tryDo: b => #(1) do: [:x | b value]");
+    assert_eq!(section6_errors(&non_threading), 1, "{non_threading}");
+}
+
+#[test]
+fn a_try_do_assigned_in_an_actor_fold_body_keeps_the_phase0_error() {
+    // The value of `r := Result tryDo: [...]` in the body of an actor `do:` is a
+    // value-bearing site the fold frame does not lower (BT-3797), so it is
+    // rejected rather than compiled to a dropped write; the statement form and
+    // a lookup behind `on:do:` are accepted and pinned at runtime by
+    // `result_try_do_tier2test.bt` / `result_try_do_tier2matrix_test.bt`.
+    let rejected = in_actor(
+        "#(1, 2) do: [:k | r := Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]]\nt",
+    );
+    let diags = adr0131_diagnostics(&rejected);
+    assert!(
+        of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading)
+            .iter()
+            .any(|d| d.message.contains("`tryDo:` writes outer local `t`")),
+        "{diags:?}"
+    );
+    for body in [
+        "#(1, 2) do: [:k | Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]]\nt",
+        "#(1, 2) do: [:k | [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]] on: Error do: [:e | 0]]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(diags.is_empty(), "{body}: {diags:?}");
+    }
+}
+
+#[test]
+fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
+    // The block is Tier 1 and reaches `'tryDo:'/1`: nothing to thread, nothing
+    // to reject, in a position that would reject a writing one.
+    let src = in_class("CvA ap: [Result tryDo: [1]]\nt");
+    assert!(adr0131_diagnostics(&src).is_empty());
+}
+
 /// PIN-BUG BT-3743: every method in the inert `*_pending.bt.pending` probe
 /// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
 /// compiled fixtures is. A phase of the BT-3743 epic that makes a shape

@@ -32,6 +32,12 @@ pub(crate) struct ReplContext {
     /// External callers should use `expression_doc_with_repl_mutation_tracking()`
     /// instead of reading this field directly.
     pub repl_loop_mutated: bool,
+    /// ADR 0131 Phase 4 (BT-3750): the span of the one expression whose
+    /// `{Value, Bindings}` tuple the REPL root unpacks (a statement or an
+    /// assignment's value compiled by `expression_doc_with_repl_mutation_tracking`,
+    /// or a REPL producer's construct). `Result tryDo:` compiles to that tuple
+    /// only there; anywhere else it is an ordinary send.
+    pub repl_unpack_site: Option<beamtalk_core::source_analysis::Span>,
 }
 
 impl ReplContext {
@@ -40,6 +46,7 @@ impl ReplContext {
         Self {
             is_repl_mode: false,
             repl_loop_mutated: false,
+            repl_unpack_site: None,
         }
     }
 }

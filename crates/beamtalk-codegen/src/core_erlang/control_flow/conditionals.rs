@@ -2048,13 +2048,15 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Classify every expression upfront using the shared classifier.
-        let plan: Vec<BodyExprKind> = body.iter().map(|e| self.classify_body_expr(e)).collect();
-
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
         let mut last_result: Option<ValueRef> = None;
 
-        for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
+        for (i, expr) in body.iter().enumerate() {
+            // Classified with the shared classifier just before the statement
+            // is lowered, so a local bound earlier in this arm is live when a
+            // catch boundary or loop in the statement is judged against the
+            // scope (ADR 0131 Phase 4, BT-3840).
+            let kind = self.classify_body_expr(expr);
             let is_last = i == body.len() - 1;
             let span = expr.span();
 

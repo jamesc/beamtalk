@@ -140,10 +140,11 @@ impl CoreErlangGenerator {
         // top-level assignment and never reads from outside
         // (`w := 0. [w < 2] whileTrue: [w := w + 1]`) is crossed by the nested
         // loop but is not this construct's to thread: counting it makes the
-        // enclosing construct thread an empty set. Decided from the body alone
-        // (as `analyze_block` decides a "new binding"), not from the live
-        // scope, so classification does not depend on how far lowering has
-        // got.
+        // enclosing construct thread an empty set. This filter is decided from
+        // the body alone (as `analyze_block` decides a "new binding"); the
+        // catch-boundary scan below also reads the live scope, which is why
+        // method-body classification runs per statement, interleaved with
+        // lowering (BT-3840).
         let analysis = self.block_profile_or_analyze(body);
         let body_defined = Self::body_introduced_locals(body, &analysis.captured_reads);
         cross_scope_writes
@@ -161,8 +162,13 @@ impl CoreErlangGenerator {
     /// the enclosing construct threads exactly when its body contains a
     /// producer that writes.
     fn body_has_operand_loop_or_fold_writes(&self, body: &Block) -> bool {
+        let analysis = self.block_profile_or_analyze(body);
+        let body_defined = Self::body_introduced_locals(body, &analysis.captured_reads);
         body.body.iter().any(|stmt| {
-            beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(&stmt.expression)
+            let loop_or_fold =
+                beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(
+                    &stmt.expression,
+                )
                 .into_iter()
                 .any(|site| {
                     local_threading_construct(site).is_some_and(|c| {
@@ -173,8 +179,43 @@ impl CoreErlangGenerator {
                     }) && self
                         .threaded_locals_of(site)
                         .is_some_and(|set| !set.lowered.is_empty())
-                })
+                });
+            loop_or_fold || self.statement_catch_boundary_writes(stmt, &body_defined)
         })
+    }
+
+    /// ADR 0131 Phase 4 (BT-3750): whether a `Result tryDo:` or `on:do:`/
+    /// `ensure:` that is the statement of a body, or sits at one of its operand
+    /// sites (`r := Result tryDo: [...]`), threads an outer local the
+    /// block-level analysis ([`analyze_block`](block_analysis::analyze_block))
+    /// does not propagate out: a write behind a nested construct it does not see
+    /// through (a `Dictionary` lookup in the block). A name the body introduces
+    /// itself is not the enclosing construct's to thread (`body_defined`, the
+    /// same filter as the loop-and-fold scan above).
+    fn statement_catch_boundary_writes(
+        &self,
+        stmt: &beamtalk_core::ast::ExpressionStatement,
+        body_defined: &std::collections::HashSet<&str>,
+    ) -> bool {
+        use beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites;
+        loop_body_operand_sites(&stmt.expression)
+            .into_iter()
+            .chain(std::iter::once(stmt.expression.unwrap_parens()))
+            .any(|site| {
+                local_threading_construct(site).is_some_and(|c| {
+                    matches!(
+                        c.family,
+                        LocalThreadingFamily::TryDo | LocalThreadingFamily::Exception
+                    )
+                }) && self.threaded_locals_of(site).is_some_and(|set| {
+                    // An outer local is a name bound in the enclosing scope
+                    // (`threaded_locals_of`'s scope predicate), not one the
+                    // body introduces itself.
+                    set.names
+                        .iter()
+                        .any(|name| !body_defined.contains(name.as_str()))
+                })
+            })
     }
 
     /// The precomputed [`block_analysis::BlockMutationAnalysis`]
@@ -265,7 +306,7 @@ impl CoreErlangGenerator {
     /// "Transitive closure"): core's [`threaded_block_writes`] descends into
     /// the blocks of every nested construct. [`ThreadedLocals::lowered`] uses
     /// [`threaded_today_block_writes`], which descends only into those whose
-    /// family [`LocalThreadingFamily::is_threaded_today`]. In the REPL the
+    /// construct [`LocalThreadingConstruct::is_threaded_today`]. In the REPL the
     /// set is the bindings the construct writes: every name assigned that is
     /// not bound inside the construct.
     ///
@@ -458,8 +499,7 @@ impl CoreErlangGenerator {
     /// construct whose result is not unpacked that way yet: the unary loops,
     /// `value` sent to a block literal (threaded by the inline-block path,
     /// `get_inline_block_captured_mutations`), the lookup selectors that are
-    /// not `Dictionary`-inline (BT-3798) and `tryDo:` (ADR 0131 phase 4), and
-    /// `eachWithIndex:`/
+    /// not `Dictionary`-inline (BT-3798), and `eachWithIndex:`/
     /// `do:separatedBy:` outside an actor's own fold
     /// ([`Self::enumeration_threads_actor_state`]).
     fn lowered_construct_blocks<'a>(
@@ -481,9 +521,9 @@ impl CoreErlangGenerator {
         };
         let sel = construct.selector.as_str();
         match construct.family {
-            LocalThreadingFamily::Conditional | LocalThreadingFamily::Exception => {
-                construct.blocks.clone()
-            }
+            LocalThreadingFamily::Conditional
+            | LocalThreadingFamily::Exception
+            | LocalThreadingFamily::TryDo => construct.blocks.clone(),
             LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => match sel {
                 // A loop or fold producer packs the blocks core's one rule
                 // names (`producer_packed_blocks`): the body, `whileTrue:`'s
@@ -509,7 +549,7 @@ impl CoreErlangGenerator {
             // ADR 0131 Phase 2d (BT-3798): a `Dictionary`-inline lookup packs
             // its handler, the one block core's `lookup_arm_blocks` names.
             LocalThreadingFamily::Lookup => lookup_arm_blocks(expr).unwrap_or_default(),
-            LocalThreadingFamily::BlockValue | LocalThreadingFamily::TryDo => Vec::new(),
+            LocalThreadingFamily::BlockValue => Vec::new(),
         }
     }
 

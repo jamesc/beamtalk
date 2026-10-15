@@ -41,6 +41,31 @@ const EXCEPTIONS: &[&str] = &[
     "[2] ensure: [nil]",
     "[n := (#(1, 2) collect: [:x | t := t + x]) size. n] on: Error do: [:e | 0]",
     "[(s < 3) ifTrue: [t := t + 1]. 1] ensure: [(s < 3) ifTrue: [u := u + 1]]",
+    // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` is the other exception-like
+    // producer. Its block is a `BranchArm` frame run by `beamtalk_result:
+    // 'tryDo:'/2`, so the same sites, frames and nesting apply; a block that
+    // writes no local is Tier 1 and no producer.
+    "Result tryDo: [t := t + 1. 2]",
+    "Result tryDo: [t := t + 1. u := u + 1. 2]",
+    "Result tryDo: [t := 5]",
+    "Result tryDo: [t := t + 1. ^t]",
+    "Result tryDo: [#(1, 2) do: [:x | t := t + x]. 2]",
+    "Result tryDo: [(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]]",
+    "Result tryDo: [[t := t + 1] ensure: [nil]]",
+    "Result tryDo: [[t := t + 1. 2] on: Error do: [:e | u := u + 1. 0]]",
+    "Result tryDo: [Result tryDo: [t := t + 1. 2]. u := u + 1]",
+    "Result tryDo: [n := (#(1, 2) collect: [:x | t := t + x]) size. n]",
+    "[Result tryDo: [t := t + 1. 2]] on: Error do: [:e | 0]",
+    "[2] ensure: [Result tryDo: [t := t + 1]]",
+    "Result tryDo: [2]",
+    "Result tryDo: [(s < 3) ifTrue: [2]]",
+    // ADR 0131 Phase 2d (BT-3798) x Phase 4: a `Dictionary at:ifAbsent:`
+    // producer nested in a `tryDo:` block.
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "Result tryDo: [v := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. v]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
+    "Result tryDo: [t := 5. 2]",
 ];
 
 /// The frames an exception producer's blocks form: `{s}` holds a statement.
@@ -57,6 +82,12 @@ const EXCEPTION_FRAMES: &[&str] = &[
     "(s < 3) ifTrue: [t := t + 1. [{s}. 1] on: Error do: [:e | 0]]",
     "[(s < 3) ifTrue: [{s}]] ensure: [nil]",
     "[#(1, 2) do: [:k | {s}]] ensure: [nil]",
+    "Result tryDo: [{s}. 1]",
+    "Result tryDo: [t := t + 1. {s}. 1]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [{s}. 0]. 1]",
+    "#(1, 2) do: [:k | Result tryDo: [{s}. 1]]",
+    "(s < 3) ifTrue: [Result tryDo: [{s}. 1]]",
+    "[Result tryDo: [{s}. 1]] ensure: [nil]",
 ];
 
 #[test]

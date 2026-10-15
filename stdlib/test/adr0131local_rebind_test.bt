@@ -83,35 +83,26 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testS8Actor => self assert: ((Adr0131LocalRebindActor spawn) s8) equals: 3
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is #[true, 0].
+  // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` whose block writes an outer
+  // local is a local-threading producer. A raise discards the block's writes.
   testTryDoRaisesClass =>
-    self should: [Adr0131LocalRebindClass tryDoRaises] raise: #type_error
+    self assert: (Adr0131LocalRebindClass tryDoRaises) equals: #[true, 0]
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is #[true, 0].
   testTryDoRaisesValue =>
-    self should: [(Adr0131LocalRebindValue new) tryDoRaises] raise: #type_error
+    self assert: ((Adr0131LocalRebindValue new) tryDoRaises) equals: #[true, 0]
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is #[true, 0].
   testTryDoRaisesActor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) tryDoRaises
-    ] raise: #type_error
+    self assert: ((Adr0131LocalRebindActor spawn) tryDoRaises) equals: #[true, 0]
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is 1.
+  // On success the block's write is kept.
   testTryDoStatementClass =>
-    self should: [Adr0131LocalRebindClass tryDoStatement] raise: #type_error
+    self assert: (Adr0131LocalRebindClass tryDoStatement) equals: 1
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is 1.
   testTryDoStatementValue =>
-    self should: [
-      (Adr0131LocalRebindValue new) tryDoStatement
-    ] raise: #type_error
+    self assert: ((Adr0131LocalRebindValue new) tryDoStatement) equals: 1
 
-  // PIN-BUG BT-3743: pins today's answer (the Tier 2 block reaches the arity-0 `beamtalk_result:'tryDo:'/1` (ADR 0131 §5)); the correct answer is 1.
   testTryDoStatementActor =>
-    self should: [
-      (Adr0131LocalRebindActor spawn) tryDoStatement
-    ] raise: #type_error
+    self assert: ((Adr0131LocalRebindActor spawn) tryDoStatement) equals: 1
 
   testVtLastInjectValue =>
     self assert: ((Adr0131LocalRebindValue new) vtLastInject) equals: 3

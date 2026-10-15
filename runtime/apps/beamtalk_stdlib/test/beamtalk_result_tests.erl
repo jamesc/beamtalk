@@ -420,3 +420,80 @@ unwrap_error_shim_raises_signal_test() ->
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('unwrap', Inner#beamtalk_error.selector)
     end.
+
+%%% ============================================================================
+%%% tryDo:/2 — the Tier 2 twin (ADR 0131 §5, BT-3750)
+%%% ============================================================================
+
+try_do_2_success_keeps_local_writes_test() ->
+    Block = fun(Acc) -> {7, Acc#{'__local__t' => maps:get('__local__t', Acc) + 1}} end,
+    {Result, Acc1} = beamtalk_result:'tryDo:'(Block, #{'__local__t' => 0}),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 7}, Result),
+    ?assertEqual(#{'__local__t' => 1}, Acc1).
+
+try_do_2_raise_discards_local_writes_and_answers_entry_state_test() ->
+    Entry = #{'__local__t' => 0},
+    Block = fun(Acc) ->
+        _Discarded = Acc#{'__local__t' => 99},
+        error(boom)
+    end,
+    {Result, Acc1} = beamtalk_result:'tryDo:'(Block, Entry),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := false, 'okValue' := nil}, Result),
+    #{'errReason' := ExObj} = Result,
+    ?assertMatch(#{'$beamtalk_class' := _}, ExObj),
+    ?assertEqual(Entry, Acc1).
+
+try_do_2_raise_restores_class_var_writes_test() ->
+    Key = beamtalk_class_vars:key('BT3750TryDo2'),
+    ok = beamtalk_class_vars:install(Key, #{n => 0}),
+    try
+        erlang:put(Key, #{n => 1}),
+        {Result, _} = beamtalk_result:'tryDo:'(
+            fun(Acc) ->
+                erlang:put(Key, #{n => 2}),
+                _ = Acc,
+                error(boom)
+            end,
+            #{}
+        ),
+        ?assertMatch(#{'isOk' := false}, Result),
+        ?assertEqual(#{n => 1}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+try_do_2_keeps_class_var_writes_on_success_test() ->
+    Key = beamtalk_class_vars:key('BT3750TryDo2Ok'),
+    ok = beamtalk_class_vars:install(Key, #{n => 0}),
+    try
+        {Result, _} = beamtalk_result:'tryDo:'(
+            fun(Acc) ->
+                erlang:put(Key, #{n => 3}),
+                {ok, Acc}
+            end,
+            #{}
+        ),
+        ?assertMatch(#{'isOk' := true}, Result),
+        ?assertEqual(#{n => 3}, erlang:get(Key))
+    after
+        beamtalk_class_vars:uninstall(Key)
+    end.
+
+try_do_2_nlr_passes_through_test() ->
+    Nlr = {'$bt_nlr', make_ref(), done},
+    ?assertThrow(
+        Nlr,
+        beamtalk_result:'tryDo:'(fun(_Acc) -> throw(Nlr) end, #{})
+    ).
+
+try_do_2_non_fun_raises_type_error_test() ->
+    try
+        beamtalk_result:'tryDo:'(fun() -> ok end, #{}),
+        ?assert(false, "tryDo:/2 should have raised a type_error")
+    catch
+        error:Caught ->
+            #{error := Inner} = Caught,
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('Result', Inner#beamtalk_error.class),
+            ?assertEqual('tryDo:', Inner#beamtalk_error.selector)
+    end.

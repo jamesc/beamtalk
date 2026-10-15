@@ -1454,7 +1454,10 @@ impl CoreErlangGenerator {
         expr: &beamtalk_core::ast::Expression,
     ) -> Result<(beamtalk_cerl_doc::Document<'static>, bool)> {
         self.set_repl_loop_mutated(false);
-        let doc = self.generate_expression(expr)?;
+        let previous = self.set_repl_unpack_site(Some(Self::repl_unpack_span(expr)));
+        let doc = self.generate_expression(expr);
+        self.set_repl_unpack_site(previous);
+        let doc = doc?;
         let mutated = self.repl_loop_mutated();
         self.set_repl_loop_mutated(false);
         Ok((doc, mutated))

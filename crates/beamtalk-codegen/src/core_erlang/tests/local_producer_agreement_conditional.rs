@@ -77,6 +77,8 @@ pub(super) const CONDITIONAL_POSITIONS: &[&str] = &[
 /// The arm frames: a conditional producer's arm holding `{s}`.
 pub(super) const ARM_FRAMES: &[&str] = &[
     "(s < 3) ifTrue: [{s}]",
+    // An arm that binds a local of its own before the statement (BT-3840).
+    "(s < 3) ifTrue: [w := 0. {s}. w]",
     "(s < 3) ifTrue: [{s}] ifFalse: [nil]",
     "(s < 3) ifFalse: [{s}]",
     "(s < 3) and: [{s}. true]",
@@ -102,6 +104,13 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
     "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
     "s ifNil: [t := t + 1. 2]",
+    "Result tryDo: [t := t + 1. 2]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]",
+    // Write-only: the first mention of `t` is the write, yet `t` is bound
+    // outside (BT-3840).
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
+    "Result tryDo: [t := 5. 2]",
 ];
 
 /// The core rule's verdict for every conditional and `on:do:`/`ensure:`
