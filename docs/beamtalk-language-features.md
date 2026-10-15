@@ -2833,7 +2833,9 @@ listOfBlocks =>
 - **`detect:ifNone:` handler** — a `detect:ifNone:` whose `ifNone:` handler writes an outer local (BT-3794)
 - **REPL operand positions** — `(xs collect: [:x | t := t + x]) size` at the REPL (BT-3795)
 - **Field-write values** — `self.f := xs collect: [:x | t := t + x]` in class and actor methods (BT-3795)
+- **Conditionals** — `c ifTrue: [t := t + 1] ifFalse: [0]` and the rest of the conditional family (`ifNil:ifNotNil:`, `and:`/`or:`, etc.) at method-root sites in class, value-type and actor methods, and at operand sites in the REPL (BT-3738)
 - **`on:do:` and `ensure:`** — `[t := t + 1] ensure: [u := u + 1]` in any producer position, in an arm of another producer and in a loop or fold body; the protected body, handler and cleanup are arms of the producer. A raise discards the protected body's writes, and the handler's (or the cleanup's) writes are kept (BT-3817)
+- **`Dictionary at:ifAbsent:` handler** — `d at: #k ifAbsent: [t := t + 1. 0]` in statement, assignment, operand, `^` value, last expression, conditional arm, `on:do:` body, and handler positions. A non-`Dictionary` receiver raises `type_error` (BT-3798)
 
 A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in every method kind; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead (BT-3817).
 
