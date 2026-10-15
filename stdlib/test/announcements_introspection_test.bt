@@ -24,7 +24,7 @@ TestCase subclass: AnnouncementsIntrospectionTest
 
   testSubscribersOfEmptyForUnsubscribedClass =>
     nodes := self.announcer subscribersOf: ParentEvent
-    self assert: nodes isEmpty equals: true
+    self assert: nodes isEmpty
 
   // --- SubscriptionNode fields ---
   testNodeAnnouncementClass =>
@@ -43,14 +43,14 @@ TestCase subclass: AnnouncementsIntrospectionTest
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
     node := (self.announcer subscribersOf: IntrospectionEvent) first
     self assert: node handlerKind equals: #do
-    self assert: node once equals: false
+    self deny: node once
     sub unsubscribe
 
   testNodeHandlerKindDoOnce =>
     sub := self.announcer when: IntrospectionEvent doOnce: [:e | nil]
     node := (self.announcer subscribersOf: IntrospectionEvent) first
     self assert: node handlerKind equals: #doOnce
-    self assert: node once equals: true
+    self assert: node once
     sub unsubscribe
 
   testNodeHandlerKindSend =>
@@ -61,7 +61,7 @@ TestCase subclass: AnnouncementsIntrospectionTest
       to: handler
     node := (self.announcer subscribersOf: IntrospectionEvent) first
     self assert: node handlerKind equals: #send
-    self assert: node isSend equals: true
+    self assert: node isSend
     sub unsubscribe
 
   // --- subscriptionCount ---
@@ -98,13 +98,13 @@ TestCase subclass: AnnouncementsIntrospectionTest
   testNavigationAnnouncedClassesIncludesSubscribedClass =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
     classes := (AnnouncementNavigation of: self.announcer) announcedClasses
-    self assert: (classes includes: IntrospectionEvent) equals: true
+    self assert: (classes includes: IntrospectionEvent)
     sub unsubscribe
 
   testNavigationAnnouncedClassesExcludesUnsubscribed =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
     classes := (AnnouncementNavigation of: self.announcer) announcedClasses
-    self assert: (classes includes: ParentEvent) equals: false
+    self deny: (classes includes: ParentEvent)
     sub unsubscribe
 
   // --- AnnouncementNavigation of: ---
@@ -116,6 +116,6 @@ TestCase subclass: AnnouncementsIntrospectionTest
   testNodePrintStringMentionsClass =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
     node := (self.announcer subscribersOf: IntrospectionEvent) first
-    self assert: (node printString includesSubstring: "IntrospectionEvent") equals: true
-    self assert: (node printString includesSubstring: "SubscriptionNode") equals: true
+    self assert: (node printString includesSubstring: "IntrospectionEvent")
+    self assert: (node printString includesSubstring: "SubscriptionNode")
     sub unsubscribe
