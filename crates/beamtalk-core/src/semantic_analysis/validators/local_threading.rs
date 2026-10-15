@@ -1704,6 +1704,28 @@ impl<'d> Walker<'d> {
         let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
         let selector = construct.selector;
+        // BT-3841: a keyed iteration on a statically non-`Dictionary` receiver
+        // keeps the permanent §6 error whether its block writes an outer local
+        // or object state (a field, a class variable): the receiver's own
+        // method would run the block as a closure, which can return neither.
+        if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
+            && self.receiver_is_not_dictionary(expr)
+        {
+            if let Some((_, body)) = producer_body_block(expr) {
+                let hint = format!(
+                    "`{selector}` runs the block inline only for a `Dictionary` receiver; this \
+                     receiver is not one, so it would call its own `{selector}` with a closure. \
+                     Compute the new value without writing it from the block, or iterate a \
+                     `Dictionary` (`asDictionary`)"
+                );
+                if !writes.is_empty() {
+                    self.report_literal_with_hint(body, &selector, hint);
+                } else if touches_state(body, self.context == Class) {
+                    self.report_state_literal(body, &selector, hint);
+                }
+            }
+            return;
+        }
         let Some(first) = writes.first().cloned() else {
             return;
         };
@@ -1711,28 +1733,6 @@ impl<'d> Walker<'d> {
         // statically known not to be a `Dictionary` would only ever raise at
         // run time (the guard), so it keeps its §6 compile error.
         if is_lookup && self.receiver_is_not_dictionary(expr) {
-            return;
-        }
-        // BT-3841: the same rule for `keysAndValuesDo:`/`doWithKey:`, whose
-        // dictionary fold is inlined for a `Dictionary` receiver only (`Ets`
-        // and any class that defines the selector run their own method with a
-        // closure that cannot return the write). The §1 block-send exemption
-        // does not cover them, so the permanent §6 error is reported here.
-        if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
-            && self.receiver_is_not_dictionary(expr)
-        {
-            if let Some((_, body)) = producer_body_block(expr) {
-                self.report_literal_with_hint(
-                    body,
-                    &selector,
-                    format!(
-                        "`{selector}` runs the block inline only for a `Dictionary` receiver; \
-                         this receiver is not one, so it would call its own `{selector}` with \
-                         a closure. Compute the new value without writing it from the block, \
-                         or iterate a `Dictionary` (`asDictionary`)"
-                    ),
-                );
-            }
             return;
         }
         // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
@@ -2171,6 +2171,19 @@ impl<'d> Walker<'d> {
             return;
         };
         self.push_literal(block, selector, &write, hint);
+    }
+
+    /// [`Self::push_literal`] for a block that writes object state (a field or
+    /// a class variable) rather than an outer local.
+    fn report_state_literal(&mut self, block: &Block, selector: &str, hint: String) {
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!("block writes object state, but `{selector}` cannot return the write"),
+                block.span,
+            )
+            .with_hint(hint)
+            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
+        );
     }
 
     fn push_literal(

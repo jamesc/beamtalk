@@ -262,7 +262,7 @@ impl CoreErlangGenerator {
         // method, which the inline fold must not replace). A receiver core
         // knows is not a `Dictionary` never gets here (the Phase 0 / §6 check
         // keeps its error).
-        let literal_receiver = matches!(receiver, Expression::MapLiteral { .. });
+        let literal_receiver = matches!(receiver.unwrap_parens(), Expression::MapLiteral { .. });
 
         // Get parameter names for key and value
         let key_param = body.parameters.first().map_or("_", |p| p.name.as_str());
@@ -528,8 +528,8 @@ mod tests {
     }
 
     #[test]
-    fn test_dict_do_with_key_field_mutation_uses_maps_to_list_foldl() {
-        // doWithKey: with a field mutation generates maps:to_list + lists:foldl.
+    fn test_dict_do_with_key_field_mutation_iterates_guarded_pairs_with_foldl() {
+        // doWithKey: with a field mutation generates the guarded pairs + lists:foldl.
         // The foldl lambda receives {K, V} pairs extracted from the list.
         let src = concat!(
             "Actor subclass: Srv\n",
@@ -540,7 +540,7 @@ mod tests {
         let code = codegen(src);
         assert!(
             code.contains("'beamtalk_map':'pairs_for_threading'"),
-            "doWithKey: with field mutation should use maps:to_list to iterate pairs. Got:\n{code}"
+            "doWithKey: with field mutation should iterate the receiver's pairs through the guard. Got:\n{code}"
         );
         assert!(
             code.contains("'lists':'foldl'"),
@@ -574,8 +574,8 @@ mod tests {
     }
 
     #[test]
-    fn test_dict_do_with_key_local_mutation_compiles_with_foldl() {
-        // doWithKey: with a local variable mutation generates maps:to_list + lists:foldl
+    fn test_dict_do_with_key_local_mutation_iterates_guarded_pairs_with_foldl() {
+        // doWithKey: with a local variable mutation generates the guarded pairs + lists:foldl
         // and the lambda destructs each {K, V} pair via element/2 calls.
         let src = concat!(
             "Actor subclass: Srv\n",
@@ -588,7 +588,7 @@ mod tests {
         let code = codegen(src);
         assert!(
             code.contains("'beamtalk_map':'pairs_for_threading'"),
-            "doWithKey: with local mutation should use maps:to_list. Got:\n{code}"
+            "doWithKey: with local mutation should iterate the receiver's pairs through the guard. Got:\n{code}"
         );
         assert!(
             code.contains("'lists':'foldl'"),
@@ -602,9 +602,9 @@ mod tests {
     }
 
     #[test]
-    fn test_keys_and_values_do_is_alias_for_do_with_key() {
+    fn test_keys_and_values_do_is_alias_for_do_with_key_and_guards_the_receiver() {
         // keysAndValuesDo: is handled by the same code path as doWithKey:.
-        // Both selectors must trigger maps:to_list + lists:foldl for mutation blocks.
+        // Both selectors must trigger the guarded pairs + lists:foldl for mutation blocks.
         let src_dwk = concat!(
             "Actor subclass: Srv\n",
             "  state: n = 0\n\n",
@@ -621,11 +621,11 @@ mod tests {
         let code_kavd = codegen(src_kavd);
         assert!(
             code_kavd.contains("'beamtalk_map':'pairs_for_threading'"),
-            "keysAndValuesDo: should use the same maps:to_list path as doWithKey:. Got:\n{code_kavd}"
+            "keysAndValuesDo: should use the same guarded pairs path as doWithKey:. Got:\n{code_kavd}"
         );
         assert!(
             code_dwk.contains("pairs_for_threading") && code_kavd.contains("pairs_for_threading"),
-            "Both doWithKey: and keysAndValuesDo: must use maps:to_list. dwk:\n{code_dwk}\nkavd:\n{code_kavd}"
+            "Both doWithKey: and keysAndValuesDo: must use pairs_for_threading. dwk:\n{code_dwk}\nkavd:\n{code_kavd}"
         );
     }
 

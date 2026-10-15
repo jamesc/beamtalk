@@ -283,6 +283,17 @@ flipped. The REPL keeps the §6 error, and a lookup in a loop or fold body is
 not a producer (it lowers at the method root and in `BranchArm` frames, like a
 conditional).
 
+**Amendment, BT-3841: keyed iteration got the same guarded-inline decision.**
+`keysAndValuesDo:` and `doWithKey:` are dictionary folds inlined for a
+`Dictionary` receiver only (`Ets` and any class may define either selector).
+They reuse the lookup design rather than a second one: the one static rule
+(`receiver_statically_not_dictionary`, shared with the lookups) keeps a
+permanent §6 `Tier2BlockNoReturnChannel` error for a receiver known not to be a
+`Dictionary`, whether the block writes an outer local or object state, and an
+unknown receiver goes through the runtime guard
+`beamtalk_map:pairs_for_threading/2` (untagged map only, else a structured
+`type_error`); a map literal needs neither.
+
 Its result is:
 
 ```text

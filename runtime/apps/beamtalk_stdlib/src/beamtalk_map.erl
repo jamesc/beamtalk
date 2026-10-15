@@ -61,7 +61,7 @@ lookup_for_threading(Receiver, Selector, _Key) ->
 
 -doc """
 The receiver guard of an inlined `keysAndValuesDo:` / `doWithKey:` whose block
-writes an outer local (ADR 0131, BT-3841): the `{Key, Value}` pairs of a
+writes outer state, a local or a field (ADR 0131, BT-3841): the `{Key, Value}` pairs of a
 `Dictionary` (an untagged map), for the compiled fold to iterate in the
 caller's activation.
 
@@ -87,9 +87,9 @@ unsupported_receiver(Receiver, Selector) ->
         beamtalk_primitive:class_of(Receiver),
         Selector,
         <<
-            "The block writes a local of the enclosing method, and only a Dictionary "
-            "receiver can run it inline; assign the result instead of writing the local "
-            "from the block"
+            "The block writes state of the enclosing method (a local or a field), and "
+            "only a Dictionary receiver can run it inline; compute the new value "
+            "without writing it from the block"
         >>
     ).
 

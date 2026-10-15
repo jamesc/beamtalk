@@ -1762,6 +1762,14 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
             of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
             "{typed}: {diags:?}"
         );
+        // A block that writes a field (object state), not a local, is the same
+        // error: the receiver's own method would run it as a closure.
+        let field = format!("t := 0\ne := 3\ne {sel} [:k :v | self.n := self.n + v]\nt");
+        let diags = adr0131_diagnostics(&in_actor(&field));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+            "{field}: {diags:?}"
+        );
         // A map literal and an unknown receiver are Dictionary-inline.
         for recv in ["#{#a => 1}", "d"] {
             let body = format!("t := 0\nd := #{{#a => 1}}\n{recv} {sel} [:k :v | t := t + v]\nt");
