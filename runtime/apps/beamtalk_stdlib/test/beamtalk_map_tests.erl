@@ -292,3 +292,28 @@ collect_pair_messages(Acc) ->
         {pair, K, V} -> collect_pair_messages([{K, V} | Acc])
     after 100 -> lists:reverse(Acc)
     end.
+
+%%% ============================================================================
+%%% pairs_for_threading/2 (ADR 0131, BT-3841)
+%%% ============================================================================
+
+pairs_for_threading_untagged_map_test() ->
+    ?assertEqual(
+        [{a, 1}, {b, 2}],
+        lists:sort(beamtalk_map:pairs_for_threading(#{a => 1, b => 2}, 'keysAndValuesDo:'))
+    ),
+    ?assertEqual([], beamtalk_map:pairs_for_threading(#{}, 'doWithKey:')).
+
+pairs_for_threading_tagged_map_raises_type_error_test() ->
+    %% An `Ets` handle or a value-type instance is a map tagged with its class.
+    Tagged = #{'$beamtalk_class' => 'Ets', table => some_table},
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = 'keysAndValuesDo:'}},
+        beamtalk_map:pairs_for_threading(Tagged, 'keysAndValuesDo:')
+    ).
+
+pairs_for_threading_non_map_raises_type_error_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = 'doWithKey:'}},
+        beamtalk_map:pairs_for_threading(42, 'doWithKey:')
+    ).

@@ -317,9 +317,10 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 /// argument of a send of `sel` with `arity` arguments, or `None` for any other
 /// selector or arity.
 ///
-/// Not listed, deliberately: `keysAndValuesDo:`/`doWithKey:` (a measured
-/// actor loop-body site is not lowered through the producer),
-/// `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
+/// `keysAndValuesDo:`/`doWithKey:` join the table with BT-3841 (their dictionary
+/// fold answers the same `{nil, StateAcc}` carrier as `do:`).
+///
+/// Not listed, deliberately: `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
 /// `inject:into:` whose spans are the original send's, so a site keyed on the
 /// original has no producer to lower it) and `anySatisfy:`/`allSatisfy:`.
 ///
@@ -336,7 +337,7 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
-            | "reject:" | "count:" | "detect:",
+            | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:",
             1,
         )
         | ("detect:ifNone:", 2) => Some(0),

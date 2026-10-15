@@ -327,3 +327,9 @@ Object subclass: Adr0131LocalRebindClass
         i > 1 ifTrue: [t := t + 5]
       ]
     t
+
+  // `keysAndValuesDo:` as a statement.
+  class stKeysAndValuesDo =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    t

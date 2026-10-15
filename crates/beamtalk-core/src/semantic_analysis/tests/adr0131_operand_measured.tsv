@@ -18,7 +18,7 @@ class	top	assign	ensure	right
 class	top	assign	value	wrong
 class	top	assign	ewi	wrong
 class	top	assign	dsb	wrong
-class	top	assign	kv	wrong
+class	top	assign	kv	right
 class	top	assign	dinH	right
 class	top	assign	dinS	right
 class	top	assign	any	wrong
@@ -36,7 +36,7 @@ class	top	field	ensure	right
 class	top	field	value	wrong
 class	top	field	ewi	wrong
 class	top	field	dsb	wrong
-class	top	field	kv	wrong
+class	top	field	kv	right
 class	top	field	dinH	right
 class	top	field	dinS	right
 class	top	field	any	wrong
@@ -54,7 +54,7 @@ class	top	recv	ensure	right
 class	top	recv	value	wrong
 class	top	recv	ewi	wrong
 class	top	recv	dsb	wrong
-class	top	recv	kv	wrong
+class	top	recv	kv	right
 class	top	recv	dinH	right
 class	top	recv	dinS	right
 class	top	recv	any	wrong
@@ -72,7 +72,7 @@ class	top	arg	ensure	right
 class	top	arg	value	wrong
 class	top	arg	ewi	wrong
 class	top	arg	dsb	wrong
-class	top	arg	kv	wrong
+class	top	arg	kv	right
 class	top	arg	dinH	right
 class	top	arg	dinS	right
 class	top	arg	any	wrong
@@ -90,7 +90,7 @@ class	top	operand	ensure	right
 class	top	operand	value	wrong
 class	top	operand	ewi	wrong
 class	top	operand	dsb	wrong
-class	top	operand	kv	wrong
+class	top	operand	kv	right
 class	top	operand	dinH	right
 class	top	operand	dinS	right
 class	top	operand	any	wrong
@@ -126,7 +126,7 @@ class	top	literal	ensure	right
 class	top	literal	value	wrong
 class	top	literal	ewi	wrong
 class	top	literal	dsb	wrong
-class	top	literal	kv	wrong
+class	top	literal	kv	right
 class	top	literal	dinH	right
 class	top	literal	dinS	right
 class	top	literal	any	wrong
@@ -180,7 +180,7 @@ class	arm	assign	ensure	right
 class	arm	assign	value	wrong
 class	arm	assign	ewi	wrong
 class	arm	assign	dsb	wrong
-class	arm	assign	kv	wrong
+class	arm	assign	kv	right
 class	arm	assign	dinH	wrong
 class	arm	assign	dinS	wrong
 class	arm	assign	any	wrong
@@ -198,7 +198,7 @@ class	arm	field	ensure	right
 class	arm	field	value	wrong
 class	arm	field	ewi	wrong
 class	arm	field	dsb	wrong
-class	arm	field	kv	wrong
+class	arm	field	kv	right
 class	arm	field	dinH	wrong
 class	arm	field	dinS	wrong
 class	arm	field	any	wrong
@@ -216,7 +216,7 @@ class	arm	recv	ensure	right
 class	arm	recv	value	wrong
 class	arm	recv	ewi	wrong
 class	arm	recv	dsb	wrong
-class	arm	recv	kv	wrong
+class	arm	recv	kv	right
 class	arm	recv	dinH	wrong
 class	arm	recv	dinS	wrong
 class	arm	recv	any	wrong
@@ -234,7 +234,7 @@ class	arm	arg	ensure	right
 class	arm	arg	value	wrong
 class	arm	arg	ewi	wrong
 class	arm	arg	dsb	wrong
-class	arm	arg	kv	wrong
+class	arm	arg	kv	right
 class	arm	arg	dinH	wrong
 class	arm	arg	dinS	wrong
 class	arm	arg	any	wrong
@@ -252,7 +252,7 @@ class	arm	operand	ensure	right
 class	arm	operand	value	wrong
 class	arm	operand	ewi	wrong
 class	arm	operand	dsb	wrong
-class	arm	operand	kv	wrong
+class	arm	operand	kv	right
 class	arm	operand	dinH	wrong
 class	arm	operand	dinS	wrong
 class	arm	operand	any	wrong
@@ -288,7 +288,7 @@ class	arm	literal	ensure	right
 class	arm	literal	value	wrong
 class	arm	literal	ewi	wrong
 class	arm	literal	dsb	wrong
-class	arm	literal	kv	wrong
+class	arm	literal	kv	right
 class	arm	literal	dinH	wrong
 class	arm	literal	dinS	wrong
 class	arm	literal	any	wrong
@@ -342,7 +342,7 @@ class	iter	assign	ensure	right
 class	iter	assign	value	wrong
 class	iter	assign	ewi	right
 class	iter	assign	dsb	right
-class	iter	assign	kv	wrong
+class	iter	assign	kv	right
 class	iter	assign	dinH	right
 class	iter	assign	dinS	right
 class	iter	assign	any	right
@@ -360,7 +360,7 @@ class	iter	field	ensure	right
 class	iter	field	value	wrong
 class	iter	field	ewi	wrong
 class	iter	field	dsb	wrong
-class	iter	field	kv	wrong
+class	iter	field	kv	right
 class	iter	field	dinH	wrong
 class	iter	field	dinS	wrong
 class	iter	field	any	wrong
@@ -378,7 +378,7 @@ class	iter	recv	ensure	right
 class	iter	recv	value	wrong
 class	iter	recv	ewi	wrong
 class	iter	recv	dsb	wrong
-class	iter	recv	kv	wrong
+class	iter	recv	kv	right
 class	iter	recv	dinH	wrong
 class	iter	recv	dinS	wrong
 class	iter	recv	any	wrong
@@ -396,7 +396,7 @@ class	iter	arg	ensure	right
 class	iter	arg	value	wrong
 class	iter	arg	ewi	wrong
 class	iter	arg	dsb	wrong
-class	iter	arg	kv	wrong
+class	iter	arg	kv	right
 class	iter	arg	dinH	wrong
 class	iter	arg	dinS	wrong
 class	iter	arg	any	wrong
@@ -414,7 +414,7 @@ class	iter	operand	ensure	right
 class	iter	operand	value	wrong
 class	iter	operand	ewi	wrong
 class	iter	operand	dsb	wrong
-class	iter	operand	kv	wrong
+class	iter	operand	kv	right
 class	iter	operand	dinH	wrong
 class	iter	operand	dinS	wrong
 class	iter	operand	any	wrong
@@ -450,7 +450,7 @@ class	iter	literal	ensure	right
 class	iter	literal	value	wrong
 class	iter	literal	ewi	wrong
 class	iter	literal	dsb	wrong
-class	iter	literal	kv	wrong
+class	iter	literal	kv	right
 class	iter	literal	dinH	wrong
 class	iter	literal	dinS	wrong
 class	iter	literal	any	wrong
@@ -504,7 +504,7 @@ value	top	assign	ensure	right
 value	top	assign	value	wrong
 value	top	assign	ewi	wrong
 value	top	assign	dsb	wrong
-value	top	assign	kv	wrong
+value	top	assign	kv	right
 value	top	assign	dinH	right
 value	top	assign	dinS	right
 value	top	assign	any	wrong
@@ -522,7 +522,7 @@ value	top	recv	ensure	right
 value	top	recv	value	wrong
 value	top	recv	ewi	wrong
 value	top	recv	dsb	wrong
-value	top	recv	kv	wrong
+value	top	recv	kv	right
 value	top	recv	dinH	right
 value	top	recv	dinS	right
 value	top	recv	any	wrong
@@ -540,7 +540,7 @@ value	top	arg	ensure	right
 value	top	arg	value	wrong
 value	top	arg	ewi	wrong
 value	top	arg	dsb	wrong
-value	top	arg	kv	wrong
+value	top	arg	kv	right
 value	top	arg	dinH	right
 value	top	arg	dinS	right
 value	top	arg	any	wrong
@@ -558,7 +558,7 @@ value	top	operand	ensure	right
 value	top	operand	value	wrong
 value	top	operand	ewi	wrong
 value	top	operand	dsb	wrong
-value	top	operand	kv	wrong
+value	top	operand	kv	right
 value	top	operand	dinH	right
 value	top	operand	dinS	right
 value	top	operand	any	wrong
@@ -594,7 +594,7 @@ value	top	literal	ensure	right
 value	top	literal	value	wrong
 value	top	literal	ewi	wrong
 value	top	literal	dsb	wrong
-value	top	literal	kv	wrong
+value	top	literal	kv	right
 value	top	literal	dinH	right
 value	top	literal	dinS	right
 value	top	literal	any	wrong
@@ -648,7 +648,7 @@ value	arm	assign	ensure	right
 value	arm	assign	value	wrong
 value	arm	assign	ewi	wrong
 value	arm	assign	dsb	wrong
-value	arm	assign	kv	wrong
+value	arm	assign	kv	right
 value	arm	assign	dinH	wrong
 value	arm	assign	dinS	wrong
 value	arm	assign	any	wrong
@@ -666,7 +666,7 @@ value	arm	recv	ensure	right
 value	arm	recv	value	wrong
 value	arm	recv	ewi	wrong
 value	arm	recv	dsb	wrong
-value	arm	recv	kv	wrong
+value	arm	recv	kv	right
 value	arm	recv	dinH	wrong
 value	arm	recv	dinS	wrong
 value	arm	recv	any	wrong
@@ -684,7 +684,7 @@ value	arm	arg	ensure	right
 value	arm	arg	value	wrong
 value	arm	arg	ewi	wrong
 value	arm	arg	dsb	wrong
-value	arm	arg	kv	wrong
+value	arm	arg	kv	right
 value	arm	arg	dinH	wrong
 value	arm	arg	dinS	wrong
 value	arm	arg	any	wrong
@@ -702,7 +702,7 @@ value	arm	operand	ensure	right
 value	arm	operand	value	wrong
 value	arm	operand	ewi	wrong
 value	arm	operand	dsb	wrong
-value	arm	operand	kv	wrong
+value	arm	operand	kv	right
 value	arm	operand	dinH	wrong
 value	arm	operand	dinS	wrong
 value	arm	operand	any	wrong
@@ -738,7 +738,7 @@ value	arm	literal	ensure	right
 value	arm	literal	value	wrong
 value	arm	literal	ewi	wrong
 value	arm	literal	dsb	wrong
-value	arm	literal	kv	wrong
+value	arm	literal	kv	right
 value	arm	literal	dinH	wrong
 value	arm	literal	dinS	wrong
 value	arm	literal	any	wrong
@@ -792,7 +792,7 @@ value	iter	assign	ensure	right
 value	iter	assign	value	wrong
 value	iter	assign	ewi	right
 value	iter	assign	dsb	right
-value	iter	assign	kv	wrong
+value	iter	assign	kv	right
 value	iter	assign	dinH	right
 value	iter	assign	dinS	right
 value	iter	assign	any	right
@@ -810,7 +810,7 @@ value	iter	recv	ensure	right
 value	iter	recv	value	wrong
 value	iter	recv	ewi	wrong
 value	iter	recv	dsb	wrong
-value	iter	recv	kv	wrong
+value	iter	recv	kv	right
 value	iter	recv	dinH	wrong
 value	iter	recv	dinS	wrong
 value	iter	recv	any	wrong
@@ -828,7 +828,7 @@ value	iter	arg	ensure	right
 value	iter	arg	value	wrong
 value	iter	arg	ewi	wrong
 value	iter	arg	dsb	wrong
-value	iter	arg	kv	wrong
+value	iter	arg	kv	right
 value	iter	arg	dinH	wrong
 value	iter	arg	dinS	wrong
 value	iter	arg	any	wrong
@@ -846,7 +846,7 @@ value	iter	operand	ensure	right
 value	iter	operand	value	wrong
 value	iter	operand	ewi	wrong
 value	iter	operand	dsb	wrong
-value	iter	operand	kv	wrong
+value	iter	operand	kv	right
 value	iter	operand	dinH	wrong
 value	iter	operand	dinS	wrong
 value	iter	operand	any	wrong
@@ -882,7 +882,7 @@ value	iter	literal	ensure	right
 value	iter	literal	value	wrong
 value	iter	literal	ewi	wrong
 value	iter	literal	dsb	wrong
-value	iter	literal	kv	wrong
+value	iter	literal	kv	right
 value	iter	literal	dinH	wrong
 value	iter	literal	dinS	wrong
 value	iter	literal	any	wrong
@@ -972,7 +972,7 @@ actor	top	recv	ensure	right
 actor	top	recv	value	wrong
 actor	top	recv	ewi	wrong
 actor	top	recv	dsb	wrong
-actor	top	recv	kv	wrong
+actor	top	recv	kv	right
 actor	top	recv	dinH	right
 actor	top	recv	dinS	right
 actor	top	recv	any	wrong
@@ -990,7 +990,7 @@ actor	top	arg	ensure	right
 actor	top	arg	value	wrong
 actor	top	arg	ewi	wrong
 actor	top	arg	dsb	wrong
-actor	top	arg	kv	wrong
+actor	top	arg	kv	right
 actor	top	arg	dinH	right
 actor	top	arg	dinS	right
 actor	top	arg	any	wrong
@@ -1008,7 +1008,7 @@ actor	top	operand	ensure	right
 actor	top	operand	value	wrong
 actor	top	operand	ewi	wrong
 actor	top	operand	dsb	wrong
-actor	top	operand	kv	wrong
+actor	top	operand	kv	right
 actor	top	operand	dinH	right
 actor	top	operand	dinS	right
 actor	top	operand	any	wrong
@@ -1044,7 +1044,7 @@ actor	top	literal	ensure	right
 actor	top	literal	value	wrong
 actor	top	literal	ewi	wrong
 actor	top	literal	dsb	wrong
-actor	top	literal	kv	wrong
+actor	top	literal	kv	right
 actor	top	literal	dinH	right
 actor	top	literal	dinS	right
 actor	top	literal	any	wrong
@@ -1134,7 +1134,7 @@ actor	arm	recv	ensure	right
 actor	arm	recv	value	wrong
 actor	arm	recv	ewi	wrong
 actor	arm	recv	dsb	wrong
-actor	arm	recv	kv	wrong
+actor	arm	recv	kv	right
 actor	arm	recv	dinH	wrong
 actor	arm	recv	dinS	wrong
 actor	arm	recv	any	wrong
@@ -1152,7 +1152,7 @@ actor	arm	arg	ensure	right
 actor	arm	arg	value	wrong
 actor	arm	arg	ewi	wrong
 actor	arm	arg	dsb	wrong
-actor	arm	arg	kv	wrong
+actor	arm	arg	kv	right
 actor	arm	arg	dinH	wrong
 actor	arm	arg	dinS	wrong
 actor	arm	arg	any	wrong
@@ -1170,7 +1170,7 @@ actor	arm	operand	ensure	right
 actor	arm	operand	value	wrong
 actor	arm	operand	ewi	wrong
 actor	arm	operand	dsb	wrong
-actor	arm	operand	kv	wrong
+actor	arm	operand	kv	right
 actor	arm	operand	dinH	wrong
 actor	arm	operand	dinS	wrong
 actor	arm	operand	any	wrong
@@ -1206,7 +1206,7 @@ actor	arm	literal	ensure	right
 actor	arm	literal	value	wrong
 actor	arm	literal	ewi	wrong
 actor	arm	literal	dsb	wrong
-actor	arm	literal	kv	wrong
+actor	arm	literal	kv	right
 actor	arm	literal	dinH	wrong
 actor	arm	literal	dinS	wrong
 actor	arm	literal	any	wrong
@@ -1260,7 +1260,7 @@ actor	iter	assign	ensure	right
 actor	iter	assign	value	wrong
 actor	iter	assign	ewi	right
 actor	iter	assign	dsb	right
-actor	iter	assign	kv	right
+actor	iter	assign	kv	erlc
 actor	iter	assign	dinH	erlc
 actor	iter	assign	dinS	erlc
 actor	iter	assign	any	right
@@ -1278,7 +1278,7 @@ actor	iter	field	ensure	wrong
 actor	iter	field	value	wrong
 actor	iter	field	ewi	wrong
 actor	iter	field	dsb	wrong
-actor	iter	field	kv	wrong
+actor	iter	field	kv	erlc
 actor	iter	field	dinH	erlc
 actor	iter	field	dinS	erlc
 actor	iter	field	any	wrong
@@ -1296,7 +1296,7 @@ actor	iter	recv	ensure	wrong
 actor	iter	recv	value	wrong
 actor	iter	recv	ewi	wrong
 actor	iter	recv	dsb	wrong
-actor	iter	recv	kv	wrong
+actor	iter	recv	kv	erlc
 actor	iter	recv	dinH	erlc
 actor	iter	recv	dinS	erlc
 actor	iter	recv	any	wrong
@@ -1314,7 +1314,7 @@ actor	iter	arg	ensure	wrong
 actor	iter	arg	value	wrong
 actor	iter	arg	ewi	wrong
 actor	iter	arg	dsb	wrong
-actor	iter	arg	kv	wrong
+actor	iter	arg	kv	erlc
 actor	iter	arg	dinH	erlc
 actor	iter	arg	dinS	erlc
 actor	iter	arg	any	wrong
@@ -1332,7 +1332,7 @@ actor	iter	operand	ensure	wrong
 actor	iter	operand	value	wrong
 actor	iter	operand	ewi	wrong
 actor	iter	operand	dsb	wrong
-actor	iter	operand	kv	wrong
+actor	iter	operand	kv	erlc
 actor	iter	operand	dinH	erlc
 actor	iter	operand	dinS	erlc
 actor	iter	operand	any	wrong
@@ -1368,7 +1368,7 @@ actor	iter	literal	ensure	wrong
 actor	iter	literal	value	wrong
 actor	iter	literal	ewi	wrong
 actor	iter	literal	dsb	wrong
-actor	iter	literal	kv	wrong
+actor	iter	literal	kv	erlc
 actor	iter	literal	dinH	erlc
 actor	iter	literal	dinS	erlc
 actor	iter	literal	any	wrong

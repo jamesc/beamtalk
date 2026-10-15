@@ -9,7 +9,8 @@
 //! per block role, per method context, per write target). This harness
 //! compiles every class, value-type and actor cell that is not a `gap` line
 //! through the real `beamtalk test` pipeline with the Phase 0 statement check
-//! bypassed (`BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`, debug builds only),
+//! bypassed (`BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`, read only by a build with the
+//! `beamtalk-core/measure-bypass` cargo feature),
 //! runs it on a BEAM, and records the answer in
 //! `adr0131_statement_measured.tsv`:
 //!
@@ -413,10 +414,27 @@ fn preflight() {
     );
 }
 
+/// `ADR0131_MEASURE_ONLY=kv,ewi`: measure only the cells of these construct
+/// kinds (a development aid while a family is being lowered). A filtered run
+/// prints the cells that do not answer right and, with
+/// `ADR0131_MEASURE_BLESS=1`, merges its answers into the checked-in table.
+fn only_kinds() -> Option<Vec<String>> {
+    std::env::var("ADR0131_MEASURE_ONLY")
+        .ok()
+        .map(|v| v.split(',').map(str::to_string).collect())
+}
+
 fn run_matrix(matrix: Matrix, file: &str) {
     preflight();
-    let order = cells(matrix);
-    assert!(order.len() > 1000, "only {} cells", order.len());
+    let full = cells(matrix);
+    assert!(full.len() > 1000, "only {} cells", full.len());
+    let only = only_kinds();
+    let order: Vec<Cell> = full
+        .iter()
+        .filter(|c| only.as_ref().is_none_or(|kinds| kinds.contains(&c.kind)))
+        .cloned()
+        .collect();
+    assert!(!order.is_empty(), "no cell matches ADR0131_MEASURE_ONLY");
     let answers = Mutex::new(BTreeMap::new());
     let batches: Vec<Vec<Cell>> = ["class", "value", "actor"]
         .iter()
@@ -456,6 +474,42 @@ fn run_matrix(matrix: Matrix, file: &str) {
         eprintln!("{context}\t{answer}\t{n}");
     }
 
+    if only.is_some() {
+        for (cell, answer) in &answers {
+            if *answer != "right" {
+                eprintln!("NOT RIGHT\t{}", cell.line(answer));
+            }
+        }
+        if std::env::var_os("ADR0131_MEASURE_BLESS").is_some() {
+            let mut merged: BTreeMap<Cell, &'static str> = matrix
+                .measured()
+                .into_iter()
+                .map(|[context, container, target, kind, answer]| {
+                    let answer = match answer.as_str() {
+                        "right" => "right",
+                        "wrong" => "wrong",
+                        _ => "erlc",
+                    };
+                    (
+                        Cell {
+                            context,
+                            container,
+                            target,
+                            kind,
+                        },
+                        answer,
+                    )
+                })
+                .collect();
+            merged.extend(answers);
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../beamtalk-core/src/semantic_analysis/tests")
+                .join(file);
+            std::fs::write(&path, table(matrix, &merged, &full)).expect("write the table");
+            eprintln!("merged into {}", path.display());
+        }
+        return;
+    }
     let measured = table(matrix, &answers, &order);
     if std::env::var_os("ADR0131_MEASURE_BLESS").is_some() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))

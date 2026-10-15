@@ -1400,7 +1400,6 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "dinS"),
     ("actor", "armProtIter", "outer", "dsb"),
     ("actor", "armProtIter", "outer", "ewi"),
-    ("actor", "armProtIter", "outer", "kv"),
     ("actor", "armProtIter", "outer", "value"),
     ("value", "armIterIter", "outer", "any"),
     ("actor", "armProtIter", "outer", "any"),
@@ -1408,7 +1407,6 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtArm", "outer", "any"),
     ("actor", "armProtArm", "outer", "dsb"),
     ("actor", "armProtArm", "outer", "ewi"),
-    ("actor", "armProtArm", "outer", "kv"),
     ("actor", "armProtArm", "outer", "value"),
     ("class", "armProtIter", "outer", "any"),
     ("class", "armIterIter", "outer", "any"),
@@ -1703,6 +1701,88 @@ fn unmeasured_three_deep_chains_stay_rejected() {
     ] {
         let diags = adr0131_diagnostics(&src);
         assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
+    }
+}
+
+/// BT-3841: `keysAndValuesDo:`/`doWithKey:` are producers like `do:`. Accepted
+/// as a statement, in an arm and in a loop body in every method context; still
+/// rejected inside a `[...] value` body, and a `^` of one in a plain closure is
+/// rejected like `^xs do: [...]` there.
+#[test]
+fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\n{kv}\nt"),
+            format!("t := 0\ntrue ifTrue: [{kv}]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | {kv}]\nt"),
+            format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                let diags = adr0131_diagnostics(&src);
+                assert!(diags.is_empty(), "{src}: {diags:?}");
+            }
+        }
+        for body in [
+            format!("t := 0\n[{kv}] value\nt"),
+            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: accepted but unmeasured or unlowered"
+                );
+            }
+        }
+    }
+}
+
+/// BT-3841 review: the inline keyed fold is valid for a `Dictionary` receiver
+/// only (`Ets` and any class that defines the selector run their own method
+/// with a closure). The one rule the lookups use
+/// (`receiver_statically_not_dictionary`) keeps a permanent §6 error for a
+/// receiver known not to be one; an unknown receiver compiles and is guarded at
+/// run time (`beamtalk_map:pairs_for_threading/2`).
+#[test]
+fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_error() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let write = format!("t := 0\nself {sel} [:k :v | t := t + v]\nt");
+        for src in [in_class(&write), in_value(&write), in_actor(&write)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+                "{src}: {diags:?}"
+            );
+        }
+        // A typed non-Dictionary local.
+        let typed = format!("t := 0\ne := 3\ne {sel} [:k :v | t := t + v]\nt");
+        let diags = adr0131_diagnostics(&in_class(&typed));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+            "{typed}: {diags:?}"
+        );
+        // A map literal and an unknown receiver are Dictionary-inline.
+        for recv in ["#{#a => 1}", "d"] {
+            let body = format!("t := 0\nd := #{{#a => 1}}\n{recv} {sel} [:k :v | t := t + v]\nt");
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+            }
+        }
+        // A closure between the frame and the construct (an opaque or stored
+        // block) is not a producer frame: the write is rejected there.
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\nself ap: [{kv}]\nt"),
+            format!("t := 0\n#(1) do: [:z | [:y | {kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: a keyed iteration in a closure was accepted"
+                );
+            }
+        }
     }
 }
 

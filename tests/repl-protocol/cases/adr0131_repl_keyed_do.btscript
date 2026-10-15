@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `keysAndValuesDo:` and `doWithKey:` are local-threading
+// producers (`producer_body_arg_index`) like `do:`, so at an operand site of a
+// REPL input they answer `nil` and keep the writes their block made. A keyed
+// iteration that is the statement or an assignment's whole value keeps the
+// REPL's own lowering.
+
+t := 0
+// => 0
+
+#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+// => nil
+
+t
+// => 3
+
+#{#a => 1, #b => 2} doWithKey: [:k :v | t := t + v]
+// => nil
+
+t
+// => 6
+
+// As the receiver of a message.
+(#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]) isNil
+// => true
+
+t
+// => 9
+
+// As an element of a literal, read before and after.
+#[t, #{#a => 1} keysAndValuesDo: [:k :v | t := t + v], t]
+// => #[9, nil, 10]
+
+// As an assignment's whole value.
+r := #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+// => nil
+
+t
+// => 13

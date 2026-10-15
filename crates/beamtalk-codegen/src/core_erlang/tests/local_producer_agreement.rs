@@ -47,6 +47,10 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "#(1, 2) do: [:x | t := t + x]",
     // A map literal receiver goes through the dictionary `do:` lowering.
     "#{#a => 1, #b => 2} do: [:x | t := t + x]",
+    // BT-3841: the keyed iterations are producers like `do:` (nested ones are in
+    // the loop-body half below).
+    "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]",
+    "#{#a => 1, #b => 2} doWithKey: [:k :w | t := t + w]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
     "#(1, 2) select: [:x | t := t + 1. true]",
     "#(1, 2) detect: [:x | t := t + 1. x > 1]",
@@ -338,6 +342,14 @@ pub(super) const FRAMES: &[&str] = &[
     "1 to: 2 do: [:k | #(1, 2) do: [:i | {s}]]",
     "[s < 3] whileTrue: [s := s + 1. #(1, 2) inject: 0 into: [:a :i | {s}. a + i]]",
     "#(1, 2) do: [:k | true ifTrue: [{s}]]",
+    // BT-3841: the keyed iterations are frames too, alone and around/inside
+    // another loop.
+    "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | {s}]",
+    "#{#a => 1, #b => 2} doWithKey: [:k :w | {s}]",
+    "#(1, 2) do: [:k | #{#a => 1} keysAndValuesDo: [:kk :w | {s}]]",
+    "#{#a => 1} keysAndValuesDo: [:k :w | 1 to: 2 do: [:i | {s}]]",
+    "#{#a => 1} doWithKey: [:k :w | true ifTrue: [{s}]]",
+    "1 to: 2 do: [:k | #{#a => 1} doWithKey: [:kk :w | {s}]]",
     "#(1, 2) do: [:k | [:z | {s}] value: k]",
     // A letrec loop (or fold) nested in a fold through an arm or a closure:
     // the arm/closure sits between the two frames, so only the inner frame is

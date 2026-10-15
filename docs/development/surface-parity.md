@@ -595,6 +595,25 @@ reports the same message at the same span. No operation is surface-specific.
   `UnmigratedLocalThreading` on every surface (CLI, REPL eval and load, LSP,
   MCP): no new error anywhere, only removed ones. The verdict is the
   analyser's, so the surfaces change together.
+- **`keysAndValuesDo:` / `doWithKey:` as producers (ADR 0131, BT-3841 PR 2).**
+  The keyed iterations joined `do:` in the producer table
+  (`producer_body_arg_index`), so a keyed iteration on a `Dictionary` whose
+  block writes an outer local is accepted, and keeps its writes, as a
+  statement, as an operand and in an arm, protected body, handler or loop body
+  (up to two nested blocks, in a class, value-type or actor method) instead of
+  reporting `UnmigratedLocalThreading`. Inside a `[...] value` body, a closure
+  (`Container::Other`), past two nested blocks and in the REPL the previous
+  verdict stands. Two shapes start reporting on every surface (CLI, REPL eval
+  and load, LSP, MCP, all from the analyser): `^kv` of a keyed iteration in a
+  plain closure in a class or value-type method (it used to compile and answer
+  `nil`; same treatment as `^xs do: [...]`, BT-3813), and a keyed iteration
+  whose receiver is statically known not to be a `Dictionary` (`self` outside a
+  `Dictionary`, a typed `Ets`/user-class local) and whose block writes an outer
+  local, a permanent §6 `Tier2BlockNoReturnChannel` error: `Ets` and any class
+  that defines the selector run their own method with a closure that cannot
+  return the write. An unknown receiver compiles and is guarded at run time
+  (`beamtalk_map:pairs_for_threading/2` raises a structured `type_error` for a
+  tagged map or a non-map). The REPL display is unchanged.
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

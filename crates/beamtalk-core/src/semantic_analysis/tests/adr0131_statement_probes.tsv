@@ -164,7 +164,7 @@ actor	armIter	outer	ewi	bad
 actor	armIter	outer	ifNil	ok
 actor	armIter	outer	ifTrue	ok
 actor	armIter	outer	inject	ok
-actor	armIter	outer	kv	bad
+actor	armIter	outer	kv	ok
 actor	armIter	outer	onDo	ok
 actor	armIter	outer	times	ok
 actor	armIter	outer	toDo	ok
@@ -344,7 +344,7 @@ actor	coll	outer	ewi	bad
 actor	coll	outer	ifNil	ok
 actor	coll	outer	ifTrue	ok
 actor	coll	outer	inject	ok
-actor	coll	outer	kv	bad
+actor	coll	outer	kv	ok
 actor	coll	outer	onDo	ok
 actor	coll	outer	times	ok
 actor	coll	outer	toDo	ok
@@ -434,7 +434,7 @@ actor	handler	direct	ewi	bad
 actor	handler	direct	ifNil	ok
 actor	handler	direct	ifTrue	ok
 actor	handler	direct	inject	ok
-actor	handler	direct	kv	bad
+actor	handler	direct	kv	ok
 actor	handler	direct	onDo	ok
 actor	handler	direct	times	ok
 actor	handler	direct	toDo	ok
@@ -488,7 +488,7 @@ actor	handler	outer	ewi	bad
 actor	handler	outer	ifNil	ok
 actor	handler	outer	ifTrue	ok
 actor	handler	outer	inject	ok
-actor	handler	outer	kv	bad
+actor	handler	outer	kv	ok
 actor	handler	outer	onDo	ok
 actor	handler	outer	times	ok
 actor	handler	outer	toDo	ok
@@ -576,7 +576,7 @@ actor	iter	outer	ewi	bad
 actor	iter	outer	ifNil	ok
 actor	iter	outer	ifTrue	ok
 actor	iter	outer	inject	ok
-actor	iter	outer	kv	bad
+actor	iter	outer	kv	ok
 actor	iter	outer	onDo	ok
 actor	iter	outer	times	ok
 actor	iter	outer	toDo	ok
@@ -656,7 +656,7 @@ actor	iterArm	outer	ewi	bad
 actor	iterArm	outer	ifNil	ok
 actor	iterArm	outer	ifTrue	ok
 actor	iterArm	outer	inject	ok
-actor	iterArm	outer	kv	bad
+actor	iterArm	outer	kv	ok
 actor	iterArm	outer	onDo	ok
 actor	iterArm	outer	times	ok
 actor	iterArm	outer	toDo	ok
@@ -692,7 +692,7 @@ actor	iterIter	outer	ewi	bad
 actor	iterIter	outer	ifNil	ok
 actor	iterIter	outer	ifTrue	ok
 actor	iterIter	outer	inject	ok
-actor	iterIter	outer	kv	bad
+actor	iterIter	outer	kv	ok
 actor	iterIter	outer	onDo	ok
 actor	iterIter	outer	times	ok
 actor	iterIter	outer	toDo	ok
@@ -726,7 +726,7 @@ actor	loop	direct	ewi	bad
 actor	loop	direct	ifNil	ok
 actor	loop	direct	ifTrue	ok
 actor	loop	direct	inject	ok
-actor	loop	direct	kv	bad
+actor	loop	direct	kv	ok
 actor	loop	direct	onDo	ok
 actor	loop	direct	times	ok
 actor	loop	direct	toDo	ok
@@ -780,7 +780,7 @@ actor	loop	outer	ewi	bad
 actor	loop	outer	ifNil	ok
 actor	loop	outer	ifTrue	ok
 actor	loop	outer	inject	ok
-actor	loop	outer	kv	bad
+actor	loop	outer	kv	ok
 actor	loop	outer	onDo	ok
 actor	loop	outer	times	ok
 actor	loop	outer	toDo	ok
@@ -822,7 +822,7 @@ actor	prot	direct	ewi	bad
 actor	prot	direct	ifNil	ok
 actor	prot	direct	ifTrue	ok
 actor	prot	direct	inject	ok
-actor	prot	direct	kv	bad
+actor	prot	direct	kv	ok
 actor	prot	direct	onDo	ok
 actor	prot	direct	times	ok
 actor	prot	direct	toDo	ok
@@ -876,7 +876,7 @@ actor	prot	outer	ewi	bad
 actor	prot	outer	ifNil	ok
 actor	prot	outer	ifTrue	ok
 actor	prot	outer	inject	ok
-actor	prot	outer	kv	bad
+actor	prot	outer	kv	ok
 actor	prot	outer	onDo	ok
 actor	prot	outer	times	ok
 actor	prot	outer	toDo	ok
@@ -902,7 +902,7 @@ actor	protArm	direct	ewi	bad
 actor	protArm	direct	ifNil	ok
 actor	protArm	direct	ifTrue	ok
 actor	protArm	direct	inject	ok
-actor	protArm	direct	kv	bad
+actor	protArm	direct	kv	ok
 actor	protArm	direct	onDo	ok
 actor	protArm	direct	times	ok
 actor	protArm	direct	toDo	ok
@@ -956,7 +956,7 @@ actor	protArm	outer	ewi	bad
 actor	protArm	outer	ifNil	ok
 actor	protArm	outer	ifTrue	ok
 actor	protArm	outer	inject	ok
-actor	protArm	outer	kv	bad
+actor	protArm	outer	kv	ok
 actor	protArm	outer	onDo	ok
 actor	protArm	outer	times	ok
 actor	protArm	outer	toDo	ok
@@ -1100,7 +1100,7 @@ actor	timesC	outer	ewi	bad
 actor	timesC	outer	ifNil	ok
 actor	timesC	outer	ifTrue	ok
 actor	timesC	outer	inject	ok
-actor	timesC	outer	kv	bad
+actor	timesC	outer	kv	ok
 actor	timesC	outer	onDo	ok
 actor	timesC	outer	times	ok
 actor	timesC	outer	toDo	ok
@@ -1188,7 +1188,7 @@ actor	toDoC	outer	ewi	bad
 actor	toDoC	outer	ifNil	ok
 actor	toDoC	outer	ifTrue	ok
 actor	toDoC	outer	inject	ok
-actor	toDoC	outer	kv	bad
+actor	toDoC	outer	kv	ok
 actor	toDoC	outer	onDo	ok
 actor	toDoC	outer	times	ok
 actor	toDoC	outer	toDo	ok
@@ -1362,7 +1362,7 @@ class	arm	direct	ewi	bad
 class	arm	direct	ifNil	ok
 class	arm	direct	ifTrue	ok
 class	arm	direct	inject	ok
-class	arm	direct	kv	bad
+class	arm	direct	kv	ok
 class	arm	direct	onDo	ok
 class	arm	direct	times	ok
 class	arm	direct	toDo	ok
@@ -1416,7 +1416,7 @@ class	arm	outer	ewi	bad
 class	arm	outer	ifNil	ok
 class	arm	outer	ifTrue	ok
 class	arm	outer	inject	ok
-class	arm	outer	kv	bad
+class	arm	outer	kv	ok
 class	arm	outer	onDo	ok
 class	arm	outer	times	ok
 class	arm	outer	toDo	ok
@@ -1460,7 +1460,7 @@ class	armAnd	outer	ewi	bad
 class	armAnd	outer	ifNil	ok
 class	armAnd	outer	ifTrue	ok
 class	armAnd	outer	inject	ok
-class	armAnd	outer	kv	bad
+class	armAnd	outer	kv	ok
 class	armAnd	outer	onDo	ok
 class	armAnd	outer	times	ok
 class	armAnd	outer	toDo	ok
@@ -1478,7 +1478,7 @@ class	armIter	direct	ewi	ok
 class	armIter	direct	ifNil	ok
 class	armIter	direct	ifTrue	ok
 class	armIter	direct	inject	ok
-class	armIter	direct	kv	bad
+class	armIter	direct	kv	ok
 class	armIter	direct	onDo	ok
 class	armIter	direct	times	ok
 class	armIter	direct	toDo	ok
@@ -1532,7 +1532,7 @@ class	armIter	outer	ewi	bad
 class	armIter	outer	ifNil	ok
 class	armIter	outer	ifTrue	ok
 class	armIter	outer	inject	ok
-class	armIter	outer	kv	bad
+class	armIter	outer	kv	ok
 class	armIter	outer	onDo	ok
 class	armIter	outer	times	ok
 class	armIter	outer	toDo	ok
@@ -1568,7 +1568,7 @@ class	armLoop	outer	ewi	bad
 class	armLoop	outer	ifNil	ok
 class	armLoop	outer	ifTrue	ok
 class	armLoop	outer	inject	ok
-class	armLoop	outer	kv	bad
+class	armLoop	outer	kv	ok
 class	armLoop	outer	onDo	ok
 class	armLoop	outer	times	ok
 class	armLoop	outer	toDo	ok
@@ -1586,7 +1586,7 @@ class	armNL	direct	ewi	bad
 class	armNL	direct	ifNil	ok
 class	armNL	direct	ifTrue	ok
 class	armNL	direct	inject	ok
-class	armNL	direct	kv	bad
+class	armNL	direct	kv	ok
 class	armNL	direct	onDo	ok
 class	armNL	direct	times	ok
 class	armNL	direct	toDo	ok
@@ -1640,7 +1640,7 @@ class	armNL	outer	ewi	bad
 class	armNL	outer	ifNil	ok
 class	armNL	outer	ifTrue	ok
 class	armNL	outer	inject	ok
-class	armNL	outer	kv	bad
+class	armNL	outer	kv	ok
 class	armNL	outer	onDo	ok
 class	armNL	outer	times	ok
 class	armNL	outer	toDo	ok
@@ -1676,7 +1676,7 @@ class	armNil	outer	ewi	bad
 class	armNil	outer	ifNil	ok
 class	armNil	outer	ifTrue	ok
 class	armNil	outer	inject	ok
-class	armNil	outer	kv	bad
+class	armNil	outer	kv	ok
 class	armNil	outer	onDo	ok
 class	armNil	outer	times	ok
 class	armNil	outer	toDo	ok
@@ -1712,7 +1712,7 @@ class	armTF	outer	ewi	bad
 class	armTF	outer	ifNil	ok
 class	armTF	outer	ifTrue	ok
 class	armTF	outer	inject	ok
-class	armTF	outer	kv	bad
+class	armTF	outer	kv	ok
 class	armTF	outer	onDo	ok
 class	armTF	outer	times	ok
 class	armTF	outer	toDo	ok
@@ -1730,7 +1730,7 @@ class	coll	direct	ewi	ok
 class	coll	direct	ifNil	ok
 class	coll	direct	ifTrue	ok
 class	coll	direct	inject	ok
-class	coll	direct	kv	bad
+class	coll	direct	kv	ok
 class	coll	direct	onDo	ok
 class	coll	direct	times	ok
 class	coll	direct	toDo	ok
@@ -1784,7 +1784,7 @@ class	coll	outer	ewi	ok
 class	coll	outer	ifNil	ok
 class	coll	outer	ifTrue	ok
 class	coll	outer	inject	ok
-class	coll	outer	kv	bad
+class	coll	outer	kv	ok
 class	coll	outer	onDo	ok
 class	coll	outer	times	ok
 class	coll	outer	toDo	ok
@@ -1820,7 +1820,7 @@ class	ens	outer	ewi	bad
 class	ens	outer	ifNil	ok
 class	ens	outer	ifTrue	ok
 class	ens	outer	inject	ok
-class	ens	outer	kv	bad
+class	ens	outer	kv	ok
 class	ens	outer	onDo	ok
 class	ens	outer	times	ok
 class	ens	outer	toDo	ok
@@ -1838,7 +1838,7 @@ class	ensBlk	direct	ewi	ok
 class	ensBlk	direct	ifNil	ok
 class	ensBlk	direct	ifTrue	ok
 class	ensBlk	direct	inject	ok
-class	ensBlk	direct	kv	bad
+class	ensBlk	direct	kv	ok
 class	ensBlk	direct	onDo	ok
 class	ensBlk	direct	times	ok
 class	ensBlk	direct	toDo	ok
@@ -1892,7 +1892,7 @@ class	ensBlk	outer	ewi	ok
 class	ensBlk	outer	ifNil	ok
 class	ensBlk	outer	ifTrue	ok
 class	ensBlk	outer	inject	ok
-class	ensBlk	outer	kv	bad
+class	ensBlk	outer	kv	ok
 class	ensBlk	outer	onDo	ok
 class	ensBlk	outer	times	ok
 class	ensBlk	outer	toDo	ok
@@ -1928,7 +1928,7 @@ class	ensLast	outer	ewi	ok
 class	ensLast	outer	ifNil	ok
 class	ensLast	outer	ifTrue	ok
 class	ensLast	outer	inject	ok
-class	ensLast	outer	kv	bad
+class	ensLast	outer	kv	ok
 class	ensLast	outer	onDo	ok
 class	ensLast	outer	times	ok
 class	ensLast	outer	toDo	ok
@@ -1946,7 +1946,7 @@ class	handler	direct	ewi	bad
 class	handler	direct	ifNil	ok
 class	handler	direct	ifTrue	ok
 class	handler	direct	inject	ok
-class	handler	direct	kv	bad
+class	handler	direct	kv	ok
 class	handler	direct	onDo	ok
 class	handler	direct	times	ok
 class	handler	direct	toDo	ok
@@ -2000,7 +2000,7 @@ class	handler	outer	ewi	bad
 class	handler	outer	ifNil	ok
 class	handler	outer	ifTrue	ok
 class	handler	outer	inject	ok
-class	handler	outer	kv	bad
+class	handler	outer	kv	ok
 class	handler	outer	onDo	ok
 class	handler	outer	times	ok
 class	handler	outer	toDo	ok
@@ -2034,7 +2034,7 @@ class	iter	direct	ewi	ok
 class	iter	direct	ifNil	ok
 class	iter	direct	ifTrue	ok
 class	iter	direct	inject	ok
-class	iter	direct	kv	bad
+class	iter	direct	kv	ok
 class	iter	direct	onDo	ok
 class	iter	direct	times	ok
 class	iter	direct	toDo	ok
@@ -2088,7 +2088,7 @@ class	iter	outer	ewi	ok
 class	iter	outer	ifNil	ok
 class	iter	outer	ifTrue	ok
 class	iter	outer	inject	ok
-class	iter	outer	kv	bad
+class	iter	outer	kv	ok
 class	iter	outer	onDo	ok
 class	iter	outer	times	ok
 class	iter	outer	toDo	ok
@@ -2114,7 +2114,7 @@ class	iterArm	direct	ewi	ok
 class	iterArm	direct	ifNil	ok
 class	iterArm	direct	ifTrue	ok
 class	iterArm	direct	inject	ok
-class	iterArm	direct	kv	bad
+class	iterArm	direct	kv	ok
 class	iterArm	direct	onDo	ok
 class	iterArm	direct	times	ok
 class	iterArm	direct	toDo	ok
@@ -2168,7 +2168,7 @@ class	iterArm	outer	ewi	ok
 class	iterArm	outer	ifNil	ok
 class	iterArm	outer	ifTrue	ok
 class	iterArm	outer	inject	ok
-class	iterArm	outer	kv	bad
+class	iterArm	outer	kv	ok
 class	iterArm	outer	onDo	ok
 class	iterArm	outer	times	ok
 class	iterArm	outer	toDo	ok
@@ -2204,7 +2204,7 @@ class	iterIter	outer	ewi	ok
 class	iterIter	outer	ifNil	ok
 class	iterIter	outer	ifTrue	ok
 class	iterIter	outer	inject	ok
-class	iterIter	outer	kv	bad
+class	iterIter	outer	kv	ok
 class	iterIter	outer	onDo	ok
 class	iterIter	outer	times	ok
 class	iterIter	outer	toDo	ok
@@ -2238,7 +2238,7 @@ class	loop	direct	ewi	bad
 class	loop	direct	ifNil	ok
 class	loop	direct	ifTrue	ok
 class	loop	direct	inject	ok
-class	loop	direct	kv	bad
+class	loop	direct	kv	ok
 class	loop	direct	onDo	ok
 class	loop	direct	times	ok
 class	loop	direct	toDo	ok
@@ -2292,7 +2292,7 @@ class	loop	outer	ewi	bad
 class	loop	outer	ifNil	ok
 class	loop	outer	ifTrue	ok
 class	loop	outer	inject	ok
-class	loop	outer	kv	bad
+class	loop	outer	kv	ok
 class	loop	outer	onDo	ok
 class	loop	outer	times	ok
 class	loop	outer	toDo	ok
@@ -2334,7 +2334,7 @@ class	prot	direct	ewi	bad
 class	prot	direct	ifNil	ok
 class	prot	direct	ifTrue	ok
 class	prot	direct	inject	ok
-class	prot	direct	kv	bad
+class	prot	direct	kv	ok
 class	prot	direct	onDo	ok
 class	prot	direct	times	ok
 class	prot	direct	toDo	ok
@@ -2388,7 +2388,7 @@ class	prot	outer	ewi	bad
 class	prot	outer	ifNil	ok
 class	prot	outer	ifTrue	ok
 class	prot	outer	inject	ok
-class	prot	outer	kv	bad
+class	prot	outer	kv	ok
 class	prot	outer	onDo	ok
 class	prot	outer	times	ok
 class	prot	outer	toDo	ok
@@ -2414,7 +2414,7 @@ class	protArm	direct	ewi	bad
 class	protArm	direct	ifNil	ok
 class	protArm	direct	ifTrue	ok
 class	protArm	direct	inject	ok
-class	protArm	direct	kv	bad
+class	protArm	direct	kv	ok
 class	protArm	direct	onDo	ok
 class	protArm	direct	times	ok
 class	protArm	direct	toDo	ok
@@ -2468,7 +2468,7 @@ class	protArm	outer	ewi	bad
 class	protArm	outer	ifNil	ok
 class	protArm	outer	ifTrue	ok
 class	protArm	outer	inject	ok
-class	protArm	outer	kv	bad
+class	protArm	outer	kv	ok
 class	protArm	outer	onDo	ok
 class	protArm	outer	times	ok
 class	protArm	outer	toDo	ok
@@ -2486,7 +2486,7 @@ class	protLast	direct	ewi	ok
 class	protLast	direct	ifNil	ok
 class	protLast	direct	ifTrue	ok
 class	protLast	direct	inject	ok
-class	protLast	direct	kv	bad
+class	protLast	direct	kv	ok
 class	protLast	direct	onDo	ok
 class	protLast	direct	times	ok
 class	protLast	direct	toDo	ok
@@ -2540,7 +2540,7 @@ class	protLast	outer	ewi	ok
 class	protLast	outer	ifNil	ok
 class	protLast	outer	ifTrue	ok
 class	protLast	outer	inject	ok
-class	protLast	outer	kv	bad
+class	protLast	outer	kv	ok
 class	protLast	outer	onDo	ok
 class	protLast	outer	times	ok
 class	protLast	outer	toDo	ok
@@ -2558,7 +2558,7 @@ class	timesC	direct	ewi	bad
 class	timesC	direct	ifNil	ok
 class	timesC	direct	ifTrue	ok
 class	timesC	direct	inject	ok
-class	timesC	direct	kv	bad
+class	timesC	direct	kv	ok
 class	timesC	direct	onDo	ok
 class	timesC	direct	times	ok
 class	timesC	direct	toDo	ok
@@ -2612,7 +2612,7 @@ class	timesC	outer	ewi	bad
 class	timesC	outer	ifNil	ok
 class	timesC	outer	ifTrue	ok
 class	timesC	outer	inject	ok
-class	timesC	outer	kv	bad
+class	timesC	outer	kv	ok
 class	timesC	outer	onDo	ok
 class	timesC	outer	times	ok
 class	timesC	outer	toDo	ok
@@ -2646,7 +2646,7 @@ class	toDoC	direct	ewi	bad
 class	toDoC	direct	ifNil	ok
 class	toDoC	direct	ifTrue	ok
 class	toDoC	direct	inject	ok
-class	toDoC	direct	kv	bad
+class	toDoC	direct	kv	ok
 class	toDoC	direct	onDo	ok
 class	toDoC	direct	times	ok
 class	toDoC	direct	toDo	ok
@@ -2700,7 +2700,7 @@ class	toDoC	outer	ewi	bad
 class	toDoC	outer	ifNil	ok
 class	toDoC	outer	ifTrue	ok
 class	toDoC	outer	inject	ok
-class	toDoC	outer	kv	bad
+class	toDoC	outer	kv	ok
 class	toDoC	outer	onDo	ok
 class	toDoC	outer	times	ok
 class	toDoC	outer	toDo	ok
@@ -2760,7 +2760,7 @@ class	top	outer	ewi	bad
 class	top	outer	ifNil	ok
 class	top	outer	ifTrue	ok
 class	top	outer	inject	ok
-class	top	outer	kv	bad
+class	top	outer	kv	ok
 class	top	outer	onDo	ok
 class	top	outer	times	ok
 class	top	outer	toDo	ok
@@ -3020,7 +3020,7 @@ value	arm	direct	ewi	bad
 value	arm	direct	ifNil	ok
 value	arm	direct	ifTrue	ok
 value	arm	direct	inject	ok
-value	arm	direct	kv	bad
+value	arm	direct	kv	ok
 value	arm	direct	onDo	ok
 value	arm	direct	times	ok
 value	arm	direct	toDo	ok
@@ -3074,7 +3074,7 @@ value	arm	outer	ewi	bad
 value	arm	outer	ifNil	ok
 value	arm	outer	ifTrue	ok
 value	arm	outer	inject	ok
-value	arm	outer	kv	bad
+value	arm	outer	kv	ok
 value	arm	outer	onDo	ok
 value	arm	outer	times	ok
 value	arm	outer	toDo	ok
@@ -3100,7 +3100,7 @@ value	armIter	direct	ewi	ok
 value	armIter	direct	ifNil	ok
 value	armIter	direct	ifTrue	ok
 value	armIter	direct	inject	ok
-value	armIter	direct	kv	bad
+value	armIter	direct	kv	ok
 value	armIter	direct	onDo	ok
 value	armIter	direct	times	ok
 value	armIter	direct	toDo	ok
@@ -3154,7 +3154,7 @@ value	armIter	outer	ewi	bad
 value	armIter	outer	ifNil	ok
 value	armIter	outer	ifTrue	ok
 value	armIter	outer	inject	ok
-value	armIter	outer	kv	bad
+value	armIter	outer	kv	ok
 value	armIter	outer	onDo	ok
 value	armIter	outer	times	ok
 value	armIter	outer	toDo	ok
@@ -3190,7 +3190,7 @@ value	armLoop	outer	ewi	bad
 value	armLoop	outer	ifNil	ok
 value	armLoop	outer	ifTrue	ok
 value	armLoop	outer	inject	ok
-value	armLoop	outer	kv	bad
+value	armLoop	outer	kv	ok
 value	armLoop	outer	onDo	ok
 value	armLoop	outer	times	ok
 value	armLoop	outer	toDo	ok
@@ -3208,7 +3208,7 @@ value	armNL	direct	ewi	bad
 value	armNL	direct	ifNil	ok
 value	armNL	direct	ifTrue	ok
 value	armNL	direct	inject	ok
-value	armNL	direct	kv	bad
+value	armNL	direct	kv	ok
 value	armNL	direct	onDo	ok
 value	armNL	direct	times	ok
 value	armNL	direct	toDo	ok
@@ -3262,7 +3262,7 @@ value	armNL	outer	ewi	bad
 value	armNL	outer	ifNil	ok
 value	armNL	outer	ifTrue	ok
 value	armNL	outer	inject	ok
-value	armNL	outer	kv	bad
+value	armNL	outer	kv	ok
 value	armNL	outer	onDo	ok
 value	armNL	outer	times	ok
 value	armNL	outer	toDo	ok
@@ -3280,7 +3280,7 @@ value	coll	direct	ewi	ok
 value	coll	direct	ifNil	ok
 value	coll	direct	ifTrue	ok
 value	coll	direct	inject	ok
-value	coll	direct	kv	bad
+value	coll	direct	kv	ok
 value	coll	direct	onDo	ok
 value	coll	direct	times	ok
 value	coll	direct	toDo	ok
@@ -3334,7 +3334,7 @@ value	coll	outer	ewi	ok
 value	coll	outer	ifNil	ok
 value	coll	outer	ifTrue	ok
 value	coll	outer	inject	ok
-value	coll	outer	kv	bad
+value	coll	outer	kv	ok
 value	coll	outer	onDo	ok
 value	coll	outer	times	ok
 value	coll	outer	toDo	ok
@@ -3352,7 +3352,7 @@ value	ensBlk	direct	ewi	ok
 value	ensBlk	direct	ifNil	ok
 value	ensBlk	direct	ifTrue	ok
 value	ensBlk	direct	inject	ok
-value	ensBlk	direct	kv	bad
+value	ensBlk	direct	kv	ok
 value	ensBlk	direct	onDo	ok
 value	ensBlk	direct	times	ok
 value	ensBlk	direct	toDo	ok
@@ -3406,7 +3406,7 @@ value	ensBlk	outer	ewi	bad
 value	ensBlk	outer	ifNil	ok
 value	ensBlk	outer	ifTrue	ok
 value	ensBlk	outer	inject	ok
-value	ensBlk	outer	kv	bad
+value	ensBlk	outer	kv	ok
 value	ensBlk	outer	onDo	ok
 value	ensBlk	outer	times	ok
 value	ensBlk	outer	toDo	ok
@@ -3424,7 +3424,7 @@ value	handler	direct	ewi	bad
 value	handler	direct	ifNil	ok
 value	handler	direct	ifTrue	ok
 value	handler	direct	inject	ok
-value	handler	direct	kv	bad
+value	handler	direct	kv	ok
 value	handler	direct	onDo	ok
 value	handler	direct	times	ok
 value	handler	direct	toDo	ok
@@ -3478,7 +3478,7 @@ value	handler	outer	ewi	bad
 value	handler	outer	ifNil	ok
 value	handler	outer	ifTrue	ok
 value	handler	outer	inject	ok
-value	handler	outer	kv	bad
+value	handler	outer	kv	ok
 value	handler	outer	onDo	ok
 value	handler	outer	times	ok
 value	handler	outer	toDo	ok
@@ -3496,7 +3496,7 @@ value	iter	direct	ewi	ok
 value	iter	direct	ifNil	ok
 value	iter	direct	ifTrue	ok
 value	iter	direct	inject	ok
-value	iter	direct	kv	bad
+value	iter	direct	kv	ok
 value	iter	direct	onDo	ok
 value	iter	direct	times	ok
 value	iter	direct	toDo	ok
@@ -3550,7 +3550,7 @@ value	iter	outer	ewi	ok
 value	iter	outer	ifNil	ok
 value	iter	outer	ifTrue	ok
 value	iter	outer	inject	ok
-value	iter	outer	kv	bad
+value	iter	outer	kv	ok
 value	iter	outer	onDo	ok
 value	iter	outer	times	ok
 value	iter	outer	toDo	ok
@@ -3576,7 +3576,7 @@ value	iterArm	direct	ewi	ok
 value	iterArm	direct	ifNil	ok
 value	iterArm	direct	ifTrue	ok
 value	iterArm	direct	inject	ok
-value	iterArm	direct	kv	bad
+value	iterArm	direct	kv	ok
 value	iterArm	direct	onDo	ok
 value	iterArm	direct	times	ok
 value	iterArm	direct	toDo	ok
@@ -3630,7 +3630,7 @@ value	iterArm	outer	ewi	ok
 value	iterArm	outer	ifNil	ok
 value	iterArm	outer	ifTrue	ok
 value	iterArm	outer	inject	ok
-value	iterArm	outer	kv	bad
+value	iterArm	outer	kv	ok
 value	iterArm	outer	onDo	ok
 value	iterArm	outer	times	ok
 value	iterArm	outer	toDo	ok
@@ -3666,7 +3666,7 @@ value	iterIter	outer	ewi	ok
 value	iterIter	outer	ifNil	ok
 value	iterIter	outer	ifTrue	ok
 value	iterIter	outer	inject	ok
-value	iterIter	outer	kv	bad
+value	iterIter	outer	kv	ok
 value	iterIter	outer	onDo	ok
 value	iterIter	outer	times	ok
 value	iterIter	outer	toDo	ok
@@ -3684,7 +3684,7 @@ value	loop	direct	ewi	bad
 value	loop	direct	ifNil	ok
 value	loop	direct	ifTrue	ok
 value	loop	direct	inject	ok
-value	loop	direct	kv	bad
+value	loop	direct	kv	ok
 value	loop	direct	onDo	ok
 value	loop	direct	times	ok
 value	loop	direct	toDo	ok
@@ -3738,7 +3738,7 @@ value	loop	outer	ewi	bad
 value	loop	outer	ifNil	ok
 value	loop	outer	ifTrue	ok
 value	loop	outer	inject	ok
-value	loop	outer	kv	bad
+value	loop	outer	kv	ok
 value	loop	outer	onDo	ok
 value	loop	outer	times	ok
 value	loop	outer	toDo	ok
@@ -3764,7 +3764,7 @@ value	prot	direct	ewi	bad
 value	prot	direct	ifNil	ok
 value	prot	direct	ifTrue	ok
 value	prot	direct	inject	ok
-value	prot	direct	kv	bad
+value	prot	direct	kv	ok
 value	prot	direct	onDo	ok
 value	prot	direct	times	ok
 value	prot	direct	toDo	ok
@@ -3818,7 +3818,7 @@ value	prot	outer	ewi	bad
 value	prot	outer	ifNil	ok
 value	prot	outer	ifTrue	ok
 value	prot	outer	inject	ok
-value	prot	outer	kv	bad
+value	prot	outer	kv	ok
 value	prot	outer	onDo	ok
 value	prot	outer	times	ok
 value	prot	outer	toDo	ok
@@ -3844,7 +3844,7 @@ value	protArm	direct	ewi	bad
 value	protArm	direct	ifNil	ok
 value	protArm	direct	ifTrue	ok
 value	protArm	direct	inject	ok
-value	protArm	direct	kv	bad
+value	protArm	direct	kv	ok
 value	protArm	direct	onDo	ok
 value	protArm	direct	times	ok
 value	protArm	direct	toDo	ok
@@ -3898,7 +3898,7 @@ value	protArm	outer	ewi	bad
 value	protArm	outer	ifNil	ok
 value	protArm	outer	ifTrue	ok
 value	protArm	outer	inject	ok
-value	protArm	outer	kv	bad
+value	protArm	outer	kv	ok
 value	protArm	outer	onDo	ok
 value	protArm	outer	times	ok
 value	protArm	outer	toDo	ok
@@ -3916,7 +3916,7 @@ value	protLast	direct	ewi	ok
 value	protLast	direct	ifNil	ok
 value	protLast	direct	ifTrue	ok
 value	protLast	direct	inject	ok
-value	protLast	direct	kv	bad
+value	protLast	direct	kv	ok
 value	protLast	direct	onDo	ok
 value	protLast	direct	times	ok
 value	protLast	direct	toDo	ok
@@ -3970,7 +3970,7 @@ value	protLast	outer	ewi	ok
 value	protLast	outer	ifNil	ok
 value	protLast	outer	ifTrue	ok
 value	protLast	outer	inject	ok
-value	protLast	outer	kv	bad
+value	protLast	outer	kv	ok
 value	protLast	outer	onDo	ok
 value	protLast	outer	times	ok
 value	protLast	outer	toDo	ok
@@ -3988,7 +3988,7 @@ value	timesC	direct	ewi	bad
 value	timesC	direct	ifNil	ok
 value	timesC	direct	ifTrue	ok
 value	timesC	direct	inject	ok
-value	timesC	direct	kv	bad
+value	timesC	direct	kv	ok
 value	timesC	direct	onDo	ok
 value	timesC	direct	times	ok
 value	timesC	direct	toDo	ok
@@ -4042,7 +4042,7 @@ value	timesC	outer	ewi	bad
 value	timesC	outer	ifNil	ok
 value	timesC	outer	ifTrue	ok
 value	timesC	outer	inject	ok
-value	timesC	outer	kv	bad
+value	timesC	outer	kv	ok
 value	timesC	outer	onDo	ok
 value	timesC	outer	times	ok
 value	timesC	outer	toDo	ok
@@ -4060,7 +4060,7 @@ value	toDoC	direct	ewi	bad
 value	toDoC	direct	ifNil	ok
 value	toDoC	direct	ifTrue	ok
 value	toDoC	direct	inject	ok
-value	toDoC	direct	kv	bad
+value	toDoC	direct	kv	ok
 value	toDoC	direct	onDo	ok
 value	toDoC	direct	times	ok
 value	toDoC	direct	toDo	ok
@@ -4114,7 +4114,7 @@ value	toDoC	outer	ewi	bad
 value	toDoC	outer	ifNil	ok
 value	toDoC	outer	ifTrue	ok
 value	toDoC	outer	inject	ok
-value	toDoC	outer	kv	bad
+value	toDoC	outer	kv	ok
 value	toDoC	outer	onDo	ok
 value	toDoC	outer	times	ok
 value	toDoC	outer	toDo	ok
@@ -4158,7 +4158,7 @@ value	top	outer	ewi	bad
 value	top	outer	ifNil	ok
 value	top	outer	ifTrue	ok
 value	top	outer	inject	ok
-value	top	outer	kv	bad
+value	top	outer	kv	ok
 value	top	outer	onDo	ok
 value	top	outer	times	ok
 value	top	outer	toDo	ok
@@ -4364,10 +4364,10 @@ actor	armProtIter	outer	inject	ok
 actor	protIterArm	outer	inject	ok
 actor	armIterIter	outer	inject	ok
 actor	armProtArm	outer	inject	ok
-actor	armProtIter	outer	kv	over
-actor	protIterArm	outer	kv	bad
-actor	armIterIter	outer	kv	bad
-actor	armProtArm	outer	kv	over
+actor	armProtIter	outer	kv	ok
+actor	protIterArm	outer	kv	ok
+actor	armIterIter	outer	kv	ok
+actor	armProtArm	outer	kv	ok
 actor	armProtIter	outer	onDo	ok
 actor	protIterArm	outer	onDo	ok
 actor	armIterIter	outer	onDo	ok
@@ -4508,10 +4508,10 @@ class	armProtIter	outer	inject	ok
 class	protIterArm	outer	inject	ok
 class	armIterIter	outer	inject	ok
 class	armProtArm	outer	inject	ok
-class	armProtIter	outer	kv	bad
-class	protIterArm	outer	kv	bad
-class	armIterIter	outer	kv	bad
-class	armProtArm	outer	kv	bad
+class	armProtIter	outer	kv	ok
+class	protIterArm	outer	kv	ok
+class	armIterIter	outer	kv	ok
+class	armProtArm	outer	kv	ok
 class	armProtIter	outer	onDo	ok
 class	protIterArm	outer	onDo	ok
 class	armIterIter	outer	onDo	ok
@@ -4652,10 +4652,10 @@ value	armProtIter	outer	inject	ok
 value	protIterArm	outer	inject	ok
 value	armIterIter	outer	inject	ok
 value	armProtArm	outer	inject	ok
-value	armProtIter	outer	kv	bad
-value	protIterArm	outer	kv	bad
-value	armIterIter	outer	kv	bad
-value	armProtArm	outer	kv	bad
+value	armProtIter	outer	kv	ok
+value	protIterArm	outer	kv	ok
+value	armIterIter	outer	kv	ok
+value	armProtArm	outer	kv	ok
 value	armProtIter	outer	onDo	ok
 value	protIterArm	outer	onDo	ok
 value	armIterIter	outer	onDo	ok

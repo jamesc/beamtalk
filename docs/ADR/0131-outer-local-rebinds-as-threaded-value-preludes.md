@@ -269,7 +269,7 @@ not known: a receiver statically known NOT to be a `Dictionary` (`self` or
 `super` outside a `Dictionary`, a class object, an inferred type that is a
 known class other than `Dictionary`, its subclasses and its ancestors, or a
 union of such) would raise on every call even when the key is present, so it
-keeps the §6 compile error (`lookup_receiver_statically_not_dictionary` in
+keeps the §6 compile error (`receiver_statically_not_dictionary` in
 `block_facts`, read by the Phase 0 check; codegen lowers whatever Phase 0
 accepts and never sees the rejected programs). The lookups are rows of ONE table in
 `beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen
@@ -902,7 +902,8 @@ keeps the measurement as a checked-in harness, so every number below is
 reproducible and every PR moves it:
 
 - `just measure-adr0131-statements` compiles every probe cell through the real
-  `beamtalk test` pipeline with the position check bypassed (debug builds, env
+  `beamtalk test` pipeline with the position check bypassed (a build with the
+  `beamtalk-core/measure-bypass` cargo feature reads env
   `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`), runs it on a BEAM and compares it
   with the ADR-expected answer. The statement matrix is the 2,693 class,
   value-type and actor cells of `adr0131_statement_probes.tsv` that are not
@@ -917,33 +918,37 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (663 = 618 wrong + 45 `erlc`; 595 of
-them in the 5a population of 733 plus 68 in the three-deep roles added by the
-BT-3841 review), by family and method context, with the work each needs:
+Statement cells that do not answer right (after BT-3841 PR 2: 571 = 527 wrong
++ 44 `erlc`; 663 before it, 595 of them in the 5a population), by family and
+method context, with the work each needs:
 
 | Family | class | value | actor | total | Classification |
 |---|---|---|---|---|---|
-| `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with their index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
+| `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
 | `detect:ifNone:` search or handler | 52 | 46 | 44 | 142 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
 | `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
-| `keysAndValuesDo:` | 40 | 35 | 17 | 92 | (a) the dictionary `do:` producer with key/value parameters |
 | any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
 | `anySatisfy:` / `allSatisfy:` | 20 | 18 | 13 | 51 | (a) BT-3833: a non-producer list-op needs a producer site (an early-exit fold) |
-| **total** | **272** | **226** | **165** | **663** | |
+| `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in BT-3841 PR 2 (`producer_body_arg_index`; the dictionary fold answers the `{nil, StateAcc}` carrier like `do:`); its cells inside a `[...] value` body are in that row |
+| **total** | **232** | **191** | **148** | **571** | |
 
-By block role: loop bodies 180, protected bodies 121, arms 85, evaluated
-blocks 85, three-deep nestings 68, handlers 57, arm/loop mixes 51, the method
-body 16. The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
-rows name the exact depth (none exist past two blocks), and the unfinished families above are rejected past
-depth two unless a row names the exact shape (the review found an `anySatisfy:`
-in an arm in a protected body in a `do:` body that the coarse rows accepted and
-that raises `bad argument` in a value-type method).
+By block role: loop bodies 151, protected bodies 103, evaluated blocks 85,
+arms 74, three-deep nestings 58, handlers 47, arm/loop mixes 39, the method
+body 14.
 
-Operand cells (1,404): 665 answer right, 675 wrong, 64 `erlc`; Phase 0 accepts
-537, all of them right (zero unsound), and rejects the 739 that do not answer
-right plus 128 that do. By position, the cells that do not answer right:
-assignment 41, field assignment 36, receiver 65, argument 65, binary operand
-65, literal element 65, cascade part 134, interpolation 134, `match:` subject
+The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
+rows name the exact depth and none may name a shape past two blocks. The
+unfinished families above are rejected past depth two in class, value-type and
+actor methods (the review found an `anySatisfy:` in an arm in a protected body
+in a `do:` body that the coarse rows accepted and that raises `bad argument` in
+a value-type method); the REPL keeps its coarse rows, unmeasured past depth
+one, until BT-3823.
+
+Operand cells (1,404): 705 answer right, 629 wrong, 70 `erlc`; Phase 0 accepts
+580, all of them right (zero unsound), and rejects the 699 that do not answer
+right plus 125 that do. By position, the cells that do not answer right:
+assignment 36, field assignment 33, receiver 57, argument 57, binary operand
+57, literal element 57, cascade part 134, interpolation 134, `match:` subject
 134. The first six are (a): the operand sites `sequenced_operand_sites` and
 `repl_operand_sites` already name for some constructs extend to the rest. The
 last three (402 cells) are the likely permanent §6 rejections: a cascade
