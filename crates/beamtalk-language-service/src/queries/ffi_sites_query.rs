@@ -126,20 +126,6 @@ struct FfiTarget<'a> {
     arity: Option<usize>,
 }
 
-/// Recover the Erlang module name from an FFI proxy receiver.
-///
-/// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend` whose
-/// receiver is `ClassReference("Erlang")` with a `Unary` selector. Returns the
-/// module name, or `None` if the receiver is not an FFI module proxy. Class-
-/// protocol selectors (`Erlang class`, …) are rejected so they are not treated
-/// as module lookups.
-///
-/// Delegates to the single shared recognizer in
-/// [`beamtalk_core::ffi_receiver`].
-fn extract_erlang_module(expr: &Expression) -> Option<&str> {
-    beamtalk_core::ffi_receiver::erlang_module_of_receiver(expr)
-}
-
 /// Determine the line number to report for a matching FFI call site. Uses the
 /// span of the selector keywords when available (so the line points at the
 /// function selector rather than the `Erlang` receiver, for multi-line calls),
@@ -196,7 +182,7 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
         } => {
             // Check whether this send is itself a matching FFI call.
             record_ffi_match(
-                extract_erlang_module(receiver),
+                beamtalk_core::ffi_receiver::erlang_module_of_receiver(receiver),
                 selector,
                 arguments.len(),
                 *span,
@@ -224,8 +210,8 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
             let shared_module = match receiver.unwrap_parens() {
                 Expression::MessageSend {
                     receiver: inner, ..
-                } => extract_erlang_module(inner),
-                other => extract_erlang_module(other),
+                } => beamtalk_core::ffi_receiver::erlang_module_of_receiver(inner),
+                other => beamtalk_core::ffi_receiver::erlang_module_of_receiver(other),
             };
             for msg in messages {
                 record_ffi_match(
