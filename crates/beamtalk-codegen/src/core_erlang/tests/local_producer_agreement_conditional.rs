@@ -77,6 +77,8 @@ pub(super) const CONDITIONAL_POSITIONS: &[&str] = &[
 /// The arm frames: a conditional producer's arm holding `{s}`.
 pub(super) const ARM_FRAMES: &[&str] = &[
     "(s < 3) ifTrue: [{s}]",
+    // An arm that binds a local of its own before the statement (BT-3840).
+    "(s < 3) ifTrue: [w := 0. {s}. w]",
     "(s < 3) ifTrue: [{s}] ifFalse: [nil]",
     "(s < 3) ifFalse: [{s}]",
     "(s < 3) and: [{s}. true]",

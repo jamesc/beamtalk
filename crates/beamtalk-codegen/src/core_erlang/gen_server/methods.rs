@@ -649,8 +649,11 @@ impl CoreErlangGenerator {
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
     ///
-    /// Classification happens exactly once (`classify_body_expr`, Phase 1);
-    /// the mutating control-flow arms consume that decision via
+    /// Classification happens exactly once per statement (`classify_body_expr`),
+    /// interleaved with lowering: just before a statement is lowered, so the
+    /// locals bound by the statements before it are live in scope (a catch
+    /// boundary in a loop body is judged against that scope, ADR 0131 Phase 4,
+    /// BT-3840). The mutating control-flow arms consume that decision via
     /// `emit_actor_threaded_last_stmts`/`emit_actor_threaded_assign_rhs_stmts`,
     /// which never decline — the earlier `verify_routing_invariant`
     /// call sites (and `VerifyError::RoutingMismatch`) are deleted because
@@ -705,7 +708,7 @@ impl CoreErlangGenerator {
         self.tier2_local_var_captured_mutations.clear();
         self.prescan_tier2_local_vars(body);
 
-        // Phase 2: lower each (expression, kind) pair to ThreadedStmts.
+        // Classify and lower each expression to ThreadedStmts, in order.
         let mut stmts: Vec<ThreadedStmt> = Vec::with_capacity(body.len());
         let body_len = body.len();
 

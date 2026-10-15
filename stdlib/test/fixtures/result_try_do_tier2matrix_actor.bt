@@ -857,3 +857,92 @@ Actor subclass: ResultTryDoTier2MatrixActor
         ]
     ] on: Error do: [:e | 0]
     t
+
+  armTryLookup =>
+    t := 0
+    (t < 100)
+      ifTrue: [
+        a := 0
+        #(1, 2)
+          do: [:k |
+            Result
+              tryDo: [
+                #{#a => 1} at: #k ifAbsent: [a := 1]
+                2
+              ]
+          ]
+        t := a
+      ]
+    t
+
+  armOnDoCond =>
+    t := 0
+    (t < 100)
+      ifTrue: [
+        a := 0
+        #(1, 2)
+          do: [:k |
+            [
+              (a < 100) ifTrue: [a := 1]
+              1
+            ] on: Error do: [:e | 0]
+          ]
+        t := a
+      ]
+    t
+
+  armTryDirect =>
+    t := 0
+    (t < 100)
+      ifTrue: [
+        a := 0
+        #(1, 2)
+          do: [:k |
+            Result
+              tryDo: [
+                a := a + 1
+                2
+              ]
+          ]
+        t := a
+      ]
+    t
+
+  armPlainLoop =>
+    t := 0
+    (t < 100)
+      ifTrue: [
+        a := 0
+        #(1, 2) do: [:k | a := a + 1]
+        t := a
+      ]
+    t
+
+  armTryHead =>
+    t := 0
+    (t < 100)
+      ifTrue: [
+        a := 0
+        1
+          to: 2
+          do: [:k |
+            Result
+              tryDo: [
+                a := 5
+                2
+              ]
+          ]
+        t := a
+      ]
+    t
+
+  armPlainLoopValue =>
+    t := 0
+    t := (t < 100)
+      ifTrue: [
+        a := 0
+        #(1, 2) do: [:k | a := a + 1]
+        a
+      ]
+      ifFalse: [0]
+    t

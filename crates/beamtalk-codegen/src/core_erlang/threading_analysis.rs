@@ -140,10 +140,11 @@ impl CoreErlangGenerator {
         // top-level assignment and never reads from outside
         // (`w := 0. [w < 2] whileTrue: [w := w + 1]`) is crossed by the nested
         // loop but is not this construct's to thread: counting it makes the
-        // enclosing construct thread an empty set. Decided from the body alone
-        // (as `analyze_block` decides a "new binding"), not from the live
-        // scope, so classification does not depend on how far lowering has
-        // got.
+        // enclosing construct thread an empty set. This filter is decided from
+        // the body alone (as `analyze_block` decides a "new binding"); the
+        // catch-boundary scan below also reads the live scope, which is why
+        // method-body classification runs per statement, interleaved with
+        // lowering (BT-3840).
         let analysis = self.block_profile_or_analyze(body);
         let body_defined = Self::body_introduced_locals(body, &analysis.captured_reads);
         cross_scope_writes

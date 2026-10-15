@@ -188,3 +188,21 @@ TestCase subclass: ResultTryDoTier2MatrixTest
 
   testOnceOnDoTry =>
     self assert: #[ResultTryDoTier2MatrixClass onceOnDoTry, (ResultTryDoTier2MatrixValue new) onceOnDoTry, (ResultTryDoTier2MatrixActor spawn) onceOnDoTry] equals: #[1, 1, 1]
+
+  testArmTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass armTryLookup, (ResultTryDoTier2MatrixValue new) armTryLookup, (ResultTryDoTier2MatrixActor spawn) armTryLookup] equals: #[1, 1, 1]
+
+  testArmOnDoCond =>
+    self assert: #[ResultTryDoTier2MatrixClass armOnDoCond, (ResultTryDoTier2MatrixValue new) armOnDoCond, (ResultTryDoTier2MatrixActor spawn) armOnDoCond] equals: #[1, 1, 1]
+
+  testArmTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass armTryDirect, (ResultTryDoTier2MatrixValue new) armTryDirect, (ResultTryDoTier2MatrixActor spawn) armTryDirect] equals: #[2, 2, 2]
+
+  testArmPlainLoop =>
+    self assert: #[ResultTryDoTier2MatrixClass armPlainLoop, (ResultTryDoTier2MatrixValue new) armPlainLoop, (ResultTryDoTier2MatrixActor spawn) armPlainLoop] equals: #[2, 2, 2]
+
+  testArmTryHead =>
+    self assert: #[ResultTryDoTier2MatrixClass armTryHead, (ResultTryDoTier2MatrixValue new) armTryHead, (ResultTryDoTier2MatrixActor spawn) armTryHead] equals: #[5, 5, 5]
+
+  testArmPlainLoopValue =>
+    self assert: #[ResultTryDoTier2MatrixClass armPlainLoopValue, (ResultTryDoTier2MatrixValue new) armPlainLoopValue, (ResultTryDoTier2MatrixActor spawn) armPlainLoopValue] equals: #[2, 2, 2]
