@@ -12,8 +12,13 @@ Resolves compiled method metadata from class references. Accepts
 various class reference formats (pid, atom, class object tuple) and
 returns a CompiledMethod map or nil.
 
-This is a stateless domain service that delegates to the class
-gen_server for the actual method lookup. It owns the logic for
+This is a stateless domain service that reads the method records each class
+publishes to ETS (`beamtalk_object_class:compiled_method_safe/3`) rather than
+calling the class gen_server (BT-3832): it runs inside class handlers
+(`Behaviour >>`), where a blocking call into another class process deadlocks two
+busy classes until the 5s timeout. A remote pid keeps the `gen_server:call` path.
+
+It owns the logic for
 normalizing class references and producing structured errors.
 
 See also: beamtalk_object_class for class process management
@@ -45,7 +50,7 @@ resolve(ClassPid, Selector) when is_pid(ClassPid) ->
 %% Metaclass receiver — look up class-side methods of the described
 %% class. The 'Metaclass'-tagged beamtalk_object holds the *described* class's
 %% pid in its `pid` field (see beamtalk_behaviour_intrinsics:classClass/1); we
-%% ask that class gen_server for its class methods (which walks the metaclass
+%% read that class's class methods (which walks the metaclass
 %% parallel hierarchy via find_inherited_class_method/2).
 resolve(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) when
     is_pid(ClassPid)
@@ -92,7 +97,7 @@ Resolve a method, walking the superclass chain if not found locally.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
-per-class `{method, Selector}` gen_server probe.
+per-class published-record probe.
 
 `ClassPid`'s own method table is checked here, outside the depth-counted
 walk — the receiver's own class is "free" and the `?MAX_HIERARCHY_DEPTH`
@@ -102,7 +107,7 @@ itself starts at the immediate superclass.
 """.
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
-    case gen_server:call(ClassPid, {method, Selector}) of
+    case beamtalk_object_class:compiled_method_safe(ClassPid, instance, Selector) of
         nil ->
             StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
             case
@@ -130,15 +135,14 @@ resolve_with_hierarchy(ClassPid, Selector) ->
 -doc """
 Resolve a class-side method on the class identified by `ClassPid`.
 
-Delegates to the class gen_server's `{class_method, Selector}` handler which
-returns a `CompiledMethod` map carrying the class-side source / signature /
-doc, or walks the metaclass parallel hierarchy to find an inherited class
-method (via `find_inherited_class_method/2` on the gen_server side). Returns
+Reads the class-side `CompiledMethod` record (source / signature / doc) the
+class published, walking the metaclass parallel hierarchy for an inherited
+class method (`beamtalk_object_class:compiled_method_safe/3`). Returns
 `nil` when no class method with the selector is defined in the chain.
 """.
 -spec resolve_class_side(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_class_side(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {class_method, Selector}).
+    beamtalk_object_class:compiled_method_safe(ClassPid, class, Selector).
 
 -doc """
 Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
@@ -147,7 +151,7 @@ superclass's pid as the next node.
 """.
 -spec method_step(pid(), selector()) -> beamtalk_hierarchy:step_result(compiled_method()).
 method_step(ClassPid, Selector) ->
-    case gen_server:call(ClassPid, {method, Selector}) of
+    case beamtalk_object_class:compiled_method_safe(ClassPid, instance, Selector) of
         nil ->
             case superclass_pid(ClassPid) of
                 none -> not_found;
@@ -163,7 +167,7 @@ there is no superclass or its process is not registered.
 """.
 -spec superclass_pid(pid()) -> pid() | none.
 superclass_pid(ClassPid) ->
-    case beamtalk_object_class:superclass(ClassPid) of
+    case beamtalk_object_class:superclass_safe(ClassPid) of
         none ->
             none;
         SuperName ->

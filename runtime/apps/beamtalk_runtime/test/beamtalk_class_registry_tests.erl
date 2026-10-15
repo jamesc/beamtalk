@@ -1895,3 +1895,187 @@ bt3826_supervisor_config_unregistered_selector_not_found_test() ->
     after
         gen_server:stop(Pid, normal, 5000)
     end.
+
+%%% ============================================================================
+%%% BT-3832: CompiledMethod lookups, class flags and hierarchy docs without
+%%% class-to-class blocking calls
+%%% ============================================================================
+
+%% `beamtalk_method_resolver:resolve/2` (`Behaviour >>`) returns a full
+%% `CompiledMethod` for another class, instance side and class side.
+bt3832_method_resolver_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{
+            instance_methods => #{bt3832Foo => #{block => fun() -> ok end, arity => 0}},
+            method_source => #{bt3832Foo => <<"bt3832Foo => 1">>},
+            method_signatures => #{bt3832Foo => <<"bt3832Foo -> Integer">>},
+            method_docs => #{bt3832Foo => <<"Foo doc.">>}
+        },
+        Site = fun(Other) ->
+            Pid = beamtalk_class_registry:whereis_class(Other),
+            Meta = #beamtalk_object{class = 'Metaclass', pid = Pid},
+            {
+                beamtalk_method_resolver:resolve(Other, bt3832Foo),
+                beamtalk_method_resolver:resolve(Pid, bt3832Missing),
+                beamtalk_method_resolver:resolve(Meta, bt3826Probe),
+                beamtalk_method_resolver:resolve(Meta, bt3832Missing)
+            }
+        end,
+        Results = bt3826_two_busy_classes("Resolver", Extra, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) ->
+                ?assertMatch({ok, {_, nil, _, nil}}, Outcome),
+                {ok, {Inst, nil, ClassSide, nil}} = Outcome,
+                ?assertMatch(
+                    #{
+                        '__selector__' := bt3832Foo,
+                        '__source__' := <<"bt3832Foo => 1">>,
+                        '__signature__' := <<"bt3832Foo -> Integer">>,
+                        '__doc__' := <<"Foo doc.">>
+                    },
+                    Inst
+                ),
+                ?assertMatch(#{'__selector__' := bt3826Probe}, ClassSide)
+            end,
+            Results
+        )
+    end}.
+
+%% The published record tracks hot patches, doc updates and the class-side
+%% inheritance walk, and equals what the class process itself answers.
+bt3832_compiled_method_records_track_class_state_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    SuperName = 'BT3832RecSuper',
+    SubName = 'BT3832RecSub',
+    {ok, SuperPid} = beamtalk_object_class:start_link(SuperName, #{
+        superclass => none,
+        module => bt3832_no_module,
+        class_methods => #{bt3832Make => #{block => fun(_) -> ok end, arity => 1}},
+        class_method_source => #{bt3832Make => <<"class make => 1">>}
+    }),
+    {ok, SubPid} = beamtalk_object_class:start_link(SubName, #{
+        superclass => SuperName,
+        module => bt3832_no_module
+    }),
+    try
+        %% Inherited class-side method: ETS walk == the class process's own walk.
+        Inherited = beamtalk_object_class:compiled_method_safe(SubPid, class, bt3832Make),
+        ?assertMatch(
+            #{'__selector__' := bt3832Make, '__source__' := <<"class make => 1">>}, Inherited
+        ),
+        ?assertEqual(Inherited, gen_server:call(SubPid, {class_method, bt3832Make})),
+        ?assertEqual(nil, beamtalk_object_class:compiled_method_safe(SubPid, class, bt3832Nope)),
+        %% Hot patch (put_method) and doc update are visible immediately.
+        ok = beamtalk_object_class:put_method(
+            SuperPid, bt3832Patched, fun(_Self) -> 1 end, <<"p">>
+        ),
+        ok = gen_server:call(SuperPid, {set_method_doc, bt3832Patched, <<"Patched doc.">>}),
+        Patched = beamtalk_method_resolver:resolve(SubPid, bt3832Patched),
+        ?assertMatch(
+            #{
+                '__selector__' := bt3832Patched,
+                '__source__' := <<"p">>,
+                '__doc__' := <<"Patched doc.">>
+            },
+            Patched
+        ),
+        ?assertEqual(Patched, gen_server:call(SuperPid, {method, bt3832Patched})),
+        %% Stopping the class drops its records.
+        gen_server:stop(SuperPid, normal, 5000),
+        ?assertEqual(
+            not_found,
+            beamtalk_class_metadata:lookup_method_record(SuperName, instance, bt3832Patched)
+        ),
+        ?assertEqual(#{}, beamtalk_class_metadata:lookup_method_records(SuperName, class))
+    after
+        [catch gen_server:stop(P, normal, 5000) || P <- [SubPid, SuperPid]]
+    end.
+
+%% The class-flag accessors (`is_sealed`, `is_typed`, `is_abstract`,
+%% `is_internal`, `shape_version`) read another class's flags.
+bt3832_class_flags_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{
+            is_sealed => true,
+            is_typed => true,
+            is_abstract => true,
+            is_internal => true,
+            shape_version => 3
+        },
+        Site = fun(Other) ->
+            Pid = beamtalk_class_registry:whereis_class(Other),
+            {
+                beamtalk_object_class:is_sealed(Pid),
+                beamtalk_object_class:is_typed(Pid),
+                beamtalk_object_class:is_abstract(Pid),
+                beamtalk_object_class:is_internal(Pid),
+                beamtalk_object_class:shape_version(Pid)
+            }
+        end,
+        Results = bt3826_two_busy_classes("Flags", Extra, Site),
+        lists:foreach(
+            fun({_Name, Outcome}) ->
+                ?assertEqual({ok, {true, true, true, true, 3}}, Outcome)
+            end,
+            Results
+        )
+    end}.
+
+%% Flags follow an `update_class` (hot reload) without a call.
+bt3832_class_flags_follow_update_class_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    Name = 'BT3832FlagReload',
+    {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+        superclass => none, module => bt3832_no_module
+    }),
+    try
+        ?assertNot(beamtalk_object_class:is_sealed(Pid)),
+        ?assertEqual(1, beamtalk_object_class:shape_version(Pid)),
+        {ok, _} = gen_server:call(
+            Pid,
+            {update_class, #{
+                superclass => none,
+                module => bt3832_no_module,
+                is_sealed => true,
+                shape_version => 2
+            }}
+        ),
+        ?assert(beamtalk_object_class:is_sealed(Pid)),
+        ?assertEqual(2, beamtalk_object_class:shape_version(Pid))
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
+%% `beamtalk_hierarchy_docs` (`Beamtalk help:`, REPL `:help`) walks another
+%% class's hierarchy from inside a class handler.
+bt3832_hierarchy_docs_no_cross_class_deadlock_test_() ->
+    {timeout, 30, fun() ->
+        Extra = #{
+            instance_methods => #{bt3832Foo => #{block => fun() -> ok end, arity => 0}}
+        },
+        Site = fun(Other) ->
+            Pid = beamtalk_class_registry:whereis_class(Other),
+            {
+                beamtalk_hierarchy_docs:find_defining_class(Pid, bt3832Foo),
+                beamtalk_hierarchy_docs:find_defining_class_method(Pid, bt3826Probe),
+                maps:keys(beamtalk_hierarchy_docs:collect_flattened_methods(Other, Pid)),
+                beamtalk_hierarchy_docs:collect_flattened_class_methods(Other, Pid)
+            }
+        end,
+        Results = bt3826_two_busy_classes("HierDocs", Extra, Site),
+        lists:foreach(
+            fun({Name, Outcome}) ->
+                %% Site(Other) is given the *other* class's name.
+                Other =
+                    case Name of
+                        'BT3826HierDocsA' -> 'BT3826HierDocsB';
+                        'BT3826HierDocsB' -> 'BT3826HierDocsA'
+                    end,
+                ?assertEqual(
+                    {ok, {Other, Other, [bt3832Foo], #{bt3826Probe => Other}}},
+                    Outcome
+                )
+            end,
+            Results
+        )
+    end}.
