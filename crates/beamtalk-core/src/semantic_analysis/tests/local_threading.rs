@@ -883,12 +883,12 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     assert!(adr0131_diagnostics(&src).is_empty());
 }
 
-/// PIN-BUG BT-3743: every method in the inert `*_pending.bt.pending` probe
+/// PIN-BUG BT-3841: every method in the inert `*_pending.bt.pending` probe
 /// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
 /// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
 /// compile moves it out of the pending fixture (and its test into
-/// `adr0131local_rebind_test.bt`), which keeps this green; phase 5 (BT-3751)
-/// deletes the allow-set and with it the pending allow-set shapes.
+/// `adr0131local_rebind_test.bt`), which keeps this green; BT-3841 deletes the
+/// allow-set and with it the pending allow-set shapes.
 #[test]
 fn adr0131_probe_matrix_pins() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
@@ -1426,7 +1426,7 @@ fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) -> Str
     template.replace('S', &stmt).replace("%c", cond)
 }
 
-/// PIN-BUG BT-3743: the statement-position probe matrix, measured on the
+/// PIN-BUG BT-3841: the statement-position probe matrix, measured on the
 /// real build (BT-3753). Every shape `adr0131_statement_probes.tsv` records
 /// as answering wrong, raising or failing to compile (`bad`) is rejected by
 /// an ADR 0131 diagnostic, and every shape it records as answering right
@@ -2069,6 +2069,24 @@ fn lookup_on_a_receiver_that_may_be_a_dictionary_stays_a_producer() {
         ),
     ] {
         let src = format!("{header}\n{}\n", indent(body));
+        let diags = adr0131_diagnostics(&src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+/// ADR 0131 Phase 5a (BT-3751): the names an arm binds exclude those a block
+/// nested in it binds. A stored closure in a protected body whose own loop
+/// writes the closure's local (`i := 0. [i < 3] whileTrue: [i := i + 1]`) is
+/// the closure's business, not the arm's, so it must not make the enclosing
+/// `on:do:` (an operand here) or the `tryDo:` inside it stop being producers.
+/// The class-variable corpus found it as a `did not compile` program (seed
+/// 9462456777465831732).
+#[test]
+fn closure_local_loop_in_a_protected_body_does_not_unbind_the_producers() {
+    let body = "t + ([_b := [i := 0. [i < 3] whileTrue: [i := i + 1]]. \
+                true ifTrue: [true ifTrue: [^t + ((Result tryDo: [t := t + 1. 5]) valueOr: 0)]]. 9] \
+                on: Error do: [:_e | 0])";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
         let diags = adr0131_diagnostics(&src);
         assert!(diags.is_empty(), "{src}: {diags:?}");
     }

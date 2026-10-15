@@ -9,14 +9,13 @@
 // the same section describes. The fixtures, with each body, are
 // fixtures/adr0131local_rebind_{class,value,actor}.bt.
 //
-// A test asserts the ADR's Expected answer. A test whose answer differs today
-// pins today's answer under a `PIN-BUG BT-3743` marker naming the correct
-// answer; the BT-3743 phases flip the pins they fix, and phase 5 (BT-3751)
-// flips the rest. A shape that does not compile in a context today cannot be
-// pinned in a compiled module; it is written with its Expected answer in
-// adr0131local_rebind_pending_test.bt.pending (and its fixtures in
-// fixtures/*_pending.bt.pending), which the runner does not discover. The
-// phase that makes it compile drops the `.pending` suffix.
+// A test asserts the ADR's Expected answer. Every cell that compiles answers
+// it (the BT-3743 phases flipped every pin; BT-3751 flipped the last). A shape
+// that does not compile in a context is a compile error (the Phase 0 position
+// diagnostic that BT-3841 retires, or the permanent §6 error); it is written
+// with its Expected answer in adr0131local_rebind_pending_test.bt.pending (and
+// its fixtures in fixtures/*_pending.bt.pending), which the runner does not
+// discover. The phase that makes it compile drops the `.pending` suffix.
 //
 // BT-3745 (ADR 0131 Phase 0b) made every shape that crashed or answered wrong
 // a compile error: the §6 error for a Tier 2 block value with no return

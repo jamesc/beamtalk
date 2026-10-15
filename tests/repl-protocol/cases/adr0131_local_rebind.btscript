@@ -13,11 +13,13 @@
 // stdlib/test/adr0131local_rebind_test.bt.
 //
 // An expression whose answer differs from the ADR today pins today's answer
-// under a `PIN-BUG BT-3743` marker that names the correct answer. Each phase
-// of the BT-3743 epic flips the pins it fixes; phase 5 (BT-3751) flips the
-// rest. Each shape resets `t` first, so one shape's wrong answer does not
-// change the next shape's input (the ADR transcript is the exception: it is
-// one stateful sequence, as the ADR writes it).
+// under a `PIN-BUG` marker that cites the open issue and names the correct
+// answer. Each phase of the BT-3743 epic flipped the pins it fixed; the rest
+// are the REPL arms (BT-3823) and the Phase 0 position diagnostic that
+// BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
+// shape's wrong answer does not change the next shape's input (the ADR
+// transcript is the exception: it is one stateful sequence, as the ADR writes
+// it).
 //
 // Since BT-3745 (ADR 0131 Phase 0b) every shape that crashed or answered
 // wrong is a compile error (the Phase 0 allow-set error, or §6), so its pin
@@ -93,7 +95,7 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the inner tuple leaked, raised, and the outer handler
+// PIN-BUG BT-3823: the inner tuple leaked, raised, and the outer handler
 // answered 3 (a silent wrong answer) until BT-3745; since then a compile
 // error naming the conditional. The REPL's protected body and conditional
 // arm are not producer frames yet (the compiled contexts answer 7 and 1,
@@ -101,7 +103,7 @@ t := 0
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
 // => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
 
-// PIN-BUG BT-3743: correct answer 1.
+// PIN-BUG BT-3823: correct answer 1.
 t
 // => 0
 
@@ -109,12 +111,12 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: a silent wrong answer (3) before BT-3745, a compile error
+// PIN-BUG BT-3823: a silent wrong answer (3) before BT-3745, a compile error
 // since (see o7). Correct answer: 2.
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
 // => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
 
-// PIN-BUG BT-3743: correct answer 1.
+// PIN-BUG BT-3823: correct answer 1.
 t
 // => 0
 
@@ -219,7 +221,7 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: the Tier 2 block reached the native `at:ifAbsent:`;
+// PIN-BUG BT-3841: the Tier 2 block reached the native `at:ifAbsent:`;
 // since BT-3745 it is an ADR 0131 §6 compile error. BT-3798 (ADR 0131 Phase
 // 2d) made a `Dictionary` lookup a producer in class, value-type and actor
 // methods; the REPL keeps the error (its bindings-map lowering has no lookup
@@ -227,7 +229,7 @@ t := 0
 r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
 // => ERROR: block writes outer local `t`, but `at:ifAbsent:` cannot return the write
 
-// PIN-BUG BT-3743: correct answer 1.
+// PIN-BUG BT-3841: correct answer 1.
 t
 // => 0
 
@@ -258,14 +260,14 @@ t := 0
 b := [t := t + 1]
 // => _
 
-// PIN-BUG BT-3743: the stored Tier 2 block is sent `value` via perform:.
+// PIN-BUG BT-3841: the stored Tier 2 block is sent `value` via perform:.
 // ADR 0131 §6 makes this a compile error when the binding and the send are
 // compiled together (BT-3745); across two REPL inputs the second sees `b`
 // only as a binding, so the runtime error remains. Correct answer: 1.
 b value
 // => ERROR: Cannot call 'value' on Block via perform:
 
-// PIN-BUG BT-3743: correct answer 1 (or a compile error under ADR 0131 §6).
+// PIN-BUG BT-3841: correct answer 1 (or a compile error under ADR 0131 §6).
 t
 // => 0
 
@@ -332,12 +334,12 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: leaked the bindings map as its value and left `t` at 0;
+// PIN-BUG BT-3823: leaked the bindings map as its value and left `t` at 0;
 // since BT-3753 it is an ADR 0131 Phase 0 compile error. Correct answer: 3.
 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]
 // => ERROR: `do:` writes outer local `t`, but as a statement inside a conditional arm
 
-// PIN-BUG BT-3743: correct answer 3.
+// PIN-BUG BT-3823: correct answer 3.
 t
 // => 0
 
@@ -345,12 +347,12 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3743: raised `invalid argument` before BT-3753, a compile error
+// PIN-BUG BT-3841: raised `invalid argument` before BT-3753, a compile error
 // since. Correct answer: 2.
 #(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]
 // => ERROR: `whileTrue:` writes outer local `t`, but as a statement inside a `do:` iteration
 
-// PIN-BUG BT-3743: correct answer 2.
+// PIN-BUG BT-3841: correct answer 2.
 t
 // => 0
 

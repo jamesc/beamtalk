@@ -1391,12 +1391,12 @@ test-metamorphic *ARGS: build-stdlib
     @echo "✅ Metamorphic tests complete"
 
 # ADR 0130 (BT-3705, enabled by BT-3713): the class-variable agreement corpus.
-# Draws every generated shape except `local_touch` (loops, on:do:/ensure:/tryDo:,
-# stored closures, writing and late-bound self-sends, in open / sealed /
+# Draws every generated shape (loops, on:do:/ensure:/tryDo:, stored closures,
+# writing and late-bound self-sends, `local_touch`, in open / sealed /
 # override spellings), runs each program on a BEAM and asserts all three
 # spellings answer the ADR 0130 §4 reference interpretation, then runs the
 # in-process codegen properties (verifier on, valid Core Erlang, catch-boundary
-# text check; these draw every shape, `local_touch` included). Both are normal
+# text check). Both are normal
 # tests, but a plain `cargo test` (`just test-rust`) runs a reduced draw (16
 # programs on a BEAM, 64 codegen cases; BT-3767); this recipe runs the full
 # budget and prints the failure report. Knobs (env vars):
@@ -1404,24 +1404,13 @@ test-metamorphic *ARGS: build-stdlib
 # PROPTEST_CASES (in-process codegen cases, default here 512),
 # CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
 # The nightly `class-var-corpus` job in .github/workflows/fuzz.yml runs this
-# recipe with a larger budget. `local_touch` (an outer local mutated inside a
-# protected block) is excluded from the BEAM draw until ADR 0131 Phase 4
-# (`tryDo:`, BT-3750) and Phase 5a (BT-3751) enable it;
-# `just test-class-var-corpus-local-touch` measures it.
+# recipe with a larger budget.
 # Measure the in-process failure rate with:
 #   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
 test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48") $PROPTEST_CASES=env_var_or_default("PROPTEST_CASES", "512"): build-stdlib
     @echo "🧬 Running the class-variable agreement corpus ({{ CV_CORPUS_CASES }} programs on a BEAM, {{ PROPTEST_CASES }} codegen cases)..."
     cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
     cargo test -p beamtalk-codegen --test class_var_agreement
-
-# ADR 0131 (BT-3817 made `on:do:`/`ensure:` producers): the `local_touch`
-# shape (an outer local mutated inside a protected block) still fails for the
-# `tryDo:` programs (Phase 4, BT-3750), so its property is `#[ignore]`d until
-# Phase 5a (BT-3751) enables it; this recipe measures it.
-test-class-var-corpus-local-touch $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48"): build-stdlib
-    @echo "🧬 Running the class-variable agreement corpus with local_touch (red until ADR 0131 Phases 4 and 5a)..."
-    cargo test -p beamtalk-cli --test cli class_var_agreement_local_touch -- --ignored --nocapture
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
@@ -1537,17 +1526,10 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #   - live_front's suite: needs a real `dist-liveview` release + a running
 #     workspace, built only by manual setup (see the module doc comment in
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
-#   - class_var_agreement_local_touch: `#[ignore]`d on purpose because it is
-#     EXPECTED to fail until ADR 0131 Phases 4 and 5a (BT-3750, BT-3751) land (run it via
-#     `just test-class-var-corpus-local-touch`). The `--ignored` pass runs every
-#     ignored test, so without this skip the coverage job fails on every push
-#     to `main` (BT-3733). Remove the skip together with the `#[ignore]` when
-#     BT-3751 enables the `local_touch` shape.
 #   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
 #     set; it is run by hand to print a generated program (BT-3733).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip negative_test_invalid_spec_detected_by_dialyzer \
-    --skip class_var_agreement_local_touch \
     --skip dump_program \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \

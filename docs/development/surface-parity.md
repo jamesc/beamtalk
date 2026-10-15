@@ -583,7 +583,7 @@ reports the same message at the same span. No operation is surface-specific.
 
 - Category `Tier2BlockNoReturnChannel` (permanent): a block that writes an
   outer local flows to a send that cannot return the write.
-- Category `UnmigratedLocalThreading` (removed by BT-3743 phase 5): a
+- Category `UnmigratedLocalThreading` (temporary; BT-3841 retires it): a
   local-threading construct whose blocks write an outer local sits in a
   position that does not thread the write back yet, including the statement
   positions that lose the write (BT-3753).

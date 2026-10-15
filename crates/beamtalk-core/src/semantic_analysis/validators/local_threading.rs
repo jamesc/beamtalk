@@ -9,9 +9,10 @@
 //! ordinary Smalltalk. Beamtalk threads such writes back through the
 //! construct's `{Value, StateAcc}` tuple (ADR 0041), and today that only works
 //! for some constructs in some positions. ADR 0131 makes every
-//! local-threading construct a `ThreadedValue` producer (phases 1-4); until it
-//! does, this module turns the shapes that crash or silently answer wrong into
-//! compile errors, so nothing is silently wrong in between. Two checks share
+//! local-threading construct a `ThreadedValue` producer (phases 1-4); for the
+//! shapes no producer lowers yet, this module turns the ones that crash or
+//! silently answer wrong into compile errors, so nothing is silently wrong.
+//! Two checks share
 //! one walk and one fact, [`outer_local_writes`]:
 //!
 //! - **§6, a Tier 2 block value with no return channel**
@@ -33,7 +34,9 @@
 //!   block on (to a self-send or a collection HOM) drops its write.
 //!   Everywhere else no callee can hand a `StateAcc` back.
 //! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
-//!   temporary). A local-threading construct
+//!   still needed: BT-3751 measured 552 of 733 rejected statement shapes still
+//!   dropping their writes silently and 43 failing erlc with it bypassed, so
+//!   BT-3841 retires it as producers land). A local-threading construct
 //!   ([`local_threading_construct`], of a family threaded today) whose
 //!   threaded set ([`construct_outer_local_writes`], the same recognizer and
 //!   set codegen's `threaded_locals_of` reads) is not empty
@@ -368,8 +371,9 @@ struct Allowed {
 /// ([`DiagnosticCategory::UnmigratedLocalThreading`]).
 ///
 /// This is the one table: phases 2-4 of ADR 0131 (BT-3749, BT-3738, BT-3750)
-/// grow it as each producer lands, and phase 5 (BT-3751) deletes the check.
-/// Add a row only for a combination that answers right today.
+/// grew it as each producer landed. Phase 5a (BT-3751) could not delete the
+/// check (see [`DENY_SET`]); BT-3841 does, once the shapes it rejects are
+/// producers. Add a row only for a combination that answers right today.
 const ALLOW_SET: &[Allowed] = &[
     // `r := <construct>` in the method body (s3, and the per-context passes of
     // the ADR's second probe table). A conditional is not here since ADR 0131
@@ -626,9 +630,12 @@ const fn deny(
 /// for its [`Position::NestedStatement`] facts. Only constructs that write a
 /// local bound outside their innermost block (`crosses: true`) are rows; a
 /// construct that writes only a local of that block is BT-3776. The same
-/// phases that grow [`ALLOW_SET`] shrink this table, and phase 5 (BT-3751)
-/// deletes it. Never add a row for a shape an existing test shows answering
-/// right.
+/// phases that grow [`ALLOW_SET`] shrink this table. Phase 5a (BT-3751)
+/// re-measured every `bad`/`over` line with the check bypassed (class, value
+/// and actor methods, run on a BEAM): 552 of the 733 answered wrong, 43 failed
+/// to compile and 138 answered right, so the table stays and BT-3841 retires
+/// it as the shapes become producers (the 138 first narrow their coarse rows).
+/// Never add a row for a shape an existing test shows answering right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
     deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
