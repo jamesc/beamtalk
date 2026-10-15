@@ -664,11 +664,11 @@ impl CoreErlangGenerator {
         match (selector.as_str(), receiver.as_ref(), arguments.as_slice()) {
             // ADR 0131 §5 (Phase 4, BT-3750): `Result tryDo: [...]` whose block
             // writes an outer local.
-            ("tryDo:", recv @ Expression::ClassReference { .. }, [Expression::Block(body)]) => {
-                debug_assert!(
-                    beamtalk_core::semantic_analysis::block_facts::is_result_try_do(recv, "tryDo:"),
-                    "the tryDo: producer is only for the Result class"
-                );
+            ("tryDo:", recv @ Expression::ClassReference { .. }, [Expression::Block(body)])
+                if beamtalk_core::semantic_analysis::block_facts::is_result_try_do(
+                    recv, "tryDo:",
+                ) =>
+            {
                 self.try_do_tier2_tuple_doc(body)
             }
             (

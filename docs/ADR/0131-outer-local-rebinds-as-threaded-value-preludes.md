@@ -21,7 +21,7 @@ Accepted (2026-10-08)
 | 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | |
 | 3c | [BT-3822](https://linear.app/beamtalk/issue/BT-3822) | Conditionals as producers at loop/fold body statements; delete `direct_params_list_op_result`; flip `stLoopArm` | M | |
 | 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
-| 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic; flip every pin | S | |
+| 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic (kept: 552 of 733 measured statement shapes still drop writes with it bypassed, retired by [BT-3841](https://linear.app/beamtalk/issue/BT-3841)); flip every pin | S | |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, status → Implemented | S | |
 
 Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3817 → 3750 → 3751 → 3752.

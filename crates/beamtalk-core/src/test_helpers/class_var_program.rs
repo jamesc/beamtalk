@@ -43,10 +43,9 @@ use std::rc::Rc;
 
 /// A set of language shapes the generator may use.
 ///
-/// The full set is what ADR 0130 must make correct; [`Shapes::ENABLED`] is the
-/// set the (non-ignored) BEAM execution property enforces: every shape except
-/// [`Shapes::LOCAL_TOUCH`], whose failures are BT-3817. The in-process codegen
-/// property draws the full set (BT-3767).
+/// The full set is what ADR 0130 and ADR 0131 must make correct;
+/// [`Shapes::ENABLED`] is the set the BEAM execution property enforces, and
+/// since ADR 0131 Phase 5a (BT-3751) it is the full set.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Shapes(u32);
 
@@ -96,9 +95,8 @@ impl Shapes {
     /// old idiom that let the pre-ADR 0130 compiler thread class
     /// variables through a block. It is no longer needed for class variables;
     /// what it still exercises is an outer *local* mutated inside a protected
-    /// block (`on:do:`, `ensure:`, `Result tryDo:`), which fails today for a
-    /// local-variable threading reason (BT-3817), so [`Shapes::ENABLED`]
-    /// leaves it out.
+    /// block (`on:do:`, `ensure:`, `Result tryDo:`), threaded by the ADR 0131
+    /// producers.
     pub const LOCAL_TOUCH: Shapes = Shapes(1 << 16);
     /// A loop or fold nested inside another loop or fold body.
     pub const NESTED_LOOPS: Shapes = Shapes(1 << 17);
@@ -188,18 +186,13 @@ impl Shapes {
         })
     }
 
-    /// The shapes the BEAM execution agreement property enforces: every shape
-    /// except [`Shapes::LOCAL_TOUCH`]. (The in-process codegen property draws
-    /// [`Shapes::all`], since `LOCAL_TOUCH` compiles cleanly and only fails
-    /// when executed; BT-3767.)
+    /// The shapes the BEAM execution agreement property enforces: every shape.
     ///
     /// ADR 0130 Phase 3 (BT-3713) flipped the properties from the three shapes
     /// that passed before it (writing and plain self-sends, `ifTrue:`, early
-    /// `^`) to this set. `LOCAL_TOUCH` (an outer local mutated inside a
-    /// protected block) fails for a reason that is not class-variable
-    /// threading, a local-variable threading bug tracked as BT-3817, so it is
-    /// excluded here and measured by its own `#[ignore]`d property instead.
-    pub const ENABLED: Shapes = Shapes::all().without(Shapes::LOCAL_TOUCH);
+    /// `^`) to all but [`Shapes::LOCAL_TOUCH`]; ADR 0131 Phase 5a (BT-3751)
+    /// added it, once every local-threading construct was a producer.
+    pub const ENABLED: Shapes = Shapes::all();
 }
 
 // ---------------------------------------------------------------------------
@@ -2082,7 +2075,8 @@ mod tests {
     }
 
     /// `local_touch` generates the §1a shape, rendered with `t` on the left
-    /// of a protected block; no other shape set does.
+    /// of a protected block; no other shape set does. [`Shapes::ENABLED`] is
+    /// every shape since ADR 0131 Phase 5a (BT-3751), so it draws it too.
     #[test]
     fn local_touch_generates_the_touch_sum_shape() {
         let mut seen = false;
@@ -2093,14 +2087,16 @@ mod tests {
                 .map(|c| c.source)
                 .collect();
             seen |= all.contains("t + ([") || all.contains("t + ((Result tryDo:");
-            let enabled: String = gen_program(seed, 3, Shapes::ENABLED)
-                .render(0, Spelling::Open)
-                .into_iter()
-                .map(|c| c.source)
-                .collect();
-            assert!(!enabled.contains("t + ("), "seed {seed}:\n{enabled}");
+            let without: String =
+                gen_program(seed, 3, Shapes::ENABLED.without(Shapes::LOCAL_TOUCH))
+                    .render(0, Spelling::Open)
+                    .into_iter()
+                    .map(|c| c.source)
+                    .collect();
+            assert!(!without.contains("t + ("), "seed {seed}:\n{without}");
         }
         assert!(seen, "no local_touch program has `t + (<protected block>)`");
+        assert_eq!(Shapes::ENABLED, Shapes::all());
     }
 
     /// An error that escapes the invocation discards every write it made.

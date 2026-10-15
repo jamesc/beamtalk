@@ -13,15 +13,11 @@
 //! execution) and asserts each spelling answers what the reference
 //! interpretation says, so the three spellings agree with each other.
 //!
-//! Two properties share one harness:
-//!
-//! - `class_var_agreement_enabled_shapes` draws [`Shapes::ENABLED`], every shape
-//!   except `local_touch`. It is a normal test (ADR 0130 Phase 3, BT-3713,
-//!   enabled it); `just test-class-var-corpus` runs it with a larger draw.
-//! - `class_var_agreement_local_touch` draws every shape including
-//!   `local_touch` (an outer local mutated inside a protected block). It is
-//!   `#[ignore]`d: those programs fail today for a local-variable threading
-//!   reason, BT-3817, not fixed by ADR 0130.
+//! One property, `class_var_agreement_enabled_shapes`, draws [`Shapes::ENABLED`]:
+//! every shape, `local_touch` (an outer local mutated inside a protected
+//! block) included since ADR 0131 Phase 5a (BT-3751). It is a normal test
+//! (ADR 0130 Phase 3, BT-3713); `just test-class-var-corpus` runs it with a
+//! larger draw.
 //!
 //! A batch is one package compiled and run once; if the package fails to
 //! compile (a rejected program, or a `ThreadedIr` verifier `internal:` error
@@ -749,17 +745,8 @@ fn property(shapes: Shapes) {
 #[test]
 fn class_var_agreement_enabled_shapes() {
     // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
-    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED`.
+    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED` (every shape).
     property(corpus_shapes_from_env(Shapes::ENABLED));
-}
-
-/// BT-3817: `local_touch` (an outer local mutated inside a `on:do:`,
-/// `ensure:` or `Result tryDo:` block) fails today. Remove the `#[ignore]` (and
-/// add `LOCAL_TOUCH` to `Shapes::ENABLED`) when BT-3817 is fixed.
-#[test]
-#[ignore = "local_touch fails today (BT-3817); run via `just test-class-var-corpus-local-touch`"]
-fn class_var_agreement_local_touch() {
-    property(Shapes::all());
 }
 
 /// `MIN_ENVIRONMENT_PROGRAMS` small programs, program `i` from seed

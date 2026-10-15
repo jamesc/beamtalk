@@ -1766,16 +1766,32 @@ fn arms_lower_as_producer(
     if kind == RootMethodKind::Actor {
         return true;
     }
+    // The names the arm itself binds: assigned by one of its statements, not
+    // inside a block nested in them. A block's own first assignment binds the
+    // name in that block (`_b := [i := 0. [i < 3] whileTrue: [i := i + 1]]`
+    // stores a closure whose `i` is not the arm's), so a construct writing
+    // only such a name writes no local of the arm.
     let mut assigned: std::collections::HashSet<String> = std::collections::HashSet::new();
     for arm in arms {
         for stmt in &arm.body {
+            let mut nested: Vec<Span> = Vec::new();
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Block(block) = e {
+                    nested.push(block.span);
+                }
+            });
+            let in_nested_block = |span: Span| {
+                nested
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
+            };
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                Expression::Assignment { target, .. } => {
+                Expression::Assignment { target, .. } if !in_nested_block(e.span()) => {
                     if let Expression::Identifier(id) = target.as_ref() {
                         assigned.insert(id.name.to_string());
                     }
                 }
-                Expression::DestructureAssignment { pattern, .. } => {
+                Expression::DestructureAssignment { pattern, .. } if !in_nested_block(e.span()) => {
                     let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
                     assigned.extend(ids.into_iter().map(|id| id.name.to_string()));
                 }
