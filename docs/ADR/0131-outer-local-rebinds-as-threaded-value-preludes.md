@@ -929,8 +929,8 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (after BT-3841 PR 2: 571 = 527 wrong
-+ 44 `erlc`; 663 before it, 595 of them in the 5a population), by family and
+Statement cells that do not answer right (after BT-3841 PR 3: 520; 571 after PR
+2, 663 after PR 1's three-deep roles, 595 in the 5a population), by family and
 method context, with the work each needs:
 
 | Family | class | value | actor | total | Classification |
@@ -939,13 +939,13 @@ method context, with the work each needs:
 | `detect:ifNone:` search or handler | 52 | 46 | 44 | 142 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
 | `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
 | any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
-| `anySatisfy:` / `allSatisfy:` | 20 | 18 | 13 | 51 | (a) BT-3833: a non-producer list-op needs a producer site (an early-exit fold) |
-| `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in BT-3841 PR 2 (`producer_body_arg_index`; the dictionary fold answers the `{nil, StateAcc}` carrier like `do:`); its cells inside a `[...] value` body are in that row |
-| **total** | **232** | **191** | **148** | **571** | |
+| `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
+| `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3: producers answering their boolean; a block that writes runs for every element (no early exit, as in actors) |
+| **total** | **212** | **173** | **135** | **520** | |
 
-By block role: loop bodies 151, protected bodies 103, evaluated blocks 85,
-arms 74, three-deep nestings 58, handlers 47, arm/loop mixes 39, the method
-body 14.
+By block role: loop bodies 141, protected bodies 90, evaluated blocks 85,
+arms 63, three-deep nestings 52, handlers 40, arm/loop mixes 37, the method
+body 12.
 
 The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
 rows name the exact depth and none may name a shape past two blocks. The
@@ -955,11 +955,11 @@ in a `do:` body that the coarse rows accepted and that raises `bad argument` in
 a value-type method); the REPL keeps its coarse rows, unmeasured past depth
 one, until BT-3823.
 
-Operand cells (1,404): 705 answer right, 629 wrong, 70 `erlc`; Phase 0 accepts
-580, all of them right (zero unsound), and rejects the 699 that do not answer
-right plus 125 that do. By position, the cells that do not answer right:
-assignment 36, field assignment 33, receiver 57, argument 57, binary operand
-57, literal element 57, cascade part 134, interpolation 134, `match:` subject
+Operand cells (1,404): 743 answer right, 585 wrong, 76 `erlc`; Phase 0 accepts
+624, all of them right (zero unsound), and rejects the 661 that do not answer
+right plus 119 that do. By position, the cells that do not answer right:
+assignment 33, field assignment 30, receiver 49, argument 49, binary operand
+49, literal element 49, cascade part 134, interpolation 134, `match:` subject
 134. The first six are (a): the operand sites `sequenced_operand_sites` and
 `repl_operand_sites` already name for some constructs extend to the rest. The
 last three (402 cells) are the likely permanent §6 rejections: a cascade

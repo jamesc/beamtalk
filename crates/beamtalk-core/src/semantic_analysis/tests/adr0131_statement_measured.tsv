@@ -337,7 +337,7 @@ actor	ensBlk	outer	toDo	right
 actor	ensBlk	outer	value	wrong
 actor	ensBlk	outer	while	right
 actor	handler	direct	and	right
-actor	handler	direct	any	wrong
+actor	handler	direct	any	right
 actor	handler	direct	collect	right
 actor	handler	direct	dinH	wrong
 actor	handler	direct	dinS	wrong
@@ -355,7 +355,7 @@ actor	handler	direct	toDo	right
 actor	handler	direct	value	wrong
 actor	handler	direct	while	right
 actor	handler	outer	and	right
-actor	handler	outer	any	wrong
+actor	handler	outer	any	right
 actor	handler	outer	collect	right
 actor	handler	outer	dinH	wrong
 actor	handler	outer	dinS	wrong
@@ -533,7 +533,7 @@ actor	loop	cvarOuter	toDo	right
 actor	loop	cvarOuter	value	wrong
 actor	loop	cvarOuter	while	right
 actor	loop	direct	and	right
-actor	loop	direct	any	wrong
+actor	loop	direct	any	right
 actor	loop	direct	collect	right
 actor	loop	direct	dinH	wrong
 actor	loop	direct	dinS	wrong
@@ -551,7 +551,7 @@ actor	loop	direct	toDo	right
 actor	loop	direct	value	erlc
 actor	loop	direct	while	right
 actor	loop	outer	and	right
-actor	loop	outer	any	wrong
+actor	loop	outer	any	right
 actor	loop	outer	collect	right
 actor	loop	outer	dinH	wrong
 actor	loop	outer	dinS	wrong
@@ -593,7 +593,7 @@ actor	prot	cvarOuter	toDo	right
 actor	prot	cvarOuter	value	wrong
 actor	prot	cvarOuter	while	right
 actor	prot	direct	and	right
-actor	prot	direct	any	wrong
+actor	prot	direct	any	right
 actor	prot	direct	collect	right
 actor	prot	direct	dinH	erlc
 actor	prot	direct	dinS	erlc
@@ -611,7 +611,7 @@ actor	prot	direct	toDo	right
 actor	prot	direct	value	wrong
 actor	prot	direct	while	right
 actor	prot	outer	and	right
-actor	prot	outer	any	wrong
+actor	prot	outer	any	right
 actor	prot	outer	collect	right
 actor	prot	outer	dinH	erlc
 actor	prot	outer	dinS	erlc
@@ -637,7 +637,7 @@ actor	prot	selfsend	toDo	right
 actor	prot	selfsend	value	wrong
 actor	prot	selfsend	while	right
 actor	protArm	direct	and	right
-actor	protArm	direct	any	wrong
+actor	protArm	direct	any	right
 actor	protArm	direct	collect	right
 actor	protArm	direct	dinH	erlc
 actor	protArm	direct	dinS	erlc
@@ -655,7 +655,7 @@ actor	protArm	direct	toDo	right
 actor	protArm	direct	value	wrong
 actor	protArm	direct	while	right
 actor	protArm	outer	and	right
-actor	protArm	outer	any	wrong
+actor	protArm	outer	any	right
 actor	protArm	outer	collect	right
 actor	protArm	outer	dinH	erlc
 actor	protArm	outer	dinS	erlc
@@ -709,7 +709,7 @@ actor	protLast	outer	toDo	right
 actor	protLast	outer	value	wrong
 actor	protLast	outer	while	right
 actor	timesC	direct	and	right
-actor	timesC	direct	any	wrong
+actor	timesC	direct	any	right
 actor	timesC	direct	collect	right
 actor	timesC	direct	dinH	wrong
 actor	timesC	direct	dinS	wrong
@@ -729,7 +729,7 @@ actor	timesC	direct	while	right
 actor	timesC	dlocal	kv	right
 actor	timesC	local	kv	right
 actor	timesC	outer	and	right
-actor	timesC	outer	any	wrong
+actor	timesC	outer	any	right
 actor	timesC	outer	collect	right
 actor	timesC	outer	dinH	wrong
 actor	timesC	outer	dinS	wrong
@@ -763,7 +763,7 @@ actor	toDoC	cvarOuter	toDo	right
 actor	toDoC	cvarOuter	value	wrong
 actor	toDoC	cvarOuter	while	right
 actor	toDoC	direct	and	right
-actor	toDoC	direct	any	wrong
+actor	toDoC	direct	any	right
 actor	toDoC	direct	collect	right
 actor	toDoC	direct	dinH	wrong
 actor	toDoC	direct	dinS	wrong
@@ -783,7 +783,7 @@ actor	toDoC	direct	while	right
 actor	toDoC	dlocal	kv	right
 actor	toDoC	local	kv	right
 actor	toDoC	outer	and	right
-actor	toDoC	outer	any	wrong
+actor	toDoC	outer	any	right
 actor	toDoC	outer	collect	right
 actor	toDoC	outer	dinH	wrong
 actor	toDoC	outer	dinS	wrong
@@ -937,7 +937,7 @@ class	arm	cvarOuter	toDo	right
 class	arm	cvarOuter	value	wrong
 class	arm	cvarOuter	while	right
 class	arm	direct	and	right
-class	arm	direct	any	wrong
+class	arm	direct	any	right
 class	arm	direct	collect	right
 class	arm	direct	dinH	wrong
 class	arm	direct	dinS	wrong
@@ -955,7 +955,7 @@ class	arm	direct	toDo	right
 class	arm	direct	value	wrong
 class	arm	direct	while	right
 class	arm	outer	and	right
-class	arm	outer	any	wrong
+class	arm	outer	any	right
 class	arm	outer	collect	right
 class	arm	outer	dinH	wrong
 class	arm	outer	dinS	wrong
@@ -981,7 +981,7 @@ class	arm	selfsend	toDo	right
 class	arm	selfsend	value	wrong
 class	arm	selfsend	while	right
 class	armAnd	outer	and	right
-class	armAnd	outer	any	wrong
+class	armAnd	outer	any	right
 class	armAnd	outer	collect	right
 class	armAnd	outer	dinH	wrong
 class	armAnd	outer	dinS	wrong
@@ -1049,7 +1049,7 @@ class	armIter	outer	toDo	right
 class	armIter	outer	value	wrong
 class	armIter	outer	while	right
 class	armLoop	outer	and	right
-class	armLoop	outer	any	wrong
+class	armLoop	outer	any	right
 class	armLoop	outer	collect	right
 class	armLoop	outer	dinH	wrong
 class	armLoop	outer	dinS	wrong
@@ -1067,7 +1067,7 @@ class	armLoop	outer	toDo	right
 class	armLoop	outer	value	erlc
 class	armLoop	outer	while	right
 class	armNL	direct	and	right
-class	armNL	direct	any	wrong
+class	armNL	direct	any	right
 class	armNL	direct	collect	right
 class	armNL	direct	dinH	wrong
 class	armNL	direct	dinS	wrong
@@ -1085,7 +1085,7 @@ class	armNL	direct	toDo	right
 class	armNL	direct	value	wrong
 class	armNL	direct	while	right
 class	armNL	outer	and	right
-class	armNL	outer	any	wrong
+class	armNL	outer	any	right
 class	armNL	outer	collect	right
 class	armNL	outer	dinH	wrong
 class	armNL	outer	dinS	wrong
@@ -1103,7 +1103,7 @@ class	armNL	outer	toDo	right
 class	armNL	outer	value	wrong
 class	armNL	outer	while	right
 class	armNil	outer	and	right
-class	armNil	outer	any	wrong
+class	armNil	outer	any	right
 class	armNil	outer	collect	right
 class	armNil	outer	dinH	wrong
 class	armNil	outer	dinS	wrong
@@ -1121,7 +1121,7 @@ class	armNil	outer	toDo	right
 class	armNil	outer	value	wrong
 class	armNil	outer	while	right
 class	armTF	outer	and	right
-class	armTF	outer	any	wrong
+class	armTF	outer	any	right
 class	armTF	outer	collect	right
 class	armTF	outer	dinH	wrong
 class	armTF	outer	dinS	wrong
@@ -1182,7 +1182,7 @@ class	coll	outer	toDo	right
 class	coll	outer	value	wrong
 class	coll	outer	while	right
 class	ens	outer	and	right
-class	ens	outer	any	wrong
+class	ens	outer	any	right
 class	ens	outer	collect	right
 class	ens	outer	dinH	wrong
 class	ens	outer	dinS	wrong
@@ -1254,7 +1254,7 @@ class	ensLast	outer	toDo	right
 class	ensLast	outer	value	wrong
 class	ensLast	outer	while	right
 class	handler	direct	and	right
-class	handler	direct	any	wrong
+class	handler	direct	any	right
 class	handler	direct	collect	right
 class	handler	direct	dinH	wrong
 class	handler	direct	dinS	wrong
@@ -1272,7 +1272,7 @@ class	handler	direct	toDo	right
 class	handler	direct	value	wrong
 class	handler	direct	while	right
 class	handler	outer	and	right
-class	handler	outer	any	wrong
+class	handler	outer	any	right
 class	handler	outer	collect	right
 class	handler	outer	dinH	wrong
 class	handler	outer	dinS	wrong
@@ -1434,7 +1434,7 @@ class	loop	cvarOuter	toDo	right
 class	loop	cvarOuter	value	wrong
 class	loop	cvarOuter	while	right
 class	loop	direct	and	right
-class	loop	direct	any	wrong
+class	loop	direct	any	right
 class	loop	direct	collect	right
 class	loop	direct	dinH	wrong
 class	loop	direct	dinS	wrong
@@ -1452,7 +1452,7 @@ class	loop	direct	toDo	right
 class	loop	direct	value	erlc
 class	loop	direct	while	right
 class	loop	outer	and	right
-class	loop	outer	any	wrong
+class	loop	outer	any	right
 class	loop	outer	collect	right
 class	loop	outer	dinH	wrong
 class	loop	outer	dinS	wrong
@@ -1494,7 +1494,7 @@ class	prot	cvarOuter	toDo	right
 class	prot	cvarOuter	value	wrong
 class	prot	cvarOuter	while	right
 class	prot	direct	and	right
-class	prot	direct	any	wrong
+class	prot	direct	any	right
 class	prot	direct	collect	right
 class	prot	direct	dinH	wrong
 class	prot	direct	dinS	wrong
@@ -1512,7 +1512,7 @@ class	prot	direct	toDo	right
 class	prot	direct	value	wrong
 class	prot	direct	while	right
 class	prot	outer	and	right
-class	prot	outer	any	wrong
+class	prot	outer	any	right
 class	prot	outer	collect	right
 class	prot	outer	dinH	wrong
 class	prot	outer	dinS	wrong
@@ -1538,7 +1538,7 @@ class	prot	selfsend	toDo	right
 class	prot	selfsend	value	wrong
 class	prot	selfsend	while	right
 class	protArm	direct	and	right
-class	protArm	direct	any	wrong
+class	protArm	direct	any	right
 class	protArm	direct	collect	right
 class	protArm	direct	dinH	erlc
 class	protArm	direct	dinS	erlc
@@ -1556,7 +1556,7 @@ class	protArm	direct	toDo	right
 class	protArm	direct	value	wrong
 class	protArm	direct	while	right
 class	protArm	outer	and	right
-class	protArm	outer	any	wrong
+class	protArm	outer	any	right
 class	protArm	outer	collect	right
 class	protArm	outer	dinH	wrong
 class	protArm	outer	dinS	wrong
@@ -1732,7 +1732,7 @@ class	top	local	times	right
 class	top	local	toDo	right
 class	top	local	while	right
 class	top	outer	and	right
-class	top	outer	any	wrong
+class	top	outer	any	right
 class	top	outer	collect	right
 class	top	outer	dinH	right
 class	top	outer	dinS	right
@@ -1794,7 +1794,7 @@ class	val	outer	toDo	wrong
 class	val	outer	value	wrong
 class	val	outer	while	wrong
 value	arm	direct	and	right
-value	arm	direct	any	wrong
+value	arm	direct	any	right
 value	arm	direct	collect	right
 value	arm	direct	dinH	wrong
 value	arm	direct	dinS	wrong
@@ -1812,7 +1812,7 @@ value	arm	direct	toDo	right
 value	arm	direct	value	wrong
 value	arm	direct	while	right
 value	arm	outer	and	right
-value	arm	outer	any	wrong
+value	arm	outer	any	right
 value	arm	outer	collect	right
 value	arm	outer	dinH	wrong
 value	arm	outer	dinS	wrong
@@ -1888,7 +1888,7 @@ value	armIter	outer	toDo	right
 value	armIter	outer	value	wrong
 value	armIter	outer	while	right
 value	armLoop	outer	and	right
-value	armLoop	outer	any	wrong
+value	armLoop	outer	any	right
 value	armLoop	outer	collect	right
 value	armLoop	outer	dinH	wrong
 value	armLoop	outer	dinS	wrong
@@ -1906,7 +1906,7 @@ value	armLoop	outer	toDo	right
 value	armLoop	outer	value	erlc
 value	armLoop	outer	while	right
 value	armNL	direct	and	right
-value	armNL	direct	any	wrong
+value	armNL	direct	any	right
 value	armNL	direct	collect	right
 value	armNL	direct	dinH	wrong
 value	armNL	direct	dinS	wrong
@@ -1924,7 +1924,7 @@ value	armNL	direct	toDo	right
 value	armNL	direct	value	wrong
 value	armNL	direct	while	right
 value	armNL	outer	and	right
-value	armNL	outer	any	wrong
+value	armNL	outer	any	right
 value	armNL	outer	collect	right
 value	armNL	outer	dinH	wrong
 value	armNL	outer	dinS	wrong
@@ -2003,7 +2003,7 @@ value	ensBlk	direct	toDo	right
 value	ensBlk	direct	value	wrong
 value	ensBlk	direct	while	right
 value	ensBlk	outer	and	right
-value	ensBlk	outer	any	wrong
+value	ensBlk	outer	any	right
 value	ensBlk	outer	collect	right
 value	ensBlk	outer	dinH	wrong
 value	ensBlk	outer	dinS	wrong
@@ -2021,7 +2021,7 @@ value	ensBlk	outer	toDo	right
 value	ensBlk	outer	value	wrong
 value	ensBlk	outer	while	right
 value	handler	direct	and	right
-value	handler	direct	any	wrong
+value	handler	direct	any	right
 value	handler	direct	collect	right
 value	handler	direct	dinH	wrong
 value	handler	direct	dinS	wrong
@@ -2039,7 +2039,7 @@ value	handler	direct	toDo	right
 value	handler	direct	value	wrong
 value	handler	direct	while	right
 value	handler	outer	and	right
-value	handler	outer	any	wrong
+value	handler	outer	any	right
 value	handler	outer	collect	right
 value	handler	outer	dinH	wrong
 value	handler	outer	dinS	wrong
@@ -2169,7 +2169,7 @@ value	iterIter	outer	toDo	right
 value	iterIter	outer	value	wrong
 value	iterIter	outer	while	right
 value	loop	direct	and	right
-value	loop	direct	any	wrong
+value	loop	direct	any	right
 value	loop	direct	collect	right
 value	loop	direct	dinH	wrong
 value	loop	direct	dinS	wrong
@@ -2187,7 +2187,7 @@ value	loop	direct	toDo	right
 value	loop	direct	value	erlc
 value	loop	direct	while	right
 value	loop	outer	and	right
-value	loop	outer	any	wrong
+value	loop	outer	any	right
 value	loop	outer	collect	right
 value	loop	outer	dinH	wrong
 value	loop	outer	dinS	wrong
@@ -2213,7 +2213,7 @@ value	loop	selfsend	toDo	right
 value	loop	selfsend	value	wrong
 value	loop	selfsend	while	right
 value	prot	direct	and	right
-value	prot	direct	any	wrong
+value	prot	direct	any	right
 value	prot	direct	collect	right
 value	prot	direct	dinH	wrong
 value	prot	direct	dinS	wrong
@@ -2231,7 +2231,7 @@ value	prot	direct	toDo	right
 value	prot	direct	value	wrong
 value	prot	direct	while	right
 value	prot	outer	and	right
-value	prot	outer	any	wrong
+value	prot	outer	any	right
 value	prot	outer	collect	right
 value	prot	outer	dinH	wrong
 value	prot	outer	dinS	wrong
@@ -2257,7 +2257,7 @@ value	prot	selfsend	toDo	right
 value	prot	selfsend	value	wrong
 value	prot	selfsend	while	right
 value	protArm	direct	and	right
-value	protArm	direct	any	wrong
+value	protArm	direct	any	right
 value	protArm	direct	collect	right
 value	protArm	direct	dinH	erlc
 value	protArm	direct	dinS	erlc
@@ -2275,7 +2275,7 @@ value	protArm	direct	toDo	right
 value	protArm	direct	value	wrong
 value	protArm	direct	while	right
 value	protArm	outer	and	right
-value	protArm	outer	any	wrong
+value	protArm	outer	any	right
 value	protArm	outer	collect	right
 value	protArm	outer	dinH	wrong
 value	protArm	outer	dinS	wrong
@@ -2420,7 +2420,7 @@ value	top	local	toDo	right
 value	top	local	value	right
 value	top	local	while	right
 value	top	outer	and	right
-value	top	outer	any	wrong
+value	top	outer	any	right
 value	top	outer	collect	right
 value	top	outer	dinH	right
 value	top	outer	dinS	right
@@ -2486,7 +2486,7 @@ actor	protIterArm	outer	and	right
 actor	armIterIter	outer	and	right
 actor	armProtArm	outer	and	right
 actor	armProtIter	outer	any	right
-actor	protIterArm	outer	any	wrong
+actor	protIterArm	outer	any	right
 actor	armIterIter	outer	any	right
 actor	armProtArm	outer	any	right
 actor	armProtIter	outer	collect	right
@@ -2558,9 +2558,9 @@ class	protIterArm	outer	and	right
 class	armIterIter	outer	and	right
 class	armProtArm	outer	and	right
 class	armProtIter	outer	any	right
-class	protIterArm	outer	any	wrong
+class	protIterArm	outer	any	right
 class	armIterIter	outer	any	right
-class	armProtArm	outer	any	wrong
+class	armProtArm	outer	any	right
 class	armProtIter	outer	collect	right
 class	protIterArm	outer	collect	right
 class	armIterIter	outer	collect	right
@@ -2629,10 +2629,10 @@ value	armProtIter	outer	and	right
 value	protIterArm	outer	and	right
 value	armIterIter	outer	and	right
 value	armProtArm	outer	and	right
-value	armProtIter	outer	any	wrong
-value	protIterArm	outer	any	wrong
+value	armProtIter	outer	any	right
+value	protIterArm	outer	any	right
 value	armIterIter	outer	any	right
-value	armProtArm	outer	any	wrong
+value	armProtArm	outer	any	right
 value	armProtIter	outer	collect	right
 value	protIterArm	outer	collect	right
 value	armIterIter	outer	collect	right

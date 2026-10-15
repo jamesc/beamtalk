@@ -397,7 +397,6 @@ const ALLOW_SET: &[Allowed] = &[
             CountedLoop,
             ListOp,
             DetectIfNoneSearch,
-            Satisfy,
             Enumeration,
             IfTrue,
             IfNil,
@@ -632,7 +631,7 @@ const fn deny(
 /// Never add a row for a shape an existing test shows answering right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Class], &[Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
     deny(None, None, None, None, None, None, &[ValueType], &[Satisfy, Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
@@ -765,14 +764,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
     right(Enumeration, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(Satisfy, DoBody, Arm, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, DoBody, DoBody, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, DoBody, DoBody, [true, true, true, false, false], 2, Actor),
-    right(Satisfy, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Actor),
-    right(Satisfy, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, Class),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Class),
     right(DetectIfNone, DoBody, Arm, [true, true, true, false, true], 2, Class),
@@ -801,11 +792,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Class),
     right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Class),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Class),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, Class),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, Class),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
     right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
@@ -826,11 +812,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
     right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, false], 1, ValueType),
-    right(Satisfy, CountedLoopBody, CountedLoopBody, [true, true, false, false, true], 1, ValueType),
-    right(Satisfy, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
 ];
 
 /// Whether `ADR0131_MEASURE_BYPASS_PHASE0` bypasses the Phase 0 position
@@ -875,7 +856,7 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// `producer_body_arg_index`. [`DENY_SET`] does not judge them any more, except
 /// in a `[...] value` body (still unfinished) or past two nested blocks, where
 /// the chain is unmeasured, and in the REPL.
-const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo];
+const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy];
 
 /// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
 /// described by the position and holds only frames the producer lowers: at

@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `anySatisfy:` and `allSatisfy:` are local-threading
+// producers (`producer_body_arg_index`) like `do:`, so at an operand site of a
+// REPL input they answer their boolean and keep the writes their block made.
+// A satisfy test that is the statement or an assignment's whole value keeps the
+// REPL's own lowering.
+
+t := 0
+// => 0
+
+(#(1, 2) anySatisfy: [:x | t := t + x. false]) printString
+// => false
+
+t
+// => 3
+
+(#(1, 2) allSatisfy: [:x | t := t + x. true]) printString
+// => true
+
+t
+// => 6
+
+#[t, #(1, 2) anySatisfy: [:x | t := t + x. false], t]
+// => #[6, false, 9]
+
+r := #(1, 2) allSatisfy: [:x | t := t + x. true]
+// => true
+
+t
+// => 12

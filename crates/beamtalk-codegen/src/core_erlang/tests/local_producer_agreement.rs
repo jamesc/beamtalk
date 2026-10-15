@@ -52,6 +52,8 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]",
     "#{#a => 1, #b => 2} doWithKey: [:k :w | t := t + w]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
+    // BT-3841: the satisfy tests are producers (they answer their boolean).
+    "#(1, 2) allSatisfy: [:x | t := t + 1. true]",
     "#(1, 2) select: [:x | t := t + 1. true]",
     "#(1, 2) detect: [:x | t := t + 1. x > 1]",
     "[s < 2] whileFalse: [s := s + 1. t := t + 1]",
@@ -346,6 +348,10 @@ pub(super) const FRAMES: &[&str] = &[
     // another loop.
     "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | {s}]",
     "#{#a => 1, #b => 2} doWithKey: [:k :w | {s}]",
+    // ... and so are the satisfy tests.
+    "#(1, 2) anySatisfy: [:k | {s}. false]",
+    "#(1, 2) allSatisfy: [:k | {s}. true]",
+    "#(1, 2) do: [:k | #(1) anySatisfy: [:i | {s}. false]]",
     "#(1, 2) do: [:k | #{#a => 1} keysAndValuesDo: [:kk :w | {s}]]",
     "#{#a => 1} keysAndValuesDo: [:k :w | 1 to: 2 do: [:i | {s}]]",
     "#{#a => 1} doWithKey: [:k :w | true ifTrue: [{s}]]",

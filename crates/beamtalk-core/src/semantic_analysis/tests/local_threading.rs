@@ -1401,15 +1401,9 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "dsb"),
     ("actor", "armProtIter", "outer", "ewi"),
     ("actor", "armProtIter", "outer", "value"),
-    ("value", "armIterIter", "outer", "any"),
-    ("actor", "armProtIter", "outer", "any"),
-    ("actor", "armIterIter", "outer", "any"),
-    ("actor", "armProtArm", "outer", "any"),
     ("actor", "armProtArm", "outer", "dsb"),
     ("actor", "armProtArm", "outer", "ewi"),
     ("actor", "armProtArm", "outer", "value"),
-    ("class", "armProtIter", "outer", "any"),
-    ("class", "armIterIter", "outer", "any"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
@@ -1630,15 +1624,14 @@ fn adr0131_phase0_summary_is_checked_in() {
     );
 }
 
-/// BT-3841 review: `RIGHT_STATEMENTS` rows match the block depth exactly (the
-/// matrix nests at most two blocks, and three for the `three-deep` roles), and
-/// the unfinished families (`anySatisfy:`, `detect:ifNone:`, the enumerations,
-/// `keysAndValuesDo:`, a block `value`) are rejected past depth two unless a row
-/// names the exact shape. This arm in a protected body in a `do:` body (depth
-/// 3) answers 4 in a class and an actor method and raises `bad argument` in a
-/// value-type method, measured on a BEAM; the coarse rows used to accept it in
-/// the value-type method, which is now rejected. Depth four stays rejected for
-/// the unfinished families in every context.
+/// BT-3841 review: the unfinished families (`detect:ifNone:`, the enumerations,
+/// a block `value`; `anySatisfy:` and the keyed iterations were here until their
+/// producers landed) are rejected past depth two unless a row names the exact
+/// shape. An `eachWithIndex:` in an arm in a protected body in a `do:` body
+/// (depth 3) is unmeasured and stays rejected in a value-type method, as does
+/// depth four in every context. (This chain used to be accepted for
+/// `anySatisfy:` by the coarse rows and raised `bad argument` in a value-type
+/// method, measured on a BEAM; the producer now answers 4 in all three.)
 #[test]
 fn unfinished_families_are_rejected_past_the_measured_depth() {
     let header = |context: &str| match context {
@@ -1654,12 +1647,12 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
             .fold(String::new(), |acc, l| acc + "    " + l + "\n");
         format!("{}{lines}", header(context))
     };
-    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]\nt";
+    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]] on: Error do: [:e | 0]]\nt";
     assert!(
         !adr0131_diagnostics(&source("value", depth3)).is_empty(),
-        "the value-type depth-3 shape raises on a BEAM and must be rejected"
+        "the value-type depth-3 shape is unmeasured and must be rejected"
     );
-    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]]\nt";
+    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]] on: Error do: [:e | 0]]]\nt";
     for context in ["class", "value", "actor"] {
         assert!(
             !adr0131_diagnostics(&source(context, depth4)).is_empty(),
@@ -1695,7 +1688,7 @@ fn unmeasured_three_deep_chains_stay_rejected() {
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]]]\nt",
+                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]]\nt",
             ),
         ),
     ] {

@@ -614,6 +614,16 @@ reports the same message at the same span. No operation is surface-specific.
   return the write. An unknown receiver compiles and is guarded at run time
   (`beamtalk_map:pairs_for_threading/2` raises a structured `type_error` for a
   tagged map or a non-map). The REPL display is unchanged.
+- **`anySatisfy:` / `allSatisfy:` as producers (ADR 0131, BT-3841 PR 3).**
+  The satisfy tests joined the producer table, so one whose block writes an
+  outer local is accepted, and keeps its writes, as a statement, as an operand
+  and in an arm, protected body, handler or loop body (up to two nested blocks,
+  in a class, value-type or actor method) instead of reporting
+  `UnmigratedLocalThreading`; inside a `[...] value` body, a closure, past two
+  nested blocks and in the REPL the previous verdict stands. Only errors are
+  removed (CLI, REPL eval and load, LSP, MCP, all from the analyser). Run-time
+  semantics, unchanged for actors and now the same in class and value-type
+  methods: a block that writes runs for every element (no early exit).
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

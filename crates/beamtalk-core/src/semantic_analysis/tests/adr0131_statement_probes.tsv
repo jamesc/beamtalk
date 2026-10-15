@@ -423,7 +423,7 @@ actor	ensBlk	outer	toDo	ok
 actor	ensBlk	outer	value	bad
 actor	ensBlk	outer	while	ok
 actor	handler	direct	and	ok
-actor	handler	direct	any	bad
+actor	handler	direct	any	ok
 actor	handler	direct	collect	ok
 actor	handler	direct	dinH	bad
 actor	handler	direct	dinS	bad
@@ -477,7 +477,7 @@ actor	handler	local	toDo	gap
 actor	handler	local	value	gap
 actor	handler	local	while	gap
 actor	handler	outer	and	ok
-actor	handler	outer	any	bad
+actor	handler	outer	any	ok
 actor	handler	outer	collect	ok
 actor	handler	outer	dinH	bad
 actor	handler	outer	dinS	bad
@@ -715,7 +715,7 @@ actor	loop	cvarOuter	toDo	ok
 actor	loop	cvarOuter	value	bad
 actor	loop	cvarOuter	while	ok
 actor	loop	direct	and	ok
-actor	loop	direct	any	bad
+actor	loop	direct	any	ok
 actor	loop	direct	collect	ok
 actor	loop	direct	dinH	bad
 actor	loop	direct	dinS	bad
@@ -769,7 +769,7 @@ actor	loop	local	toDo	gap
 actor	loop	local	value	gap
 actor	loop	local	while	gap
 actor	loop	outer	and	ok
-actor	loop	outer	any	bad
+actor	loop	outer	any	ok
 actor	loop	outer	collect	ok
 actor	loop	outer	dinH	bad
 actor	loop	outer	dinS	bad
@@ -811,7 +811,7 @@ actor	prot	cvarOuter	toDo	ok
 actor	prot	cvarOuter	value	bad
 actor	prot	cvarOuter	while	ok
 actor	prot	direct	and	ok
-actor	prot	direct	any	bad
+actor	prot	direct	any	ok
 actor	prot	direct	collect	ok
 actor	prot	direct	dinH	bad
 actor	prot	direct	dinS	bad
@@ -865,7 +865,7 @@ actor	prot	local	toDo	gap
 actor	prot	local	value	gap
 actor	prot	local	while	gap
 actor	prot	outer	and	ok
-actor	prot	outer	any	bad
+actor	prot	outer	any	ok
 actor	prot	outer	collect	ok
 actor	prot	outer	dinH	bad
 actor	prot	outer	dinS	bad
@@ -891,7 +891,7 @@ actor	prot	selfsend	toDo	ok
 actor	prot	selfsend	value	bad
 actor	prot	selfsend	while	ok
 actor	protArm	direct	and	ok
-actor	protArm	direct	any	bad
+actor	protArm	direct	any	ok
 actor	protArm	direct	collect	ok
 actor	protArm	direct	dinH	bad
 actor	protArm	direct	dinS	bad
@@ -945,7 +945,7 @@ actor	protArm	local	toDo	gap
 actor	protArm	local	value	gap
 actor	protArm	local	while	gap
 actor	protArm	outer	and	ok
-actor	protArm	outer	any	bad
+actor	protArm	outer	any	ok
 actor	protArm	outer	collect	ok
 actor	protArm	outer	dinH	bad
 actor	protArm	outer	dinS	bad
@@ -1035,7 +1035,7 @@ actor	protLast	outer	toDo	ok
 actor	protLast	outer	value	bad
 actor	protLast	outer	while	ok
 actor	timesC	direct	and	ok
-actor	timesC	direct	any	bad
+actor	timesC	direct	any	ok
 actor	timesC	direct	collect	ok
 actor	timesC	direct	dinH	bad
 actor	timesC	direct	dinS	bad
@@ -1089,7 +1089,7 @@ actor	timesC	local	toDo	gap
 actor	timesC	local	value	gap
 actor	timesC	local	while	gap
 actor	timesC	outer	and	ok
-actor	timesC	outer	any	bad
+actor	timesC	outer	any	ok
 actor	timesC	outer	collect	ok
 actor	timesC	outer	dinH	bad
 actor	timesC	outer	dinS	bad
@@ -1123,7 +1123,7 @@ actor	toDoC	cvarOuter	toDo	ok
 actor	toDoC	cvarOuter	value	bad
 actor	toDoC	cvarOuter	while	ok
 actor	toDoC	direct	and	ok
-actor	toDoC	direct	any	bad
+actor	toDoC	direct	any	ok
 actor	toDoC	direct	collect	ok
 actor	toDoC	direct	dinH	bad
 actor	toDoC	direct	dinS	bad
@@ -1177,7 +1177,7 @@ actor	toDoC	local	toDo	gap
 actor	toDoC	local	value	gap
 actor	toDoC	local	while	gap
 actor	toDoC	outer	and	ok
-actor	toDoC	outer	any	bad
+actor	toDoC	outer	any	ok
 actor	toDoC	outer	collect	ok
 actor	toDoC	outer	dinH	bad
 actor	toDoC	outer	dinS	bad
@@ -1351,7 +1351,7 @@ class	arm	cvarOuter	toDo	ok
 class	arm	cvarOuter	value	bad
 class	arm	cvarOuter	while	ok
 class	arm	direct	and	ok
-class	arm	direct	any	bad
+class	arm	direct	any	ok
 class	arm	direct	collect	ok
 class	arm	direct	dinH	bad
 class	arm	direct	dinS	bad
@@ -1405,7 +1405,7 @@ class	arm	local	toDo	gap
 class	arm	local	value	gap
 class	arm	local	while	gap
 class	arm	outer	and	ok
-class	arm	outer	any	bad
+class	arm	outer	any	ok
 class	arm	outer	collect	ok
 class	arm	outer	dinH	bad
 class	arm	outer	dinS	bad
@@ -1449,7 +1449,7 @@ class	armAnd	local	toDo	gap
 class	armAnd	local	value	gap
 class	armAnd	local	while	gap
 class	armAnd	outer	and	ok
-class	armAnd	outer	any	bad
+class	armAnd	outer	any	ok
 class	armAnd	outer	collect	ok
 class	armAnd	outer	dinH	bad
 class	armAnd	outer	dinS	bad
@@ -1557,7 +1557,7 @@ class	armLoop	local	toDo	gap
 class	armLoop	local	value	gap
 class	armLoop	local	while	gap
 class	armLoop	outer	and	ok
-class	armLoop	outer	any	bad
+class	armLoop	outer	any	ok
 class	armLoop	outer	collect	ok
 class	armLoop	outer	dinH	bad
 class	armLoop	outer	dinS	bad
@@ -1575,7 +1575,7 @@ class	armLoop	outer	toDo	ok
 class	armLoop	outer	value	bad
 class	armLoop	outer	while	ok
 class	armNL	direct	and	ok
-class	armNL	direct	any	bad
+class	armNL	direct	any	ok
 class	armNL	direct	collect	ok
 class	armNL	direct	dinH	bad
 class	armNL	direct	dinS	bad
@@ -1629,7 +1629,7 @@ class	armNL	local	toDo	gap
 class	armNL	local	value	gap
 class	armNL	local	while	gap
 class	armNL	outer	and	ok
-class	armNL	outer	any	bad
+class	armNL	outer	any	ok
 class	armNL	outer	collect	ok
 class	armNL	outer	dinH	bad
 class	armNL	outer	dinS	bad
@@ -1665,7 +1665,7 @@ class	armNil	local	toDo	gap
 class	armNil	local	value	gap
 class	armNil	local	while	gap
 class	armNil	outer	and	ok
-class	armNil	outer	any	bad
+class	armNil	outer	any	ok
 class	armNil	outer	collect	ok
 class	armNil	outer	dinH	bad
 class	armNil	outer	dinS	bad
@@ -1701,7 +1701,7 @@ class	armTF	local	toDo	gap
 class	armTF	local	value	gap
 class	armTF	local	while	gap
 class	armTF	outer	and	ok
-class	armTF	outer	any	bad
+class	armTF	outer	any	ok
 class	armTF	outer	collect	ok
 class	armTF	outer	dinH	bad
 class	armTF	outer	dinS	bad
@@ -1809,7 +1809,7 @@ class	ens	local	toDo	gap
 class	ens	local	value	gap
 class	ens	local	while	gap
 class	ens	outer	and	ok
-class	ens	outer	any	bad
+class	ens	outer	any	ok
 class	ens	outer	collect	ok
 class	ens	outer	dinH	bad
 class	ens	outer	dinS	bad
@@ -1935,7 +1935,7 @@ class	ensLast	outer	toDo	ok
 class	ensLast	outer	value	bad
 class	ensLast	outer	while	ok
 class	handler	direct	and	ok
-class	handler	direct	any	bad
+class	handler	direct	any	ok
 class	handler	direct	collect	ok
 class	handler	direct	dinH	bad
 class	handler	direct	dinS	bad
@@ -1989,7 +1989,7 @@ class	handler	local	toDo	gap
 class	handler	local	value	gap
 class	handler	local	while	gap
 class	handler	outer	and	ok
-class	handler	outer	any	bad
+class	handler	outer	any	ok
 class	handler	outer	collect	ok
 class	handler	outer	dinH	bad
 class	handler	outer	dinS	bad
@@ -2227,7 +2227,7 @@ class	loop	cvarOuter	toDo	ok
 class	loop	cvarOuter	value	bad
 class	loop	cvarOuter	while	ok
 class	loop	direct	and	ok
-class	loop	direct	any	bad
+class	loop	direct	any	ok
 class	loop	direct	collect	ok
 class	loop	direct	dinH	bad
 class	loop	direct	dinS	bad
@@ -2281,7 +2281,7 @@ class	loop	local	toDo	gap
 class	loop	local	value	gap
 class	loop	local	while	gap
 class	loop	outer	and	ok
-class	loop	outer	any	bad
+class	loop	outer	any	ok
 class	loop	outer	collect	ok
 class	loop	outer	dinH	bad
 class	loop	outer	dinS	bad
@@ -2323,7 +2323,7 @@ class	prot	cvarOuter	toDo	ok
 class	prot	cvarOuter	value	bad
 class	prot	cvarOuter	while	ok
 class	prot	direct	and	ok
-class	prot	direct	any	bad
+class	prot	direct	any	ok
 class	prot	direct	collect	ok
 class	prot	direct	dinH	bad
 class	prot	direct	dinS	bad
@@ -2377,7 +2377,7 @@ class	prot	local	toDo	gap
 class	prot	local	value	gap
 class	prot	local	while	gap
 class	prot	outer	and	ok
-class	prot	outer	any	bad
+class	prot	outer	any	ok
 class	prot	outer	collect	ok
 class	prot	outer	dinH	bad
 class	prot	outer	dinS	bad
@@ -2403,7 +2403,7 @@ class	prot	selfsend	toDo	ok
 class	prot	selfsend	value	bad
 class	prot	selfsend	while	ok
 class	protArm	direct	and	ok
-class	protArm	direct	any	bad
+class	protArm	direct	any	ok
 class	protArm	direct	collect	ok
 class	protArm	direct	dinH	bad
 class	protArm	direct	dinS	bad
@@ -2457,7 +2457,7 @@ class	protArm	local	toDo	gap
 class	protArm	local	value	gap
 class	protArm	local	while	gap
 class	protArm	outer	and	ok
-class	protArm	outer	any	bad
+class	protArm	outer	any	ok
 class	protArm	outer	collect	ok
 class	protArm	outer	dinH	bad
 class	protArm	outer	dinS	bad
@@ -2749,7 +2749,7 @@ class	top	local	toDo	ok
 class	top	local	value	gap
 class	top	local	while	ok
 class	top	outer	and	ok
-class	top	outer	any	bad
+class	top	outer	any	ok
 class	top	outer	collect	ok
 class	top	outer	dinH	ok
 class	top	outer	dinS	ok
@@ -3009,7 +3009,7 @@ repl	val	outer	toDo	ok
 repl	val	outer	value	ok
 repl	val	outer	while	ok
 value	arm	direct	and	ok
-value	arm	direct	any	bad
+value	arm	direct	any	ok
 value	arm	direct	collect	ok
 value	arm	direct	dinH	bad
 value	arm	direct	dinS	bad
@@ -3063,7 +3063,7 @@ value	arm	local	toDo	gap
 value	arm	local	value	gap
 value	arm	local	while	gap
 value	arm	outer	and	ok
-value	arm	outer	any	bad
+value	arm	outer	any	ok
 value	arm	outer	collect	ok
 value	arm	outer	dinH	bad
 value	arm	outer	dinS	bad
@@ -3179,7 +3179,7 @@ value	armLoop	local	toDo	gap
 value	armLoop	local	value	gap
 value	armLoop	local	while	gap
 value	armLoop	outer	and	ok
-value	armLoop	outer	any	bad
+value	armLoop	outer	any	ok
 value	armLoop	outer	collect	ok
 value	armLoop	outer	dinH	bad
 value	armLoop	outer	dinS	bad
@@ -3197,7 +3197,7 @@ value	armLoop	outer	toDo	ok
 value	armLoop	outer	value	bad
 value	armLoop	outer	while	ok
 value	armNL	direct	and	ok
-value	armNL	direct	any	bad
+value	armNL	direct	any	ok
 value	armNL	direct	collect	ok
 value	armNL	direct	dinH	bad
 value	armNL	direct	dinS	bad
@@ -3251,7 +3251,7 @@ value	armNL	local	toDo	gap
 value	armNL	local	value	gap
 value	armNL	local	while	gap
 value	armNL	outer	and	ok
-value	armNL	outer	any	bad
+value	armNL	outer	any	ok
 value	armNL	outer	collect	ok
 value	armNL	outer	dinH	bad
 value	armNL	outer	dinS	bad
@@ -3395,7 +3395,7 @@ value	ensBlk	local	toDo	gap
 value	ensBlk	local	value	gap
 value	ensBlk	local	while	gap
 value	ensBlk	outer	and	ok
-value	ensBlk	outer	any	bad
+value	ensBlk	outer	any	ok
 value	ensBlk	outer	collect	ok
 value	ensBlk	outer	dinH	bad
 value	ensBlk	outer	dinS	bad
@@ -3413,7 +3413,7 @@ value	ensBlk	outer	toDo	ok
 value	ensBlk	outer	value	bad
 value	ensBlk	outer	while	ok
 value	handler	direct	and	ok
-value	handler	direct	any	bad
+value	handler	direct	any	ok
 value	handler	direct	collect	ok
 value	handler	direct	dinH	bad
 value	handler	direct	dinS	bad
@@ -3467,7 +3467,7 @@ value	handler	local	toDo	gap
 value	handler	local	value	gap
 value	handler	local	while	gap
 value	handler	outer	and	ok
-value	handler	outer	any	bad
+value	handler	outer	any	ok
 value	handler	outer	collect	ok
 value	handler	outer	dinH	bad
 value	handler	outer	dinS	bad
@@ -3673,7 +3673,7 @@ value	iterIter	outer	toDo	ok
 value	iterIter	outer	value	bad
 value	iterIter	outer	while	ok
 value	loop	direct	and	ok
-value	loop	direct	any	bad
+value	loop	direct	any	ok
 value	loop	direct	collect	ok
 value	loop	direct	dinH	bad
 value	loop	direct	dinS	bad
@@ -3727,7 +3727,7 @@ value	loop	local	toDo	gap
 value	loop	local	value	gap
 value	loop	local	while	gap
 value	loop	outer	and	ok
-value	loop	outer	any	bad
+value	loop	outer	any	ok
 value	loop	outer	collect	ok
 value	loop	outer	dinH	bad
 value	loop	outer	dinS	bad
@@ -3753,7 +3753,7 @@ value	loop	selfsend	toDo	ok
 value	loop	selfsend	value	bad
 value	loop	selfsend	while	ok
 value	prot	direct	and	ok
-value	prot	direct	any	bad
+value	prot	direct	any	ok
 value	prot	direct	collect	ok
 value	prot	direct	dinH	bad
 value	prot	direct	dinS	bad
@@ -3807,7 +3807,7 @@ value	prot	local	toDo	gap
 value	prot	local	value	gap
 value	prot	local	while	gap
 value	prot	outer	and	ok
-value	prot	outer	any	bad
+value	prot	outer	any	ok
 value	prot	outer	collect	ok
 value	prot	outer	dinH	bad
 value	prot	outer	dinS	bad
@@ -3833,7 +3833,7 @@ value	prot	selfsend	toDo	ok
 value	prot	selfsend	value	bad
 value	prot	selfsend	while	ok
 value	protArm	direct	and	ok
-value	protArm	direct	any	bad
+value	protArm	direct	any	ok
 value	protArm	direct	collect	ok
 value	protArm	direct	dinH	bad
 value	protArm	direct	dinS	bad
@@ -3887,7 +3887,7 @@ value	protArm	local	toDo	gap
 value	protArm	local	value	gap
 value	protArm	local	while	gap
 value	protArm	outer	and	ok
-value	protArm	outer	any	bad
+value	protArm	outer	any	ok
 value	protArm	outer	collect	ok
 value	protArm	outer	dinH	bad
 value	protArm	outer	dinS	bad
@@ -4147,7 +4147,7 @@ value	top	local	toDo	ok
 value	top	local	value	ok
 value	top	local	while	ok
 value	top	outer	and	ok
-value	top	outer	any	bad
+value	top	outer	any	ok
 value	top	outer	collect	ok
 value	top	outer	dinH	ok
 value	top	outer	dinS	ok
@@ -4320,10 +4320,10 @@ actor	armProtIter	outer	and	ok
 actor	protIterArm	outer	and	ok
 actor	armIterIter	outer	and	ok
 actor	armProtArm	outer	and	ok
-actor	armProtIter	outer	any	over
-actor	protIterArm	outer	any	bad
-actor	armIterIter	outer	any	over
-actor	armProtArm	outer	any	over
+actor	armProtIter	outer	any	ok
+actor	protIterArm	outer	any	ok
+actor	armIterIter	outer	any	ok
+actor	armProtArm	outer	any	ok
 actor	armProtIter	outer	collect	ok
 actor	protIterArm	outer	collect	ok
 actor	armIterIter	outer	collect	ok
@@ -4464,10 +4464,10 @@ class	armProtIter	outer	and	ok
 class	protIterArm	outer	and	ok
 class	armIterIter	outer	and	ok
 class	armProtArm	outer	and	ok
-class	armProtIter	outer	any	over
-class	protIterArm	outer	any	bad
-class	armIterIter	outer	any	over
-class	armProtArm	outer	any	bad
+class	armProtIter	outer	any	ok
+class	protIterArm	outer	any	ok
+class	armIterIter	outer	any	ok
+class	armProtArm	outer	any	ok
 class	armProtIter	outer	collect	ok
 class	protIterArm	outer	collect	ok
 class	armIterIter	outer	collect	ok
@@ -4608,10 +4608,10 @@ value	armProtIter	outer	and	ok
 value	protIterArm	outer	and	ok
 value	armIterIter	outer	and	ok
 value	armProtArm	outer	and	ok
-value	armProtIter	outer	any	bad
-value	protIterArm	outer	any	bad
-value	armIterIter	outer	any	over
-value	armProtArm	outer	any	bad
+value	armProtIter	outer	any	ok
+value	protIterArm	outer	any	ok
+value	armIterIter	outer	any	ok
+value	armProtArm	outer	any	ok
 value	armProtIter	outer	collect	ok
 value	protIterArm	outer	collect	ok
 value	armIterIter	outer	collect	ok
