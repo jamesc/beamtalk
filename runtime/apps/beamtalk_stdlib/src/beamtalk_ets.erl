@@ -72,6 +72,9 @@ Ets objects are represented as tagged maps:
 %% the exported name matches the Beamtalk selector.
 -export([at/2]).
 
+%% Opt-out of the FFI proxy's ok/error -> Result coercion: Ets returns user data.
+-export([beamtalk_ffi_raw_results/0]).
+
 %% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
 -export([new/2, named/1, exists/1, newOrExisting/2]).
 
@@ -252,13 +255,9 @@ insert(_Self, _Key, _Value) ->
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
-    %% Only the lookup is protected: a `try ... of` body is outside the catch, so a
-    %% `badarg` raised by the user's Block is not misreported as a stale table.
-    try ets:lookup(TableName, Key) of
+    case guarded(TableName, 'at:ifAbsent:', fun() -> ets:lookup(TableName, Key) end) of
         [{_K, Value} | _] -> Value;
-        [] -> Block()
-    catch
-        error:badarg -> stale_table_error('lookupIfAbsent:key:block:', TableName)
+        [] -> call_block(Block, [], 'at:ifAbsent:')
     end;
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Third argument must be a Block">>);
@@ -341,6 +340,15 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
+
+-doc """
+Marker read by `beamtalk_erlang_proxy:coerce_ffi_result/2`: results of this
+module are user data and must reach Beamtalk unchanged (a stored `#ok` stays
+`#ok`, not `Result ok: nil`). No function here signals failure through an
+`ok`/`{error, _}` return, so nothing relies on the coercion.
+""".
+-spec beamtalk_ffi_raw_results() -> true.
+beamtalk_ffi_raw_results() -> true.
 
 %%% ============================================================================
 %%% Bulk Reads, Conditional Lookup and Atomic Updates (BT-3831)
@@ -430,19 +438,12 @@ Atomically add N to the integer stored at Key (missing key starts at 0) via
 -spec incrementAt(t(), Key :: term(), integer()) -> integer().
 incrementAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, N) when is_integer(N) ->
     require_unique_keys(TableName, 'at:increment:'),
-    try
-        ets:update_counter(TableName, Key, {2, N}, {Key, 0})
-    catch
-        error:badarg ->
-            case ets:whereis(TableName) of
-                undefined ->
-                    stale_table_error('at:increment:', TableName);
-                _ ->
-                    beamtalk_error:raise_type_error(
-                        'Ets', 'at:increment:', <<"Stored value must be an Integer">>
-                    )
-            end
-    end;
+    guarded(
+        TableName,
+        'at:increment:',
+        fun() -> ets:update_counter(TableName, Key, {2, N}, {Key, 0}) end,
+        <<"Stored value must be an Integer">>
+    );
 incrementAt(#{'$beamtalk_class' := 'Ets'}, _Key, _N) ->
     beamtalk_error:raise_type_error(
         'Ets', 'at:increment:', <<"Increment must be an Integer">>
@@ -475,6 +476,16 @@ updateAt(_Self, _Key, _Block) ->
         'Ets', 'at:update:', <<"Receiver must be an Ets instance">>
     ).
 
+-doc """
+Yield the scheduler before retrying a lost compare-and-swap, so a writer that
+keeps losing on a hot key gives the winners room to finish. The retry bound is
+unchanged.
+""".
+-spec retry_update(atom(), term(), function(), pos_integer()) -> term().
+retry_update(TableName, Key, Block, Retries) ->
+    erlang:yield(),
+    update_loop(TableName, Key, Block, Retries - 1).
+
 -spec update_loop(atom(), term(), function(), non_neg_integer()) -> term().
 update_loop(TableName, Key, _Block, 0) ->
     beamtalk_error:raise(
@@ -497,7 +508,7 @@ update_loop(TableName, Key, Block, Retries) ->
                 guarded(TableName, 'at:update:', fun() -> ets:insert_new(TableName, {Key, New}) end)
             of
                 true -> New;
-                false -> update_loop(TableName, Key, Block, Retries - 1)
+                false -> retry_update(TableName, Key, Block, Retries)
             end;
         [{StoredKey, Old}] ->
             New = call_block(Block, [Old], 'at:update:'),
@@ -513,7 +524,7 @@ update_loop(TableName, Key, Block, Retries) ->
             ],
             case guarded(TableName, 'at:update:', fun() -> ets:select_replace(TableName, MS) end) of
                 1 -> New;
-                0 -> update_loop(TableName, Key, Block, Retries - 1)
+                0 -> retry_update(TableName, Key, Block, Retries)
             end
     end.
 
@@ -525,6 +536,11 @@ the operation under a different key).
 """.
 -spec guarded(atom(), atom(), fun(() -> term())) -> term().
 guarded(TableName, Selector, Fun) ->
+    guarded(TableName, Selector, Fun, <<"ETS operation rejected its arguments">>).
+
+-doc "As `guarded/3`, with the message used for a `type_error` when the table is not stale.".
+-spec guarded(atom(), atom(), fun(() -> term()), binary()) -> term().
+guarded(TableName, Selector, Fun, BadArgMessage) ->
     %% bt-catcher-audit: not-applicable-no-block - Fun is always an internal ETS operation
     %% closure built in this module, never a Beamtalk block.
     try
@@ -535,9 +551,7 @@ guarded(TableName, Selector, Fun) ->
                 undefined ->
                     stale_table_error(Selector, TableName);
                 _ ->
-                    beamtalk_error:raise_type_error(
-                        'Ets', Selector, <<"ETS operation rejected its arguments">>
-                    )
+                    beamtalk_error:raise_type_error('Ets', Selector, BadArgMessage)
             end
     end.
 

@@ -756,10 +756,28 @@ charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
 coerce_ffi_result(Module, Result) ->
     case is_beamtalk_module(Module) of
         true ->
-            coerce_result_no_charlist(Result);
+            case returns_raw_results(Module) of
+                true -> Result;
+                false -> coerce_result_no_charlist(Result)
+            end;
         false ->
             coerce_result(coerce_charlist_result(Result))
     end.
+
+-doc """
+Opt-out marker for Beamtalk-owned modules whose functions return **user data**.
+
+A module that exports `beamtalk_ffi_raw_results/0` (returning `true`) has its
+results passed through unchanged: no ADR 0076 `ok`/`{ok, _}`/`{error, _}` →
+`Result` coercion. `Ets` needs this because a stored or computed value such as
+`#ok` must come back as `#ok`, not as `Result ok: nil`. Only modules whose
+functions never signal success or failure through `ok`/`{error, _}` returns may
+opt out, since opting out also removes the coercion for their own returns.
+""".
+-spec returns_raw_results(atom()) -> boolean().
+returns_raw_results(Module) ->
+    erlang:function_exported(Module, beamtalk_ffi_raw_results, 0) andalso
+        Module:beamtalk_ffi_raw_results() =:= true.
 
 -doc """
 Like coerce_result/1 but skips charlist coercion on inner values and does not
