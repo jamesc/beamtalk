@@ -204,8 +204,10 @@ fn test_codegen_compiles(case_name: &str) {
 
     let (module_name, core_erlang) = generate_core_erlang(case_name);
 
-    // Write to temp file
-    let temp_dir = std::env::temp_dir();
+    // Write to a unique per-test temp dir so parallel runs never collide.
+    // Dropping `scratch` removes the directory (including any .beam output).
+    let scratch = tempfile::TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = scratch.path().to_path_buf();
     let core_file = temp_dir.join(format!("{}.core", module_name));
     fs::write(&core_file, &core_erlang)
         .unwrap_or_else(|e| panic!("Failed to write temp file: {}", e));
@@ -217,11 +219,6 @@ fn test_codegen_compiles(case_name: &str) {
         .current_dir(&temp_dir)
         .output()
         .expect("Failed to run erlc");
-
-    // Clean up
-    let _ = fs::remove_file(&core_file);
-    let beam_file = temp_dir.join(format!("{}.beam", module_name));
-    let _ = fs::remove_file(&beam_file);
 
     // Check result
     assert!(
