@@ -241,8 +241,10 @@ TestCase subclass: EtsTest
     self assert: (self.table at: "missing" ifAbsent: [#ok]) equals: #ok
     self assert: (self.table at: "missing" update: [:o | #ok]) equals: #ok
 
-  testIfAbsentBlockRunsOnceWhenItRaises =>
-    // BT-3836: an error raised by the block propagates; the block is not re-run.
+  testIfAbsentBlockErrorPropagatesWithoutRerun =>
+    // An error raised by the block propagates and the block is not re-run. The
+    // raw-badarg retry path (BT-3836) cannot be reached from a compiled block, so
+    // it is covered by the EUnit test bt3836_if_absent_block_badarg_runs_once_test.
     self.table at: "n" put: 0
     self
       should: [
