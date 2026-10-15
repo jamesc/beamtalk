@@ -1770,6 +1770,14 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
         for src in [in_class(&selfsend), in_value(&selfsend)] {
             assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
         }
+        // A class-variable write in the block is written in place (ADR 0130),
+        // not threaded, so a class method accepts it too.
+        let cvar = format!("t := 0\ne := 3\ne {sel} [:k :v | self.n := self.n + v]\nt");
+        let diags = adr0131_diagnostics(&in_class(&cvar));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+            "{cvar}: {diags:?}"
+        );
         let selfrecv = format!("t := 0\nself {sel} [:k :v | self plain]\nt");
         for src in [in_class(&selfrecv), in_value(&selfrecv)] {
             assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
