@@ -33,7 +33,10 @@ Value subclass: Adr0131KeyedDoValue
 
   keysUsed =>
     t := 0
-    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + (k =:= #a ifTrue: [10] ifFalse: [v])]
+    #{
+      #a => 1,
+      #b => 2
+    } keysAndValuesDo: [:k :v | t := t + (k =:= #a ifTrue: [10] ifFalse: [v])]
     t
 
   inArm: c =>
@@ -43,7 +46,9 @@ Value subclass: Adr0131KeyedDoValue
 
   inArmElse: c =>
     t := 0
-    c ifTrue: [t := 100] ifFalse: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
     t
 
   inDo =>
@@ -64,12 +69,18 @@ Value subclass: Adr0131KeyedDoValue
   inWhile =>
     t := 0
     i := 0
-    [i < 2] whileTrue: [i := i + 1. #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+      ]
     t
 
   inOnDo =>
     t := 0
-    [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]] on: Error do: [:e | 0]
+    [
+      #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    ] on: Error do: [:e | 0]
     t
 
   inEnsure =>
@@ -79,17 +90,27 @@ Value subclass: Adr0131KeyedDoValue
 
   inHandler =>
     t := 0
-    [Error signal: "x"] on: Error do: [:e | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    [
+      Error signal: "x"
+    ] on: Error do: [:e |
+      #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    ]
     t
 
   nested =>
     t := 0
-    #{#x => 10} keysAndValuesDo: [:k2 :v2 | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v + v2]]
+    #{
+      #x => 10
+    } keysAndValuesDo: [:k2 :v2 |
+      #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v + v2]
+    ]
     t
 
   inArmInDo: c =>
     t := 0
-    #(1, 2) do: [:z | c ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]]
+    #(1, 2) do: [:z |
+      c ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    ]
     t
 
   returnInArm: c =>
