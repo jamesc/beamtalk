@@ -858,6 +858,19 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// the chain is unmeasured, and in the REPL.
 const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy];
 
+/// The kinds lowered only where the fold is measured right: `detect:ifNone:`
+/// (its search block or its handler writing an outer local) in a class or
+/// value-type method. In an actor method the same folds still answer wrong or
+/// fail to compile in nested positions and stay with [`DENY_SET`].
+const LOWERED_CLASS_VALUE_KINDS: &[ConstructKind] = &[DetectIfNone, DetectIfNoneSearch];
+
+/// Whether `kind` is lowered as a producer in `context`.
+fn lowered_in(kind: ConstructKind, context: MethodContext) -> bool {
+    context != Repl
+        && (LOWERED_KINDS.contains(&kind)
+            || (matches!(context, Class | ValueType) && LOWERED_CLASS_VALUE_KINDS.contains(&kind)))
+}
+
 /// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
 /// described by the position and holds only frames the producer lowers: at
 /// most two nested blocks, none of them an evaluated block or a closure
@@ -883,7 +896,7 @@ fn lowered_chain(position: Position) -> bool {
 
 /// What the coarse rows say about a statement, before the measured carve-outs.
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-    if context != Repl && LOWERED_KINDS.contains(&kind) && lowered_chain(position) {
+    if lowered_in(kind, context) && lowered_chain(position) {
         return true;
     }
     if let Position::NestedStatement { depth, .. } = position {

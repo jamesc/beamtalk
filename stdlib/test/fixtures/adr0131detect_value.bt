@@ -1,0 +1,766 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `detect:ifNone:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131detect_test.bt. The block runs up to and including
+// the first element that decides the answer (BT-3805), so a decisive first
+// element leaves the later elements' writes undone. `c` is the condition of
+// the arm shapes.
+
+Value subclass: Adr0131DetectValue
+  field: n = 0
+
+  topHit =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    t
+
+  inArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmElseHit: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inDoHit =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inToDoHit =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inTimesHit =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inWhileHit =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inOnDoHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] ensure: [nil]
+    t
+
+  inHandlerHit =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmInDoHit: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                true
+              ]
+              ifNone: [
+                t := t + 100
+                0
+              ]
+          ]
+      ]
+    t
+
+  returnInArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  assignedHit =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    #[r, t]
+
+  topMiss =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        false
+      ]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    t
+
+  inArmMiss: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmElseMiss: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inDoMiss =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inToDoMiss =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inTimesMiss =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inWhileMiss =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inOnDoMiss =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          false
+        ]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureMiss =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          false
+        ]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] ensure: [nil]
+    t
+
+  inHandlerMiss =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmInDoMiss: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                false
+              ]
+              ifNone: [
+                t := t + 100
+                0
+              ]
+          ]
+      ]
+    t
+
+  returnInArmMiss: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  assignedMiss =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        false
+      ]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    #[r, t]
+
+  topSearch =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+      ifNone: [0]
+    t
+
+  inArmSearch: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inArmElseSearch: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inDoSearch =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inToDoSearch =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inTimesSearch =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inWhileSearch =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inOnDoSearch =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+        ifNone: [0]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureSearch =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+        ifNone: [0]
+    ] ensure: [nil]
+    t
+
+  inHandlerSearch =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  inArmInDoSearch: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                v > 1
+              ]
+              ifNone: [0]
+          ]
+      ]
+    t
+
+  returnInArmSearch: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+          ifNone: [0]
+      ]
+    t
+
+  assignedSearch =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+      ifNone: [0]
+    #[r, t]
+
+  topHandler =>
+    t := 0
+    #(1, 2)
+      detect: [:v | v > 5]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    t
+
+  inArmHandler: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmElseHandler: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inDoHandler =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inToDoHandler =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inTimesHandler =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inWhileHandler =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inOnDoHandler =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v | v > 5]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureHandler =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v | v > 5]
+        ifNone: [
+          t := t + 100
+          0
+        ]
+    ] ensure: [nil]
+    t
+
+  inHandlerHandler =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  inArmInDoHandler: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v | v > 5]
+              ifNone: [
+                t := t + 100
+                0
+              ]
+          ]
+      ]
+    t
+
+  returnInArmHandler: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v | v > 5]
+          ifNone: [
+            t := t + 100
+            0
+          ]
+      ]
+    t
+
+  assignedHandler =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v | v > 5]
+      ifNone: [
+        t := t + 100
+        0
+      ]
+    #[r, t]

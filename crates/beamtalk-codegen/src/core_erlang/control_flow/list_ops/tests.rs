@@ -605,9 +605,9 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
 
 #[test]
 fn test_any_satisfy_with_field_mutation_threads_state() {
-    // anySatisfy: with a field mutation in its body cannot short-circuit
-    // (mutations must run for every element), so it uses lists:foldl with a bool
-    // accumulator starting false.
+    // anySatisfy: with a field mutation in its body uses lists:foldl with a bool
+    // accumulator starting false (the state has to be threaded). The fold lambda
+    // skips the block once the accumulator is decided (BT-3805).
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items anySatisfy: [:item | self.count := self.count + 1. item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -621,6 +621,10 @@ fn test_any_satisfy_with_field_mutation_threads_state() {
     assert!(
         code.contains("maps':'put'('count'"),
         "anySatisfy: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+    assert!(
+        code.contains("case BoolAcc of <'true'> when 'true' ->"),
+        "anySatisfy: must skip the block once a match decided the answer. Got:\n{code}"
     );
 }
 
@@ -642,12 +646,16 @@ fn test_all_satisfy_with_field_mutation_threads_state() {
         code.contains("maps':'put'('count'"),
         "allSatisfy: body should update 'count' field via maps:put. Got:\n{code}"
     );
+    assert!(
+        code.contains("case BoolAcc of <'false'> when 'true' ->"),
+        "allSatisfy: must skip the block once a failure decided the answer. Got:\n{code}"
+    );
 }
 
 #[test]
 fn test_detect_with_field_mutation_threads_state() {
     // detect: with field mutation uses foldl with a {FoundItem, FoundFlag, State...}
-    // accumulator so that mutations execute for every element (no short-circuit).
+    // accumulator; the lambda skips the block once FoundFlag is true (BT-3805).
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0]\n";
     let code = codegen(src);
     assert!(
@@ -661,6 +669,10 @@ fn test_detect_with_field_mutation_threads_state() {
     assert!(
         code.contains("maps':'put'('count'"),
         "detect: body should update 'count' field via maps:put. Got:\n{code}"
+    );
+    assert!(
+        code.contains("case FoundFlag of <'true'> when 'true' ->"),
+        "detect: must skip the block once an element matched. Got:\n{code}"
     );
 }
 

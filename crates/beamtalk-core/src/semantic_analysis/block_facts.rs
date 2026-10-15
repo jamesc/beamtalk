@@ -2199,9 +2199,14 @@ pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> boo
 /// (ADR 0131 Phase 3b/3c, BT-3817/BT-3822) wherever the frame has a site for it.
 #[must_use]
 pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
-    if let Expression::MessageSend { selector, .. } = site.unwrap_parens() {
-        if matches!(selector.name().as_str(), "detect:" | "detect:ifNone:") {
-            return false;
+    // BT-3841: in an actor method a `detect:`/`detect:ifNone:` in a frame
+    // is measured wrong or fails to compile (the actor fold frames do not lower
+    // it); a class or value-type method lowers it.
+    if ctx.in_actor {
+        if let Expression::MessageSend { selector, .. } = site.unwrap_parens() {
+            if matches!(selector.name().as_str(), "detect:" | "detect:ifNone:") {
+                return false;
+            }
         }
     }
     // ADR 0131 Phase 3 (BT-3738) / Phase 3c (BT-3822): a conditional is a
