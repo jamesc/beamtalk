@@ -361,3 +361,117 @@ fn a_lookup_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
 fn a_lookup_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
     assert_lookup_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 3c (BT-3822): the same checks on conditional producers, at
+// the method root and as a statement of every loop and fold body frame mode
+// (a counted loop's letrec parameters, a `whileTrue:` loop, a `do:`/`collect:`
+// /`inject:into:` fold's tuple accumulator or an actor's `StateAcc`), where
+// the enclosing frame lowers the construct's `LocalRebind`s.
+// ---------------------------------------------------------------------------
+
+/// The §1a probe shape with a conditional as the right operand, at the method
+/// root and as a statement of each loop or fold frame.
+fn conditional_programs() -> Vec<String> {
+    let mut out = Vec::new();
+    for (frame, stmt) in [
+        (
+            "{s}",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "1 to: 2 do: [:i | {s}]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "#(1, 2) do: [:i | {s}]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "#(1, 2) collect: [:i | {s}. i]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "#(1, 2) inject: 0 into: [:a :i | {s}. a + i]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "[u < 2] whileTrue: [u := u + 1. {s}]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        (
+            "#(1, 2) do: [:i | 1 to: 2 do: [:j | {s}]]",
+            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
+        ),
+        // A statement-position conditional in each frame mode.
+        ("1 to: 2 do: [:i | {s}]", "(u < 3) ifTrue: [t := t + 1]"),
+        ("#(1, 2) do: [:i | {s}]", "(u < 3) ifTrue: [t := t + 1]"),
+    ] {
+        let body = format!(
+            "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
+            frame.replace("{s}", stmt)
+        );
+        out.push(format!(
+            "Object subclass: CondCorpusClass\n  class go =>\n{body}"
+        ));
+        out.push(format!("Value subclass: CondCorpusValue\n  go =>\n{body}"));
+        // An actor fold frame does not lower a value-bearing site through the
+        // producer (`is_actor_fold_value_site`), so the operand probe has no
+        // producer to break there; Phase 0 rejects it (see
+        // `local_producer_agreement_conditional.rs` for the statement forms).
+        if frame.contains("#(1, 2)") && stmt.starts_with("r := ") {
+            continue;
+        }
+        out.push(format!(
+            "Actor subclass: CondCorpusActor\n  state: n = 0\n\n  go =>\n{body}"
+        ));
+    }
+    out
+}
+
+fn assert_conditional_reports(fault: LocalRebindFault, error: &str) {
+    for src in conditional_programs() {
+        let Some(report) = verifier_report(&src, fault) else {
+            // A statement-position conditional has no sibling read to
+            // snapshot: the fault only applies to the operand probes.
+            assert!(
+                fault == LocalRebindFault::SkipSiblingSnapshot && !src.contains("r := t + "),
+                "{fault:?} compiled without a verifier report:\n{src}"
+            );
+            continue;
+        };
+        assert!(
+            report.contains(error),
+            "{fault:?} should be reported as {error}, got: {report}\n{src}"
+        );
+    }
+}
+
+#[test]
+fn the_unbroken_conditional_producer_compiles_in_every_frame() {
+    for src in conditional_programs() {
+        let code = codegen(&src);
+        assert!(
+            code.contains("'__local__t'") || code.contains("Tmp"),
+            "{src}\n{code}"
+        );
+    }
+}
+
+#[test]
+fn a_conditional_sibling_read_in_place_is_local_read_after_sibling_rebind() {
+    assert_conditional_reports(
+        LocalRebindFault::SkipSiblingSnapshot,
+        "LocalReadAfterSiblingRebind",
+    );
+}
+
+#[test]
+fn a_conditional_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
+    assert_conditional_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+}
+
+#[test]
+fn a_conditional_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
+    assert_conditional_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+}

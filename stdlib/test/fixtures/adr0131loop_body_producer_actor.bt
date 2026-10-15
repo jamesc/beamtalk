@@ -454,3 +454,36 @@ Actor subclass: Adr0131LoopBodyProducerActor
   bump =>
     self.n := self.n + 1
     self.n
+
+  // BT-3822 (ADR 0131 Phase 3c): a conditional in an actor fold body is a
+  // producer, so its arm is a frame and the loop in the arm is a frame site.
+  armLoopInFoldStatement =>
+    t := 0
+    #(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]
+    t
+
+  armLoopInFoldAssigned =>
+    t := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        k > 0
+          ifTrue: [
+            1
+              to: 2
+              do: [:i |
+                r := #(1, 2)
+                  inject: 0
+                  into: [:a :x |
+                    t := t + x
+                    a + x
+                  ]
+              ]
+          ]
+      ]
+    #[t, r]
+
+  whileInArmInToDo =>
+    s := 0
+    1 to: 3 do: [:i | i > 0 ifTrue: [[s < i] whileTrue: [s := s + 1]]]
+    s

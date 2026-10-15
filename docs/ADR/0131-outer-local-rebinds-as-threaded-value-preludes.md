@@ -19,6 +19,7 @@ Accepted (2026-10-08)
 | 2d | [BT-3798](https://linear.app/beamtalk/issue/BT-3798) | `Dictionary at:ifAbsent:` as a producer (a guarded inline lowering); retire the unreachable `OpaqueFold` construct | M | |
 | 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | |
 | 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | |
+| 3c | [BT-3822](https://linear.app/beamtalk/issue/BT-3822) | Conditionals as producers at loop/fold body statements; delete `direct_params_list_op_result`; flip `stLoopArm` | M | |
 | 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | |
 | 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; drop the allow-set diagnostic; flip every pin | S | |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, status → Implemented | S | |
@@ -393,6 +394,63 @@ correct, and the NLR 4-tuple's state slot carries what the method's catch
 needs (ADR 0041 §State-Carrying Non-Local Returns, unchanged). The
 `ThreadedLocalDropped` check below is defined on the fall-through path and
 ignores the throw path.
+
+**Phase 3c amendment (BT-3822): conditionals are producers in loop and fold
+frames.** `is_loop_body_producer_site` (`block_facts`) no longer excludes a
+conditional outside an arm: at a statement of a loop or fold body, a
+conditional that `conditional_producer_writes` names is a producer, exactly as
+an `on:do:`/`ensure:` is (Phase 3b). The one rule is read by the Phase 0
+check (`arm_frame_conditional_producer`) and by codegen
+(`with_body_producer_sites` → `is_producer_frame_for`). A `Dictionary` lookup
+stays a root/arm-frame producer only (§6). The invariant, for the versioned
+local after each scope kind:
+
+- *top-level statement / method root*: unchanged (Phase 3a).
+- *conditional arm*: the arm is a `BranchArm` frame; a nested conditional in
+  it is a producer and rebinds into the arm's seeded `StateAcc`.
+- *`Letrec` loop body* (`whileTrue:`/`timesRepeat:`/`to:do:`) and *`Foldl` loop
+  body* (`do:`/`collect:`/`inject:into:`/…): the conditional's construct tuple
+  carries every local its arms write; the body frame lowers one `LocalRebind`
+  per local by its mode (`LoopParam` for direct params / tuple accumulator,
+  `MapPut` for a `StateAcc` frame), and the loop's closing recursive call or
+  tuple reads the rebound identities, so a write in an arm reaches the next
+  iteration and the code after the loop.
+- *`on:do:`/`ensure:` arm*, *bare block*, *stored closure*: unchanged; a
+  conditional there is not a frame site, so the closure/escape rows decide.
+- *NLR boundary*: a `^` inside an arm skips the rebinds by design.
+
+A direct-params or tuple-acc loop or fold frame has no `StateAcc`, so a
+conditional producer there keeps a private scratch map (a fresh `maps:new()`
+seeded with the construct's own locals), as an `on:do:`/`ensure:` producer does
+(`conditional_has_private_scratch`); a `StateAcc` or hybrid frame continues its
+own map.
+
+**What Phase 3c deletes, and what it keeps.** The `direct_params_list_op_result`
+side channel and the list-op branches that fed it are deleted (a list op in a
+direct-params body is a producer, lowered with `with_cleared_direct_params_loop`).
+Three write-backs stay (BT-3833), each reachable from a program Phase 0 accepts today and
+none from a conditional in a loop or fold body (probed: removing each one
+silently dropped the write):
+
+- `push_control_flow_threaded_var_rereads` (and its helper
+  `rebind_threaded_vars_from_state`): the arm of a conditional that is not a
+  producer (it writes no outer local) whose nested loop or fold writes a local
+  *of that arm* (`adr0131cond_non_producer_test.bt`). Deleting it needs the arms
+  of every non-producer conditional to be `BranchArm` frames.
+- `lower_foldl_body`'s write-back of a non-producer nested list-op that writes a
+  local (`anySatisfy:` as a statement of a `do:` body).
+- the "control-flow-with-mutations" guard in `try_generate_block_local_plain_let`
+  and `generate_local_var_assignment_in_loop`'s unwrap: a construct that returns
+  `{Value, State}` but threads no outer local (an actor list-op that only sends to
+  `self`).
+
+The verifier obligation for the conditional producer is the existing
+`ThreadedLocalDropped` (a construct tuple whose local is not rebound), shown to
+fire for conditionals in every loop and fold frame mode by
+`local_rebind_verifier_corpus.rs`; the agreement tests
+(`local_producer_agreement_conditional.rs`) compare the core rule and codegen
+both ways for conditionals in every loop and fold frame, including the
+conditionals that are not producers.
 
 ### 3. Families are taken from context, not hard-coded
 

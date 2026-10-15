@@ -490,20 +490,23 @@ impl CoreErlangGenerator {
 
     /// Whether a conditional in `frame` is lowered as a local-threading
     /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
-    /// `frame` is the method root or a registered `BranchArm` frame
-    /// ([`Self::is_conditional_producer_frame`]), and it is not the REPL. The one
-    /// predicate for both the arm frames and the `LocalRebind`s.
+    /// `frame` is the method root or a registered frame (a `BranchArm`, or a loop
+    /// or fold body, where the conditional is one of the body's producer sites),
+    /// and it is not the REPL. The one predicate for both the arm frames and the
+    /// `LocalRebind`s.
     fn lowers_as_conditional_producer(&self, frame: FrameId, producer: bool) -> bool {
-        producer && self.is_conditional_producer_frame(frame) && !self.is_repl_mode()
+        producer
+            && (frame == FrameId::ROOT || self.rebind_frames.contains_key(&frame))
+            && !self.is_repl_mode()
     }
 
     /// The `BranchArm` frame the arms of a conditional producer are lowered
     /// as (ADR 0131 §2): the construct's seeded set, for a conditional
-    /// producer at the method root or in another conditional producer's arm (a
-    /// registered `BranchArm` frame). `producer` says whether the construct is
-    /// one ([`Self::conditional_producer_locals`]): a conditional the Phase 0
-    /// check does not name as a producer keeps the legacy arm, as do the arms of
-    /// a conditional in a loop or fold body and of the REPL
+    /// producer at the method root, in another conditional producer's arm (a
+    /// registered `BranchArm` frame) or in a loop or fold body (ADR 0131 Phase 3c).
+    /// `producer` says whether the construct is one
+    /// ([`Self::conditional_producer_locals`]): a conditional the Phase 0 check
+    /// does not name as a producer keeps the legacy arm, as do the arms in the REPL
     /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
     /// unpack their own tuples).
     pub(in crate::core_erlang::control_flow) fn conditional_arm_frame(
@@ -539,17 +542,31 @@ impl CoreErlangGenerator {
     /// threaded locals, and its locals come back through `LocalRebind`s. No
     /// `State` variable is referenced, because none exists there.
     ///
-    /// Not private: an actor instance method (`State` is an eligible family,
-    /// [`Self::eligible_families`]: element 2 *is* the next `State` version),
-    /// the REPL (its `State` is the bindings map), and a non-root frame of a
-    /// non-actor method (a loop body, whose own `StateAcc` the construct
-    /// continues: a loop or fold frame's consumer re-reads its own locals). A
-    /// conditional in a registered `BranchArm` frame is not at the method root
-    /// either, and continues the arm's `StateAcc`.
+    /// Not private: an actor instance method's root (`State` is an eligible
+    /// family, [`Self::eligible_families`]: element 2 *is* the next `State`
+    /// version), the REPL (its `State` is the bindings map), a `StateAcc` or
+    /// hybrid loop or fold frame (the construct continues the frame's own
+    /// `StateAcc`), and a registered `BranchArm` frame (it continues the arm's
+    /// `StateAcc`).
+    ///
+    /// ADR 0131 Phase 3c (BT-3822): also private in a direct-params or
+    /// tuple-acc loop or fold frame, whose body has no `StateAcc` (its locals
+    /// are the loop's parameters, `RebindFrameKind::extends_state_chain`):
+    /// there is no map to continue, exactly as for an `on:do:`/`ensure:`
+    /// producer in that frame (`exception_body_outer_state`).
     pub(in crate::core_erlang) fn conditional_has_private_scratch(&self, frame: FrameId) -> bool {
-        frame == FrameId::ROOT
-            && !self.is_repl_mode()
-            && !self.eligible_families().contains(&VersionPrefix::State)
+        if self.is_repl_mode() {
+            return false;
+        }
+        if frame == FrameId::ROOT {
+            return !self.eligible_families().contains(&VersionPrefix::State);
+        }
+        self.rebind_frames.get(&frame).is_some_and(|rebind| {
+            matches!(
+                rebind.kind,
+                RebindFrameKind::Loop(ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_))
+            )
+        })
     }
 
     /// Where a conditional producer in `frame` starts its scratch map.
@@ -595,15 +612,15 @@ impl CoreErlangGenerator {
     /// `[Statement(let CF = <case…> in), Bind(State_{n+1} ← element(2,
     /// CF))]`, value `element(1, CF)`.
     ///
-    /// ADR 0131 §1/§2 (Phase 3): at the method root or in a registered
-    /// `BranchArm` frame the prelude also carries one `LocalRebind` per local
-    /// the construct threads (`arms`' threaded set), lowered by that frame: the
-    /// construct is a local-threading producer. In a class or value-type method
-    /// the scratch map is private ([`Self::conditional_has_private_scratch`])
-    /// and there is no `State` `Bind`; in an actor instance method the `State`
-    /// `Bind` comes first and each rebind reads through it. In a loop or fold
-    /// frame the prelude is the legacy one: the frame's consumer re-reads its
-    /// own locals.
+    /// ADR 0131 §1/§2 (Phase 3, 3c): at the method root, in a registered
+    /// `BranchArm` frame or in a loop or fold body the prelude also carries one
+    /// `LocalRebind` per local the construct threads (`arms`' threaded set),
+    /// lowered by that frame: the construct is a local-threading producer. Where
+    /// the scratch map is private ([`Self::conditional_has_private_scratch`]:
+    /// the root of a class or value-type method, a direct-params or tuple-acc
+    /// frame) there is no `State` `Bind`; in an actor instance method the
+    /// `State` `Bind` comes first and each rebind reads through it. A
+    /// conditional that is not a producer gets the legacy prelude.
     ///
     /// `frame` MUST be captured by the caller via
     /// [`CoreErlangGenerator::current_frame`] BEFORE building `tuple_doc` —
@@ -632,9 +649,8 @@ impl CoreErlangGenerator {
             leaf::var(carrier.clone()),
             ")",
         ]);
-        // The method root and a registered `BranchArm` frame lower the
-        // construct's `LocalRebind`s; a loop or fold frame's consumer re-reads
-        // its own locals.
+        // The method root and a registered frame (a `BranchArm`, a loop or fold
+        // body) lower the construct's `LocalRebind`s.
         let rebinds_locals = self.lowers_as_conditional_producer(frame, producer);
         let locals = if rebinds_locals {
             self.branch_threaded_locals(arms)
@@ -676,8 +692,8 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         if self.conditional_has_private_scratch(frame) {
             return Err(CodeGenError::Internal(
-                "a match: or opaque-callable fold producer was reached at the root of a method \
-                 with no State family (ADR 0131 §3)"
+                "a match: or opaque-callable fold producer was reached in a frame with a \
+                 private scratch map (no State family to continue; ADR 0131 §3)"
                     .to_string(),
             ));
         }
@@ -1437,7 +1453,7 @@ impl CoreErlangGenerator {
         tail: ProducerTail,
     ) -> Result<Option<ThreadedValue>> {
         let expr = expr.unwrap_parens();
-        let root_producer_locals = if self.is_conditional_producer_frame(self.current_frame()) {
+        let root_producer_locals = if self.is_producer_frame_for(self.current_frame(), expr) {
             self.conditional_producer_locals(expr)
         } else {
             None
@@ -2772,6 +2788,15 @@ impl CoreErlangGenerator {
     /// one `Statement` (or none, if there are no threaded vars) to `stmts`.
     /// A rebind read is never itself a version mutation (Rule 1) — always a
     /// `Statement`, never a `Bind`.
+    ///
+    /// ADR 0131 Phase 3c (BT-3822): reached only from the legacy arm of a
+    /// conditional that is not a local-threading producer (it writes no outer
+    /// local, so no `BranchArm` frame is registered), whose nested loop or
+    /// fold writes a local *of that arm*; pinned by
+    /// `adr0131cond_non_producer_test.bt`. A conditional in a loop or fold
+    /// body that writes an outer local is a producer in that frame and never
+    /// gets here. Deleting this (BT-3833) needs the arms of every non-producer
+    /// conditional to be frames too (follow-up).
     fn push_control_flow_threaded_var_rereads(
         &mut self,
         source_expr: &Expression,

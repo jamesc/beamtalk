@@ -1440,11 +1440,10 @@ impl<'d> Walker<'d> {
 
     /// Whether `expr`, a conditional or `on:do:`/`ensure:` at a site of the
     /// innermost frame, is a local-threading producer in that frame: a
-    /// conditional ([`conditional_producer_writes`]) only in an arm of a
-    /// conditional or exception producer (`FrameSites::arm`), an `on:do:`/
-    /// `ensure:` ([`exception_producer_writes`]) in any threaded frame, a loop
-    /// or fold body included (ADR 0131 Phase 3b), at one of the statement's
-    /// sites.
+    /// conditional ([`conditional_producer_writes`]) or an `on:do:`/`ensure:`
+    /// ([`exception_producer_writes`]) in any threaded frame, a loop or fold
+    /// body included (ADR 0131 Phase 3b and 3c, BT-3817/BT-3822), at one of the
+    /// statement's sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
         let Some(kind) = self.root_method_kind() else {
             return false;
@@ -1453,14 +1452,10 @@ impl<'d> Walker<'d> {
         self.frame_sites
             .last()
             .and_then(Option::as_ref)
-            .is_some_and(|frame| frame.sites.contains(&expr.span()) && frame.arm)
-            && conditional_producer_writes(expr, &bound, kind).is_some()
-            || self
-                .frame_sites
-                .last()
-                .and_then(Option::as_ref)
-                .is_some_and(|frame| frame.sites.contains(&expr.span()))
-                && exception_producer_writes(expr, &bound, kind).is_some()
+            .is_some_and(|frame| frame.sites.contains(&expr.span()))
+            && is_loop_body_producer_site(expr, &self.loop_body_context())
+            && (conditional_producer_writes(expr, &bound, kind).is_some()
+                || exception_producer_writes(expr, &bound, kind).is_some())
     }
 
     /// The Phase 0 allow-set check for a construct at `position`.

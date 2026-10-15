@@ -139,4 +139,13 @@ TestCase subclass: Adr0131LoopBodyProducerTest
     self assert: ((Adr0131LoopBodyProducerActor spawn) stateChainDoOverParameter: #(1, 2)) equals: #[6, 9]
 
   testArmLoopInFoldStatement =>
-    self assert: #[Adr0131LoopBodyProducerClass armLoopInFoldStatement, (Adr0131LoopBodyProducerValue new) armLoopInFoldStatement] equals: #[4, 4]
+    self assert: #[Adr0131LoopBodyProducerClass armLoopInFoldStatement, (Adr0131LoopBodyProducerValue new) armLoopInFoldStatement, (Adr0131LoopBodyProducerActor spawn) armLoopInFoldStatement] equals: #[4, 4, 4]
+
+  testArmLoopInFoldAssignedActor =>
+    self assert: (Adr0131LoopBodyProducerActor spawn) armLoopInFoldAssigned equals: #[12, 3]
+
+  testWhileInArmInToDo =>
+    self assert: #[Adr0131LoopBodyProducerClass whileInArmInToDo, (Adr0131LoopBodyProducerValue new) whileInArmInToDo, (Adr0131LoopBodyProducerActor spawn) whileInArmInToDo] equals: #[3, 3, 3]
+
+  testConditionalAssignedInDoBody =>
+    self assert: #[Adr0131LoopBodyProducerClass conditionalAssignedInDoBody, (Adr0131LoopBodyProducerValue new) conditionalAssignedInDoBody] equals: #[#[1, 2], #[1, 2]]

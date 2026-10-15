@@ -165,64 +165,36 @@ impl CoreErlangGenerator {
             let (str_binding, str_result) =
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
-            if self.loop_mode.in_direct_params_loop {
-                // Skip StateAcc repack. Emit open let-chain so variable rebindings
-                // escape to the outer scope. Store the result var for the caller.
-                self.loop_mode.direct_params_list_op_result = Some(str_result);
-                docs.push(docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(safe_list_var),
-                    ") in let ",
-                    leaf::var(rev_list.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(fold_result),
-                    ") in let ",
-                    leaf::var(final_list.clone()),
-                    " = call 'lists':'reverse'(",
-                    leaf::var(rev_list),
-                    ") in ",
-                    str_binding.clone(),
-                    " in ",
-                    extract_doc,
-                ]);
-            } else {
-                // Re-pack into StateAcc for outer method-body `maps:get` extraction.
-                let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
-                docs.push(docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(safe_list_var),
-                    ") in let ",
-                    leaf::var(rev_list.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(fold_result),
-                    ") in let ",
-                    leaf::var(final_list.clone()),
-                    " = call 'lists':'reverse'(",
-                    leaf::var(rev_list),
-                    ") in ",
-                    str_binding.clone(),
-                    " in ",
-                    extract_doc,
-                    repack_doc,
-                    "{",
-                    leaf::var(str_result),
-                    ", ",
-                    leaf::var(stateacc),
-                    "}",
-                ]);
-            }
+            // Re-pack into StateAcc for outer method-body `maps:get` extraction.
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+            docs.push(docvec![
+                " in let ",
+                leaf::var(fold_result.clone()),
+                " = call 'lists':'foldl'(",
+                leaf::var(lambda_var),
+                ", ",
+                init_tuple_doc,
+                ", ",
+                leaf::var(safe_list_var),
+                ") in let ",
+                leaf::var(rev_list.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(fold_result),
+                ") in let ",
+                leaf::var(final_list.clone()),
+                " = call 'lists':'reverse'(",
+                leaf::var(rev_list),
+                ") in ",
+                str_binding.clone(),
+                " in ",
+                extract_doc,
+                repack_doc,
+                "{",
+                leaf::var(str_result),
+                ", ",
+                leaf::var(stateacc),
+                "}",
+            ]);
             return Ok(Document::Vec(docs));
         }
 

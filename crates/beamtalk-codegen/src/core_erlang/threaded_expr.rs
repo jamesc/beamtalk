@@ -701,8 +701,8 @@ impl CoreErlangGenerator {
 
     /// ADR 0131 Phase 3 (BT-3738): the threaded locals of the conditional
     /// `expr` (paren-unwrapped: `ifTrue:` … `ifNil:ifNotNil:`, `and:`/`or:`)
-    /// when it is a local-threading producer at the method root or in an arm
-    /// of another conditional producer, or `None`.
+    /// when it is a local-threading producer at the method root, in an arm
+    /// of another conditional producer or in a loop or fold body, or `None`.
     ///
     /// The codegen half of `beamtalk_core`'s `conditional_producer_writes`,
     /// which the Phase 0 check reads: every arm is a block literal
@@ -715,8 +715,8 @@ impl CoreErlangGenerator {
     /// answers for an operand site that writes a binding. The site set decides
     /// the frame: a method-root site, a method-body assignment's whole value or
     /// statement, or a statement of a conditional producer's arm
-    /// (`with_body_producer_sites` with `arm`); never a conditional nested in a
-    /// loop or fold body.
+    /// (`with_body_producer_sites` with `arm`), or a producer site of a loop or
+    /// fold body (`is_loop_body_producer_site`).
     pub(super) fn conditional_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
             conditional_arm_blocks, conditional_arms_lower_as_producer,
@@ -804,7 +804,8 @@ impl CoreErlangGenerator {
 
     /// Whether `expr` (paren-unwrapped) is an `on:do:`/`ensure:` that
     /// [`Self::threaded_expression`] lowers as a local-threading producer in the
-    /// frame being lowered: a method root or a registered `BranchArm` frame,
+    /// frame being lowered ([`Self::is_producer_frame_for`]: a method root, a
+    /// registered `BranchArm` frame, or a producer site of a loop or fold body),
     /// outside the REPL (whose root adopts the bindings map and lowers its
     /// constructs itself). The one predicate behind
     /// [`Self::threaded_expression`]'s exception hook and
@@ -822,9 +823,22 @@ impl CoreErlangGenerator {
     /// body's producer sites (`with_body_producer_sites`, the rule the Phase 0
     /// check reads).
     pub(super) fn is_exception_producer_frame(&self, frame: FrameId, expr: &Expression) -> bool {
+        self.is_producer_frame_for(frame, expr)
+    }
+
+    /// Whether `frame` lowers the rebinds of the conditional, `on:do:` or
+    /// `ensure:` `expr` as a local-threading producer: the method root, a
+    /// `BranchArm` frame ([`Self::is_conditional_producer_frame`]), or the
+    /// registered frame of a loop or fold body when `expr` is one of that
+    /// body's producer sites (`with_body_producer_sites`, the rule the Phase 0
+    /// check reads). ADR 0131 Phase 3c (BT-3822): the one frame rule for the
+    /// conditional and exception families.
+    pub(super) fn is_producer_frame_for(&self, frame: FrameId, expr: &Expression) -> bool {
         self.is_conditional_producer_frame(frame)
             || (self.rebind_frames.contains_key(&frame)
-                && self.local_producer_sites.contains(&expr.span()))
+                && self
+                    .local_producer_sites
+                    .contains(&expr.unwrap_parens().span()))
     }
 
     /// Whether `thread_ahead` has already spliced `expr` (paren-unwrapped) as a

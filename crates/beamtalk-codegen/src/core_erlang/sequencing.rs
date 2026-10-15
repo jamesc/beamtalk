@@ -230,7 +230,6 @@ impl CoreErlangGenerator {
     /// only has to be added here.
     pub(super) fn can_annotate_closed_expression(&self) -> bool {
         !self.loop_mode.direct_params_do_open_chain
-            && self.loop_mode.direct_params_list_op_result.is_none()
     }
 
     /// Removes every entry `scope` registered, once the parent compile

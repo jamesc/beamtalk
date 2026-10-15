@@ -11,7 +11,8 @@
 //   shapes compile since BT-3738, ADR 0131 Phase 3a; the `on:do:`/`ensure:`
 //   shapes are BT-3817.)
 //   (s2, `detect:ifNone:` whose handler writes, compiles since BT-3794; s1,
-//   `Dictionary at:ifAbsent:` whose handler writes, since BT-3798.)
+//   `Dictionary at:ifAbsent:` whose handler writes, since BT-3798; stLoopArm,
+//   a conditional in a loop body, since BT-3822, ADR 0131 Phase 3c.)
 //
 // BT-3745 (ADR 0131 Phase 0b) added every cell that crashed or answered wrong
 // (each now an ADR 0131 Phase 0 allow-set or §6 compile error, pinned by
@@ -43,9 +44,3 @@ TestCase subclass: Adr0131LocalRebindPendingTest
 
   testStBlockValueClass =>
     self assert: (Adr0131LocalRebindClassPending stBlockValue) equals: 1
-
-  testStLoopArmClass =>
-    self assert: (Adr0131LocalRebindClassPending stLoopArm) equals: 5
-
-  testStLoopArmValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stLoopArm) equals: 5

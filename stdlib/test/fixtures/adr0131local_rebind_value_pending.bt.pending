@@ -14,6 +14,9 @@
 //   (s1, `Dictionary at:ifAbsent:` whose handler writes, moved to the
 //   compiled fixture with BT-3798, ADR 0131 Phase 2d.)
 //
+// (stLoopArm, a conditional in a `whileTrue:` body, moved to the compiled
+// fixture with BT-3822, ADR 0131 Phase 3c.)
+//
 // Every method here is rejected by an ADR 0131 diagnostic today;
 // `adr0131_probe_matrix_pins` in beamtalk-core checks that.
 
@@ -40,14 +43,4 @@ Value subclass: Adr0131LocalRebindValuePending
   stKeysAndValuesDo =>
     t := 0
     #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
-    t
-
-  // A conditional in a `whileTrue:` body (erlc `unbound variable` before).
-  stLoopArm =>
-    t := 0
-    i := 0
-    [i < 2] whileTrue: [
-      i := i + 1
-      i > 1 ifTrue: [t := t + 5]
-    ]
     t
