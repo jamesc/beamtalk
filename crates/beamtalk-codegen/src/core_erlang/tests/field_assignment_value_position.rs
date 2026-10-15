@@ -52,6 +52,26 @@ fn send_argument_field_assignment_followed_by_state_read() {
     assert_compiles_through_erlc("test", &code);
 }
 
+/// BT-3819: `^super sel: <operand>` threaded its operand through a closed
+/// argument list (the early-return `SuperSend` arm skipped the sequencing the
+/// statement form has), tripping `StateEffectEscapesExpression` when the operand
+/// wrote a field. Statement, last-statement and `^` forms all sequence it.
+#[test]
+fn super_send_operand_with_field_write_is_sequenced_in_every_statement_form() {
+    for body in [
+        "r := super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])\n    r",
+        "^super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])",
+        "super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])\n    self.n",
+        "^super isKindOf: (self.n := 5)",
+    ] {
+        let src = format!(
+            "Actor subclass: SuperOperandProbe\n  state: n = 0\n\n  go: c =>\n    {body}\n"
+        );
+        let code = codegen(&src);
+        assert_compiles_through_erlc("test", &code);
+    }
+}
+
 /// A value position: a template over `EXPR`, a parenthesized field assignment.
 const POSITIONS: &[(&str, &str)] = &[
     ("self_send_arg", "self take: EXPR"),

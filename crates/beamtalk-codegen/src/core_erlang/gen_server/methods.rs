@@ -430,6 +430,30 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
+    /// BT-3814 / BT-3819: the one lowering of a `super` send's operands in a
+    /// method-body statement (`super take: (self bump)`, `^super take: (c
+    /// ifTrue: [self.n := 1 ...])`). Their state-effecting sub-expressions
+    /// thread ahead of the super dispatch into `stmts` (the sequencing rule),
+    /// so the dispatch reads the post-operand `State` and an operand's rebind
+    /// is not scoped away inside the dispatch's closed argument list. The
+    /// returned scope goes back to [`Self::finish_precompiled_scope`] once the
+    /// send itself is compiled.
+    fn thread_super_send_operands(
+        &mut self,
+        send: &Expression,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<PrecompiledScope> {
+        let operands: Vec<&Expression> = if let Expression::MessageSend { arguments, .. } = send {
+            arguments.iter().collect()
+        } else {
+            Vec::new()
+        };
+        let (operand_prelude, scope) =
+            self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
+        stmts.extend(operand_prelude);
+        Ok(scope)
+    }
+
     /// Classify a body expression for state-threading dispatch.
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
@@ -751,7 +775,11 @@ impl CoreErlangGenerator {
                     }
                     match value_kind {
                         BodyExprKind::SuperSend => {
+                            // BT-3819: `^super take: (c ifTrue: [self.n := 1. ...])`
+                            // sequences its operands like the statement form.
+                            let super_scope = self.thread_super_send_operands(value, &mut stmts)?;
                             let expr_str = self.expression_doc(value)?;
+                            self.finish_precompiled_scope(super_scope)?;
                             stmts.push(ThreadedStmt::Statement(
                                 docvec![
                                     "let _SuperTuple = ",
@@ -1611,15 +1639,7 @@ impl CoreErlangGenerator {
                     // statement shape here), so the dispatch reads the
                     // post-operand `State` and the operand's rebind is not
                     // scoped away inside the dispatch's argument list.
-                    let operands: Vec<&Expression> =
-                        if let Expression::MessageSend { arguments, .. } = expr {
-                            arguments.iter().collect()
-                        } else {
-                            Vec::new()
-                        };
-                    let (operand_prelude, super_scope) =
-                        self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
-                    stmts.extend(operand_prelude);
+                    let super_scope = self.thread_super_send_operands(expr, &mut stmts)?;
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
