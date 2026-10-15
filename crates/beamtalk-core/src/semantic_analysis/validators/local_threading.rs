@@ -632,7 +632,7 @@ const fn deny(
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
     deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
-    deny(None, None, None, None, None, None, &[ValueType], &[Satisfy, Enumeration, IfNil, AndOr]),
+    deny(None, None, None, None, None, None, &[ValueType], &[Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
@@ -1687,8 +1687,12 @@ impl<'d> Walker<'d> {
         let selector = construct.selector;
         // BT-3841: a keyed iteration on a statically non-`Dictionary` receiver
         // keeps the permanent §6 error whether its block writes an outer local
-        // or object state (a field, a class variable): the receiver's own
-        // method would run the block as a closure, which can return neither.
+        // or, in an actor instance method, object state (a field write or a
+        // self-send): the receiver's own method would run the block as a closure,
+        // which can return neither. Only an actor method inlines a state-only
+        // keyed block (`needs_mutation_threading` threads the actor `State`);
+        // a class or value-type method dispatches it normally, so there the
+        // block is accepted unless it writes an outer local.
         if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
             && self.receiver_is_not_dictionary(expr)
         {
@@ -1701,7 +1705,7 @@ impl<'d> Walker<'d> {
                 );
                 if !writes.is_empty() {
                     self.report_literal_with_hint(body, &selector, hint);
-                } else if touches_state(body, self.context == Class) {
+                } else if self.context == Actor && touches_state(body, false) {
                     self.report_state_literal(body, &selector, hint);
                 }
             }

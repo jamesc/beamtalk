@@ -1763,6 +1763,17 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
             of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
             "{field}: {diags:?}"
         );
+        // ... but only in an actor method, the one context that inlines a
+        // state-only keyed block: in a class or value-type method a self-send
+        // block on such a receiver dispatches normally and is accepted.
+        let selfsend = format!("t := 0\ne := 3\ne {sel} [:k :v | self plain]\nt");
+        for src in [in_class(&selfsend), in_value(&selfsend)] {
+            assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        }
+        let selfrecv = format!("t := 0\nself {sel} [:k :v | self plain]\nt");
+        for src in [in_class(&selfrecv), in_value(&selfrecv)] {
+            assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        }
         // A map literal and an unknown receiver are Dictionary-inline.
         for recv in ["#{#a => 1}", "d"] {
             let body = format!("t := 0\nd := #{{#a => 1}}\n{recv} {sel} [:k :v | t := t + v]\nt");
