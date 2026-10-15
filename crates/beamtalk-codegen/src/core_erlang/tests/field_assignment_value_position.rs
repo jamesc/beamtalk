@@ -806,3 +806,122 @@ fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+/// BT-3838 item 1: a parenthesised LAST value-type statement keeps its written form.
+///
+/// BT-3830 unwraps parentheses only on a non-last statement, because the last statement is the
+/// method's value: a bare last field assignment answers the updated `Self`, a parenthesised one
+/// answers the assignment's value (and `(t := t + 1)` answers `t + 1`). Both stay as written
+/// there, so this pins that they still compile with no verifier diagnostic, with and without a
+/// preceding `#(1) do: [:e | ^ e]` (a non-local return, whose tail returns
+/// `{Result, FinalSelf}`), and that a field write in them survives.
+#[test]
+fn parenthesised_last_statements_compile_with_and_without_a_non_local_return() {
+    let lasts = [
+        "(self.m := 5)",
+        "(t := t + 1)",
+        "(self.m := self.m + 1)",
+        "([t < 3] whileTrue: [t := t + 1])",
+        "(c ifTrue: [self.m := 1] ifFalse: [0])",
+    ];
+    let prefixes = ["", "#(1) do: [:e | ^ e].\n    "];
+    let mut problems = Vec::new();
+    let mut k = 0;
+    for prefix in prefixes {
+        for last in lasts {
+            let src = format!(
+                "{VT_HEADER}\n  probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {prefix}{last}\n"
+            );
+            match vt_outcome(&src) {
+                VtOutcome::Compiles(code) => {
+                    if let Err(why) = written_fields_survive(&src, k, &code) {
+                        problems.push(format!("{why}\n{src}"));
+                    }
+                }
+                VtOutcome::RejectedCleanly => {}
+                VtOutcome::Fails(why) => problems.push(format!("{why}\n{src}")),
+            }
+            k += 1;
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n\n"));
+}
+
+/// BT-3838 item 2: the actor / class-method counterpart of
+/// `parenthesised_non_last_statements_lower_exactly_like_their_bare_form`. A NON-last statement's
+/// value is discarded, so `(s)` must lower exactly like `s` in an `Actor subclass:` method and a
+/// class method too, not only in a value type.
+#[test]
+fn parenthesised_non_last_statements_lower_like_bare_in_actors_and_class_methods() {
+    const ACTOR: &str = "Actor subclass: ParenProbe
+  state: n = 0
+  state: m = 0
+";
+    const CLASS: &str = "Object subclass: ParenProbe
+  classState: n = 0
+  classState: m = 0
+";
+    let forms: &[&str] = &[
+        "self.m := 5",
+        "t := t + 1",
+        "c ifTrue: [self.m := 1] ifFalse: [0]",
+        "c ifTrue: [t := t + 1]",
+        "c ifTrue: [t := t + 1. self.m := 1] ifFalse: [0]",
+        "[self.m := 1] on: Error do: [:e | 0]",
+        "[self.m := 1. t := t + 1] on: Error do: [:e | 0]",
+        "[self.m := 1] ensure: [0]",
+        "#(1, 2) do: [:e | t := t + e]",
+        "#(1, 2) do: [:e | self.m := e]",
+        "1 to: 3 do: [:i | t := t + i]",
+        "[t < 3] whileTrue: [t := t + 1]",
+        "3 timesRepeat: [t := t + 1]",
+        "3 timesRepeat: [self.m := self.m + 1]",
+        "#(1, 2) inject: 0 into: [:a :e | t := t + e. a + e]",
+    ];
+    // The generated function for `probe{k}`, so source offsets elsewhere in the module do not
+    // make two spellings differ.
+    let lower = |header: &str, class_side: bool, k: usize, stmt: &str| -> Result<String, String> {
+        let sel = if class_side { "class " } else { "" };
+        let src = format!(
+            "{header}\n  {sel}probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {stmt}.\n    t + self.m\n"
+        );
+        match vt_outcome(&src) {
+            VtOutcome::Compiles(code) => {
+                let at = code
+                    .find(&format!("probe{k}'"))
+                    .ok_or_else(|| format!("no generated function for probe{k}\n{src}"))?;
+                // Actor methods are clauses of one `dispatch`: stop at the next clause.
+                let body = code[at..].split("\n'").next().unwrap_or("");
+                Ok(body
+                    .split("<OtherSelector>")
+                    .next()
+                    .unwrap_or("")
+                    .to_string())
+            }
+            VtOutcome::RejectedCleanly => Ok("rejected".to_string()),
+            VtOutcome::Fails(why) => Err(format!("{why}\n{src}")),
+        }
+    };
+    let mut problems = Vec::new();
+    for (name, header, class_side) in [("actor", ACTOR, false), ("class method", CLASS, true)] {
+        for (k, form) in forms.iter().enumerate() {
+            let bare = lower(header, class_side, k, form);
+            let paren = lower(header, class_side, k, &format!("({form})"));
+            // The same statement parenthesised inside a conditional arm (a non-last arm statement).
+            let arm_bare = lower(header, class_side, k, &format!("c ifTrue: [{form}. 0]"));
+            let arm_paren = lower(header, class_side, k, &format!("c ifTrue: [({form}). 0]"));
+            if arm_bare != arm_paren {
+                problems.push(format!(
+                    "{name} arm statement `{form}`:\n bare: {arm_bare:?}\n paren: {arm_paren:?}"
+                ));
+            }
+            match (&bare, &paren) {
+                (Ok(b), Ok(p)) if b == p => {}
+                _ => problems.push(format!(
+                    "{name} `{form}`:\n bare: {bare:?}\n paren: {paren:?}"
+                )),
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n\n"));
+}

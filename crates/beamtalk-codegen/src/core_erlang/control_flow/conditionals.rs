@@ -2052,6 +2052,13 @@ impl CoreErlangGenerator {
         let mut last_result: Option<ValueRef> = None;
 
         for (i, expr) in body.iter().enumerate() {
+            // BT-3838: a NON-last arm statement's value is discarded, so `(s)` is exactly `s`
+            // (see `lower_body_exprs_with_reply_in_sites`); the last one is the arm's value.
+            let expr = if i == body.len() - 1 {
+                expr
+            } else {
+                &expr.unwrap_parens()
+            };
             // Classified with the shared classifier just before the statement
             // is lowered, so a local bound earlier in this arm is live when a
             // catch boundary or loop in the statement is judged against the

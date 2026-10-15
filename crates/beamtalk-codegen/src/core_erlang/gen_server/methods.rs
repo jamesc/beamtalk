@@ -737,6 +737,18 @@ impl CoreErlangGenerator {
         let body_len = body.len();
 
         for (i, expr) in body.iter().enumerate() {
+            // BT-3838: INVARIANT - classification and emission see the same node (the
+            // value-type twin is BT-3830). `classify_body_expr` and most of its predicates
+            // do not look through parentheses, so a parenthesised statement was classified
+            // `Pure` while its bare form got a threading kind: `(t := t + 1)` dropped the
+            // local write. A NON-last statement's value is discarded, so `(s)` is exactly
+            // `s`: unwrap it once here, for every kind. The last statement is the method
+            // value, so it is left as written.
+            let expr = if i == body.len() - 1 {
+                expr
+            } else {
+                &expr.unwrap_parens()
+            };
             // Classified here, just before the statement is lowered, so the
             // locals bound by the statements before it are live in scope: a
             // loop's threaded set (`threaded_locals_of`) is decided against

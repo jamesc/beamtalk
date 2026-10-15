@@ -1181,6 +1181,17 @@ impl CoreErlangGenerator {
             return false;
         }
         match stmt.unwrap_parens() {
+            // BT-3838: a PARENTHESISED field assignment as the last statement
+            // (`(self.m := 5)`, the method's value is the assigned value, not the updated
+            // `Self`) is classified `Pure`, so no body kind owns it: it is a producer itself,
+            // exactly as in any other value position. (A bare one is `FieldAssignment`, and a
+            // non-last one is unwrapped by the body loop, so neither reaches this arm.)
+            inner @ Expression::Assignment { .. }
+                if matches!(stmt, Expression::Parenthesized { .. })
+                    && self.is_field_assignment(inner) =>
+            {
+                true
+            }
             Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
                 self.subexpr_has_field_write_producer(value)
             }
