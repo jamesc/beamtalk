@@ -196,24 +196,9 @@ impl CoreErlangGenerator {
             return Ok(());
         }
 
-        // Clear any pending list op result before generating the value.
-        self.loop_mode.direct_params_list_op_result = None;
         let value_code = self.expression_doc(value)?;
         if let Some(scope) = thread_scope {
             self.finish_precompiled_scope(scope)?;
-        }
-
-        if let Some(result_var) = self.loop_mode.direct_params_list_op_result.take() {
-            let new_var = self.fresh_temp_var(&canonical);
-            self.bind_var(&id.name, &new_var);
-            stmts.push(ThreadedStmt::Statement(value_code, span));
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
-                source,
-                op: BindOp::Direct(ValueRef::Var(result_var)),
-                span,
-            });
-            return Ok(());
         }
 
         let new_var = self.fresh_temp_var(&canonical);

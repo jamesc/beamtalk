@@ -362,3 +362,129 @@ fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
         "only {compiled} actor programs compiled and compared"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0131 Phase 3c (BT-3822): conditionals in loop and fold bodies
+// ---------------------------------------------------------------------------
+
+/// The loop and fold frames a conditional is a statement of (`{s}`): a counted
+/// loop, a `whileTrue:` loop, a fold of each accumulator shape, a loop in a
+/// fold and a fold in a loop (the innermost frame alone does not tell whether
+/// an actor fold encloses the site), and a closure and a protected body between
+/// a frame and the conditional, where no frame site exists.
+pub(super) const LOOP_BODY_FRAMES: &[&str] = &[
+    "1 to: 2 do: [:k | {s}]",
+    "2 timesRepeat: [{s}]",
+    "[s < 3] whileTrue: [s := s + 1. {s}]",
+    "#(1, 2) do: [:k | {s}]",
+    "#(1, 2) collect: [:k | {s}. k]",
+    "#(1, 2) inject: 0 into: [:a :k | {s}. a + k]",
+    "#(1, 2) do: [:k | 1 to: 2 do: [:i | {s}]]",
+    "1 to: 2 do: [:k | #(1, 2) do: [:i | {s}]]",
+    "#(1, 2) do: [:k | [:z | {s}] value: k]",
+    "#(1, 2) do: [:k | [{s}] on: Error do: [:e | nil]]",
+];
+
+/// Conditionals that write `t`, a cross-section of [`CONDITIONALS`] for the
+/// loop-body products, which multiply by every frame and statement shape.
+const LOOP_BODY_CONDITIONALS: &[&str] = &[
+    "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
+    "(s < 3) ifTrue: [t := t + 1]",
+    "(s < 3) and: [t := t + 1. true]",
+    "s ifNil: [t := t + 1. 2]",
+    "s ifNotNil: [:v | t := t + v. 2]",
+    "(s < 3) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]",
+    "(s < 3) ifTrue: [#(1, 2) do: [:x | t := t + x]]",
+    "(s < 3) ifTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]",
+    "(s < 3) ifTrue: [(s < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] ifFalse: [3]",
+    "(s < 3) ifTrue: [#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]]",
+    "(s < 3) ifTrue: [t := t + 1. ^t]",
+    "(s < 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
+];
+
+/// Both ways, for a conditional anywhere a loop or fold body statement can
+/// hold one (the statement, an assignment's value, an operand): the core rule's
+/// `is_loop_body_producer_site` + `conditional_producer_writes` name exactly
+/// the conditionals codegen lowers as local-threading producers in the loop
+/// frame, in class, value-type and actor methods.
+#[test]
+fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer() {
+    let mut checked = [0usize; 3];
+    for frame in LOOP_BODY_FRAMES {
+        for construct in LOOP_BODY_CONDITIONALS {
+            for statement in BODY_STATEMENTS {
+                for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
+                    checked[i] += check_conditional_agreement(src).unwrap_or(0);
+                }
+            }
+        }
+    }
+    assert!(
+        checked.iter().all(|&n| n > 150),
+        "loop-body conditional producer sites compared (class, value, actor): {checked:?}"
+    );
+}
+
+/// Conditionals that are not producers: their arms write no outer local and
+/// hold no loop or fold (a class or value-type counted loop whose body holds a
+/// non-producer conditional with a nested loop writing an arm-local fails the
+/// verifier on `main` as well (BT-3834), a pre-existing gap independent of
+/// conditionals-as-producers).
+const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
+    "(s < 3) ifTrue: [m := 0. m := m + 1. m] ifFalse: [0]",
+    "(s < 3) ifTrue: [m := 5. m]",
+    "s ifNil: [m := 1. m] ifNotNil: [:v | v]",
+    "s ifNotNil: [:v | m := v. m]",
+    "(s < 3) and: [m := 1. true]",
+    "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 1. m]]",
+    "(s < 3) ifTrue: [t] ifFalse: [u]",
+];
+
+/// Conditionals that are not producers, as a statement of every loop or fold
+/// body, in class, value-type and actor methods: Phase 0 accepts the program
+/// and codegen lowers the conditional by its statement lowering, never as a
+/// producer and never leaking its `{Value, StateAcc}` tuple (the program
+/// compiles and agrees with the rule).
+#[test]
+fn loop_body_conditionals_that_are_not_producers_agree_with_the_core_rule() {
+    let mut compiled = [0usize; 3];
+    for frame in LOOP_BODY_FRAMES {
+        for construct in LOOP_BODY_NON_PRODUCER_CONDITIONALS {
+            for statement in BODY_STATEMENTS
+                .iter()
+                .filter(|p| !p.contains("super") && !p.contains(".blk"))
+            {
+                for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
+                    compiled[i] += usize::from(check_conditional_agreement(src).is_some());
+                }
+            }
+        }
+    }
+    assert!(
+        compiled.iter().all(|&n| n >= 100),
+        "loop-body programs compiled and compared per context (class, value, actor): {compiled:?}"
+    );
+}
+
+/// The actor counterpart with field writes and self-sends in the arms (no outer
+/// local written by the conditional itself): not producers, and a loop or fold
+/// in the arm is lowered by the legacy rows, never by an arm frame.
+#[test]
+fn actor_loop_body_conditionals_that_are_not_producers_agree_with_the_core_rule() {
+    let mut compiled = 0;
+    for frame in LOOP_BODY_FRAMES {
+        for construct in ACTOR_NON_PRODUCER_CONDITIONALS {
+            for statement in BODY_STATEMENTS
+                .iter()
+                .filter(|p| !p.contains("super") && !p.contains(".blk"))
+            {
+                let [_, _, actor] = body_sources(frame, construct, statement);
+                compiled += usize::from(check_conditional_agreement(&actor).is_some());
+            }
+        }
+    }
+    assert!(
+        compiled >= 100,
+        "only {compiled} actor loop-body programs compiled and compared"
+    );
+}

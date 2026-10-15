@@ -315,3 +315,15 @@ Object subclass: Adr0131LocalRebindClass
       7
     ] on: Error do: [:e | 0]
     t
+
+  // BT-3822 (ADR 0131 Phase 3c): a conditional in a `whileTrue:` body is a
+  // local-threading producer in the loop frame (erlc `unbound variable` before).
+  class stLoopArm =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        i > 1 ifTrue: [t := t + 5]
+      ]
+    t

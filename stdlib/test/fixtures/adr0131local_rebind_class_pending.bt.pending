@@ -14,6 +14,9 @@
 //   (o3, o12, o13, s7, seqArg, seqRecv and the conditional-arm statement
 //   shapes moved to the compiled fixture with BT-3738, ADR 0131 Phase 3a.)
 //
+// (stLoopArm, a conditional in a `whileTrue:` body, moved to the compiled
+// fixture with BT-3822, ADR 0131 Phase 3c.)
+//
 // Every method here is rejected by an ADR 0131 diagnostic today;
 // `adr0131_probe_matrix_pins` in beamtalk-core checks that.
 
@@ -46,14 +49,4 @@ Object subclass: Adr0131LocalRebindClassPending
   class stBlockValue =>
     t := 0
     [t := t + 1] value
-    t
-
-  // A conditional in a `whileTrue:` body (erlc `unbound variable` before).
-  class stLoopArm =>
-    t := 0
-    i := 0
-    [i < 2] whileTrue: [
-      i := i + 1
-      i > 1 ifTrue: [t := t + 5]
-    ]
     t
