@@ -150,7 +150,7 @@ actor	armIter	outer	ewi	wrong
 actor	armIter	outer	ifNil	right
 actor	armIter	outer	ifTrue	right
 actor	armIter	outer	inject	right
-actor	armIter	outer	kv	wrong
+actor	armIter	outer	kv	right
 actor	armIter	outer	onDo	right
 actor	armIter	outer	times	right
 actor	armIter	outer	toDo	right
@@ -294,7 +294,7 @@ actor	coll	outer	ewi	wrong
 actor	coll	outer	ifNil	right
 actor	coll	outer	ifTrue	right
 actor	coll	outer	inject	right
-actor	coll	outer	kv	wrong
+actor	coll	outer	kv	right
 actor	coll	outer	onDo	right
 actor	coll	outer	times	right
 actor	coll	outer	toDo	right
@@ -348,7 +348,7 @@ actor	handler	direct	ewi	wrong
 actor	handler	direct	ifNil	right
 actor	handler	direct	ifTrue	right
 actor	handler	direct	inject	right
-actor	handler	direct	kv	wrong
+actor	handler	direct	kv	right
 actor	handler	direct	onDo	right
 actor	handler	direct	times	right
 actor	handler	direct	toDo	right
@@ -366,7 +366,7 @@ actor	handler	outer	ewi	wrong
 actor	handler	outer	ifNil	right
 actor	handler	outer	ifTrue	right
 actor	handler	outer	inject	right
-actor	handler	outer	kv	wrong
+actor	handler	outer	kv	right
 actor	handler	outer	onDo	right
 actor	handler	outer	times	right
 actor	handler	outer	toDo	right
@@ -438,7 +438,7 @@ actor	iter	outer	ewi	wrong
 actor	iter	outer	ifNil	right
 actor	iter	outer	ifTrue	right
 actor	iter	outer	inject	right
-actor	iter	outer	kv	wrong
+actor	iter	outer	kv	right
 actor	iter	outer	onDo	right
 actor	iter	outer	times	right
 actor	iter	outer	toDo	right
@@ -492,7 +492,7 @@ actor	iterArm	outer	ewi	wrong
 actor	iterArm	outer	ifNil	right
 actor	iterArm	outer	ifTrue	right
 actor	iterArm	outer	inject	right
-actor	iterArm	outer	kv	wrong
+actor	iterArm	outer	kv	right
 actor	iterArm	outer	onDo	right
 actor	iterArm	outer	times	right
 actor	iterArm	outer	toDo	right
@@ -510,7 +510,7 @@ actor	iterIter	outer	ewi	wrong
 actor	iterIter	outer	ifNil	right
 actor	iterIter	outer	ifTrue	right
 actor	iterIter	outer	inject	right
-actor	iterIter	outer	kv	wrong
+actor	iterIter	outer	kv	right
 actor	iterIter	outer	onDo	right
 actor	iterIter	outer	times	right
 actor	iterIter	outer	toDo	right
@@ -544,7 +544,7 @@ actor	loop	direct	ewi	wrong
 actor	loop	direct	ifNil	right
 actor	loop	direct	ifTrue	right
 actor	loop	direct	inject	right
-actor	loop	direct	kv	wrong
+actor	loop	direct	kv	right
 actor	loop	direct	onDo	right
 actor	loop	direct	times	right
 actor	loop	direct	toDo	right
@@ -562,7 +562,7 @@ actor	loop	outer	ewi	wrong
 actor	loop	outer	ifNil	right
 actor	loop	outer	ifTrue	right
 actor	loop	outer	inject	right
-actor	loop	outer	kv	wrong
+actor	loop	outer	kv	right
 actor	loop	outer	onDo	right
 actor	loop	outer	times	right
 actor	loop	outer	toDo	right
@@ -604,7 +604,7 @@ actor	prot	direct	ewi	wrong
 actor	prot	direct	ifNil	right
 actor	prot	direct	ifTrue	right
 actor	prot	direct	inject	right
-actor	prot	direct	kv	wrong
+actor	prot	direct	kv	right
 actor	prot	direct	onDo	right
 actor	prot	direct	times	right
 actor	prot	direct	toDo	right
@@ -622,7 +622,7 @@ actor	prot	outer	ewi	wrong
 actor	prot	outer	ifNil	right
 actor	prot	outer	ifTrue	right
 actor	prot	outer	inject	right
-actor	prot	outer	kv	wrong
+actor	prot	outer	kv	right
 actor	prot	outer	onDo	right
 actor	prot	outer	times	right
 actor	prot	outer	toDo	right
@@ -648,7 +648,7 @@ actor	protArm	direct	ewi	wrong
 actor	protArm	direct	ifNil	right
 actor	protArm	direct	ifTrue	right
 actor	protArm	direct	inject	right
-actor	protArm	direct	kv	wrong
+actor	protArm	direct	kv	right
 actor	protArm	direct	onDo	right
 actor	protArm	direct	times	right
 actor	protArm	direct	toDo	right
@@ -666,7 +666,7 @@ actor	protArm	outer	ewi	wrong
 actor	protArm	outer	ifNil	right
 actor	protArm	outer	ifTrue	right
 actor	protArm	outer	inject	right
-actor	protArm	outer	kv	wrong
+actor	protArm	outer	kv	right
 actor	protArm	outer	onDo	right
 actor	protArm	outer	times	right
 actor	protArm	outer	toDo	right
@@ -740,7 +740,7 @@ actor	timesC	outer	ewi	wrong
 actor	timesC	outer	ifNil	right
 actor	timesC	outer	ifTrue	right
 actor	timesC	outer	inject	right
-actor	timesC	outer	kv	wrong
+actor	timesC	outer	kv	right
 actor	timesC	outer	onDo	right
 actor	timesC	outer	times	right
 actor	timesC	outer	toDo	right
@@ -794,7 +794,7 @@ actor	toDoC	outer	ewi	wrong
 actor	toDoC	outer	ifNil	right
 actor	toDoC	outer	ifTrue	right
 actor	toDoC	outer	inject	right
-actor	toDoC	outer	kv	wrong
+actor	toDoC	outer	kv	right
 actor	toDoC	outer	onDo	right
 actor	toDoC	outer	times	right
 actor	toDoC	outer	toDo	right
@@ -948,7 +948,7 @@ class	arm	direct	ewi	wrong
 class	arm	direct	ifNil	right
 class	arm	direct	ifTrue	right
 class	arm	direct	inject	right
-class	arm	direct	kv	wrong
+class	arm	direct	kv	right
 class	arm	direct	onDo	right
 class	arm	direct	times	right
 class	arm	direct	toDo	right
@@ -966,7 +966,7 @@ class	arm	outer	ewi	wrong
 class	arm	outer	ifNil	right
 class	arm	outer	ifTrue	right
 class	arm	outer	inject	right
-class	arm	outer	kv	wrong
+class	arm	outer	kv	right
 class	arm	outer	onDo	right
 class	arm	outer	times	right
 class	arm	outer	toDo	right
@@ -992,7 +992,7 @@ class	armAnd	outer	ewi	wrong
 class	armAnd	outer	ifNil	right
 class	armAnd	outer	ifTrue	right
 class	armAnd	outer	inject	right
-class	armAnd	outer	kv	wrong
+class	armAnd	outer	kv	right
 class	armAnd	outer	onDo	right
 class	armAnd	outer	times	right
 class	armAnd	outer	toDo	right
@@ -1010,7 +1010,7 @@ class	armIter	direct	ewi	right
 class	armIter	direct	ifNil	right
 class	armIter	direct	ifTrue	right
 class	armIter	direct	inject	right
-class	armIter	direct	kv	wrong
+class	armIter	direct	kv	right
 class	armIter	direct	onDo	right
 class	armIter	direct	times	right
 class	armIter	direct	toDo	right
@@ -1042,7 +1042,7 @@ class	armIter	outer	ewi	wrong
 class	armIter	outer	ifNil	right
 class	armIter	outer	ifTrue	right
 class	armIter	outer	inject	right
-class	armIter	outer	kv	wrong
+class	armIter	outer	kv	right
 class	armIter	outer	onDo	right
 class	armIter	outer	times	right
 class	armIter	outer	toDo	right
@@ -1060,7 +1060,7 @@ class	armLoop	outer	ewi	wrong
 class	armLoop	outer	ifNil	right
 class	armLoop	outer	ifTrue	right
 class	armLoop	outer	inject	right
-class	armLoop	outer	kv	wrong
+class	armLoop	outer	kv	right
 class	armLoop	outer	onDo	right
 class	armLoop	outer	times	right
 class	armLoop	outer	toDo	right
@@ -1078,7 +1078,7 @@ class	armNL	direct	ewi	wrong
 class	armNL	direct	ifNil	right
 class	armNL	direct	ifTrue	right
 class	armNL	direct	inject	right
-class	armNL	direct	kv	wrong
+class	armNL	direct	kv	right
 class	armNL	direct	onDo	right
 class	armNL	direct	times	right
 class	armNL	direct	toDo	right
@@ -1096,7 +1096,7 @@ class	armNL	outer	ewi	wrong
 class	armNL	outer	ifNil	right
 class	armNL	outer	ifTrue	right
 class	armNL	outer	inject	right
-class	armNL	outer	kv	wrong
+class	armNL	outer	kv	right
 class	armNL	outer	onDo	right
 class	armNL	outer	times	right
 class	armNL	outer	toDo	right
@@ -1114,7 +1114,7 @@ class	armNil	outer	ewi	wrong
 class	armNil	outer	ifNil	right
 class	armNil	outer	ifTrue	right
 class	armNil	outer	inject	right
-class	armNil	outer	kv	wrong
+class	armNil	outer	kv	right
 class	armNil	outer	onDo	right
 class	armNil	outer	times	right
 class	armNil	outer	toDo	right
@@ -1132,7 +1132,7 @@ class	armTF	outer	ewi	wrong
 class	armTF	outer	ifNil	right
 class	armTF	outer	ifTrue	right
 class	armTF	outer	inject	right
-class	armTF	outer	kv	wrong
+class	armTF	outer	kv	right
 class	armTF	outer	onDo	right
 class	armTF	outer	times	right
 class	armTF	outer	toDo	right
@@ -1150,7 +1150,7 @@ class	coll	direct	ewi	right
 class	coll	direct	ifNil	right
 class	coll	direct	ifTrue	right
 class	coll	direct	inject	right
-class	coll	direct	kv	wrong
+class	coll	direct	kv	right
 class	coll	direct	onDo	right
 class	coll	direct	times	right
 class	coll	direct	toDo	right
@@ -1175,7 +1175,7 @@ class	coll	outer	ewi	right
 class	coll	outer	ifNil	right
 class	coll	outer	ifTrue	right
 class	coll	outer	inject	right
-class	coll	outer	kv	wrong
+class	coll	outer	kv	right
 class	coll	outer	onDo	right
 class	coll	outer	times	right
 class	coll	outer	toDo	right
@@ -1193,7 +1193,7 @@ class	ens	outer	ewi	wrong
 class	ens	outer	ifNil	right
 class	ens	outer	ifTrue	right
 class	ens	outer	inject	right
-class	ens	outer	kv	wrong
+class	ens	outer	kv	right
 class	ens	outer	onDo	right
 class	ens	outer	times	right
 class	ens	outer	toDo	right
@@ -1211,7 +1211,7 @@ class	ensBlk	direct	ewi	right
 class	ensBlk	direct	ifNil	right
 class	ensBlk	direct	ifTrue	right
 class	ensBlk	direct	inject	right
-class	ensBlk	direct	kv	wrong
+class	ensBlk	direct	kv	right
 class	ensBlk	direct	onDo	right
 class	ensBlk	direct	times	right
 class	ensBlk	direct	toDo	right
@@ -1229,7 +1229,7 @@ class	ensBlk	outer	ewi	right
 class	ensBlk	outer	ifNil	right
 class	ensBlk	outer	ifTrue	right
 class	ensBlk	outer	inject	right
-class	ensBlk	outer	kv	wrong
+class	ensBlk	outer	kv	right
 class	ensBlk	outer	onDo	right
 class	ensBlk	outer	times	right
 class	ensBlk	outer	toDo	right
@@ -1247,7 +1247,7 @@ class	ensLast	outer	ewi	right
 class	ensLast	outer	ifNil	right
 class	ensLast	outer	ifTrue	right
 class	ensLast	outer	inject	right
-class	ensLast	outer	kv	wrong
+class	ensLast	outer	kv	right
 class	ensLast	outer	onDo	right
 class	ensLast	outer	times	right
 class	ensLast	outer	toDo	right
@@ -1265,7 +1265,7 @@ class	handler	direct	ewi	wrong
 class	handler	direct	ifNil	right
 class	handler	direct	ifTrue	right
 class	handler	direct	inject	right
-class	handler	direct	kv	wrong
+class	handler	direct	kv	right
 class	handler	direct	onDo	right
 class	handler	direct	times	right
 class	handler	direct	toDo	right
@@ -1283,7 +1283,7 @@ class	handler	outer	ewi	wrong
 class	handler	outer	ifNil	right
 class	handler	outer	ifTrue	right
 class	handler	outer	inject	right
-class	handler	outer	kv	wrong
+class	handler	outer	kv	right
 class	handler	outer	onDo	right
 class	handler	outer	times	right
 class	handler	outer	toDo	right
@@ -1317,7 +1317,7 @@ class	iter	direct	ewi	right
 class	iter	direct	ifNil	right
 class	iter	direct	ifTrue	right
 class	iter	direct	inject	right
-class	iter	direct	kv	wrong
+class	iter	direct	kv	right
 class	iter	direct	onDo	right
 class	iter	direct	times	right
 class	iter	direct	toDo	right
@@ -1349,7 +1349,7 @@ class	iter	outer	ewi	right
 class	iter	outer	ifNil	right
 class	iter	outer	ifTrue	right
 class	iter	outer	inject	right
-class	iter	outer	kv	wrong
+class	iter	outer	kv	right
 class	iter	outer	onDo	right
 class	iter	outer	times	right
 class	iter	outer	toDo	right
@@ -1375,7 +1375,7 @@ class	iterArm	direct	ewi	right
 class	iterArm	direct	ifNil	right
 class	iterArm	direct	ifTrue	right
 class	iterArm	direct	inject	right
-class	iterArm	direct	kv	wrong
+class	iterArm	direct	kv	right
 class	iterArm	direct	onDo	right
 class	iterArm	direct	times	right
 class	iterArm	direct	toDo	right
@@ -1393,7 +1393,7 @@ class	iterArm	outer	ewi	right
 class	iterArm	outer	ifNil	right
 class	iterArm	outer	ifTrue	right
 class	iterArm	outer	inject	right
-class	iterArm	outer	kv	wrong
+class	iterArm	outer	kv	right
 class	iterArm	outer	onDo	right
 class	iterArm	outer	times	right
 class	iterArm	outer	toDo	right
@@ -1411,7 +1411,7 @@ class	iterIter	outer	ewi	right
 class	iterIter	outer	ifNil	right
 class	iterIter	outer	ifTrue	right
 class	iterIter	outer	inject	right
-class	iterIter	outer	kv	wrong
+class	iterIter	outer	kv	right
 class	iterIter	outer	onDo	right
 class	iterIter	outer	times	right
 class	iterIter	outer	toDo	right
@@ -1445,7 +1445,7 @@ class	loop	direct	ewi	wrong
 class	loop	direct	ifNil	right
 class	loop	direct	ifTrue	right
 class	loop	direct	inject	right
-class	loop	direct	kv	wrong
+class	loop	direct	kv	right
 class	loop	direct	onDo	right
 class	loop	direct	times	right
 class	loop	direct	toDo	right
@@ -1463,7 +1463,7 @@ class	loop	outer	ewi	wrong
 class	loop	outer	ifNil	right
 class	loop	outer	ifTrue	right
 class	loop	outer	inject	right
-class	loop	outer	kv	wrong
+class	loop	outer	kv	right
 class	loop	outer	onDo	right
 class	loop	outer	times	right
 class	loop	outer	toDo	right
@@ -1505,7 +1505,7 @@ class	prot	direct	ewi	wrong
 class	prot	direct	ifNil	right
 class	prot	direct	ifTrue	right
 class	prot	direct	inject	right
-class	prot	direct	kv	wrong
+class	prot	direct	kv	right
 class	prot	direct	onDo	right
 class	prot	direct	times	right
 class	prot	direct	toDo	right
@@ -1523,7 +1523,7 @@ class	prot	outer	ewi	wrong
 class	prot	outer	ifNil	right
 class	prot	outer	ifTrue	right
 class	prot	outer	inject	right
-class	prot	outer	kv	wrong
+class	prot	outer	kv	right
 class	prot	outer	onDo	right
 class	prot	outer	times	right
 class	prot	outer	toDo	right
@@ -1549,7 +1549,7 @@ class	protArm	direct	ewi	wrong
 class	protArm	direct	ifNil	right
 class	protArm	direct	ifTrue	right
 class	protArm	direct	inject	right
-class	protArm	direct	kv	wrong
+class	protArm	direct	kv	right
 class	protArm	direct	onDo	right
 class	protArm	direct	times	right
 class	protArm	direct	toDo	right
@@ -1567,7 +1567,7 @@ class	protArm	outer	ewi	wrong
 class	protArm	outer	ifNil	right
 class	protArm	outer	ifTrue	right
 class	protArm	outer	inject	right
-class	protArm	outer	kv	wrong
+class	protArm	outer	kv	right
 class	protArm	outer	onDo	right
 class	protArm	outer	times	right
 class	protArm	outer	toDo	right
@@ -1585,7 +1585,7 @@ class	protLast	direct	ewi	right
 class	protLast	direct	ifNil	right
 class	protLast	direct	ifTrue	right
 class	protLast	direct	inject	right
-class	protLast	direct	kv	wrong
+class	protLast	direct	kv	right
 class	protLast	direct	onDo	right
 class	protLast	direct	times	right
 class	protLast	direct	toDo	right
@@ -1603,7 +1603,7 @@ class	protLast	outer	ewi	right
 class	protLast	outer	ifNil	right
 class	protLast	outer	ifTrue	right
 class	protLast	outer	inject	right
-class	protLast	outer	kv	wrong
+class	protLast	outer	kv	right
 class	protLast	outer	onDo	right
 class	protLast	outer	times	right
 class	protLast	outer	toDo	right
@@ -1621,7 +1621,7 @@ class	timesC	direct	ewi	wrong
 class	timesC	direct	ifNil	right
 class	timesC	direct	ifTrue	right
 class	timesC	direct	inject	right
-class	timesC	direct	kv	wrong
+class	timesC	direct	kv	right
 class	timesC	direct	onDo	right
 class	timesC	direct	times	right
 class	timesC	direct	toDo	right
@@ -1639,7 +1639,7 @@ class	timesC	outer	ewi	wrong
 class	timesC	outer	ifNil	right
 class	timesC	outer	ifTrue	right
 class	timesC	outer	inject	right
-class	timesC	outer	kv	wrong
+class	timesC	outer	kv	right
 class	timesC	outer	onDo	right
 class	timesC	outer	times	right
 class	timesC	outer	toDo	right
@@ -1673,7 +1673,7 @@ class	toDoC	direct	ewi	wrong
 class	toDoC	direct	ifNil	right
 class	toDoC	direct	ifTrue	right
 class	toDoC	direct	inject	right
-class	toDoC	direct	kv	wrong
+class	toDoC	direct	kv	right
 class	toDoC	direct	onDo	right
 class	toDoC	direct	times	right
 class	toDoC	direct	toDo	right
@@ -1691,7 +1691,7 @@ class	toDoC	outer	ewi	wrong
 class	toDoC	outer	ifNil	right
 class	toDoC	outer	ifTrue	right
 class	toDoC	outer	inject	right
-class	toDoC	outer	kv	wrong
+class	toDoC	outer	kv	right
 class	toDoC	outer	onDo	right
 class	toDoC	outer	times	right
 class	toDoC	outer	toDo	right
@@ -1743,7 +1743,7 @@ class	top	outer	ewi	wrong
 class	top	outer	ifNil	right
 class	top	outer	ifTrue	right
 class	top	outer	inject	right
-class	top	outer	kv	wrong
+class	top	outer	kv	right
 class	top	outer	onDo	right
 class	top	outer	times	right
 class	top	outer	toDo	right
@@ -1805,7 +1805,7 @@ value	arm	direct	ewi	wrong
 value	arm	direct	ifNil	right
 value	arm	direct	ifTrue	right
 value	arm	direct	inject	right
-value	arm	direct	kv	wrong
+value	arm	direct	kv	right
 value	arm	direct	onDo	right
 value	arm	direct	times	right
 value	arm	direct	toDo	right
@@ -1823,7 +1823,7 @@ value	arm	outer	ewi	wrong
 value	arm	outer	ifNil	right
 value	arm	outer	ifTrue	right
 value	arm	outer	inject	right
-value	arm	outer	kv	wrong
+value	arm	outer	kv	right
 value	arm	outer	onDo	right
 value	arm	outer	times	right
 value	arm	outer	toDo	right
@@ -1849,7 +1849,7 @@ value	armIter	direct	ewi	right
 value	armIter	direct	ifNil	right
 value	armIter	direct	ifTrue	right
 value	armIter	direct	inject	right
-value	armIter	direct	kv	wrong
+value	armIter	direct	kv	right
 value	armIter	direct	onDo	right
 value	armIter	direct	times	right
 value	armIter	direct	toDo	right
@@ -1881,7 +1881,7 @@ value	armIter	outer	ewi	wrong
 value	armIter	outer	ifNil	right
 value	armIter	outer	ifTrue	right
 value	armIter	outer	inject	right
-value	armIter	outer	kv	wrong
+value	armIter	outer	kv	right
 value	armIter	outer	onDo	right
 value	armIter	outer	times	right
 value	armIter	outer	toDo	right
@@ -1899,7 +1899,7 @@ value	armLoop	outer	ewi	wrong
 value	armLoop	outer	ifNil	right
 value	armLoop	outer	ifTrue	right
 value	armLoop	outer	inject	right
-value	armLoop	outer	kv	wrong
+value	armLoop	outer	kv	right
 value	armLoop	outer	onDo	right
 value	armLoop	outer	times	right
 value	armLoop	outer	toDo	right
@@ -1917,7 +1917,7 @@ value	armNL	direct	ewi	wrong
 value	armNL	direct	ifNil	right
 value	armNL	direct	ifTrue	right
 value	armNL	direct	inject	right
-value	armNL	direct	kv	wrong
+value	armNL	direct	kv	right
 value	armNL	direct	onDo	right
 value	armNL	direct	times	right
 value	armNL	direct	toDo	right
@@ -1935,7 +1935,7 @@ value	armNL	outer	ewi	wrong
 value	armNL	outer	ifNil	right
 value	armNL	outer	ifTrue	right
 value	armNL	outer	inject	right
-value	armNL	outer	kv	wrong
+value	armNL	outer	kv	right
 value	armNL	outer	onDo	right
 value	armNL	outer	times	right
 value	armNL	outer	toDo	right
@@ -1953,7 +1953,7 @@ value	coll	direct	ewi	right
 value	coll	direct	ifNil	right
 value	coll	direct	ifTrue	right
 value	coll	direct	inject	right
-value	coll	direct	kv	wrong
+value	coll	direct	kv	right
 value	coll	direct	onDo	right
 value	coll	direct	times	right
 value	coll	direct	toDo	right
@@ -1978,7 +1978,7 @@ value	coll	outer	ewi	right
 value	coll	outer	ifNil	right
 value	coll	outer	ifTrue	right
 value	coll	outer	inject	right
-value	coll	outer	kv	wrong
+value	coll	outer	kv	right
 value	coll	outer	onDo	right
 value	coll	outer	times	right
 value	coll	outer	toDo	right
@@ -1996,7 +1996,7 @@ value	ensBlk	direct	ewi	right
 value	ensBlk	direct	ifNil	right
 value	ensBlk	direct	ifTrue	right
 value	ensBlk	direct	inject	right
-value	ensBlk	direct	kv	wrong
+value	ensBlk	direct	kv	right
 value	ensBlk	direct	onDo	right
 value	ensBlk	direct	times	right
 value	ensBlk	direct	toDo	right
@@ -2014,7 +2014,7 @@ value	ensBlk	outer	ewi	wrong
 value	ensBlk	outer	ifNil	right
 value	ensBlk	outer	ifTrue	right
 value	ensBlk	outer	inject	right
-value	ensBlk	outer	kv	wrong
+value	ensBlk	outer	kv	right
 value	ensBlk	outer	onDo	right
 value	ensBlk	outer	times	right
 value	ensBlk	outer	toDo	right
@@ -2032,7 +2032,7 @@ value	handler	direct	ewi	wrong
 value	handler	direct	ifNil	right
 value	handler	direct	ifTrue	right
 value	handler	direct	inject	right
-value	handler	direct	kv	wrong
+value	handler	direct	kv	right
 value	handler	direct	onDo	right
 value	handler	direct	times	right
 value	handler	direct	toDo	right
@@ -2050,7 +2050,7 @@ value	handler	outer	ewi	wrong
 value	handler	outer	ifNil	right
 value	handler	outer	ifTrue	right
 value	handler	outer	inject	right
-value	handler	outer	kv	wrong
+value	handler	outer	kv	right
 value	handler	outer	onDo	right
 value	handler	outer	times	right
 value	handler	outer	toDo	right
@@ -2068,7 +2068,7 @@ value	iter	direct	ewi	right
 value	iter	direct	ifNil	right
 value	iter	direct	ifTrue	right
 value	iter	direct	inject	right
-value	iter	direct	kv	wrong
+value	iter	direct	kv	right
 value	iter	direct	onDo	right
 value	iter	direct	times	right
 value	iter	direct	toDo	right
@@ -2100,7 +2100,7 @@ value	iter	outer	ewi	right
 value	iter	outer	ifNil	right
 value	iter	outer	ifTrue	right
 value	iter	outer	inject	right
-value	iter	outer	kv	wrong
+value	iter	outer	kv	right
 value	iter	outer	onDo	right
 value	iter	outer	times	right
 value	iter	outer	toDo	right
@@ -2126,7 +2126,7 @@ value	iterArm	direct	ewi	right
 value	iterArm	direct	ifNil	right
 value	iterArm	direct	ifTrue	right
 value	iterArm	direct	inject	right
-value	iterArm	direct	kv	wrong
+value	iterArm	direct	kv	right
 value	iterArm	direct	onDo	right
 value	iterArm	direct	times	right
 value	iterArm	direct	toDo	right
@@ -2144,7 +2144,7 @@ value	iterArm	outer	ewi	right
 value	iterArm	outer	ifNil	right
 value	iterArm	outer	ifTrue	right
 value	iterArm	outer	inject	right
-value	iterArm	outer	kv	wrong
+value	iterArm	outer	kv	right
 value	iterArm	outer	onDo	right
 value	iterArm	outer	times	right
 value	iterArm	outer	toDo	right
@@ -2162,7 +2162,7 @@ value	iterIter	outer	ewi	right
 value	iterIter	outer	ifNil	right
 value	iterIter	outer	ifTrue	right
 value	iterIter	outer	inject	right
-value	iterIter	outer	kv	wrong
+value	iterIter	outer	kv	right
 value	iterIter	outer	onDo	right
 value	iterIter	outer	times	right
 value	iterIter	outer	toDo	right
@@ -2180,7 +2180,7 @@ value	loop	direct	ewi	wrong
 value	loop	direct	ifNil	right
 value	loop	direct	ifTrue	right
 value	loop	direct	inject	right
-value	loop	direct	kv	wrong
+value	loop	direct	kv	right
 value	loop	direct	onDo	right
 value	loop	direct	times	right
 value	loop	direct	toDo	right
@@ -2198,7 +2198,7 @@ value	loop	outer	ewi	wrong
 value	loop	outer	ifNil	right
 value	loop	outer	ifTrue	right
 value	loop	outer	inject	right
-value	loop	outer	kv	wrong
+value	loop	outer	kv	right
 value	loop	outer	onDo	right
 value	loop	outer	times	right
 value	loop	outer	toDo	right
@@ -2224,7 +2224,7 @@ value	prot	direct	ewi	wrong
 value	prot	direct	ifNil	right
 value	prot	direct	ifTrue	right
 value	prot	direct	inject	right
-value	prot	direct	kv	wrong
+value	prot	direct	kv	right
 value	prot	direct	onDo	right
 value	prot	direct	times	right
 value	prot	direct	toDo	right
@@ -2242,7 +2242,7 @@ value	prot	outer	ewi	wrong
 value	prot	outer	ifNil	right
 value	prot	outer	ifTrue	right
 value	prot	outer	inject	right
-value	prot	outer	kv	wrong
+value	prot	outer	kv	right
 value	prot	outer	onDo	right
 value	prot	outer	times	right
 value	prot	outer	toDo	right
@@ -2268,7 +2268,7 @@ value	protArm	direct	ewi	wrong
 value	protArm	direct	ifNil	right
 value	protArm	direct	ifTrue	right
 value	protArm	direct	inject	right
-value	protArm	direct	kv	wrong
+value	protArm	direct	kv	right
 value	protArm	direct	onDo	right
 value	protArm	direct	times	right
 value	protArm	direct	toDo	right
@@ -2286,7 +2286,7 @@ value	protArm	outer	ewi	wrong
 value	protArm	outer	ifNil	right
 value	protArm	outer	ifTrue	right
 value	protArm	outer	inject	right
-value	protArm	outer	kv	wrong
+value	protArm	outer	kv	right
 value	protArm	outer	onDo	right
 value	protArm	outer	times	right
 value	protArm	outer	toDo	right
@@ -2304,7 +2304,7 @@ value	protLast	direct	ewi	right
 value	protLast	direct	ifNil	right
 value	protLast	direct	ifTrue	right
 value	protLast	direct	inject	right
-value	protLast	direct	kv	wrong
+value	protLast	direct	kv	right
 value	protLast	direct	onDo	right
 value	protLast	direct	times	right
 value	protLast	direct	toDo	right
@@ -2322,7 +2322,7 @@ value	protLast	outer	ewi	right
 value	protLast	outer	ifNil	right
 value	protLast	outer	ifTrue	right
 value	protLast	outer	inject	right
-value	protLast	outer	kv	wrong
+value	protLast	outer	kv	right
 value	protLast	outer	onDo	right
 value	protLast	outer	times	right
 value	protLast	outer	toDo	right
@@ -2340,7 +2340,7 @@ value	timesC	direct	ewi	wrong
 value	timesC	direct	ifNil	right
 value	timesC	direct	ifTrue	right
 value	timesC	direct	inject	right
-value	timesC	direct	kv	wrong
+value	timesC	direct	kv	right
 value	timesC	direct	onDo	right
 value	timesC	direct	times	right
 value	timesC	direct	toDo	right
@@ -2358,7 +2358,7 @@ value	timesC	outer	ewi	wrong
 value	timesC	outer	ifNil	right
 value	timesC	outer	ifTrue	right
 value	timesC	outer	inject	right
-value	timesC	outer	kv	wrong
+value	timesC	outer	kv	right
 value	timesC	outer	onDo	right
 value	timesC	outer	times	right
 value	timesC	outer	toDo	right
@@ -2376,7 +2376,7 @@ value	toDoC	direct	ewi	wrong
 value	toDoC	direct	ifNil	right
 value	toDoC	direct	ifTrue	right
 value	toDoC	direct	inject	right
-value	toDoC	direct	kv	wrong
+value	toDoC	direct	kv	right
 value	toDoC	direct	onDo	right
 value	toDoC	direct	times	right
 value	toDoC	direct	toDo	right
@@ -2394,7 +2394,7 @@ value	toDoC	outer	ewi	wrong
 value	toDoC	outer	ifNil	right
 value	toDoC	outer	ifTrue	right
 value	toDoC	outer	inject	right
-value	toDoC	outer	kv	wrong
+value	toDoC	outer	kv	right
 value	toDoC	outer	onDo	right
 value	toDoC	outer	times	right
 value	toDoC	outer	toDo	right
@@ -2431,7 +2431,7 @@ value	top	outer	ewi	wrong
 value	top	outer	ifNil	right
 value	top	outer	ifTrue	right
 value	top	outer	inject	right
-value	top	outer	kv	wrong
+value	top	outer	kv	right
 value	top	outer	onDo	right
 value	top	outer	times	right
 value	top	outer	toDo	right
@@ -2530,8 +2530,8 @@ actor	protIterArm	outer	inject	right
 actor	armIterIter	outer	inject	right
 actor	armProtArm	outer	inject	right
 actor	armProtIter	outer	kv	right
-actor	protIterArm	outer	kv	wrong
-actor	armIterIter	outer	kv	wrong
+actor	protIterArm	outer	kv	right
+actor	armIterIter	outer	kv	right
 actor	armProtArm	outer	kv	right
 actor	armProtIter	outer	onDo	right
 actor	protIterArm	outer	onDo	right
@@ -2601,10 +2601,10 @@ class	armProtIter	outer	inject	right
 class	protIterArm	outer	inject	right
 class	armIterIter	outer	inject	right
 class	armProtArm	outer	inject	right
-class	armProtIter	outer	kv	wrong
-class	protIterArm	outer	kv	wrong
-class	armIterIter	outer	kv	wrong
-class	armProtArm	outer	kv	wrong
+class	armProtIter	outer	kv	right
+class	protIterArm	outer	kv	right
+class	armIterIter	outer	kv	right
+class	armProtArm	outer	kv	right
 class	armProtIter	outer	onDo	right
 class	protIterArm	outer	onDo	right
 class	armIterIter	outer	onDo	right
@@ -2673,10 +2673,10 @@ value	armProtIter	outer	inject	right
 value	protIterArm	outer	inject	right
 value	armIterIter	outer	inject	right
 value	armProtArm	outer	inject	right
-value	armProtIter	outer	kv	wrong
-value	protIterArm	outer	kv	wrong
-value	armIterIter	outer	kv	wrong
-value	armProtArm	outer	kv	wrong
+value	armProtIter	outer	kv	right
+value	protIterArm	outer	kv	right
+value	armIterIter	outer	kv	right
+value	armProtArm	outer	kv	right
 value	armProtIter	outer	onDo	right
 value	protIterArm	outer	onDo	right
 value	armIterIter	outer	onDo	right

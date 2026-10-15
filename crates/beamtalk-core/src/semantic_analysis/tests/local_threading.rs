@@ -1400,7 +1400,6 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "dinS"),
     ("actor", "armProtIter", "outer", "dsb"),
     ("actor", "armProtIter", "outer", "ewi"),
-    ("actor", "armProtIter", "outer", "kv"),
     ("actor", "armProtIter", "outer", "value"),
     ("value", "armIterIter", "outer", "any"),
     ("actor", "armProtIter", "outer", "any"),
@@ -1408,7 +1407,6 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtArm", "outer", "any"),
     ("actor", "armProtArm", "outer", "dsb"),
     ("actor", "armProtArm", "outer", "ewi"),
-    ("actor", "armProtArm", "outer", "kv"),
     ("actor", "armProtArm", "outer", "value"),
     ("class", "armProtIter", "outer", "any"),
     ("class", "armIterIter", "outer", "any"),
@@ -1703,6 +1701,40 @@ fn unmeasured_three_deep_chains_stay_rejected() {
     ] {
         let diags = adr0131_diagnostics(&src);
         assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
+    }
+}
+
+/// BT-3841: `keysAndValuesDo:`/`doWithKey:` are producers like `do:`. Accepted
+/// as a statement, in an arm and in a loop body in every method context; still
+/// rejected inside a `[...] value` body, and a `^` of one in a plain closure is
+/// rejected like `^xs do: [...]` there.
+#[test]
+fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\n{kv}\nt"),
+            format!("t := 0\ntrue ifTrue: [{kv}]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | {kv}]\nt"),
+            format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                let diags = adr0131_diagnostics(&src);
+                assert!(diags.is_empty(), "{src}: {diags:?}");
+            }
+        }
+        for body in [
+            format!("t := 0\n[{kv}] value\nt"),
+            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: accepted but unmeasured or unlowered"
+                );
+            }
+        }
     }
 }
 

@@ -39,8 +39,3 @@ Value subclass: Adr0131LocalRebindValuePending
     #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
     t
 
-  // `keysAndValuesDo:` as a statement.
-  stKeysAndValuesDo =>
-    t := 0
-    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
-    t

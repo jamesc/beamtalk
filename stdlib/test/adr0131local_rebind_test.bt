@@ -326,3 +326,9 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testStLoopArmActor =>
     self assert: ((Adr0131LocalRebindActor spawn) stLoopArm) equals: 5
+
+  testStKeysAndValuesDoClass =>
+    self assert: (Adr0131LocalRebindClass stKeysAndValuesDo) equals: 3
+
+  testStKeysAndValuesDoValue =>
+    self assert: ((Adr0131LocalRebindValue new) stKeysAndValuesDo) equals: 3

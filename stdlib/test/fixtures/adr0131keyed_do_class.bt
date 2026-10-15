@@ -1,0 +1,102 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `keysAndValuesDo:` and `doWithKey:` are local-threading
+// producers (`producer_body_arg_index`), like `do:`. Each method starts from
+// `t := 0` and writes it from the keyed-iteration block in one position; the
+// expected answers are in stdlib/test/adr0131keyed_do_test.bt. `c` is the
+// condition of the arm shapes.
+
+Object subclass: Adr0131KeyedDoClass
+
+  class top =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  class topKey =>
+    t := 0
+    #{#a => 1, #b => 2} doWithKey: [:k :v | t := t + v]
+    t
+
+  class viaLocal =>
+    t := 0
+    d := #{#a => 1, #b => 2}
+    d keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  class empty =>
+    t := 0
+    #{} keysAndValuesDo: [:k :v | t := t + v]
+    t
+
+  class keysUsed =>
+    t := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + (k =:= #a ifTrue: [10] ifFalse: [v])]
+    t
+
+  class inArm: c =>
+    t := 0
+    c ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class inArmElse: c =>
+    t := 0
+    c ifTrue: [t := 100] ifFalse: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class inDo =>
+    t := 0
+    #(1, 2) do: [:z | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class inToDo =>
+    t := 0
+    1 to: 2 do: [:z | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class inTimes =>
+    t := 0
+    2 timesRepeat: [#{#a => 1, #b => 2} doWithKey: [:k :v | t := t + v]]
+    t
+
+  class inWhile =>
+    t := 0
+    i := 0
+    [i < 2] whileTrue: [i := i + 1. #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class inOnDo =>
+    t := 0
+    [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]] on: Error do: [:e | 0]
+    t
+
+  class inEnsure =>
+    t := 0
+    [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]] ensure: [nil]
+    t
+
+  class inHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class nested =>
+    t := 0
+    #{#x => 10} keysAndValuesDo: [:k2 :v2 | #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v + v2]]
+    t
+
+  class inArmInDo: c =>
+    t := 0
+    #(1, 2) do: [:z | c ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]]
+    t
+
+  class returnInArm: c =>
+    t := 0
+    c ifTrue: [^#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class assigned =>
+    t := 0
+    r := #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
+    #[r, t]

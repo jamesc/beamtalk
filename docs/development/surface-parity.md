@@ -595,6 +595,17 @@ reports the same message at the same span. No operation is surface-specific.
   `UnmigratedLocalThreading` on every surface (CLI, REPL eval and load, LSP,
   MCP): no new error anywhere, only removed ones. The verdict is the
   analyser's, so the surfaces change together.
+- **`keysAndValuesDo:` / `doWithKey:` as producers (ADR 0131, BT-3841 PR 2).**
+  The keyed iterations joined `do:` in the producer table
+  (`producer_body_arg_index`), so a keyed iteration whose block writes an outer
+  local is accepted, and keeps its writes, as a statement, as an operand and in
+  an arm, protected body, handler or loop body (up to two nested blocks, in a
+  class, value-type or actor method) instead of reporting
+  `UnmigratedLocalThreading`; inside a `[...] value` body, past two nested
+  blocks and in the REPL the previous verdict stands. Errors are only removed
+  (CLI, REPL eval and load, LSP, MCP change together); the REPL display is
+  unchanged. `^` of a keyed iteration inside a plain closure used to compile and
+  answer `nil`; it is now rejected like `^xs do: [...]` there (BT-3813).
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

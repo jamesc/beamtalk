@@ -10,7 +10,7 @@
 //! `maps:to_list` (for `doWithKey:`) using `lists:foldl` with state threading.
 
 use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CoreErlangGenerator, Result};
 use super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -197,11 +197,11 @@ impl CoreErlangGenerator {
              \x20 dict doWithKey: [:key :value | key printString]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_dict_do_with_key_mutations(receiver, body_block);
-            }
+        // The one predicate every fold generator reads (`block_needs_mutation_threading`):
+        // it also sees a write buried in a nested loop or fold, which a bare
+        // `analyze_block` does not propagate out of the nested block.
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_dict_do_with_key_mutations(receiver, body_block);
         }
 
         // No mutations: delegate to runtime helper
@@ -293,20 +293,6 @@ impl CoreErlangGenerator {
                     ") in ",
                     extract_doc,
                 ]
-            } else if matches!(plan.context, CodeGenContext::ValueType) {
-                docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(pairs_var),
-                    ") in ",
-                    extract_doc,
-                    "'nil'",
-                ]
             } else {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
@@ -383,11 +369,7 @@ impl CoreErlangGenerator {
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
-        if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
-            post_docs.push(Document::Str("'nil'"));
-        } else {
-            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
-        }
+        post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         docs.push(Document::Vec(post_docs));
 
         Ok(Document::Vec(docs))
@@ -737,11 +719,11 @@ mod tests {
     }
 
     #[test]
-    fn test_dict_do_with_key_value_type_with_local_mutation_emits_nil_result() {
+    fn test_dict_do_with_key_value_type_with_local_mutation_answers_the_carrier() {
         // ValueType context + doWithKey: + local mutation uses the map-acc path in
-        // generate_dict_do_with_key_mutations. When threaded_locals is non-empty and
-        // context is ValueType, the result suffix is 'nil' rather than {'nil', FoldResult}
-        // (covers lines 428-429 of dict_ops.rs).
+        // generate_dict_do_with_key_mutations. Like `do:` (BT-3796) the closed form
+        // answers the `{nil, FoldResult}` carrier that the producer site unpacks
+        // (BT-3841), not a bare `nil`.
         let src = concat!(
             "Value subclass: V\n",
             "  state: dummy = 0\n\n",
@@ -762,6 +744,10 @@ mod tests {
         assert!(
             code.contains("maps':'get'('__local__total'"),
             "ValueType doWithKey: map-acc path should extract local via maps:get. Got:\n{code}"
+        );
+        assert!(
+            code.contains("{'nil', _FoldResult"),
+            "ValueType doWithKey: closed form answers the carrier. Got:\n{code}"
         );
     }
 }

@@ -395,7 +395,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            KeyedDo,
             ListOp,
             DetectIfNoneSearch,
             Satisfy,
@@ -445,7 +444,6 @@ const ALLOW_SET: &[Allowed] = &[
         kinds: &[
             Loop,
             CountedLoop,
-            KeyedDo,
             ListOp,
             DetectIfNoneSearch,
             Enumeration,
@@ -459,27 +457,14 @@ const ALLOW_SET: &[Allowed] = &[
     // `^<construct>` as a method-body statement (the value only: the method
     // ends, so its rebinds are dropped).
     Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            KeyedDo,
-            ListOp,
-            DetectIfNoneSearch,
-            IfTrue,
-        ],
+        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch, IfTrue],
         position: Position::ReturnValue { nested: false },
         contexts: &[Class],
     },
     Allowed {
-        kinds: &[KeyedDo],
-        position: Position::ReturnValue { nested: false },
-        contexts: &[ValueType],
-    },
-    Allowed {
         kinds: &[
             Loop,
             CountedLoop,
-            KeyedDo,
             ListOp,
             DetectIfNoneSearch,
             DetectIfNone,
@@ -500,12 +485,7 @@ const ALLOW_SET: &[Allowed] = &[
     // ADR 0131 Phase 3 / 3b, BT-3813's arm and handler cases), so it never
     // reaches this row; a `^` inside any other closure is not, and its
     // carrier would be returned raw (BT-3813's remaining closure case). The
-    // keyed `do:` forms still answer a plain `nil`.
-    Allowed {
-        kinds: &[KeyedDo],
-        position: Position::ReturnValue { nested: true },
-        contexts: &[Class, ValueType],
-    },
+    // keyed `do:` forms are producers too (BT-3841).
     Allowed {
         kinds: &[IfTrue, IfNil, AndOr],
         position: Position::ReturnValue { nested: true },
@@ -785,12 +765,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
     right(Enumeration, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
-    right(KeyedDo, Arm, Arm, [true, false, false, false, false], 1, Actor),
-    right(KeyedDo, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(KeyedDo, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(KeyedDo, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(KeyedDo, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
-    right(KeyedDo, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
     right(Satisfy, Arm, DoBody, [true, true, true, false, false], 2, Actor),
     right(Satisfy, Arm, DoBody, [true, true, true, false, true], 2, Actor),
     right(Satisfy, DoBody, Arm, [true, true, true, false, false], 2, Actor),
@@ -896,8 +870,34 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
     BlockValue,
 ];
 
+/// The kinds lowered as local-threading producers wherever a producer frame
+/// holds them (BT-3841): `keysAndValuesDo:`/`doWithKey:` join `do:` in
+/// `producer_body_arg_index`. [`DENY_SET`] does not judge them any more, except
+/// in a `[...] value` body (still unfinished) or past two nested blocks, where
+/// the chain is unmeasured, and in the REPL.
+const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo];
+
+/// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
+/// described by the position and holds only frames the producer lowers: at
+/// most two nested blocks, none of them an evaluated block.
+fn lowered_chain(position: Position) -> bool {
+    match position {
+        Position::Statement => true,
+        Position::NestedStatement {
+            container,
+            inner,
+            depth,
+            ..
+        } => depth <= 2 && container != EvaluatedBlock && inner != EvaluatedBlock,
+        _ => false,
+    }
+}
+
 /// What the coarse rows say about a statement, before the measured carve-outs.
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
+    if context != Repl && LOWERED_KINDS.contains(&kind) && lowered_chain(position) {
+        return true;
+    }
     if let Position::NestedStatement { depth, .. } = position {
         // The REPL rows are unmeasured past depth one (BT-3823) and keep the
         // coarse rows' verdict, which may accept unmeasured three-deep shapes
