@@ -35,9 +35,9 @@
 //! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
-//!   table does not thread (a unary `whileTrue` condition; `eachWithIndex:` /
-//!   `do:separatedBy:` outside an actor; a keyword `whileTrue:` condition is a
-//!   §6 error since BT-3782),
+//!   table does not thread (BT-3782: a unary `whileTrue` condition;
+//!   `eachWithIndex:` / `do:separatedBy:` outside an actor; a keyword
+//!   `whileTrue:` condition is a §6 error since BT-3782),
 //!   which crashes or loses the write at runtime today. As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
