@@ -812,6 +812,29 @@ fn a_family_the_arms_advanced_but_nothing_merges_is_dropped() {
 }
 
 #[test]
+fn a_discard_of_the_carrier_does_not_hide_a_dropped_family() {
+    // BT-3830: `DiscardLocals` at a method tail drops the threaded locals
+    // legitimately, but a declared family still needs its merge `Bind` first.
+    let ir = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![
+            family_construct(&[VersionPrefix::SelfVt]),
+            build_discard_locals(CARRIER, span()),
+        ],
+    )];
+    assert_eq!(verify(&ir), vec![family_dropped(VersionPrefix::SelfVt)]);
+
+    let mut merged = vec![family_construct(&[VersionPrefix::SelfVt])];
+    merged.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::SelfVt]));
+    merged.push(build_discard_locals(CARRIER, span()));
+    assert_eq!(
+        verify(&[build_method_body(FrameId::ROOT, Vec::new(), merged)]),
+        Vec::new()
+    );
+}
+
+#[test]
 fn a_family_merged_straight_after_the_tuple_passes() {
     let mut body = vec![family_construct(&[VersionPrefix::SelfVt])];
     body.extend(merge_binds(FrameId::ROOT, &[VersionPrefix::SelfVt]));

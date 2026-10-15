@@ -153,6 +153,19 @@
 - Fix `on:do:`/`ensure:` arm self-sends not routed through the shared sequenced dispatch path, and `super take: (self bump)` silently dropping operand state rebinds (BT-3814, #4275)
 - Fix multi-statement REPL assignment with a whole-value fold (`r := coll inject: 0 into: [:a :x | u := u + 1. a + x]`) binding `r` to a raw `{Value, Bindings}` tuple instead of the value (BT-3800, #4264)
 - Fix innermost scope not winning for class-variable home in a `ClassBuilder` `classMethods:` block nested in a class-side extension — now correctly shows the generic error instead of misleadingly naming the ancestor (BT-3804, #4266)
+- **Conditionals as local-threading producers (ADR 0131 Phase 3a; BT-3738)** — `ifTrue:ifFalse:`, `ifNil:ifNotNil:`, `and:`/`or:` and the rest of the conditional family that write an outer local are now local-threading producers at method-root sites in class, value-type and actor methods, and at operand sites in the REPL. Nil-testing conditionals in the REPL now lower correctly (previously the write was dropped or had wrong arity). `^xs do: [...]` inside an arm, handler or closure in a class or value-type method now reports `UnmigratedLocalThreading` instead of silently compiling to `nil` (#4279)
+- **`on:do:` and `ensure:` as local-threading producers (ADR 0131 Phase 3b; BT-3817)** — `[t := t + 1] ensure: [u := u + 1]` is now accepted as a local-threading producer in any position, in an arm of another producer and in a loop or fold body. The protected body, handler and cleanup are arms of the producer; a raise discards the protected body's writes. A `match:` arm that assigns an outer local is now a compile error in every method kind (previously the write was silently dropped in class, value and actor methods). Fix: a block ending in an assignment inside `on:do:`/`ensure:` now answers the assigned value instead of `nil`. Fix: nested `inject:into:` fold params (`Item`/`Acc`) no longer shadow an inner fold's params (#4285)
+- **`Dictionary at:ifAbsent:` handler as a local-threading producer (ADR 0131 Phase 2d; BT-3798)** — a `Dictionary`'s `at:ifAbsent:` whose handler block writes an outer local is now a local-threading producer in class, value-type and actor methods: `r := d at: #k ifAbsent: [t := t + 1. 0]` works in statement, assignment, operand, `^` value, last expression, conditional arm, `on:do:` body, and handler positions. A non-`Dictionary` receiver (value-type instance, `Ets`, user class) raises a structured `type_error` instead of dropping the write. `OpaqueFold` (an unreachable `ThreadedIr` construct) is retired (#4287)
+- Fix value-type (`TestCase`) field assignment in value position failing `erlc` with an unbound variable or tripping the ThreadedIr verifier — a parenthesized field assignment (`self take: (self.n := 5)`) in a value-type method body now threads correctly through `threaded_expression`, matching actor methods (BT-3816, #4283)
+
+### Runtime
+
+- Fix class-process deadlock in `live_class_entries` — two class processes could deadlock when each called `gen_server:call(OtherPid, class_name)` while handling a call. Class identity (`class_name`, `module_name`, `superclass`) is now read from ETS metadata (`class_name_safe/1`, `module_name_safe/1`, `superclass_safe/1`), so a class process never makes a blocking call into another class process while handling a call. Fixes flaky `ProcessNavigationTest` timeout (BT-3820, #4284, #4288)
+- Fix class-object dispatch `not_found` fallthrough and `resolve_class_object` making 5s `gen_server:call`s into the class process for class name/module resolution — these now read from ETS metadata (BT-3820, #4284)
+
+### Internal
+
+- Fix `dependency_classes` scan including `stubs/` files from a dependency's source directory, causing spurious `declare native:` errors (#4278)
 
 ### Standard Library
 

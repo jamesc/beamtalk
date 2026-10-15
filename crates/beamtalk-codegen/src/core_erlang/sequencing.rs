@@ -23,7 +23,7 @@
 //! parent's ordinary AST-directed compile substitutes that value instead of
 //! compiling (and, for a self-send, dispatching) the child a second time.
 
-use super::threaded_ir::ThreadedStmt;
+use super::threaded_ir::{ThreadedStmt, VerifyError};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -51,9 +51,13 @@ pub(super) struct PrecompiledSubexpr {
     /// `call 'erlang':'element'(1, _SD)` shape; `take_precompiled_subexpr`
     /// additionally re-applies that arm's guard as defence in depth.
     annotate: bool,
-    /// Set on the first hit; a never-hit entry is an invariant violation
-    /// reported by `finish_precompiled_scope`.
-    used: bool,
+    /// How many times the parent's compile read this entry back. INVARIANT
+    /// (BT-3830): exactly once — a never-read entry is a hard error and a
+    /// multiply-read one a `PrecompiledSubexprReadMoreThanOnce` verifier
+    /// finding, both reported by `finish_precompiled_scope`: the child's
+    /// prelude ran once, so a second read means the parent compiled (and so
+    /// threaded) the child's value a second time.
+    reads: u32,
 }
 
 /// The set of [`CoreErlangGenerator::precompiled_subexprs`] entries one
@@ -171,7 +175,7 @@ impl CoreErlangGenerator {
             PrecompiledSubexpr {
                 doc,
                 annotate,
-                used: false,
+                reads: 0,
             },
         );
         scope.0.push(span);
@@ -202,7 +206,7 @@ impl CoreErlangGenerator {
         let span = expr.span();
         let (doc, annotate) = {
             let entry = self.precompiled_subexprs.get_mut(&span)?;
-            entry.used = true;
+            entry.reads += 1;
             (entry.doc.clone(), entry.annotate)
         };
         // Never annotate while an open let-chain is in flight — an
@@ -237,12 +241,25 @@ impl CoreErlangGenerator {
     /// would dispatch twice: an internal error, never a silent drop.
     pub(super) fn finish_precompiled_scope(&mut self, scope: PrecompiledScope) -> Result<()> {
         let mut unused = Vec::new();
+        let mut over_read = Vec::new();
         for span in scope.0 {
             if let Some(entry) = self.precompiled_subexprs.remove(&span) {
-                if !entry.used {
-                    unused.push(span);
+                match entry.reads {
+                    0 => unused.push(span),
+                    1 => {}
+                    reads => over_read
+                        .push(VerifyError::PrecompiledSubexprReadMoreThanOnce { at: span, reads }),
                 }
             }
+        }
+        if let Some(VerifyError::PrecompiledSubexprReadMoreThanOnce { at, .. }) = over_read.first()
+        {
+            let at = *at;
+            self.report_threaded_ir_verify_errors(
+                &over_read,
+                "pre-sequenced sub-expression read back more than once",
+                at,
+            );
         }
         if let Some(span) = unused.first() {
             return Err(super::CodeGenError::Internal(format!(

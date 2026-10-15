@@ -1456,6 +1456,7 @@ impl CoreErlangGenerator {
 
     /// [`Self::generate_vt_body_exprs`] once the method body's local-producer
     /// sites are set (ADR 0131 Phase 2).
+    #[allow(clippy::too_many_lines)]
     fn generate_vt_body_exprs_in_sites(
         &mut self,
         body: &[&Expression],
@@ -1465,8 +1466,19 @@ impl CoreErlangGenerator {
         let body_len = body.len();
 
         for (i, expr) in body.iter().enumerate() {
-            let kind = self.classify_vt_body_expr(expr);
             let is_last = i == body_len - 1;
+            // BT-3830: INVARIANT - classification and emission see the same node.
+            // `classify_vt_body_expr` and most of its predicates do not look through
+            // parentheses, while others (`is_vt_field_conditional_producer`) do, so a
+            // parenthesised statement was classified `Pure` while its bare form got a
+            // threading kind: `(t := t + 1)` and `([t < 3] whileTrue: [t := t + 1])` dropped
+            // the local write, `(self.m := 5)` trapped its `Self` rebind in a closed
+            // expression. A NON-last statement's value is discarded, so `(s)` is exactly
+            // `s`: unwrap it once here, for every kind. The last statement is the method
+            // value (a bare last field assignment answers the updated `Self`, a
+            // parenthesised one its value), so it is left as written.
+            let expr = if is_last { expr } else { expr.unwrap_parens() };
+            let kind = self.classify_vt_body_expr(expr);
 
             // ADR 0131 Phase 2: a local-threading producer in this statement
             // rebinds its locals at the method root, so the statement is
@@ -3506,8 +3518,7 @@ impl CoreErlangGenerator {
             })
             .collect();
         let enclosing = self.rebind_frame_of(frame)?;
-        #[allow(unused_mut)]
-        let mut built = build_family_local_threading_prelude(
+        let built = build_family_local_threading_prelude(
             &enclosing,
             result_var,
             case_doc,
@@ -3519,7 +3530,9 @@ impl CoreErlangGenerator {
             |_, _| RebindLowering::Let,
         );
         // BT-3821 fault injection: the last local's rebind is omitted
-        // (`ThreadedLocalDropped` on a real compile).
+        // (`ThreadedLocalDropped` on a real compile). Only test builds mutate `built`.
+        #[cfg(test)]
+        let mut built = built;
         #[cfg(test)]
         if super::threaded_expr::fault::active()
             == Some(super::threaded_expr::fault::LocalRebindFault::DropRebind)
