@@ -269,7 +269,7 @@ not known: a receiver statically known NOT to be a `Dictionary` (`self` or
 `super` outside a `Dictionary`, a class object, an inferred type that is a
 known class other than `Dictionary`, its subclasses and its ancestors, or a
 union of such) would raise on every call even when the key is present, so it
-keeps the §6 compile error (`lookup_receiver_statically_not_dictionary` in
+keeps the §6 compile error (`receiver_statically_not_dictionary` in
 `block_facts`, read by the Phase 0 check; codegen lowers whatever Phase 0
 accepts and never sees the rejected programs). The lookups are rows of ONE table in
 `beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen

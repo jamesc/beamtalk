@@ -21,6 +21,7 @@ Replaces the former beamtalk_map.erl hand-written dispatch module.
     do_with_key/2,
     includes/2,
     lookup_for_threading/3,
+    pairs_for_threading/2,
     print_string/1
 ]).
 
@@ -56,6 +57,28 @@ lookup_for_threading(Receiver, Selector, Key) when is_map(Receiver) ->
             unsupported_receiver(Receiver, Selector)
     end;
 lookup_for_threading(Receiver, Selector, _Key) ->
+    unsupported_receiver(Receiver, Selector).
+
+-doc """
+The receiver guard of an inlined `keysAndValuesDo:` / `doWithKey:` whose block
+writes an outer local (ADR 0131, BT-3841): the `{Key, Value}` pairs of a
+`Dictionary` (an untagged map), for the compiled fold to iterate in the
+caller's activation.
+
+Any other receiver would have run its own method of that name with a closure
+that cannot return the write (`Ets keysAndValuesDo:`, a user class's
+`doWithKey:`), and iterating its tagged map would walk the wrong entries, so
+a tagged map (an `Ets` handle, a value-type instance) or a non-map raises the
+structured `type_error` that `lookup_for_threading/3` raises. `Selector` is
+the iteration selector, for the error only.
+""".
+-spec pairs_for_threading(term(), atom()) -> [{term(), term()}].
+pairs_for_threading(Receiver, Selector) when is_map(Receiver) ->
+    case beamtalk_primitive:is_object(Receiver) of
+        false -> maps:to_list(Receiver);
+        true -> unsupported_receiver(Receiver, Selector)
+    end;
+pairs_for_threading(Receiver, Selector) ->
     unsupported_receiver(Receiver, Selector).
 
 -spec unsupported_receiver(term(), atom()) -> no_return().

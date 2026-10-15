@@ -158,3 +158,114 @@ TestCase subclass: Adr0131KeyedDoTest
 
   testActorStatefulInDo =>
     self assert: ((Adr0131KeyedDoActor spawn) statefulInDo) equals: #[6, 6]
+
+  testClassViaParamDictionary =>
+    self assert: (Adr0131KeyedDoClass viaParam: #{#a => 1, #b => 2}) equals: 2
+    self assert: (Adr0131KeyedDoClass viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testClassViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsClass type: #set
+    ets at: "a" put: 1
+    r := [
+      Adr0131KeyedDoClass viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      Adr0131KeyedDoClass viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testClassViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      Adr0131KeyedDoClass viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      Adr0131KeyedDoClass viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testValueViaParamDictionary =>
+    self assert: ((Adr0131KeyedDoValue new) viaParam: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+    self assert: ((Adr0131KeyedDoValue new) viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testValueViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsValue type: #set
+    ets at: "a" put: 1
+    r := [
+      (Adr0131KeyedDoValue new) viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoValue new) viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testValueViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      (Adr0131KeyedDoValue new) viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoValue new) viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testActorViaParamDictionary =>
+    self assert: ((Adr0131KeyedDoActor spawn) viaParam: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+    self assert: ((Adr0131KeyedDoActor spawn) viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testActorViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsActor type: #set
+    ets at: "a" put: 1
+    r := [
+      (Adr0131KeyedDoActor spawn) viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoActor spawn) viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testActorViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      (Adr0131KeyedDoActor spawn) viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoActor spawn) viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0

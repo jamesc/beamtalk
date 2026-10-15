@@ -143,3 +143,13 @@ Actor subclass: Adr0131KeyedDoActor
           ]
       ]
     #[t, self.n]
+
+  viaParam: d =>
+    t := 0
+    d keysAndValuesDo: [:k :v | t := t + 1]
+    t
+
+  viaParamKey: d =>
+    t := 0
+    d doWithKey: [:k :v | t := t + 1]
+    t

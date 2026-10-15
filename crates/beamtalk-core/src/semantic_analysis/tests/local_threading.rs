@@ -1738,6 +1738,54 @@ fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
     }
 }
 
+/// BT-3841 review: the inline keyed fold is valid for a `Dictionary` receiver
+/// only (`Ets` and any class that defines the selector run their own method
+/// with a closure). The one rule the lookups use
+/// (`receiver_statically_not_dictionary`) keeps a permanent §6 error for a
+/// receiver known not to be one; an unknown receiver compiles and is guarded at
+/// run time (`beamtalk_map:pairs_for_threading/2`).
+#[test]
+fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_error() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let write = format!("t := 0\nself {sel} [:k :v | t := t + v]\nt");
+        for src in [in_class(&write), in_value(&write), in_actor(&write)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+                "{src}: {diags:?}"
+            );
+        }
+        // A typed non-Dictionary local.
+        let typed = format!("t := 0\ne := 3\ne {sel} [:k :v | t := t + v]\nt");
+        let diags = adr0131_diagnostics(&in_class(&typed));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+            "{typed}: {diags:?}"
+        );
+        // A map literal and an unknown receiver are Dictionary-inline.
+        for recv in ["#{#a => 1}", "d"] {
+            let body = format!("t := 0\nd := #{{#a => 1}}\n{recv} {sel} [:k :v | t := t + v]\nt");
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+            }
+        }
+        // A closure between the frame and the construct (an opaque or stored
+        // block) is not a producer frame: the write is rejected there.
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\nself ap: [{kv}]\nt"),
+            format!("t := 0\n#(1) do: [:z | [:y | {kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: a keyed iteration in a closure was accepted"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
     // BT-3746 follow-up (PR #4230): a `whileTrue:` nested as a statement in a

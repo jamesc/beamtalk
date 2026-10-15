@@ -777,7 +777,11 @@ impl CoreErlangGenerator {
                         }
                     }
                     "doWithKey:" | "keysAndValuesDo:" if arguments.len() == 1 => {
-                        let doc = self.generate_dict_do_with_key(receiver, &arguments[0])?;
+                        let doc = self.generate_dict_do_with_key(
+                            receiver,
+                            &arguments[0],
+                            &selector_name,
+                        )?;
                         if matches!(doc, Document::Nil) {
                             Ok(None)
                         } else {

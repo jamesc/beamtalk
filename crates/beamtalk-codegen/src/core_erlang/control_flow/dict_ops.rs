@@ -188,6 +188,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         body: &Expression,
+        selector: &str,
     ) -> Result<Document<'static>> {
         validate_block_arity_exact(
             body,
@@ -201,11 +202,39 @@ impl CoreErlangGenerator {
         // it also sees a write buried in a nested loop or fold, which a bare
         // `analyze_block` does not propagate out of the nested block.
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
-            return self.generate_dict_do_with_key_mutations(receiver, body_block);
+            return self.generate_dict_do_with_key_mutations(receiver, body_block, selector);
         }
 
         // No mutations: delegate to runtime helper
         Ok(Document::Nil)
+    }
+
+    /// The `{K, V}` pairs of the dictionary bound to `dict_var` that the keyed
+    /// fold iterates: `maps:to_list/1` for a map literal, the receiver guard
+    /// `beamtalk_map:pairs_for_threading/2` otherwise (it answers an untagged
+    /// map's pairs and raises a structured `type_error` for `Ets`, a value-type
+    /// instance, a user class or a non-map, instead of walking the wrong
+    /// entries; the keyed counterpart of `lookup_for_threading/3`, BT-3841).
+    fn keyed_pairs_doc(
+        dict_var: &str,
+        literal_receiver: bool,
+        selector: &str,
+    ) -> Document<'static> {
+        if literal_receiver {
+            docvec![
+                "call 'maps':'to_list'(",
+                leaf::var(dict_var.to_string()),
+                ")"
+            ]
+        } else {
+            docvec![
+                "call 'beamtalk_map':'pairs_for_threading'(",
+                leaf::var(dict_var.to_string()),
+                ", ",
+                leaf::atom(selector.to_string()),
+                ")"
+            ]
+        }
     }
 
     /// Generates stateful `dictionary doWithKey:` using `lists:foldl` over `maps:to_list`.
@@ -217,6 +246,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         body: &Block,
+        selector: &str,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
@@ -226,6 +256,13 @@ impl CoreErlangGenerator {
         let pairs_var = self.fresh_temp_var("temp");
         let lambda_var = self.fresh_temp_var("temp");
         let pair_var = self.fresh_temp_var("Pair");
+        // The fold is inlined for a `Dictionary` only. A map literal is one; any
+        // other receiver goes through the runtime guard (`Ets`, a value-type
+        // instance or a user class defining the selector would run its own
+        // method, which the inline fold must not replace). A receiver core
+        // knows is not a `Dictionary` never gets here (the Phase 0 / §6 check
+        // keeps its error).
+        let literal_receiver = matches!(receiver, Expression::MapLiteral { .. });
 
         // Get parameter names for key and value
         let key_param = body.parameters.first().map_or("_", |p| p.name.as_str());
@@ -244,9 +281,9 @@ impl CoreErlangGenerator {
                 recv_code,
                 " in let ",
                 leaf::var(pairs_var.clone()),
-                " = call 'maps':'to_list'(",
-                leaf::var(dict_var),
-                ") in let ",
+                " = ",
+                Self::keyed_pairs_doc(&dict_var, literal_receiver, selector),
+                " in let ",
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(pair_var.clone()),
@@ -328,9 +365,9 @@ impl CoreErlangGenerator {
             recv_code,
             " in let ",
             leaf::var(pairs_var.clone()),
-            " = call 'maps':'to_list'(",
-            leaf::var(dict_var),
-            ") in let ",
+            " = ",
+            Self::keyed_pairs_doc(&dict_var, literal_receiver, selector),
+            " in let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(pair_var.clone()),
@@ -502,7 +539,7 @@ mod tests {
         );
         let code = codegen(src);
         assert!(
-            code.contains("'maps':'to_list'"),
+            code.contains("'beamtalk_map':'pairs_for_threading'"),
             "doWithKey: with field mutation should use maps:to_list to iterate pairs. Got:\n{code}"
         );
         assert!(
@@ -550,7 +587,7 @@ mod tests {
         );
         let code = codegen(src);
         assert!(
-            code.contains("'maps':'to_list'"),
+            code.contains("'beamtalk_map':'pairs_for_threading'"),
             "doWithKey: with local mutation should use maps:to_list. Got:\n{code}"
         );
         assert!(
@@ -583,11 +620,11 @@ mod tests {
         let code_dwk = codegen(src_dwk);
         let code_kavd = codegen(src_kavd);
         assert!(
-            code_kavd.contains("'maps':'to_list'"),
+            code_kavd.contains("'beamtalk_map':'pairs_for_threading'"),
             "keysAndValuesDo: should use the same maps:to_list path as doWithKey:. Got:\n{code_kavd}"
         );
         assert!(
-            code_dwk.contains("'maps':'to_list'") && code_kavd.contains("'maps':'to_list'"),
+            code_dwk.contains("pairs_for_threading") && code_kavd.contains("pairs_for_threading"),
             "Both doWithKey: and keysAndValuesDo: must use maps:to_list. dwk:\n{code_dwk}\nkavd:\n{code_kavd}"
         );
     }
@@ -749,5 +786,42 @@ mod tests {
             code.contains("{'nil', _FoldResult"),
             "ValueType doWithKey: closed form answers the carrier. Got:\n{code}"
         );
+    }
+
+    #[test]
+    fn test_keyed_fold_guards_a_non_literal_receiver_and_not_a_map_literal() {
+        // BT-3841: the keyed fold is inlined for a `Dictionary` only. A map
+        // literal is one (plain `maps:to_list`); any other receiver goes through
+        // `beamtalk_map:pairs_for_threading/2`, which raises for `Ets`, a
+        // value-type instance, a user class or a non-map instead of walking the
+        // wrong entries.
+        for (sel, arity_block) in [
+            ("keysAndValuesDo:", "[:k :v | total := total + v]"),
+            ("doWithKey:", "[:k :v | total := total + v]"),
+        ] {
+            for header in [
+                "Value subclass: V\n  state: dummy = 0\n\n",
+                "Actor subclass: V\n  state: dummy = 0\n\n",
+            ] {
+                let literal = format!(
+                    "{header}  run =>\n    total := 0\n    #{{#a => 1}} {sel} {arity_block}\n    total\n"
+                );
+                let code = codegen(&literal);
+                assert!(
+                    code.contains("'maps':'to_list'") && !code.contains("pairs_for_threading"),
+                    "a map literal is a Dictionary: no guard. Got:\n{code}"
+                );
+                let dynamic = format!(
+                    "{header}  run: d =>\n    total := 0\n    d {sel} {arity_block}\n    total\n"
+                );
+                let code = codegen(&dynamic);
+                assert!(
+                    code.contains("'beamtalk_map':'pairs_for_threading'(")
+                        && code.contains(&format!("'{sel}')"))
+                        && !code.contains("'maps':'to_list'"),
+                    "an unknown receiver goes through the guard with the selector. Got:\n{code}"
+                );
+            }
+        }
     }
 }

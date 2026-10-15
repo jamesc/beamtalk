@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): a class that defines `keysAndValuesDo:` / `doWithKey:`
+// itself. Its instance is not a `Dictionary`, so the compiled keyed fold, which
+// is inlined for a `Dictionary` receiver only, must not iterate it as one. See
+// stdlib/test/adr0131keyed_do_test.bt.
+
+Value subclass: Adr0131KeyedDoCustom
+
+  keysAndValuesDo: aBlock => aBlock value: 1 value: 2
+
+  doWithKey: aBlock => aBlock value: 1 value: 2

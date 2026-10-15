@@ -54,8 +54,8 @@ use crate::semantic_analysis::block_facts::{
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
     is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
-    lookup_receiver_statically_not_dictionary, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, producer_body_block, repl_operand_sites, root_producer_writes,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
+    receiver_statically_not_dictionary, repl_operand_sites, root_producer_writes,
     sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
@@ -632,8 +632,8 @@ const fn deny(
 /// Never add a row for a shape an existing test shows answering right.
 #[rustfmt::skip] // one row per line: a measured table
 const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Class], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
-    deny(None, None, None, None, None, None, &[ValueType], &[KeyedDo, Satisfy, Enumeration, IfNil, AndOr]),
+    deny(None, None, None, None, None, None, &[Class], &[Satisfy, Enumeration, IfNil, AndOr, BlockValue]),
+    deny(None, None, None, None, None, None, &[ValueType], &[Satisfy, Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
@@ -879,7 +879,9 @@ const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo];
 
 /// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
 /// described by the position and holds only frames the producer lowers: at
-/// most two nested blocks, none of them an evaluated block.
+/// most two nested blocks, none of them an evaluated block or a closure
+/// (`Container::Other`: a block value passed on or stored, whose write only the
+/// §6 check can judge).
 fn lowered_chain(position: Position) -> bool {
     match position {
         Position::Statement => true,
@@ -888,7 +890,12 @@ fn lowered_chain(position: Position) -> bool {
             inner,
             depth,
             ..
-        } => depth <= 2 && container != EvaluatedBlock && inner != EvaluatedBlock,
+        } => {
+            depth <= 2
+                && ![container, inner]
+                    .iter()
+                    .any(|role| matches!(role, EvaluatedBlock | Container::Other))
+        }
         _ => false,
     }
 }
@@ -1022,7 +1029,7 @@ pub(crate) fn check_local_threading(
 }
 
 /// What the lookup-receiver rule
-/// ([`lookup_receiver_statically_not_dictionary`]) reads for one method body.
+/// ([`receiver_statically_not_dictionary`]) reads for one method body.
 #[derive(Clone)]
 struct ReceiverFacts<'a> {
     hierarchy: &'a ClassHierarchy,
@@ -1703,7 +1710,29 @@ impl<'d> Walker<'d> {
         // ADR 0131 Phase 2d (BT-3798 review): a lookup whose receiver is
         // statically known not to be a `Dictionary` would only ever raise at
         // run time (the guard), so it keeps its §6 compile error.
-        if is_lookup && self.lookup_receiver_is_not_dictionary(expr) {
+        if is_lookup && self.receiver_is_not_dictionary(expr) {
+            return;
+        }
+        // BT-3841: the same rule for `keysAndValuesDo:`/`doWithKey:`, whose
+        // dictionary fold is inlined for a `Dictionary` receiver only (`Ets`
+        // and any class that defines the selector run their own method with a
+        // closure that cannot return the write). The §1 block-send exemption
+        // does not cover them, so the permanent §6 error is reported here.
+        if matches!(selector.as_str(), "keysAndValuesDo:" | "doWithKey:")
+            && self.receiver_is_not_dictionary(expr)
+        {
+            if let Some((_, body)) = producer_body_block(expr) {
+                self.report_literal_with_hint(
+                    body,
+                    &selector,
+                    format!(
+                        "`{selector}` runs the block inline only for a `Dictionary` receiver; \
+                         this receiver is not one, so it would call its own `{selector}` with \
+                         a closure. Compute the new value without writing it from the block, \
+                         or iterate a `Dictionary` (`asDictionary`)"
+                    ),
+                );
+            }
             return;
         }
         // ADR 0131 Phase 2 (BT-3749): a loop or fold at a sequenced operand
@@ -1886,8 +1915,8 @@ impl<'d> Walker<'d> {
     }
 
     /// Whether the receiver of the lookup send `expr` is statically known not
-    /// to be a `Dictionary` ([`lookup_receiver_statically_not_dictionary`]).
-    fn lookup_receiver_is_not_dictionary(&self, expr: &Expression) -> bool {
+    /// to be a `Dictionary` ([`receiver_statically_not_dictionary`]).
+    fn receiver_is_not_dictionary(&self, expr: &Expression) -> bool {
         let (Some(facts), Expression::MessageSend { receiver, .. }) =
             (&self.receivers, expr.unwrap_parens())
         else {
@@ -1896,12 +1925,7 @@ impl<'d> Walker<'d> {
         let ty = facts
             .type_map
             .and_then(|map| map.get(receiver.unwrap_parens().span()));
-        lookup_receiver_statically_not_dictionary(
-            receiver,
-            ty,
-            facts.self_is_dictionary,
-            facts.hierarchy,
-        )
+        receiver_statically_not_dictionary(receiver, ty, facts.self_is_dictionary, facts.hierarchy)
     }
 
     /// The help text for a construct the Phase 0 check rejects at

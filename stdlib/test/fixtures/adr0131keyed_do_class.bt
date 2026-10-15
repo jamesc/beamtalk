@@ -121,3 +121,13 @@ Object subclass: Adr0131KeyedDoClass
     t := 0
     r := #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
     #[r, t]
+
+  class viaParam: d =>
+    t := 0
+    d keysAndValuesDo: [:k :v | t := t + 1]
+    t
+
+  class viaParamKey: d =>
+    t := 0
+    d doWithKey: [:k :v | t := t + 1]
+    t
