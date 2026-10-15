@@ -420,10 +420,12 @@ lookupIfAbsent_absent_test() ->
     end).
 
 lookupIfAbsent_block_badarg_is_not_reported_as_stale_table_test() ->
-    %% BT-3739: a badarg raised by the user's Block is the Block's own error.
+    %% BT-3739: a badarg raised by the user's Block is the Block's own error, never
+    %% a stale_table. BT-3836: it surfaces as a structured type_error (not a raw
+    %% badarg, which would trigger the FFI proxy's charlist retry and re-run the Block).
     with_table(bt_ets_test_lookup_default_block_badarg, fun(Table) ->
         ?assertError(
-            badarg,
+            #{error := #beamtalk_error{kind = type_error}},
             beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end)
         )
     end).
@@ -759,13 +761,15 @@ bt3831_values_snapshot_test() ->
         ?assertEqual(#{a => 1, b => 2}, beamtalk_ets:asDictionary(T)),
         Self = self(),
         beamtalk_ets:keysAndValuesDo(T, fun(K, V) -> Self ! {kv, K, V} end),
-        ?assertEqual(
-            ok,
+        %% Assert on both messages so none is left behind in the EUnit mailbox.
+        Seen = lists:sort([
             receive
-                {kv, a, 1} -> ok
+                {kv, K, V} -> {K, V}
             after 100 -> timeout
             end
-        )
+         || _ <- [1, 2]
+        ]),
+        ?assertEqual([{a, 1}, {b, 2}], Seen)
     end).
 
 bt3831_if_present_test() ->
@@ -910,3 +914,77 @@ bt3831_update_map_key_rejected_test() ->
         ),
         ?assertEqual(0, beamtalk_ets:lookup(T, #{a => 1, b => 2}))
     end).
+
+bt3836_if_absent_block_badarg_runs_once_test() ->
+    with_table(bt3836_absent, fun(T) ->
+        Self = self(),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_erlang_proxy:direct_call(
+                beamtalk_ets,
+                lookupIfAbsent,
+                [
+                    T,
+                    <<"k">>,
+                    fun() ->
+                        Self ! ran,
+                        erlang:error(badarg)
+                    end
+                ]
+            )
+        ),
+        ?assertEqual(
+            ran,
+            receive
+                ran -> ran
+            after 100 -> none
+            end
+        ),
+        ?assertEqual(
+            none,
+            receive
+                ran -> ran
+            after 50 -> none
+            end
+        )
+    end).
+
+bt3836_user_values_are_not_result_coerced_test() ->
+    %% Stored/computed `ok`, `{ok, _}` and `{error, _}` values must come back
+    %% unchanged through the FFI proxy (beamtalk_ffi_raw_results/0 opt-out).
+    with_table(bt3836_raw, fun(T) ->
+        lists:foreach(
+            fun(V) ->
+                beamtalk_ets:insert(T, k, V),
+                ?assertEqual(V, beamtalk_erlang_proxy:direct_call(beamtalk_ets, lookup, [T, k])),
+                ?assertEqual(
+                    V,
+                    beamtalk_erlang_proxy:native_call(
+                        beamtalk_ets, lookup, [T, k], {'Ets', 'at:'}
+                    )
+                ),
+                ?assertEqual(
+                    V,
+                    beamtalk_erlang_proxy:direct_call(
+                        beamtalk_ets, ifPresent, [T, k, fun(X) -> X end]
+                    )
+                ),
+                ?assertEqual(
+                    V,
+                    beamtalk_erlang_proxy:direct_call(
+                        beamtalk_ets, updateAt, [T, k, fun(_) -> V end]
+                    )
+                ),
+                ?assertEqual(
+                    V,
+                    beamtalk_erlang_proxy:direct_call(
+                        beamtalk_ets, lookupIfAbsent, [T, absent, fun() -> V end]
+                    )
+                )
+            end,
+            [ok, {ok, 1}, {error, boom}, error]
+        )
+    end).
+
+bt3836_raw_results_marker_test() ->
+    ?assert(beamtalk_ets:beamtalk_ffi_raw_results()).

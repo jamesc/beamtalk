@@ -229,3 +229,31 @@ TestCase subclass: EtsTest
     self assert: (self.table anySatisfy: [:v | v > 2])
     self assert: (self.table count: [:v | v > 1]) equals: 2
     self assert: self.table size equals: 3
+
+  testOkSymbolRoundTripsUnchanged =>
+    // BT-3836: stored/computed #ok must not be coerced into `Result ok: nil`
+    // by the FFI proxy.
+    self.table at: "k" put: #ok
+    self assert: (self.table at: "k") equals: #ok
+    self assert: (self.table at: "k" ifAbsent: [nil]) equals: #ok
+    self assert: (self.table at: "k" ifPresent: [:v | v]) equals: #ok
+    self assert: (self.table at: "k" update: [:o | #ok]) equals: #ok
+    self assert: (self.table at: "missing" ifAbsent: [#ok]) equals: #ok
+    self assert: (self.table at: "missing" update: [:o | #ok]) equals: #ok
+
+  testIfAbsentBlockErrorPropagatesWithoutRerun =>
+    // An error raised by the block propagates and the block is not re-run. The
+    // raw-badarg retry path (BT-3836) cannot be reached from a compiled block, so
+    // it is covered by the EUnit test bt3836_if_absent_block_badarg_runs_once_test.
+    self.table at: "n" put: 0
+    self
+      should: [
+        self.table
+          at: "gone"
+          ifAbsent: [
+            self.table at: "n" increment: 1
+            self error: "boom"
+          ]
+      ]
+      raise: #user_error
+    self assert: (self.table at: "n") equals: 1
