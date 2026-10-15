@@ -92,9 +92,9 @@ pub(super) use ir::{
     ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
-pub(super) use verify::{SequencedSibling, verify_bind_frames, verify_sibling_reads};
+pub(super) use verify::{SequencedSibling, VerifyError, verify_bind_frames, verify_sibling_reads};
 
-// `AccParam`/`CloseContext`/`VerifyError` have no production caller by name
+// `AccParam`/`CloseContext` have no production caller by name
 // today (constructed only in tests, or reached only through `verify()`'s
 // inferred return type) — `#[cfg(test)]` keeps the plain build warning-free
 // without narrowing what a future non-test caller can reach:
@@ -107,7 +107,7 @@ pub(super) use verify::{SequencedSibling, verify_bind_frames, verify_sibling_rea
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
-    CatchRestoreDefect, ClassMethodDefect, ScopeKind, VerifyError, verify, verify_in_scope,
+    CatchRestoreDefect, ClassMethodDefect, ScopeKind, verify, verify_in_scope,
 };
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
