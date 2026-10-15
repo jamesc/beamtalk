@@ -888,9 +888,9 @@ fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
         ("[self.m := 1. t := t + 1] on: Error do: [:e | 0]", true),
         ("[self.m := 1] ensure: [0]", true),
         ("#(1, 2) do: [:e | t := t + e]", true),
-        // A field-writing `do:` body is not threaded in a value type at all (see
-        // `VT_UNSUPPORTED_FIELD_WRITING_BODIES`): a structured rejection in both spellings.
-        ("#(1, 2) do: [:e | self.m := e]", false),
+        // BT-3827: a top-level field write in a value-type `do:` body threads `Self` through the
+        // fold accumulator, so both spellings compile.
+        ("#(1, 2) do: [:e | self.m := e]", true),
         ("1 to: 3 do: [:i | t := t + i]", true),
         ("[t < 3] whileTrue: [t := t + 1]", true),
         ("3 timesRepeat: [t := t + 1]", true),
