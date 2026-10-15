@@ -107,6 +107,10 @@ pub(super) mod fault {
         /// BT-3821: a value-type conditional producer omits the merge `Bind` of
         /// the `Self` family its arms advanced (`ConstructFamilyDropped`).
         DropFamilyBind,
+        /// BT-3827: a value-type fold lambda omits the `Return` that carries the
+        /// `Self` family its body advanced out through the accumulator
+        /// (`FoldFamilyNotCarried`).
+        DropFoldFamilySlot,
     }
 
     thread_local! {
@@ -1395,7 +1399,9 @@ impl CoreErlangGenerator {
         // A nested construct returns its own `{Value, StateAcc}` tuple: the
         // enclosing direct-params loop's open-chain list-op forms (which
         // rebind by name and return no tuple) must not apply to it.
-        let doc = self.with_cleared_direct_params_loop(|this| this.expression_doc(expr))?;
+        let doc = self.with_fold_self_slot_consumer(expr, |this| {
+            this.with_cleared_direct_params_loop(|this| this.expression_doc(expr))
+        })?;
         let carrier = self.fresh_temp_var("ThreadedResult");
         let element = |k: i64, carrier: &str| {
             docvec![

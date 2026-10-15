@@ -6,6 +6,7 @@
 
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
+use super::super::family_slots::FoldFamilySlots;
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use super::OpaqueFoldOp;
 use beamtalk_cerl_doc::Document;
@@ -583,7 +584,8 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         // Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate)
+            .with_value_self_slot(self, body)?;
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         // Add is_list guard for non-list collection types.
@@ -690,6 +692,9 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
+        // BT-3827: a value-type body that writes a field carries `Self` in a
+        // `{Acc, Self}` wrapper around the accumulator.
+        let slots = plan.fold_family_slots(self);
         docs.push(docvec![
             "let ",
             leaf::var(init_var.clone()),
@@ -700,8 +705,16 @@ impl CoreErlangGenerator {
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(acc_state_var.clone()),
+            leaf::var(
+                slots
+                    .as_ref()
+                    .map_or(acc_state_var.as_str(), FoldFamilySlots::lambda_param)
+                    .to_string()
+            ),
             ") -> ",
+            slots
+                .as_ref()
+                .map_or(Document::Nil, |s| s.lambda_prologue(&acc_state_var)),
             "let ",
             leaf::var(acc_var.clone()),
             " = call 'erlang':'element'(1, ",
@@ -728,15 +741,34 @@ impl CoreErlangGenerator {
         let acc_out = self.fresh_temp_var("AccOut");
         let state_out = self.fresh_temp_var("StOut");
 
-        docs.push(docvec![
-            ThreadingPlan::foldl_call_doc(
-                &lambda_var,
-                docvec!["{", leaf::var(init_var), ", ", leaf::var(init_state), "}"],
-                &safe_list_var,
-                &result_var
-            ),
-            "let ",
+        let init_acc = docvec!["{", leaf::var(init_var), ", ", leaf::var(init_state), "}"];
+        let init_acc = match &slots {
+            Some(s) => s.wrap_init(init_acc, self),
+            None => init_acc,
+        };
+        let fold_pair = slots
+            .as_ref()
+            .map_or(result_var.as_str(), FoldFamilySlots::result_var);
+        let fold_call =
+            ThreadingPlan::foldl_call_doc(&lambda_var, init_acc, &safe_list_var, fold_pair);
+        let unwrap = slots
+            .as_ref()
+            .map_or(Document::Nil, |s| s.unwrap_result(&result_var));
+        let result_open = docvec![
+            "{",
             leaf::var(acc_out.clone()),
+            ", ",
+            leaf::var(state_out.clone())
+        ];
+        let result_tuple = match &slots {
+            Some(s) => s.close_tuple(result_open, self),
+            None => docvec![result_open, "}"],
+        };
+        docs.push(docvec![
+            fold_call,
+            unwrap,
+            "let ",
+            leaf::var(acc_out),
             " = call 'erlang':'element'(1, ",
             leaf::var(result_var.clone()),
             ") in let ",
@@ -745,11 +777,7 @@ impl CoreErlangGenerator {
             leaf::var(result_var),
             ") in ",
             plan.generate_extract_suffix_doc(&state_out, self),
-            "{",
-            leaf::var(acc_out),
-            ", ",
-            leaf::var(state_out),
-            "}",
+            result_tuple,
         ]);
 
         Ok(Document::Vec(docs))

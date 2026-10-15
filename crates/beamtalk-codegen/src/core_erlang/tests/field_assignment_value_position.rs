@@ -432,16 +432,63 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "conditional_wrapping_field_rhs",
         "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
-];
-
-/// Loop-shaped constructs whose BODY writes a field are rejected in every position of a value
-/// type, statement position included: their accumulator has no `Self` slot yet. A gap separate
-/// from BT-3821's value-position threading, pinned so a fix flips it.
-const VT_UNSUPPORTED_FIELD_WRITING_BODIES: &[&str] = &[
-    "self take: (#(1, 2) do: [:e | self.m := e])",
-    "xs := #(1, 2) collect: [:e | self.m := e]. xs",
-    "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
-    "#(1, 2) do: [:e | self.m := e]",
+    // BT-3827: `do:` / `collect:` / `inject:into:` bodies that write a field carry `Self` through
+    // the fold accumulator (`FoldFamilySlots`), so each compiles in every position and statement
+    // shape; the `FoldFamilyNotCarried` verifier invariant covers the lambda's tail
+    // (`value_type_fold_family_verifier_corpus.rs`).
+    ("do_field_write_statement", "#(1, 2) do: [:e | self.m := e]"),
+    (
+        "do_field_write_send_arg",
+        "self take: (#(1, 2) do: [:e | self.m := e])",
+    ),
+    (
+        "collect_field_write_assigned",
+        "xs := #(1, 2) collect: [:e | self.m := e]. xs",
+    ),
+    (
+        "inject_field_write_send_arg",
+        "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
+    ),
+    (
+        "do_field_write_reads_field",
+        "#(1, 2) do: [:e | self.m := self.m + e]",
+    ),
+    (
+        "do_two_field_writes",
+        "#(1, 2) do: [:e | self.m := e. self.n := e + 1]",
+    ),
+    (
+        "do_field_write_and_local",
+        "t := 0. #(1, 2) do: [:e | t := t + e. self.m := t]. t",
+    ),
+    (
+        "collect_field_write_and_local",
+        "t := 0. xs := #(1, 2) collect: [:e | t := t + e. self.m := t. e * 2]. xs",
+    ),
+    (
+        "inject_field_write_accumulates",
+        "#(1, 2) inject: 0 into: [:a :e | self.m := self.m + e. a + e]",
+    ),
+    (
+        "inject_field_write_binary_operand",
+        "(#(1, 2) inject: 0 into: [:a :e | self.m := e. a + e]) + 1",
+    ),
+    (
+        "inject_field_write_returned",
+        "^ #(1, 2) inject: 0 into: [:a :e | self.m := e. a + e]",
+    ),
+    (
+        "collect_field_write_returned",
+        "^ #(1, 2) collect: [:e | self.m := e. e + 1]",
+    ),
+    (
+        "do_field_write_then_field_read_operand",
+        "#(1, 2) do: [:e | self.m := e]. self.m + EXPR",
+    ),
+    (
+        "collect_field_write_empty_list",
+        "#() collect: [:e | self.m := e]",
+    ),
 ];
 
 /// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
@@ -484,6 +531,31 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
     ),
     ("block_value", "    [STMT] value.\n    self.n\n", false),
 ];
+
+/// Statement-level shapes in which a field-writing fold position is a structured rejection
+/// rather than a compile (BT-3827). In both a fold's `Self` slot has no reader, and the lowering
+/// refuses it (`CoreErlangGenerator::value_self_fold_slot`) instead of dropping the write:
+///
+/// * `block_value`: an evaluated block (`[STMT] value`) whose body is lowered closed unless the
+///   block itself writes a field at its top level;
+/// * `conditional_condition`: the fold is an operand of a conditional's receiver, which is not a
+///   sequenced operand site of the method body.
+///
+/// The same rejection a fold gets in a stored block, a cascade or a receiver
+/// (`field_writing_folds_in_closed_contexts_stay_a_structured_rejection`).
+pub(super) const VT_FOLD_REJECTING_SHAPES: &[&str] = &["block_value", "conditional_condition"];
+
+/// Whether a [`VT_POSITIONS`] template is one of the BT-3827 field-writing fold positions.
+pub(super) fn is_fold_writing_position(template: &str) -> bool {
+    [
+        "do: [:e | self.",
+        "collect: [:e | self.",
+        "inject: 0 into: [:a :e | self.",
+        "[:e | t := t + e. self.",
+    ]
+    .iter()
+    .any(|fold| template.contains(fold))
+}
 
 pub(super) enum VtOutcome {
     /// Compiled through `erlc`; carries the generated Core Erlang.
@@ -596,7 +668,9 @@ fn value_type_field_assignment_value_position_corpus() {
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
-            let may_reject = *shape_may_reject;
+            let may_reject = *shape_may_reject
+                || (is_fold_writing_position(position)
+                    && VT_FOLD_REJECTING_SHAPES.contains(shape_name));
             let name = format!("{shape_name} / {position_name}");
             let pinned = VT_PINNED_FAILURES.contains(&name.as_str());
             if !may_reject && !pinned {
@@ -657,19 +731,72 @@ fn value_type_field_assignment_value_position_corpus() {
     );
 }
 
-/// `do:` / `collect:` / `inject:into:` bodies that write a field are not threaded in a value type
-/// at all (their accumulator has no `Self` slot), statement position included: a gap separate
-/// from BT-3821's value-position conditional threading. They must stay a structured rejection
-/// (never a silently dropped write); the day one compiles, this fails and the entry moves to
-/// [`VT_POSITIONS`].
+/// BT-3827 (flips the former `field_writing_fold_bodies_stay_a_structured_rejection` pin): a
+/// `do:` / `collect:` / `inject:into:` body that writes a field threads `Self` through the fold
+/// accumulator in a value type, in statement position and in every value position. The shapes the
+/// pin named, now compiling, with the write surviving into the generated function.
 #[test]
-fn field_writing_fold_bodies_stay_a_structured_rejection() {
-    for body in VT_UNSUPPORTED_FIELD_WRITING_BODIES {
+fn field_writing_fold_bodies_compile_with_the_write_threaded() {
+    for body in [
+        "self take: (#(1, 2) do: [:e | self.m := e])",
+        "xs := #(1, 2) collect: [:e | self.m := e]. xs",
+        "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
+        "#(1, 2) do: [:e | self.m := e]",
+    ] {
+        let src = format!("{VT_HEADER}\n  probe0 =>\n    {body}\n    self.n\n");
+        let VtOutcome::Compiles(code) = vt_outcome(&src) else {
+            panic!("`{body}` must compile now that fold accumulators carry `Self`:\n{src}");
+        };
+        written_fields_survive(&src, 0, &code).unwrap_or_else(|why| panic!("{why}\n{src}"));
+    }
+}
+
+/// The folds [`SELF_THREADING_FOLDS`] does not name keep the structured rejection of a field
+/// write in their body (never a silently dropped write), as does a write nested below the fold
+/// body's top level — the same limit the Letrec loops have (a conditional arm's `Self` rebind
+/// is scoped to its arm). Widening either means opting the construct in, not editing this list.
+#[test]
+fn field_writing_bodies_the_fold_slot_does_not_cover_stay_a_structured_rejection() {
+    for body in [
+        "#(1, 2) select: [:e | self.m := e. true]",
+        "#(1, 2) reject: [:e | self.m := e. true]",
+        "#(1, 2) detect: [:e | self.m := e. true]",
+        "#(1, 2) anySatisfy: [:e | self.m := e. true]",
+        "#(1, 2) count: [:e | self.m := e. true]",
+        "#(1, 2) sort: [:a :b | self.m := a. a < b]",
+        "#(1, 2) do: [:e | e > 1 ifTrue: [self.m := e]]",
+        "#(1, 2) do: [:e | self take: (self.m := e)]",
+        "#(1, 2) inject: 0 into: [:a :e | e > 1 ifTrue: [self.m := e]. a]",
+    ] {
         let src = format!("{VT_HEADER}\n  probe =>\n    {body}\n    self.n\n");
         assert!(
             matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
-            "`{body}` is expected to be rejected with a structured diagnostic; if it now \
-             compiles, move it into VT_POSITIONS:\n{src}"
+            "`{body}` is expected to be rejected with a structured diagnostic:\n{src}"
+        );
+    }
+}
+
+/// A fold that writes a field hands its `Self` back as a trailing slot of its result tuple, so it
+/// is lowered only where a consumer reads that slot (`with_fold_self_slot_consumer`). Anywhere
+/// else (a stored block, an evaluated block with no top-level write of its own, a cascade, a
+/// receiver, an `and:` argument) it is the structured rejection, never a dropped write.
+#[test]
+fn field_writing_folds_in_closed_contexts_stay_a_structured_rejection() {
+    for body in [
+        "b := [#(1, 2) do: [:e | self.m := e]]. b value",
+        "[#(1, 2) do: [:e | self.m := e]] value",
+        "c := [#(1, 2) do: [:e | self.m := e]] value. c",
+        "[:x | #(1, 2) collect: [:e | self.m := e]] value: 3",
+        "(#(1, 2) do: [:e | self.m := e]) printString; displayString",
+        "#(1, 2) do: [:e | self.m := e]; yourself",
+        "(#(1, 2) collect: [:e | self.m := e]) do: [:x | x]",
+        "(#(1, 2) do: [:e | self.m := e]) ifNil: [3]",
+        "true and: [#(1, 2) do: [:e | self.m := e]. true]",
+    ] {
+        let src = format!("{VT_HEADER}\n  probe =>\n    {body}\n    self.n\n");
+        assert!(
+            matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
+            "`{body}` is expected to be rejected with a structured diagnostic:\n{src}"
         );
     }
 }

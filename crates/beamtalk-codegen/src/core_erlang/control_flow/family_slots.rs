@@ -38,8 +38,11 @@
 //!   `[State]` — ADR 0122's "State already fits" — never data-driven per
 //!   call site.
 //!
-//! A `Foldl*` accumulator carries no family slot at all, so the list ops'
-//! `ThreadingPlan::foldl_call_doc` builds the plain fold call.
+//! A `Foldl*` accumulator carries no family slot of its own: a fold that
+//! threads a family (BT-3827: a value-type `do:`/`collect:`/`inject:into:` body
+//! writing a field) wraps its accumulator as `{Acc, Family...}` through
+//! [`FoldFamilySlots`], and returns the family as the trailing slot of the
+//! fold's own result tuple, where every consumer already reads a Letrec loop's.
 //!
 //! **Trailing position only** — no leading-slot mode.
 //!
@@ -54,10 +57,12 @@
 //! - [`extract_family_slots`] — unpacks the trailing slots back into fresh
 //!   per-family versions after the construct completes.
 
+use super::super::CoreErlangGenerator;
 use super::super::threaded_ir::{
-    BindOp, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar, render_value,
+    BindOp, FrameId, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar, render_value,
 };
 use super::analysis::ThreadedFamilies;
+use super::plan::{LoopFamilyParam, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::{docvec, leaf};
 use beamtalk_core::source_analysis::Span;
@@ -248,4 +253,165 @@ pub(in crate::core_erlang) fn extract_family_slots(
             }
         })
         .collect()
+}
+
+/// BT-3827: the accumulator wrapper of a `Foldl*` fold that threads a storage
+/// family (today only a value type's `Self`).
+///
+/// A fold kind's own accumulator (`StateAcc`, `{AccList, StateAcc}`,
+/// `{Value, StateAcc}`) has no slot for a family, and its lambda is a closure
+/// whose `Self{N}` rebinds die with it. The wrapper passes the family through
+/// `lists:foldl` beside the accumulator instead, so no kind's accumulator shape
+/// changes:
+///
+/// ```text
+/// init     {Acc0, Self}                                    (wrap_init)
+/// lambda   fun (Item, FoldAcc) ->
+///            let Acc = element(1, FoldAcc) in
+///            let Self = element(2, FoldAcc) in ...         (lambda_prologue)
+///            ... {NewAcc, SelfN}                           (generate_foldl_loop_body's Return)
+/// after    let Acc = element(1, R) in
+///          let SelfOut = element(2, R) in                  (unwrap_result)
+/// result   {..., SelfOut}                                  (close_tuple: the trailing slot)
+/// ```
+///
+/// Built once per fold by [`ThreadingPlan::fold_family_slots`] from the same
+/// [`ThreadedFamilies`] that drive the Letrec loops' extra parameter, so the
+/// four steps agree on the family list and its order by construction.
+pub(in crate::core_erlang) struct FoldFamilySlots {
+    families: ThreadedFamilies,
+    params: Vec<LoopFamilyParam>,
+    /// The lambda's accumulator parameter (the wrapper).
+    wrapper_var: String,
+    /// The `lists:foldl` result (the wrapper again).
+    result_var: String,
+    /// One variable per family, bound by [`Self::unwrap_result`].
+    out_vars: Vec<String>,
+}
+
+impl FoldFamilySlots {
+    pub(super) fn new(plan: &ThreadingPlan, generator: &mut CoreErlangGenerator) -> Option<Self> {
+        let families = plan.threaded_families().clone();
+        if families.as_slice().is_empty() {
+            return None;
+        }
+        let params = plan.capture_loop_family_params(generator);
+        let out_vars = families
+            .as_slice()
+            .iter()
+            .map(|_| generator.fresh_temp_var("FoldSelf"))
+            .collect();
+        Some(Self {
+            families,
+            params,
+            wrapper_var: generator.fresh_temp_var("FoldAcc"),
+            result_var: generator.fresh_temp_var("FoldPair"),
+            out_vars,
+        })
+    }
+
+    /// The lambda's second parameter: the `{Acc, Family...}` wrapper.
+    pub(in crate::core_erlang) fn lambda_param(&self) -> &str {
+        &self.wrapper_var
+    }
+
+    /// The variables [`Self::unwrap_result`] binds the families to, in
+    /// `families` order — for a consumer that rebinds the live family itself
+    /// (an open `do:` chain) instead of closing a result tuple.
+    pub(in crate::core_erlang) fn out_vars(&self) -> &[String] {
+        &self.out_vars
+    }
+
+    /// The variable `lists:foldl` binds its (wrapped) result to.
+    pub(in crate::core_erlang) fn result_var(&self) -> &str {
+        &self.result_var
+    }
+
+    /// `{init, Family...}`: the fold's initial accumulator, each family seeded
+    /// with the version live at the call site (the lambda's own parameter name).
+    pub(in crate::core_erlang) fn wrap_init(
+        &self,
+        init: Document<'static>,
+        generator: &mut CoreErlangGenerator,
+    ) -> Document<'static> {
+        let ctx = RenderCtx::new(generator);
+        append_family_slots(
+            docvec!["{", init],
+            &self.families,
+            |prefix| self.param_for(prefix).gensym_seed(FrameId::ROOT),
+            &ctx,
+        )
+    }
+
+    /// The lambda's opening bindings: the kind's own accumulator variable
+    /// (`acc_var`, the name the body expects) and each family under the name
+    /// the body reads it by.
+    pub(in crate::core_erlang) fn lambda_prologue(&self, acc_var: &str) -> Document<'static> {
+        let mut docs = vec![Self::element_binding(acc_var, &self.wrapper_var, 1)];
+        for (i, prefix) in self.families.as_slice().iter().enumerate() {
+            docs.push(Self::element_binding(
+                &self.param_for(prefix).param_name,
+                &self.wrapper_var,
+                i + 2,
+            ));
+        }
+        Document::Vec(docs)
+    }
+
+    /// After the fold: the kind's own accumulator back under `acc_out`, and
+    /// each family under its `out_vars` entry.
+    pub(in crate::core_erlang) fn unwrap_result(&self, acc_out: &str) -> Document<'static> {
+        let mut docs = vec![Self::element_binding(acc_out, &self.result_var, 1)];
+        for (i, out) in self.out_vars.iter().enumerate() {
+            docs.push(Self::element_binding(out, &self.result_var, i + 2));
+        }
+        Document::Vec(docs)
+    }
+
+    /// Closes the fold's result tuple `base` (an open `{...` prefix) with the
+    /// families after the fold as its trailing slots.
+    pub(in crate::core_erlang) fn close_tuple(
+        &self,
+        base: Document<'static>,
+        generator: &mut CoreErlangGenerator,
+    ) -> Document<'static> {
+        let ctx = RenderCtx::new(generator);
+        append_family_slots(
+            base,
+            &self.families,
+            |prefix| {
+                let at = self
+                    .families
+                    .as_slice()
+                    .iter()
+                    .position(|p| p == prefix)
+                    .expect("append_family_slots only ever asks for a family in `families`");
+                VersionedVar::new(
+                    VersionPrefix::Gensym(self.out_vars[at].clone()),
+                    0,
+                    FrameId::ROOT,
+                )
+            },
+            &ctx,
+        )
+    }
+
+    fn param_for(&self, prefix: &VersionPrefix) -> &LoopFamilyParam {
+        self.params
+            .iter()
+            .find(|p| &p.prefix == prefix)
+            .expect("append_family_slots only ever asks for a family in `families`")
+    }
+
+    fn element_binding(var: &str, tuple_var: &str, index: usize) -> Document<'static> {
+        docvec![
+            "let ",
+            leaf::var(var.to_string()),
+            " = call 'erlang':'element'(",
+            leaf::int_lit(i64::try_from(index).unwrap_or(i64::MAX)),
+            ", ",
+            leaf::var(tuple_var.to_string()),
+            ") in ",
+        ]
+    }
 }

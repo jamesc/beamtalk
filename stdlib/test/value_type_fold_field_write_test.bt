@@ -1,0 +1,169 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3827: a `do:` / `collect:` / `inject:into:` body that writes a field, inside a value-type
+// (TestCase) method, must hand the fold's final `Self` back to the code after it. The
+// value-type lowering used to reject every such fold (`FieldAssignmentInUnsupportedBlock`)
+// because the fold accumulator had no `Self` slot and the lambda's `Self` rebinds died with
+// the closure. Every case asserts the field AFTER the fold, so a write that compiles but is
+// lost fails here rather than slipping past the codegen corpus (which only proves `erlc`
+// accepts it).
+
+TestCase subclass: ValueTypeFoldFieldWriteTest
+  field: n = 0
+  field: m = 0
+
+  take: x => x
+
+  doBare =>
+    #(1, 2, 3) do: [:e | self.m := self.m + e]
+
+  collectLast => #(1, 2, 3) collect: [:e | self.m := self.m + e]
+
+  injectLast => #(1, 2, 3) inject: 0 into: [:a :e | self.m := self.m + e. a + e]
+
+  testDoAccumulatesIntoField =>
+    #(1, 2, 3) do: [:e | self.m := self.m + e]
+    self assert: self.m equals: 6
+
+  testDoLastWriteWins =>
+    #(1, 2, 3) do: [:e | self.m := e]
+    self assert: self.m equals: 3
+
+  earlyReturnAfterFold =>
+    #(1, 2, 3) do: [:e | self.m := self.m + e]
+    #(1) do: [:e | ^ self.m]
+    99
+
+  nonLocalReturnThenFoldLast =>
+    #(1) do: [:e | e > 5 ifTrue: [^ 0]]
+    #(1, 2) inject: 0 into: [:a :e | self.m := e. a + e]
+
+  testCollectAsMethodValueAnswersMappedValues =>
+    self assert: self collectLast equals: #(1, 3, 6)
+
+  testFoldThenNonLocalReturnSeesTheFoldsWrite =>
+    self assert: self earlyReturnAfterFold equals: 6
+
+  testFoldInLastPositionOfMethodWithNonLocalReturn =>
+    self assert: self nonLocalReturnThenFoldLast equals: 3
+
+  testDoEmptyListLeavesFieldUnchanged =>
+    self.m := 9
+    #() do: [:e | self.m := e]
+    self assert: self.m equals: 9
+
+  testDoTwoFields =>
+    #(1, 2, 3) do: [:e | self.m := e. self.n := self.n + e]
+    self assert: self.m equals: 3
+    self assert: self.n equals: 6
+
+  testDoWritesBetweenOtherWrites =>
+    self.n := 100
+    #(1, 2) do: [:e | self.m := self.m + e]
+    self.n := self.n + self.m
+    self assert: self.n equals: 103
+    self assert: self.m equals: 3
+
+  testDoWithOuterLocalAndField =>
+    t := 0
+    #(1, 2, 3) do: [:e | t := t + e. self.m := t]
+    self assert: t equals: 6
+    self assert: self.m equals: 6
+
+  testDoOverRange =>
+    (1 to: 4) do: [:e | self.m := self.m + e]
+    self assert: self.m equals: 10
+
+  testDoAsLastStatementOfHelperMethod =>
+    self doBare
+    self assert: self.m equals: 0
+
+  testDoInSendArgumentRebindsSelf =>
+    r := self take: (#(1, 2, 3) do: [:e | self.m := self.m + e])
+    self assert: self.m equals: 6
+    self assert: r equals: nil
+
+  testCollectAnswersMappedValuesAndWritesField =>
+    xs := #(1, 2, 3) collect: [:e | self.m := self.m + e. e * 2]
+    self assert: xs equals: #(2, 4, 6)
+    self assert: self.m equals: 6
+
+  testCollectAnswersTheWrittenValue =>
+    xs := #(1, 2, 3) collect: [:e | self.m := e * 10]
+    self assert: xs equals: #(10, 20, 30)
+    self assert: self.m equals: 30
+
+  testCollectWithOuterLocalAndField =>
+    t := 0
+    xs := #(1, 2, 3) collect: [:e | t := t + e. self.m := t. t]
+    self assert: xs equals: #(1, 3, 6)
+    self assert: self.m equals: 6
+    self assert: t equals: 6
+
+  testCollectInSendArgument =>
+    r := self take: (#(1, 2) collect: [:e | self.m := self.m + e. e])
+    self assert: r equals: #(1, 2)
+    self assert: self.m equals: 3
+
+  testCollectEmptyListLeavesFieldUnchanged =>
+    self.m := 4
+    xs := #() collect: [:e | self.m := e]
+    self assert: xs equals: #()
+    self assert: self.m equals: 4
+
+  testInjectAnswersFoldAndWritesField =>
+    r := #(1, 2, 3) inject: 0 into: [:a :e | self.m := self.m + e. a + e]
+    self assert: r equals: 6
+    self assert: self.m equals: 6
+
+  testInjectAsMethodValueAnswersFold =>
+    r := self injectLast
+    self assert: r equals: 6
+
+  testInjectInBinaryOperand =>
+    r := (#(1, 2, 3) inject: 0 into: [:a :e | self.m := e. a + e]) + 1
+    self assert: r equals: 7
+    self assert: self.m equals: 3
+
+  testInjectWithOuterLocalAndField =>
+    t := 0
+    r := #(1, 2, 3) inject: 10 into: [:a :e | t := t + 1. self.m := a + e. a + e]
+    self assert: r equals: 16
+    self assert: t equals: 3
+    self assert: self.m equals: 16
+
+  testInjectEmptyListAnswersInitialAndLeavesFieldUnchanged =>
+    self.m := 5
+    r := #() inject: 99 into: [:a :e | self.m := e. a + e]
+    self assert: r equals: 99
+    self assert: self.m equals: 5
+
+  testNestedFoldsEachCarrySelfSeparately =>
+    #(1, 2) do: [:e | self.m := self.m + e]
+    xs := #(10, 20) collect: [:e | self.n := self.n + e. e]
+    self assert: self.m equals: 3
+    self assert: self.n equals: 30
+    self assert: xs equals: #(10, 20)
+
+  testFoldInsideFieldWritingBlockValue =>
+    [#(1, 2, 3) do: [:e | self.m := self.m + e]. self.n := 5] value
+    self assert: self.m equals: 6
+    self assert: self.n equals: 5
+
+  testFoldThenReadInsideFieldWritingBlockValue =>
+    r := [#(1, 2, 3) do: [:e | self.m := self.m + e]. self.n := 5. self.m + self.n] value
+    self assert: r equals: 11
+    self assert: self.m equals: 6
+
+  testFoldAndLocalInsideBlockValue =>
+    r := [t := 0. #(1, 2, 3) do: [:e | t := t + e. self.m := t]. t] value
+    self assert: r equals: 6
+    self assert: self.m equals: 6
+
+  testTwoFoldsInSequenceBothVisible =>
+    #(1, 2, 3) do: [:e | self.m := self.m + e]
+    r := #(1, 2) inject: 0 into: [:a :e | self.n := self.m + e. a + e]
+    self assert: self.m equals: 6
+    self assert: self.n equals: 8
+    self assert: r equals: 3

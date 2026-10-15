@@ -98,10 +98,16 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-3827: a value-type fold body that writes a field carries `Self`
+        // through the accumulator. Captured before the body lowers, like the
+        // Letrec loops do (`ThreadingPlan::capture_loop_family_params`).
+        let family_params = plan.capture_loop_family_params(self);
+
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
             let mut stmts = unpack_stmts;
             stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
+            Self::carry_fold_families(&mut stmts, &family_params, frame)?;
             let final_state_version = this.state_version();
             let node = ThreadedStmt::Threaded {
                 mode: mode.clone(),
@@ -141,12 +147,81 @@ impl CoreErlangGenerator {
                 produces: Vec::new(),
                 span,
             };
-            let errors = this.verify_threaded_ir(std::slice::from_ref(&fixture));
+            let mut errors = this.verify_threaded_ir(std::slice::from_ref(&fixture));
+            // BT-3827: whichever the plan says, a body that advances `Self`
+            // must hand the final version back out through the accumulator.
+            let ThreadedStmt::Threaded {
+                body: fixture_body, ..
+            } = &fixture
+            else {
+                unreachable!("fixture is always a Threaded node, constructed just above")
+            };
+            errors.extend(threaded_ir::verify_fold_family_carried(fixture_body, frame));
             this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
             let mut ctx = threaded_ir::RenderCtx::new(this);
             let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
             Ok((doc, final_state_version))
         })
+    }
+
+    /// BT-3827: closes a value-type fold lambda so the `Self` family its body
+    /// advanced rides the accumulator out of the closure.
+    ///
+    /// **Invariant** (the fold counterpart of the Letrec loops' trailing
+    /// `Self` parameter): for a fold whose plan threads `Self`
+    /// ([`ThreadingPlan::threads_value_self`]), the lambda receives
+    /// `{Acc, Self}`, the body's first `Self` `Bind` sources from that
+    /// incoming `Self` (rebased onto the `Gensym` seed exactly as
+    /// [`Self::rebase_loop_seed`] does for a Letrec), and the body ends in a
+    /// [`ThreadedStmt::Return`] answering `{<kind's own accumulator>, Self{N}}`
+    /// for the chain's last version, so the next iteration and the code after
+    /// the fold both see it. Every fold kind that threads `Self` gets this from
+    /// here; no emitter hand-rolls a tail. A body that advances `Self` without
+    /// the `Return` is [`threaded_ir::VerifyError::FoldFamilyNotCarried`].
+    fn carry_fold_families(
+        stmts: &mut Vec<ThreadedStmt>,
+        family_params: &[super::plan::LoopFamilyParam],
+        frame: FrameId,
+    ) -> Result<()> {
+        for param in family_params {
+            match param.prefix {
+                VersionPrefix::SelfVt => {}
+                ref other => unreachable!(
+                    "a fold's threaded_families only ever contains SelfVt, got {other:?}"
+                ),
+            }
+            let real_seed = param.real_seed(frame);
+            let gensym_seed = param.gensym_seed(frame);
+            Self::rebase_loop_seed(stmts, &real_seed, &gensym_seed);
+            let last_bind = stmts.iter().rev().find_map(|stmt| match stmt {
+                ThreadedStmt::Bind { target, .. }
+                    if target.prefix == VersionPrefix::SelfVt && target.frame == frame =>
+                {
+                    Some(target.clone())
+                }
+                _ => None,
+            });
+            // Test-only fault injection: the lambda forgets to return `Self`,
+            // so the verifier's `FoldFamilyNotCarried` is shown to fire on a
+            // real compile (`tests/value_type_fold_family_verifier_corpus.rs`).
+            #[cfg(test)]
+            if super::super::threaded_expr::fault::active()
+                == Some(super::super::threaded_expr::fault::LocalRebindFault::DropFoldFamilySlot)
+            {
+                continue;
+            }
+            let Some(ThreadedStmt::Statement(tail, tail_span)) = stmts.pop() else {
+                return Err(CodeGenError::Internal(
+                    "a value-type fold body ended without its accumulator statement".to_string(),
+                ));
+            };
+            stmts.push(ThreadedStmt::Return(
+                ValueRef::Doc(tail),
+                last_bind.unwrap_or(gensym_seed),
+                tail_span,
+            ));
+        }
+        Ok(())
     }
 
     /// ADR 0111 Addendum 15: lowers a `whileTrue:`/`whileFalse:`/
@@ -566,11 +641,12 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // The `Foldl*` half of the same check the Letrec body
-            // makes — and strictly broader there, since `threads_value_self`
-            // is never set for a `Foldl*` plan (a fold accumulator has no
-            // trailing `Self` slot), so EVERY value-type field write in this
-            // body is unthreadable, top-level statement included. Same shared
+            // The `Foldl*` half of the same check the Letrec body makes.
+            // `threads_value_self` is set only for the folds that carry `Self`
+            // through their accumulator (`SELF_THREADING_FOLDS`, BT-3827), and
+            // only for a top-level write, exactly as for a Letrec; for every
+            // other fold EVERY value-type field write in this body is
+            // unthreadable, top-level statement included. Same shared
             // helper, so the two call sites cannot drift; see
             // `reject_unthreadable_value_self_field_write`.
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;

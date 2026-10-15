@@ -70,6 +70,16 @@ impl ThreadedFamilies {
     }
 }
 
+/// BT-3827: the `Foldl*` selectors whose value-type field-writing bodies thread
+/// `Self` through the fold accumulator (see
+/// [`CoreErlangGenerator::fold_threads_value_self`]). Any other fold selector
+/// still rejects a field write in its body, in every position; widening this
+/// list means opting that kind's emitter into
+/// `ThreadingPlan::with_value_self_slot` and wrapping its accumulator with
+/// `FoldFamilySlots`.
+pub(in crate::core_erlang) const SELF_THREADING_FOLDS: &[&str] =
+    &["do:", "collect:", "inject:into:"];
+
 /// BT-3510 differential test: one [`super::plan::ThreadingPlan::new_impl`]
 /// call's OLD (still-live, unchanged) `threads_value_self`
 /// answer, alongside what the NEW recursive
@@ -324,6 +334,70 @@ impl CoreErlangGenerator {
         self.find_value_self_mutating_stmt(body).is_some()
     }
 
+    /// BT-3827: whether `expr` is a fold whose literal body writes a value-type
+    /// field and which carries that `Self` through its accumulator
+    /// ([`ThreadingPlan::with_value_self_slot`], [`super::family_slots::FoldFamilySlots`]).
+    ///
+    /// The ONE place the set of such folds is named ([`SELF_THREADING_FOLDS`]):
+    /// the fold emitters opt their plan in, and the value-type consumers
+    /// ([`Self::vt_loop_threaded_families`](CoreErlangGenerator::vt_loop_threaded_families),
+    /// the `do:`/fold-op predicates) read the family off the construct's tuple
+    /// by this predicate, so a producer and its consumer cannot disagree about
+    /// whether the result tuple has a `Self` slot. Every other fold keeps the
+    /// structured rejection
+    /// ([`Self::reject_unthreadable_value_self_field_write`]).
+    pub(in crate::core_erlang) fn fold_threads_value_self(&self, expr: &Expression) -> bool {
+        let Some((selector, body)) =
+            beamtalk_core::semantic_analysis::block_facts::producer_body_block(expr)
+        else {
+            return false;
+        };
+        SELF_THREADING_FOLDS.contains(&selector.as_str()) && self.loop_body_threads_value_self(body)
+    }
+
+    /// BT-3827: runs `f` (compiling the fold `expr`) as a consumer that unpacks
+    /// the fold's trailing `Self` slot, so [`Self::value_self_fold_slot`] lets
+    /// the fold's emitter thread it. Every site that compiles a fold and then
+    /// reads element 3 of its result (`extract_vt_loop_family_slot`) goes
+    /// through here; a fold compiled anywhere else is refused.
+    pub(in crate::core_erlang) fn with_fold_self_slot_consumer<T>(
+        &mut self,
+        expr: &Expression,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let body = beamtalk_core::semantic_analysis::block_facts::producer_body_block(expr)
+            .map(|(_, body)| body.span);
+        let saved = std::mem::replace(&mut self.fold_self_slot_consumer, body);
+        let result = f(self);
+        self.fold_self_slot_consumer = saved;
+        result
+    }
+
+    /// BT-3827: whether the fold with body `body` threads `Self` through its
+    /// accumulator: it writes a field (the Letrec loops' detector,
+    /// [`Self::loop_body_threads_value_self`]) AND a consumer that unpacks the
+    /// result's `Self` slot is compiling it
+    /// ([`Self::with_fold_self_slot_consumer`]). A fold that writes a field with no
+    /// such consumer is the structured rejection, not a dropped write: its
+    /// result tuple's `Self` slot would reach nobody (a stored block, an
+    /// evaluated block's body).
+    pub(in crate::core_erlang) fn value_self_fold_slot(
+        &self,
+        body: &beamtalk_core::ast::Block,
+    ) -> Result<bool> {
+        let Some(write) = self.find_value_self_mutating_stmt(body) else {
+            return Ok(false);
+        };
+        if self.fold_self_slot_consumer == Some(body.span) {
+            return Ok(true);
+        }
+        let field = self.field_assignment_name(write).unwrap_or_default();
+        Err(CodeGenError::field_assignment_in_unsupported_block(
+            field,
+            self.location_label(write.span()),
+        ))
+    }
+
     /// Shared predicate behind [`Self::loop_body_threads_value_self`] and
     /// [`Self::nested_loop_lost_value_self_mutation`] — returns
     /// the first top-level statement of `body` that is a value-type
@@ -361,11 +435,12 @@ impl CoreErlangGenerator {
     ///
     /// * a write nested inside a conditional branch (or any other nested
     ///   block) of a `Letrec` body — the shape this issue is named for;
-    /// * ANY write in a `Foldl*` (`do:`/`collect:`/…) body, top-level
-    ///   included: a fold accumulator has no trailing `Self` slot, so
-    ///   `threads_value_self` is never set for a `Foldl*` plan (see
-    ///   `ThreadingPlan::new_impl`) and this predicate's `threads_value_self`
-    ///   argument is correspondingly always `false` there.
+    /// * ANY write in the body of a `Foldl*` fold [`SELF_THREADING_FOLDS`] does
+    ///   not name (`select:`/`reject:`/`detect:`/…), top-level included: its
+    ///   accumulator has no `Self` slot, so `threads_value_self` is `false`
+    ///   there. (`do:`/`collect:`/`inject:into:` carry `Self` through a
+    ///   `{Acc, Self}` wrapper, BT-3827, and thread a top-level write like a
+    ///   Letrec does; a write nested below their top level is still rejected.)
     ///
     /// Left un-rejected, those shapes either silently dropped the mutation or
     /// crashed `erlc` outright (`unbound variable 'State'`, from the pack
@@ -448,12 +523,11 @@ impl CoreErlangGenerator {
     /// silently discarded. Rejecting it cleanly is the chosen behaviour;
     /// making arbitrary nesting work is explicitly out of scope.
     ///
-    /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
-    /// body's value-type field write has no `Self` threading of its own to
-    /// lose here — `generate_field_assignment_open` never threads one
-    /// through a fold accumulator. That shape is rejected instead, via
+    /// Only the `Letrec` shape is checked: a nested `Foldl*` body's
+    /// value-type field write is rejected instead, via
     /// [`Self::reject_unthreadable_value_self_field_write`], which runs
-    /// immediately after this check at both call sites.
+    /// immediately after this check at both call sites (BT-3827: a nested
+    /// fold's `Self` slot is unpacked by no enclosing body statement either).
     pub(super) fn nested_loop_lost_value_self_mutation(&self, expr: &Expression) -> Option<String> {
         let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
         if !matches!(shape, NestedLoopShape::Letrec) {
