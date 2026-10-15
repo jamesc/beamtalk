@@ -1449,8 +1449,9 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
 
 #[test]
 fn test_value_type_do_with_local_mutation_open_chain() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
+    // A value-type do: with a local mutation at the method root is a
+    // local-threading producer whose foldl result the method body continues
+    // directly.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    #(1, 2, 3) do: [:item | total := total + item]\n    total\n";
     let code = codegen(src);
     assert!(
@@ -2396,8 +2397,9 @@ fn test_do_nested_in_direct_params_loop() {
 
 #[test]
 fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
+    // Regression: `^` fed the direct result of a mutation-threaded do: nested in
+    // a direct-params loop. The thrown value must be do:'s nil, never an unbound
+    // `_`.
     let src = concat!(
         "Actor subclass: Ctr3053\n",
         "  state: x = 0\n\n",
@@ -2951,5 +2953,28 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
         code.contains("'__local__count'"),
         "CF-mutations sort: mutation of outer local 'count' in ifTrue: branch must be \
          threaded via '__local__count'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() {
+    // ADR 0131 section 3: `match:` is a State-family producer. In an actor
+    // instance method a loop body holding a `match:` that writes a local (the
+    // loop threads only locals: the direct-params shape) must compile, not hit the "private scratch map" internal error.
+    let src = concat!(
+        "Actor subclass: MatchLoop\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      i match: [1 -> [count := count + 1]; _ -> [count := count + 2]]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        !code.contains("private scratch map"),
+        "match: in an actor loop body must not hit the private-scratch error. Got:\n{code}"
     );
 }

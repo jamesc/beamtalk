@@ -803,7 +803,8 @@ impl CoreErlangGenerator {
 
     /// Whether `expr` (paren-unwrapped) is an `on:do:`/`ensure:` that
     /// [`Self::threaded_expression`] lowers as a local-threading producer in the
-    /// frame being lowered: a method root or a registered `BranchArm` frame,
+    /// frame being lowered ([`Self::is_producer_frame_for`]: a method root, a
+    /// registered `BranchArm` frame, or a producer site of a loop or fold body),
     /// outside the REPL (whose root adopts the bindings map and lowers its
     /// constructs itself). The one predicate behind
     /// [`Self::threaded_expression`]'s exception hook and

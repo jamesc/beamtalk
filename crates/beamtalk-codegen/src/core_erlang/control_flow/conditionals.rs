@@ -692,8 +692,8 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         if self.conditional_has_private_scratch(frame) {
             return Err(CodeGenError::Internal(
-                "a match: or opaque-callable fold producer was reached at the root of a method \
-                 with no State family (ADR 0131 §3)"
+                "a match: or opaque-callable fold producer was reached in a frame with a \
+                 private scratch map (no State family to continue; ADR 0131 §3)"
                     .to_string(),
             ));
         }
@@ -1496,7 +1496,7 @@ impl CoreErlangGenerator {
         // ADR 0131 Phase 2d (BT-3798): a `Dictionary` lookup whose handler
         // writes an outer local, a producer here (never `needs_threading`).
         if root_producer {
-            if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
+            if let Some(tv) = self.generate_lookup_producer(expr, tail, root_producer)? {
                 return Ok(Some(tv));
             }
         }
