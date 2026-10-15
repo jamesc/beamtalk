@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a
-// method local, in a value-type method. `run`/`runEmptyBody` use a stateful
-// condition (it sends to `self`); `plainEmptyBody` a plain one (BT-3782).
-// See stdlib/test/bt3746stateful_while_test.bt.
+// method local, in a value-type method, with a stateful condition (it sends
+// to `self`). A plain condition write is a compile error (BT-3782, ADR 0131
+// §6). See stdlib/test/bt3746stateful_while_test.bt.
 
 Value subclass: Bt3746StatefulWhileValue
 
@@ -24,13 +24,5 @@ Value subclass: Bt3746StatefulWhileValue
     [
       t := t + 1
       self check: t
-    ] whileTrue: [nil]
-    t
-
-  plainEmptyBody =>
-    t := 0
-    [
-      t := t + 1
-      t < 3
     ] whileTrue: [nil]
     t

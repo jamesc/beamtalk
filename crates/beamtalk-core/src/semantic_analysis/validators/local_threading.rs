@@ -1773,6 +1773,15 @@ impl<'d> Walker<'d> {
         // receiver once itself, so `inlined: false` skips it here.
         if inlined {
             match receiver {
+                // BT-3782: a `whileTrue:`/`whileFalse:` CONDITION block has a
+                // return channel only where codegen lowers it through the
+                // loop's `StateAcc` (`while_loop_threads`).
+                Expression::Block(block)
+                    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+                        && !self.while_condition_threads(block, arguments) =>
+                {
+                    self.report_literal(block, &sel);
+                }
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &sel);
                 }
@@ -1908,6 +1917,31 @@ impl<'d> Walker<'d> {
                 ))
                 .with_category(DiagnosticCategory::UnmigratedLocalThreading),
             );
+        }
+    }
+
+    /// Whether codegen threads an outer-local write in the condition block of
+    /// a keyword `whileTrue:`/`whileFalse:` (BT-3782). It does only when the
+    /// loop is lowered by the stateful generator and the condition has state
+    /// effects (a self-send or field write), in a non-class method: then the
+    /// condition is compiled in the loop's own frame. Every other condition
+    /// is compiled as a Tier 2 closure that is called with the wrong arity
+    /// (value-type, actor) or hangs (class methods); a top-level expression
+    /// is left to the REPL's own handling.
+    ///
+    /// Mirrors `CoreErlangGenerator::while_loop_threads` and
+    /// `condition_has_state_effects` in `beamtalk-codegen`; pinned by
+    /// `stdlib/test/bt3746stateful_while_test.bt` and the
+    /// `while_condition_*` unit tests below.
+    fn while_condition_threads(&self, cond: &Block, arguments: &[Expression]) -> bool {
+        match self.context {
+            Repl => true,
+            Class => false,
+            ValueType | Actor => {
+                matches!(arguments.first(), Some(Expression::Block(_)))
+                    && crate::semantic_analysis::block_facts::analyze_block(cond)
+                        .has_state_effects()
+            }
         }
     }
 
@@ -2155,7 +2189,9 @@ fn is_section1_selector(selector: &str) -> bool {
 }
 
 /// Whether a block literal *receiver* of `selector` is inlined: a block
-/// `value` send, a loop's condition, or a protected body.
+/// `value` send, a loop's condition, or a protected body. A keyword
+/// `whileTrue:`/`whileFalse:` condition is narrowed first by
+/// `while_condition_threads` (BT-3782).
 fn receiver_has_channel(selector: &str) -> bool {
     crate::state_threading_selectors::is_state_threaded_block_receiver(selector)
         || crate::state_threading_selectors::is_state_threading_unary_selector(selector)

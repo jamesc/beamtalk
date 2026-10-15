@@ -19,8 +19,8 @@
 // CONDITION block that writes an outer local (`[i := i + 1. i < 3]
 // whileTrue: [nil]`) is compiled as a Tier 2 closure in this context and
 // crashes at runtime ("function expects 1 arguments but was called with
-// 0"), so that receiver position stays OUT of the table and the lint
-// keeps flagging it until BT-3607 lands — see
+// 0"), so that receiver position stays OUT of the table. ADR 0131 §6 now
+// rejects it at compile time (BT-3782), so it cannot be written here — see
 // `is_state_threaded_block_receiver`'s doc.
 
 TestCase subclass: DeadAssignmentReceiverThreadingTest

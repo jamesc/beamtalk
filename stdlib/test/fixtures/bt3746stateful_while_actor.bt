@@ -2,31 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a
-// method local, in an actor instance method. `run`/`runEmptyBody` use a
-// stateful condition (it sends to `self`); `plainEmptyBody` a plain one
-// (BT-3782). The class-side methods are the same shapes in an actor class's
-// class methods; their non-empty-body forms loop forever today (BT-3782) and
-// are not compiled here. See stdlib/test/bt3746stateful_while_test.bt.
+// method local, in an actor instance method, with a stateful condition (it
+// sends to `self`). A plain condition write, or any condition write in a
+// class method, is a compile error (BT-3782, ADR 0131 §6). See
+// stdlib/test/bt3746stateful_while_test.bt.
 
 Actor subclass: Bt3746StatefulWhileActor
-
-  class check: n => n < 3
-
-  class runEmptyBody =>
-    t := 0
-    [
-      t := t + 1
-      self check: t
-    ] whileTrue: [nil]
-    t
-
-  class plainEmptyBody =>
-    t := 0
-    [
-      t := t + 1
-      t < 3
-    ] whileTrue: [nil]
-    t
 
   check: n => n < 3
 
@@ -44,13 +25,5 @@ Actor subclass: Bt3746StatefulWhileActor
     [
       t := t + 1
       self check: t
-    ] whileTrue: [nil]
-    t
-
-  plainEmptyBody =>
-    t := 0
-    [
-      t := t + 1
-      t < 3
     ] whileTrue: [nil]
     t

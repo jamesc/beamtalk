@@ -35,8 +35,9 @@
 //! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
-//!   table does not thread (a `whileTrue:` condition, BT-3782; `eachWithIndex:` /
-//!   `do:separatedBy:` outside an actor),
+//!   table does not thread (a unary `whileTrue` condition; `eachWithIndex:` /
+//!   `do:separatedBy:` outside an actor; a keyword `whileTrue:` condition is a
+//!   §6 error since BT-3782),
 //!   which crashes or loses the write at runtime today. As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
@@ -820,11 +821,11 @@ sealed typed Value subclass: Foo
         assert!(diags[0].message.contains("`x`"));
     }
 
-    /// Construct positions §6 accepts but the shared table does not thread (BT-3782, BT-3753)
-    /// still warn: in a value-type context a keyword `whileTrue:`/
-    /// `whileFalse:` CONDITION block's write crashes at runtime today
-    /// ("function expects 1 arguments but was called with 0"), and
-    /// `eachWithIndex:`/`do:separatedBy:` lose theirs.
+    /// Construct positions the shared table does not thread (BT-3753) still
+    /// warn when the lint is run alone (it does not run §6): a keyword
+    /// `whileTrue:`/`whileFalse:` CONDITION block's write crashes at runtime
+    /// ("function expects 1 arguments but was called with 0"; §6 rejects it
+    /// since BT-3782), and `eachWithIndex:`/`do:separatedBy:` lose theirs.
     #[test]
     fn unthreaded_construct_positions_still_warn() {
         for src in [
@@ -986,9 +987,12 @@ sealed typed Value subclass: Foo
             // An Erlang FFI argument: lossy by design (ADR 0041 §Erlang
             // Interop Boundary), so §6 exempts it for good.
             ("(Erlang lists) map: [:e | x := x + 1. e] with: #(1)", Lint),
+            // A `whileTrue:`/`whileFalse:` condition's plain outer-local write
+            // crashed at runtime; §6 rejects it (BT-3782).
+            ("[i := i + 1. i < 3] whileTrue: [nil]", CompileError),
+            ("[i := i + 1. i >= 3] whileFalse: [nil]", CompileError),
             // Accepted by §6, wrong at runtime today (probed in a TestCase:
-            // the condition crashes, eachWithIndex:/do:separatedBy: answer 0).
-            ("[i := i + 1. i < 3] whileTrue: [nil]", Either),
+            // eachWithIndex:/do:separatedBy: answer 0).
             ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),
             ("#(1, 2) do: [:e | nil] separatedBy: [x := x + 1]", Either),
         ];

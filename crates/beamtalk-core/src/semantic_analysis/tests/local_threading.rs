@@ -2091,3 +2091,59 @@ fn closure_local_loop_in_a_protected_body_does_not_unbind_the_producers() {
         assert!(diags.is_empty(), "{src}: {diags:?}");
     }
 }
+
+/// BT-3782: a keyword `whileTrue:`/`whileFalse:` CONDITION block that writes an
+/// outer local has a return channel only where codegen lowers it through the
+/// loop's `StateAcc` — a state-effecting condition (a self-send) with a literal
+/// body in a value-type or actor method. Every other combination compiled to a
+/// Tier 2 closure called with the wrong arity (value-type, actor) or a hang
+/// (class methods). Generated over context x selector x condition x body.
+#[test]
+fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
+    type Wrap = fn(&str) -> String;
+    let contexts: [(&str, Wrap); 3] = [
+        ("class", in_class),
+        ("value", in_value),
+        ("actor", in_actor),
+    ];
+    let selectors = [("whileTrue:", "t < 3"), ("whileFalse:", "t >= 3")];
+    let conditions = [
+        // (shape, has state effects)
+        ("t := t + 1. {c}", false),
+        ("t := t + 1. self check: t. {c}", true),
+        ("t := t + 1. self.n := t. {c}", true),
+    ];
+    let bodies = [("[nil]", true), ("body", false)];
+    let mut checked = 0;
+    for (ctx_name, wrap) in contexts {
+        for (selector, cmp) in selectors {
+            for (cond_shape, effects) in conditions {
+                for (body, literal) in bodies {
+                    let cond = cond_shape.replace("{c}", cmp);
+                    let source = wrap(&format!("body := [nil]\n[{cond}] {selector} {body}\nt"));
+                    let diags = adr0131_diagnostics(&source);
+                    let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+                    let threads = ctx_name != "class" && effects && literal;
+                    assert_eq!(
+                        errors.is_empty(),
+                        threads,
+                        "{ctx_name} {selector} cond=[{cond}] body={body}: {diags:?}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 36);
+}
+
+/// BT-3782: a condition that only reads outer locals, and a loop body that
+/// writes them, stay accepted in every context.
+#[test]
+fn while_condition_without_outer_write_is_accepted() {
+    for wrap in [in_class, in_value, in_actor] {
+        let source = wrap("[t < 3] whileTrue: [t := t + 1]\nt");
+        let diags = adr0131_diagnostics(&source);
+        assert!(diags.is_empty(), "{source}: {diags:?}");
+    }
+}

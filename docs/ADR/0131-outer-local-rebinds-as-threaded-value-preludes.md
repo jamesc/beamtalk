@@ -607,6 +607,23 @@ The escape classification is `block_facts::escape_sites`, the one behind
 `escaping_blocks`; a REPL expression list is not checked. A block that is only the
 implicit value of a nested conditional branch or block (no `^`) is not seen.
 
+**A `whileTrue:`/`whileFalse:` condition block (BT-3782).** The loop's
+*body* is a §1 construct, but its keyword *condition* is a block receiver
+whose outer-local write only has a return channel where codegen lowers the
+loop through its `StateAcc` (`while_loop_threads`): a literal body and a
+condition with a state effect (a self-send or field write), in a value-type
+or actor instance method. Any other condition that writes an outer local
+(`[i := i + 1. i < 3] whileTrue: [nil]`) was compiled as a Tier 2 closure and
+called with the wrong arity (`function expects 1 arguments but was called
+with 0`), and in a class method hangs, so it is the same error until the
+condition is lowered as a producer (BT-3743). A top-level (REPL) expression is
+not narrowed. The unary `whileTrue`/`whileFalse` condition is unchanged. The
+agreement is pinned by `lint_and_section6_agree` and
+`while_condition_outer_local_write_is_rejected_unless_codegen_threads_it`.
+Phase 0's position allow-set does not cover this shape (it accepts any
+statement position), so this is a §6 rule, not an allow-set row; Phase 5
+removes it together with the lowering.
+
 **Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
 x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy
 by design, with a warning, and `generate_erlang_interop_wrapper` already
