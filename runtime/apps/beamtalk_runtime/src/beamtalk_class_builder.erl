@@ -268,7 +268,7 @@ validate_superclass_not_sealed(SuperclassRef) ->
         ClassPid when is_pid(ClassPid) ->
             case beamtalk_object_class:is_sealed(ClassPid) of
                 true ->
-                    SuperclassName = beamtalk_object_class:class_name(ClassPid),
+                    SuperclassName = beamtalk_object_class:class_name_safe(ClassPid),
                     Error1 = beamtalk_error:new(instantiation_error, 'ClassBuilder', 'superclass:'),
                     {error,
                         beamtalk_error:with_hint(
@@ -297,9 +297,9 @@ Accepts:
 resolve_superclass_name(Name) when is_atom(Name) ->
     Name;
 resolve_superclass_name(Pid) when is_pid(Pid) ->
-    beamtalk_object_class:class_name(Pid);
+    beamtalk_object_class:class_name_safe(Pid);
 resolve_superclass_name(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
-    beamtalk_object_class:class_name(Pid).
+    beamtalk_object_class:class_name_safe(Pid).
 
 -doc """
 Build a ClassInfo map for beamtalk_object_class:start/2.

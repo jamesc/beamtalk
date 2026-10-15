@@ -301,7 +301,7 @@ encode_beamtalk_object(#beamtalk_object{pid = Pid} = Obj, _Path) ->
             %% the receiving node's own class registry on decode (ADR 0126
             %% §5.1/§5.5): a class object that crosses a node is that node's
             %% class of the same name, never a remote class process.
-            ClassName = beamtalk_object_class:class_name(Pid),
+            ClassName = beamtalk_object_class:class_name_safe(Pid),
             {ok, {'$beamtalk_class_ref', ClassName}};
         false ->
             {ok, Obj#beamtalk_object{pid = encode_actor_pid(Pid)}}

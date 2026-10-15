@@ -178,6 +178,12 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 
 -export_type([scope/0, node_map/0]).
 
+-ifdef(TEST).
+%% BT-3826 regression test: the no-cross-class-deadlock test drives the
+%% supervisor-config read from inside class handlers.
+-export([supervisor_config/2]).
+-endif.
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -1332,7 +1338,7 @@ supervisor_strategy(ClassPid) ->
             true ->
                 simpleOneForOne;
             false ->
-                case beamtalk_object_class:class_send(ClassPid, strategy, []) of
+                case supervisor_class_config(ClassPid, strategy) of
                     S when is_atom(S) -> S;
                     _ -> nil
                 end
@@ -1341,11 +1347,38 @@ supervisor_strategy(ClassPid) ->
         _:_ -> nil
     end.
 
+%% Read a Supervisor class's nullary configuration method (BT-3826).
+%%
+%% The snapshot walk runs inside a class method, i.e. in a class process, so a
+%% `class_send/3` to the supervisor's class would be a blocking call into another
+%% class process and can deadlock two busy classes against each other. The
+%% definition is run in this process instead
+%% (`beamtalk_supervisor:class_config_value/2`), resolved with dispatch's
+%% precedence, so the snapshot reports what a class-side send would answer,
+%% including ADR 0084 runtime overrides. (`static_init/2` / `dynamic_init/2`
+%% configure OTP from the compiled export only; that divergence is tracked in
+%% BT-3832.) Only when there is no in-process definition (`not_found`) may a
+%% caller that is NOT a class process fall back to `class_send/3`; in a class
+%% process that raises. An exception from the method body propagates and is never
+%% re-run through `class_send/3`.
+-spec supervisor_class_config(pid(), atom()) -> term().
+supervisor_class_config(ClassPid, Selector) ->
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    case beamtalk_supervisor:class_config_value(ClassName, Selector) of
+        {ok, Value} ->
+            Value;
+        not_found ->
+            case get(beamtalk_class_name) of
+                undefined -> beamtalk_object_class:class_send(ClassPid, Selector, []);
+                _InClassProcess -> erlang:error({no_in_process_definition, ClassName, Selector})
+            end
+    end.
+
 -spec supervisor_restart_intensity(pid()) -> map() | nil.
 supervisor_restart_intensity(ClassPid) ->
     try
-        Max = beamtalk_object_class:class_send(ClassPid, maxRestarts, []),
-        Window = beamtalk_object_class:class_send(ClassPid, restartWindow, []),
+        Max = supervisor_class_config(ClassPid, maxRestarts),
+        Window = supervisor_class_config(ClassPid, restartWindow),
         #{maxRestarts => Max, window => Window}
     catch
         _:_ -> nil
