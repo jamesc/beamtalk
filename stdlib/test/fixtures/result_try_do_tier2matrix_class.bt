@@ -86,6 +86,41 @@ Object subclass: ResultTryDoTier2MatrixClass
       ]
     t
 
+  class doTryPureWrite =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            #{#a => 1} at: #k ifAbsent: [t := 1]
+            2
+          ]
+      ]
+    t
+
+  class doOnDoPureWrite =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        [
+          (t < 100) ifTrue: [t := 1]
+          1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  class doTryHeadWrite =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            t := 5
+            2
+          ]
+      ]
+    t
+
   class doTryRaise =>
     t := 0
     #(1, 2)
@@ -226,6 +261,44 @@ Object subclass: ResultTryDoTier2MatrixClass
       ]
     t
 
+  class todoTryPureWrite =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            #{#a => 1} at: #k ifAbsent: [t := 1]
+            2
+          ]
+      ]
+    t
+
+  class todoOnDoPureWrite =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        [
+          (t < 100) ifTrue: [t := 1]
+          1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  class todoTryHeadWrite =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            t := 5
+            2
+          ]
+      ]
+    t
+
   class todoTryRaise =>
     t := 0
     1
@@ -362,6 +435,41 @@ Object subclass: ResultTryDoTier2MatrixClass
               0
             ]
         ] on: Error do: [:e | 0]
+      ]
+    t
+
+  class timesTryPureWrite =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            #{#a => 1} at: #k ifAbsent: [t := 1]
+            2
+          ]
+      ]
+    t
+
+  class timesOnDoPureWrite =>
+    t := 0
+    2
+      timesRepeat: [
+        [
+          (t < 100) ifTrue: [t := 1]
+          1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  class timesTryHeadWrite =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            t := 5
+            2
+          ]
       ]
     t
 
@@ -510,6 +618,47 @@ Object subclass: ResultTryDoTier2MatrixClass
       ]
     t
 
+  class whileTryPureWrite =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            #{#a => 1} at: #k ifAbsent: [t := 1]
+            2
+          ]
+      ]
+    t
+
+  class whileOnDoPureWrite =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [
+          (t < 100) ifTrue: [t := 1]
+          1
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  class whileTryHeadWrite =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            t := 5
+            2
+          ]
+      ]
+    t
+
   class whileTryRaise =>
     t := 0
     i := 0
@@ -636,6 +785,32 @@ Object subclass: ResultTryDoTier2MatrixClass
           0
         ]
     ] on: Error do: [:e | 0]
+    t
+
+  class onceTryPureWrite =>
+    t := 0
+    Result
+      tryDo: [
+        #{#a => 1} at: #k ifAbsent: [t := 1]
+        2
+      ]
+    t
+
+  class onceOnDoPureWrite =>
+    t := 0
+    [
+      (t < 100) ifTrue: [t := 1]
+      1
+    ] on: Error do: [:e | 0]
+    t
+
+  class onceTryHeadWrite =>
+    t := 0
+    Result
+      tryDo: [
+        t := 5
+        2
+      ]
     t
 
   class onceTryRaise =>

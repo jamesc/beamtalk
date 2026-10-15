@@ -63,6 +63,9 @@ const EXCEPTIONS: &[&str] = &[
     // producer nested in a `tryDo:` block.
     "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
     "Result tryDo: [v := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. v]",
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
+    "Result tryDo: [t := 5. 2]",
 ];
 
 /// The frames an exception producer's blocks form: `{s}` holds a statement.

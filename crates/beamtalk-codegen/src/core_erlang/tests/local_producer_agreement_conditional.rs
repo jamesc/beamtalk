@@ -104,6 +104,11 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "s ifNil: [t := t + 1. 2]",
     "Result tryDo: [t := t + 1. 2]",
     "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]",
+    // Write-only: the first mention of `t` is the write, yet `t` is bound
+    // outside (BT-3840).
+    "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
+    "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
+    "Result tryDo: [t := 5. 2]",
 ];
 
 /// The core rule's verdict for every conditional and `on:do:`/`ensure:`

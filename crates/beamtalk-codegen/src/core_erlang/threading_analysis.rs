@@ -179,7 +179,7 @@ impl CoreErlangGenerator {
                         .threaded_locals_of(site)
                         .is_some_and(|set| !set.lowered.is_empty())
                 });
-            loop_or_fold || Self::statement_catch_boundary_writes(stmt, &body_defined)
+            loop_or_fold || self.statement_catch_boundary_writes(stmt, &body_defined)
         })
     }
 
@@ -192,77 +192,29 @@ impl CoreErlangGenerator {
     /// itself is not the enclosing construct's to thread (`body_defined`, the
     /// same filter as the loop-and-fold scan above).
     fn statement_catch_boundary_writes(
+        &self,
         stmt: &beamtalk_core::ast::ExpressionStatement,
         body_defined: &std::collections::HashSet<&str>,
     ) -> bool {
-        use beamtalk_core::semantic_analysis::block_facts::{
-            construct_outer_local_writes, loop_body_operand_sites,
-        };
+        use beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites;
         loop_body_operand_sites(&stmt.expression)
             .into_iter()
             .chain(std::iter::once(stmt.expression.unwrap_parens()))
-            .filter_map(local_threading_construct)
-            .filter(|c| {
-                matches!(
-                    c.family,
-                    LocalThreadingFamily::TryDo | LocalThreadingFamily::Exception
-                )
-            })
-            .any(|c| {
-                // Decided from the AST alone (the live scope is not populated
-                // yet when a method-body statement is classified): a name is
-                // an outer local unless the enclosing body introduces it or a
-                // block of the construct introduces it with a top-level
-                // assignment of its own (`i := 0` at the head of a protected
-                // body), the same "new binding" rule `body_introduced_locals`
-                // applies to the body.
-                let introduced = Self::construct_introduced_locals(&c);
-                !construct_outer_local_writes(&c, &|name| {
-                    !body_defined.contains(name) && !introduced.contains(name)
+            .any(|site| {
+                local_threading_construct(site).is_some_and(|c| {
+                    matches!(
+                        c.family,
+                        LocalThreadingFamily::TryDo | LocalThreadingFamily::Exception
+                    )
+                }) && self.threaded_locals_of(site).is_some_and(|set| {
+                    // An outer local is a name bound in the enclosing scope
+                    // (`threaded_locals_of`'s scope predicate), not one the
+                    // body introduces itself.
+                    set.names
+                        .iter()
+                        .any(|name| !body_defined.contains(name.as_str()))
                 })
-                .is_empty()
             })
-    }
-
-    /// The names a local-threading construct introduces itself: those whose
-    /// first occurrence in its blocks (source order, nested blocks included) is
-    /// an assignment whose value does not read the name. Every other name the
-    /// construct writes was bound outside it (`t := t + 1` reads `t` first).
-    /// Decided from the AST alone, like `body_introduced_locals`.
-    fn construct_introduced_locals(
-        construct: &LocalThreadingConstruct<'_>,
-    ) -> std::collections::HashSet<String> {
-        use beamtalk_core::ast::Expression;
-        fn mentions(expr: &Expression, name: &str) -> bool {
-            let mut found = false;
-            beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
-                if matches!(e, Expression::Identifier(id) if id.name == name) {
-                    found = true;
-                }
-            });
-            found
-        }
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut introduced: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for block in &construct.blocks {
-            for stmt in &block.body {
-                beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                    Expression::Assignment { target, value, .. } => {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let name = id.name.to_string();
-                            if seen.insert(name.clone()) && !mentions(value, &name) {
-                                introduced.insert(name);
-                            }
-                        }
-                    }
-                    Expression::Identifier(id) => {
-                        seen.insert(id.name.to_string());
-                    }
-                    _ => {}
-                });
-            }
-        }
-        introduced
     }
 
     /// The precomputed [`block_analysis::BlockMutationAnalysis`]
