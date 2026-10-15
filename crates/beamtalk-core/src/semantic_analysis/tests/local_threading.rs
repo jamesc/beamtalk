@@ -814,6 +814,32 @@ fn a_try_do_sent_to_another_receiver_takes_the_ordinary_section6_path() {
 }
 
 #[test]
+fn a_try_do_assigned_in_an_actor_fold_body_keeps_the_phase0_error() {
+    // The value of `r := Result tryDo: [...]` in the body of an actor `do:` is a
+    // value-bearing site the fold frame does not lower (BT-3797), so it is
+    // rejected rather than compiled to a dropped write; the statement form and
+    // a lookup behind `on:do:` are accepted and pinned at runtime by
+    // `result_try_do_tier2test.bt` / `result_try_do_tier2matrix_test.bt`.
+    let rejected = in_actor(
+        "#(1, 2) do: [:k | r := Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]]\nt",
+    );
+    let diags = adr0131_diagnostics(&rejected);
+    assert!(
+        of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading)
+            .iter()
+            .any(|d| d.message.contains("`tryDo:` writes outer local `t`")),
+        "{diags:?}"
+    );
+    for body in [
+        "#(1, 2) do: [:k | Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]]\nt",
+        "#(1, 2) do: [:k | [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]] on: Error do: [:e | 0]]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(diags.is_empty(), "{body}: {diags:?}");
+    }
+}
+
+#[test]
 fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     // The block is Tier 1 and reaches `'tryDo:'/1`: nothing to thread, nothing
     // to reject, in a position that would reject a writing one.

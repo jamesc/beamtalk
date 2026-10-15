@@ -161,26 +161,73 @@ impl CoreErlangGenerator {
     /// the enclosing construct threads exactly when its body contains a
     /// producer that writes.
     fn body_has_operand_loop_or_fold_writes(&self, body: &Block) -> bool {
+        let analysis = self.block_profile_or_analyze(body);
+        let body_defined = Self::body_introduced_locals(body, &analysis.captured_reads);
         body.body.iter().any(|stmt| {
-            // ADR 0131 Phase 4 (BT-3750): and a `Result tryDo:` that is the
-            // statement itself, whose block may hold constructs (a `Dictionary`
-            // lookup) the block-level analysis does not propagate out.
-            beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(&stmt.expression)
+            let loop_or_fold =
+                beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(
+                    &stmt.expression,
+                )
                 .into_iter()
-                .chain(std::iter::once(stmt.expression.unwrap_parens()))
                 .any(|site| {
                     local_threading_construct(site).is_some_and(|c| {
                         matches!(
                             c.family,
-                            LocalThreadingFamily::Loop
-                                | LocalThreadingFamily::Fold
-                                | LocalThreadingFamily::TryDo
+                            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
                         )
                     }) && self
                         .threaded_locals_of(site)
                         .is_some_and(|set| !set.lowered.is_empty())
-                })
+                });
+            loop_or_fold || Self::statement_catch_boundary_writes(stmt, &body_defined)
         })
+    }
+
+    /// ADR 0131 Phase 4 (BT-3750): whether a `Result tryDo:` or `on:do:`/
+    /// `ensure:` that is the statement of a body, or sits at one of its operand
+    /// sites (`r := Result tryDo: [...]`), threads an outer local the
+    /// block-level analysis ([`analyze_block`](block_analysis::analyze_block))
+    /// does not propagate out: a write behind a nested construct it does not see
+    /// through (a `Dictionary` lookup in the block). A name the body introduces
+    /// itself is not the enclosing construct's to thread (`body_defined`, the
+    /// same filter as the loop-and-fold scan above).
+    fn statement_catch_boundary_writes(
+        stmt: &beamtalk_core::ast::ExpressionStatement,
+        body_defined: &std::collections::HashSet<&str>,
+    ) -> bool {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            construct_outer_local_writes, loop_body_operand_sites,
+        };
+        loop_body_operand_sites(&stmt.expression)
+            .into_iter()
+            .chain(std::iter::once(stmt.expression.unwrap_parens()))
+            .filter_map(local_threading_construct)
+            .filter(|c| {
+                matches!(
+                    c.family,
+                    LocalThreadingFamily::TryDo | LocalThreadingFamily::Exception
+                )
+            })
+            .any(|c| {
+                // Decided from the AST alone (the live scope is not populated
+                // yet when a method-body statement is classified): a name is
+                // an outer local unless the enclosing body introduces it or a
+                // block of the construct introduces it with a top-level
+                // assignment of its own (`i := 0` at the head of a protected
+                // body), the same "new binding" rule `body_introduced_locals`
+                // applies to the body.
+                let introduced: std::collections::HashSet<&str> = c
+                    .blocks
+                    .iter()
+                    .flat_map(|block| {
+                        Self::body_introduced_locals(block, &std::collections::HashSet::new())
+                    })
+                    .collect();
+                !construct_outer_local_writes(&c, &|name| {
+                    !body_defined.contains(name) && !introduced.contains(name)
+                })
+                .is_empty()
+            })
     }
 
     /// The precomputed [`block_analysis::BlockMutationAnalysis`]

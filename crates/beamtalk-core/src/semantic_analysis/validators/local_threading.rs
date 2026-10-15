@@ -2140,8 +2140,9 @@ fn section6_help(name: &str, selector: &str) -> String {
 
 /// ADR 0131 §6: a §1 construct selector, whose literal block arguments are
 /// inlined (so their outer-local writes have a way back): a state-threading
-/// selector, the conditional family, `on:do:`/`ensure:`, or `tryDo:` (keyed
-/// on the selector, not on the receiver being spelled `Result`, ADR 0131 §5).
+/// selector, the conditional family or `on:do:`/`ensure:`. (`tryDo:` is a §1
+/// construct only when sent to the `Result` class, `is_result_try_do`, which
+/// the call site checks with the receiver; ADR 0131 §5.)
 fn is_section1_selector(selector: &str) -> bool {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threading_keyword_selector,

@@ -730,12 +730,22 @@ impl CoreErlangGenerator {
         self.set_self_version(outer_self);
         Ok(docvec![
             seed_doc,
-            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
-            Document::Vec(fun_docs),
-            ", ",
-            leaf::var(base_state),
-            ")",
+            Self::try_do_tier2_call(Document::Vec(fun_docs), base_state)
         ])
+    }
+
+    /// `call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> <body>, <entry>)`:
+    /// the one spelling of the Tier 2 call, shared by the method-body and REPL
+    /// producers. `body` is the fun's `{Value, StateAcc1}` arm; `entry` the
+    /// `StateAcc` variable it starts from.
+    fn try_do_tier2_call(body: Document<'static>, entry: String) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
+            body,
+            ", ",
+            leaf::var(entry),
+            ")",
+        ]
     }
 
     /// [`Self::try_do_tier2_tuple_doc`] at the REPL root, whose locals live in
@@ -755,13 +765,7 @@ impl CoreErlangGenerator {
         let bindings = self.current_state_var();
         let (arm_doc, _final_version) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(body))?;
-        Ok(docvec![
-            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
-            arm_doc,
-            ", ",
-            leaf::var(bindings),
-            ")",
-        ])
+        Ok(Self::try_do_tier2_call(arm_doc, bindings))
     }
 
     /// ADR 0131 §5 (Phase 4, BT-3750): the REPL's hook for

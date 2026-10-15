@@ -61,7 +61,7 @@ use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use beamtalk_core::semantic_analysis::block_facts::outer_local_writes;
+use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
 use beamtalk_core::semantic_analysis::{
     extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
 };
@@ -185,8 +185,9 @@ enum BlockPosition<'s> {
     Value,
     /// The receiver of `selector` (`[...] value`, `[...] ensure: [...]`).
     Receiver(&'s str),
-    /// The argument at this index of `selector`.
-    Arg(&'s str, usize),
+    /// The argument at this index of `selector`; the flag says whether the
+    /// send is `Result tryDo:` ([`is_result_try_do`]).
+    Arg(&'s str, usize, bool),
 }
 
 impl BlockPosition<'_> {
@@ -201,9 +202,8 @@ impl BlockPosition<'_> {
             // ADR 0131 Phase 4 (BT-3750): the block of `Result tryDo:` is
             // threaded back by the exception producer, not by the shared
             // table's inline arms.
-            BlockPosition::Arg(selector, index) => {
-                table::is_state_threaded_block_arg(selector, index)
-                    || (index == 0 && table::is_try_do_selector(selector))
+            BlockPosition::Arg(selector, index, result_try_do) => {
+                table::is_state_threaded_block_arg(selector, index) || (index == 0 && result_try_do)
             }
         }
     }
@@ -245,7 +245,8 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
             } else {
                 walk_expr(receiver, scope, out);
             }
-            walk_msg_args(&selector, arguments, scope, out);
+            let result_try_do = is_result_try_do(receiver, &selector);
+            walk_msg_args(&selector, result_try_do, arguments, scope, out);
         }
 
         Cascade {
@@ -253,7 +254,7 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
         } => {
             walk_expr(receiver, scope, out);
             for msg in messages {
-                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, out);
+                walk_msg_args(&msg.selector.name(), false, &msg.arguments, scope, out);
             }
         }
 
@@ -330,13 +331,19 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
 /// Walk message arguments, checking each block literal by its position.
 fn walk_msg_args(
     selector: &str,
+    result_try_do: bool,
     arguments: &[Expression],
     scope: &mut LintScope,
     out: &mut Out<'_>,
 ) {
     for (i, arg) in arguments.iter().enumerate() {
         if let Expression::Block(block) = arg {
-            enter_block(block, BlockPosition::Arg(selector, i), scope, out);
+            enter_block(
+                block,
+                BlockPosition::Arg(selector, i, result_try_do),
+                scope,
+                out,
+            );
         } else {
             walk_expr(arg, scope, out);
         }

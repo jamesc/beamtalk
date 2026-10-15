@@ -1,0 +1,115 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3750 (ADR 0131 Phase 4): a loop frame x catch-boundary construct matrix
+// over `Result tryDo:`, `on:do:` and `ensure:` with a `Dictionary` lookup
+// (BT-3798) or a nested `tryDo:` in the protected block, in a class, a
+// value-type and an actor method. Each answers the count of `t` writes the
+// construct keeps: a raise inside `tryDo:` discards its write.
+
+TestCase subclass: ResultTryDoTier2MatrixTest
+
+  testDoTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass doTryLookup, (ResultTryDoTier2MatrixValue new) doTryLookup, (ResultTryDoTier2MatrixActor spawn) doTryLookup] equals: #[2, 2, 2]
+
+  testDoTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass doTryDirect, (ResultTryDoTier2MatrixValue new) doTryDirect, (ResultTryDoTier2MatrixActor spawn) doTryDirect] equals: #[2, 2, 2]
+
+  testDoTryNested =>
+    self assert: #[ResultTryDoTier2MatrixClass doTryNested, (ResultTryDoTier2MatrixValue new) doTryNested, (ResultTryDoTier2MatrixActor spawn) doTryNested] equals: #[2, 2, 2]
+
+  testDoTryRaise =>
+    self assert: #[ResultTryDoTier2MatrixClass doTryRaise, (ResultTryDoTier2MatrixValue new) doTryRaise, (ResultTryDoTier2MatrixActor spawn) doTryRaise] equals: #[0, 0, 0]
+
+  testDoOnDoLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass doOnDoLookup, (ResultTryDoTier2MatrixValue new) doOnDoLookup, (ResultTryDoTier2MatrixActor spawn) doOnDoLookup] equals: #[2, 2, 2]
+
+  testDoEnsureLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass doEnsureLookup, (ResultTryDoTier2MatrixValue new) doEnsureLookup, (ResultTryDoTier2MatrixActor spawn) doEnsureLookup] equals: #[2, 2, 2]
+
+  testDoOnDoTry =>
+    self assert: #[ResultTryDoTier2MatrixClass doOnDoTry, (ResultTryDoTier2MatrixValue new) doOnDoTry, (ResultTryDoTier2MatrixActor spawn) doOnDoTry] equals: #[2, 2, 2]
+
+  testTodoTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass todoTryLookup, (ResultTryDoTier2MatrixValue new) todoTryLookup, (ResultTryDoTier2MatrixActor spawn) todoTryLookup] equals: #[2, 2, 2]
+
+  testTodoTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass todoTryDirect, (ResultTryDoTier2MatrixValue new) todoTryDirect, (ResultTryDoTier2MatrixActor spawn) todoTryDirect] equals: #[2, 2, 2]
+
+  testTodoTryNested =>
+    self assert: #[ResultTryDoTier2MatrixClass todoTryNested, (ResultTryDoTier2MatrixValue new) todoTryNested, (ResultTryDoTier2MatrixActor spawn) todoTryNested] equals: #[2, 2, 2]
+
+  testTodoTryRaise =>
+    self assert: #[ResultTryDoTier2MatrixClass todoTryRaise, (ResultTryDoTier2MatrixValue new) todoTryRaise, (ResultTryDoTier2MatrixActor spawn) todoTryRaise] equals: #[0, 0, 0]
+
+  testTodoOnDoLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass todoOnDoLookup, (ResultTryDoTier2MatrixValue new) todoOnDoLookup, (ResultTryDoTier2MatrixActor spawn) todoOnDoLookup] equals: #[2, 2, 2]
+
+  testTodoEnsureLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass todoEnsureLookup, (ResultTryDoTier2MatrixValue new) todoEnsureLookup, (ResultTryDoTier2MatrixActor spawn) todoEnsureLookup] equals: #[2, 2, 2]
+
+  testTodoOnDoTry =>
+    self assert: #[ResultTryDoTier2MatrixClass todoOnDoTry, (ResultTryDoTier2MatrixValue new) todoOnDoTry, (ResultTryDoTier2MatrixActor spawn) todoOnDoTry] equals: #[2, 2, 2]
+
+  testTimesTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass timesTryLookup, (ResultTryDoTier2MatrixValue new) timesTryLookup, (ResultTryDoTier2MatrixActor spawn) timesTryLookup] equals: #[2, 2, 2]
+
+  testTimesTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass timesTryDirect, (ResultTryDoTier2MatrixValue new) timesTryDirect, (ResultTryDoTier2MatrixActor spawn) timesTryDirect] equals: #[2, 2, 2]
+
+  testTimesTryNested =>
+    self assert: #[ResultTryDoTier2MatrixClass timesTryNested, (ResultTryDoTier2MatrixValue new) timesTryNested, (ResultTryDoTier2MatrixActor spawn) timesTryNested] equals: #[2, 2, 2]
+
+  testTimesTryRaise =>
+    self assert: #[ResultTryDoTier2MatrixClass timesTryRaise, (ResultTryDoTier2MatrixValue new) timesTryRaise, (ResultTryDoTier2MatrixActor spawn) timesTryRaise] equals: #[0, 0, 0]
+
+  testTimesOnDoLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass timesOnDoLookup, (ResultTryDoTier2MatrixValue new) timesOnDoLookup, (ResultTryDoTier2MatrixActor spawn) timesOnDoLookup] equals: #[2, 2, 2]
+
+  testTimesEnsureLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass timesEnsureLookup, (ResultTryDoTier2MatrixValue new) timesEnsureLookup, (ResultTryDoTier2MatrixActor spawn) timesEnsureLookup] equals: #[2, 2, 2]
+
+  testTimesOnDoTry =>
+    self assert: #[ResultTryDoTier2MatrixClass timesOnDoTry, (ResultTryDoTier2MatrixValue new) timesOnDoTry, (ResultTryDoTier2MatrixActor spawn) timesOnDoTry] equals: #[2, 2, 2]
+
+  testWhileTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass whileTryLookup, (ResultTryDoTier2MatrixValue new) whileTryLookup, (ResultTryDoTier2MatrixActor spawn) whileTryLookup] equals: #[2, 2, 2]
+
+  testWhileTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass whileTryDirect, (ResultTryDoTier2MatrixValue new) whileTryDirect, (ResultTryDoTier2MatrixActor spawn) whileTryDirect] equals: #[2, 2, 2]
+
+  testWhileTryNested =>
+    self assert: #[ResultTryDoTier2MatrixClass whileTryNested, (ResultTryDoTier2MatrixValue new) whileTryNested, (ResultTryDoTier2MatrixActor spawn) whileTryNested] equals: #[2, 2, 2]
+
+  testWhileTryRaise =>
+    self assert: #[ResultTryDoTier2MatrixClass whileTryRaise, (ResultTryDoTier2MatrixValue new) whileTryRaise, (ResultTryDoTier2MatrixActor spawn) whileTryRaise] equals: #[0, 0, 0]
+
+  testWhileOnDoLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass whileOnDoLookup, (ResultTryDoTier2MatrixValue new) whileOnDoLookup, (ResultTryDoTier2MatrixActor spawn) whileOnDoLookup] equals: #[2, 2, 2]
+
+  testWhileEnsureLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass whileEnsureLookup, (ResultTryDoTier2MatrixValue new) whileEnsureLookup, (ResultTryDoTier2MatrixActor spawn) whileEnsureLookup] equals: #[2, 2, 2]
+
+  testWhileOnDoTry =>
+    self assert: #[ResultTryDoTier2MatrixClass whileOnDoTry, (ResultTryDoTier2MatrixValue new) whileOnDoTry, (ResultTryDoTier2MatrixActor spawn) whileOnDoTry] equals: #[2, 2, 2]
+
+  testOnceTryLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass onceTryLookup, (ResultTryDoTier2MatrixValue new) onceTryLookup, (ResultTryDoTier2MatrixActor spawn) onceTryLookup] equals: #[1, 1, 1]
+
+  testOnceTryDirect =>
+    self assert: #[ResultTryDoTier2MatrixClass onceTryDirect, (ResultTryDoTier2MatrixValue new) onceTryDirect, (ResultTryDoTier2MatrixActor spawn) onceTryDirect] equals: #[1, 1, 1]
+
+  testOnceTryNested =>
+    self assert: #[ResultTryDoTier2MatrixClass onceTryNested, (ResultTryDoTier2MatrixValue new) onceTryNested, (ResultTryDoTier2MatrixActor spawn) onceTryNested] equals: #[1, 1, 1]
+
+  testOnceTryRaise =>
+    self assert: #[ResultTryDoTier2MatrixClass onceTryRaise, (ResultTryDoTier2MatrixValue new) onceTryRaise, (ResultTryDoTier2MatrixActor spawn) onceTryRaise] equals: #[0, 0, 0]
+
+  testOnceOnDoLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass onceOnDoLookup, (ResultTryDoTier2MatrixValue new) onceOnDoLookup, (ResultTryDoTier2MatrixActor spawn) onceOnDoLookup] equals: #[1, 1, 1]
+
+  testOnceEnsureLookup =>
+    self assert: #[ResultTryDoTier2MatrixClass onceEnsureLookup, (ResultTryDoTier2MatrixValue new) onceEnsureLookup, (ResultTryDoTier2MatrixActor spawn) onceEnsureLookup] equals: #[1, 1, 1]
+
+  testOnceOnDoTry =>
+    self assert: #[ResultTryDoTier2MatrixClass onceOnDoTry, (ResultTryDoTier2MatrixValue new) onceOnDoTry, (ResultTryDoTier2MatrixActor spawn) onceOnDoTry] equals: #[1, 1, 1]

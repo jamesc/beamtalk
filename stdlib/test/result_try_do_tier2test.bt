@@ -43,5 +43,14 @@ TestCase subclass: ResultTryDoTier2Test
   testNonLocalReturnPassesThrough =>
     self assert: ResultTryDoTier2Fixture tier2NonLocalReturn equals: 42
 
+  testActorLoopBodyTryDoWithALookupKeepsItsWrite =>
+    self assert: ResultTryDoTier2ActorFixture spawn lookupInLoop equals: 2
+
+  testActorLoopBodyLookupBehindOnDoKeepsItsWrite =>
+    self assert: ResultTryDoTier2ActorFixture spawn lookupBehindOnDoInLoop equals: 2
+
+  testActorLoopBodyTryDoRaiseDiscardsTheWrite =>
+    self assert: ResultTryDoTier2ActorFixture spawn raisingInLoop equals: 0
+
   testDictionaryLookupProducerNestedInTheBlockKeepsItsWrite =>
     self assert: ResultTryDoTier2Fixture tier2Lookup equals: 1

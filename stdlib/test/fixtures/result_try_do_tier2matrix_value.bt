@@ -1,0 +1,513 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3750 (ADR 0131 Phase 4): generated matrix, loop frame x catch-boundary
+// construct, in one method context; the expected counts are in
+// stdlib/test/result_try_do_tier2matrix_test.bt.
+
+Value subclass: ResultTryDoTier2MatrixValue
+
+  doTryLookup =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  doTryDirect =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            7
+          ]
+      ]
+    t
+
+  doTryNested =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            Result
+              tryDo: [
+                t := t + 1
+                1
+              ]
+            7
+          ]
+      ]
+    t
+
+  doTryRaise =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            Error signal: "boom"
+          ]
+      ]
+    t
+
+  doOnDoLookup =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  doEnsureLookup =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] ensure: [nil]
+      ]
+    t
+
+  doOnDoTry =>
+    t := 0
+    #(1, 2)
+      do: [:k |
+        [
+          Result
+            tryDo: [
+              t := t + 1
+              1
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  todoTryLookup =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  todoTryDirect =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            7
+          ]
+      ]
+    t
+
+  todoTryNested =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            Result
+              tryDo: [
+                t := t + 1
+                1
+              ]
+            7
+          ]
+      ]
+    t
+
+  todoTryRaise =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        Result
+          tryDo: [
+            t := t + 1
+            Error signal: "boom"
+          ]
+      ]
+    t
+
+  todoOnDoLookup =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  todoEnsureLookup =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] ensure: [nil]
+      ]
+    t
+
+  todoOnDoTry =>
+    t := 0
+    1
+      to: 2
+      do: [:k |
+        [
+          Result
+            tryDo: [
+              t := t + 1
+              1
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  timesTryLookup =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  timesTryDirect =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            t := t + 1
+            7
+          ]
+      ]
+    t
+
+  timesTryNested =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            Result
+              tryDo: [
+                t := t + 1
+                1
+              ]
+            7
+          ]
+      ]
+    t
+
+  timesTryRaise =>
+    t := 0
+    2
+      timesRepeat: [
+        Result
+          tryDo: [
+            t := t + 1
+            Error signal: "boom"
+          ]
+      ]
+    t
+
+  timesOnDoLookup =>
+    t := 0
+    2
+      timesRepeat: [
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  timesEnsureLookup =>
+    t := 0
+    2
+      timesRepeat: [
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] ensure: [nil]
+      ]
+    t
+
+  timesOnDoTry =>
+    t := 0
+    2
+      timesRepeat: [
+        [
+          Result
+            tryDo: [
+              t := t + 1
+              1
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  whileTryLookup =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            #{#a => 1}
+              at: #k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+            7
+          ]
+      ]
+    t
+
+  whileTryDirect =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            t := t + 1
+            7
+          ]
+      ]
+    t
+
+  whileTryNested =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            Result
+              tryDo: [
+                t := t + 1
+                1
+              ]
+            7
+          ]
+      ]
+    t
+
+  whileTryRaise =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        Result
+          tryDo: [
+            t := t + 1
+            Error signal: "boom"
+          ]
+      ]
+    t
+
+  whileOnDoLookup =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  whileEnsureLookup =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [
+          #{#a => 1}
+            at: #k
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] ensure: [nil]
+      ]
+    t
+
+  whileOnDoTry =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        [
+          Result
+            tryDo: [
+              t := t + 1
+              1
+            ]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  onceTryLookup =>
+    t := 0
+    Result
+      tryDo: [
+        #{#a => 1}
+          at: #k
+          ifAbsent: [
+            t := t + 1
+            0
+          ]
+        7
+      ]
+    t
+
+  onceTryDirect =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        7
+      ]
+    t
+
+  onceTryNested =>
+    t := 0
+    Result
+      tryDo: [
+        Result
+          tryDo: [
+            t := t + 1
+            1
+          ]
+        7
+      ]
+    t
+
+  onceTryRaise =>
+    t := 0
+    Result
+      tryDo: [
+        t := t + 1
+        Error signal: "boom"
+      ]
+    t
+
+  onceOnDoLookup =>
+    t := 0
+    [
+      #{#a => 1}
+        at: #k
+        ifAbsent: [
+          t := t + 1
+          0
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  onceEnsureLookup =>
+    t := 0
+    [
+      #{#a => 1}
+        at: #k
+        ifAbsent: [
+          t := t + 1
+          0
+        ]
+    ] ensure: [nil]
+    t
+
+  onceOnDoTry =>
+    t := 0
+    [
+      Result
+        tryDo: [
+          t := t + 1
+          1
+        ]
+    ] on: Error do: [:e | 0]
+    t
