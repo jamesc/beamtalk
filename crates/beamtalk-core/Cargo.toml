@@ -93,6 +93,10 @@ default = []
 ## Add `beamtalk-core = { features = ["test"] }` to the dependent crate's
 ## `[dev-dependencies]` section to enable this.
 test = ["dep:proptest"]
+## Let `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0` bypass the ADR 0131 Phase 0 position
+## check, for `just measure-adr0131-statements` (BT-3841). Never enabled by default;
+## the last BT-3841 PR deletes it with the check.
+measure-bypass = []
 ## Enable serde Serialize/Deserialize derives on ClassInfo and related types.
 ## Used by beamtalk-cli to persist Pass 1 metadata cache for incremental builds.
 serde = ["ecow/serde"]

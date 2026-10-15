@@ -36,11 +36,5 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   testStDoSeparatedByValue =>
     self assert: ((Adr0131LocalRebindValuePending new) stDoSeparatedBy) equals: 13
 
-  testStKeysAndValuesDoClass =>
-    self assert: (Adr0131LocalRebindClassPending stKeysAndValuesDo) equals: 3
-
-  testStKeysAndValuesDoValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stKeysAndValuesDo) equals: 3
-
   testStBlockValueClass =>
     self assert: (Adr0131LocalRebindClassPending stBlockValue) equals: 1

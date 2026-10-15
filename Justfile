@@ -1412,6 +1412,16 @@ test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48
     cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
     cargo test -p beamtalk-codegen --test class_var_agreement
 
+# ADR 0131 (BT-3841): compile every Phase 0 probe cell with the position check
+# bypassed, run it on a BEAM and compare with the checked-in measured table
+# (`semantic_analysis/tests/adr0131_statement_measured.tsv`,
+# `adr0131_operand_measured.tsv`). `ADR0131_MEASURE_BLESS=1 just
+# measure-adr0131-statements` rewrites the tables.
+measure-adr0131-statements: build-stdlib
+    @echo "📐 Measuring the ADR 0131 Phase 0 probe cells on a BEAM..."
+    cargo build --workspace --features beamtalk-core/measure-bypass
+    cargo test -p beamtalk-cli --features beamtalk-core/measure-bypass --test cli adr0131_ -- --ignored --nocapture --test-threads=1
+
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
 # Output: summary only on success, full output on failure

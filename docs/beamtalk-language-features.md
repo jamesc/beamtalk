@@ -763,7 +763,7 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work in actor instance methods (ADR 0041 Tier 2); elsewhere a stored closure that writes an outer local has no way to return the write and is a compile error. A block that writes an outer local and escapes the method (returned, stored in a field, or placed in a collection literal) is also a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
+**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. A stored closure that writes an outer local works only where the write can be handed back: in an actor instance method when the stored block is sent `value` (or its siblings) as a method-body statement or passed to a `sealed` self-send that threads it (ADR 0041 Tier 2, ADR 0131 §6), and wherever the block is invoked by a control-flow construct that threads locals (`do:`, `inject:into:`, `on:do:`, ...). Anywhere else (a class or value-type method invoking it with `b value`, a user-defined higher-order method, a collection literal) no callee can return the write and the compiler rejects it with the ["block writes outer local" error](#what-works-and-what-doesnt). A block that writes an outer local and escapes the method (returned, stored in a field, or placed in a collection literal) is also a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
 
 ```beamtalk
 // ❌ ERROR: field assignment inside stored closure
@@ -2689,7 +2689,7 @@ The compiler uses a two-tier optimization for block mutations:
 - **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
 - **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
 
-**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`), and, in a few top-level shapes of an actor instance method, in stored closures and blocks passed to the actor's own methods. Anywhere else there is no way for the callee to hand the write back, and the compiler rejects it (see [What Works and What Doesn't](#what-works-and-what-doesnt)). **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
+**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), in every method kind and in the REPL, including when the construct is an operand of a larger expression, and, in a few top-level shapes of an actor instance method, in stored closures and blocks passed to the actor's own methods. Where the write cannot be handed back the compiler rejects the program instead of dropping the write (see [What Works and What Doesn't](#what-works-and-what-doesnt)). **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
@@ -2827,21 +2827,53 @@ listOfBlocks =>
 
 **Actor self-send exemption** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). In an actor instance method, a `self` send with a state-writing block argument is accepted only when the callee is a `sealed` method of the *same* class that provably threads the block — direct `b value` invocations as statements, assignments, or returns in the callee's body, the bare callable form of a collection HOM (`#(1) do: b`), or forwarding to another such method. Inherited, non-sealed, overridable, or otherwise unverifiable callees are a compile error.
 
-**Local-threading producers** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) Phase 2). Many positions that previously rejected a construct whose block writes an outer local now accept it. The following are local-threading producers that answer their value and keep their writes:
+**What works where** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md)). A construct whose blocks write a local of the enclosing method (a *local-threading producer*) answers its value and keeps those writes. The writes are returned alongside the value and rebound in the enclosing frame, so the construct can sit wherever an expression can, not only as a statement. The constructs are the loops and collection messages in the table above, the conditionals (`ifTrue:`, `ifNil:`, `and:`/`or:`, ...), `on:do:`/`ensure:`, `Result tryDo:`, `detect:ifNone:`, a block literal sent `value`, and `Dictionary at:ifAbsent:`. The positions that work are:
 
-- **Method-body operand positions** — `r := xs collect: [:x | count := count + x]`, `#[xs do: [...], t]`, `^xs do: [...]` (BT-3795, BT-3796)
-- **Nested loop/fold bodies** — `items do: [:x | result := xs collect: [:y | t := t + y]]` (BT-3793)
-- **`do:` as a producer** — `do:` whose block writes an outer local answers `nil` and keeps its writes (BT-3796)
-- **`detect:ifNone:` handler** — a `detect:ifNone:` whose `ifNone:` handler writes an outer local (BT-3794)
-- **REPL operand positions** — `(xs collect: [:x | t := t + x]) size` at the REPL (BT-3795)
-- **Field-write values** — `self.f := xs collect: [:x | t := t + x]` in class and actor methods (BT-3795)
-- **Conditionals** — `c ifTrue: [t := t + 1] ifFalse: [0]` and the rest of the conditional family (`ifNil:ifNotNil:`, `and:`/`or:`, etc.) at method-root sites in class, value-type and actor methods, and at operand sites in the REPL (BT-3738)
-- **`on:do:` and `ensure:`** — `[t := t + 1] ensure: [u := u + 1]` in any producer position, in an arm of another producer and in a loop or fold body; the protected body, handler and cleanup are arms of the producer. A raise discards the protected body's writes, and the handler's (or the cleanup's) writes are kept (BT-3817)
-- **`Dictionary at:ifAbsent:` handler** — `d at: #k ifAbsent: [t := t + 1. 0]` in statement, assignment, operand, `^` value, last expression, conditional arm, `on:do:` body, and handler positions. A non-`Dictionary` receiver raises `type_error` (BT-3798)
+- a statement, the right-hand side of an assignment, a `^` value, the value of a field write (`self.f := ...`) and the operands of a send or binary operator, in class methods, value-type methods and actor methods, and as an operand in the REPL
+- a statement or value inside the arm of a conditional, the protected body or handler of `on:do:`/`ensure:`, or the body of a loop or fold, for the combinations listed below as accepted by the compiler
 
-A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in every method kind; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead (BT-3817).
+```beamtalk
+// An operand-position construct: `+` sees the collect: result, and `t` keeps the writes
+t := 0
+n := (#(1, 2, 3) collect: [:x | t := t + x]) size + t
+// n = 3 + 6 = 9, t = 6
 
-Positions that remain rejected (tracked for future phases): constructs inside a block, a conditional's receiver, a cascade, a field-write value in a value type, value-bearing producer positions inside actor fold bodies, `^xs do: [...]` inside a closure in class/value-type methods ([BT-3813](https://linear.app/beamtalk/issue/BT-3813)), and constructs nested two blocks deep in an actor method. `r := <construct>` is accepted wherever it threads correctly.
+// A sibling that reads the local before a later sibling rebinds it reads the old value
+t := 0
+r := t + ([t := t + 1. 1] on: Error do: [:e | 0])
+// r = 0 + 1 = 1, t = 1
+```
+
+Specific forms:
+
+- **Method-body operand positions**: `r := xs collect: [:x | count := count + x]`, `#[xs do: [...], t]`, `^xs do: [...]`
+- **Nested loop and fold bodies**: `items do: [:x | result := xs collect: [:y | t := t + y]]`; a conditional whose arm writes an outer local, inside a loop or fold body
+- **`do:`** answers `nil` and keeps its writes; a **`detect:ifNone:`** whose `ifNone:` handler writes an outer local keeps them
+- **Conditionals**: `c ifTrue: [t := t + 1] ifFalse: [0]` and the rest of the family, at method-root sites in all three method kinds and at operand sites in the REPL
+- **`on:do:` and `ensure:`**: `[t := t + 1] ensure: [u := u + 1]` in any producer position; the protected body, handler and cleanup are arms of the producer
+- **`Result tryDo:`**: `r := Result tryDo: [t := t + 1. 1 / 0]`, the Tier 2 twin of the one-argument `tryDo:`; the receiver must be the literal `Result` class reference. A `tryDo:` sent to any other receiver keeps its dynamic send, and a writing block passed to it is the "block writes outer local" error
+- **`Dictionary at:ifAbsent:`**: `d at: #k ifAbsent: [t := t + 1. 0]` in statement, assignment, operand, `^`, conditional-arm, `on:do:` body and handler positions. The handler is lowered inline behind a runtime check that the receiver is a `Dictionary`; any other receiver (an `Ets`, a user class) raises a structured `type_error` instead of dropping the write, and a receiver statically known not to be a `Dictionary` is a compile error. A lookup in a loop or fold body, in a closure or in the REPL is still a compile error. `at:ifPresent:`, `at:ifAbsentPut:` and `removeKey:ifAbsent:` handlers are not producers (the §6 error)
+
+**The protected-region rule.** A local written inside the block of an `on:do:` or `Result tryDo:` that then raises is *discarded*: after the handler runs, the local has the value it had on entering the block. Writes made before entering the block are kept, and writes made by the handler itself (and by an `ensure:` cleanup) are kept. This holds in every method kind and in the REPL, and matches what class variables do at a catch boundary (ADR 0130 §4).
+
+```beamtalk
+t := 0
+(Result tryDo: [t := t + 1. 1 / 0]) isError   // => true
+t                                             // => 0, the write inside the raising block is discarded
+```
+
+This is a deliberate departure from Pharo, where temporaries are shared cells and a write made before the raise survives. On BEAM the protected region's locals are a value that is returned only when the block completes. A block that does not raise keeps all its writes.
+
+**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. (The REPL is exempt from this error and is not covered by this rule.)
+
+**Position errors.** Some combinations of a construct, the position it sits in and the method kind are not yet lowered as producers and are rejected with a second, temporary error rather than being allowed to drop the write:
+
+```text
+error: `eachWithIndex:` writes outer local `t`, but as a statement inside a conditional arm in a class method
+       the write is not threaded back yet (BT-3743)
+```
+
+These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly statements nested inside a conditional arm, protected body, handler or loop body of another construct (`eachWithIndex:`, `do:separatedBy:`, `keysAndValuesDo:`, `[...] value`, `anySatisfy:`, an `ifNil:`/`and:` family member, and an actor loop in an arm), and a REPL conditional arm or loop nested inside a REPL `on:do:`/`tryDo:`. The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: a construct inside a plain closure (`^xs do: [...]` inside a closure in a class or value-type method), a cascade, and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

@@ -20,11 +20,22 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
 }
 
+/// The environment variable that bypasses the ADR 0131 Phase 0 position check
+/// in a build with the `measure-bypass` feature (BT-3841): read by the check,
+/// set by the BEAM measurement harness in `beamtalk-cli`.
+#[cfg(any(test, feature = "test", feature = "measure-bypass"))]
+pub const ADR0131_MEASURE_BYPASS_ENV: &str = "BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0";
+
 // BT-3705 (ADR 0130 Phase 1): generated class-variable programs and the
 // reference interpreter. A sibling module (not part of `test_support`) because
 // it is plain data + a pure interpreter with no parser/AST dependency.
 #[cfg(any(test, feature = "test"))]
 pub mod class_var_program;
+
+// BT-3841 (ADR 0131): the statement-position probe matrix, shared by the
+// Phase 0 pin tests and the BEAM measurement harness in `beamtalk-cli`.
+#[cfg(any(test, feature = "test"))]
+pub mod statement_probes;
 
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///

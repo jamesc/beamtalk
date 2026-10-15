@@ -1,0 +1,271 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `keysAndValuesDo:` / `doWithKey:` as local-threading
+// producers in a class method, a value-type method and an actor method. The
+// fixtures are fixtures/adr0131keyed_do_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131KeyedDoTest
+
+  testClassTop => self assert: (Adr0131KeyedDoClass top) equals: 3
+
+  testClassTopKey => self assert: (Adr0131KeyedDoClass topKey) equals: 3
+
+  testClassViaLocal => self assert: (Adr0131KeyedDoClass viaLocal) equals: 3
+
+  testClassEmpty => self assert: (Adr0131KeyedDoClass empty) equals: 0
+
+  testClassKeysUsed => self assert: (Adr0131KeyedDoClass keysUsed) equals: 12
+
+  testClassInArm =>
+    self assert: (Adr0131KeyedDoClass inArm: true) equals: 3
+    self assert: (Adr0131KeyedDoClass inArm: false) equals: 0
+
+  testClassInArmElse =>
+    self assert: (Adr0131KeyedDoClass inArmElse: true) equals: 100
+    self assert: (Adr0131KeyedDoClass inArmElse: false) equals: 3
+
+  testClassInDo => self assert: (Adr0131KeyedDoClass inDo) equals: 6
+
+  testClassInToDo => self assert: (Adr0131KeyedDoClass inToDo) equals: 6
+
+  testClassInTimes => self assert: (Adr0131KeyedDoClass inTimes) equals: 6
+
+  testClassInWhile => self assert: (Adr0131KeyedDoClass inWhile) equals: 6
+
+  testClassInOnDo => self assert: (Adr0131KeyedDoClass inOnDo) equals: 3
+
+  testClassInEnsure => self assert: (Adr0131KeyedDoClass inEnsure) equals: 3
+
+  testClassInHandler => self assert: (Adr0131KeyedDoClass inHandler) equals: 3
+
+  testClassNested => self assert: (Adr0131KeyedDoClass nested) equals: 23
+
+  testClassInArmInDo =>
+    self assert: (Adr0131KeyedDoClass inArmInDo: true) equals: 6
+    self assert: (Adr0131KeyedDoClass inArmInDo: false) equals: 0
+
+  testClassReturnInArm =>
+    self assert: (Adr0131KeyedDoClass returnInArm: true) equals: nil
+    self assert: (Adr0131KeyedDoClass returnInArm: false) equals: 0
+
+  testClassAssigned =>
+    self assert: (Adr0131KeyedDoClass assigned) equals: #[nil, 3]
+
+  testValueTop => self assert: ((Adr0131KeyedDoValue new) top) equals: 3
+
+  testValueTopKey => self assert: ((Adr0131KeyedDoValue new) topKey) equals: 3
+
+  testValueViaLocal =>
+    self assert: ((Adr0131KeyedDoValue new) viaLocal) equals: 3
+
+  testValueEmpty => self assert: ((Adr0131KeyedDoValue new) empty) equals: 0
+
+  testValueKeysUsed =>
+    self assert: ((Adr0131KeyedDoValue new) keysUsed) equals: 12
+
+  testValueInArm =>
+    self assert: ((Adr0131KeyedDoValue new) inArm: true) equals: 3
+    self assert: ((Adr0131KeyedDoValue new) inArm: false) equals: 0
+
+  testValueInArmElse =>
+    self assert: ((Adr0131KeyedDoValue new) inArmElse: true) equals: 100
+    self assert: ((Adr0131KeyedDoValue new) inArmElse: false) equals: 3
+
+  testValueInDo => self assert: ((Adr0131KeyedDoValue new) inDo) equals: 6
+
+  testValueInToDo => self assert: ((Adr0131KeyedDoValue new) inToDo) equals: 6
+
+  testValueInTimes => self assert: ((Adr0131KeyedDoValue new) inTimes) equals: 6
+
+  testValueInWhile => self assert: ((Adr0131KeyedDoValue new) inWhile) equals: 6
+
+  testValueInOnDo => self assert: ((Adr0131KeyedDoValue new) inOnDo) equals: 3
+
+  testValueInEnsure =>
+    self assert: ((Adr0131KeyedDoValue new) inEnsure) equals: 3
+
+  testValueInHandler =>
+    self assert: ((Adr0131KeyedDoValue new) inHandler) equals: 3
+
+  testValueNested => self assert: ((Adr0131KeyedDoValue new) nested) equals: 23
+
+  testValueInArmInDo =>
+    self assert: ((Adr0131KeyedDoValue new) inArmInDo: true) equals: 6
+    self assert: ((Adr0131KeyedDoValue new) inArmInDo: false) equals: 0
+
+  testValueReturnInArm =>
+    self assert: ((Adr0131KeyedDoValue new) returnInArm: true) equals: nil
+    self assert: ((Adr0131KeyedDoValue new) returnInArm: false) equals: 0
+
+  testValueAssigned =>
+    self assert: ((Adr0131KeyedDoValue new) assigned) equals: #[nil, 3]
+
+  testActorTop => self assert: ((Adr0131KeyedDoActor spawn) top) equals: 3
+
+  testActorTopKey => self assert: ((Adr0131KeyedDoActor spawn) topKey) equals: 3
+
+  testActorViaLocal =>
+    self assert: ((Adr0131KeyedDoActor spawn) viaLocal) equals: 3
+
+  testActorEmpty => self assert: ((Adr0131KeyedDoActor spawn) empty) equals: 0
+
+  testActorKeysUsed =>
+    self assert: ((Adr0131KeyedDoActor spawn) keysUsed) equals: 12
+
+  testActorInArm =>
+    self assert: ((Adr0131KeyedDoActor spawn) inArm: true) equals: 3
+    self assert: ((Adr0131KeyedDoActor spawn) inArm: false) equals: 0
+
+  testActorInArmElse =>
+    self assert: ((Adr0131KeyedDoActor spawn) inArmElse: true) equals: 100
+    self assert: ((Adr0131KeyedDoActor spawn) inArmElse: false) equals: 3
+
+  testActorInDo => self assert: ((Adr0131KeyedDoActor spawn) inDo) equals: 6
+
+  testActorInToDo => self assert: ((Adr0131KeyedDoActor spawn) inToDo) equals: 6
+
+  testActorInTimes =>
+    self assert: ((Adr0131KeyedDoActor spawn) inTimes) equals: 6
+
+  testActorInWhile =>
+    self assert: ((Adr0131KeyedDoActor spawn) inWhile) equals: 6
+
+  testActorInOnDo => self assert: ((Adr0131KeyedDoActor spawn) inOnDo) equals: 3
+
+  testActorInEnsure =>
+    self assert: ((Adr0131KeyedDoActor spawn) inEnsure) equals: 3
+
+  testActorInHandler =>
+    self assert: ((Adr0131KeyedDoActor spawn) inHandler) equals: 3
+
+  testActorNested =>
+    self assert: ((Adr0131KeyedDoActor spawn) nested) equals: 23
+
+  testActorInArmInDo =>
+    self assert: ((Adr0131KeyedDoActor spawn) inArmInDo: true) equals: 6
+    self assert: ((Adr0131KeyedDoActor spawn) inArmInDo: false) equals: 0
+
+  testActorReturnInArm =>
+    self assert: ((Adr0131KeyedDoActor spawn) returnInArm: true) equals: nil
+    self assert: ((Adr0131KeyedDoActor spawn) returnInArm: false) equals: 0
+
+  testActorAssigned =>
+    self assert: ((Adr0131KeyedDoActor spawn) assigned) equals: #[nil, 3]
+
+  testActorStateful =>
+    self assert: ((Adr0131KeyedDoActor spawn) stateful) equals: #[3, 3]
+
+  testActorStatefulInDo =>
+    self assert: ((Adr0131KeyedDoActor spawn) statefulInDo) equals: #[6, 6]
+
+  testClassViaParamDictionary =>
+    self assert: (Adr0131KeyedDoClass viaParam: #{#a => 1, #b => 2}) equals: 2
+    self assert: (Adr0131KeyedDoClass viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testClassViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsClass type: #set
+    ets at: "a" put: 1
+    r := [
+      Adr0131KeyedDoClass viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      Adr0131KeyedDoClass viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testClassViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      Adr0131KeyedDoClass viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      Adr0131KeyedDoClass viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testValueViaParamDictionary =>
+    self assert: ((Adr0131KeyedDoValue new) viaParam: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+    self assert: ((Adr0131KeyedDoValue new) viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testValueViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsValue type: #set
+    ets at: "a" put: 1
+    r := [
+      (Adr0131KeyedDoValue new) viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoValue new) viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testValueViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      (Adr0131KeyedDoValue new) viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoValue new) viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testActorViaParamDictionary =>
+    self assert: ((Adr0131KeyedDoActor spawn) viaParam: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+    self assert: ((Adr0131KeyedDoActor spawn) viaParamKey: #{
+      #a => 1,
+      #b => 2
+    }) equals: 2
+
+  testActorViaParamEtsRaises =>
+    ets := Ets new: #adr0131KeyedDoEtsActor type: #set
+    ets at: "a" put: 1
+    r := [
+      (Adr0131KeyedDoActor spawn) viaParam: ets
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoActor spawn) viaParamKey: ets
+      1
+    ] on: Error do: [:e | 0]
+    ets delete
+    self assert: r equals: 0
+    self assert: r2 equals: 0
+
+  testActorViaParamCustomClassRaises =>
+    custom := Adr0131KeyedDoCustom new
+    r := [
+      (Adr0131KeyedDoActor spawn) viaParam: custom
+      1
+    ] on: Error do: [:e | 0]
+    r2 := [
+      (Adr0131KeyedDoActor spawn) viaParamKey: custom
+      1
+    ] on: Error do: [:e | 0]
+    self assert: r equals: 0
+    self assert: r2 equals: 0

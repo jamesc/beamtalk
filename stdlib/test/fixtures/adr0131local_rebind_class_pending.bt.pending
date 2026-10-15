@@ -39,12 +39,6 @@ Object subclass: Adr0131LocalRebindClassPending
     #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
     t
 
-  // `keysAndValuesDo:` as a statement.
-  class stKeysAndValuesDo =>
-    t := 0
-    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
-    t
-
   // `[...] value` as a statement.
   class stBlockValue =>
     t := 0

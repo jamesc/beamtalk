@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use std::fmt::Write as _;
 
 fn parse_module(src: &str) -> Module {
     let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
@@ -1315,115 +1316,19 @@ fn a_nested_do_in_a_class_loop_body_is_accepted_with_or_without_state_access() {
 // BT-3753: the statement-position probe matrix (`DENY_SET`)
 // ---------------------------------------------------------------------------
 
-/// The construct kinds of the statement-position probe matrix: each body,
-/// with `@` for the local it writes and `X` for an extra statement inside its
-/// block (the `stateful` variants), and how much it adds to that local.
-/// `%c` is the condition: the method parameter `c`, or `4 =:= 4` at the REPL.
-const STATEMENT_PROBE_KINDS: &[(&str, &str, i64)] = &[
-    ("do", "#(1, 2) do: [:e | @ := @ + eX]", 3),
-    ("while", "[@ < 2] whileTrue: [@ := @ + 1X]", 2),
-    ("times", "2 timesRepeat: [@ := @ + 1X]", 2),
-    ("toDo", "1 to: 2 do: [:i | @ := @ + iX]", 3),
-    (
-        "inject",
-        "#(1, 2) inject: 0 into: [:a :x | @ := @ + xX. a + x]",
-        3,
-    ),
-    ("collect", "#(1, 2) collect: [:x | @ := @ + xX]", 3),
-    ("ifTrue", "%c ifTrue: [@ := @ + 1X]", 1),
-    ("ifNil", "nil ifNil: [@ := @ + 1X]", 1),
-    ("and", "%c and: [@ := @ + 1X. true]", 1),
-    ("onDo", "[@ := @ + 1X] on: Error do: [:e | 0]", 1),
-    ("ensure", "[@ := @ + 1X] ensure: [nil]", 1),
-    ("value", "[@ := @ + 1X] value", 1),
-    ("ewi", "#(1, 2) eachWithIndex: [:x :i | @ := @ + xX]", 3),
-    (
-        "dsb",
-        "#(1, 2) do: [:x | @ := @ + xX] separatedBy: [@ := @ + 10]",
-        13,
-    ),
-    (
-        "kv",
-        "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | @ := @ + wX]",
-        3,
-    ),
-    (
-        "dinH",
-        "#(1, 2) detect: [:e | e > 5] ifNone: [@ := @ + 1X]",
-        1,
-    ),
-    (
-        "dinS",
-        "#(1, 2) detect: [:e | @ := @ + 1X. e > 5] ifNone: [nil]",
-        2,
-    ),
-    ("any", "#(1, 2) anySatisfy: [:e | @ := @ + 1X. e > 5]", 2),
-];
+use crate::test_helpers::statement_probes::{
+    Matrix, ProbeRow, class_source, probe_class_source, probe_method, probe_rows, statement_probe,
+};
 
-/// The block roles of the statement-position probe matrix, with `S` for the
-/// probed statement.
-const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
-    ("top", "S"),
-    ("arm", "%c ifTrue: [S]"),
-    ("armTF", "%c ifTrue: [S] ifFalse: [nil]"),
-    ("armNil", "nil ifNil: [S]"),
-    ("armAnd", "%c and: [S. true]"),
-    ("armNL", "%c ifTrue: [S. 5]"),
-    ("prot", "[S. 7] on: Error do: [:e | 0]"),
-    ("protLast", "[S] on: Error do: [:e | 0]"),
-    ("ens", "[S. 7] ensure: [nil]"),
-    ("ensLast", "[S] ensure: [nil]"),
-    ("handler", "[Error signal: \"x\"] on: Error do: [:e | S. 0]"),
-    ("ensBlk", "[nil] ensure: [S]"),
-    ("loop", "i := 0. [i < 1] whileTrue: [i := i + 1. S]"),
-    ("timesC", "1 timesRepeat: [S]"),
-    ("toDoC", "1 to: 1 do: [:z | S]"),
-    ("iter", "#(1) do: [:z | S]"),
-    ("coll", "#(1) collect: [:z | S. z]"),
-    ("val", "[S] value"),
-    ("armIter", "#(1) do: [:z | %c ifTrue: [S]]"),
-    ("iterArm", "%c ifTrue: [#(1) do: [:z | S]]"),
-    (
-        "armLoop",
-        "i := 0. [i < 1] whileTrue: [i := i + 1. %c ifTrue: [S]]",
-    ),
-    ("protArm", "%c ifTrue: [[S. 7] on: Error do: [:e | 0]]"),
-    ("iterIter", "#(1) do: [:y | #(1) do: [:z | S]]"),
-    // REPL-only roles.
-    ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
-];
-
-/// The probe statement for `kind` in `container`. `target` says which local
-/// the construct writes and how the block reads it back: `outer` writes the
-/// method-level `t`; `local` writes a local `u` of the innermost block and
-/// then sets `t := u`; `direct` first writes `t := t + 0` in the block;
-/// `dlocal` writes `u` and then `t := t + u`; `cvar`, `selfsend` and
-/// `cvarOuter` write `t` with a class-variable write or a self-send inside
-/// the construct's block, or a class-variable write before it.
-fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) -> String {
-    let (_, snippet, _) = STATEMENT_PROBE_KINDS
-        .iter()
-        .find(|(k, _, _)| *k == kind)
-        .unwrap_or_else(|| panic!("unknown kind {kind}"));
-    let (_, template) = STATEMENT_PROBE_CONTAINERS
-        .iter()
-        .find(|(c, _)| *c == container)
-        .unwrap_or_else(|| panic!("unknown container {container}"));
-    let extra = match target {
-        "cvar" => ". self.n := 1",
-        "selfsend" => ". self plain",
-        "cvarOuter" | "outer" | "local" | "direct" | "dlocal" => "",
-        other => panic!("unknown target {other}"),
-    };
-    let snippet = snippet.replace('X', extra);
-    let stmt = match target {
-        "local" => format!("u := 0. {}. t := u", snippet.replace('@', "u")),
-        "dlocal" => format!("u := 0. {}. t := t + u", snippet.replace('@', "u")),
-        "direct" => format!("t := t + 0. {}", snippet.replace('@', "t")),
-        "cvarOuter" => format!("self.n := 1. {}", snippet.replace('@', "t")),
-        _ => snippet.replace('@', "t"),
-    };
-    template.replace('S', &stmt).replace("%c", cond)
+/// The ADR 0131 diagnostics the probe `(context, container, target, kind)`
+/// draws (`repl` rows run as module-level expressions).
+fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -> Vec<Diagnostic> {
+    if context == "repl" {
+        let body = statement_probe(kind, container, target, "4 =:= 4");
+        adr0131_diagnostics_with(&format!("{body}\n"), &["t"])
+    } else {
+        adr0131_diagnostics(&probe_class_source(context, "P", container, target, kind))
+    }
 }
 
 /// PIN-BUG BT-3841: the statement-position probe matrix, measured on the
@@ -1440,35 +1345,18 @@ fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) -> Str
 /// green.
 #[test]
 fn adr0131_statement_probe_pins() {
-    let table = include_str!("adr0131_statement_probes.tsv");
     let mut checked = 0;
     let mut wrong = Vec::new();
-    for line in table
-        .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    for ProbeRow {
+        context,
+        container,
+        target,
+        kind,
+        verdict,
+    } in probe_rows()
     {
-        let cols: Vec<&str> = line.split('\t').collect();
-        let [context, container, target, kind, verdict] = cols[..] else {
-            panic!("bad line {line:?}");
-        };
-        let diags = if context == "repl" {
-            let body = statement_probe(kind, container, target, "4 =:= 4");
-            adr0131_diagnostics_with(&format!("{body}\n"), &["t"])
-        } else {
-            let body = statement_probe(kind, container, target, "c");
-            let method = format!("probe: c =>\n    t := 0\n    {body}\n    t\n");
-            let src = match context {
-                "class" => format!(
-                    "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class {method}"
-                ),
-                "value" => format!("Value subclass: P\n  plain => 0\n  {method}"),
-                "actor" => format!("Actor subclass: P\n  state: n = 0\n  plain => 0\n  {method}"),
-                other => panic!("unknown context {other}"),
-            };
-            adr0131_diagnostics(&src)
-        };
-        let rejected = !diags.is_empty();
-        let expected_rejected = match verdict {
+        let rejected = !probe_diagnostics(&context, &container, &target, &kind).is_empty();
+        let expected_rejected = match verdict.as_str() {
             "bad" | "over" => Some(true),
             "ok" => Some(false),
             "gap" => None,
@@ -1489,6 +1377,413 @@ fn adr0131_statement_probe_pins() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// Cells that answer right but that Phase 0 still rejects, because the facts a
+/// statement position carries cannot tell them from a sibling cell that
+/// answers wrong: a `eachWithIndex:` in an actor `whileTrue:`/`to:do:` body
+/// that also touches state (the state touch inside the construct's own block,
+/// `cvar` and `selfsend`, is right and the one before it is not), the
+/// `Enumeration`/`KeyedDo`/`detect:ifNone:`/`value` statements of an actor
+/// arm-in-protected-body-in-`do:` role (`armProtIter`) and an `anySatisfy:` in
+/// a value-type arm-in-`do:`-in-`do:` role (`armIterIter`), and the three-deep
+/// `anySatisfy:`/enumeration cells generally: no `RIGHT_STATEMENTS` row exists
+/// past depth two, because a row keyed on the outermost and innermost roles
+/// would also accept every unmeasured middle role. PIN-BUG BT-3841:
+/// the producer work for those families deletes the entries.
+const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
+    ("actor", "loop", "cvar", "ewi"),
+    ("actor", "loop", "selfsend", "ewi"),
+    ("actor", "toDoC", "cvar", "ewi"),
+    ("actor", "toDoC", "selfsend", "ewi"),
+    ("actor", "armProtIter", "outer", "dinH"),
+    ("actor", "armProtIter", "outer", "dinS"),
+    ("actor", "armProtIter", "outer", "dsb"),
+    ("actor", "armProtIter", "outer", "ewi"),
+    ("actor", "armProtIter", "outer", "value"),
+    ("value", "armIterIter", "outer", "any"),
+    ("actor", "armProtIter", "outer", "any"),
+    ("actor", "armIterIter", "outer", "any"),
+    ("actor", "armProtArm", "outer", "any"),
+    ("actor", "armProtArm", "outer", "dsb"),
+    ("actor", "armProtArm", "outer", "ewi"),
+    ("actor", "armProtArm", "outer", "value"),
+    ("class", "armProtIter", "outer", "any"),
+    ("class", "armIterIter", "outer", "any"),
+];
+
+/// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
+/// `adr0131_statement_measured.tsv` records, for every class, value-type and
+/// actor cell the check once rejected, what the cell answers when compiled
+/// with the check bypassed and run on a BEAM (regenerate it with `just
+/// measure-adr0131-statements`, which fails when the numbers drift). Both
+/// directions are asserted: a cell that answers `wrong` or fails `erlc` must
+/// be rejected (soundness: no silent wrong answer), and a cell that answers
+/// `right` must be accepted (the table is not coarser than the measurement)
+/// except the [`KNOWN_OVER_REJECTED`] ones, and the verdict table agrees with
+/// the measurement.
+#[test]
+fn adr0131_phase0_agrees_with_measured_answers() {
+    let verdicts: std::collections::HashMap<(String, String, String, String), String> =
+        probe_rows()
+            .into_iter()
+            .map(|r| ((r.context, r.container, r.target, r.kind), r.verdict))
+            .collect();
+    let mut problems = Vec::new();
+    let measured = Matrix::Statement.measured();
+    assert!(
+        measured.len() >= 733,
+        "only {} measured cells",
+        measured.len()
+    );
+    for [context, container, target, kind, answer] in measured {
+        let right = match answer.as_str() {
+            "right" => true,
+            "wrong" | "erlc" => false,
+            other => panic!("unknown answer {other}"),
+        };
+        let rejected = !probe_diagnostics(&context, &container, &target, &kind).is_empty();
+        let cell = format!("{context}\t{container}\t{target}\t{kind}");
+        let over_rejected = KNOWN_OVER_REJECTED.contains(&(
+            context.as_str(),
+            container.as_str(),
+            target.as_str(),
+            kind.as_str(),
+        ));
+        // A known over-rejected cell answers right and is still rejected; the
+        // phase that lowers it deletes its entry.
+        let agrees = if over_rejected {
+            rejected && right
+        } else {
+            rejected != right
+        };
+        if !agrees {
+            problems.push(format!(
+                "{cell}\tmeasured {answer}, but Phase 0 {}",
+                match (rejected, over_rejected) {
+                    (true, false) => "rejects it (coarser than the measurement)",
+                    (false, false) => "accepts it (a silent wrong answer or a compile failure)",
+                    (_, true) => "no longer rejects it (delete it from KNOWN_OVER_REJECTED)",
+                }
+            ));
+        }
+        match verdicts
+            .get(&(context, container, target, kind))
+            .map(String::as_str)
+        {
+            Some("ok") if !right => problems.push(format!("{cell}\tverdict ok, measured {answer}")),
+            Some("bad") if right => {
+                problems.push(format!("{cell}\tverdict bad, measured right"));
+            }
+            Some("over") if !over_rejected => {
+                problems.push(format!(
+                    "{cell}\tverdict over, but not in KNOWN_OVER_REJECTED"
+                ));
+            }
+            Some("ok" | "bad" | "over") => {}
+            other => problems.push(format!("{cell}\tno usable verdict line ({other:?})")),
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "{} disagreements:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
+}
+
+/// The ADR 0131 diagnostics the operand-matrix probe `(context, container,
+/// position, kind)` draws.
+fn operand_diagnostics(
+    context: &str,
+    container: &str,
+    position: &str,
+    kind: &str,
+) -> Vec<Diagnostic> {
+    let method = probe_method(
+        Matrix::Operand,
+        context,
+        "probe:",
+        container,
+        position,
+        kind,
+    );
+    adr0131_diagnostics(&class_source(context, "P", &[method]))
+}
+
+/// PIN-BUG BT-3841: the operand-position half of Phase 0 (`ALLOW_SET`) is
+/// sound. `adr0131_operand_measured.tsv` records what a construct answers as
+/// the value of an assignment, a receiver, an argument, a cascade part, a
+/// literal element, a `match:` subject or an interpolation, with the check
+/// bypassed and run on a BEAM; every cell that does not answer right must be
+/// rejected. Not every right cell is accepted (`ALLOW_SET` is deliberately
+/// coarse here): the count of those is the BT-3841 backlog, not asserted.
+#[test]
+fn adr0131_phase0_operand_positions_are_sound() {
+    let measured = Matrix::Operand.measured();
+    assert!(measured.len() > 1000, "only {} cells", measured.len());
+    let mut unsound = Vec::new();
+    for [context, container, position, kind, answer] in measured {
+        let right = match answer.as_str() {
+            "right" => true,
+            "wrong" | "erlc" => false,
+            other => panic!("unknown answer {other}"),
+        };
+        let rejected = !operand_diagnostics(&context, &container, &position, &kind).is_empty();
+        if !right && !rejected {
+            unsound.push(format!(
+                "{context}\t{container}\t{position}\t{kind}\t{answer}"
+            ));
+        }
+    }
+    assert!(
+        unsound.is_empty(),
+        "{} operand cells answer wrong but compile:\n{}",
+        unsound.len(),
+        unsound.join("\n")
+    );
+}
+
+/// The BT-3841 summary: for the statement matrix, how many cells answer right,
+/// wrong or fail to compile, by family, by block-role group and by context; for
+/// the operand matrix, the same by position plus what Phase 0 does with them.
+fn phase0_summary() -> String {
+    use crate::test_helpers::statement_probes::{container_group, statement_family};
+    use std::collections::BTreeMap;
+    let mut text = String::from(
+        "# ADR 0131 Phase 0 measurement summary (BT-3841), generated from the two measured\n\
+         # tables by `adr0131_phase0_summary_is_checked_in`; regenerate with\n\
+         # `ADR0131_BLESS=1 cargo test -p beamtalk-core --lib adr0131_phase0_summary`.\n\
+         # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc\n\
+         # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells\n\
+         # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right\n",
+    );
+    let mut by_family: BTreeMap<(String, String), [usize; 3]> = BTreeMap::new();
+    let mut by_group: BTreeMap<(String, String, String), usize> = BTreeMap::new();
+    for [context, container, _target, kind, answer] in Matrix::Statement.measured() {
+        let slot = match answer.as_str() {
+            "right" => 0,
+            "wrong" => 1,
+            _ => 2,
+        };
+        let family = statement_family(&container, &kind);
+        by_family
+            .entry((family.to_string(), context.clone()))
+            .or_default()[slot] += 1;
+        if slot != 0 {
+            *by_group
+                .entry((
+                    container_group(&container).to_string(),
+                    family.to_string(),
+                    context,
+                ))
+                .or_default() += 1;
+        }
+    }
+    for ((family, context), [r, w, e]) in &by_family {
+        let _ = writeln!(text, "statement\t{family}\t{context}\t{r}\t{w}\t{e}");
+    }
+    for ((group, family, context), n) in &by_group {
+        let _ = writeln!(text, "statement-group\t{group}\t{family}\t{context}\t{n}");
+    }
+    let mut by_position: BTreeMap<(String, String), [usize; 6]> = BTreeMap::new();
+    for [context, container, position, kind, answer] in Matrix::Operand.measured() {
+        let rejected = !operand_diagnostics(&context, &container, &position, &kind).is_empty();
+        let slot = match answer.as_str() {
+            "right" => 1,
+            "wrong" => 2,
+            _ => 3,
+        };
+        let row = by_position.entry((position, context)).or_default();
+        row[0] += 1;
+        row[slot] += 1;
+        if !rejected {
+            row[4] += 1;
+        } else if slot == 1 {
+            row[5] += 1;
+        }
+    }
+    for ((position, context), [n, r, w, e, acc, over]) in &by_position {
+        let _ = writeln!(
+            text,
+            "operand\t{position}\t{context}\t{n}\t{r}\t{w}\t{e}\t{acc}\t{over}"
+        );
+    }
+    text
+}
+
+/// PIN-BUG BT-3841: the checked-in summary of the measurement
+/// (`adr0131_phase0_summary.tsv`) is the one the measured tables and Phase 0
+/// produce now; the family counts in the PR and the ADR are read off it.
+#[test]
+fn adr0131_phase0_summary_is_checked_in() {
+    let summary = phase0_summary();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/semantic_analysis/tests/adr0131_phase0_summary.tsv");
+    if std::env::var_os("ADR0131_BLESS").is_some() {
+        std::fs::write(&path, &summary).expect("write the summary");
+        return;
+    }
+    assert!(
+        summary == include_str!("adr0131_phase0_summary.tsv").replace("\r\n", "\n"),
+        "the summary drifted; regenerate with ADR0131_BLESS=1:\n{summary}"
+    );
+}
+
+/// BT-3841 review: `RIGHT_STATEMENTS` rows match the block depth exactly (the
+/// matrix nests at most two blocks, and three for the `three-deep` roles), and
+/// the unfinished families (`anySatisfy:`, `detect:ifNone:`, the enumerations,
+/// `keysAndValuesDo:`, a block `value`) are rejected past depth two unless a row
+/// names the exact shape. This arm in a protected body in a `do:` body (depth
+/// 3) answers 4 in a class and an actor method and raises `bad argument` in a
+/// value-type method, measured on a BEAM; the coarse rows used to accept it in
+/// the value-type method, which is now rejected. Depth four stays rejected for
+/// the unfinished families in every context.
+#[test]
+fn unfinished_families_are_rejected_past_the_measured_depth() {
+    let header = |context: &str| match context {
+        "class" => {
+            "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class probe: c =>\n"
+        }
+        "value" => "Value subclass: P\n  plain => 0\n  probe: c =>\n",
+        _ => "Actor subclass: P\n  state: n = 0\n  plain => 0\n  probe: c =>\n",
+    };
+    let source = |context: &str, body: &str| {
+        let lines = body
+            .lines()
+            .fold(String::new(), |acc, l| acc + "    " + l + "\n");
+        format!("{}{lines}", header(context))
+    };
+    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]\nt";
+    assert!(
+        !adr0131_diagnostics(&source("value", depth3)).is_empty(),
+        "the value-type depth-3 shape raises on a BEAM and must be rejected"
+    );
+    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]] on: Error do: [:e | 0]]]\nt";
+    for context in ["class", "value", "actor"] {
+        assert!(
+            !adr0131_diagnostics(&source(context, depth4)).is_empty(),
+            "{context}: depth-4 shape accepted"
+        );
+    }
+}
+
+/// BT-3841 review: unmeasured middle roles of a three-block nesting stay
+/// rejected for the unfinished families, whatever the outermost and innermost
+/// roles are (no `RIGHT_STATEMENTS` row exists past depth two).
+#[test]
+fn unmeasured_three_deep_chains_stay_rejected() {
+    for (context, src) in [
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[t := t + 1] value]]] on: Error do: [:e | 0]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[t := t + 1] value]]]\nt",
+            ),
+        ),
+        (
+            "actor",
+            in_actor(
+                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]]]\nt",
+            ),
+        ),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
+    }
+}
+
+/// BT-3841: `keysAndValuesDo:`/`doWithKey:` are producers like `do:`. Accepted
+/// as a statement, in an arm and in a loop body in every method context; still
+/// rejected inside a `[...] value` body, and a `^` of one in a plain closure is
+/// rejected like `^xs do: [...]` there.
+#[test]
+fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\n{kv}\nt"),
+            format!("t := 0\ntrue ifTrue: [{kv}]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | {kv}]\nt"),
+            format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                let diags = adr0131_diagnostics(&src);
+                assert!(diags.is_empty(), "{src}: {diags:?}");
+            }
+        }
+        for body in [
+            format!("t := 0\n[{kv}] value\nt"),
+            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: accepted but unmeasured or unlowered"
+                );
+            }
+        }
+    }
+}
+
+/// BT-3841 review: the inline keyed fold is valid for a `Dictionary` receiver
+/// only (`Ets` and any class that defines the selector run their own method
+/// with a closure). The one rule the lookups use
+/// (`receiver_statically_not_dictionary`) keeps a permanent §6 error for a
+/// receiver known not to be one; an unknown receiver compiles and is guarded at
+/// run time (`beamtalk_map:pairs_for_threading/2`).
+#[test]
+fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_error() {
+    for sel in ["keysAndValuesDo:", "doWithKey:"] {
+        let write = format!("t := 0\nself {sel} [:k :v | t := t + v]\nt");
+        for src in [in_class(&write), in_value(&write), in_actor(&write)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+                "{src}: {diags:?}"
+            );
+        }
+        // A typed non-Dictionary local.
+        let typed = format!("t := 0\ne := 3\ne {sel} [:k :v | t := t + v]\nt");
+        let diags = adr0131_diagnostics(&in_class(&typed));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len() == 1,
+            "{typed}: {diags:?}"
+        );
+        // A map literal and an unknown receiver are Dictionary-inline.
+        for recv in ["#{#a => 1}", "d"] {
+            let body = format!("t := 0\nd := #{{#a => 1}}\n{recv} {sel} [:k :v | t := t + v]\nt");
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+            }
+        }
+        // A closure between the frame and the construct (an opaque or stored
+        // block) is not a producer frame: the write is rejected there.
+        let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
+        for body in [
+            format!("t := 0\nself ap: [{kv}]\nt"),
+            format!("t := 0\n#(1) do: [:z | [:y | {kv}] value: z]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body)] {
+                assert!(
+                    !adr0131_diagnostics(&src).is_empty(),
+                    "{src}: a keyed iteration in a closure was accepted"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1532,9 +1827,12 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
             "s := 0\n1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]\ns",
             [true, true, true],
         ),
+        // A search-block write inside a `do:` body answers right in a class and
+        // a value-type method and wrong in an actor method (BT-3841's
+        // measurement: `iter`/`outer`/`dinS` in `adr0131_statement_measured.tsv`).
         (
             "t := 0\n#(1, 2) do: [:i | #(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]]\nt",
-            [true, true, true],
+            [false, false, true],
         ),
         // ADR 0131 Phase 2c (BT-3796): a nested `do:` is a producer in every
         // context.
