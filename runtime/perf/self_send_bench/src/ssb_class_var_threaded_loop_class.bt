@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3851: ADR 0130 Phase 0 gate 3, in the shape the gate was defined and
+// first measured in (BT-3702, BT-3713). The local `acc` write makes the
+// `to:do:` body need threading, so the loop is inlined as a `letrec`; without
+// it (`SsbClassVarClass`) the loop falls through to `Integer>>to:do:` and pays
+// a block call per iteration on top of the class-variable accesses. Only this
+// case compiles on `main` before ADR 0130, so gate 3 re-runs use it.
+
+Object subclass: SsbClassVarThreadedLoopClass
+  classState: a = 1
+  classState: b = 2
+  classState: c = 3
+
+  class loop: n :: Integer -> Integer =>
+    acc := 0
+    1
+      to: n
+      do: [:i |
+        acc := i
+        self.a := self.b + self.c
+        self.b := self.a - self.c
+        self.c := self.a - self.b + self.c - self.a + self.b - self.c
+      ]
+    acc
