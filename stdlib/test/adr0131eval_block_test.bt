@@ -7,9 +7,9 @@
 // enclosing frame's `LocalRebind`s wherever the send sits (statement, last
 // expression, an assignment's value, an operand, an arm, a protected body, a
 // handler, a loop or fold body, another evaluated block). The receiver is a
-// block literal, so no other class's `value` can run. The columns are
-// adr0131eval_block_{class,value,actor}.bt; the expected answers are in
-// stdlib/test/adr0131eval_block_test.bt.
+// block literal, so no other class's `value` can run. The methods under test
+// are in stdlib/test/fixtures/adr0131eval_block_{class,value,actor}.bt; the
+// expected answers are the assertions below.
 
 TestCase subclass: Adr0131EvalBlockTest
 

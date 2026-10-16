@@ -1,0 +1,31 @@
+// BT-3841 (ADR 0131): an evaluated literal block (`[...] value`) is an
+// arm-like local-threading producer in class, value-type and actor METHODS
+// only. The REPL root keeps its own lowering. The mutation analysis does pass a
+// nested `[...] value` block's writes up to its enclosing block in every
+// context, so this pins what a REPL `do:` body whose only write to a binding is
+// inside a nested `[t := t + x] value` answers.
+
+t := 0
+// => 0
+
+[t := t + 1] value
+// => 1
+
+t
+// => 1
+
+// A `do:` body whose only write is inside a nested `[...] value` keeps the
+// Phase 0 error in the REPL (the REPL's frames are not arms yet, BT-3823).
+#(1, 2) do: [:x | [t := t + x] value]
+// => ERROR: `value` writes outer local `t`
+
+t
+// => 1
+
+// An arm holding one. (Behaviour identical with and without the analysis
+// change: checked against a build that does not propagate the block's writes.)
+true ifTrue: [[t := t + 10] value]
+// => 11
+
+t
+// => 11
