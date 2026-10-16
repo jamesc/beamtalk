@@ -27,16 +27,25 @@ Actor subclass: Adr0131EvalBlockActor
 
   last =>
     t := 0
-    [t := t + 1. t] value
+    [
+      t := t + 1
+      t
+    ] value
 
   assign =>
     t := 0
-    r := [t := t + 5. 7] value
+    r := [
+      t := t + 5
+      7
+    ] value
     #[r, t]
 
   operand =>
     t := 0
-    r := t + ([t := t + 1. 5] value)
+    r := t + ([
+      t := t + 1
+      5
+    ] value)
     #[r, t]
 
   arm =>
@@ -51,18 +60,27 @@ Actor subclass: Adr0131EvalBlockActor
 
   nested =>
     t := 0
-    [[t := t + 1] value. [t := t + 10] value] value
+    [
+      [t := t + 1] value
+      [t := t + 10] value
+    ] value
     t
 
   twoLocals =>
     t := 0
     u := 0
-    [t := t + 1. u := u + 2] value
+    [
+      t := t + 1
+      u := u + 2
+    ] value
     #[t, u]
 
   blockLocal =>
     t := 0
-    [x := 5. t := t + x] value
+    [
+      x := 5
+      t := t + x
+    ] value
     t
 
   inDo =>
@@ -83,7 +101,11 @@ Actor subclass: Adr0131EvalBlockActor
   inWhile =>
     t := 0
     i := 0
-    [i < 3] whileTrue: [i := i + 1. [t := t + i] value]
+    [i < 3]
+      whileTrue: [
+        i := i + 1
+        [t := t + i] value
+      ]
     t
 
   inTimes =>
@@ -93,7 +115,11 @@ Actor subclass: Adr0131EvalBlockActor
 
   inCollect =>
     t := 0
-    r := #(1, 2) collect: [:e | [t := t + e] value. e * 2]
+    r := #(1, 2)
+      collect: [:e |
+        [t := t + e] value
+        e * 2
+      ]
     t * 100 + (r inject: 0 into: [:a :x | a + x])
 
   inHandler =>
@@ -108,7 +134,10 @@ Actor subclass: Adr0131EvalBlockActor
 
   inProtectedRaise =>
     t := 0
-    [[t := t + 1] value. Error signal: "x"] on: Error do: [:e | nil]
+    [
+      [t := t + 1] value
+      Error signal: "x"
+    ] on: Error do: [:e | nil]
     t
 
   inEnsure =>
@@ -118,7 +147,9 @@ Actor subclass: Adr0131EvalBlockActor
 
   armDoProt =>
     t := 0
-    4 > 3 ifTrue: [#(1, 2) do: [:e | [[t := t + e] value] on: Error do: [:x | 0]]]
+    4 > 3 ifTrue: [
+      #(1, 2) do: [:e | [[t := t + e] value] on: Error do: [:x | 0]]
+    ]
     t
 
   doDoArm =>
@@ -138,17 +169,33 @@ Actor subclass: Adr0131EvalBlockActor
 
   injectInValue =>
     t := 0
-    r := [#(1, 2, 3) inject: 0 into: [:a :e | t := t + 1. a + e]] value
+    r := [
+      #(1, 2, 3)
+        inject: 0
+        into: [:a :e |
+          t := t + 1
+          a + e
+        ]
+    ] value
     #[r, t]
 
   earlyReturn =>
     t := 0
-    [t := t + 1. ^t] value
+    [
+      t := t + 1
+      ^t
+    ] value
     99
 
   valueInValueInArm =>
     t := 0
-    4 > 3 ifTrue: [[[t := t + 1] value. [t := t + 2] value] value]
+    4 > 3
+      ifTrue: [
+        [
+          [t := t + 1] value
+          [t := t + 2] value
+        ] value
+      ]
     t
 
   nilArm =>
@@ -158,17 +205,30 @@ Actor subclass: Adr0131EvalBlockActor
 
   andArm =>
     t := 0
-    r := 4 > 3 and: [[t := t + 1] value. true]
+    r := 4 > 3
+      and: [
+        [t := t + 1] value
+        true
+      ]
     #[r, t]
 
   fieldMix =>
     self.n := 0
     t := 0
-    [self.n := self.n + 1. t := t + 1] value
+    [
+      self.n := self.n + 1
+      t := t + 1
+    ] value
     #[self.n, t]
 
   fieldInDo =>
     self.n := 0
     t := 0
-    #(1, 2) do: [:e | [self.n := self.n + e. t := t + 1] value]
+    #(1, 2)
+      do: [:e |
+        [
+          self.n := self.n + e
+          t := t + 1
+        ] value
+      ]
     #[self.n, t]
