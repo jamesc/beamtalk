@@ -1,0 +1,313 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `eachWithIndex:` / `do:separatedBy:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131enum_test.bt. The block runs for every element, in order. `c` is the condition of
+// the arm shapes.
+
+Object subclass: Adr0131EnumClass
+
+  class topEwi =>
+    t := 0
+    #(1, 2) eachWithIndex: [:v :k | t := t + v]
+    t
+
+  class inArmEwi: c =>
+    t := 0
+    c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inArmElseEwi: c =>
+    t := 0
+    c ifTrue: [t := 100] ifFalse: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inDoEwi =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inToDoEwi =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inTimesEwi =>
+    t := 0
+    2 timesRepeat: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inWhileEwi =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) eachWithIndex: [:v :k | t := t + v]
+      ]
+    t
+
+  class inOnDoEwi =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + v]] on: Error do: [:e | 0]
+    t
+
+  class inEnsureEwi =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + v]] ensure: [nil]
+    t
+
+  class inHandlerEwi =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class inArmInDoEwi: c =>
+    t := 0
+    #(1, 2) do: [:z | c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]]
+    t
+
+  class returnInArmEwi: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  class assignedEwi =>
+    t := 0
+    r := #(1, 2) eachWithIndex: [:v :k | t := t + v]
+    #[r, t]
+
+  class topEwiIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+    t
+
+  class inArmEwiIndex: c =>
+    t := 0
+    c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inArmElseEwiIndex: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inDoEwiIndex =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inToDoEwiIndex =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inTimesEwiIndex =>
+    t := 0
+    2 timesRepeat: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inWhileEwiIndex =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+      ]
+    t
+
+  class inOnDoEwiIndex =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]] on: Error do: [:e | 0]
+    t
+
+  class inEnsureEwiIndex =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]] ensure: [nil]
+    t
+
+  class inHandlerEwiIndex =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class inArmInDoEwiIndex: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    ]
+    t
+
+  class returnInArmEwiIndex: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  class assignedEwiIndex =>
+    t := 0
+    r := #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+    #[r, t]
+
+  class topDsb =>
+    t := 0
+    #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    t
+
+  class inArmDsb: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class inArmElseDsb: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class inDoDsb =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class inToDoDsb =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class inTimesDsb =>
+    t := 0
+    2 timesRepeat: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class inWhileDsb =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+      ]
+    t
+
+  class inOnDoDsb =>
+    t := 0
+    [
+      #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureDsb =>
+    t := 0
+    [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]] ensure: [nil]
+    t
+
+  class inHandlerDsb =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e |
+      #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    ]
+    t
+
+  class inArmInDoDsb: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    ]
+    t
+
+  class returnInArmDsb: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  class assignedDsb =>
+    t := 0
+    r := #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    #[r, t]
+
+  class topDsbSep =>
+    t := 0
+    #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+    t
+
+  class inArmDsbSep: c =>
+    t := 0
+    c ifTrue: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inArmElseDsbSep: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inDoDsbSep =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inToDoDsbSep =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inTimesDsbSep =>
+    t := 0
+    2 timesRepeat: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inWhileDsbSep =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+      ]
+    t
+
+  class inOnDoDsbSep =>
+    t := 0
+    [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]] on: Error do: [:e | 0]
+    t
+
+  class inEnsureDsbSep =>
+    t := 0
+    [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]] ensure: [nil]
+    t
+
+  class inHandlerDsbSep =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class inArmInDoDsbSep: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    ]
+    t
+
+  class returnInArmDsbSep: c =>
+    t := 0
+    c ifTrue: [^#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  class assignedDsbSep =>
+    t := 0
+    r := #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+    #[r, t]

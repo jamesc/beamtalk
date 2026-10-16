@@ -27,18 +27,6 @@ Object subclass: Adr0131LocalRebindClassPending
   // BT-3753: statement-position shapes that answered wrong, raised or failed
   // to compile before; each is an ADR 0131 Phase 0 compile error now.
 
-  // `eachWithIndex:` as a statement.
-  class stEachWithIndex =>
-    t := 0
-    #(1, 2) eachWithIndex: [:x :i | t := t + x]
-    t
-
-  // `do:separatedBy:` as a statement.
-  class stDoSeparatedBy =>
-    t := 0
-    #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
-    t
-
   // `[...] value` as a statement.
   class stBlockValue =>
     t := 0

@@ -36,7 +36,7 @@ use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arit
 use super::super::threaded_ir::{
     self, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CoreErlangGenerator, Result};
 use super::ThreadingPlan;
 use super::family_slots::append_family_slots;
 use beamtalk_cerl_doc::docvec;
@@ -55,7 +55,8 @@ type HybridFieldExtraction = (
 impl CoreErlangGenerator {
     /// Whether a `whileTrue:`/`whileFalse:` with a literal `body` block is
     /// lowered by the stateful (`{Result, StateAcc}`) generator: the body
-    /// has writes or a nested list op's cross-scope write, or the
+    /// has writes or a nested list op's cross-scope write and something to
+    /// carry them (`loop_body_has_carried_mutations`, BT-3834), or the
     /// `condition` has a state effect. The loop generators and the
     /// value-type result-unpacking gate (`is_while_with_vt_local_threading`)
     /// both read this, so a loop that produces the tuple is always unpacked
@@ -66,9 +67,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body_block: &beamtalk_core::ast::Block,
     ) -> bool {
-        let analysis = block_analysis::analyze_block(body_block);
-        self.needs_mutation_threading(&analysis)
-            || self.body_has_list_op_cross_scope_mutations(body_block)
+        self.loop_body_has_carried_mutations(body_block)
             || super::condition_has_state_effects(self, condition)
     }
 

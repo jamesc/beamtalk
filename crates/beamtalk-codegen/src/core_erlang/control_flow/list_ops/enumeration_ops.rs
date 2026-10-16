@@ -120,15 +120,6 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 }
 
 impl CoreErlangGenerator {
-    /// Returns `true` if `block` mutates field/local state in a way that requires
-    /// threading (and so cannot be served by a plain dispatch to the `collection.bt`
-    /// method). shares [`Self::block_arg_needs_threading`] — the same
-    /// combinator `control_flow_has_mutations` and
-    /// `conditional_needs_mutation_threading` use for their own per-block check.
-    fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
-        self.block_arg_needs_threading(block)
-    }
-
     /// Returns `true` when the desugared fold threads actor `State`: an actor
     /// (`gen_server`) method body not inside a direct-params counted loop.
     ///
@@ -144,6 +135,18 @@ impl CoreErlangGenerator {
         matches!(self.context, CodeGenContext::Actor) && !self.loop_mode.in_direct_params_loop
     }
 
+    /// Whether the desugared fold is a local-threading producer's construct
+    /// tuple in a class or value-type method (BT-3841): the fold answers
+    /// `{Acc, StateAcc}`, whose element 1 is the index / "first" accumulator,
+    /// not the `nil` the selectors answer, so it is re-projected like an
+    /// actor's. A fold nested in a direct-params loop is an open let-chain
+    /// instead and keeps the plain fold result.
+    fn enumeration_yields_construct_tuple(&self, inject_send: &Expression) -> bool {
+        (self.in_class_method() || matches!(self.context, CodeGenContext::ValueType))
+            && !self.loop_mode.in_direct_params_loop
+            && self.expr_yields_vt_threaded_tuple(inject_send)
+    }
+
     /// Lowers a synthetic `inject:into:` send (already threading state) to the value
     /// the enumeration methods actually return.
     ///
@@ -155,23 +158,12 @@ impl CoreErlangGenerator {
     /// annotation does not produce the invalid `( ( … ) )` two-deep parenthesisation
     /// that `core_parse` rejects.
     ///
+    /// A class or value-type method whose fold is a producer's construct tuple
+    /// ([`Self::enumeration_yields_construct_tuple`]) re-projects the same way.
     /// Elsewhere the fold is emitted as the *un-annotated* message send (the caller's
     /// own send annotation is then the only one, matching a hand-written
     /// `inject:into:`), and its accumulator value stands as the result.
     fn finalize_enumeration_fold(&mut self, inject_send: &Expression) -> Result<Document<'static>> {
-        if self.enumeration_threads_actor_state() {
-            let inject_doc = self.expression_doc(inject_send)?;
-            let tuple_var = self.fresh_temp_var("EnumFold");
-            return Ok(docvec![
-                "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                inject_doc,
-                " in {'nil', call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
-                ")}",
-            ]);
-        }
         // Both callers (`try_generate_each_with_index` / `try_generate_do_separated_by`)
         // build `inject_send` via `inject_into`, which always returns an
         // `Expression::MessageSend`, so this destructure cannot fail.
@@ -186,7 +178,33 @@ impl CoreErlangGenerator {
                 "finalize_enumeration_fold is only called with a synthetic inject:into: send"
             );
         };
-        self.generate_message_send(receiver, selector, arguments)
+        if self.enumeration_threads_actor_state() {
+            let inject_doc = self.expression_doc(inject_send)?;
+            return Ok(self.reproject_enumeration_fold(inject_doc));
+        }
+        // The synthetic send is generated as a message send, not as an
+        // expression: its span is not one of the statement's producer sites, so
+        // it must not be taken for a producer itself.
+        let reproject = self.enumeration_yields_construct_tuple(inject_send);
+        let fold_doc = self.generate_message_send(receiver, selector, arguments)?;
+        if reproject {
+            return Ok(self.reproject_enumeration_fold(fold_doc));
+        }
+        Ok(fold_doc)
+    }
+
+    /// Binds the fold's `{Acc, NewState}` tuple and answers `{'nil', NewState}`.
+    fn reproject_enumeration_fold(&mut self, fold_doc: Document<'static>) -> Document<'static> {
+        let tuple_var = self.fresh_temp_var("EnumFold");
+        docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            fold_doc,
+            " in {'nil', call 'erlang':'element'(2, ",
+            leaf::var(tuple_var),
+            ")}",
+        ]
     }
 
     /// Desugars `receiver eachWithIndex: [:elem :idx | body]` into a
@@ -205,7 +223,13 @@ impl CoreErlangGenerator {
         if user_block.parameters.len() != 2 {
             return Ok(None);
         }
-        if !self.enumeration_block_needs_threading(user_block) {
+        // `loop_body_has_carried_mutations`, not `loop_body_needs_threading`
+        // (BT-3834): `eachWithIndex:`/`do:separatedBy:` are not producers
+        // (`producer_body_arg_index` leaves them out), so nothing unpacks a
+        // write-only local the threaded set alone would add, and the statement
+        // classifier (`control_flow_has_mutations`) reads this same predicate
+        // for their blocks.
+        if !self.loop_body_has_carried_mutations(user_block) {
             // falling through to `collection.bt`'s own self-hosted
             // `eachWithIndex:` (built on `do:`).
             return Ok(None);
@@ -256,8 +280,10 @@ impl CoreErlangGenerator {
         if element_block.parameters.len() != 1 || !separator_block.parameters.is_empty() {
             return Ok(None);
         }
-        if !self.enumeration_block_needs_threading(element_block)
-            && !self.enumeration_block_needs_threading(separator_block)
+        // The same gate as `eachWithIndex:` (see `try_generate_each_with_index`'s
+        // comment on it).
+        if !self.loop_body_has_carried_mutations(element_block)
+            && !self.loop_body_has_carried_mutations(separator_block)
         {
             // falling through to `collection.bt`'s own self-hosted
             // `do:separatedBy:` (built on `inject:into:`).
@@ -277,7 +303,14 @@ impl CoreErlangGenerator {
             inlined_body(&separator_block.body),
             separator_block.span,
         );
-        let mut inject_body = vec![if_false(ident(&first_name, span), separator, span)];
+        // The conditional carries the separator block's span (a node of the user's
+        // source, not the element block's), so a producer lowering of it can be
+        // told from the construct's own.
+        let mut inject_body = vec![if_false(
+            ident(&first_name, span),
+            separator,
+            separator_block.span,
+        )];
         inject_body.extend(inlined_body(&element_block.body));
         inject_body.push(ident("false", span));
 

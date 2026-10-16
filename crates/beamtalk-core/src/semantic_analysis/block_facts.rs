@@ -868,6 +868,54 @@ pub fn is_result_try_do(receiver: &Expression, selector_name: &str) -> bool {
         )
 }
 
+/// ADR 0118 phase 3 / BT-3845: whether a `whileTrue:`/`whileFalse:`
+/// `condition` has state effects (a field write, a self-send, a stored-block
+/// call or an opaque-callable HOM send) that the loop must thread. Only a
+/// literal block condition can; in a class method nothing does (ADR 0130 §3:
+/// a class method threads no family, and answering `true` there made the loop
+/// open a `StateAcc` whose initial state does not exist, BT-3694).
+///
+/// The one rule codegen's loop gates read (`condition_has_state_effects`:
+/// `while_loop_threads`, the stateful condition lowering, the actor
+/// statement classifier) and the one the ADR 0131 §6 validator reads through
+/// [`while_condition_writes_thread`].
+#[must_use]
+pub fn while_condition_has_state_effects(condition: &Expression, in_class_method: bool) -> bool {
+    matches!(condition, Expression::Block(block)
+        if block_condition_has_state_effects(block, in_class_method))
+}
+
+/// BT-3782/BT-3845: whether an outer-local write in the condition block of a
+/// keyword `whileTrue:`/`whileFalse:` is threaded back to the method in a
+/// compiled (non-REPL) method. It is exactly when codegen compiles the
+/// condition in the loop's own frame and packs its local writes into the
+/// loop's `StateAcc` (`generate_stateful_while_condition`): the `body`
+/// argument is a literal block (only then is the stateful lowering
+/// considered at all) and the condition has state effects
+/// ([`while_condition_has_state_effects`]).
+///
+/// A body that writes a local does **not** extend this: it also selects the
+/// stateful lowering, but with a pure condition the condition is compiled as a
+/// plain block body whose own writes are never packed, so the loop re-reads
+/// the pre-loop value forever (probed for BT-3845:
+/// `[t := t + 1. t < 3] whileTrue: [u := u + 1]` hangs in value-type, actor and
+/// class methods). Such a condition write stays a compile error; pinned by the
+/// `while_condition_*` matrix in `semantic_analysis/tests/local_threading.rs`
+/// and, for the accepted shapes, `stdlib/test/bt3746stateful_while_test.bt`.
+#[must_use]
+pub fn while_condition_writes_thread(
+    condition: &Block,
+    body: Option<&Expression>,
+    in_class_method: bool,
+) -> bool {
+    matches!(body, Some(Expression::Block(_)))
+        && block_condition_has_state_effects(condition, in_class_method)
+}
+
+fn block_condition_has_state_effects(condition: &Block, in_class_method: bool) -> bool {
+    !in_class_method && analyze_block(condition).has_state_effects()
+}
+
 /// Propagates a nested inline-compiled block's mutation
 /// analysis into the enclosing block's `analysis` — used for the block
 /// receiver/arguments of `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`/
@@ -2061,7 +2109,21 @@ pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     sequenced_operand_sites(stmt)
         .into_iter()
         .filter(|site| Some(site.span()) != whole_value)
+        .filter(|site| !is_repl_unmeasured_enumeration(site))
         .collect()
+}
+
+/// BT-3841: `eachWithIndex:`/`do:separatedBy:` became producers for class,
+/// value-type and actor methods; the REPL's operand sites keep excluding them
+/// (they keep their statement and assignment lowering and the Phase 0 operand
+/// rows), because the REPL root's fold frames are unmeasured (BT-3823): the
+/// desugared fold's separator conditional fails the `ThreadedIr` verifier there.
+fn is_repl_unmeasured_enumeration(site: &Expression) -> bool {
+    matches!(
+        site.unwrap_parens(),
+        Expression::MessageSend { selector, .. }
+            if matches!(selector.name().as_str(), "eachWithIndex:" | "do:separatedBy:")
+    )
 }
 
 /// ADR 0131 Phase 2b (BT-3793): [`sequenced_operand_sites`] for a statement

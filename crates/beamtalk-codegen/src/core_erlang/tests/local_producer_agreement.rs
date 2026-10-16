@@ -51,6 +51,13 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     // the loop-body half below).
     "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]",
     "#{#a => 1, #b => 2} doWithKey: [:k :w | t := t + w]",
+    // BT-3841: the enumerations are producers (the separator is the handler a
+    // producer packs besides its body: element-only, separator-only, both, and
+    // a separator writing a second local).
+    "#(1, 2) eachWithIndex: [:x :k | t := t + k]",
+    "#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]",
+    "#(1, 2) do: [:x | x] separatedBy: [t := t + 10]",
+    "#(1, 2) do: [:x | t := t + x] separatedBy: [u := 1]",
     "#(1, 2) anySatisfy: [:x | t := t + 1. false]",
     // BT-3841: the satisfy tests are producers (they answer their boolean).
     "#(1, 2) allSatisfy: [:x | t := t + 1. true]",
@@ -133,6 +140,25 @@ pub(super) fn core_producers(
 /// lowers a loop or fold there through the same construct tuple (a method-body
 /// assignment's whole value), which the sites rule does not name.
 pub(super) fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
+    // `do:separatedBy:` is desugared to an `inject:into:` whose body starts with
+    // `first ifFalse: [separator]`: that synthetic conditional is a producer in
+    // the fold's body and carries the separator block's span (BT-3841), so the
+    // separator spans of every `do:separatedBy:` in the statement are lowerings
+    // codegen performs for the construct, not sites of the core rule.
+    beamtalk_core::ast_walker::walk_expression(stmt, &mut |e| {
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = e
+        {
+            if selector.name() == "do:separatedBy:" {
+                if let Some(Expression::Block(separator)) = arguments.get(1) {
+                    out.insert(separator.span);
+                }
+            }
+        }
+    });
     let inner = stmt.unwrap_parens();
     out.insert(Expression::span(inner));
     match inner {

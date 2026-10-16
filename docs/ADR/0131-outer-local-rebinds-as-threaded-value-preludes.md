@@ -42,7 +42,7 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
 7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)** (done): `Dictionary` defines `at:ifPresent:`/`at:ifPresent:ifAbsent:`, and their handlers are producers like `at:ifAbsent:` (the present handler's parameter is bound to the found value). `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors permanently by decision, since an immutable `Dictionary` has no such behaviour. The three `Dictionary` lookups are producers only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
 8. **[BT-3835](https://linear.app/beamtalk/issue/BT-3835)**: a conditional producer's `LocalRebind` in a `StateAcc` fold frame emits a redundant identity `MapPut`.
-9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)**: a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panics the debug verifier with `StateAccLoopWithoutLocals`.
+9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)** (Done): a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panicked the debug verifier with `StateAccLoopWithoutLocals`. A loop or fold that carries nothing now lowers as a plain loop (§2, BT-3834 amendment).
 10. **[BT-3842](https://linear.app/beamtalk/issue/BT-3842)**: Phase 5a review nits (a shared block-scope helper for `arms_lower_as_producer` and `OuterWriteWalker`; a non-`Result` `tryDo:` falls through to a generic internal error).
 
 Two scope notes. `Result tryDo:` is a producer only for a literal `Result` receiver; any other receiver keeps its dynamic send and a writing block is a compile error (§5 implementation note). The `MethodBody` IR node has no production builder: it exists, is verified and rendered, but the non-REPL method root is still the implicit frame (`RebindFrame::implicit_root`) and the REPL root does not construct one either.
@@ -503,6 +503,36 @@ fire for conditionals in every loop and fold frame mode by
 (`local_producer_agreement_conditional.rs`) compare the core rule and codegen
 both ways for conditionals in every loop and fold frame, including the
 conditionals that are not producers.
+
+**BT-3834 amendment: a loop or fold that carries nothing is not a `StateAcc`
+loop.** The gate that sends a loop or fold to its threading lowering (a
+`ThreadingPlan`) was the mutation analysis of its body
+(`block_arg_needs_threading`) or a non-empty threaded set. The analysis is a
+heuristic; when it said "threads" and the threaded set was empty (a write to a
+local of an arm, an `ensure:` or an `on:do:` block nested in the body that it
+misread as an outer write: BT-3834, BT-3848), the plan fell back to `StateAcc`
+with no locals, seeded from the ambient `State`, which a class method or a
+value-type method writing no field does not have. The invariant, per scope kind:
+a loop or fold whose threaded set is empty selects a `StateAcc` plan only when
+the scope has a carrier to seed it with: the actor `State` (actor instance
+method), the REPL bindings, or a family the body threads (`SelfVt` in a
+value-type method that writes a field). In a class method or a value-type
+method writing no field it lowers as a plain loop. This holds for every
+`Letrec` loop (`timesRepeat:`, `to:do:`, `to:by:do:`, `whileTrue:`/
+`whileFalse:`) and every `Foldl` loop (`do:`, `collect:`, `inject:into:`, the
+search and keyed folds, `eachWithIndex:`/`do:separatedBy:`), whatever encloses
+it (a method body, a conditional arm, an `on:do:`/`ensure:` block, another loop
+body). One predicate decides it (`loop_body_has_carried_mutations`, with
+`loop_body_needs_threading` adding the threaded set for the counted loops and
+folds), read by every loop and fold gate and by the statement classifier
+(`control_flow_has_mutations`) for a loop or fold's block arguments, so the
+lowering and the caller that unpacks it cannot disagree. Conditional arms and
+exception blocks keep `block_arg_needs_threading`. The verifier check is the
+existing `ActorStateInClassMethod { StateAccLoopWithoutLocals }`; the
+class-variable corpus gains the `block_local` shape (a block-introduced local
+rebound inside a loop nested in that block), which with `local_touch` off
+reproduces both the BT-3834 and the BT-3848 panics on the pre-BT-3848 analysis
+without this gate and none with it.
 
 ### 3. Families are taken from context, not hard-coded
 
