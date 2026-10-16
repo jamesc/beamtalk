@@ -5,7 +5,9 @@
 // class-variable reads and three writes per iteration, straight-line, no sends.
 // The values stay small integers (no bignum growth). The loop body touches
 // nothing but class variables (BT-3766 dropped the local write the threaded
-// lowering before ADR 0130 needed).
+// lowering before ADR 0130 needed), so `to:do:` is not inlined here and each
+// iteration also pays a block call. Gate 3 re-runs use
+// `SsbClassVarThreadedLoopClass` (BT-3851), which keeps the inlined shape.
 
 Object subclass: SsbClassVarClass
   classState: a = 1
