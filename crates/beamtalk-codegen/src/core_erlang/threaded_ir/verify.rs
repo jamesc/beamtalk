@@ -15,9 +15,9 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RebindFrame,
-    RebindFrameKind, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
-    VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
+    RebindFrame, RebindFrameKind, RebindLowering, RebindShape, StateAccFallbackReason,
+    ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -295,6 +295,18 @@ pub(in crate::core_erlang) enum VerifyError {
     /// shape the fold lowering used to reject rather than miscompile. Applies
     /// to every fold of every kind; checked by [`verify_fold_family_carried`].
     FoldFamilyNotCarried { family: VersionPrefix, at: Span },
+
+    /// BT-3835: a [`ThreadedStmt::LocalRebind`] lowered to
+    /// [`RebindLowering::MapHeld`](super::ir::RebindLowering::MapHeld) — the
+    /// `MapPut` cell with its `Put` elided as an identity write — whose
+    /// elision is not provably the identity: its read is not a `Key` read of
+    /// its own `key` through `state_first == map`, `map` is not a `State`
+    /// version of the enclosing frame, or a later `State` step of that frame
+    /// in the same statement list has moved the frame's map past `map`. The
+    /// elided write would then be a real one (a different value, or into a
+    /// different/stale map): the local's new value never reaches the map the
+    /// frame threads out, and the write is silently lost (`erlc`-clean).
+    HeldRebindNotIdentity { local: String, at: Span },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -577,6 +589,7 @@ struct VerifyWalk<'a> {
 impl VerifyWalk<'_> {
     fn walk(&mut self, stmts: &[ThreadedStmt]) {
         self.check_construct_rebinds(stmts);
+        self.check_held_rebinds(stmts);
         for stmt in stmts {
             self.walk_stmt(stmt);
         }
@@ -708,6 +721,58 @@ impl VerifyWalk<'_> {
         }
         close(&mut open, &mut dropped);
         self.errors.extend(dropped);
+    }
+
+    /// [`VerifyError::HeldRebindNotIdentity`] over one statement list: each
+    /// `MapHeld` rebind must read its own `key` through `state_first ==
+    /// map`, `map` must be a `State` version of the enclosing frame, and —
+    /// when this list steps that frame's `State` map before the rebind —
+    /// the last such step's target must be `map`. A list that has not
+    /// stepped the map yet inherits its current version from outside the
+    /// list, which this check does not reconstruct.
+    fn check_held_rebinds(&mut self, stmts: &[ThreadedStmt]) {
+        let frame = self.enclosing_frame().frame;
+        let own_state = |v: &VersionedVar| v.prefix == VersionPrefix::State && v.frame == frame;
+        let mut current: Option<&VersionedVar> = None;
+        for stmt in stmts {
+            match stmt {
+                ThreadedStmt::Bind { target, .. } if own_state(target) => current = Some(target),
+                ThreadedStmt::TupleAccUnpack { targets, .. } => {
+                    if let Some(target) = targets.iter().rev().find(|t| own_state(t)) {
+                        current = Some(target);
+                    }
+                }
+                ThreadedStmt::LocalRebind {
+                    local,
+                    slot,
+                    state_first,
+                    lowering,
+                    span,
+                    ..
+                } => match lowering {
+                    RebindLowering::MapHeld { key, map } => {
+                        let identity = state_first.as_ref() == Some(map)
+                            && *slot == CarrierSlot::Key(key.clone())
+                            && own_state(map)
+                            && current.is_none_or(|c| c == map);
+                        if !identity {
+                            self.errors.push(VerifyError::HeldRebindNotIdentity {
+                                local: local.clone(),
+                                at: *span,
+                            });
+                        }
+                    }
+                    _ => {
+                        if let Some((_, target)) = lowering.version_step()
+                            && own_state(target)
+                        {
+                            current = Some(target);
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
     }
 
     /// [`VerifyError::LocalRebindFrameMismatch`] and
