@@ -142,6 +142,15 @@ pub fn expected_answer(container: &str, target: &str, kind: &str) -> i64 {
     }
 }
 
+/// Whether `ADR0131_MEASURE_GAPS` asks the measurement harness to run the `gap`
+/// probe lines too (BT-3776: a construct that writes only a local of its own
+/// enclosing block). A development aid: the gap cells are not in the measured
+/// table, so a run that includes them must not bless (the harness refuses).
+#[must_use]
+pub fn include_gaps() -> bool {
+    std::env::var_os("ADR0131_MEASURE_GAPS").is_some()
+}
+
 /// The two probe matrices: the statement positions (`DENY_SET` side, a
 /// construct as a statement of a block role) and the operand positions
 /// (`ALLOW_SET` side, a construct as the value of an assignment, a receiver,
@@ -193,7 +202,7 @@ impl Matrix {
         match self {
             Matrix::Statement => probe_rows()
                 .into_iter()
-                .filter(|r| r.context != "repl" && r.verdict != "gap")
+                .filter(|r| r.context != "repl" && (r.verdict != "gap" || include_gaps()))
                 .map(|r| [r.context, r.container, r.target, r.kind])
                 .collect(),
             Matrix::Operand => {

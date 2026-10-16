@@ -946,7 +946,8 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (after BT-3841 PR 4: 422; 520 after PR
+Statement cells that do not answer right (after BT-3841 PR 5, the evaluated
+literal block: 213; 422 after PR 4; 520 after PR
 3, 571 after PR
 2, 663 after PR 1's three-deep roles, 595 in the 5a population), by family and
 method context, with the work each needs:
@@ -955,15 +956,33 @@ method context, with the work each needs:
 |---|---|---|---|---|---|
 | `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
 | `detect:ifNone:` search or handler | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
-| `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
-| any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
+| `[...] value` as a statement | 0 | 0 | 0 | 0 | done in PR 5 (was 58 / 39 / 35 = 132): an evaluated literal block is an arm-like producer, below |
+| any statement inside a `[...] value` body | 4 | 4 | 0 | 8 | done in PR 5 except the 8 cells whose construct is `eachWithIndex:` / `do:separatedBy:` (was 36 / 36 / 13 = 85); they wait for the enumeration producer |
 | `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
 | `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3 as producers answering their boolean; PR 4 added the early exit |
-| **total** | **160** | **127** | **135** | **422** | |
+| **total** | **70** | **56** | **87** | **213** | |
 
-By block role: loop bodies 117, evaluated blocks 85, protected bodies 72,
-arms 41, three-deep nestings 36, handlers 30, arm/loop mixes 29, the method
-body 12.
+By block role: loop bodies 66, protected bodies 45, three-deep nestings 26,
+arms 26, handlers 18, arm/loop mixes 16, the method body 8, evaluated blocks 8
+(117 / 72 / 36 / 41 / 30 / 29 / 12 / 85 before PR 5).
+
+**Amendment, BT-3841 PR 5: an evaluated literal block is an arm-like producer.**
+`[...] value` (the unary `value` sent to a block literal with no parameters) is
+the degenerate conditional: one arm that always runs. `literal_block_value_arm`
+(`block_facts.rs`) is its one site rule, and `conditional_arm_blocks` returns the
+block as the single arm, so the conditional producer rule
+(`conditional_producer_writes`), the site rules (`sequenced_operand_sites`,
+`loop_body_producer_sites`), the Phase 0 check (arm frames in
+`Walker::expr`, `check_construct`) and codegen's producer
+(`generate_block_value_with_mutations`: the seeded scratch map, a `BranchArm`
+frame for the block, `conditional_tuple_to_threaded_value`) all read the same
+rule. The receiver rule: the receiver is a block literal (parentheses are not
+peeled), so its class is statically `Block` and no other class's `value` can run;
+`value:` / `value:value:` / `valueWithArguments:` bind arguments outside the frame
+and keep their legacy lowering and rows, as does the REPL root. The block's
+writes are also the enclosing block's writes for the mutation analysis
+(`analyze_expression` propagates them, like an `on:do:` receiver), so a `do:` body
+whose only outer write is inside a nested `[...] value` is threaded.
 
 **Amendment, BT-3841 PR 4: the satisfy and detect folds exit early.** The
 inline fold of a writing `anySatisfy:`, `allSatisfy:`, `detect:` and

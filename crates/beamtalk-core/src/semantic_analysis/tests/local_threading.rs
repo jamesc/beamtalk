@@ -499,10 +499,11 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 
 #[test]
 fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
-    // o1's operand shape with a construct that is not a producer yet: a
-    // `value` sent to a block literal (an `on:do:` is one since BT-3817, ADR
-    // 0131 Phase 3b).
-    let src = in_class("r := ([t := t + 1. 1] value) + 1\n#[r, t]");
+    // o1's operand shape with a construct that is not a producer: a `value:`
+    // sent to a block literal (an `on:do:` is one since BT-3817, ADR 0131 Phase
+    // 3b, and a unary `value` since BT-3841: its argument-binding form keeps the
+    // legacy rows).
+    let src = in_class("r := ([:v | t := t + v. 1] value: 2) + 1\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -510,7 +511,7 @@ fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     assert_eq!(d.severity, Severity::Error);
     assert_eq!(
         d.message.as_str(),
-        "`value` writes outer local `t`, but as the receiver of a message in a class \
+        "`value:` writes outer local `t`, but as the receiver of a message in a class \
          method the write is not threaded back yet (BT-3743)"
     );
     assert!(
@@ -1397,10 +1398,8 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "dinS"),
     ("actor", "armProtIter", "outer", "dsb"),
     ("actor", "armProtIter", "outer", "ewi"),
-    ("actor", "armProtIter", "outer", "value"),
     ("actor", "armProtArm", "outer", "dsb"),
     ("actor", "armProtArm", "outer", "ewi"),
-    ("actor", "armProtArm", "outer", "value"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
@@ -1660,26 +1659,28 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
 
 /// BT-3841 review: unmeasured middle roles of a three-block nesting stay
 /// rejected for the unfinished families, whatever the outermost and innermost
-/// roles are (no `RIGHT_STATEMENTS` row exists past depth two).
+/// roles are (no `RIGHT_STATEMENTS` row exists past depth two). (An evaluated
+/// literal block is not one of them since BT-3841: it is a producer by rule at
+/// any depth, `evaluated_literal_blocks_are_producers_at_any_depth`.)
 #[test]
 fn unmeasured_three_deep_chains_stay_rejected() {
     for (context, src) in [
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[t := t + 1] value]]] on: Error do: [:e | 0]]\nt",
+                "t := 0\n#(1, 2) do: [:z | true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]] on: Error do: [:e | 0]]\nt",
             ),
         ),
         (
             "actor",
             in_actor(
-                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]]\nt",
             ),
         ),
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[t := t + 1] value]]]\nt",
+                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]]\nt",
             ),
         ),
         (
@@ -1695,9 +1696,9 @@ fn unmeasured_three_deep_chains_stay_rejected() {
 }
 
 /// BT-3841: `keysAndValuesDo:`/`doWithKey:` are producers like `do:`. Accepted
-/// as a statement, in an arm and in a loop body in every method context; still
-/// rejected inside a `[...] value` body, and a `^` of one in a plain closure is
-/// rejected like `^xs do: [...]` there.
+/// as a statement, in an arm, in a loop body and in an evaluated literal block
+/// (`[...] value`, an arm frame) in every method context; a `^` of one in a plain
+/// closure is rejected like `^xs do: [...]` there.
 #[test]
 fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
     for sel in ["keysAndValuesDo:", "doWithKey:"] {
@@ -1707,17 +1708,17 @@ fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
             format!("t := 0\ntrue ifTrue: [{kv}]\nt"),
             format!("t := 0\n#(1, 2) do: [:z | {kv}]\nt"),
             format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
+            format!("t := 0\n[{kv}] value\nt"),
+            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
         ] {
             for src in [in_class(&body), in_value(&body), in_actor(&body)] {
                 let diags = adr0131_diagnostics(&src);
                 assert!(diags.is_empty(), "{src}: {diags:?}");
             }
         }
-        for body in [
-            format!("t := 0\n[{kv}] value\nt"),
-            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
-            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
-        ] {
+        for body in [format!(
+            "t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"
+        )] {
             for src in [in_class(&body), in_value(&body)] {
                 assert!(
                     !adr0131_diagnostics(&src).is_empty(),
@@ -2461,4 +2462,50 @@ fn while_condition_without_outer_write_is_accepted() {
         let diags = adr0131_diagnostics(&source);
         assert!(diags.is_empty(), "{source}: {diags:?}");
     }
+}
+
+/// BT-3841: an evaluated literal block (`[...] value`) that writes an outer local
+/// is an arm-like local-threading producer by rule, the one `conditional_arm_blocks`
+/// site rule: accepted as a statement, as an operand, in an arm, a protected body,
+/// a handler and a loop body, and nested in itself, at any depth, in every method
+/// context. What is not a producer keeps the legacy verdict: `value:` (its
+/// arguments bind the block's parameters outside the frame), a parenthesised
+/// receiver (a block value, §6), and the REPL.
+#[test]
+fn evaluated_literal_blocks_are_producers_at_any_depth() {
+    for body in [
+        "t := 0\n[t := t + 1] value\nt",
+        "t := 0\nr := [t := t + 1. 5] value\n#[r, t]",
+        "t := 0\nr := t + ([t := t + 1. 5] value)\n#[r, t]",
+        "t := 0\ntrue ifTrue: [[t := t + 1] value]\nt",
+        "t := 0\n[[t := t + 1] value] value\nt",
+        "t := 0\n#(1, 2) do: [:z | [t := t + z] value]\nt",
+        "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + z] value]]\nt",
+        "t := 0\n[[t := t + 1] value] on: Error do: [:e | 0]\nt",
+        "t := 0\n[Error signal: \"x\"] on: Error do: [:e | [t := t + 1] value. 0]\nt",
+        "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | [[t := t + z] value] on: Error do: [:e | 0]]]\nt",
+        "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+        "t := 0\n1 to: 2 do: [:i | [t := t + i. [t := t + 1] value] value]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+    // Not producers: a `value:` send and a parenthesised receiver (§6) keep their
+    // legacy verdict.
+    for body in [
+        "t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt",
+        "t := 0\n([t := t + 1]) value\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            assert!(
+                !adr0131_diagnostics(&src).is_empty(),
+                "{src}: accepted but not a producer"
+            );
+        }
+    }
+    // The REPL keeps its own lowering and its verdict.
+    let diags = adr0131_diagnostics_with("[t := t + 1] value\n", &["t"]);
+    assert!(diags.is_empty(), "{diags:?}");
 }

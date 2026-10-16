@@ -53,10 +53,10 @@ use crate::semantic_analysis::block_facts::{
     RootMethodKind, captured_local_mutations, conditional_arm_blocks, conditional_producer_writes,
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_safe_value_family_selector, is_threaded_frame_body, local_threading_construct,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
-    receiver_statically_not_dictionary, repl_operand_sites, root_producer_writes,
-    sequenced_operand_sites, stored_block_var_uses,
+    is_safe_value_family_selector, is_threaded_frame_body, literal_block_value_arm,
+    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
+    outer_local_writes, producer_body_block, receiver_statically_not_dictionary,
+    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
@@ -746,6 +746,9 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(BlockValue, Arm, Arm, [true, true, false, true, false], 1, Actor),
     right(BlockValue, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
     right(BlockValue, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
+    right(DetectIfNone, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
+    right(DetectIfNoneSearch, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
+    right(Enumeration, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, Arm, [true, false, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, Arm, [true, true, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Actor),
@@ -1466,7 +1469,14 @@ impl<'d> Walker<'d> {
                 // `on:do:`/`ensure:` producer.
                 let arm_frames = self.is_arm_frame_conditional(expr, position);
                 self.pending_frame_body = match receiver.as_ref() {
-                    Expression::Block(_) if arm_frames && exception_arm_blocks(expr).is_some() => {
+                    // The receiver block of an `on:do:`/`ensure:` (the protected
+                    // body) or of an evaluated literal block (`[...] value`, the
+                    // arm that always runs) is an arm frame.
+                    Expression::Block(_)
+                        if arm_frames
+                            && (exception_arm_blocks(expr).is_some()
+                                || literal_block_value_arm(expr).is_some()) =>
+                    {
                         Some(FrameBody {
                             fold: false,
                             arm: true,
@@ -1748,8 +1758,11 @@ impl<'d> Walker<'d> {
         let bound = |name: &str| self.is_bound(name);
         let root_producer = match self.context {
             // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
-            // only; the REPL keeps the §6 rejection.
-            Repl if is_lookup => None,
+            // only; the REPL keeps the §6 rejection. So does an evaluated
+            // literal block (BT-3841): the REPL root threads its bindings map
+            // and lowers `[...] value` itself (codegen's
+            // `conditional_producer_locals` agrees).
+            Repl if is_lookup || literal_block_value_arm(expr).is_some() => None,
             // The REPL's conditionals at an operand site (`repl_operand_sites`)
             // are producers that adopt the bindings map whole.
             Repl | Actor => root_producer_writes(expr, &bound, RootMethodKind::Actor),

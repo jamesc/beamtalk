@@ -415,6 +415,24 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// BT-3841: the threaded set of an evaluated literal block
+    /// (`[...] value`, `literal_block_value_arm`) whose `arms` is its one block:
+    /// the [`Self::threaded_locals_of_blocks`] kernel over the arm, with the arm
+    /// packed (`lowered`) like a conditional's. [`Self::threaded_locals_of`]
+    /// leaves `lowered` empty for the same send (the legacy inline-block path
+    /// unpacks its own tuple), so the producer reads this one; the producer rule
+    /// (`conditional_producer_locals`) is the only caller.
+    pub(in crate::core_erlang) fn block_value_threaded_locals(
+        &self,
+        arms: &[&Block],
+    ) -> Option<ThreadedLocals> {
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::BlockValue),
+            arms,
+            arms,
+        )
+    }
+
     /// The lowered set of a loop or fold generator's `body` block (and,
     /// for `whileTrue:`/`whileFalse:`, its `condition`): the
     /// [`Self::threaded_locals_of_blocks`] kernel over the same blocks

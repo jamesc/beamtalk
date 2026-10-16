@@ -15,7 +15,7 @@ class	top	assign	ifNil	right
 class	top	assign	and	right
 class	top	assign	onDo	right
 class	top	assign	ensure	right
-class	top	assign	value	wrong
+class	top	assign	value	right
 class	top	assign	ewi	wrong
 class	top	assign	dsb	wrong
 class	top	assign	kv	right
@@ -33,7 +33,7 @@ class	top	field	ifNil	right
 class	top	field	and	right
 class	top	field	onDo	right
 class	top	field	ensure	right
-class	top	field	value	wrong
+class	top	field	value	right
 class	top	field	ewi	wrong
 class	top	field	dsb	wrong
 class	top	field	kv	right
@@ -51,7 +51,7 @@ class	top	recv	ifNil	right
 class	top	recv	and	right
 class	top	recv	onDo	right
 class	top	recv	ensure	right
-class	top	recv	value	wrong
+class	top	recv	value	right
 class	top	recv	ewi	wrong
 class	top	recv	dsb	wrong
 class	top	recv	kv	right
@@ -69,7 +69,7 @@ class	top	arg	ifNil	right
 class	top	arg	and	right
 class	top	arg	onDo	right
 class	top	arg	ensure	right
-class	top	arg	value	wrong
+class	top	arg	value	right
 class	top	arg	ewi	wrong
 class	top	arg	dsb	wrong
 class	top	arg	kv	right
@@ -87,7 +87,7 @@ class	top	operand	ifNil	right
 class	top	operand	and	right
 class	top	operand	onDo	right
 class	top	operand	ensure	right
-class	top	operand	value	wrong
+class	top	operand	value	right
 class	top	operand	ewi	wrong
 class	top	operand	dsb	wrong
 class	top	operand	kv	right
@@ -105,7 +105,7 @@ class	top	cascade	ifNil	erlc
 class	top	cascade	and	erlc
 class	top	cascade	onDo	erlc
 class	top	cascade	ensure	erlc
-class	top	cascade	value	wrong
+class	top	cascade	value	erlc
 class	top	cascade	ewi	wrong
 class	top	cascade	dsb	wrong
 class	top	cascade	kv	wrong
@@ -123,7 +123,7 @@ class	top	literal	ifNil	right
 class	top	literal	and	right
 class	top	literal	onDo	right
 class	top	literal	ensure	right
-class	top	literal	value	wrong
+class	top	literal	value	right
 class	top	literal	ewi	wrong
 class	top	literal	dsb	wrong
 class	top	literal	kv	right
@@ -159,7 +159,7 @@ class	top	interp	ifNil	erlc
 class	top	interp	and	erlc
 class	top	interp	onDo	erlc
 class	top	interp	ensure	erlc
-class	top	interp	value	wrong
+class	top	interp	value	erlc
 class	top	interp	ewi	wrong
 class	top	interp	dsb	wrong
 class	top	interp	kv	wrong
@@ -177,7 +177,7 @@ class	arm	assign	ifNil	right
 class	arm	assign	and	right
 class	arm	assign	onDo	right
 class	arm	assign	ensure	right
-class	arm	assign	value	wrong
+class	arm	assign	value	right
 class	arm	assign	ewi	wrong
 class	arm	assign	dsb	wrong
 class	arm	assign	kv	right
@@ -195,7 +195,7 @@ class	arm	field	ifNil	right
 class	arm	field	and	right
 class	arm	field	onDo	right
 class	arm	field	ensure	right
-class	arm	field	value	wrong
+class	arm	field	value	right
 class	arm	field	ewi	wrong
 class	arm	field	dsb	wrong
 class	arm	field	kv	right
@@ -213,7 +213,7 @@ class	arm	recv	ifNil	right
 class	arm	recv	and	right
 class	arm	recv	onDo	right
 class	arm	recv	ensure	right
-class	arm	recv	value	wrong
+class	arm	recv	value	right
 class	arm	recv	ewi	wrong
 class	arm	recv	dsb	wrong
 class	arm	recv	kv	right
@@ -231,7 +231,7 @@ class	arm	arg	ifNil	right
 class	arm	arg	and	right
 class	arm	arg	onDo	right
 class	arm	arg	ensure	right
-class	arm	arg	value	wrong
+class	arm	arg	value	right
 class	arm	arg	ewi	wrong
 class	arm	arg	dsb	wrong
 class	arm	arg	kv	right
@@ -249,7 +249,7 @@ class	arm	operand	ifNil	right
 class	arm	operand	and	right
 class	arm	operand	onDo	right
 class	arm	operand	ensure	right
-class	arm	operand	value	wrong
+class	arm	operand	value	right
 class	arm	operand	ewi	wrong
 class	arm	operand	dsb	wrong
 class	arm	operand	kv	right
@@ -267,7 +267,7 @@ class	arm	cascade	ifNil	right
 class	arm	cascade	and	right
 class	arm	cascade	onDo	right
 class	arm	cascade	ensure	right
-class	arm	cascade	value	wrong
+class	arm	cascade	value	right
 class	arm	cascade	ewi	wrong
 class	arm	cascade	dsb	wrong
 class	arm	cascade	kv	wrong
@@ -285,7 +285,7 @@ class	arm	literal	ifNil	right
 class	arm	literal	and	right
 class	arm	literal	onDo	right
 class	arm	literal	ensure	right
-class	arm	literal	value	wrong
+class	arm	literal	value	right
 class	arm	literal	ewi	wrong
 class	arm	literal	dsb	wrong
 class	arm	literal	kv	right
@@ -303,7 +303,7 @@ class	arm	match	ifNil	right
 class	arm	match	and	right
 class	arm	match	onDo	right
 class	arm	match	ensure	right
-class	arm	match	value	wrong
+class	arm	match	value	right
 class	arm	match	ewi	wrong
 class	arm	match	dsb	wrong
 class	arm	match	kv	wrong
@@ -321,7 +321,7 @@ class	arm	interp	ifNil	right
 class	arm	interp	and	right
 class	arm	interp	onDo	right
 class	arm	interp	ensure	right
-class	arm	interp	value	wrong
+class	arm	interp	value	right
 class	arm	interp	ewi	wrong
 class	arm	interp	dsb	wrong
 class	arm	interp	kv	wrong
@@ -339,7 +339,7 @@ class	iter	assign	ifNil	right
 class	iter	assign	and	right
 class	iter	assign	onDo	right
 class	iter	assign	ensure	right
-class	iter	assign	value	wrong
+class	iter	assign	value	right
 class	iter	assign	ewi	right
 class	iter	assign	dsb	right
 class	iter	assign	kv	right
@@ -357,7 +357,7 @@ class	iter	field	ifNil	right
 class	iter	field	and	right
 class	iter	field	onDo	right
 class	iter	field	ensure	right
-class	iter	field	value	wrong
+class	iter	field	value	right
 class	iter	field	ewi	wrong
 class	iter	field	dsb	wrong
 class	iter	field	kv	right
@@ -375,7 +375,7 @@ class	iter	recv	ifNil	right
 class	iter	recv	and	right
 class	iter	recv	onDo	right
 class	iter	recv	ensure	right
-class	iter	recv	value	wrong
+class	iter	recv	value	right
 class	iter	recv	ewi	wrong
 class	iter	recv	dsb	wrong
 class	iter	recv	kv	right
@@ -393,7 +393,7 @@ class	iter	arg	ifNil	right
 class	iter	arg	and	right
 class	iter	arg	onDo	right
 class	iter	arg	ensure	right
-class	iter	arg	value	wrong
+class	iter	arg	value	right
 class	iter	arg	ewi	wrong
 class	iter	arg	dsb	wrong
 class	iter	arg	kv	right
@@ -411,7 +411,7 @@ class	iter	operand	ifNil	right
 class	iter	operand	and	right
 class	iter	operand	onDo	right
 class	iter	operand	ensure	right
-class	iter	operand	value	wrong
+class	iter	operand	value	right
 class	iter	operand	ewi	wrong
 class	iter	operand	dsb	wrong
 class	iter	operand	kv	right
@@ -447,7 +447,7 @@ class	iter	literal	ifNil	right
 class	iter	literal	and	right
 class	iter	literal	onDo	right
 class	iter	literal	ensure	right
-class	iter	literal	value	wrong
+class	iter	literal	value	right
 class	iter	literal	ewi	wrong
 class	iter	literal	dsb	wrong
 class	iter	literal	kv	right
@@ -501,7 +501,7 @@ value	top	assign	ifNil	right
 value	top	assign	and	right
 value	top	assign	onDo	right
 value	top	assign	ensure	right
-value	top	assign	value	wrong
+value	top	assign	value	right
 value	top	assign	ewi	wrong
 value	top	assign	dsb	wrong
 value	top	assign	kv	right
@@ -519,7 +519,7 @@ value	top	recv	ifNil	right
 value	top	recv	and	right
 value	top	recv	onDo	right
 value	top	recv	ensure	right
-value	top	recv	value	wrong
+value	top	recv	value	right
 value	top	recv	ewi	wrong
 value	top	recv	dsb	wrong
 value	top	recv	kv	right
@@ -537,7 +537,7 @@ value	top	arg	ifNil	right
 value	top	arg	and	right
 value	top	arg	onDo	right
 value	top	arg	ensure	right
-value	top	arg	value	wrong
+value	top	arg	value	right
 value	top	arg	ewi	wrong
 value	top	arg	dsb	wrong
 value	top	arg	kv	right
@@ -555,7 +555,7 @@ value	top	operand	ifNil	right
 value	top	operand	and	right
 value	top	operand	onDo	right
 value	top	operand	ensure	right
-value	top	operand	value	wrong
+value	top	operand	value	right
 value	top	operand	ewi	wrong
 value	top	operand	dsb	wrong
 value	top	operand	kv	right
@@ -573,7 +573,7 @@ value	top	cascade	ifNil	erlc
 value	top	cascade	and	erlc
 value	top	cascade	onDo	right
 value	top	cascade	ensure	right
-value	top	cascade	value	wrong
+value	top	cascade	value	right
 value	top	cascade	ewi	wrong
 value	top	cascade	dsb	wrong
 value	top	cascade	kv	wrong
@@ -591,7 +591,7 @@ value	top	literal	ifNil	right
 value	top	literal	and	right
 value	top	literal	onDo	right
 value	top	literal	ensure	right
-value	top	literal	value	wrong
+value	top	literal	value	right
 value	top	literal	ewi	wrong
 value	top	literal	dsb	wrong
 value	top	literal	kv	right
@@ -609,7 +609,7 @@ value	top	match	ifNil	wrong
 value	top	match	and	wrong
 value	top	match	onDo	right
 value	top	match	ensure	right
-value	top	match	value	wrong
+value	top	match	value	right
 value	top	match	ewi	wrong
 value	top	match	dsb	wrong
 value	top	match	kv	wrong
@@ -627,7 +627,7 @@ value	top	interp	ifNil	erlc
 value	top	interp	and	erlc
 value	top	interp	onDo	right
 value	top	interp	ensure	right
-value	top	interp	value	wrong
+value	top	interp	value	right
 value	top	interp	ewi	wrong
 value	top	interp	dsb	wrong
 value	top	interp	kv	wrong
@@ -645,7 +645,7 @@ value	arm	assign	ifNil	right
 value	arm	assign	and	right
 value	arm	assign	onDo	right
 value	arm	assign	ensure	right
-value	arm	assign	value	wrong
+value	arm	assign	value	right
 value	arm	assign	ewi	wrong
 value	arm	assign	dsb	wrong
 value	arm	assign	kv	right
@@ -663,7 +663,7 @@ value	arm	recv	ifNil	right
 value	arm	recv	and	right
 value	arm	recv	onDo	right
 value	arm	recv	ensure	right
-value	arm	recv	value	wrong
+value	arm	recv	value	right
 value	arm	recv	ewi	wrong
 value	arm	recv	dsb	wrong
 value	arm	recv	kv	right
@@ -681,7 +681,7 @@ value	arm	arg	ifNil	right
 value	arm	arg	and	right
 value	arm	arg	onDo	right
 value	arm	arg	ensure	right
-value	arm	arg	value	wrong
+value	arm	arg	value	right
 value	arm	arg	ewi	wrong
 value	arm	arg	dsb	wrong
 value	arm	arg	kv	right
@@ -699,7 +699,7 @@ value	arm	operand	ifNil	right
 value	arm	operand	and	right
 value	arm	operand	onDo	right
 value	arm	operand	ensure	right
-value	arm	operand	value	wrong
+value	arm	operand	value	right
 value	arm	operand	ewi	wrong
 value	arm	operand	dsb	wrong
 value	arm	operand	kv	right
@@ -717,7 +717,7 @@ value	arm	cascade	ifNil	right
 value	arm	cascade	and	right
 value	arm	cascade	onDo	right
 value	arm	cascade	ensure	right
-value	arm	cascade	value	wrong
+value	arm	cascade	value	right
 value	arm	cascade	ewi	wrong
 value	arm	cascade	dsb	wrong
 value	arm	cascade	kv	wrong
@@ -735,7 +735,7 @@ value	arm	literal	ifNil	right
 value	arm	literal	and	right
 value	arm	literal	onDo	right
 value	arm	literal	ensure	right
-value	arm	literal	value	wrong
+value	arm	literal	value	right
 value	arm	literal	ewi	wrong
 value	arm	literal	dsb	wrong
 value	arm	literal	kv	right
@@ -753,7 +753,7 @@ value	arm	match	ifNil	right
 value	arm	match	and	right
 value	arm	match	onDo	right
 value	arm	match	ensure	right
-value	arm	match	value	wrong
+value	arm	match	value	right
 value	arm	match	ewi	wrong
 value	arm	match	dsb	wrong
 value	arm	match	kv	wrong
@@ -771,7 +771,7 @@ value	arm	interp	ifNil	right
 value	arm	interp	and	right
 value	arm	interp	onDo	right
 value	arm	interp	ensure	right
-value	arm	interp	value	wrong
+value	arm	interp	value	right
 value	arm	interp	ewi	wrong
 value	arm	interp	dsb	wrong
 value	arm	interp	kv	wrong
@@ -789,7 +789,7 @@ value	iter	assign	ifNil	right
 value	iter	assign	and	right
 value	iter	assign	onDo	right
 value	iter	assign	ensure	right
-value	iter	assign	value	wrong
+value	iter	assign	value	right
 value	iter	assign	ewi	right
 value	iter	assign	dsb	right
 value	iter	assign	kv	right
@@ -807,7 +807,7 @@ value	iter	recv	ifNil	right
 value	iter	recv	and	right
 value	iter	recv	onDo	right
 value	iter	recv	ensure	right
-value	iter	recv	value	wrong
+value	iter	recv	value	right
 value	iter	recv	ewi	wrong
 value	iter	recv	dsb	wrong
 value	iter	recv	kv	right
@@ -825,7 +825,7 @@ value	iter	arg	ifNil	right
 value	iter	arg	and	right
 value	iter	arg	onDo	right
 value	iter	arg	ensure	right
-value	iter	arg	value	wrong
+value	iter	arg	value	right
 value	iter	arg	ewi	wrong
 value	iter	arg	dsb	wrong
 value	iter	arg	kv	right
@@ -843,7 +843,7 @@ value	iter	operand	ifNil	right
 value	iter	operand	and	right
 value	iter	operand	onDo	right
 value	iter	operand	ensure	right
-value	iter	operand	value	wrong
+value	iter	operand	value	right
 value	iter	operand	ewi	wrong
 value	iter	operand	dsb	wrong
 value	iter	operand	kv	right
@@ -879,7 +879,7 @@ value	iter	literal	ifNil	right
 value	iter	literal	and	right
 value	iter	literal	onDo	right
 value	iter	literal	ensure	right
-value	iter	literal	value	wrong
+value	iter	literal	value	right
 value	iter	literal	ewi	wrong
 value	iter	literal	dsb	wrong
 value	iter	literal	kv	right
@@ -933,7 +933,7 @@ actor	top	assign	ifNil	right
 actor	top	assign	and	right
 actor	top	assign	onDo	right
 actor	top	assign	ensure	right
-actor	top	assign	value	wrong
+actor	top	assign	value	right
 actor	top	assign	ewi	right
 actor	top	assign	dsb	right
 actor	top	assign	kv	right
@@ -951,7 +951,7 @@ actor	top	field	ifNil	right
 actor	top	field	and	right
 actor	top	field	onDo	right
 actor	top	field	ensure	right
-actor	top	field	value	wrong
+actor	top	field	value	right
 actor	top	field	ewi	right
 actor	top	field	dsb	right
 actor	top	field	kv	right
@@ -969,7 +969,7 @@ actor	top	recv	ifNil	right
 actor	top	recv	and	right
 actor	top	recv	onDo	right
 actor	top	recv	ensure	right
-actor	top	recv	value	wrong
+actor	top	recv	value	right
 actor	top	recv	ewi	wrong
 actor	top	recv	dsb	wrong
 actor	top	recv	kv	right
@@ -987,7 +987,7 @@ actor	top	arg	ifNil	right
 actor	top	arg	and	right
 actor	top	arg	onDo	right
 actor	top	arg	ensure	right
-actor	top	arg	value	wrong
+actor	top	arg	value	right
 actor	top	arg	ewi	wrong
 actor	top	arg	dsb	wrong
 actor	top	arg	kv	right
@@ -1005,7 +1005,7 @@ actor	top	operand	ifNil	right
 actor	top	operand	and	right
 actor	top	operand	onDo	right
 actor	top	operand	ensure	right
-actor	top	operand	value	wrong
+actor	top	operand	value	right
 actor	top	operand	ewi	wrong
 actor	top	operand	dsb	wrong
 actor	top	operand	kv	right
@@ -1023,7 +1023,7 @@ actor	top	cascade	ifNil	right
 actor	top	cascade	and	right
 actor	top	cascade	onDo	right
 actor	top	cascade	ensure	right
-actor	top	cascade	value	wrong
+actor	top	cascade	value	right
 actor	top	cascade	ewi	wrong
 actor	top	cascade	dsb	wrong
 actor	top	cascade	kv	wrong
@@ -1041,7 +1041,7 @@ actor	top	literal	ifNil	right
 actor	top	literal	and	right
 actor	top	literal	onDo	right
 actor	top	literal	ensure	right
-actor	top	literal	value	wrong
+actor	top	literal	value	right
 actor	top	literal	ewi	wrong
 actor	top	literal	dsb	wrong
 actor	top	literal	kv	right
@@ -1059,7 +1059,7 @@ actor	top	match	ifNil	right
 actor	top	match	and	right
 actor	top	match	onDo	right
 actor	top	match	ensure	right
-actor	top	match	value	wrong
+actor	top	match	value	right
 actor	top	match	ewi	wrong
 actor	top	match	dsb	wrong
 actor	top	match	kv	wrong
@@ -1077,7 +1077,7 @@ actor	top	interp	ifNil	right
 actor	top	interp	and	right
 actor	top	interp	onDo	right
 actor	top	interp	ensure	right
-actor	top	interp	value	wrong
+actor	top	interp	value	right
 actor	top	interp	ewi	wrong
 actor	top	interp	dsb	wrong
 actor	top	interp	kv	wrong
@@ -1113,7 +1113,7 @@ actor	arm	field	ifNil	right
 actor	arm	field	and	right
 actor	arm	field	onDo	right
 actor	arm	field	ensure	right
-actor	arm	field	value	wrong
+actor	arm	field	value	right
 actor	arm	field	ewi	right
 actor	arm	field	dsb	right
 actor	arm	field	kv	right
@@ -1131,7 +1131,7 @@ actor	arm	recv	ifNil	right
 actor	arm	recv	and	right
 actor	arm	recv	onDo	right
 actor	arm	recv	ensure	right
-actor	arm	recv	value	wrong
+actor	arm	recv	value	right
 actor	arm	recv	ewi	wrong
 actor	arm	recv	dsb	wrong
 actor	arm	recv	kv	right
@@ -1149,7 +1149,7 @@ actor	arm	arg	ifNil	right
 actor	arm	arg	and	right
 actor	arm	arg	onDo	right
 actor	arm	arg	ensure	right
-actor	arm	arg	value	wrong
+actor	arm	arg	value	right
 actor	arm	arg	ewi	wrong
 actor	arm	arg	dsb	wrong
 actor	arm	arg	kv	right
@@ -1167,7 +1167,7 @@ actor	arm	operand	ifNil	right
 actor	arm	operand	and	right
 actor	arm	operand	onDo	right
 actor	arm	operand	ensure	right
-actor	arm	operand	value	wrong
+actor	arm	operand	value	right
 actor	arm	operand	ewi	wrong
 actor	arm	operand	dsb	wrong
 actor	arm	operand	kv	right
@@ -1185,7 +1185,7 @@ actor	arm	cascade	ifNil	right
 actor	arm	cascade	and	right
 actor	arm	cascade	onDo	right
 actor	arm	cascade	ensure	right
-actor	arm	cascade	value	wrong
+actor	arm	cascade	value	right
 actor	arm	cascade	ewi	wrong
 actor	arm	cascade	dsb	wrong
 actor	arm	cascade	kv	wrong
@@ -1203,7 +1203,7 @@ actor	arm	literal	ifNil	right
 actor	arm	literal	and	right
 actor	arm	literal	onDo	right
 actor	arm	literal	ensure	right
-actor	arm	literal	value	wrong
+actor	arm	literal	value	right
 actor	arm	literal	ewi	wrong
 actor	arm	literal	dsb	wrong
 actor	arm	literal	kv	right
@@ -1221,7 +1221,7 @@ actor	arm	match	ifNil	right
 actor	arm	match	and	right
 actor	arm	match	onDo	right
 actor	arm	match	ensure	right
-actor	arm	match	value	wrong
+actor	arm	match	value	right
 actor	arm	match	ewi	wrong
 actor	arm	match	dsb	wrong
 actor	arm	match	kv	wrong
@@ -1239,7 +1239,7 @@ actor	arm	interp	ifNil	right
 actor	arm	interp	and	right
 actor	arm	interp	onDo	right
 actor	arm	interp	ensure	right
-actor	arm	interp	value	wrong
+actor	arm	interp	value	right
 actor	arm	interp	ewi	wrong
 actor	arm	interp	dsb	wrong
 actor	arm	interp	kv	wrong
@@ -1257,7 +1257,7 @@ actor	iter	assign	ifNil	wrong
 actor	iter	assign	and	wrong
 actor	iter	assign	onDo	right
 actor	iter	assign	ensure	right
-actor	iter	assign	value	wrong
+actor	iter	assign	value	right
 actor	iter	assign	ewi	right
 actor	iter	assign	dsb	right
 actor	iter	assign	kv	erlc

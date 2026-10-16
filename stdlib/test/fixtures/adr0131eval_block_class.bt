@@ -1,0 +1,174 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): an evaluated literal block (`[...] value`) that writes an
+// outer local is an arm-like local-threading producer: the block is a
+// `BranchArm` frame that always runs, so its writes come back through the
+// enclosing frame's `LocalRebind`s wherever the send sits (statement, last
+// expression, an assignment's value, an operand, an arm, a protected body, a
+// handler, a loop or fold body, another evaluated block). The receiver is a
+// block literal, so no other class's `value` can run. The columns are
+// adr0131eval_block_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131eval_block_test.bt.
+
+Object subclass: Adr0131EvalBlockClass
+  classState: n = 0
+
+  class stA =>
+    t := 0
+    [t := t + 1] value
+    t
+
+  class stSeq =>
+    t := 0
+    [t := t + 1] value
+    [t := t + 10] value
+    t
+
+  class last =>
+    t := 0
+    [t := t + 1. t] value
+
+  class assign =>
+    t := 0
+    r := [t := t + 5. 7] value
+    #[r, t]
+
+  class operand =>
+    t := 0
+    r := t + ([t := t + 1. 5] value)
+    #[r, t]
+
+  class arm =>
+    t := 0
+    4 > 3 ifTrue: [[t := t + 1] value]
+    t
+
+  class armNotTaken =>
+    t := 0
+    4 < 3 ifTrue: [[t := t + 1] value]
+    t
+
+  class nested =>
+    t := 0
+    [[t := t + 1] value. [t := t + 10] value] value
+    t
+
+  class twoLocals =>
+    t := 0
+    u := 0
+    [t := t + 1. u := u + 2] value
+    #[t, u]
+
+  class blockLocal =>
+    t := 0
+    [x := 5. t := t + x] value
+    t
+
+  class inDo =>
+    t := 0
+    #(1, 2, 3) do: [:e | [t := t + e] value]
+    t
+
+  class inDoArm =>
+    t := 0
+    #(1, 2, 3) do: [:e | e > 1 ifTrue: [[t := t + e] value]]
+    t
+
+  class inToDo =>
+    t := 0
+    1 to: 3 do: [:i | [t := t + i] value]
+    t
+
+  class inWhile =>
+    t := 0
+    i := 0
+    [i < 3] whileTrue: [i := i + 1. [t := t + i] value]
+    t
+
+  class inTimes =>
+    t := 0
+    3 timesRepeat: [[t := t + 1] value]
+    t
+
+  class inCollect =>
+    t := 0
+    r := #(1, 2) collect: [:e | [t := t + e] value. e * 2]
+    t * 100 + (r inject: 0 into: [:a :x | a + x])
+
+  class inHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | [t := t + 100] value]
+    t
+
+  class inProtected =>
+    t := 0
+    [[t := t + 1] value] on: Error do: [:e | 0]
+    t
+
+  class inProtectedRaise =>
+    t := 0
+    [[t := t + 1] value. Error signal: "x"] on: Error do: [:e | nil]
+    t
+
+  class inEnsure =>
+    t := 0
+    [[t := t + 1] value] ensure: [[t := t + 10] value]
+    t
+
+  class armDoProt =>
+    t := 0
+    4 > 3 ifTrue: [#(1, 2) do: [:e | [[t := t + e] value] on: Error do: [:x | 0]]]
+    t
+
+  class doDoArm =>
+    t := 0
+    #(1, 2) do: [:a | #(1, 2) do: [:b | 4 > 3 ifTrue: [[t := t + 1] value]]]
+    t
+
+  class loopInValue =>
+    t := 0
+    [#(1, 2, 3) do: [:e | t := t + e]] value
+    t
+
+  class condInValue =>
+    t := 0
+    [4 > 3 ifTrue: [t := t + 1]] value
+    t
+
+  class injectInValue =>
+    t := 0
+    r := [#(1, 2, 3) inject: 0 into: [:a :e | t := t + 1. a + e]] value
+    #[r, t]
+
+  class earlyReturn =>
+    t := 0
+    [t := t + 1. ^t] value
+    99
+
+  class valueInValueInArm =>
+    t := 0
+    4 > 3 ifTrue: [[[t := t + 1] value. [t := t + 2] value] value]
+    t
+
+  class nilArm =>
+    t := 0
+    nil ifNil: [[t := t + 1] value]
+    t
+
+  class andArm =>
+    t := 0
+    r := 4 > 3 and: [[t := t + 1] value. true]
+    #[r, t]
+
+  class fieldMix =>
+    self.n := 0
+    t := 0
+    [self.n := self.n + 1. t := t + 1] value
+    #[self.n, t]
+
+  class fieldInDo =>
+    self.n := 0
+    t := 0
+    #(1, 2) do: [:e | [self.n := self.n + e. t := t + 1] value]
+    #[self.n, t]

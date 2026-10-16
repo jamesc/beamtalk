@@ -716,6 +716,17 @@ impl CoreErlangGenerator {
         out: &mut std::collections::HashSet<String>,
     ) {
         use beamtalk_core::ast::MessageSelector;
+        // BT-3841: an evaluated literal block (`[...] value`) is an inline arm
+        // like a conditional's: a list-op's cross-scope write hides behind it
+        // the same way, so recurse through its statements.
+        if let Some(block) =
+            beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr)
+        {
+            for stmt in &block.body {
+                Self::collect_list_op_cross_scope_mutations_recursive(&stmt.expression, facts, out);
+            }
+            return;
+        }
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),

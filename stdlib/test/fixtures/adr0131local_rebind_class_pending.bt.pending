@@ -38,9 +38,3 @@ Object subclass: Adr0131LocalRebindClassPending
     t := 0
     #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
     t
-
-  // `[...] value` as a statement.
-  class stBlockValue =>
-    t := 0
-    [t := t + 1] value
-    t
