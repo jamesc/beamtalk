@@ -203,7 +203,7 @@ impl CoreErlangGenerator {
             });
             // Test-only fault injection: the lambda forgets to return `Self`,
             // so the verifier's `FoldFamilyNotCarried` is shown to fire on a
-            // real compile (`tests/value_type_fold_family_verifier_corpus.rs`).
+            // real compile (`tests/value_type_fold_family_corpus.rs`).
             #[cfg(test)]
             if super::super::threaded_expr::fault::active()
                 == Some(super::super::threaded_expr::fault::LocalRebindFault::DropFoldFamilySlot)
