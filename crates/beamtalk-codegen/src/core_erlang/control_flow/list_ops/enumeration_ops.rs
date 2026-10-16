@@ -122,11 +122,11 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 impl CoreErlangGenerator {
     /// Returns `true` if `block` mutates field/local state in a way that requires
     /// threading (and so cannot be served by a plain dispatch to the `collection.bt`
-    /// method). shares [`Self::block_arg_needs_threading`] — the same
-    /// combinator `control_flow_has_mutations` and
-    /// `conditional_needs_mutation_threading` use for their own per-block check.
+    /// method). Shares [`Self::loop_body_has_carried_mutations`] — the same
+    /// predicate `control_flow_has_mutations` reads for a loop or fold's block
+    /// argument (BT-3834).
     fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
-        self.block_arg_needs_threading(block)
+        self.loop_body_has_carried_mutations(block)
     }
 
     /// Returns `true` when the desugared fold threads actor `State`: an actor

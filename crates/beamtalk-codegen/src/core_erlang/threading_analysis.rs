@@ -258,6 +258,46 @@ impl CoreErlangGenerator {
             || self.body_has_list_op_cross_scope_mutations(block)
     }
 
+    /// BT-3834: [`Self::block_arg_needs_threading`] for the body of a loop or
+    /// fold, true only when the loop has something to carry.
+    ///
+    /// The mutation analysis is a heuristic over the body's writes; the
+    /// loop's threaded set is [`Self::loop_threaded_locals`] (ADR 0131's one
+    /// recognizer). When the heuristic says "threads" but the set is empty,
+    /// a `StateAcc` lowering carries a map only if the scope has one to seed
+    /// it with: the actor `State` of an actor instance method, the REPL
+    /// bindings, or a family the body threads (`SelfVt` in a value-type
+    /// method that writes a field). Anywhere else (a class method, a
+    /// value-type method writing no field) the loop threads nothing, and a
+    /// locals-less `StateAcc` loop would be seeded from an unbound `State`
+    /// (`ClassMethodDefect::StateAccLoopWithoutLocals`), so it lowers as a
+    /// plain loop instead.
+    ///
+    /// Every loop and fold gate reads this ([`Self::loop_body_needs_threading`],
+    /// `while_loop_threads`) and so does the statement classifier
+    /// (`control_flow_has_mutations`) for a loop or fold's block arguments,
+    /// so the lowering and the caller that unpacks it cannot disagree.
+    pub(in crate::core_erlang) fn loop_body_has_carried_mutations(&self, body: &Block) -> bool {
+        self.block_arg_needs_threading(body)
+            && (self.is_repl_mode()
+                || !self
+                    .body_threaded_families(body, &self.eligible_families())
+                    .as_slice()
+                    .is_empty()
+                || !self.loop_threaded_locals(body, None).is_empty())
+    }
+
+    /// BT-3834: the gate of every counted loop and fold lowering — whether
+    /// `body` is lowered with mutation threading (a `ThreadingPlan`) rather
+    /// than as a plain loop: [`Self::loop_body_has_carried_mutations`], or a
+    /// write to an outer local the mutation analysis misses (a write-only
+    /// local, or one buried in a nested loop), which
+    /// [`Self::loop_threaded_locals`] names.
+    pub(in crate::core_erlang) fn loop_body_needs_threading(&self, body: &Block) -> bool {
+        self.loop_body_has_carried_mutations(body)
+            || !self.loop_threaded_locals(body, None).is_empty()
+    }
+
     /// Recursively scans an expression for list op message sends with
     /// cross-scope mutations. Unlike `collect_list_op_cross_scope_mutations`,
     /// this also looks inside Assignment values.

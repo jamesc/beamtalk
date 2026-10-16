@@ -215,6 +215,44 @@ proptest! {
     }
 }
 
+/// Cases `block_locals_without_local_touch_pass_verified_codegen` draws.
+const BLOCK_LOCAL_CASES: usize = 256;
+
+/// BT-3834: with [`Shapes::LOCAL_TOUCH`] off no block writes a method-level
+/// local, so a conditional arm, `ensure:` or `on:do:` block that introduces a
+/// local and rebinds it in a nested loop ([`Shapes::BLOCK_LOCAL`]) threads
+/// nothing itself, and neither does the loop or fold enclosing it. Such a loop
+/// lowers as a plain loop: before the BT-3834 gate (with the pre-BT-3848
+/// analysis) 10 of 1024 of these programs panicked the verifier with a
+/// locals-less `StateAcc` loop (`StateAccLoopWithoutLocals`, a foldl
+/// mode/shape mismatch). The draw is fixed (`draw_class_programs`), so this is
+/// the same corpus on every run.
+#[test]
+fn block_locals_without_local_touch_pass_verified_codegen() {
+    let shapes = Shapes::all().without(Shapes::LOCAL_TOUCH);
+    let mut rejected = 0;
+    for (index, (seed, size, program)) in draw_class_programs(shapes, BLOCK_LOCAL_CASES)
+        .iter()
+        .enumerate()
+    {
+        match check_program(index, program) {
+            Ok(()) => {}
+            // PIN-BUG BT-3849: a block lowered as a plain closure whose
+            // nested construct threads two of its locals is rejected
+            // (`generate_block_control_flow_threaded`). A rejection is a
+            // compile error, not a verifier failure or a wrong answer.
+            Err(e) if e.contains("Multiple threaded variables in control flow") => {
+                rejected += 1;
+            }
+            Err(e) => panic!("seed {seed} size {size}: {e}"),
+        }
+    }
+    assert!(
+        rejected <= BLOCK_LOCAL_CASES / 50,
+        "{rejected} of {BLOCK_LOCAL_CASES} programs rejected (BT-3849)"
+    );
+}
+
 /// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen`
 /// (now `all_shapes_pass_verified_codegen`) in CI (an inlined `inject:into:`
 /// fold fun leaked its state version into the enclosing `StateAcc` loop).
@@ -227,7 +265,9 @@ fn bt_3737_ci_seeds_pass_verified_codegen() {
         12_525_934_088_575_929_805,
         15_420_763_691_539_516_991,
     ] {
-        let program = gen_program(seed, 3, Shapes::ENABLED);
+        // Without `block_local` (BT-3834), so each seed draws the program
+        // that failed then.
+        let program = gen_program(seed, 3, Shapes::ENABLED.without(Shapes::BLOCK_LOCAL));
         if let Err(e) = check_program(0, &program) {
             panic!("seed {seed}: {e}");
         }
