@@ -327,7 +327,9 @@ fn render_carrier_read(
 ///   [`final_loop_arg_identities`] carries into the loop's recursive call;
 /// - [`RebindLowering::MapPut`] (`StateAcc` loop/handler, `BranchArm`, REPL
 ///   `MethodBody` member): `let V = <read> in` then the `Put` `Bind`
-///   `let StateN+1 = maps:put(Key, V, StateN) in`.
+///   `let StateN+1 = maps:put(Key, V, StateN) in`;
+/// - [`RebindLowering::MapHeld`] (a `MapPut` cell whose `Put` would be the
+///   identity, BT-3835): `let V = maps:get(Key, StateN) in` alone.
 ///
 /// Every version step goes through [`render_bind`], so a rebind and an
 /// ordinary mutation of the same shape can never differ in bytes.
@@ -350,24 +352,10 @@ fn render_local_rebind(
         ]
     };
     match lowering {
-        RebindLowering::Let => plain_let(read),
+        // BT-3835: the map already holds the value; no `Put`, no step.
+        RebindLowering::Let | RebindLowering::MapHeld { .. } => plain_let(read),
         RebindLowering::LoopParam { source, target } => {
             render_bind(target, source, &BindOp::Direct(ValueRef::Doc(read)), ctx)
-        }
-        // BT-3835: the value was read from `source` under `key`; writing it
-        // back is an identity, so only the version alias is bound.
-        RebindLowering::MapPut { source, target, .. }
-            if lowering.is_identity_put(slot, state_first) =>
-        {
-            docvec![
-                plain_let(read),
-                render_bind(
-                    target,
-                    source,
-                    &BindOp::Direct(ValueRef::Version(source.clone())),
-                    ctx,
-                ),
-            ]
         }
         RebindLowering::MapPut {
             key,

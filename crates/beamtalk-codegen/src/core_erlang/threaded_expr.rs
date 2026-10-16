@@ -111,6 +111,12 @@ pub(super) mod fault {
         /// `Self` family its body advanced out through the accumulator
         /// (`FoldFamilyNotCarried`).
         DropFoldFamilySlot,
+        /// BT-3857: the producer's last `MapPut` rebind is rewritten into a
+        /// `MapHeld` over the version that rebind would have produced, read
+        /// through it. That version is never produced (a held rebind steps
+        /// nothing), so the elided write is not an identity
+        /// (`HeldRebindNotIdentity`).
+        StaleHeld,
     }
 
     thread_local! {
@@ -1561,6 +1567,29 @@ impl CoreErlangGenerator {
                         source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
                         target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
                     };
+                }
+            }
+            (Some(LocalRebindFault::StaleHeld), _) => {
+                // The last `MapPut` rebind (not necessarily the last rebind).
+                let last_put = prelude.iter().rposition(|stmt| {
+                    matches!(
+                        stmt,
+                        ThreadedStmt::LocalRebind {
+                            lowering: RebindLowering::MapPut { .. },
+                            ..
+                        }
+                    )
+                });
+                if let Some(i) = last_put
+                    && let ThreadedStmt::LocalRebind {
+                        state_first,
+                        lowering,
+                        ..
+                    } = &mut prelude[i]
+                    && let RebindLowering::MapPut { key, target, .. } = lowering.clone()
+                {
+                    *state_first = Some(target.clone());
+                    *lowering = RebindLowering::MapHeld { key, map: target };
                 }
             }
             (Some(LocalRebindFault::WrongFrame), Some(i)) => {
