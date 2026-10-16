@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3848: Fixture for the outer-local direction of the wrapper-local
+// cross-scope-write rule. A wrapping `ensure:` / `on:do:` / conditional block
+// that reassigns an OUTER local through a nested loop must still thread that
+// local out of the enclosing `do:`; only locals the wrapper block introduces
+// itself are exempt (see wrapper_local_loop_in_class_method_fold_test.bt).
+
+Object subclass: WrapperOuterLocalThreadingHelper
+  classState: n = 0
+
+  class ensureOuter =>
+    i := 5
+    #(1, 2)
+      do: [:e |
+        self.n := 4
+        [
+          i := 0
+          [i < 3] whileTrue: [i := i + 1]
+        ] ensure: [nil]
+      ]
+    i
+
+  class onDoOuter =>
+    i := 5
+    #(1, 2)
+      do: [:e |
+        self.n := 4
+        [
+          i := 0
+          [i < 3] whileTrue: [i := i + 1]
+        ] on: Error do: [:x | nil]
+      ]
+    i
+
+  class conditionalOuter =>
+    i := 5
+    #(1, 2)
+      do: [:e |
+        self.n := 4
+        e > 0
+          ifTrue: [
+            i := 0
+            [i < 3] whileTrue: [i := i + 1]
+          ]
+          ifFalse: [nil]
+      ]
+    i
+
+  class wrapperLocalInFold =>
+    #(1, 3)
+      inject: 0
+      into: [:a :e |
+        self.n := 4
+        [a]
+          ensure: [
+            i := 0
+            [i < 3]
+              whileTrue: [
+                self.n := 1
+                i := i + 1
+              ]
+            a
+          ]
+      ]
