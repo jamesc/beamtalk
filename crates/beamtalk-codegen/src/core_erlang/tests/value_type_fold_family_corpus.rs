@@ -32,10 +32,10 @@
 
 use super::codegen;
 use super::field_assignment_value_position::{
-    VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, VtOutcome,
-    is_fold_writing_position, vt_outcome,
+    VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, is_fold_writing_position,
 };
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
 
 /// `(case name, program)` for every statement-level shape x every fold-writing position.
 fn verifier_programs() -> Vec<(String, String)> {
@@ -449,9 +449,11 @@ fn generated_field_writing_folds_agree_with_the_oracle_when_run() {
 // ── Conditional arms (BT-3844) ──────────────────────────────────────────────────────────────
 
 /// How a generated fold `FOLD` sits in a conditional arm. `x` is an outer local, so every form but
-/// [`ARM_FORMS`]'s plain one makes the arm a local-threading arm.
+/// the bare `FOLD` one makes the arm itself a local-threading arm. The bare form is a plain arm
+/// only under the selectors whose arms are all `FOLD`: where the other arm writes `x := 5`
+/// ([`ARM_SELECTORS`]), that arm puts the whole conditional on the local-threading lowering.
 const ARM_FORMS: [&str; 4] = [
-    // plain arm: the fold alone, as the arm's value
+    // the fold alone, as the arm's value (no local write of its own)
     "FOLD",
     // local-threading arm, the fold a statement between two local writes
     "x := 1. FOLD. x := x + 1",
@@ -514,17 +516,26 @@ fn generated_field_writing_folds_in_conditional_arms_stay_a_structured_rejection
         "only {} generated conditional-arm programs: the corpus has thinned out",
         programs.len()
     );
+    // Exactly the up-front arm rejection ADR 0122's conditional-arm row documents
+    // (`reject_nested_vt_conditional_self_field_writes` -> `FieldAssignmentInUnsupportedBlock`),
+    // not just any structured value-type error: a different one would mean the arm got past that
+    // pre-pass into a lowering this corpus has never run.
     let not_rejected: Vec<String> = programs
         .iter()
         .filter_map(|(name, method)| {
             let src = format!("{VT_HEADER}\n{method}");
-            match vt_outcome(&src) {
-                VtOutcome::RejectedCleanly => None,
-                VtOutcome::Compiles(_) => Some(format!(
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+            let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+            match generate_module_surfacing_verifier(&module, CodegenOptions::new("test")) {
+                Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => None,
+                Ok(_) => Some(format!(
                     "{name}: compiled, but nothing proves the fold's write reaches the code after \
                      the arm; give it an oracle run first\n{method}"
                 )),
-                VtOutcome::Fails(why) => Some(format!("{name}: {why}\n{method}")),
+                Err(other) => Some(format!(
+                    "{name}: expected the arm pre-pass rejection \
+                     (FieldAssignmentInUnsupportedBlock), got {other:?}\n{method}"
+                )),
             }
         })
         .collect();
