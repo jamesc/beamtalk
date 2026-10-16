@@ -344,10 +344,10 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
             | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:" | "anySatisfy:"
-            | "allSatisfy:",
+            | "allSatisfy:" | "eachWithIndex:",
             1,
         )
-        | ("detect:ifNone:", 2) => Some(0),
+        | ("detect:ifNone:" | "do:separatedBy:", 2) => Some(0),
         ("to:do:" | "inject:into:", 2) => Some(1),
         ("to:by:do:", 3) => Some(2),
         _ => None,
@@ -369,7 +369,7 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
 #[must_use]
 pub fn producer_handler_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
-        ("detect:ifNone:", 2) => Some(1),
+        ("detect:ifNone:" | "do:separatedBy:", 2) => Some(1),
         _ => None,
     }
 }
