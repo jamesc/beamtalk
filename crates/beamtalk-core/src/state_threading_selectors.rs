@@ -326,9 +326,9 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 /// the `detect:` folds, stops running the block at the first decisive element,
 /// BT-3805).
 ///
-/// Not listed, deliberately: `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
-/// `inject:into:` whose spans are the original send's, so a site keyed on the
-/// original has no producer to lower it).
+/// `eachWithIndex:` and `do:separatedBy:` are listed too (BT-3841): codegen
+/// desugars them to a synthetic `inject:into:` fold and lowers that fold as the
+/// producer, keyed on the original send.
 ///
 /// The body block is the one whose outer-local writes the construct packs
 /// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
