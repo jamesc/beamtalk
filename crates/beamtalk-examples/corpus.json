@@ -17928,12 +17928,17 @@
         "object",
         "process",
         "subclassing",
+        "testActorFieldWritingCondition",
         "testActorStatefulCondition",
         "testActorStatefulConditionEmptyBody",
+        "testActorStatefulConditionSelfSendBody",
+        "testActorStatefulWhileFalse",
         "testValueTypeStatefulCondition",
-        "testValueTypeStatefulConditionEmptyBody"
+        "testValueTypeStatefulConditionEmptyBody",
+        "testValueTypeStatefulConditionSelfSendBody",
+        "testValueTypeStatefulWhileFalse"
       ],
-      "source": "// BT-3746 (ADR 0131 Phase 1a, PR #4230 review): `whileTrue:` loops whose\n// condition writes a method local, in each method context. Each condition\n// advances `t` to 3, so `run` answers #[3, 2] and the empty-body forms\n// answer 3. A stateful condition (one that sends to `self`) in a value-type\n// or actor method packs its write through the loop's `StateAcc`; the shared\n// pack/unpack gate (`while_loop_threads`) must include it, or the loop\n// produces a tuple nobody unpacks. A plain condition write, or any condition\n// write in a class method, crashed or hung and is a compile error (BT-3782,\n// ADR 0131 §6; pinned in `semantic_analysis/tests/local_threading.rs`).\n// Fixtures: fixtures/bt3746stateful_while_{value,actor}.bt.\n\nTestCase subclass: Bt3746StatefulWhileTest\n\n  testValueTypeStatefulCondition =>\n    self assert: Bt3746StatefulWhileValue new run equals: #[3, 2]\n\n  testValueTypeStatefulConditionEmptyBody =>\n    self assert: Bt3746StatefulWhileValue new runEmptyBody equals: 3\n\n  testActorStatefulCondition =>\n    self assert: Bt3746StatefulWhileActor spawn run equals: #[3, 2]\n\n  testActorStatefulConditionEmptyBody =>\n    self assert: Bt3746StatefulWhileActor spawn runEmptyBody equals: 3",
+      "source": "// BT-3746 (ADR 0131 Phase 1a, PR #4230 review): `whileTrue:` loops whose\n// condition writes a method local, in each method context. Each condition\n// advances `t` to 3, so `run` answers #[3, 2] and the empty-body forms\n// answer 3. A stateful condition (one that sends to `self`) in a value-type\n// or actor method packs its write through the loop's `StateAcc`; the shared\n// pack/unpack gate (`while_loop_threads`) must include it, or the loop\n// produces a tuple nobody unpacks. A plain condition write, or any condition\n// write in a class method, crashed or hung and is a compile error (BT-3782,\n// ADR 0131 §6; pinned in `semantic_analysis/tests/local_threading.rs`).\n// Fixtures: fixtures/bt3746stateful_while_{value,actor}.bt.\n\nTestCase subclass: Bt3746StatefulWhileTest\n\n  testValueTypeStatefulCondition =>\n    self assert: Bt3746StatefulWhileValue new run equals: #[3, 2]\n\n  testValueTypeStatefulConditionEmptyBody =>\n    self assert: Bt3746StatefulWhileValue new runEmptyBody equals: 3\n\n  testActorStatefulCondition =>\n    self assert: Bt3746StatefulWhileActor spawn run equals: #[3, 2]\n\n  testActorStatefulConditionEmptyBody =>\n    self assert: Bt3746StatefulWhileActor spawn runEmptyBody equals: 3\n\n  // BT-3845: every other shape the ADR 0131 §6 validator accepts\n  // (`block_facts::while_condition_writes_thread`) threads at runtime.\n  testValueTypeStatefulWhileFalse =>\n    self assert: Bt3746StatefulWhileValue new runWhileFalse equals: #[3, 2]\n\n  testValueTypeStatefulConditionSelfSendBody =>\n    self assert: Bt3746StatefulWhileValue new runSelfSendBody equals: #[3, 2]\n\n  testActorStatefulWhileFalse =>\n    self assert: Bt3746StatefulWhileActor spawn runWhileFalse equals: #[3, 2]\n\n  testActorFieldWritingCondition =>\n    self assert: Bt3746StatefulWhileActor spawn runFieldCondition equals: #[3, 2, 3]\n\n  testActorStatefulConditionSelfSendBody =>\n    self assert: Bt3746StatefulWhileActor spawn runSelfSendBody equals: #[3, 2]",
       "explanation": "BT-3746 (ADR 0131 Phase 1a, PR #4230 review): `whileTrue:` loops whose condition writes a method local, in each method context. Each condition advances `t` to 3, so `run` answers #[3, 2] and the empty-body forms answer 3. A stateful condition (one that sends to `self`) in a value-type or actor method packs its write through the loop's `StateAcc`; the shared pack/unpack gate (`while_loop_threads`) must include it, or the loop produces a tuple nobody unpacks. A plain condition write, or any condition write in a class method, crashed or hung and is a compile error (BT-3782, ADR 0131 §6; pinned in `semantic_analysis/tests/local_threading.rs`). Fixtures: fixtures/bt3746stateful_while_{value,actor}.bt."
     },
     {
@@ -28697,19 +28702,26 @@
         "check:",
         "concurrent",
         "extends",
+        "field",
         "gen_server",
         "genserver",
         "inherit",
         "inheritance",
+        "instance variable",
+        "member",
         "mutate",
         "mutation",
         "process",
+        "property",
         "run",
         "runEmptyBody",
+        "runFieldCondition",
+        "runSelfSendBody",
+        "runWhileFalse",
         "set",
         "subclassing"
       ],
-      "source": "// BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a\n// method local, in an actor instance method, with a stateful condition (it\n// sends to `self`). A plain condition write, or any condition write in a\n// class method, is a compile error (BT-3782, ADR 0131 §6). See\n// stdlib/test/bt3746stateful_while_test.bt.\n\nActor subclass: Bt3746StatefulWhileActor\n\n  check: n => n < 3\n\n  run =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [u := u + 1]\n    #[t, u]\n\n  runEmptyBody =>\n    t := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [nil]\n    t",
+      "source": "// BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a\n// method local, in an actor instance method, with a stateful condition (it\n// sends to `self`). A plain condition write, or any condition write in a\n// class method, is a compile error (BT-3782, ADR 0131 §6). See\n// stdlib/test/bt3746stateful_while_test.bt.\n\nActor subclass: Bt3746StatefulWhileActor\n  state: n = 0\n\n  check: m => m < 3\n\n  run =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [u := u + 1]\n    #[t, u]\n\n  runEmptyBody =>\n    t := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [nil]\n    t\n\n  // BT-3845: the other accepted shapes — `whileFalse:`, a field-writing\n  // condition, and a body that writes a local and sends to `self`.\n  runWhileFalse =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      (self check: t) not\n    ] whileFalse: [u := u + 1]\n    #[t, u]\n\n  runFieldCondition =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self.n := t\n      t < 3\n    ] whileTrue: [u := u + 1]\n    #[t, u, self.n]\n\n  runSelfSendBody =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ]\n      whileTrue: [\n        u := u + 1\n        self check: u\n      ]\n    #[t, u]",
       "explanation": "BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a method local, in an actor instance method, with a stateful condition (it sends to `self`). A plain condition write, or any condition write in a class method, is a compile error (BT-3782, ADR 0131 §6). See stdlib/test/bt3746stateful_while_test.bt."
     },
     {
@@ -28730,11 +28742,13 @@
         "mutation",
         "run",
         "runEmptyBody",
+        "runSelfSendBody",
+        "runWhileFalse",
         "set",
         "subclassing",
         "value"
       ],
-      "source": "// BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a\n// method local, in a value-type method, with a stateful condition (it sends\n// to `self`). A plain condition write is a compile error (BT-3782, ADR 0131\n// §6). See stdlib/test/bt3746stateful_while_test.bt.\n\nValue subclass: Bt3746StatefulWhileValue\n\n  check: n => n < 3\n\n  run =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [u := u + 1]\n    #[t, u]\n\n  runEmptyBody =>\n    t := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [nil]\n    t",
+      "source": "// BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a\n// method local, in a value-type method, with a stateful condition (it sends\n// to `self`). A plain condition write is a compile error (BT-3782, ADR 0131\n// §6). See stdlib/test/bt3746stateful_while_test.bt.\n\nValue subclass: Bt3746StatefulWhileValue\n\n  check: n => n < 3\n\n  run =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [u := u + 1]\n    #[t, u]\n\n  runEmptyBody =>\n    t := 0\n    [\n      t := t + 1\n      self check: t\n    ] whileTrue: [nil]\n    t\n\n  // BT-3845: the other accepted shapes — `whileFalse:`, and a body that\n  // writes a local and sends to `self` alongside the stateful condition.\n  runWhileFalse =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      (self check: t) not\n    ] whileFalse: [u := u + 1]\n    #[t, u]\n\n  runSelfSendBody =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      self check: t\n    ]\n      whileTrue: [\n        u := u + 1\n        self check: u\n      ]\n    #[t, u]",
       "explanation": "BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a method local, in a value-type method, with a stateful condition (it sends to `self`). A plain condition write is a compile error (BT-3782, ADR 0131 §6). See stdlib/test/bt3746stateful_while_test.bt."
     },
     {
