@@ -103,9 +103,11 @@ jobs:
             echo '__BTPROMPTEOF__'
           } >> "$GITHUB_OUTPUT"
 
+      # The key is referenced as ${LINEAR_API_KEY} (Claude Code expands env vars in
+      # MCP headers) and set only on the action step, so it is not written to disk.
       - name: Write Linear MCP config
         run: |
-          cat > "${RUNNER_TEMP}/linear-mcp.json" <<JSON
+          cat > "${RUNNER_TEMP}/linear-mcp.json" <<'JSON'
           {
             "mcpServers": {
               "linear": {
@@ -116,21 +118,33 @@ jobs:
             }
           }
           JSON
-        env:
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
 
       - name: Triage with Claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Read-only on the repo and the evidence; it may build and run the
-          # reproduction, and use Linear to search for duplicates and file one
-          # issue. No git write access, no arbitrary shell, no GitHub access.
+          # Trust boundary: the agent reads untrusted data (logs, fuzz inputs, fuzzed
+          # source), so the tool list is kept small. It can read files with the Read,
+          # Grep and Glob tools (not /proc), write only under triage/, run only
+          # cargo fuzz/test/build, just and read-only git, and use the Linear
+          # issue tools. Not allowed: find, cat, other shell, git writes, the web.
+          # `cargo` still executes this repo's build scripts (the checked-out
+          # default-branch commit, which the agent cannot modify), and the OAuth token
+          # and Linear key are in the job's environment, so injected instructions
+          # could in principle still reach them through those tools; that residual
+          # risk is why the prompt marks all fetched data as untrusted.
           claude_args: >-
             --max-turns 60
             --mcp-config ${{ runner.temp }}/linear-mcp.json
-            --allowedTools "Read,Grep,Glob,Write,Bash(cargo:*),Bash(just:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+            --allowedTools "Read,Grep,Glob,Write(triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+            --disallowedTools "Read(//proc/**),Read(//home/runner/work/_temp/**)"
           prompt: ${{ steps.load_prompt.outputs.prompt }}
+
+      - name: Remove Linear MCP config
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/linear-mcp.json"
 
       - name: Add to job summary
         if: always()
