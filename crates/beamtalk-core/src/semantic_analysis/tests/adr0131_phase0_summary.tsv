@@ -10,12 +10,15 @@ statement	block-value	value	42	0	0
 statement	detect-ifnone	actor	38	30	14
 statement	detect-ifnone	class	86	0	0
 statement	detect-ifnone	value	76	0	0
+statement	detect-plain	actor	31	9	7
+statement	detect-plain	class	46	0	0
+statement	detect-plain	value	41	0	0
 statement	enumeration	actor	69	43	0
 statement	enumeration	class	32	66	0
 statement	enumeration	value	24	52	0
-statement	evaluated-block	actor	53	0	0
-statement	evaluated-block	class	32	4	0
-statement	evaluated-block	value	32	4	0
+statement	evaluated-block	actor	56	0	0
+statement	evaluated-block	class	34	4	0
+statement	evaluated-block	value	34	4	0
 statement	keyed-do	actor	51	0	0
 statement	keyed-do	class	40	0	0
 statement	keyed-do	value	35	0	0
@@ -34,46 +37,50 @@ statement-group	arm-loop-mix	enumeration	value	4
 statement-group	evaluated-block	evaluated-block	class	4
 statement-group	evaluated-block	evaluated-block	value	4
 statement-group	handler	detect-ifnone	actor	4
+statement-group	handler	detect-plain	actor	2
 statement-group	handler	enumeration	actor	4
 statement-group	handler	enumeration	class	4
 statement-group	handler	enumeration	value	6
 statement-group	loop-body	detect-ifnone	actor	18
+statement-group	loop-body	detect-plain	actor	6
 statement-group	loop-body	enumeration	actor	20
 statement-group	loop-body	enumeration	class	15
 statement-group	loop-body	enumeration	value	13
 statement-group	method-body	enumeration	class	5
 statement-group	method-body	enumeration	value	3
 statement-group	protected-body	detect-ifnone	actor	12
+statement-group	protected-body	detect-plain	actor	6
 statement-group	protected-body	enumeration	actor	11
 statement-group	protected-body	enumeration	class	13
 statement-group	protected-body	enumeration	value	9
 statement-group	three-deep	detect-ifnone	actor	6
+statement-group	three-deep	detect-plain	actor	2
 statement-group	three-deep	enumeration	actor	4
 statement-group	three-deep	enumeration	class	8
 statement-group	three-deep	enumeration	value	8
-operand	arg	actor	54	33	11	10	30	3
-operand	arg	class	54	48	6	0	48	0
-operand	arg	value	54	48	6	0	48	0
-operand	assign	actor	54	41	3	10	33	8
-operand	assign	class	54	50	4	0	48	2
-operand	assign	value	54	50	4	0	48	2
-operand	cascade	actor	54	12	42	0	0	12
-operand	cascade	class	54	9	39	6	0	9
-operand	cascade	value	54	12	39	3	0	12
-operand	field	actor	54	39	5	10	32	7
-operand	field	class	54	48	6	0	48	0
-operand	interp	actor	54	12	42	0	0	12
-operand	interp	class	54	9	39	6	0	9
-operand	interp	value	54	12	39	3	0	12
-operand	literal	actor	54	33	11	10	30	3
-operand	literal	class	54	48	6	0	48	0
-operand	literal	value	54	48	6	0	48	0
-operand	match	actor	54	12	42	0	0	12
-operand	match	class	54	9	45	0	0	9
-operand	match	value	54	12	42	0	0	12
-operand	operand	actor	54	33	11	10	30	3
-operand	operand	class	54	48	6	0	48	0
-operand	operand	value	54	48	6	0	48	0
-operand	recv	actor	54	33	11	10	30	3
-operand	recv	class	54	48	6	0	48	0
-operand	recv	value	54	48	6	0	48	0
+operand	arg	actor	57	34	12	11	31	3
+operand	arg	class	57	51	6	0	51	0
+operand	arg	value	57	51	6	0	51	0
+operand	assign	actor	57	43	3	11	35	8
+operand	assign	class	57	53	4	0	51	2
+operand	assign	value	57	53	4	0	51	2
+operand	cascade	actor	57	12	45	0	0	12
+operand	cascade	class	57	9	42	6	0	9
+operand	cascade	value	57	12	42	3	0	12
+operand	field	actor	57	41	5	11	33	8
+operand	field	class	57	51	6	0	51	0
+operand	interp	actor	57	12	45	0	0	12
+operand	interp	class	57	9	42	6	0	9
+operand	interp	value	57	12	42	3	0	12
+operand	literal	actor	57	34	12	11	31	3
+operand	literal	class	57	51	6	0	51	0
+operand	literal	value	57	51	6	0	51	0
+operand	match	actor	57	12	45	0	0	12
+operand	match	class	57	9	48	0	0	9
+operand	match	value	57	12	45	0	0	12
+operand	operand	actor	57	34	12	11	31	3
+operand	operand	class	57	51	6	0	51	0
+operand	operand	value	57	51	6	0	51	0
+operand	recv	actor	57	34	12	11	31	3
+operand	recv	class	57	51	6	0	51	0
+operand	recv	value	57	51	6	0	51	0

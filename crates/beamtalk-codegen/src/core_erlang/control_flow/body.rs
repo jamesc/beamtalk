@@ -1122,7 +1122,8 @@ impl CoreErlangGenerator {
 
         // FoldlDetect — update found-item accumulator on first match.
         // Accumulator is {FoundItem, FoundFlag, StateVars...}.
-        // Only update FoundItem when pred=true AND FoundFlag='false' (first match only).
+        // The fold lambda skips the body once FoundFlag is 'true' (`skip_when_decided`,
+        // BT-3805), so a predicate hit here is always the first match.
         if let BodyKind::FoldlDetect { item_var } = kind {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
@@ -1131,13 +1132,11 @@ impl CoreErlangGenerator {
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                            " of <'true'> when 'true' -> {",
                             leaf::var(item_var.clone()),
                             ", 'true', ",
                             vars_doc.clone(),
-                            "} <'true'> when 'true' -> {FoundItem, 'true', ",
-                            vars_doc.clone(),
-                            "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                            "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
                             vars_doc,
                             "} end",
                         ],
@@ -1153,13 +1152,11 @@ impl CoreErlangGenerator {
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                            " of <'true'> when 'true' -> {",
                             leaf::var(item_var.clone()),
                             ", 'true', ",
                             leaf::var(final_state.clone()),
-                            "} <'true'> when 'true' -> {FoundItem, 'true', ",
-                            leaf::var(final_state.clone()),
-                            "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                            "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
                             leaf::var(final_state),
                             "} end",
                         ],

@@ -933,10 +933,10 @@ reproducible and every PR moves it:
   `beamtalk test` pipeline with the position check bypassed (a build with the
   `beamtalk-core/measure-bypass` cargo feature reads env
   `BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`), runs it on a BEAM and compares it
-  with the ADR-expected answer. The statement matrix is the 2,693 class,
+  with the ADR-expected answer. The statement matrix is the 2,834 class,
   value-type and actor cells of `adr0131_statement_probes.tsv` that are not
   `gap` lines (every looping role runs its body twice); the operand matrix is
-  1,404 cells (a construct as the value of an assignment or field assignment, a
+  1,482 cells (a construct as the value of an assignment or field assignment, a
   receiver, an argument, a binary operand, a cascade part, a literal element, a
   `match:` subject or an interpolation, in a method body, an arm and a `do:`
   body). Results: `adr0131_statement_measured.tsv`, `adr0131_operand_measured.tsv`
@@ -946,8 +946,7 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (after BT-3841 PR 5, the evaluated
-literal block: 213; 422 after PR 4; 520 after PR
+Statement cells that do not answer right (after BT-3841 PR 6, the evaluated literal block: 229; after PR 5: 443, of which 21 are cells of the plain-`detect:` kind added to the matrix there; 422 after PR 4; 520 after PR
 3, 571 after PR
 2, 663 after PR 1's three-deep roles, 595 in the 5a population), by family and
 method context, with the work each needs:
@@ -955,18 +954,19 @@ method context, with the work each needs:
 | Family | class | value | actor | total | Classification |
 |---|---|---|---|---|---|
 | `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
-| `detect:ifNone:` search or handler | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
-| `[...] value` as a statement | 0 | 0 | 0 | 0 | done in PR 5 (was 58 / 39 / 35 = 132): an evaluated literal block is an arm-like producer, below |
-| any statement inside a `[...] value` body | 4 | 4 | 0 | 8 | done in PR 5 except the 8 cells whose construct is `eachWithIndex:` / `do:separatedBy:` (was 36 / 36 / 13 = 85); they wait for the enumeration producer |
+| `detect:ifNone:` search or handler (and plain `detect:`, same fold; 241 plain-detect probe cells measured, class and value right outside the permanent shapes) | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
+| `[...] value` as a statement | 0 | 0 | 0 | 0 | done in PR 6 (was 58 / 39 / 35 = 132): an evaluated literal block is an arm-like producer, below |
+| any statement inside a `[...] value` body | 4 | 4 | 0 | 8 | done in PR 6 except the 8 cells whose construct is `eachWithIndex:` / `do:separatedBy:` (was 38 / 38 / 14 = 90); they wait for the enumeration producer |
 | `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
 | `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3 as producers answering their boolean; PR 4 added the early exit |
-| **total** | **70** | **56** | **87** | **213** | |
+| plain `detect:` (kind added in PR 5) | 0 | 0 | 16 | 16 | measured right in class and value everywhere but the permanent shapes; the actor cells wait with `detect:ifNone:` |
+| **total** | **70** | **56** | **103** | **229** | |
 
-By block role: loop bodies 66, protected bodies 45, three-deep nestings 26,
-arms 26, handlers 18, arm/loop mixes 16, the method body 8, evaluated blocks 8
-(117 / 72 / 36 / 41 / 30 / 29 / 12 / 85 before PR 5).
+By block role: loop bodies 72, protected bodies 51, three-deep nestings 28,
+arms 26, handlers 20, arm/loop mixes 16, the method body 8, evaluated blocks 8
+(123 / 78 / 38 / 41 / 32 / 29 / 12 / 90 before PR 6).
 
-**Amendment, BT-3841 PR 5: an evaluated literal block is an arm-like producer.**
+**Amendment, BT-3841 PR 6: an evaluated literal block is an arm-like producer.**
 `[...] value` (the unary `value` sent to a block literal with no parameters) is
 the degenerate conditional: one arm that always runs. `literal_block_value_arm`
 (`block_facts.rs`) is its one site rule, and `conditional_arm_blocks` returns the
@@ -981,8 +981,19 @@ peeled), so its class is statically `Block` and no other class's `value` can run
 `value:` / `value:value:` / `valueWithArguments:` bind arguments outside the frame
 and keep their legacy lowering and rows, as does the REPL root. The block's
 writes are also the enclosing block's writes for the mutation analysis
-(`analyze_expression` propagates them, like an `on:do:` receiver), so a `do:` body
-whose only outer write is inside a nested `[...] value` is threaded.
+(`analyze_expression` and the cross-scope collector read it like an `on:do:`
+receiver), so a `do:` body whose only outer write is inside a nested `[...] value`
+is threaded. The operand matrix moved too: the `value` kind went from 1 to 61 cells
+answering right (assignment, field, receiver, argument, operand, literal), the
+cascade, interpolation and `match:` positions stay rejected like a conditional's.
+
+Residual `gap` cells (BT-3776, a construct writing only a local of its own block):
+of the 134 `gap` cells of this family, 116 now answer right; two still answer wrong
+and are accepted (`iterIter` and `armIterIter` with a `local` target in an actor
+method: the outer `do:` does not see a write-only `t := u` behind a nested `do:`,
+the same failure for all 31 kinds there, not specific to `value`), and sixteen are
+`eachWithIndex:` / `do:separatedBy:` inside a `[...] value` body (twelve rejected,
+four accepted in value-type methods until the enumeration producer lands).
 
 **Amendment, BT-3841 PR 4: the satisfy and detect folds exit early.** The
 inline fold of a writing `anySatisfy:`, `allSatisfy:`, `detect:` and
@@ -1005,14 +1016,14 @@ in a `do:` body that the coarse rows accepted and that raises `bad argument` in
 a value-type method); the REPL keeps its coarse rows, unmeasured past depth
 one, until BT-3823.
 
-Operand cells (1,404): 783 answer right, 545 wrong, 76 `erlc`; Phase 0 accepts
-668, all of them right (zero unsound), and rejects the 621 that do not answer
-right plus 115 that do. By position, the cells that do not answer right:
-assignment 29, field assignment 26, receiver 41, argument 41, binary operand
-41, literal element 41, cascade part 134, interpolation 134, `match:` subject
-134. The first six are (a): the operand sites `sequenced_operand_sites` and
+Operand cells (1,482): 824 answer right, 576 wrong, 82 `erlc`; Phase 0 accepts
+708, all of them right (zero unsound), and rejects the 658 that do not answer
+right plus 116 that do. By position, the cells that do not answer right:
+assignment 30, field assignment 27, receiver 43, argument 43, binary operand
+43, literal element 43, cascade part 143, interpolation 143, `match:` subject
+143. The first six are (a): the operand sites `sequenced_operand_sites` and
 `repl_operand_sites` already name for some constructs extend to the rest. The
-last three (402 cells) are the likely permanent §6 rejections: a cascade
+last three (429 cells) are the likely permanent §6 rejections: a cascade
 shares one receiver across parts, an interpolation builds one binary and a
 `match:` subject is a single expression, so there is no statement boundary for
 a `LocalRebind` prelude to sit on without rewriting the expression; they stay

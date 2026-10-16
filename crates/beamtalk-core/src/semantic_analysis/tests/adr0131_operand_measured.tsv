@@ -22,6 +22,7 @@ class	top	assign	kv	right
 class	top	assign	dinH	right
 class	top	assign	dinS	right
 class	top	assign	any	right
+class	top	assign	det	right
 class	top	field	do	right
 class	top	field	while	right
 class	top	field	times	right
@@ -40,6 +41,7 @@ class	top	field	kv	right
 class	top	field	dinH	right
 class	top	field	dinS	right
 class	top	field	any	right
+class	top	field	det	right
 class	top	recv	do	right
 class	top	recv	while	right
 class	top	recv	times	right
@@ -58,6 +60,7 @@ class	top	recv	kv	right
 class	top	recv	dinH	right
 class	top	recv	dinS	right
 class	top	recv	any	right
+class	top	recv	det	right
 class	top	arg	do	right
 class	top	arg	while	right
 class	top	arg	times	right
@@ -76,6 +79,7 @@ class	top	arg	kv	right
 class	top	arg	dinH	right
 class	top	arg	dinS	right
 class	top	arg	any	right
+class	top	arg	det	right
 class	top	operand	do	right
 class	top	operand	while	right
 class	top	operand	times	right
@@ -94,6 +98,7 @@ class	top	operand	kv	right
 class	top	operand	dinH	right
 class	top	operand	dinS	right
 class	top	operand	any	right
+class	top	operand	det	right
 class	top	cascade	do	wrong
 class	top	cascade	while	wrong
 class	top	cascade	times	wrong
@@ -112,6 +117,7 @@ class	top	cascade	kv	wrong
 class	top	cascade	dinH	wrong
 class	top	cascade	dinS	wrong
 class	top	cascade	any	wrong
+class	top	cascade	det	wrong
 class	top	literal	do	right
 class	top	literal	while	right
 class	top	literal	times	right
@@ -130,6 +136,7 @@ class	top	literal	kv	right
 class	top	literal	dinH	right
 class	top	literal	dinS	right
 class	top	literal	any	right
+class	top	literal	det	right
 class	top	match	do	wrong
 class	top	match	while	wrong
 class	top	match	times	wrong
@@ -148,6 +155,7 @@ class	top	match	kv	wrong
 class	top	match	dinH	wrong
 class	top	match	dinS	wrong
 class	top	match	any	wrong
+class	top	match	det	wrong
 class	top	interp	do	wrong
 class	top	interp	while	wrong
 class	top	interp	times	wrong
@@ -166,6 +174,7 @@ class	top	interp	kv	wrong
 class	top	interp	dinH	wrong
 class	top	interp	dinS	wrong
 class	top	interp	any	wrong
+class	top	interp	det	wrong
 class	arm	assign	do	right
 class	arm	assign	while	right
 class	arm	assign	times	right
@@ -184,6 +193,7 @@ class	arm	assign	kv	right
 class	arm	assign	dinH	right
 class	arm	assign	dinS	right
 class	arm	assign	any	right
+class	arm	assign	det	right
 class	arm	field	do	right
 class	arm	field	while	right
 class	arm	field	times	right
@@ -202,6 +212,7 @@ class	arm	field	kv	right
 class	arm	field	dinH	right
 class	arm	field	dinS	right
 class	arm	field	any	right
+class	arm	field	det	right
 class	arm	recv	do	right
 class	arm	recv	while	right
 class	arm	recv	times	right
@@ -220,6 +231,7 @@ class	arm	recv	kv	right
 class	arm	recv	dinH	right
 class	arm	recv	dinS	right
 class	arm	recv	any	right
+class	arm	recv	det	right
 class	arm	arg	do	right
 class	arm	arg	while	right
 class	arm	arg	times	right
@@ -238,6 +250,7 @@ class	arm	arg	kv	right
 class	arm	arg	dinH	right
 class	arm	arg	dinS	right
 class	arm	arg	any	right
+class	arm	arg	det	right
 class	arm	operand	do	right
 class	arm	operand	while	right
 class	arm	operand	times	right
@@ -256,6 +269,7 @@ class	arm	operand	kv	right
 class	arm	operand	dinH	right
 class	arm	operand	dinS	right
 class	arm	operand	any	right
+class	arm	operand	det	right
 class	arm	cascade	do	wrong
 class	arm	cascade	while	wrong
 class	arm	cascade	times	wrong
@@ -274,6 +288,7 @@ class	arm	cascade	kv	wrong
 class	arm	cascade	dinH	wrong
 class	arm	cascade	dinS	wrong
 class	arm	cascade	any	wrong
+class	arm	cascade	det	wrong
 class	arm	literal	do	right
 class	arm	literal	while	right
 class	arm	literal	times	right
@@ -292,6 +307,7 @@ class	arm	literal	kv	right
 class	arm	literal	dinH	right
 class	arm	literal	dinS	right
 class	arm	literal	any	right
+class	arm	literal	det	right
 class	arm	match	do	wrong
 class	arm	match	while	wrong
 class	arm	match	times	wrong
@@ -310,6 +326,7 @@ class	arm	match	kv	wrong
 class	arm	match	dinH	wrong
 class	arm	match	dinS	wrong
 class	arm	match	any	wrong
+class	arm	match	det	wrong
 class	arm	interp	do	wrong
 class	arm	interp	while	wrong
 class	arm	interp	times	wrong
@@ -328,6 +345,7 @@ class	arm	interp	kv	wrong
 class	arm	interp	dinH	wrong
 class	arm	interp	dinS	wrong
 class	arm	interp	any	wrong
+class	arm	interp	det	wrong
 class	iter	assign	do	right
 class	iter	assign	while	right
 class	iter	assign	times	right
@@ -346,6 +364,7 @@ class	iter	assign	kv	right
 class	iter	assign	dinH	right
 class	iter	assign	dinS	right
 class	iter	assign	any	right
+class	iter	assign	det	right
 class	iter	field	do	right
 class	iter	field	while	right
 class	iter	field	times	right
@@ -364,6 +383,7 @@ class	iter	field	kv	right
 class	iter	field	dinH	right
 class	iter	field	dinS	right
 class	iter	field	any	right
+class	iter	field	det	right
 class	iter	recv	do	right
 class	iter	recv	while	right
 class	iter	recv	times	right
@@ -382,6 +402,7 @@ class	iter	recv	kv	right
 class	iter	recv	dinH	right
 class	iter	recv	dinS	right
 class	iter	recv	any	right
+class	iter	recv	det	right
 class	iter	arg	do	right
 class	iter	arg	while	right
 class	iter	arg	times	right
@@ -400,6 +421,7 @@ class	iter	arg	kv	right
 class	iter	arg	dinH	right
 class	iter	arg	dinS	right
 class	iter	arg	any	right
+class	iter	arg	det	right
 class	iter	operand	do	right
 class	iter	operand	while	right
 class	iter	operand	times	right
@@ -418,6 +440,7 @@ class	iter	operand	kv	right
 class	iter	operand	dinH	right
 class	iter	operand	dinS	right
 class	iter	operand	any	right
+class	iter	operand	det	right
 class	iter	cascade	do	wrong
 class	iter	cascade	while	wrong
 class	iter	cascade	times	wrong
@@ -436,6 +459,7 @@ class	iter	cascade	kv	wrong
 class	iter	cascade	dinH	wrong
 class	iter	cascade	dinS	wrong
 class	iter	cascade	any	wrong
+class	iter	cascade	det	wrong
 class	iter	literal	do	right
 class	iter	literal	while	right
 class	iter	literal	times	right
@@ -454,6 +478,7 @@ class	iter	literal	kv	right
 class	iter	literal	dinH	right
 class	iter	literal	dinS	right
 class	iter	literal	any	right
+class	iter	literal	det	right
 class	iter	match	do	wrong
 class	iter	match	while	wrong
 class	iter	match	times	wrong
@@ -472,6 +497,7 @@ class	iter	match	kv	wrong
 class	iter	match	dinH	wrong
 class	iter	match	dinS	wrong
 class	iter	match	any	wrong
+class	iter	match	det	wrong
 class	iter	interp	do	wrong
 class	iter	interp	while	wrong
 class	iter	interp	times	wrong
@@ -490,6 +516,7 @@ class	iter	interp	kv	wrong
 class	iter	interp	dinH	wrong
 class	iter	interp	dinS	wrong
 class	iter	interp	any	wrong
+class	iter	interp	det	wrong
 value	top	assign	do	right
 value	top	assign	while	right
 value	top	assign	times	right
@@ -508,6 +535,7 @@ value	top	assign	kv	right
 value	top	assign	dinH	right
 value	top	assign	dinS	right
 value	top	assign	any	right
+value	top	assign	det	right
 value	top	recv	do	right
 value	top	recv	while	right
 value	top	recv	times	right
@@ -526,6 +554,7 @@ value	top	recv	kv	right
 value	top	recv	dinH	right
 value	top	recv	dinS	right
 value	top	recv	any	right
+value	top	recv	det	right
 value	top	arg	do	right
 value	top	arg	while	right
 value	top	arg	times	right
@@ -544,6 +573,7 @@ value	top	arg	kv	right
 value	top	arg	dinH	right
 value	top	arg	dinS	right
 value	top	arg	any	right
+value	top	arg	det	right
 value	top	operand	do	right
 value	top	operand	while	right
 value	top	operand	times	right
@@ -562,6 +592,7 @@ value	top	operand	kv	right
 value	top	operand	dinH	right
 value	top	operand	dinS	right
 value	top	operand	any	right
+value	top	operand	det	right
 value	top	cascade	do	wrong
 value	top	cascade	while	wrong
 value	top	cascade	times	wrong
@@ -580,6 +611,7 @@ value	top	cascade	kv	wrong
 value	top	cascade	dinH	wrong
 value	top	cascade	dinS	wrong
 value	top	cascade	any	wrong
+value	top	cascade	det	wrong
 value	top	literal	do	right
 value	top	literal	while	right
 value	top	literal	times	right
@@ -598,6 +630,7 @@ value	top	literal	kv	right
 value	top	literal	dinH	right
 value	top	literal	dinS	right
 value	top	literal	any	right
+value	top	literal	det	right
 value	top	match	do	wrong
 value	top	match	while	wrong
 value	top	match	times	wrong
@@ -616,6 +649,7 @@ value	top	match	kv	wrong
 value	top	match	dinH	wrong
 value	top	match	dinS	wrong
 value	top	match	any	wrong
+value	top	match	det	wrong
 value	top	interp	do	wrong
 value	top	interp	while	wrong
 value	top	interp	times	wrong
@@ -634,6 +668,7 @@ value	top	interp	kv	wrong
 value	top	interp	dinH	wrong
 value	top	interp	dinS	wrong
 value	top	interp	any	wrong
+value	top	interp	det	wrong
 value	arm	assign	do	right
 value	arm	assign	while	right
 value	arm	assign	times	right
@@ -652,6 +687,7 @@ value	arm	assign	kv	right
 value	arm	assign	dinH	right
 value	arm	assign	dinS	right
 value	arm	assign	any	right
+value	arm	assign	det	right
 value	arm	recv	do	right
 value	arm	recv	while	right
 value	arm	recv	times	right
@@ -670,6 +706,7 @@ value	arm	recv	kv	right
 value	arm	recv	dinH	right
 value	arm	recv	dinS	right
 value	arm	recv	any	right
+value	arm	recv	det	right
 value	arm	arg	do	right
 value	arm	arg	while	right
 value	arm	arg	times	right
@@ -688,6 +725,7 @@ value	arm	arg	kv	right
 value	arm	arg	dinH	right
 value	arm	arg	dinS	right
 value	arm	arg	any	right
+value	arm	arg	det	right
 value	arm	operand	do	right
 value	arm	operand	while	right
 value	arm	operand	times	right
@@ -706,6 +744,7 @@ value	arm	operand	kv	right
 value	arm	operand	dinH	right
 value	arm	operand	dinS	right
 value	arm	operand	any	right
+value	arm	operand	det	right
 value	arm	cascade	do	wrong
 value	arm	cascade	while	wrong
 value	arm	cascade	times	wrong
@@ -724,6 +763,7 @@ value	arm	cascade	kv	wrong
 value	arm	cascade	dinH	wrong
 value	arm	cascade	dinS	wrong
 value	arm	cascade	any	wrong
+value	arm	cascade	det	wrong
 value	arm	literal	do	right
 value	arm	literal	while	right
 value	arm	literal	times	right
@@ -742,6 +782,7 @@ value	arm	literal	kv	right
 value	arm	literal	dinH	right
 value	arm	literal	dinS	right
 value	arm	literal	any	right
+value	arm	literal	det	right
 value	arm	match	do	wrong
 value	arm	match	while	wrong
 value	arm	match	times	wrong
@@ -760,6 +801,7 @@ value	arm	match	kv	wrong
 value	arm	match	dinH	wrong
 value	arm	match	dinS	wrong
 value	arm	match	any	wrong
+value	arm	match	det	wrong
 value	arm	interp	do	wrong
 value	arm	interp	while	wrong
 value	arm	interp	times	wrong
@@ -778,6 +820,7 @@ value	arm	interp	kv	wrong
 value	arm	interp	dinH	wrong
 value	arm	interp	dinS	wrong
 value	arm	interp	any	wrong
+value	arm	interp	det	wrong
 value	iter	assign	do	right
 value	iter	assign	while	right
 value	iter	assign	times	right
@@ -796,6 +839,7 @@ value	iter	assign	kv	right
 value	iter	assign	dinH	right
 value	iter	assign	dinS	right
 value	iter	assign	any	right
+value	iter	assign	det	right
 value	iter	recv	do	right
 value	iter	recv	while	right
 value	iter	recv	times	right
@@ -814,6 +858,7 @@ value	iter	recv	kv	right
 value	iter	recv	dinH	right
 value	iter	recv	dinS	right
 value	iter	recv	any	right
+value	iter	recv	det	right
 value	iter	arg	do	right
 value	iter	arg	while	right
 value	iter	arg	times	right
@@ -832,6 +877,7 @@ value	iter	arg	kv	right
 value	iter	arg	dinH	right
 value	iter	arg	dinS	right
 value	iter	arg	any	right
+value	iter	arg	det	right
 value	iter	operand	do	right
 value	iter	operand	while	right
 value	iter	operand	times	right
@@ -850,6 +896,7 @@ value	iter	operand	kv	right
 value	iter	operand	dinH	right
 value	iter	operand	dinS	right
 value	iter	operand	any	right
+value	iter	operand	det	right
 value	iter	cascade	do	wrong
 value	iter	cascade	while	wrong
 value	iter	cascade	times	wrong
@@ -868,6 +915,7 @@ value	iter	cascade	kv	wrong
 value	iter	cascade	dinH	wrong
 value	iter	cascade	dinS	wrong
 value	iter	cascade	any	wrong
+value	iter	cascade	det	wrong
 value	iter	literal	do	right
 value	iter	literal	while	right
 value	iter	literal	times	right
@@ -886,6 +934,7 @@ value	iter	literal	kv	right
 value	iter	literal	dinH	right
 value	iter	literal	dinS	right
 value	iter	literal	any	right
+value	iter	literal	det	right
 value	iter	match	do	wrong
 value	iter	match	while	wrong
 value	iter	match	times	wrong
@@ -904,6 +953,7 @@ value	iter	match	kv	wrong
 value	iter	match	dinH	wrong
 value	iter	match	dinS	wrong
 value	iter	match	any	wrong
+value	iter	match	det	wrong
 value	iter	interp	do	wrong
 value	iter	interp	while	wrong
 value	iter	interp	times	wrong
@@ -922,6 +972,7 @@ value	iter	interp	kv	wrong
 value	iter	interp	dinH	wrong
 value	iter	interp	dinS	wrong
 value	iter	interp	any	wrong
+value	iter	interp	det	wrong
 actor	top	assign	do	right
 actor	top	assign	while	right
 actor	top	assign	times	right
@@ -940,6 +991,7 @@ actor	top	assign	kv	right
 actor	top	assign	dinH	right
 actor	top	assign	dinS	right
 actor	top	assign	any	right
+actor	top	assign	det	right
 actor	top	field	do	right
 actor	top	field	while	right
 actor	top	field	times	right
@@ -958,6 +1010,7 @@ actor	top	field	kv	right
 actor	top	field	dinH	right
 actor	top	field	dinS	right
 actor	top	field	any	right
+actor	top	field	det	right
 actor	top	recv	do	right
 actor	top	recv	while	right
 actor	top	recv	times	right
@@ -976,6 +1029,7 @@ actor	top	recv	kv	right
 actor	top	recv	dinH	right
 actor	top	recv	dinS	right
 actor	top	recv	any	right
+actor	top	recv	det	right
 actor	top	arg	do	right
 actor	top	arg	while	right
 actor	top	arg	times	right
@@ -994,6 +1048,7 @@ actor	top	arg	kv	right
 actor	top	arg	dinH	right
 actor	top	arg	dinS	right
 actor	top	arg	any	right
+actor	top	arg	det	right
 actor	top	operand	do	right
 actor	top	operand	while	right
 actor	top	operand	times	right
@@ -1012,6 +1067,7 @@ actor	top	operand	kv	right
 actor	top	operand	dinH	right
 actor	top	operand	dinS	right
 actor	top	operand	any	right
+actor	top	operand	det	right
 actor	top	cascade	do	wrong
 actor	top	cascade	while	wrong
 actor	top	cascade	times	wrong
@@ -1030,6 +1086,7 @@ actor	top	cascade	kv	wrong
 actor	top	cascade	dinH	wrong
 actor	top	cascade	dinS	wrong
 actor	top	cascade	any	wrong
+actor	top	cascade	det	wrong
 actor	top	literal	do	right
 actor	top	literal	while	right
 actor	top	literal	times	right
@@ -1048,6 +1105,7 @@ actor	top	literal	kv	right
 actor	top	literal	dinH	right
 actor	top	literal	dinS	right
 actor	top	literal	any	right
+actor	top	literal	det	right
 actor	top	match	do	wrong
 actor	top	match	while	wrong
 actor	top	match	times	wrong
@@ -1066,6 +1124,7 @@ actor	top	match	kv	wrong
 actor	top	match	dinH	wrong
 actor	top	match	dinS	wrong
 actor	top	match	any	wrong
+actor	top	match	det	wrong
 actor	top	interp	do	wrong
 actor	top	interp	while	wrong
 actor	top	interp	times	wrong
@@ -1084,6 +1143,7 @@ actor	top	interp	kv	wrong
 actor	top	interp	dinH	wrong
 actor	top	interp	dinS	wrong
 actor	top	interp	any	wrong
+actor	top	interp	det	wrong
 actor	arm	assign	do	right
 actor	arm	assign	while	right
 actor	arm	assign	times	right
@@ -1102,6 +1162,7 @@ actor	arm	assign	kv	right
 actor	arm	assign	dinH	right
 actor	arm	assign	dinS	right
 actor	arm	assign	any	right
+actor	arm	assign	det	right
 actor	arm	field	do	right
 actor	arm	field	while	right
 actor	arm	field	times	right
@@ -1120,6 +1181,7 @@ actor	arm	field	kv	right
 actor	arm	field	dinH	right
 actor	arm	field	dinS	right
 actor	arm	field	any	right
+actor	arm	field	det	right
 actor	arm	recv	do	right
 actor	arm	recv	while	right
 actor	arm	recv	times	right
@@ -1138,6 +1200,7 @@ actor	arm	recv	kv	right
 actor	arm	recv	dinH	wrong
 actor	arm	recv	dinS	wrong
 actor	arm	recv	any	right
+actor	arm	recv	det	wrong
 actor	arm	arg	do	right
 actor	arm	arg	while	right
 actor	arm	arg	times	right
@@ -1156,6 +1219,7 @@ actor	arm	arg	kv	right
 actor	arm	arg	dinH	wrong
 actor	arm	arg	dinS	wrong
 actor	arm	arg	any	right
+actor	arm	arg	det	wrong
 actor	arm	operand	do	right
 actor	arm	operand	while	right
 actor	arm	operand	times	right
@@ -1174,6 +1238,7 @@ actor	arm	operand	kv	right
 actor	arm	operand	dinH	wrong
 actor	arm	operand	dinS	wrong
 actor	arm	operand	any	right
+actor	arm	operand	det	wrong
 actor	arm	cascade	do	wrong
 actor	arm	cascade	while	wrong
 actor	arm	cascade	times	wrong
@@ -1192,6 +1257,7 @@ actor	arm	cascade	kv	wrong
 actor	arm	cascade	dinH	wrong
 actor	arm	cascade	dinS	wrong
 actor	arm	cascade	any	wrong
+actor	arm	cascade	det	wrong
 actor	arm	literal	do	right
 actor	arm	literal	while	right
 actor	arm	literal	times	right
@@ -1210,6 +1276,7 @@ actor	arm	literal	kv	right
 actor	arm	literal	dinH	wrong
 actor	arm	literal	dinS	wrong
 actor	arm	literal	any	right
+actor	arm	literal	det	wrong
 actor	arm	match	do	wrong
 actor	arm	match	while	wrong
 actor	arm	match	times	wrong
@@ -1228,6 +1295,7 @@ actor	arm	match	kv	wrong
 actor	arm	match	dinH	wrong
 actor	arm	match	dinS	wrong
 actor	arm	match	any	wrong
+actor	arm	match	det	wrong
 actor	arm	interp	do	wrong
 actor	arm	interp	while	wrong
 actor	arm	interp	times	wrong
@@ -1246,6 +1314,7 @@ actor	arm	interp	kv	wrong
 actor	arm	interp	dinH	wrong
 actor	arm	interp	dinS	wrong
 actor	arm	interp	any	wrong
+actor	arm	interp	det	wrong
 actor	iter	assign	do	erlc
 actor	iter	assign	while	erlc
 actor	iter	assign	times	erlc
@@ -1264,6 +1333,7 @@ actor	iter	assign	kv	erlc
 actor	iter	assign	dinH	erlc
 actor	iter	assign	dinS	erlc
 actor	iter	assign	any	erlc
+actor	iter	assign	det	erlc
 actor	iter	field	do	erlc
 actor	iter	field	while	erlc
 actor	iter	field	times	erlc
@@ -1282,6 +1352,7 @@ actor	iter	field	kv	erlc
 actor	iter	field	dinH	erlc
 actor	iter	field	dinS	erlc
 actor	iter	field	any	erlc
+actor	iter	field	det	erlc
 actor	iter	recv	do	erlc
 actor	iter	recv	while	erlc
 actor	iter	recv	times	erlc
@@ -1300,6 +1371,7 @@ actor	iter	recv	kv	erlc
 actor	iter	recv	dinH	erlc
 actor	iter	recv	dinS	erlc
 actor	iter	recv	any	erlc
+actor	iter	recv	det	erlc
 actor	iter	arg	do	erlc
 actor	iter	arg	while	erlc
 actor	iter	arg	times	erlc
@@ -1318,6 +1390,7 @@ actor	iter	arg	kv	erlc
 actor	iter	arg	dinH	erlc
 actor	iter	arg	dinS	erlc
 actor	iter	arg	any	erlc
+actor	iter	arg	det	erlc
 actor	iter	operand	do	erlc
 actor	iter	operand	while	erlc
 actor	iter	operand	times	erlc
@@ -1336,6 +1409,7 @@ actor	iter	operand	kv	erlc
 actor	iter	operand	dinH	erlc
 actor	iter	operand	dinS	erlc
 actor	iter	operand	any	erlc
+actor	iter	operand	det	erlc
 actor	iter	cascade	do	wrong
 actor	iter	cascade	while	wrong
 actor	iter	cascade	times	wrong
@@ -1354,6 +1428,7 @@ actor	iter	cascade	kv	wrong
 actor	iter	cascade	dinH	wrong
 actor	iter	cascade	dinS	wrong
 actor	iter	cascade	any	wrong
+actor	iter	cascade	det	wrong
 actor	iter	literal	do	erlc
 actor	iter	literal	while	erlc
 actor	iter	literal	times	erlc
@@ -1372,6 +1447,7 @@ actor	iter	literal	kv	erlc
 actor	iter	literal	dinH	erlc
 actor	iter	literal	dinS	erlc
 actor	iter	literal	any	erlc
+actor	iter	literal	det	erlc
 actor	iter	match	do	wrong
 actor	iter	match	while	wrong
 actor	iter	match	times	wrong
@@ -1390,6 +1466,7 @@ actor	iter	match	kv	wrong
 actor	iter	match	dinH	wrong
 actor	iter	match	dinS	wrong
 actor	iter	match	any	wrong
+actor	iter	match	det	wrong
 actor	iter	interp	do	wrong
 actor	iter	interp	while	wrong
 actor	iter	interp	times	wrong
@@ -1408,3 +1485,4 @@ actor	iter	interp	kv	wrong
 actor	iter	interp	dinH	wrong
 actor	iter	interp	dinS	wrong
 actor	iter	interp	any	wrong
+actor	iter	interp	det	wrong

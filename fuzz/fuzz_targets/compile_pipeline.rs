@@ -49,20 +49,24 @@ fuzz_target!(|data: &[u8]| {
     let source = String::from_utf8_lossy(data);
 
     let tokens = lex_with_eof(&source);
-    let (module, _parse_diagnostics) = parse(tokens);
+    let (module, parse_diagnostics) = parse(tokens);
 
     // Success = no panic. We don't care whether analysis finds errors — most
-    // fuzzer-mutated input will fail semantic checks, and that's fine.
+    // fuzzer-mutated input will fail semantic checks, and that's fine. Analysis
+    // runs on parser-recovered ASTs too: the language service analyses them on
+    // every keystroke, so a panic there is a real finding.
     let analysis = analyse(&module);
 
-    // The real pipeline never runs codegen on a module whose analysis reported
-    // errors, and codegen's `ThreadedIr` verifier `debug_assert!`s (by design)
-    // on shapes that analysis rejects up front (e.g. the ADR 0131 Phase 0
-    // allow-set errors). Fuzzing codegen past those errors only finds
-    // unreachable panics (nightly runs 244-247), so stop here.
-    if analysis
-        .diagnostics
+    // The real compile pipeline never runs codegen on a module whose parse or
+    // analysis diagnostics include an error (`compute_diagnostics` folds the
+    // parse diagnostics in), and codegen's `ThreadedIr` verifier
+    // `debug_assert!`s (by design) on shapes those errors reject up front
+    // (e.g. the ADR 0131 Phase 0 allow-set errors, or the AST recovered from an
+    // unclosed block — nightly run 249, BT-3847). Fuzzing codegen past them only
+    // finds unreachable panics (nightly runs 244-247), so stop here.
+    if parse_diagnostics
         .iter()
+        .chain(analysis.diagnostics.iter())
         .any(|d| d.severity == Severity::Error)
     {
         return;

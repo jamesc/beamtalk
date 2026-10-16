@@ -80,6 +80,7 @@ pub fn statement_family(container: &str, kind: &str) -> &'static str {
         "ewi" | "dsb" => "enumeration",
         "kv" => "keyed-do",
         "dinS" | "dinH" => "detect-ifnone",
+        "det" => "detect-plain",
         "any" => "satisfy",
         _ => "other",
     }
@@ -407,6 +408,10 @@ pub const STATEMENT_PROBE_KINDS: &[(&str, &str, i64)] = &[
         2,
     ),
     ("any", "#(1, 2) anySatisfy: [:e | @ := @ + 1X. e > 5]", 2),
+    // Plain `detect:` that hits at the first element: the fold stops there, so
+    // the block writes once (BT-3841; the miss that raises `not_found` is
+    // covered by BUnit, a probe cannot answer after raising).
+    ("det", "#(1, 2) detect: [:e | @ := @ + 1X. e > 0]", 1),
 ];
 
 /// The block roles of the statement-position probe matrix, with `S` for the

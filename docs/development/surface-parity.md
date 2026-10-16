@@ -627,7 +627,7 @@ reports the same message at the same span. No operation is surface-specific.
   REPL; `detect:ifNone:` (search block or handler writing) joins the producer
   table in class and value-type methods, and stays rejected in nested actor
   positions until measured.
-- **`[...] value` as a producer (ADR 0131, BT-3841 PR 5).** An evaluated
+- **`[...] value` as a producer (ADR 0131, BT-3841 PR 6).** An evaluated
   literal block (`[...] value`, the unary `value` sent to a block literal with no
   parameters) whose block writes an outer local is an arm-like local-threading
   producer: accepted, and keeps its writes, as a statement, as an operand and in
