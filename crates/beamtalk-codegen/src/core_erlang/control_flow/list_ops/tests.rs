@@ -1929,11 +1929,11 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
 }
 
 #[test]
-fn test_each_with_index_value_type_desugars_without_reprojection() {
-    // In a Value-type method the desugar fires (a mutating local still needs
-    // threading) but the actor nil-with-state re-projection must NOT appear —
-    // the fold accumulator value is the result directly (covers the else branch
-    // of finalize_enumeration_fold).
+fn test_each_with_index_value_type_reprojects_as_a_producer() {
+    // In a Value-type method the desugar fires and, since BT-3841, the
+    // enumeration is a local-threading producer: its fold is a construct tuple,
+    // so it re-projects `{nil, NewState}` for the producer to unpack (the
+    // `enumeration_yields_construct_tuple` branch of finalize_enumeration_fold).
     let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items eachWithIndex: [:item :i | acc := acc + i]\n";
     let code = codegen(src);
     assert!(
@@ -1945,8 +1945,8 @@ fn test_each_with_index_value_type_desugars_without_reprojection() {
         "eachWithIndex: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
     );
     assert!(
-        !code.contains("{'nil', call 'erlang':'element'(2,"),
-        "eachWithIndex: Value type: should NOT re-project (not an actor). Got:\n{code}"
+        code.contains("{'nil', call 'erlang':'element'(2,"),
+        "eachWithIndex: Value type: should re-project for the producer (BT-3841). Got:\n{code}"
     );
 }
 
@@ -2089,12 +2089,9 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
 }
 
 #[test]
-fn test_do_separated_by_value_type_desugars_without_reprojection() {
-    // Mirrors test_each_with_index_value_type_desugars_without_reprojection for
-    // do:separatedBy:: in a Value-type method the desugar still fires for a
-    // mutating local, but the actor nil-with-state re-projection must NOT
-    // appear (covers the else branch of finalize_enumeration_fold for this
-    // selector).
+fn test_do_separated_by_value_type_reprojects_as_a_producer() {
+    // Mirrors test_each_with_index_value_type_reprojects_as_a_producer for
+    // do:separatedBy: (BT-3841).
     let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items do: [:x | x printString] separatedBy: [acc := acc + 1]\n";
     let code = codegen(src);
     assert!(
@@ -2106,8 +2103,8 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
         "do:separatedBy: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
     );
     assert!(
-        !code.contains("{'nil', call 'erlang':'element'(2,"),
-        "do:separatedBy: Value type: should NOT re-project (not an actor). Got:\n{code}"
+        code.contains("{'nil', call 'erlang':'element'(2,"),
+        "do:separatedBy: Value type: should re-project for the producer (BT-3841). Got:\n{code}"
     );
 }
 

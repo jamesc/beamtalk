@@ -95,10 +95,6 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
         ),
         ("[t := t + 1] value", LocalThreadingFamily::BlockValue),
         ("[t := t + 1. t < 3] whileTrue", LocalThreadingFamily::Loop),
-        (
-            "#(1) eachWithIndex: [:x :i | t := i]",
-            LocalThreadingFamily::Fold,
-        ),
     ] {
         let set = threaded(&generator, src).unwrap_or_else(|| panic!("{src}: no set"));
         assert_eq!(set.construct, ThreadedConstruct::Inline(family), "{src}");
@@ -112,10 +108,12 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
         ThreadedConstruct::Inline(LocalThreadingFamily::Lookup)
     );
     assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]));
-    // `eachWithIndex:` is lowered in an actor's own fold.
-    let actor = make_generator(CodeGenContext::Actor, &["t"]);
-    let set = threaded(&actor, "#(1) eachWithIndex: [:x :i | t := i]").expect("set");
-    assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]));
+    // BT-3841: `eachWithIndex:` is lowered in every method context.
+    for context in [CodeGenContext::Actor, CodeGenContext::ValueType] {
+        let generator = make_generator(context, &["t"]);
+        let set = threaded(&generator, "#(1) eachWithIndex: [:x :i | t := i]").expect("set");
+        assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]));
+    }
 }
 
 #[test]

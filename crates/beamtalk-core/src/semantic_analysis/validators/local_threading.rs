@@ -109,7 +109,8 @@ pub(crate) enum ConstructKind {
     /// `keysAndValuesDo:`, `doWithKey:`.
     KeyedDo,
     /// The value-returning list ops: `collect:`, `select:`, `reject:`,
-    /// `inject:into:`, `detect:`, `count:`, …
+    /// `inject:into:`, `count:`, … (a plain `detect:` too in the REPL; elsewhere
+    /// it is [`Self::DetectIfNoneSearch`])
     ListOp,
     /// `detect:ifNone:` when only its search block writes an outer local, and a
     /// plain `detect:`.
@@ -750,7 +751,6 @@ const RIGHT_STATEMENTS: &[RightStatement] = &[
     right(BlockValue, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
     right(DetectIfNone, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
     right(DetectIfNoneSearch, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
-    right(Enumeration, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, Arm, [true, false, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, Arm, [true, true, false, false, false], 1, Actor),
     right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Actor),
@@ -861,7 +861,7 @@ const UNFINISHED_FAMILIES: &[ConstructKind] = &[
 /// `producer_body_arg_index`. [`DENY_SET`] does not judge them any more, except
 /// in a `[...] value` body (still unfinished) or past two nested blocks, where
 /// the chain is unmeasured, and in the REPL.
-const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy];
+const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy, Enumeration];
 
 /// The kinds lowered only where the fold is measured right: `detect:ifNone:`
 /// (its search block or its handler writing an outer local) in a class or

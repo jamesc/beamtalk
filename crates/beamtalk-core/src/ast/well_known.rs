@@ -362,7 +362,9 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
         "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
         | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:" | "dropWhile:"
         | "partition:" | "groupBy:" | "timesRepeat:" | "ifTrue:" | "ifFalse:"
-        | "keysAndValuesDo:" | "doWithKey:" => arg_index == 0,
+        | "keysAndValuesDo:" | "doWithKey:" | "eachWithIndex:" | "do:separatedBy:" => {
+            arg_index == 0
+        }
         "to:do:" | "inject:into:" => arg_index == 1,
         "to:by:do:" => arg_index == 2,
         "ifTrue:ifFalse:" => arg_index == 0 || arg_index == 1,

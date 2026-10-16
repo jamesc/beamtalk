@@ -839,6 +839,39 @@ impl CoreErlangGenerator {
         // blocks, so a write buried in a doubly-nested loop is invisible above
         // without this recursion.
         out.extend(Self::nested_cross_scope_writes_outside(body_block, facts));
+
+        // The handler block a producer packs besides its body (`detect:ifNone:`'s
+        // `ifNone:`, `do:separatedBy:`'s separator; core's
+        // `producer_packed_blocks`, the one rule for what a producer packs)
+        // writes outer locals like the body does: an enclosing loop must thread
+        // them, or a handler-only write nested in a loop body is dropped
+        // (BT-3841: `n timesRepeat: [xs do: [:x | x] separatedBy: [t := t + 1]]`
+        // in an actor method answered 0).
+        for packed in beamtalk_core::semantic_analysis::block_facts::producer_packed_blocks(expr) {
+            if packed.span == body_block.span
+                || matches!(receiver.as_ref(), Expression::Block(cond) if cond.span == packed.span)
+            {
+                continue;
+            }
+            let handler_analysis = facts
+                .block_profile(&packed.span)
+                .cloned()
+                .unwrap_or_else(|| block_analysis::analyze_block(packed));
+            let handler_params: std::collections::HashSet<String> = packed
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+            for v in handler_analysis
+                .captured_reads
+                .intersection(&handler_analysis.local_writes)
+            {
+                if !handler_params.contains(v.as_str()) {
+                    out.insert(v.clone());
+                }
+            }
+            out.extend(Self::nested_cross_scope_writes_outside(packed, facts));
+        }
     }
 
     /// The cross-scope writes found by recursing into `block`'s statements,

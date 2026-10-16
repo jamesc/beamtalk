@@ -340,3 +340,15 @@ Object subclass: Adr0131LocalRebindClass
     t := 0
     #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]
     t
+
+  // `eachWithIndex:` as a statement.
+  class stEachWithIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:x :i | t := t + x]
+    t
+
+  // `do:separatedBy:` as a statement.
+  class stDoSeparatedBy =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
+    t

@@ -335,3 +335,15 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testStKeysAndValuesDoValue =>
     self assert: ((Adr0131LocalRebindValue new) stKeysAndValuesDo) equals: 3
+
+  testStEachWithIndexClass =>
+    self assert: (Adr0131LocalRebindClass stEachWithIndex) equals: 3
+
+  testStEachWithIndexValue =>
+    self assert: ((Adr0131LocalRebindValue new) stEachWithIndex) equals: 3
+
+  testStDoSeparatedByClass =>
+    self assert: (Adr0131LocalRebindClass stDoSeparatedBy) equals: 13
+
+  testStDoSeparatedByValue =>
+    self assert: ((Adr0131LocalRebindValue new) stDoSeparatedBy) equals: 13

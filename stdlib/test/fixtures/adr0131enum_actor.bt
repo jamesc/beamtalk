@@ -1,0 +1,314 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `eachWithIndex:` / `do:separatedBy:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131enum_test.bt. The block runs for every element, in order. `c` is the condition of
+// the arm shapes.
+
+Actor subclass: Adr0131EnumActor
+  state: n = 0
+
+  topEwi =>
+    t := 0
+    #(1, 2) eachWithIndex: [:v :k | t := t + v]
+    t
+
+  inArmEwi: c =>
+    t := 0
+    c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inArmElseEwi: c =>
+    t := 0
+    c ifTrue: [t := 100] ifFalse: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inDoEwi =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inToDoEwi =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inTimesEwi =>
+    t := 0
+    2 timesRepeat: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inWhileEwi =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) eachWithIndex: [:v :k | t := t + v]
+      ]
+    t
+
+  inOnDoEwi =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + v]] on: Error do: [:e | 0]
+    t
+
+  inEnsureEwi =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + v]] ensure: [nil]
+    t
+
+  inHandlerEwi =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  inArmInDoEwi: c =>
+    t := 0
+    #(1, 2) do: [:z | c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + v]]]
+    t
+
+  returnInArmEwi: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) eachWithIndex: [:v :k | t := t + v]]
+    t
+
+  assignedEwi =>
+    t := 0
+    r := #(1, 2) eachWithIndex: [:v :k | t := t + v]
+    #[r, t]
+
+  topEwiIndex =>
+    t := 0
+    #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+    t
+
+  inArmEwiIndex: c =>
+    t := 0
+    c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inArmElseEwiIndex: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inDoEwiIndex =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inToDoEwiIndex =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inTimesEwiIndex =>
+    t := 0
+    2 timesRepeat: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inWhileEwiIndex =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+      ]
+    t
+
+  inOnDoEwiIndex =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]] on: Error do: [:e | 0]
+    t
+
+  inEnsureEwiIndex =>
+    t := 0
+    [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]] ensure: [nil]
+    t
+
+  inHandlerEwiIndex =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  inArmInDoEwiIndex: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    ]
+    t
+
+  returnInArmEwiIndex: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]]
+    t
+
+  assignedEwiIndex =>
+    t := 0
+    r := #(1, 2) eachWithIndex: [:v :k | t := t + (v * k)]
+    #[r, t]
+
+  topDsb =>
+    t := 0
+    #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    t
+
+  inArmDsb: c =>
+    t := 0
+    c ifTrue: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  inArmElseDsb: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  inDoDsb =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  inToDoDsb =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  inTimesDsb =>
+    t := 0
+    2 timesRepeat: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  inWhileDsb =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+      ]
+    t
+
+  inOnDoDsb =>
+    t := 0
+    [
+      #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureDsb =>
+    t := 0
+    [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]] ensure: [nil]
+    t
+
+  inHandlerDsb =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e |
+      #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    ]
+    t
+
+  inArmInDoDsb: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    ]
+    t
+
+  returnInArmDsb: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]]
+    t
+
+  assignedDsb =>
+    t := 0
+    r := #(1, 2) do: [:v | t := t + v] separatedBy: [t := t + 10]
+    #[r, t]
+
+  topDsbSep =>
+    t := 0
+    #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+    t
+
+  inArmDsbSep: c =>
+    t := 0
+    c ifTrue: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inArmElseDsbSep: c =>
+    t := 0
+    c ifTrue: [
+      t := 100
+    ] ifFalse: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inDoDsbSep =>
+    t := 0
+    #(1, 2) do: [:z | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inToDoDsbSep =>
+    t := 0
+    1 to: 2 do: [:z | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inTimesDsbSep =>
+    t := 0
+    2 timesRepeat: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inWhileDsbSep =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+      ]
+    t
+
+  inOnDoDsbSep =>
+    t := 0
+    [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]] on: Error do: [:e | 0]
+    t
+
+  inEnsureDsbSep =>
+    t := 0
+    [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]] ensure: [nil]
+    t
+
+  inHandlerDsbSep =>
+    t := 0
+    [
+      Error signal: "x"
+    ] on: Error do: [:e | #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  inArmInDoDsbSep: c =>
+    t := 0
+    #(1, 2) do: [:z |
+      c ifTrue: [#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    ]
+    t
+
+  returnInArmDsbSep: c =>
+    t := 0
+    c ifTrue: [^#(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]]
+    t
+
+  assignedDsbSep =>
+    t := 0
+    r := #(1, 2, 3) do: [:v | v] separatedBy: [t := t + 10]
+    #[r, t]
