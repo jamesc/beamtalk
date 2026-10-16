@@ -3332,9 +3332,23 @@ impl CoreErlangGenerator {
         // first argument (predicate), not the last (ifNone handler).
         // `block_arg_needs_threading` also catches nested list ops with
         // cross-scope mutations that `analyze_block` alone can't see.
+        //
+        // Conditionals have returned above, so what reaches here is a loop or
+        // fold (and the handler/cleanup blocks of `on:do:`/`ensure:`). A loop
+        // or fold block is read through the loop gate's own predicate
+        // (`loop_body_has_carried_mutations`, BT-3834), so a loop that carries
+        // nothing — and is therefore lowered as a plain loop — is never
+        // unpacked as a `{Value, StateAcc}` tuple.
+        let is_exception =
+            beamtalk_core::state_threading_selectors::is_exception_selector(sel_str.as_str());
         for arg in arguments {
             if let Expression::Block(block) = arg {
-                if self.block_arg_needs_threading(block) {
+                let threads = if is_exception {
+                    self.block_arg_needs_threading(block)
+                } else {
+                    self.loop_body_has_carried_mutations(block)
+                };
+                if threads {
                     return true;
                 }
             }

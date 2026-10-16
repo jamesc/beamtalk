@@ -504,7 +504,6 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        use super::block_analysis;
         validate_block_arity_exact(
             &arguments[0],
             0,
@@ -514,16 +513,11 @@ impl CoreErlangGenerator {
              \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
         )?;
         if let Expression::Block(body_block) = &arguments[0] {
-            let analysis = block_analysis::analyze_block(body_block);
-            // Also check for nested list ops with cross-scope mutations.
-            // Also thread when the body mutates an outer local (including
-            // write-only mutations like `[last := i]`) that `needs_mutation_threading`
-            // misses in value-type/class-method context. `loop_threaded_locals`
-            // is the canonical set the loop codegen actually packs into `StateAcc`.
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self.loop_threaded_locals(body_block, None).is_empty()
-            {
+            // The one loop/fold gate (BT-3834): the body's mutations, or a
+            // write to an outer local (including write-only `[last := i]`)
+            // the mutation analysis misses, and only when the loop has
+            // something to carry.
+            if self.loop_body_needs_threading(body_block) {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
@@ -540,7 +534,6 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        use super::block_analysis;
         validate_block_arity_exact(
             &arguments[1],
             1,
@@ -549,13 +542,8 @@ impl CoreErlangGenerator {
              \x20 1 to: 10 do: [:i | i printString]",
         )?;
         if let Expression::Block(body_block) = &arguments[1] {
-            let analysis = block_analysis::analyze_block(body_block);
-            // Also check for nested list ops with cross-scope mutations.
-            // Also thread write-only outer-local mutations (see try_generate_times_repeat).
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self.loop_threaded_locals(body_block, None).is_empty()
-            {
+            // The one loop/fold gate (see `try_generate_times_repeat`).
+            if self.loop_body_needs_threading(body_block) {
                 let doc =
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
@@ -573,7 +561,6 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        use super::block_analysis;
         validate_block_arity_exact(
             &arguments[2],
             1,
@@ -582,13 +569,8 @@ impl CoreErlangGenerator {
              \x20 1 to: 10 by: 2 do: [:i | i printString]",
         )?;
         if let Expression::Block(body_block) = &arguments[2] {
-            let analysis = block_analysis::analyze_block(body_block);
-            // Also check for nested list ops with cross-scope mutations.
-            // Also thread write-only outer-local mutations (see try_generate_times_repeat).
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self.loop_threaded_locals(body_block, None).is_empty()
-            {
+            // The one loop/fold gate (see `try_generate_times_repeat`).
+            if self.loop_body_needs_threading(body_block) {
                 let doc = self.generate_to_by_do_with_mutations(
                     receiver,
                     &arguments[0],
@@ -3013,8 +2995,9 @@ impl CoreErlangGenerator {
         blocks.iter().any(|block| {
             // shares `block_arg_needs_threading`'s block-body check
             // (block-local/field mutations plus a cross-scope list-op
-            // mutation) — the same combinator `control_flow_has_mutations`
-            // and `enumeration_block_needs_threading` use — extended here
+            // mutation) — the combinator `control_flow_has_mutations` uses
+            // for conditional arms and exception blocks (loops and folds
+            // read `loop_body_has_carried_mutations`, BT-3834) — extended here
             // with the in-loop-body-local-write disjunct only this caller
             // needs.
             self.block_arg_needs_threading(block)
