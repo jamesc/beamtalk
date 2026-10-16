@@ -2178,26 +2178,22 @@ impl<'d> Walker<'d> {
     }
 
     /// Whether codegen threads an outer-local write in the condition block of
-    /// a keyword `whileTrue:`/`whileFalse:` (BT-3782). It does only when the
-    /// loop is lowered by the stateful generator and the condition has state
-    /// effects (a self-send or field write), in a non-class method: then the
-    /// condition is compiled in the loop's own frame. Every other condition
-    /// is compiled as a Tier 2 closure that is called with the wrong arity
-    /// (value-type, actor) or hangs (class methods); a top-level expression
-    /// is left to the REPL's own handling.
-    ///
-    /// Mirrors `CoreErlangGenerator::while_loop_threads` and
-    /// `condition_has_state_effects` in `beamtalk-codegen`; pinned by
-    /// `stdlib/test/bt3746stateful_while_test.bt` and the
-    /// `while_condition_*` unit tests below.
+    /// a keyword `whileTrue:`/`whileFalse:` (BT-3782): the shared leaf
+    /// [`while_condition_writes_thread`](crate::semantic_analysis::block_facts::while_condition_writes_thread),
+    /// whose condition half is the predicate codegen's loop gates call
+    /// (BT-3845). Every other condition is compiled as a Tier 2 closure that
+    /// is called with the wrong arity, or as a plain block body whose write
+    /// is never packed (the loop hangs); a top-level expression is left to
+    /// the REPL's own handling.
     fn while_condition_threads(&self, cond: &Block, arguments: &[Expression]) -> bool {
         match self.context {
             Repl => true,
-            Class => false,
-            ValueType | Actor => {
-                matches!(arguments.first(), Some(Expression::Block(_)))
-                    && crate::semantic_analysis::block_facts::analyze_block(cond)
-                        .has_state_effects()
+            Class | ValueType | Actor => {
+                crate::semantic_analysis::block_facts::while_condition_writes_thread(
+                    cond,
+                    arguments.first(),
+                    self.context == Class,
+                )
             }
         }
     }

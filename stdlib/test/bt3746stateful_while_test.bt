@@ -25,3 +25,20 @@ TestCase subclass: Bt3746StatefulWhileTest
 
   testActorStatefulConditionEmptyBody =>
     self assert: Bt3746StatefulWhileActor spawn runEmptyBody equals: 3
+
+  // BT-3845: every other shape the ADR 0131 §6 validator accepts
+  // (`block_facts::while_condition_writes_thread`) threads at runtime.
+  testValueTypeStatefulWhileFalse =>
+    self assert: Bt3746StatefulWhileValue new runWhileFalse equals: #[3, 2]
+
+  testValueTypeStatefulConditionSelfSendBody =>
+    self assert: Bt3746StatefulWhileValue new runSelfSendBody equals: #[3, 2]
+
+  testActorStatefulWhileFalse =>
+    self assert: Bt3746StatefulWhileActor spawn runWhileFalse equals: #[3, 2]
+
+  testActorFieldWritingCondition =>
+    self assert: Bt3746StatefulWhileActor spawn runFieldCondition equals: #[3, 2, 3]
+
+  testActorStatefulConditionSelfSendBody =>
+    self assert: Bt3746StatefulWhileActor spawn runSelfSendBody equals: #[3, 2]

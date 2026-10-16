@@ -2420,6 +2420,13 @@ fn closure_local_loop_in_a_protected_body_does_not_unbind_the_producers() {
 /// body in a value-type or actor method. Every other combination compiled to a
 /// Tier 2 closure called with the wrong arity (value-type, actor) or a hang
 /// (class methods). Generated over context x selector x condition x body.
+///
+/// BT-3845: a body that writes a local (or sends to `self`) also selects the
+/// stateful lowering, but a pure condition is then compiled as a plain block
+/// body whose write is never packed (probed: the loop hangs), so it stays
+/// rejected; the decision is the shared leaf
+/// `block_facts::while_condition_writes_thread`. The accepted shapes run in
+/// `stdlib/test/bt3746stateful_while_test.bt`.
 #[test]
 fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
     type Wrap = fn(&str) -> String;
@@ -2435,14 +2442,22 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
         ("t := t + 1. self check: t. {c}", true),
         ("t := t + 1. self.n := t. {c}", true),
     ];
-    let bodies = [("[nil]", true), ("body", false)];
+    let bodies = [
+        // (body, literal block)
+        ("[nil]", true),
+        ("body", false),
+        ("[u := u + 1]", true),
+        ("[u := u + 1. self check: u]", true),
+    ];
     let mut checked = 0;
     for (ctx_name, wrap) in contexts {
         for (selector, cmp) in selectors {
             for (cond_shape, effects) in conditions {
                 for (body, literal) in bodies {
                     let cond = cond_shape.replace("{c}", cmp);
-                    let source = wrap(&format!("body := [nil]\n[{cond}] {selector} {body}\nt"));
+                    let source = wrap(&format!(
+                        "u := 0\nbody := [nil]\n[{cond}] {selector} {body}\n#[t, u]"
+                    ));
                     let diags = adr0131_diagnostics(&source);
                     let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
                     let threads = ctx_name != "class" && effects && literal;
@@ -2456,7 +2471,7 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
             }
         }
     }
-    assert_eq!(checked, 36);
+    assert_eq!(checked, 72);
 }
 
 /// BT-3782: a condition that only reads outer locals, and a loop body that
