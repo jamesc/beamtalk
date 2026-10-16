@@ -1512,6 +1512,14 @@ Apply the ADR 0087 miss-partition and stale-drop to a pre-fetched `Sites`
 list, returning the two-key result map `senders_of_bt/1` and
 `references_to_bt/1` both need.  Centralises the stale-drop list comprehension
 so the two call sites cannot drift from each other.
+
+Note on read order: `Sites` (the raw xref query result) is evaluated by the
+caller *before* `bt_site_result/2` is called, so the loaded-class snapshot
+from `miss_partition/1` is taken *after* the sites list is fetched.  This is
+intentional — if a class is unloaded between the two reads, its rows are
+dropped rather than kept, which is the safer behaviour.  Do not reorder the
+two reads to make the snapshot come first; that would silently change the
+stale-drop semantics back for both call sites at once.
 """.
 -spec bt_site_result(atom(), [site()]) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
