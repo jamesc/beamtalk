@@ -25,6 +25,7 @@ inputs are only ever passed as a file argument to `cargo fuzz run`.
   corpus. Exit 101 is a Rust panic or failed assertion. The report lists each failing
   program's `(index, seed, size)`. Reproduce a program with
   `CV_SEED=<seed> CV_SIZE=<size> CV_SHAPES=<names|all> cargo test -p beamtalk-core --lib dump_program -- --ignored --nocapture`.
+  Use exactly that variable order and no other shell syntax; the tool allowlist matches that form.
 - `corpus-through-erlc`: generated Core Erlang that erlc/core_lint rejects.
 - `extended-proptest`: a proptest property failed; the shrunk case is in the log.
 

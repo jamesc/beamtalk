@@ -128,7 +128,8 @@ jobs:
           # Trust boundary: the agent reads untrusted data (logs, fuzz inputs, fuzzed
           # source), so the tool list is kept small. It can read files with the Read,
           # Grep and Glob tools (not /proc), write only under triage/, run only
-          # cargo fuzz/test/build, just and read-only git, and use the Linear
+          # cargo fuzz/test/build (including the env-prefixed `CV_SEED=… cargo test`
+          # repro form), just and read-only git, and use the Linear
           # issue tools. Not allowed: find, cat, other shell, git writes, the web.
           # `cargo` still executes this repo's build scripts (the checked-out
           # default-branch commit, which the agent cannot modify), and the OAuth token
@@ -138,7 +139,7 @@ jobs:
           claude_args: >-
             --max-turns 60
             --mcp-config ${{ runner.temp }}/linear-mcp.json
-            --allowedTools "Read,Grep,Glob,Write(triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+            --allowedTools "Read,Grep,Glob,Write(triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(CV_SEED=* CV_SIZE=* CV_SHAPES=* cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
             --disallowedTools "Read(//proc/**),Read(//home/runner/work/_temp/**)"
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
