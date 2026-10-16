@@ -74,6 +74,10 @@ the repo's own copy in the checked-out commit may be missing or older).
 - If every failure is infrastructure/flaky with no repro, still file one low-priority issue for
   the first occurrence, and comment on it on repeats.
 
+End every Linear comment or issue body you write with a line that says it is automated triage,
+for example `_Automated triage by fuzz-triage.yml for @RUN_URL@_`. The Linear API key belongs to
+a person, so without it your comments look hand-written.
+
 ## Finish
 
 Write `triage/result.md` with one line per failed job: the classification and the Linear issue id
