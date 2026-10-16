@@ -1,9 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3841 (ADR 0131): plain `detect:` as local-threading producers in a class method, a
-// value-type method and an actor method. The fixtures are
-// fixtures/adr0131detect_plain_{class,value,actor}.bt.
+// BT-3841 (ADR 0131): plain `detect:` as a local-threading producer in a class
+// method and a value-type method. The fixtures are
+// fixtures/adr0131detect_plain_{class,value}.bt. There is no actor fixture: a
+// nested `detect:` in an actor method keeps the Phase 0 rejection.
 
 TestCase subclass: Adr0131DetectPlainTest
 

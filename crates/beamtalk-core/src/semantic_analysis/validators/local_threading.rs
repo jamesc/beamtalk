@@ -1815,6 +1815,15 @@ impl<'d> Walker<'d> {
                     if matches!(arguments.get(1), Some(Expression::Block(h)) if !self.writes_of(h).is_empty())
             );
         let kind = ConstructKind::of(&selector, handler_writes);
+        // BT-3841 PR 5: the REPL has no measured rows for the detect search
+        // (BT-3823) and a writing plain `detect:` in a REPL arm leaks the
+        // fold's tuple and drops the write, so there it stays a generic list
+        // op, which the REPL arm rows deny.
+        let kind = if self.context == Repl && selector == "detect:" {
+            ListOp
+        } else {
+            kind
+        };
         // An assignment inside a block whose construct only writes locals of
         // that same block is threaded in that block's own frame, exactly as
         // in a method body; only a write that crosses the block boundary
