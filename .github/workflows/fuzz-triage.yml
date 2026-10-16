@@ -54,9 +54,25 @@ jobs:
           sha=$(gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}" --jq .head_sha)
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
+      # The code under test: the commit the nightly run failed on.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.run.outputs.sha }}
+          persist-credentials: false
+
+      # The triage config (prompt, issue conventions): always from the workflow's
+      # own commit, not the failed one, which may predate these files (a dispatch
+      # against an old run, or a failure before this workflow existed). Kept in a
+      # subdirectory so it cannot be mistaken for, or overwritten by, the code
+      # under test.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .triage-config
+          sparse-checkout: |
+            .github/claude-fuzz-triage-prompt.md
+            .claude/commands/create-issue/SKILL.md
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Install Rust nightly toolchain
@@ -96,7 +112,7 @@ jobs:
           sed -e "s|@RUN_ID@|${RUN_ID}|g" \
               -e "s|@RUN_URL@|${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}|g" \
               -e "s|@SHA@|${{ steps.run.outputs.sha }}|g" \
-              .github/claude-fuzz-triage-prompt.md > "${prompt_file}"
+              .triage-config/.github/claude-fuzz-triage-prompt.md > "${prompt_file}"
           {
             echo 'prompt<<__BTPROMPTEOF__'
             cat "${prompt_file}"
