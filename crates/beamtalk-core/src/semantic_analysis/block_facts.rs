@@ -967,6 +967,24 @@ pub fn outer_local_writes(
     walker.writes
 }
 
+/// The names `stmt` itself binds by assignment or destructuring: those not
+/// inside a block nested in it, and not a match-arm binding. A nested block's
+/// own first assignment binds the name in that block
+/// (`_b := [i := 0. [i < 3] whileTrue: [i := i + 1]]` stores a closure whose
+/// `i` is not the statement's). The block-scope rule is [`OuterWriteWalker`]'s,
+/// the one encoding of "every nested `Block` opens its own binding scope".
+fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
+    let mut walker = OuterWriteWalker {
+        bound_outside: &|_| false,
+        frames: vec![HashSet::new()],
+        writes: Vec::new(),
+        blocks_entered: 1,
+        nested: NestedBlocks::None,
+    };
+    walker.expr(stmt);
+    walker.frames.pop().unwrap_or_default()
+}
+
 /// Scope-tracking walk behind [`outer_local_writes`].
 struct OuterWriteWalker<'a> {
     bound_outside: &'a dyn Fn(&str) -> bool,
@@ -982,6 +1000,9 @@ struct OuterWriteWalker<'a> {
 /// Which nested blocks an [`OuterWriteWalker`] descends into.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NestedBlocks {
+    /// No block at all ([`names_assigned_outside_nested_blocks`]): every
+    /// nested `Block` opens its own binding scope, so none is entered.
+    None,
     /// Every block ([`outer_local_writes`]).
     All,
     /// Only the blocks of nested local-threading constructs
@@ -1039,7 +1060,7 @@ impl OuterWriteWalker<'_> {
     /// any other block operand is a closure.
     fn send(&mut self, send: &Expression, receiver: &Expression, arguments: &[Expression]) {
         let nested: Vec<&Block> = match self.nested {
-            NestedBlocks::All => Vec::new(),
+            NestedBlocks::None | NestedBlocks::All => Vec::new(),
             NestedBlocks::Producers => local_threading_construct(send)
                 .map(|c| c.blocks)
                 .unwrap_or_default(),
@@ -1773,32 +1794,10 @@ fn arms_lower_as_producer(
     // name in that block (`_b := [i := 0. [i < 3] whileTrue: [i := i + 1]]`
     // stores a closure whose `i` is not the arm's), so a construct writing
     // only such a name writes no local of the arm.
-    let mut assigned: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut assigned: HashSet<ecow::EcoString> = HashSet::new();
     for arm in arms {
         for stmt in &arm.body {
-            let mut nested: Vec<Span> = Vec::new();
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Block(block) = e {
-                    nested.push(block.span);
-                }
-            });
-            let in_nested_block = |span: Span| {
-                nested
-                    .iter()
-                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
-            };
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                Expression::Assignment { target, .. } if !in_nested_block(e.span()) => {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        assigned.insert(id.name.to_string());
-                    }
-                }
-                Expression::DestructureAssignment { pattern, .. } if !in_nested_block(e.span()) => {
-                    let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
-                    assigned.extend(ids.into_iter().map(|id| id.name.to_string()));
-                }
-                _ => {}
-            });
+            assigned.extend(names_assigned_outside_nested_blocks(&stmt.expression));
         }
     }
     let arm_bound = |name: &str| bound_outside(name) || assigned.contains(name);
