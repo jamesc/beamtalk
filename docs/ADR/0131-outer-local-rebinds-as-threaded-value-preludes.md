@@ -681,13 +681,35 @@ Once the method frame is gone nothing can hand `t` back, in any method kind;
 probed before the fix, each shape compiled and then raised `Cannot call 'value'
 on Block ... captures mutable state` at the first later `value`, except the
 actor `b := [...]. self.f := b`, which silently lost the write. A block that
-writes no local of the method (a pure closure, its own locals only, or an actor
-`self.x` field) is unaffected. A block literal assigned straight to an instance
+writes no local of the method (a pure closure, or its own locals only) is
+unaffected; an actor block that writes a `self.x` field passes §6 but is
+codegen's `FieldAssignmentInUnsupportedBlock` error in every escape shape
+(BT-2792, pinned for each shape by BT-3806). A block literal assigned straight to an instance
 field is already the block analyzer's "cannot mutate captured variable ...
 stored in a field" error, reported once; §6 reports it for a class variable.
 The escape classification is `block_facts::escape_sites`, the one behind
-`escaping_blocks`; a REPL expression list is not checked. A block that is only the
-implicit value of a nested conditional branch or block (no `^`) is not seen.
+`escaping_blocks`; a REPL expression list is not checked (BT-3806 pinned what
+the REPL does, the same runtime error, in the repl-protocol case
+`adr0131_section6_escape_pins`; rejecting it there waits on a maintainer
+decision).
+
+BT-3806 follows a returned value through what makes it up (`escape_sites`
+only; `escaping_blocks`, the census's and the class-state-abroad lint's,
+still takes it as written): a last-statement or returned local assignment
+(`b := [t := t + 1]` as the method's last statement, `^(b := [..])`), the last
+statement of each arm of an inlined conditional, an evaluated literal block,
+an `on:do:` body or handler, or an `ensure:` body, and a `match:` arm body,
+repeatedly (`c ifTrue: [[t := t + 1]] ifFalse: [...]`). A local counts as
+the block of its latest binding in walk order however often it is assigned
+(`b := nil. b := [t := t + 1]. ^b`), and a local bound to such a value
+(`b := c ifTrue: [[..]] ...`) as that block. Probed before the fix, every one
+of these raised the same `Cannot call 'value' on Block ... captures mutable
+state` at the first `value` in class, value-type and actor methods (the
+actor's last-statement `b := [...]` answered `nil`). Still not seen: a local
+rebound to something else in only one branch before it escapes (any rebind
+forgets the block), a local that is the value of a conditional arm (an
+alias, `c ifTrue: [b] ...` stored in another local), and a block that is the
+value of a non-inlined send.
 
 **A `whileTrue:`/`whileFalse:` condition block (BT-3782).** The loop's
 *body* is a §1 construct, but its keyword *condition* is a block receiver

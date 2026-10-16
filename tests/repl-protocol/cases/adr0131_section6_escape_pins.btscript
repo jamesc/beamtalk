@@ -1,0 +1,49 @@
+// BT-3806 (ADR 0131 §6): the REPL keeps no escape check. A block that writes
+// a session binding and is the value of a REPL expression goes to the display,
+// not to a caller, and the expression list is not a method, so §6's
+// "returned / stored / placed in a literal" rule (a compile error in class,
+// value-type and actor methods since BT-3756/BT-3806) is skipped here.
+//
+// What it does today (probed): every such block is accepted and displayed,
+// and the first later `value` raises the same "captures mutable state" error
+// a method's escaping block raised before §6; the binding is never written.
+// Whether the REPL should reject these at compile time instead is an open
+// question for the maintainer (CLAUDE.md: REPL behaviour changes need
+// confirmation), tracked as a follow-up to BT-3806. This case pins today's
+// behaviour so that decision changes it on purpose.
+
+t := 0
+// => 0
+
+// The expression's value is the block.
+[t := t + 1]
+// => Block/1
+
+b := [t := t + 1]
+// => Block/1
+
+b value
+// => ERROR: Cannot call 'value' on Block via perform:
+
+t
+// => 0
+
+// The value of a conditional arm.
+c := true ifTrue: [[t := t + 10]] ifFalse: [[0]]
+// => Block/1
+
+c value
+// => ERROR: Cannot call 'value' on Block via perform:
+
+t
+// => 0
+
+// An element of a collection literal.
+d := #([t := t + 100])
+// => ["Block/1"]
+
+d first value
+// => ERROR: Cannot call 'value' on Block via perform:
+
+t
+// => 0

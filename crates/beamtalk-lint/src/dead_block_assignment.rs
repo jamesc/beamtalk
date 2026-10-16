@@ -28,10 +28,12 @@
 //!
 //! What is left for the lint (pinned by `lint_and_section6_agree` below):
 //!
-//! - a block stored in a local and never sent (`blk := [x := 2]`): it does not
-//!   leave the method, so §6 has nothing to reject (a block that is returned,
-//!   stored in a field, or placed in a collection literal is a §6 error since
-//!   BT-3756);
+//! - a block stored in a local and never sent (`blk := [x := 2]`, followed by
+//!   another statement): it does not leave the method, so §6 has nothing to
+//!   reject (a block that is returned, stored in a field, or placed in a
+//!   collection literal is a §6 error since BT-3756; so is one that is the
+//!   method's value through a last-statement `blk := [..]` or a conditional
+//!   arm, since BT-3806);
 //! - an Erlang FFI block argument, which §6 exempts for good (ADR 0041
 //!   §Erlang Interop Boundary: lossy by design);
 //! - a block literal at a construct position §6 accepts but the shared
@@ -48,6 +50,7 @@
 //!
 //! // Warned — blk is stored and never sent, so its write never reaches count
 //! blk := [count := count + 1]
+//! count
 //! ```
 //!
 //! Not warned at all: Actor subclasses (their blocks thread through the
@@ -506,7 +509,8 @@ BaseActor subclass: Counter
 Object subclass: Foo
   bar =>
     x := 0
-    blk := [x := 1]";
+    blk := [x := 1]
+    x";
         let diags = lint(src);
         assert_eq!(
             diags.len(),
@@ -524,7 +528,8 @@ Value subclass: Point
   state: y = 0
   broken =>
     z := 0
-    blk := [z := 1]";
+    blk := [z := 1]
+    z";
         let diags = lint(src);
         assert_eq!(
             diags.len(),
@@ -601,7 +606,8 @@ Object subclass: Foo
   value => 1
 Foo >> bar =>
   x := 0
-  blk := [x := 1]";
+  blk := [x := 1]
+  x";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
     }
@@ -612,7 +618,8 @@ Foo >> bar =>
         let src = "\
 Object subclass: Foo
   withX: x =>
-    blk := [x := 99]";
+    blk := [x := 99]
+    x";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
@@ -996,14 +1003,36 @@ sealed typed Value subclass: Foo
             ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),
             ("#(1, 2) do: [:e | nil] separatedBy: [x := x + 1]", Either),
         ];
+        // The same, as the method's last statement (no trailing `x`): a value
+        // there is returned (BT-3806), through a local assignment or the arms
+        // of a conditional, so the block leaves the method.
+        let last_statement_shapes: &[(&str, Owner)] = &[
+            ("blk := [x := 2]", CompileError),
+            ("^blk := [x := 2]", CompileError),
+            ("x > 0 ifTrue: [[x := 2]] ifFalse: [[0]]", CompileError),
+            (
+                "x > 0 ifTrue: [blk := [x := 2]] ifFalse: [nil]",
+                CompileError,
+            ),
+            ("[[x := 2]] value", CompileError),
+            ("blk := nil\n    blk := [x := 2]", CompileError),
+            ("blk := [x := 2]\n    blk := nil", Lint),
+            ("blk := [:t | t := 1. t]", Neither),
+        ];
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,
             DiagnosticCategory::UnmigratedLocalThreading,
         ];
         let mut failures = Vec::new();
-        for &(shape, expected) in shapes {
+        let tailed = shapes
+            .iter()
+            .map(|&(shape, owner)| (shape, owner, "\n    x"));
+        let last = last_statement_shapes
+            .iter()
+            .map(|&(shape, owner)| (shape, owner, ""));
+        for (shape, expected, tail) in tailed.chain(last) {
             let src = format!(
-                "Object subclass: Probe\n  run =>\n    x := 0\n    i := 0\n    {shape}\n    x\n"
+                "Object subclass: Probe\n  run =>\n    x := 0\n    i := 0\n    {shape}{tail}\n"
             );
             let (module, parse_diags) = parse(lex_with_eof(&src));
             assert!(

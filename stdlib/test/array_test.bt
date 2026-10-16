@@ -85,7 +85,9 @@ TestCase subclass: ArrayTest
     // guard also applies to Array, since the guard is keyed on selector
     // name, not receiver class. (Array has no reject: primitive, so that
     // selector isn't guarded here.)
-    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the runtime guard through a tuple (a list literal holding it is a §6 error, BT-3756); if that exemption narrows, this test must change.
+    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the
+    // runtime guard through a tuple (a list literal holding it is a §6 error,
+    // BT-3756); if that exemption narrows, this test must change.
     count := 0
     @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
