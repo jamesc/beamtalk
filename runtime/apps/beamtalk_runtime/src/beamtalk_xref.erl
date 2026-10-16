@@ -1516,10 +1516,14 @@ so the two call sites cannot drift from each other.
 Note on read order: `Sites` (the raw xref query result) is evaluated by the
 caller *before* `bt_site_result/2` is called, so the loaded-class snapshot
 from `miss_partition/1` is taken *after* the sites list is fetched.  This is
-intentional — if a class is unloaded between the two reads, its rows are
-dropped rather than kept, which is the safer behaviour.  Do not reorder the
-two reads to make the snapshot come first; that would silently change the
-stale-drop semantics back for both call sites at once.
+intentional, but note it trades one benign race for another: a class unloaded
+between the two reads has its rows dropped (old snapshot-first order kept
+them), while a class loaded/re-indexed between the two reads is absent from
+`Sites` even though it appears in `Loaded` (neither order avoids all races).
+The other `*_bt` entry points (`implementors_of_bt/1`, etc.) still take the
+snapshot first; the two orders are both correct.  Do not reorder the two reads
+here without updating this note and considering both race directions; a silent
+reorder would change the stale-drop semantics for both call sites at once.
 """.
 -spec bt_site_result(atom(), [site()]) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
