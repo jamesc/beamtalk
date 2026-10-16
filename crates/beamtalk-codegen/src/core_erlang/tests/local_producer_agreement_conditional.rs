@@ -59,6 +59,23 @@ pub(super) const CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
     "(s < 3) ifTrue: [n := (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]) + 1. 2] ifFalse: [3]",
     "(s < 3) ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]",
+    // BT-3841: an evaluated literal block is the degenerate conditional (one arm
+    // that always runs): the same site rule, producer rule and arm frame.
+    "[t := t + 1. 2] value",
+    "[t := 9. 2] value",
+    "[t := t + 1. u := u + 1. 2] value",
+    "[t := t + 1] value",
+    "[#(1, 2) do: [:x | t := t + x]] value",
+    "[n := (#(1, 2) collect: [:x | t := t + x]) size. 2] value",
+    "[(s < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] value",
+    "[[t := t + 1. 1] value. 3] value",
+    "[t := t + 1. ^t] value",
+    "[[t := t + 1] on: Error do: [:e | 0]] value",
+    "[#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]] value",
+    // Not producers: a literal with parameters or arguments (`value:`), and a
+    // parenthesised block receiver.
+    "[:v | t := t + v] value: 2",
+    "([t := t + 1. 2]) value",
 ];
 
 /// [`POSITIONS`] plus the positions a conditional is a producer in without
@@ -91,6 +108,17 @@ pub(super) const ARM_FRAMES: &[&str] = &[
     "(s < 3) ifTrue: [r := (s < 3) ifTrue: [{s}. 1] ifFalse: [2]. r]",
     "#(1, 2) do: [:k | (s < 3) ifTrue: [{s}]]",
     "2 timesRepeat: [(s < 3) ifTrue: [#(1, 2) do: [:i | {s}]]]",
+    // BT-3841: the arm frame of an evaluated literal block, alone and in the
+    // other frames.
+    "[{s}] value",
+    "[{s}. 1] value",
+    "[w := 0. {s}. w] value",
+    "[[{s}] value] value",
+    "(s < 3) ifTrue: [[{s}] value]",
+    "[(s < 3) ifTrue: [{s}]] value",
+    "#(1, 2) do: [:k | [{s}] value]",
+    "[#(1, 2) do: [:k | {s}]] value",
+    "[[{s}] on: Error do: [:e | 0]] value",
 ];
 
 /// Constructs used inside arm frames (a subset of [`CONSTRUCTS`] that keeps the
@@ -111,6 +139,7 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
     "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
     "Result tryDo: [t := 5. 2]",
+    "[t := t + 1. 2] value",
 ];
 
 /// The core rule's verdict for every conditional and `on:do:`/`ensure:`
@@ -326,6 +355,10 @@ const NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m]]",
     "s ifNil: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifNotNil: [:v | v]",
     "(s < 3) and: [m := 0. #(1, 2) do: [:e | m := m + e]. true]",
+    // An evaluated literal block that writes no outer local is not a producer
+    // either (BT-3841): the loop in it is judged by the legacy rows.
+    "[m := 0. #(1, 2) do: [:e | m := m + e]. m] value",
+    "[m := 0. 1 to: 2 do: [:i | m := m + i]. m] value",
 ];
 
 #[test]
@@ -387,6 +420,10 @@ pub(super) const LOOP_BODY_FRAMES: &[&str] = &[
     "1 to: 2 do: [:k | #(1, 2) do: [:i | {s}]]",
     "#(1, 2) do: [:k | [:z | {s}] value: k]",
     "#(1, 2) do: [:k | [{s}] on: Error do: [:e | nil]]",
+    // BT-3841: an evaluated literal block between a frame and the statement is
+    // an arm frame of its own.
+    "#(1, 2) do: [:k | [{s}] value]",
+    "1 to: 2 do: [:k | [{s}] value]",
 ];
 
 /// Conditionals that write `t`, a cross-section of [`CONDITIONALS`] for the
@@ -404,6 +441,9 @@ const LOOP_BODY_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]]",
     "(s < 3) ifTrue: [t := t + 1. ^t]",
     "(s < 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
+    "[t := t + 1. 2] value",
+    "[#(1, 2) do: [:x | t := t + x]] value",
+    "[(s < 3) ifTrue: [t := t + 1]] value",
 ];
 
 /// Both ways, for a conditional anywhere a loop or fold body statement can
@@ -429,11 +469,11 @@ fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer(
     );
 }
 
-/// Conditionals that are not producers: their arms write no outer local and
-/// hold no loop or fold (a class or value-type counted loop whose body holds a
-/// non-producer conditional with a nested loop writing an arm-local fails the
-/// verifier on `main` as well (BT-3834), a pre-existing gap independent of
-/// conditionals-as-producers).
+/// Conditionals that are not producers: their arms write no outer local. The
+/// last four hold a loop or fold writing a local of the arm (BT-3834): the
+/// enclosing loop or fold threads nothing, so in a class or value-type method
+/// it lowers as a plain loop, never as a locals-less `StateAcc` loop
+/// (`StateAccLoopWithoutLocals`).
 const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [m := 0. m := m + 1. m] ifFalse: [0]",
     "(s < 3) ifTrue: [m := 5. m]",
@@ -442,6 +482,10 @@ const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) and: [m := 1. true]",
     "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 1. m]]",
     "(s < 3) ifTrue: [t] ifFalse: [u]",
+    "(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
+    "(s < 3) ifTrue: [m := 0. 1 to: 2 do: [:e | m := m + e]. m] ifFalse: [0]",
+    "s ifNotNil: [:v | m := v. [m < 5] whileTrue: [m := m + 1]. m]",
+    "(s < 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
 ];
 
 /// Conditionals that are not producers, as a statement of every loop or fold

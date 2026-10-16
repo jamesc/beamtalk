@@ -68,6 +68,31 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// ```
   at: key :: K ifAbsent: block :: Block(T) -> V | T => @primitive
 
+  /// Evaluate `block` with the value for `key` and answer its result, or
+  /// answer `nil` if `key` is absent.
+  ///
+  /// A stored `nil` is present: `block` runs with `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} at: #a ifPresent: [:v | v * 10]   // => 10
+  /// #{#a => 1} at: #b ifPresent: [:v | v * 10]   // => nil
+  /// ```
+  at: key :: K ifPresent: block :: Block(V, R) -> R | Nil => @primitive
+
+  /// Evaluate `presentBlock` with the value for `key` and answer its result,
+  /// or evaluate `absentBlock` if `key` is absent.
+  ///
+  /// A stored `nil` is present: `presentBlock` runs with `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} at: #a ifPresent: [:v | v * 10] ifAbsent: [0]   // => 10
+  /// #{#a => 1} at: #b ifPresent: [:v | v * 10] ifAbsent: [0]   // => 0
+  /// ```
+  at: key :: K ifPresent: presentBlock :: Block(V, R) ifAbsent: absentBlock :: Block(T) -> R | T =>
+    @primitive
+
   /// Return a new dictionary with `key` mapped to `value`.
   ///
   /// ## Examples

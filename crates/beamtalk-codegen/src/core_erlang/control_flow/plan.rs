@@ -260,18 +260,19 @@ struct BodyEffects {
 /// opens a locals-less `StateAcc` loop or threads the `State`/`SelfVt` family,
 /// so a predicate that disagrees with this guard fails `verify()` rather than
 /// only `erlc`.
+///
+/// The rule itself is the `beamtalk-core` leaf
+/// [`while_condition_has_state_effects`](beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects),
+/// which the ADR 0131 §6 validator reads too (BT-3845), so the validator's
+/// "this condition write threads" and this lowering cannot disagree.
 pub(in crate::core_erlang) fn condition_has_state_effects(
     generator: &CoreErlangGenerator,
     condition: &Expression,
 ) -> bool {
-    if generator.in_class_method() {
-        return false;
-    }
-    if let Expression::Block(cond_block) = condition {
-        block_analysis::analyze_block(cond_block).has_state_effects()
-    } else {
-        false
-    }
+    beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
+        condition,
+        generator.in_class_method(),
+    )
 }
 
 impl BodyEffects {

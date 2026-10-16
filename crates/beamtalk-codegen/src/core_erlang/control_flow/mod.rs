@@ -30,7 +30,7 @@
 //! - [`counted_loops`] — Counted loop constructs (and `CountedLoopFrame`)
 //! - [`conditionals`] — `ifTrue:`/`ifFalse:`/`match:` etc.
 //! - [`exception_handling`] — `on:do:`/`ensure:`
-//! - [`lookups`] — `Dictionary` `at:ifAbsent:` whose handler writes an outer local
+//! - [`lookups`] — `Dictionary` `at:ifAbsent:` / `at:ifPresent:` / `at:ifPresent:ifAbsent:` whose handler writes an outer local
 //! - [`loop_mode`] — [`LoopMode`], the generator's own loop-body context field
 //! - [`family_slots`] — ADR 0122 Decision 3: the unified storage-family
 //!   result-tuple append/extract emission helper (not wired into any site

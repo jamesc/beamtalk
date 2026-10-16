@@ -998,6 +998,10 @@ impl CoreErlangGenerator {
         if self.exception_producer_in_frame(inner) {
             return true;
         }
+        // BT-3841: and its evaluated literal block (`[...] value`) producer.
+        if self.block_value_producer_in_frame(inner) {
+            return true;
+        }
         // ADR 0118 phase 5b: mirrors `threaded_expression`'s
         // `class_method_prelude_producer` branch — a same-class self-send
         // or a direct class-var assignment, in class-method context, needs

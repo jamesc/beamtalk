@@ -627,6 +627,16 @@ reports the same message at the same span. No operation is surface-specific.
   REPL; `detect:ifNone:` (search block or handler writing) joins the producer
   table in class and value-type methods, and stays rejected in nested actor
   positions until measured.
+- **`[...] value` as a producer (ADR 0131, BT-3841 PR 6).** An evaluated
+  literal block (`[...] value`, the unary `value` sent to a block literal with no
+  parameters) whose block writes an outer local is an arm-like local-threading
+  producer: accepted, and keeps its writes, as a statement, as an operand and in
+  an arm, protected body, handler, loop body or another evaluated block (at any
+  depth, in class, value-type and actor methods) instead of reporting
+  `UnmigratedLocalThreading`. `value:` forms, a parenthesised receiver and the
+  REPL root keep their previous verdict and lowering. No new error on any
+  surface (CLI, REPL eval and load, LSP, MCP, all from the analyser); the REPL
+  display is unchanged.
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

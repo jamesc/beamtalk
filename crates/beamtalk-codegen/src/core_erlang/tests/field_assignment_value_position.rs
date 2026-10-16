@@ -410,8 +410,8 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "self take: ((EXPR > 3 ifTrue: [self.m := 1. true] ifFalse: [false]) ifTrue: [self.n := 2] ifFalse: [0])",
     ),
     // Loops in value position: counted and `whileTrue:` loops thread `Self` through their own
-    // tuple (`do:` / `collect:` / `inject:into:` bodies cannot write a field in a value type
-    // in any position, see `VT_UNSUPPORTED_FIELD_WRITING_BODIES`).
+    // tuple (`do:` / `collect:` / `inject:into:` fold bodies carry it in the fold accumulator,
+    // below).
     (
         "assigned_loop_receiver",
         "c := EXPR timesRepeat: [self.m := self.m + 1]. c",
@@ -433,9 +433,10 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
     // BT-3827: `do:` / `collect:` / `inject:into:` bodies that write a field carry `Self` through
-    // the fold accumulator (`FoldFamilySlots`), so each compiles in every position and statement
-    // shape; the `FoldFamilyNotCarried` verifier invariant covers the lambda's tail
-    // (`value_type_fold_family_verifier_corpus.rs`).
+    // the fold accumulator (`FoldFamilySlots`), so each compiles in every position of every
+    // statement-level shape outside `VT_FOLD_REJECTING_SHAPES`, and is a structured rejection in
+    // every nested shape (`fold_writing_position_must_be_rejected`); the `FoldFamilyNotCarried`
+    // verifier invariant covers the lambda's tail (`value_type_fold_family_corpus.rs`).
     ("do_field_write_statement", "#(1, 2) do: [:e | self.m := e]"),
     (
         "do_field_write_send_arg",
@@ -509,6 +510,14 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
         "    self.m > 5 ifTrue: [STMT] ifFalse: [self.m := 1].\n    self.n\n",
         true,
     ),
+    // BT-3844: an arm that also rebinds an outer local before and after STMT, so the
+    // conditional takes the local-threading lowering (the arm's statements are an open chain
+    // whose locals the post-`case` rebinds read) rather than only the field-write merge.
+    (
+        "local_threading_conditional_arm",
+        "    t := 0.\n    self.m > 5 ifTrue: [t := 1. STMT. t := t + 1] ifFalse: [t := 2].\n    t + self.n\n",
+        true,
+    ),
     (
         "conditional_condition",
         "    ((STMT) > 3) ifTrue: [self.m := 1].\n    self.n\n",
@@ -544,6 +553,22 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
 /// The same rejection a fold gets in a stored block, a cascade or a receiver
 /// (`field_writing_folds_in_closed_contexts_stay_a_structured_rejection`).
 pub(super) const VT_FOLD_REJECTING_SHAPES: &[&str] = &["block_value", "conditional_condition"];
+
+/// BT-3844: in every shape that nests STMT below the method body (`may_reject == true`: a
+/// conditional arm, plain or local-threading, a loop body, a `do:` body, an `on:do:` block) a
+/// field-writing fold is not merely *allowed* to be rejected, it MUST be: the enclosing
+/// construct is lowered by the shared up-front rejection of a field write below an arm's / a
+/// body's top level (`reject_nested_vt_conditional_self_field_writes`,
+/// `reject_unthreadable_value_self_field_write`), so no consumer reads the fold's `Self` slot
+/// there. A fold that starts compiling in one of these shapes has had that rejection lifted
+/// without the runtime coverage that proves its write survives (the corpus's `maps:put` check
+/// alone cannot: the `maps:put` is inside the fold lambda whether or not its `Self` reaches the
+/// code after the construct). Lifting it means adding that coverage first (`BUnit` cases that
+/// read the field after the construct, and a position in `value_type_fold_family_corpus.rs`'s
+/// oracle run), then exempting that shape here.
+fn fold_writing_position_must_be_rejected(shape_may_reject: bool, position: &str) -> bool {
+    shape_may_reject && is_fold_writing_position(position)
+}
 
 /// Whether a [`VT_POSITIONS`] template is one of the BT-3827 field-writing fold positions.
 pub(super) fn is_fold_writing_position(template: &str) -> bool {
@@ -677,6 +702,16 @@ fn value_type_field_assignment_value_position_corpus() {
                 must_compile += 1;
             }
             match vt_outcome(&src) {
+                VtOutcome::Compiles(_)
+                    if fold_writing_position_must_be_rejected(*shape_may_reject, position) =>
+                {
+                    failing.push(name.clone());
+                    details.push(format!(
+                        "{name}: a field-writing fold compiled below the method body's top \
+                         level, where it must be a structured rejection until its write is \
+                         proven at runtime (see `fold_writing_position_must_be_rejected`)\n{src}"
+                    ));
+                }
                 VtOutcome::Compiles(code) => {
                     compiled += 1;
                     if !may_reject && !pinned {

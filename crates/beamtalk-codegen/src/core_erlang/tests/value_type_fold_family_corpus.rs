@@ -19,12 +19,23 @@
 //!    debug verifier on, through `erlc`, and each probe is *run*; its observed `(m, n, t, value)`
 //!    must equal what a Rust interpreter computes. A write the lowering drops, or applies in the
 //!    wrong order, fails here although it compiles.
+//! 3. **Conditional arms stay a structured rejection (BT-3844).** The same generated fold
+//!    bodies, placed in a conditional arm — plain or local-threading, `ifTrue:` / `ifFalse:` /
+//!    `ifTrue:ifFalse:` (either or both arms), as an arm statement, an arm assignment or the
+//!    arm's value, with the conditional as a statement, the method's last statement or an
+//!    assigned value ([`arm_programs`]). None can run against the oracle: every one is refused
+//!    up front (`reject_nested_vt_conditional_self_field_writes` treats the fold's body write as
+//!    a write below the arm's top level), so the arm never reaches a lowering that reads the
+//!    fold's `Self` slot. The test pins that refusal for the whole corpus; lifting it (BT-3854)
+//!    means giving these programs an oracle (taken arm: the fold's state; other arm /
+//!    passthrough: `START`) and running them like [`oracle_programs`].
 
 use super::codegen;
 use super::field_assignment_value_position::{
     VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, is_fold_writing_position,
 };
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
 
 /// `(case name, program)` for every statement-level shape x every fold-writing position.
 fn verifier_programs() -> Vec<(String, String)> {
@@ -432,5 +443,107 @@ fn generated_field_writing_folds_agree_with_the_oracle_when_run() {
         mismatches.len(),
         programs.len(),
         mismatches.join("\n")
+    );
+}
+
+// ── Conditional arms (BT-3844) ──────────────────────────────────────────────────────────────
+
+/// How a generated fold `FOLD` sits in a conditional arm. `x` is an outer local, so every form but
+/// the bare `FOLD` one makes the arm itself a local-threading arm. The bare form is a plain arm
+/// only under the selectors whose arms are all `FOLD`: where the other arm writes `x := 5`
+/// ([`ARM_SELECTORS`]), that arm puts the whole conditional on the local-threading lowering.
+const ARM_FORMS: [&str; 4] = [
+    // the fold alone, as the arm's value (no local write of its own)
+    "FOLD",
+    // local-threading arm, the fold a statement between two local writes
+    "x := 1. FOLD. x := x + 1",
+    // local-threading arm, the fold assigned to the local
+    "x := FOLD. x",
+    // local-threading arm, the fold the arm's value
+    "x := 1. FOLD",
+];
+
+/// The conditional around one or two arms `ARM`.
+const ARM_SELECTORS: [&str; 5] = [
+    "c ifTrue: [ARM]",
+    "c ifFalse: [ARM]",
+    "c ifTrue: [ARM] ifFalse: [x := 5]",
+    "c ifTrue: [x := 5] ifFalse: [ARM]",
+    "c ifTrue: [ARM] ifFalse: [ARM]",
+];
+
+/// Where the conditional `COND` sits in the method.
+const ARM_POSITIONS: [&str; 3] = [
+    // a statement, the fields and locals read after it
+    "COND.\n    #(self.m, self.n, t, x)",
+    // the method's last statement (its value is the method's answer)
+    "COND",
+    // an assigned value, read with the fields after it
+    "r := COND.\n    #(self.m, self.n, t, x, r)",
+];
+
+/// `(probe name, method source)` for every generated fold body x fold kind x arm form x selector
+/// x conditional position.
+fn arm_programs() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for kind in [Kind::Do, Kind::Collect, Kind::Inject] {
+        for body in bodies() {
+            let fold = kind.source(&body);
+            for form in ARM_FORMS {
+                let arm = form.replace("FOLD", &fold);
+                for selector in ARM_SELECTORS {
+                    let conditional = selector.replace("ARM", &arm);
+                    for position in ARM_POSITIONS {
+                        let name = format!("probe{}", out.len());
+                        let method = format!(
+                            "  {name} =>\n    t := 0\n    x := 0\n    c := self.n > 10\n    {}\n",
+                            position.replace("COND", &conditional)
+                        );
+                        out.push((name, method));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn generated_field_writing_folds_in_conditional_arms_stay_a_structured_rejection() {
+    let programs = arm_programs();
+    assert!(
+        programs.len() >= 1000,
+        "only {} generated conditional-arm programs: the corpus has thinned out",
+        programs.len()
+    );
+    // Exactly the up-front arm rejection ADR 0122's conditional-arm row documents
+    // (`reject_nested_vt_conditional_self_field_writes` -> `FieldAssignmentInUnsupportedBlock`),
+    // not just any structured value-type error: a different one would mean the arm got past that
+    // pre-pass into a lowering this corpus has never run.
+    let not_rejected: Vec<String> = programs
+        .iter()
+        .filter_map(|(name, method)| {
+            let src = format!("{VT_HEADER}\n{method}");
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+            let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+            match generate_module_surfacing_verifier(&module, CodegenOptions::new("test")) {
+                Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => None,
+                Ok(_) => Some(format!(
+                    "{name}: compiled, but nothing proves the fold's write reaches the code after \
+                     the arm; give it an oracle run first\n{method}"
+                )),
+                Err(other) => Some(format!(
+                    "{name}: expected the arm pre-pass rejection \
+                     (FieldAssignmentInUnsupportedBlock), got {other:?}\n{method}"
+                )),
+            }
+        })
+        .collect();
+    assert!(
+        not_rejected.is_empty(),
+        "{} of {} conditional-arm fold programs are not a structured rejection:\n\n{}",
+        not_rejected.len(),
+        programs.len(),
+        not_rejected.join("\n")
     );
 }

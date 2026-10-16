@@ -33,6 +33,31 @@ pub(crate) fn generate_dictionary_bif(
                 ")",
             ])
         }
+        "at:ifPresent:" => {
+            let p0 = param(params, 0, "_Key");
+            let p1 = param(params, 1, "_Block");
+            Some(docvec![
+                "call 'beamtalk_map':'at_if_present'(Self, ",
+                leaf::var(p0.to_string()),
+                ", ",
+                leaf::var(p1.to_string()),
+                ")",
+            ])
+        }
+        "at:ifPresent:ifAbsent:" => {
+            let p0 = param(params, 0, "_Key");
+            let p1 = param(params, 1, "_PresentBlock");
+            let p2 = param(params, 2, "_AbsentBlock");
+            Some(docvec![
+                "call 'beamtalk_map':'at_if_present_if_absent'(Self, ",
+                leaf::var(p0.to_string()),
+                ", ",
+                leaf::var(p1.to_string()),
+                ", ",
+                leaf::var(p2.to_string()),
+                ")",
+            ])
+        }
         "at:put:" => {
             let p0 = param(params, 0, "_Key");
             let p1 = param(params, 1, "_Value");

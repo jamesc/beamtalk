@@ -118,6 +118,13 @@ Object subclass: Adr0131LocalRebindClass
       ]
     #[r, t]
 
+  // `[...] value` as a statement (an evaluated literal block is an arm-like
+  // producer since BT-3841).
+  class stBlockValue =>
+    t := 0
+    [t := t + 1] value
+    t
+
   class stDetectIfNone =>
     t := 0
     #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]

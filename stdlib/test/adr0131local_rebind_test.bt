@@ -108,6 +108,9 @@ TestCase subclass: Adr0131LocalRebindTest
 
   // BT-3753: statement-position shapes that answer right today (the ones that
   // do not are Phase 0 compile errors, in adr0131local_rebind_pending_test).
+  testStBlockValueClass =>
+    self assert: (Adr0131LocalRebindClass stBlockValue) equals: 1
+
   testStBlockValueValue =>
     self assert: ((Adr0131LocalRebindValue new) stBlockValue) equals: 1
 
