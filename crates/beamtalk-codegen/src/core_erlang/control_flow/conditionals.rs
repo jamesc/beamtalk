@@ -914,6 +914,48 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// BT-3841: the [`ThreadedValue`] producer for an evaluated literal block
+    /// (`[block] value`, `beamtalk_core`'s `literal_block_value_arm`) that is a
+    /// local-threading producer: the degenerate conditional whose one arm always
+    /// runs. It shares the conditional producer's scratch map, arm frame and
+    /// tuple-to-`ThreadedValue` step, so the arm's locals come back through
+    /// `LocalRebind`s lowered by the enclosing frame.
+    pub(in crate::core_erlang) fn generate_block_value_with_mutations(
+        &mut self,
+        block: &Block,
+        tail: ProducerTail,
+        producer: bool,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc = self.generate_block_value_with_mutations_tuple(block, scratch, producer)?;
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
+    }
+
+    /// The `{Result, NewState}` tuple of [`Self::generate_block_value_with_mutations`]:
+    /// the seeded scratch map, then the arm. There is no `case`: the arm is
+    /// taken every time.
+    pub(in crate::core_erlang) fn generate_block_value_with_mutations_tuple(
+        &mut self,
+        block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
+    ) -> Result<Document<'static>> {
+        let outer_state = self.current_state_var();
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
+        Ok(docvec![
+            seed_doc,
+            "let StateAcc = ",
+            leaf::var(base_state),
+            " in ",
+            branch_doc,
+        ])
+    }
+
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifFalse: [block]` — see [`Self::generate_if_true_with_mutations`]'s
     /// doc comment for the shape every one of these producers shares.
@@ -1480,6 +1522,7 @@ impl CoreErlangGenerator {
     /// [`Self::inline_control_flow_producer_with`] once `expr` is
     /// paren-unwrapped; `root_producer` says it is a conditional local-threading
     /// producer ([`Self::conditional_producer_locals`]).
+    #[allow(clippy::too_many_lines)] // one arm per conditional selector
     fn lower_inline_control_flow(
         &mut self,
         expr: &Expression,
@@ -1509,6 +1552,19 @@ impl CoreErlangGenerator {
         if root_producer {
             if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
                 return Ok(Some(tv));
+            }
+        }
+        // BT-3841: an evaluated literal block (`[...] value`) that is a
+        // producer here is a conditional whose one arm always runs.
+        if root_producer {
+            if let Some(block) =
+                beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr)
+            {
+                return Ok(Some(self.generate_block_value_with_mutations(
+                    block,
+                    tail,
+                    root_producer,
+                )?));
             }
         }
         let Expression::MessageSend {

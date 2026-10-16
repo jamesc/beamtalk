@@ -2844,6 +2844,11 @@ impl CoreErlangGenerator {
     /// When true, the expression will generate a `{Result, NewState}` tuple via
     /// `generate_block_value_call_stateful()` and must be unpacked by the caller.
     pub(in crate::core_erlang) fn is_tier2_value_call(&self, expr: &Expression) -> bool {
+        // BT-3841: a producer-shaped `[...] value` in this frame is lowered by
+        // the evaluated-block producer (see `control_flow_has_mutations`).
+        if self.block_value_producer_in_frame(expr) {
+            return false;
+        }
         if let Expression::MessageSend {
             receiver, selector, ..
         } = expr
@@ -3180,6 +3185,15 @@ impl CoreErlangGenerator {
         // classified as control flow with mutations (and thus unpacked + threaded)
         // rather than falling through to a plain pure local assignment.
         let expr = expr.unwrap_parens();
+
+        // BT-3841: an evaluated literal block (`[...] value`) that is a
+        // local-threading producer in the frame being lowered is control flow
+        // with mutations: its arm's writes come back through the producer's
+        // prelude, never through the legacy Tier 2 inline-block tuple
+        // ([`Self::is_tier2_value_call`] leaves it to this classifier).
+        if self.block_value_producer_in_frame(expr) {
+            return true;
+        }
 
         // `match:` is a dedicated `Expression::Match` node, not a
         // `MessageSend`, so it's otherwise invisible to this classifier — a

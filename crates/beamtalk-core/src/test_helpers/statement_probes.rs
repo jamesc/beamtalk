@@ -144,6 +144,15 @@ pub fn expected_answer(container: &str, target: &str, kind: &str) -> i64 {
     }
 }
 
+/// Whether `ADR0131_MEASURE_GAPS` asks the measurement harness to run the `gap`
+/// probe lines too (BT-3776: a construct that writes only a local of its own
+/// enclosing block). A development aid: the gap cells are not in the measured
+/// table, so a run that includes them must not bless (the harness refuses).
+#[must_use]
+pub fn include_gaps() -> bool {
+    std::env::var_os("ADR0131_MEASURE_GAPS").is_some()
+}
+
 /// The two probe matrices: the statement positions (`DENY_SET` side, a
 /// construct as a statement of a block role) and the operand positions
 /// (`ALLOW_SET` side, a construct as the value of an assignment, a receiver,
@@ -195,7 +204,10 @@ impl Matrix {
         match self {
             Matrix::Statement => probe_rows()
                 .into_iter()
-                .filter(|r| r.context != "repl" && (r.verdict != "gap" || gap_is_measured(r)))
+                .filter(|r| {
+                    r.context != "repl"
+                        && (r.verdict != "gap" || gap_is_measured(r) || include_gaps())
+                })
                 .map(|r| [r.context, r.container, r.target, r.kind])
                 .collect(),
             Matrix::Operand => {
@@ -362,17 +374,17 @@ pub fn probe_class_source(
 /// list when it is lowered, and the agreement test then holds its `local` and
 /// `dlocal` cells to the same rule as every other cell (rejected unless they
 /// answer right). The other kinds' `gap` cells stay unmeasured (BT-3776).
-pub const GAP_MEASURED_KINDS: &[&str] = &["ewi", "dsb"];
+pub const GAP_MEASURED_KINDS: &[&str] = &["ewi", "dsb", "value"];
 
 /// Whether the `gap` cell `row` is measured: its kind is in
-/// [`GAP_MEASURED_KINDS`], and it is not one of the roles where a block-local
-/// write is lost for every kind alike, plain `do:` included (so the cell says
-/// nothing about the family): the evaluated block `[...] value` (the
-/// `[...] value` families' work) and an actor `do:` nested in a `do:`
-/// (`iterIter`, `armIterIter`). Those stay with BT-3776.
+/// [`GAP_MEASURED_KINDS`], or it sits in an evaluated block (container `val`,
+/// whose frame is an arm since BT-3841, so every kind in it is held to the rule),
+/// and it is not one of the roles where a block-local write is lost for every
+/// kind alike, plain `do:` included (so the cell says nothing about the family):
+/// an actor `do:` nested in a `do:` (`iterIter`, `armIterIter`). Those stay with
+/// BT-3776.
 fn gap_is_measured(row: &ProbeRow) -> bool {
-    GAP_MEASURED_KINDS.contains(&row.kind.as_str())
-        && row.container != "val"
+    (GAP_MEASURED_KINDS.contains(&row.kind.as_str()) || row.container == "val")
         && !(row.context == "actor" && matches!(row.container.as_str(), "iterIter" | "armIterIter"))
 }
 

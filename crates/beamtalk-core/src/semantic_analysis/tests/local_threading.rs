@@ -499,10 +499,11 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 
 #[test]
 fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
-    // o1's operand shape with a construct that is not a producer yet: a
-    // `value` sent to a block literal (an `on:do:` is one since BT-3817, ADR
-    // 0131 Phase 3b).
-    let src = in_class("r := ([t := t + 1. 1] value) + 1\n#[r, t]");
+    // o1's operand shape with a construct that is not a producer: a `value:`
+    // sent to a block literal (an `on:do:` is one since BT-3817, ADR 0131 Phase
+    // 3b, and a unary `value` since BT-3841: its argument-binding form keeps the
+    // legacy rows).
+    let src = in_class("r := ([:v | t := t + v. 1] value: 2) + 1\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -510,7 +511,7 @@ fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     assert_eq!(d.severity, Severity::Error);
     assert_eq!(
         d.message.as_str(),
-        "`value` writes outer local `t`, but as the receiver of a message in a class \
+        "`value:` writes outer local `t`, but as the receiver of a message in a class \
          method the write is not threaded back yet (BT-3743)"
     );
     assert!(
@@ -621,7 +622,7 @@ fn allow_set_do_assignment_is_accepted_in_every_context() {
 fn allow_set_field_assignment_in_class_method_is_an_error() {
     // o5's shape with a construct that is not a producer yet (an `on:do:` is one
     // since BT-3817): the tuple would be stored in the class variable.
-    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := [t := t + 1] value\n    t\n";
+    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := [:v | t := t + v] value: 1\n    t\n";
     let diags = adr0131_diagnostics(src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -633,7 +634,7 @@ fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
     // local needs the loop to thread it on. A construct that is not a
     // local-threading producer in the body keeps the error.
-    let src = in_class("r := 0\n#(1, 2) do: [:x | r := [t := t + y] value]\n#[r, t]");
+    let src = in_class("r := 0\n#(1, 2) do: [:x | r := [:v | t := t + y] value: 1]\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -1248,13 +1249,13 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 
 #[test]
 fn deny_set_nested_statement_names_the_enclosing_block() {
-    let src = in_class("4 > 3 ifTrue: [[t := t + 1] value]\nt");
+    let src = in_class("4 > 3 ifTrue: [[:v | t := t + v] value: 1]\nt");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
-        "`value` writes outer local `t`, but as a statement inside a conditional arm \
+        "`value:` writes outer local `t`, but as a statement inside a conditional arm \
          in a class method the write is not threaded back yet (BT-3743)"
     );
     assert!(
@@ -1271,7 +1272,7 @@ fn deny_set_nested_statement_names_the_enclosing_block() {
 fn deny_set_method_body_statement_is_rejected_per_context() {
     // A `[...] value` loses the write as a class method statement and answers
     // right in an actor method.
-    let body = "[t := t + 1] value\nt";
+    let body = "[:v | t := t + v] value: 1\nt";
     let diags = adr0131_diagnostics(&in_class(body));
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -1421,8 +1422,6 @@ fn adr0131_statement_probe_pins() {
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtIter", "outer", "dinH"),
     ("actor", "armProtIter", "outer", "dinS"),
-    ("actor", "armProtIter", "outer", "value"),
-    ("actor", "armProtArm", "outer", "value"),
     ("actor", "armIter", "outer", "det"),
     ("actor", "coll", "outer", "det"),
     ("actor", "iter", "outer", "det"),
@@ -1673,13 +1672,12 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
             .fold(String::new(), |acc, l| acc + "    " + l + "\n");
         format!("{}{lines}", header(context))
     };
-    let depth3 =
-        "t := 0\n#(1, 2) do: [:z | [c ifTrue: [[t := t + 1] value]] on: Error do: [:e | 0]]\nt";
+    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]\nt";
     assert!(
         !adr0131_diagnostics(&source("value", depth3)).is_empty(),
         "the value-type depth-3 shape is unmeasured and must be rejected"
     );
-    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [[t := t + 1] value]] on: Error do: [:e | 0]]]\nt";
+    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]]\nt";
     for context in ["class", "value", "actor"] {
         assert!(
             !adr0131_diagnostics(&source(context, depth4)).is_empty(),
@@ -1690,32 +1688,34 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
 
 /// BT-3841 review: unmeasured middle roles of a three-block nesting stay
 /// rejected for the unfinished families, whatever the outermost and innermost
-/// roles are (no `RIGHT_STATEMENTS` row exists past depth two).
+/// roles are (no `RIGHT_STATEMENTS` row exists past depth two). (An evaluated
+/// literal block is not one of them since BT-3841: it is a producer by rule at
+/// any depth, `evaluated_literal_blocks_are_producers_at_any_depth`.)
 #[test]
 fn unmeasured_three_deep_chains_stay_rejected() {
     for (context, src) in [
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[t := t + 1] value]]] on: Error do: [:e | 0]]\nt",
+                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[:v | t := t + v] value: 1]]] on: Error do: [:e | 0]]\nt",
             ),
         ),
         (
             "actor",
             in_actor(
-                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
             ),
         ),
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[t := t + 1] value]]]\nt",
+                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
             ),
         ),
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [[t := t + 1] value]]]\nt",
+                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]]]\nt",
             ),
         ),
     ] {
@@ -1725,9 +1725,9 @@ fn unmeasured_three_deep_chains_stay_rejected() {
 }
 
 /// BT-3841: `keysAndValuesDo:`/`doWithKey:` are producers like `do:`. Accepted
-/// as a statement, in an arm and in a loop body in every method context; still
-/// rejected inside a `[...] value` body, and a `^` of one in a plain closure is
-/// rejected like `^xs do: [...]` there.
+/// as a statement, in an arm, in a loop body and in an evaluated literal block
+/// (`[...] value`, an arm frame) in every method context; a `^` of one in a plain
+/// closure is rejected like `^xs do: [...]` there.
 #[test]
 fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
     for sel in ["keysAndValuesDo:", "doWithKey:"] {
@@ -1737,17 +1737,17 @@ fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
             format!("t := 0\ntrue ifTrue: [{kv}]\nt"),
             format!("t := 0\n#(1, 2) do: [:z | {kv}]\nt"),
             format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
+            format!("t := 0\n[{kv}] value\nt"),
+            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
         ] {
             for src in [in_class(&body), in_value(&body), in_actor(&body)] {
                 let diags = adr0131_diagnostics(&src);
                 assert!(diags.is_empty(), "{src}: {diags:?}");
             }
         }
-        for body in [
-            format!("t := 0\n[{kv}] value\nt"),
-            format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
-            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
-        ] {
+        for body in [format!(
+            "t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"
+        )] {
             for src in [in_class(&body), in_value(&body)] {
                 assert!(
                     !adr0131_diagnostics(&src).is_empty(),
@@ -2556,4 +2556,50 @@ fn while_condition_without_outer_write_is_accepted() {
         let diags = adr0131_diagnostics(&source);
         assert!(diags.is_empty(), "{source}: {diags:?}");
     }
+}
+
+/// BT-3841: an evaluated literal block (`[...] value`) that writes an outer local
+/// is an arm-like local-threading producer by rule, the one `conditional_arm_blocks`
+/// site rule: accepted as a statement, as an operand, in an arm, a protected body,
+/// a handler and a loop body, and nested in itself, at any depth, in every method
+/// context. What is not a producer keeps the legacy verdict: `value:` (its
+/// arguments bind the block's parameters outside the frame), a parenthesised
+/// receiver (a block value, §6), and the REPL.
+#[test]
+fn evaluated_literal_blocks_are_producers_at_any_depth() {
+    for body in [
+        "t := 0\n[t := t + 1] value\nt",
+        "t := 0\nr := [t := t + 1. 5] value\n#[r, t]",
+        "t := 0\nr := t + ([t := t + 1. 5] value)\n#[r, t]",
+        "t := 0\ntrue ifTrue: [[t := t + 1] value]\nt",
+        "t := 0\n[[t := t + 1] value] value\nt",
+        "t := 0\n#(1, 2) do: [:z | [t := t + z] value]\nt",
+        "t := 0\n#(1, 2) do: [:z | true ifTrue: [[t := t + z] value]]\nt",
+        "t := 0\n[[t := t + 1] value] on: Error do: [:e | 0]\nt",
+        "t := 0\n[Error signal: \"x\"] on: Error do: [:e | [t := t + 1] value. 0]\nt",
+        "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | [[t := t + z] value] on: Error do: [:e | 0]]]\nt",
+        "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | true ifTrue: [[t := t + 1] value]]]\nt",
+        "t := 0\n1 to: 2 do: [:i | [t := t + i. [t := t + 1] value] value]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+    // Not producers: a `value:` send and a parenthesised receiver (§6) keep their
+    // legacy verdict.
+    for body in [
+        "t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt",
+        "t := 0\n([t := t + 1]) value\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            assert!(
+                !adr0131_diagnostics(&src).is_empty(),
+                "{src}: accepted but not a producer"
+            );
+        }
+    }
+    // The REPL keeps its own lowering and its verdict.
+    let diags = adr0131_diagnostics_with("[t := t + 1] value\n", &["t"]);
+    assert!(diags.is_empty(), "{diags:?}");
 }
