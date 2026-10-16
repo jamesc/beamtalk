@@ -2995,8 +2995,9 @@ impl CoreErlangGenerator {
         blocks.iter().any(|block| {
             // shares `block_arg_needs_threading`'s block-body check
             // (block-local/field mutations plus a cross-scope list-op
-            // mutation) — the same combinator `control_flow_has_mutations`
-            // and `enumeration_block_needs_threading` use — extended here
+            // mutation) — the combinator `control_flow_has_mutations` uses
+            // for conditional arms and exception blocks (loops and folds
+            // read `loop_body_has_carried_mutations`, BT-3834) — extended here
             // with the in-loop-body-local-write disjunct only this caller
             // needs.
             self.block_arg_needs_threading(block)

@@ -218,6 +218,11 @@ proptest! {
 /// Cases `block_locals_without_local_touch_pass_verified_codegen` draws.
 const BLOCK_LOCAL_CASES: usize = 256;
 
+/// PIN-BUG BT-3849: how many of the [`BLOCK_LOCAL_CASES`] fixed-draw programs
+/// codegen rejects with "Multiple threaded variables in control flow" (7 of
+/// the first 1024 of the same draw, `measure_failure_rate`).
+const BT_3849_REJECTED: usize = 2;
+
 /// BT-3834: with [`Shapes::LOCAL_TOUCH`] off no block writes a method-level
 /// local, so a conditional arm, `ensure:` or `on:do:` block that introduces a
 /// local and rebinds it in a nested loop ([`Shapes::BLOCK_LOCAL`]) threads
@@ -247,9 +252,11 @@ fn block_locals_without_local_touch_pass_verified_codegen() {
             Err(e) => panic!("seed {seed} size {size}: {e}"),
         }
     }
-    assert!(
-        rejected <= BLOCK_LOCAL_CASES / 50,
-        "{rejected} of {BLOCK_LOCAL_CASES} programs rejected (BT-3849)"
+    // The draw is fixed, so the count is exact: a fix for BT-3849 flips this
+    // pin to 0 (and removes the allowance above).
+    assert_eq!(
+        rejected, BT_3849_REJECTED,
+        "PIN-BUG BT-3849: programs of {BLOCK_LOCAL_CASES} rejected changed"
     );
 }
 
