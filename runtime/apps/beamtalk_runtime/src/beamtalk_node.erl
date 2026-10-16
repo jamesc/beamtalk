@@ -433,9 +433,10 @@ remote_shape_manifest(Name) ->
 The ADR 0126 §9 item 2 connect guard, as a pure-ish decision: `ok` if a
 connection to `Node` may be attempted, or `{error, #beamtalk_error{kind =
 insecure_distribution}}` if `Node`'s host is not this host and `TlsEnabled`
-is false. Host resolution uses `inet:getaddrs/2`; an IP-literal host
-resolves without DNS. A host that does not resolve at all cannot be proven
-local, so it falls under the policy too.
+is false. Host resolution uses `inet:getaddrs/2`; an IP-literal host, and a
+name under the RFC 6761 `invalid` TLD, are decided without any lookup. A
+host that does not resolve at all cannot be proven local, so it falls under
+the policy too.
 """.
 -spec connect_policy(node(), boolean()) -> ok | {error, #beamtalk_error{}}.
 connect_policy(_Node, true) ->
@@ -576,10 +577,37 @@ own_host_names() ->
         end,
     ["localhost", string:lowercase(Hostname) | OwnNodeHost].
 
+-doc """
+Whether every address `Host` resolves to is on this machine. Two host forms
+are answered without touching a resolver: an IP literal is its own (single)
+address, and a name under the RFC 6761 special-use `invalid` TLD never
+resolves (RFC 6761 §6.4 asks resolver libraries to answer such names
+negatively at once; doing it here keeps a guaranteed-negative answer from
+waiting on a DNS round trip, which can stall past a caller's timeout —
+BT-3829). Any other name goes through `inet:getaddrs/2`.
+""".
 -spec resolves_locally(string()) -> boolean().
 resolves_locally(Host) ->
-    Addrs = resolve(Host, inet) ++ resolve(Host, inet6),
+    Addrs = host_addrs(Host),
     Addrs =/= [] andalso lists:all(fun is_local_addr/1, Addrs).
+
+-spec host_addrs(string()) -> [inet:ip_address()].
+host_addrs(Host) ->
+    case inet:parse_address(Host) of
+        {ok, Addr} ->
+            [Addr];
+        {error, einval} ->
+            case is_special_use_invalid(Host) of
+                true -> [];
+                false -> resolve(Host, inet) ++ resolve(Host, inet6)
+            end
+    end.
+
+-doc "Whether `Host` is `invalid` or a name under it (a trailing root dot allowed).".
+-spec is_special_use_invalid(string()) -> boolean().
+is_special_use_invalid(Host) ->
+    Labels = string:lexemes(string:lowercase(Host), "."),
+    Labels =/= [] andalso lists:last(Labels) =:= "invalid".
 
 -spec resolve(string(), inet | inet6) -> [inet:ip_address()].
 resolve(Host, Family) ->
