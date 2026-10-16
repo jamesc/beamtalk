@@ -693,35 +693,32 @@ fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
-    // Still rejected inside a block that is not a threaded frame body: an arm.
+    // BT-3841: also an assignment in an arm of a class or value-type method (the
+    // fold is measured right there; the actor method keeps its rejection).
     let arm = "true ifTrue: [r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]]\nt";
     for src in [in_class(arm), in_value(arm)] {
-        assert_eq!(
-            of_category(
-                &adr0131_diagnostics(&src),
-                DiagnosticCategory::UnmigratedLocalThreading
-            )
-            .len(),
-            1,
-            "{src}"
-        );
+        let diags = adr0131_diagnostics(&src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
     }
 }
 
 #[test]
-fn detect_if_none_handler_write_in_a_counted_loop_body_is_rejected() {
-    // BT-3822 review: `detect:ifNone:` is not a loop-body producer site, so a
-    // handler that writes an outer local inside a direct-params `to:do:` is
-    // rejected by Phase 0 in every method context (never a silently dropped
-    // write or a leaked tuple).
+fn detect_if_none_handler_write_in_a_counted_loop_body_is_rejected_in_an_actor() {
+    // BT-3822 review: a handler that writes an outer local inside a
+    // direct-params `to:do:` must never be a silently dropped write or a leaked
+    // tuple. BT-3841 lowers it for a class or value-type method (the loop body
+    // is a producer frame there); the actor method still answers wrong and
+    // stays rejected by Phase 0.
     let body = "t := 0\nn := 0\n1 to: 3 do: [:i |\n  n := n + 1\n  \
                 #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]\n]\n#[t, n]";
-    for src in [in_class(body), in_value(body), in_actor(body)] {
+    let diags = adr0131_diagnostics(&in_actor(body));
+    assert!(
+        !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+        "{diags:?}"
+    );
+    for src in [in_class(body), in_value(body)] {
         let diags = adr0131_diagnostics(&src);
-        assert!(
-            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
-            "{src}: {diags:?}"
-        );
+        assert!(diags.is_empty(), "{src}: {diags:?}");
     }
 }
 
@@ -1249,20 +1246,20 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 
 #[test]
 fn deny_set_nested_statement_names_the_enclosing_block() {
-    let src = in_class("4 > 3 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]\nt");
+    let src = in_class("4 > 3 ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]\nt");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
-        "`detect:ifNone:` writes outer local `t`, but as a statement inside a conditional arm \
+        "`eachWithIndex:` writes outer local `t`, but as a statement inside a conditional arm \
          in a class method the write is not threaded back yet (BT-3743)"
     );
     assert!(
         p0[0]
             .hint
             .as_deref()
-            .is_some_and(|h| h.contains("not inside a conditional arm")),
+            .is_some_and(|h| h.contains("compute the new value of `t`")),
         "{:?}",
         p0[0]
     );
@@ -1770,6 +1767,14 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
         for src in [in_class(&selfsend), in_value(&selfsend)] {
             assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
         }
+        // A class-variable write in the block is written in place (ADR 0130),
+        // not threaded, so a class method accepts it too.
+        let cvar = format!("t := 0\ne := 3\ne {sel} [:k :v | self.n := self.n + v]\nt");
+        let diags = adr0131_diagnostics(&in_class(&cvar));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+            "{cvar}: {diags:?}"
+        );
         let selfrecv = format!("t := 0\nself {sel} [:k :v | self plain]\nt");
         for src in [in_class(&selfrecv), in_value(&selfrecv)] {
             assert!(adr0131_diagnostics(&src).is_empty(), "{src}");

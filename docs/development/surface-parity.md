@@ -622,8 +622,11 @@ reports the same message at the same span. No operation is surface-specific.
   `UnmigratedLocalThreading`; inside a `[...] value` body, a closure, past two
   nested blocks and in the REPL the previous verdict stands. Only errors are
   removed (CLI, REPL eval and load, LSP, MCP, all from the analyser). Run-time
-  semantics, unchanged for actors and now the same in class and value-type
-  methods: a block that writes runs for every element (no early exit).
+  semantics (BT-3805, BT-3841 PR 4): a block that writes stops at the first
+  decisive element, like the non-writing form, in every method kind and in the
+  REPL; `detect:ifNone:` (search block or handler writing) joins the producer
+  table in class and value-type methods, and stays rejected in nested actor
+  positions until measured.
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

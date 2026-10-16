@@ -1,0 +1,340 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `detect:ifNone:` as local-threading producers in a class method, a
+// value-type method and an actor method. The fixtures are
+// fixtures/adr0131detect_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131DetectTest
+
+  testClassTopHit => self assert: (Adr0131DetectClass topHit) equals: 1
+
+  testClassInArmHit =>
+    self assert: (Adr0131DetectClass inArmHit: true) equals: 1
+    self assert: (Adr0131DetectClass inArmHit: false) equals: 0
+
+  testClassInArmElseHit =>
+    self assert: (Adr0131DetectClass inArmElseHit: true) equals: 100
+    self assert: (Adr0131DetectClass inArmElseHit: false) equals: 1
+
+  testClassInDoHit => self assert: (Adr0131DetectClass inDoHit) equals: 2
+
+  testClassInToDoHit => self assert: (Adr0131DetectClass inToDoHit) equals: 2
+
+  testClassInTimesHit => self assert: (Adr0131DetectClass inTimesHit) equals: 2
+
+  testClassInWhileHit => self assert: (Adr0131DetectClass inWhileHit) equals: 2
+
+  testClassInOnDoHit => self assert: (Adr0131DetectClass inOnDoHit) equals: 1
+
+  testClassInEnsureHit =>
+    self assert: (Adr0131DetectClass inEnsureHit) equals: 1
+
+  testClassInHandlerHit =>
+    self assert: (Adr0131DetectClass inHandlerHit) equals: 1
+
+  testClassInArmInDoHit =>
+    self assert: (Adr0131DetectClass inArmInDoHit: true) equals: 2
+    self assert: (Adr0131DetectClass inArmInDoHit: false) equals: 0
+
+  testClassReturnInArmHit =>
+    self assert: (Adr0131DetectClass returnInArmHit: true) equals: 1
+    self assert: (Adr0131DetectClass returnInArmHit: false) equals: 0
+
+  testClassAssignedHit =>
+    self assert: (Adr0131DetectClass assignedHit) equals: #[1, 1]
+
+  testClassTopMiss => self assert: (Adr0131DetectClass topMiss) equals: 103
+
+  testClassInArmMiss =>
+    self assert: (Adr0131DetectClass inArmMiss: true) equals: 103
+    self assert: (Adr0131DetectClass inArmMiss: false) equals: 0
+
+  testClassInArmElseMiss =>
+    self assert: (Adr0131DetectClass inArmElseMiss: true) equals: 100
+    self assert: (Adr0131DetectClass inArmElseMiss: false) equals: 103
+
+  testClassInDoMiss => self assert: (Adr0131DetectClass inDoMiss) equals: 206
+
+  testClassInToDoMiss =>
+    self assert: (Adr0131DetectClass inToDoMiss) equals: 206
+
+  testClassInTimesMiss =>
+    self assert: (Adr0131DetectClass inTimesMiss) equals: 206
+
+  testClassInWhileMiss =>
+    self assert: (Adr0131DetectClass inWhileMiss) equals: 206
+
+  testClassInOnDoMiss =>
+    self assert: (Adr0131DetectClass inOnDoMiss) equals: 103
+
+  testClassInEnsureMiss =>
+    self assert: (Adr0131DetectClass inEnsureMiss) equals: 103
+
+  testClassInHandlerMiss =>
+    self assert: (Adr0131DetectClass inHandlerMiss) equals: 103
+
+  testClassInArmInDoMiss =>
+    self assert: (Adr0131DetectClass inArmInDoMiss: true) equals: 206
+    self assert: (Adr0131DetectClass inArmInDoMiss: false) equals: 0
+
+  testClassReturnInArmMiss =>
+    self assert: (Adr0131DetectClass returnInArmMiss: true) equals: 0
+    self assert: (Adr0131DetectClass returnInArmMiss: false) equals: 0
+
+  testClassAssignedMiss =>
+    self assert: (Adr0131DetectClass assignedMiss) equals: #[0, 103]
+
+  testClassTopSearch => self assert: (Adr0131DetectClass topSearch) equals: 3
+
+  testClassInArmSearch =>
+    self assert: (Adr0131DetectClass inArmSearch: true) equals: 3
+    self assert: (Adr0131DetectClass inArmSearch: false) equals: 0
+
+  testClassInArmElseSearch =>
+    self assert: (Adr0131DetectClass inArmElseSearch: true) equals: 100
+    self assert: (Adr0131DetectClass inArmElseSearch: false) equals: 3
+
+  testClassInDoSearch => self assert: (Adr0131DetectClass inDoSearch) equals: 6
+
+  testClassInToDoSearch =>
+    self assert: (Adr0131DetectClass inToDoSearch) equals: 6
+
+  testClassInTimesSearch =>
+    self assert: (Adr0131DetectClass inTimesSearch) equals: 6
+
+  testClassInWhileSearch =>
+    self assert: (Adr0131DetectClass inWhileSearch) equals: 6
+
+  testClassInOnDoSearch =>
+    self assert: (Adr0131DetectClass inOnDoSearch) equals: 3
+
+  testClassInEnsureSearch =>
+    self assert: (Adr0131DetectClass inEnsureSearch) equals: 3
+
+  testClassInHandlerSearch =>
+    self assert: (Adr0131DetectClass inHandlerSearch) equals: 3
+
+  testClassInArmInDoSearch =>
+    self assert: (Adr0131DetectClass inArmInDoSearch: true) equals: 6
+    self assert: (Adr0131DetectClass inArmInDoSearch: false) equals: 0
+
+  testClassReturnInArmSearch =>
+    self assert: (Adr0131DetectClass returnInArmSearch: true) equals: 2
+    self assert: (Adr0131DetectClass returnInArmSearch: false) equals: 0
+
+  testClassAssignedSearch =>
+    self assert: (Adr0131DetectClass assignedSearch) equals: #[2, 3]
+
+  testClassTopHandler =>
+    self assert: (Adr0131DetectClass topHandler) equals: 100
+
+  testClassInArmHandler =>
+    self assert: (Adr0131DetectClass inArmHandler: true) equals: 100
+    self assert: (Adr0131DetectClass inArmHandler: false) equals: 0
+
+  testClassInArmElseHandler =>
+    self assert: (Adr0131DetectClass inArmElseHandler: true) equals: 100
+    self assert: (Adr0131DetectClass inArmElseHandler: false) equals: 100
+
+  testClassInDoHandler =>
+    self assert: (Adr0131DetectClass inDoHandler) equals: 200
+
+  testClassInToDoHandler =>
+    self assert: (Adr0131DetectClass inToDoHandler) equals: 200
+
+  testClassInTimesHandler =>
+    self assert: (Adr0131DetectClass inTimesHandler) equals: 200
+
+  testClassInWhileHandler =>
+    self assert: (Adr0131DetectClass inWhileHandler) equals: 200
+
+  testClassInOnDoHandler =>
+    self assert: (Adr0131DetectClass inOnDoHandler) equals: 100
+
+  testClassInEnsureHandler =>
+    self assert: (Adr0131DetectClass inEnsureHandler) equals: 100
+
+  testClassInHandlerHandler =>
+    self assert: (Adr0131DetectClass inHandlerHandler) equals: 100
+
+  testClassInArmInDoHandler =>
+    self assert: (Adr0131DetectClass inArmInDoHandler: true) equals: 200
+    self assert: (Adr0131DetectClass inArmInDoHandler: false) equals: 0
+
+  testClassReturnInArmHandler =>
+    self assert: (Adr0131DetectClass returnInArmHandler: true) equals: 0
+    self assert: (Adr0131DetectClass returnInArmHandler: false) equals: 0
+
+  testClassAssignedHandler =>
+    self assert: (Adr0131DetectClass assignedHandler) equals: #[0, 100]
+
+  testValueTopHit => self assert: ((Adr0131DetectValue new) topHit) equals: 1
+
+  testValueInArmHit =>
+    self assert: ((Adr0131DetectValue new) inArmHit: true) equals: 1
+    self assert: ((Adr0131DetectValue new) inArmHit: false) equals: 0
+
+  testValueInArmElseHit =>
+    self assert: ((Adr0131DetectValue new) inArmElseHit: true) equals: 100
+    self assert: ((Adr0131DetectValue new) inArmElseHit: false) equals: 1
+
+  testValueInDoHit => self assert: ((Adr0131DetectValue new) inDoHit) equals: 2
+
+  testValueInToDoHit =>
+    self assert: ((Adr0131DetectValue new) inToDoHit) equals: 2
+
+  testValueInTimesHit =>
+    self assert: ((Adr0131DetectValue new) inTimesHit) equals: 2
+
+  testValueInWhileHit =>
+    self assert: ((Adr0131DetectValue new) inWhileHit) equals: 2
+
+  testValueInOnDoHit =>
+    self assert: ((Adr0131DetectValue new) inOnDoHit) equals: 1
+
+  testValueInEnsureHit =>
+    self assert: ((Adr0131DetectValue new) inEnsureHit) equals: 1
+
+  testValueInHandlerHit =>
+    self assert: ((Adr0131DetectValue new) inHandlerHit) equals: 1
+
+  testValueInArmInDoHit =>
+    self assert: ((Adr0131DetectValue new) inArmInDoHit: true) equals: 2
+    self assert: ((Adr0131DetectValue new) inArmInDoHit: false) equals: 0
+
+  testValueReturnInArmHit =>
+    self assert: ((Adr0131DetectValue new) returnInArmHit: true) equals: 1
+    self assert: ((Adr0131DetectValue new) returnInArmHit: false) equals: 0
+
+  testValueAssignedHit =>
+    self assert: ((Adr0131DetectValue new) assignedHit) equals: #[1, 1]
+
+  testValueTopMiss =>
+    self assert: ((Adr0131DetectValue new) topMiss) equals: 103
+
+  testValueInArmMiss =>
+    self assert: ((Adr0131DetectValue new) inArmMiss: true) equals: 103
+    self assert: ((Adr0131DetectValue new) inArmMiss: false) equals: 0
+
+  testValueInArmElseMiss =>
+    self assert: ((Adr0131DetectValue new) inArmElseMiss: true) equals: 100
+    self assert: ((Adr0131DetectValue new) inArmElseMiss: false) equals: 103
+
+  testValueInDoMiss =>
+    self assert: ((Adr0131DetectValue new) inDoMiss) equals: 206
+
+  testValueInToDoMiss =>
+    self assert: ((Adr0131DetectValue new) inToDoMiss) equals: 206
+
+  testValueInTimesMiss =>
+    self assert: ((Adr0131DetectValue new) inTimesMiss) equals: 206
+
+  testValueInWhileMiss =>
+    self assert: ((Adr0131DetectValue new) inWhileMiss) equals: 206
+
+  testValueInOnDoMiss =>
+    self assert: ((Adr0131DetectValue new) inOnDoMiss) equals: 103
+
+  testValueInEnsureMiss =>
+    self assert: ((Adr0131DetectValue new) inEnsureMiss) equals: 103
+
+  testValueInHandlerMiss =>
+    self assert: ((Adr0131DetectValue new) inHandlerMiss) equals: 103
+
+  testValueInArmInDoMiss =>
+    self assert: ((Adr0131DetectValue new) inArmInDoMiss: true) equals: 206
+    self assert: ((Adr0131DetectValue new) inArmInDoMiss: false) equals: 0
+
+  testValueReturnInArmMiss =>
+    self assert: ((Adr0131DetectValue new) returnInArmMiss: true) equals: 0
+    self assert: ((Adr0131DetectValue new) returnInArmMiss: false) equals: 0
+
+  testValueAssignedMiss =>
+    self assert: ((Adr0131DetectValue new) assignedMiss) equals: #[0, 103]
+
+  testValueTopSearch =>
+    self assert: ((Adr0131DetectValue new) topSearch) equals: 3
+
+  testValueInArmSearch =>
+    self assert: ((Adr0131DetectValue new) inArmSearch: true) equals: 3
+    self assert: ((Adr0131DetectValue new) inArmSearch: false) equals: 0
+
+  testValueInArmElseSearch =>
+    self assert: ((Adr0131DetectValue new) inArmElseSearch: true) equals: 100
+    self assert: ((Adr0131DetectValue new) inArmElseSearch: false) equals: 3
+
+  testValueInDoSearch =>
+    self assert: ((Adr0131DetectValue new) inDoSearch) equals: 6
+
+  testValueInToDoSearch =>
+    self assert: ((Adr0131DetectValue new) inToDoSearch) equals: 6
+
+  testValueInTimesSearch =>
+    self assert: ((Adr0131DetectValue new) inTimesSearch) equals: 6
+
+  testValueInWhileSearch =>
+    self assert: ((Adr0131DetectValue new) inWhileSearch) equals: 6
+
+  testValueInOnDoSearch =>
+    self assert: ((Adr0131DetectValue new) inOnDoSearch) equals: 3
+
+  testValueInEnsureSearch =>
+    self assert: ((Adr0131DetectValue new) inEnsureSearch) equals: 3
+
+  testValueInHandlerSearch =>
+    self assert: ((Adr0131DetectValue new) inHandlerSearch) equals: 3
+
+  testValueInArmInDoSearch =>
+    self assert: ((Adr0131DetectValue new) inArmInDoSearch: true) equals: 6
+    self assert: ((Adr0131DetectValue new) inArmInDoSearch: false) equals: 0
+
+  testValueReturnInArmSearch =>
+    self assert: ((Adr0131DetectValue new) returnInArmSearch: true) equals: 2
+    self assert: ((Adr0131DetectValue new) returnInArmSearch: false) equals: 0
+
+  testValueAssignedSearch =>
+    self assert: ((Adr0131DetectValue new) assignedSearch) equals: #[2, 3]
+
+  testValueTopHandler =>
+    self assert: ((Adr0131DetectValue new) topHandler) equals: 100
+
+  testValueInArmHandler =>
+    self assert: ((Adr0131DetectValue new) inArmHandler: true) equals: 100
+    self assert: ((Adr0131DetectValue new) inArmHandler: false) equals: 0
+
+  testValueInArmElseHandler =>
+    self assert: ((Adr0131DetectValue new) inArmElseHandler: true) equals: 100
+    self assert: ((Adr0131DetectValue new) inArmElseHandler: false) equals: 100
+
+  testValueInDoHandler =>
+    self assert: ((Adr0131DetectValue new) inDoHandler) equals: 200
+
+  testValueInToDoHandler =>
+    self assert: ((Adr0131DetectValue new) inToDoHandler) equals: 200
+
+  testValueInTimesHandler =>
+    self assert: ((Adr0131DetectValue new) inTimesHandler) equals: 200
+
+  testValueInWhileHandler =>
+    self assert: ((Adr0131DetectValue new) inWhileHandler) equals: 200
+
+  testValueInOnDoHandler =>
+    self assert: ((Adr0131DetectValue new) inOnDoHandler) equals: 100
+
+  testValueInEnsureHandler =>
+    self assert: ((Adr0131DetectValue new) inEnsureHandler) equals: 100
+
+  testValueInHandlerHandler =>
+    self assert: ((Adr0131DetectValue new) inHandlerHandler) equals: 100
+
+  testValueInArmInDoHandler =>
+    self assert: ((Adr0131DetectValue new) inArmInDoHandler: true) equals: 200
+    self assert: ((Adr0131DetectValue new) inArmInDoHandler: false) equals: 0
+
+  testValueReturnInArmHandler =>
+    self assert: ((Adr0131DetectValue new) returnInArmHandler: true) equals: 0
+    self assert: ((Adr0131DetectValue new) returnInArmHandler: false) equals: 0
+
+  testValueAssignedHandler =>
+    self assert: ((Adr0131DetectValue new) assignedHandler) equals: #[0, 100]

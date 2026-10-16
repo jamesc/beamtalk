@@ -3,10 +3,10 @@
 
 // BT-3841 (ADR 0131): `anySatisfy:` / `allSatisfy:` as local-threading producers. Each method starts
 // from `t := 0` and writes it from the block in one position; the expected
-// answers are in stdlib/test/adr0131satisfy_test.bt. The block runs for every element
-// (the fold does not short-circuit, as in an actor method since ADR 0041): a
-// predicate that answers true early still runs its writes for the rest.
-// `c` is the condition of the arm shapes.
+// answers are in stdlib/test/adr0131satisfy_test.bt. The block runs up to and including
+// the first element that decides the answer (BT-3805), so a decisive first
+// element leaves the later elements' writes undone. `c` is the condition of
+// the arm shapes.
 
 Object subclass: Adr0131SatisfyClass
 

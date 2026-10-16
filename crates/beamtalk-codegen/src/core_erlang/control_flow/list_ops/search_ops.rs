@@ -46,6 +46,31 @@ pub(super) fn bind_detect_found_or_raise_doc(
     ]
 }
 
+/// BT-3841 (BT-3805): the fold lambda of a writing `anySatisfy:` /
+/// `allSatisfy:` / `detect:` / `detect:ifNone:` stops running the block once the
+/// answer is decided (Smalltalk semantics: the block runs up to and including
+/// the first decisive element). `lists:foldl` has no early exit, so the lambda
+/// returns the accumulator unchanged for every later element: `decided_value` is
+/// the value of `decided_var` (`BoolAcc` / `FoundFlag`) that means decided.
+fn skip_when_decided(
+    decided_value: &'static str,
+    decided_var: &'static str,
+    acc_state_var: &str,
+    body: Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "case ",
+        decided_var,
+        " of <",
+        decided_value,
+        "> when 'true' -> ",
+        leaf::var(acc_state_var.to_string()),
+        " <_> when 'true' -> ",
+        body,
+        " end",
+    ]
+}
+
 impl CoreErlangGenerator {
     /// Generates code for `list anySatisfy:` with mutation analysis.
     pub(in crate::core_erlang) fn generate_list_any_satisfy(
@@ -164,9 +189,10 @@ impl CoreErlangGenerator {
     /// Generates stateful `anySatisfy:`/`allSatisfy:` using `lists:foldl`
     /// with state threading and a boolean accumulator.
     ///
-    /// Note: Unlike `lists:any/2` and `lists:all/2`, this does NOT short-circuit.
-    /// All elements are always processed because field mutations must execute for
-    /// every element to maintain correct state.
+    /// Like `lists:any/2` and `lists:all/2` the block stops running at the first
+    /// decisive element (BT-3805): the fold lambda returns its accumulator
+    /// unchanged once `BoolAcc` is decided, so the later elements' writes never
+    /// happen ([`skip_when_decided`]).
     ///
     /// Accumulator is `{BoolAcc, StateVars...}` (tuple) or `{BoolAcc, StateAcc}` (map).
     /// - `is_all = false` (anySatisfy): `BoolAcc` starts `false`, set to `true` on match
@@ -224,7 +250,12 @@ impl CoreErlangGenerator {
                 &acc_state_var,
                 1,
             )?;
-            docs.push(body_doc);
+            docs.push(skip_when_decided(
+                if is_all { "'false'" } else { "'true'" },
+                "BoolAcc",
+                &acc_state_var,
+                body_doc,
+            ));
             self.pop_scope();
 
             let fold_result = self.fresh_temp_var("FoldResult");
@@ -293,7 +324,12 @@ impl CoreErlangGenerator {
             &acc_state_var,
             1,
         )?;
-        docs.push(body_doc);
+        docs.push(skip_when_decided(
+            if is_all { "'false'" } else { "'true'" },
+            "BoolAcc",
+            &acc_state_var,
+            body_doc,
+        ));
         self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
@@ -330,9 +366,9 @@ impl CoreErlangGenerator {
     /// Generates code for `list detect:` with mutation analysis.
     ///
     /// Without mutations: falls through to `beamtalk_list:detect/2` BIF.
-    /// With mutations: uses `lists:foldl` to process all elements (no short-circuit)
-    /// so that field mutations are applied for every element. Returns the first
-    /// matching element or `nil`.
+    /// With mutations: uses `lists:foldl` and stops running the block at the first
+    /// match (BT-3805), so the mutations of the elements up to and including it
+    /// are applied. Returns the first matching element or `nil`.
     pub(in crate::core_erlang) fn generate_list_detect(
         &mut self,
         receiver: &Expression,
@@ -556,7 +592,7 @@ impl CoreErlangGenerator {
         body: &Block,
         if_none: &Expression,
     ) -> Result<Document<'static>> {
-        // The detect foldl generates code that processes all elements and returns
+        // The detect foldl generates code that processes the elements up to the match and returns
         // {FoundItem, StateAcc}. But we need the FoundFlag to distinguish found-nil
         // from not-found. Rather than restructuring the entire detect codegen, we
         // use a 3-element fold result: {FoundItem, FoundFlag, StateAcc}.
@@ -639,7 +675,12 @@ impl CoreErlangGenerator {
                 &acc_state_var,
                 2,
             )?;
-            docs.push(body_doc);
+            docs.push(skip_when_decided(
+                "'true'",
+                "FoundFlag",
+                &acc_state_var,
+                body_doc,
+            ));
             self.pop_scope();
 
             let fold_result = self.fresh_temp_var("FoldResult");
@@ -722,7 +763,12 @@ impl CoreErlangGenerator {
             &acc_state_var,
             2,
         )?;
-        docs.push(body_doc);
+        docs.push(skip_when_decided(
+            "'true'",
+            "FoundFlag",
+            &acc_state_var,
+            body_doc,
+        ));
         self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
@@ -773,8 +819,9 @@ impl CoreErlangGenerator {
     /// Generates stateful `detect:` using `lists:foldl`
     /// with state threading and a found-item accumulator.
     ///
-    /// All elements are processed (no short-circuit) because field mutations must
-    /// execute for every element. Accumulator is `{FoundItem, FoundFlag, StateVars...}`.
+    /// The elements are processed up to and including the first match
+    /// ([`skip_when_decided`], BT-3805). Accumulator is
+    /// `{FoundItem, FoundFlag, StateVars...}`.
     ///
     /// Returns `{FoundItem, StateAcc}` where `FoundItem` is `nil` if no match.
     #[allow(clippy::too_many_lines)]
@@ -833,7 +880,12 @@ impl CoreErlangGenerator {
                 &acc_state_var,
                 2,
             )?;
-            docs.push(body_doc);
+            docs.push(skip_when_decided(
+                "'true'",
+                "FoundFlag",
+                &acc_state_var,
+                body_doc,
+            ));
             self.pop_scope();
 
             let fold_result = self.fresh_temp_var("FoldResult");
@@ -904,7 +956,12 @@ impl CoreErlangGenerator {
             &acc_state_var,
             2,
         )?;
-        docs.push(body_doc);
+        docs.push(skip_when_decided(
+            "'true'",
+            "FoundFlag",
+            &acc_state_var,
+            body_doc,
+        ));
         self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");

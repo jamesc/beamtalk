@@ -5,7 +5,7 @@
 // producers (`producer_body_arg_index`) like `do:`, so at an operand site of a
 // REPL input they answer their boolean and keep the writes their block made.
 // A satisfy test that is the statement or an assignment's whole value keeps the
-// REPL's own lowering.
+// REPL's own lowering. The fold stops at the first decisive element (BT-3805).
 
 t := 0
 // => 0
@@ -30,3 +30,21 @@ r := #(1, 2) allSatisfy: [:x | t := t + x. true]
 
 t
 // => 12
+
+(#(1, 2) anySatisfy: [:x | t := t + x. true]) printString
+// => true
+
+t
+// => 13
+
+(#(1, 2) allSatisfy: [:x | t := t + x. false]) printString
+// => false
+
+t
+// => 14
+
+#(1, 2) detect: [:x | t := t + x. true] ifNone: [t := t + 100. 0]
+// => 1
+
+t
+// => 15

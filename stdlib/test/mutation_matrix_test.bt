@@ -187,9 +187,11 @@ TestCase subclass: MutationMatrixTest
 
   // P3-1: detect: with field mutation in predicate block (BT-1486)
   // Mutation in the predicate block should persist after detect: returns.
+  // BT-3805: the block runs up to and including the first match (20), so the
+  // counter reaches 2, not 3; the element after the match is never visited.
   testDetectMutation =>
     count := self.a detectMutation: #(1, 20, 3)
-    self assert: count equals: 3
+    self assert: count equals: 2
     self assert: self.a getLog equals: #(20)
 
   // P3-1b: detect: with no match + mutation (BT-1486, BT-3028)
@@ -198,9 +200,8 @@ TestCase subclass: MutationMatrixTest
   // `beamtalk_list:detect/2` path raised — the same expression meant two
   // different things depending on whether its block mutated state. BT-3028
   // made the fold consult its found flag and raise like every other receiver.
-  // The all-elements-visited property this case was added for is still
-  // asserted by testDetectMutation above (counter reaches 3 despite an
-  // early match).
+  // With no match every element is visited (counter 3); with a match the fold
+  // stops there (BT-3805, testDetectMutation above).
   testDetectMutationNoMatch =>
     self should: [self.a detectMutation: #(1, 2, 3)] raise: #not_found
 
@@ -216,10 +217,11 @@ TestCase subclass: MutationMatrixTest
 
   // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
   // Unlike P1-8 which mutates *before* detect:ifNone:, this mutates *inside* the predicate.
-  // All elements are processed (no short-circuit) to ensure mutations are applied.
+  // BT-3805: the predicate runs up to and including the first match (20), so
+  // the mutation is applied for two elements and the third is never visited.
   testDetectIfNonePredicateMutation =>
     count := self.a detectIfNonePredicateMutation: #(1, 20, 3)
-    self assert: count equals: 3
+    self assert: count equals: 2
     self assert: self.a getLog equals: #(20)
 
   // P3-2b: detect:ifNone: with mutation in predicate, no match (BT-1486)

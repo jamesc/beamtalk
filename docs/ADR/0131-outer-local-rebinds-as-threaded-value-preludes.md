@@ -946,23 +946,37 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (after BT-3841 PR 3: 520; 571 after PR
+Statement cells that do not answer right (after BT-3841 PR 4: 422; 520 after PR
+3, 571 after PR
 2, 663 after PR 1's three-deep roles, 595 in the 5a population), by family and
 method context, with the work each needs:
 
 | Family | class | value | actor | total | Classification |
 |---|---|---|---|---|---|
 | `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
-| `detect:ifNone:` search or handler | 52 | 46 | 44 | 142 | (a) BT-3839 (handler) and a search-block site rule; an early-exit fold |
+| `detect:ifNone:` search or handler | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
 | `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
 | any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
 | `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
-| `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3: producers answering their boolean; a block that writes runs for every element (no early exit, as in actors) |
-| **total** | **212** | **173** | **135** | **520** | |
+| `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3 as producers answering their boolean; PR 4 added the early exit |
+| **total** | **160** | **127** | **135** | **422** | |
 
-By block role: loop bodies 141, protected bodies 90, evaluated blocks 85,
-arms 63, three-deep nestings 52, handlers 40, arm/loop mixes 37, the method
+By block role: loop bodies 117, evaluated blocks 85, protected bodies 72,
+arms 41, three-deep nestings 36, handlers 30, arm/loop mixes 29, the method
 body 12.
+
+**Amendment, BT-3841 PR 4: the satisfy and detect folds exit early.** The
+inline fold of a writing `anySatisfy:`, `allSatisfy:`, `detect:` and
+`detect:ifNone:` is a `lists:foldl`, which has no early exit, so the first
+version of the satisfy producers ran the block for every element (BT-3805: a
+silently different answer from the non-writing form, and a block that can raise
+on elements the form never visits). The fold lambda now returns its accumulator
+unchanged once the answer is decided (`BoolAcc` is the decisive value, or
+`FoundFlag` is `true`), so the block runs up to and including the first
+decisive element in every method kind and in the REPL. `detect:ifNone:` is a
+producer in class and value-type methods (its search block and its handler
+pack into one accumulator); in an actor method the nested statement shapes
+still answer wrong or fail to compile and keep the Phase 0 rejection.
 
 The statement matrix nests at most three blocks; `RIGHT_STATEMENTS`
 rows name the exact depth and none may name a shape past two blocks. The
@@ -972,11 +986,11 @@ in a `do:` body that the coarse rows accepted and that raises `bad argument` in
 a value-type method); the REPL keeps its coarse rows, unmeasured past depth
 one, until BT-3823.
 
-Operand cells (1,404): 743 answer right, 585 wrong, 76 `erlc`; Phase 0 accepts
-624, all of them right (zero unsound), and rejects the 661 that do not answer
-right plus 119 that do. By position, the cells that do not answer right:
-assignment 33, field assignment 30, receiver 49, argument 49, binary operand
-49, literal element 49, cascade part 134, interpolation 134, `match:` subject
+Operand cells (1,404): 783 answer right, 545 wrong, 76 `erlc`; Phase 0 accepts
+668, all of them right (zero unsound), and rejects the 621 that do not answer
+right plus 115 that do. By position, the cells that do not answer right:
+assignment 29, field assignment 26, receiver 41, argument 41, binary operand
+41, literal element 41, cascade part 134, interpolation 134, `match:` subject
 134. The first six are (a): the operand sites `sequenced_operand_sites` and
 `repl_operand_sites` already name for some constructs extend to the rest. The
 last three (402 cells) are the likely permanent §6 rejections: a cascade
