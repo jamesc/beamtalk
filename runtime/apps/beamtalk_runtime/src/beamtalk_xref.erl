@@ -897,7 +897,7 @@ so the cost is bounded by the miss count rather than the workspace size.
 -spec senders_of_bt(selector()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
 senders_of_bt(Selector) when is_atom(Selector) ->
-    bt_site_result(sendersOf, senders_of(Selector)).
+    bt_site_result(sendersOf, fun() -> senders_of(Selector) end).
 
 -doc """
 Return all sites that reference `Class` (type annotations, class
@@ -937,7 +937,7 @@ map has the same two keys:
 -spec references_to_bt(class_name()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
 references_to_bt(Class) when is_atom(Class) ->
-    bt_site_result(referencesTo, references_to(Class)).
+    bt_site_result(referencesTo, fun() -> references_to(Class) end).
 
 -doc """
 Return all `{Class, ClassSide}` pairs that implement `Selector`.
@@ -1508,30 +1508,22 @@ site_to_bt_row(Site) ->
     }.
 
 -doc """
-Apply the ADR 0087 miss-partition and stale-drop to a pre-fetched `Sites`
+Apply the ADR 0087 miss-partition and stale-drop to a lazily-fetched `Sites`
 list, returning the two-key result map `senders_of_bt/1` and
 `references_to_bt/1` both need.  Centralises the stale-drop list comprehension
 so the two call sites cannot drift from each other.
 
-Note on read order: `Sites` (the raw xref query result) is evaluated by the
-caller *before* `bt_site_result/2` is called, so the loaded-class snapshot
-from `miss_partition/1` is taken *after* the sites list is fetched.  This is
-intentional, but note it trades one benign race for another: a class unloaded
-between the two reads has its rows dropped (old snapshot-first order kept
-them), while a class loaded/re-indexed between the two reads is absent from
-`Sites` even though it appears in `Loaded` (neither order avoids all races).
-The other `*_bt` entry points (`implementors_of_bt/1`, etc.) still take the
-snapshot first; the two orders are both correct.  Do not reorder the two reads
-here without updating this note and considering both race directions; a silent
-reorder would change the stale-drop semantics for both call sites at once.
+`FetchSites` is a zero-arity thunk.  Calling it inside this function, *after*
+`miss_partition/1` takes the loaded-class snapshot, keeps the read order
+consistent with every other `*_bt` entry point (snapshot first, then sites).
 """.
--spec bt_site_result(atom(), [site()]) ->
+-spec bt_site_result(atom(), fun(() -> [site()])) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
-bt_site_result(Op, Sites) ->
+bt_site_result(Op, FetchSites) ->
     {Loaded, FallbackClasses} = miss_partition(Op),
     IndexedRows = [
         site_to_bt_row(Site)
-     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
+     || Site <- FetchSites(), sets:is_element(maps:get(owner, Site), Loaded)
     ],
     #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
