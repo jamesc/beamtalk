@@ -397,13 +397,24 @@ fn table(matrix: Matrix, answers: &BTreeMap<Cell, &'static str>, order: &[Cell])
 
 /// Asserts the `beamtalk` binary under test was built with the
 /// `measure-bypass` feature: a cell Phase 0 rejects must compile (`just
-/// measure-adr0131-statements` builds it that way).
+/// measure-adr0131-statements` builds it that way). The probe is the first
+/// checked-in `wrong` cell (Phase 0 rejects exactly the cells that do not answer
+/// `right`, and a `wrong` cell compiles), so it stays a rejected cell as
+/// families become producers. With no `wrong` cell left, the bypass changes no
+/// answer and there is nothing to check.
 fn preflight() {
+    let Some([context, container, target, kind, _]) = Matrix::Statement
+        .measured()
+        .into_iter()
+        .find(|[.., answer]| answer == "wrong")
+    else {
+        return;
+    };
     let cell = Cell {
-        context: "class".into(),
-        container: "top".into(),
-        target: "outer".into(),
-        kind: "ewi".into(),
+        context,
+        container,
+        target,
+        kind,
     };
     let run = run_package(&render(Matrix::Statement, &[cell], CHUNK));
     assert!(
