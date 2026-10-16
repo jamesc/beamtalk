@@ -956,7 +956,7 @@ method context, with the work each needs:
 | `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
 | `detect:ifNone:` search or handler (and plain `detect:`, same fold; 241 plain-detect probe cells measured, class and value right outside the permanent shapes) | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
 | `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
-| any statement inside a `[...] value` body | 36 | 36 | 13 | 85 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
+| any statement inside a `[...] value` body | 38 | 38 | 14 | 90 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
 | `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
 | `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3 as producers answering their boolean; PR 4 added the early exit |
 | plain `detect:` (kind added in PR 5) | 0 | 0 | 16 | 16 | measured right in class and value everywhere but the permanent shapes; the actor cells wait with `detect:ifNone:` |

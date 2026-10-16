@@ -2991,7 +2991,7 @@ class	val	outer	while	bad
 repl	arm	outer	and	ok
 repl	arm	outer	any	bad
 repl	arm	outer	collect	bad
-repl	arm	outer	det	ok
+repl	arm	outer	det	bad
 repl	arm	outer	dinH	ok
 repl	arm	outer	dinS	ok
 repl	arm	outer	do	bad
