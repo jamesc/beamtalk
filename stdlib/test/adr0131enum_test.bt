@@ -1,0 +1,499 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): `eachWithIndex:` / `do:separatedBy:` as local-threading producers in a class method, a
+// value-type method and an actor method. The fixtures are
+// fixtures/adr0131enum_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131EnumTest
+
+  testClassTopEwi => self assert: (Adr0131EnumClass topEwi) equals: 3
+
+  testClassInArmEwi =>
+    self assert: (Adr0131EnumClass inArmEwi: true) equals: 3
+    self assert: (Adr0131EnumClass inArmEwi: false) equals: 0
+
+  testClassInArmElseEwi =>
+    self assert: (Adr0131EnumClass inArmElseEwi: true) equals: 100
+    self assert: (Adr0131EnumClass inArmElseEwi: false) equals: 3
+
+  testClassInDoEwi => self assert: (Adr0131EnumClass inDoEwi) equals: 6
+
+  testClassInToDoEwi => self assert: (Adr0131EnumClass inToDoEwi) equals: 6
+
+  testClassInTimesEwi => self assert: (Adr0131EnumClass inTimesEwi) equals: 6
+
+  testClassInWhileEwi => self assert: (Adr0131EnumClass inWhileEwi) equals: 6
+
+  testClassInOnDoEwi => self assert: (Adr0131EnumClass inOnDoEwi) equals: 3
+
+  testClassInEnsureEwi => self assert: (Adr0131EnumClass inEnsureEwi) equals: 3
+
+  testClassInHandlerEwi =>
+    self assert: (Adr0131EnumClass inHandlerEwi) equals: 3
+
+  testClassInArmInDoEwi =>
+    self assert: (Adr0131EnumClass inArmInDoEwi: true) equals: 6
+    self assert: (Adr0131EnumClass inArmInDoEwi: false) equals: 0
+
+  testClassReturnInArmEwi =>
+    self assert: (Adr0131EnumClass returnInArmEwi: true) equals: nil
+    self assert: (Adr0131EnumClass returnInArmEwi: false) equals: 0
+
+  testClassAssignedEwi =>
+    self assert: (Adr0131EnumClass assignedEwi) equals: #[nil, 3]
+
+  testClassTopEwiIndex => self assert: (Adr0131EnumClass topEwiIndex) equals: 5
+
+  testClassInArmEwiIndex =>
+    self assert: (Adr0131EnumClass inArmEwiIndex: true) equals: 5
+    self assert: (Adr0131EnumClass inArmEwiIndex: false) equals: 0
+
+  testClassInArmElseEwiIndex =>
+    self assert: (Adr0131EnumClass inArmElseEwiIndex: true) equals: 100
+    self assert: (Adr0131EnumClass inArmElseEwiIndex: false) equals: 5
+
+  testClassInDoEwiIndex =>
+    self assert: (Adr0131EnumClass inDoEwiIndex) equals: 10
+
+  testClassInToDoEwiIndex =>
+    self assert: (Adr0131EnumClass inToDoEwiIndex) equals: 10
+
+  testClassInTimesEwiIndex =>
+    self assert: (Adr0131EnumClass inTimesEwiIndex) equals: 10
+
+  testClassInWhileEwiIndex =>
+    self assert: (Adr0131EnumClass inWhileEwiIndex) equals: 10
+
+  testClassInOnDoEwiIndex =>
+    self assert: (Adr0131EnumClass inOnDoEwiIndex) equals: 5
+
+  testClassInEnsureEwiIndex =>
+    self assert: (Adr0131EnumClass inEnsureEwiIndex) equals: 5
+
+  testClassInHandlerEwiIndex =>
+    self assert: (Adr0131EnumClass inHandlerEwiIndex) equals: 5
+
+  testClassInArmInDoEwiIndex =>
+    self assert: (Adr0131EnumClass inArmInDoEwiIndex: true) equals: 10
+    self assert: (Adr0131EnumClass inArmInDoEwiIndex: false) equals: 0
+
+  testClassReturnInArmEwiIndex =>
+    self assert: (Adr0131EnumClass returnInArmEwiIndex: true) equals: nil
+    self assert: (Adr0131EnumClass returnInArmEwiIndex: false) equals: 0
+
+  testClassAssignedEwiIndex =>
+    self assert: (Adr0131EnumClass assignedEwiIndex) equals: #[nil, 5]
+
+  testClassTopDsb => self assert: (Adr0131EnumClass topDsb) equals: 13
+
+  testClassInArmDsb =>
+    self assert: (Adr0131EnumClass inArmDsb: true) equals: 13
+    self assert: (Adr0131EnumClass inArmDsb: false) equals: 0
+
+  testClassInArmElseDsb =>
+    self assert: (Adr0131EnumClass inArmElseDsb: true) equals: 100
+    self assert: (Adr0131EnumClass inArmElseDsb: false) equals: 13
+
+  testClassInDoDsb => self assert: (Adr0131EnumClass inDoDsb) equals: 26
+
+  testClassInToDoDsb => self assert: (Adr0131EnumClass inToDoDsb) equals: 26
+
+  testClassInTimesDsb => self assert: (Adr0131EnumClass inTimesDsb) equals: 26
+
+  testClassInWhileDsb => self assert: (Adr0131EnumClass inWhileDsb) equals: 26
+
+  testClassInOnDoDsb => self assert: (Adr0131EnumClass inOnDoDsb) equals: 13
+
+  testClassInEnsureDsb => self assert: (Adr0131EnumClass inEnsureDsb) equals: 13
+
+  testClassInHandlerDsb =>
+    self assert: (Adr0131EnumClass inHandlerDsb) equals: 13
+
+  testClassInArmInDoDsb =>
+    self assert: (Adr0131EnumClass inArmInDoDsb: true) equals: 26
+    self assert: (Adr0131EnumClass inArmInDoDsb: false) equals: 0
+
+  testClassReturnInArmDsb =>
+    self assert: (Adr0131EnumClass returnInArmDsb: true) equals: nil
+    self assert: (Adr0131EnumClass returnInArmDsb: false) equals: 0
+
+  testClassAssignedDsb =>
+    self assert: (Adr0131EnumClass assignedDsb) equals: #[nil, 13]
+
+  testClassTopDsbSep => self assert: (Adr0131EnumClass topDsbSep) equals: 20
+
+  testClassInArmDsbSep =>
+    self assert: (Adr0131EnumClass inArmDsbSep: true) equals: 20
+    self assert: (Adr0131EnumClass inArmDsbSep: false) equals: 0
+
+  testClassInArmElseDsbSep =>
+    self assert: (Adr0131EnumClass inArmElseDsbSep: true) equals: 100
+    self assert: (Adr0131EnumClass inArmElseDsbSep: false) equals: 20
+
+  testClassInDoDsbSep => self assert: (Adr0131EnumClass inDoDsbSep) equals: 40
+
+  testClassInToDoDsbSep =>
+    self assert: (Adr0131EnumClass inToDoDsbSep) equals: 40
+
+  testClassInTimesDsbSep =>
+    self assert: (Adr0131EnumClass inTimesDsbSep) equals: 40
+
+  testClassInWhileDsbSep =>
+    self assert: (Adr0131EnumClass inWhileDsbSep) equals: 40
+
+  testClassInOnDoDsbSep =>
+    self assert: (Adr0131EnumClass inOnDoDsbSep) equals: 20
+
+  testClassInEnsureDsbSep =>
+    self assert: (Adr0131EnumClass inEnsureDsbSep) equals: 20
+
+  testClassInHandlerDsbSep =>
+    self assert: (Adr0131EnumClass inHandlerDsbSep) equals: 20
+
+  testClassInArmInDoDsbSep =>
+    self assert: (Adr0131EnumClass inArmInDoDsbSep: true) equals: 40
+    self assert: (Adr0131EnumClass inArmInDoDsbSep: false) equals: 0
+
+  testClassReturnInArmDsbSep =>
+    self assert: (Adr0131EnumClass returnInArmDsbSep: true) equals: nil
+    self assert: (Adr0131EnumClass returnInArmDsbSep: false) equals: 0
+
+  testClassAssignedDsbSep =>
+    self assert: (Adr0131EnumClass assignedDsbSep) equals: #[nil, 20]
+
+  testValueTopEwi => self assert: ((Adr0131EnumValue new) topEwi) equals: 3
+
+  testValueInArmEwi =>
+    self assert: ((Adr0131EnumValue new) inArmEwi: true) equals: 3
+    self assert: ((Adr0131EnumValue new) inArmEwi: false) equals: 0
+
+  testValueInArmElseEwi =>
+    self assert: ((Adr0131EnumValue new) inArmElseEwi: true) equals: 100
+    self assert: ((Adr0131EnumValue new) inArmElseEwi: false) equals: 3
+
+  testValueInDoEwi => self assert: ((Adr0131EnumValue new) inDoEwi) equals: 6
+
+  testValueInToDoEwi =>
+    self assert: ((Adr0131EnumValue new) inToDoEwi) equals: 6
+
+  testValueInTimesEwi =>
+    self assert: ((Adr0131EnumValue new) inTimesEwi) equals: 6
+
+  testValueInWhileEwi =>
+    self assert: ((Adr0131EnumValue new) inWhileEwi) equals: 6
+
+  testValueInOnDoEwi =>
+    self assert: ((Adr0131EnumValue new) inOnDoEwi) equals: 3
+
+  testValueInEnsureEwi =>
+    self assert: ((Adr0131EnumValue new) inEnsureEwi) equals: 3
+
+  testValueInHandlerEwi =>
+    self assert: ((Adr0131EnumValue new) inHandlerEwi) equals: 3
+
+  testValueInArmInDoEwi =>
+    self assert: ((Adr0131EnumValue new) inArmInDoEwi: true) equals: 6
+    self assert: ((Adr0131EnumValue new) inArmInDoEwi: false) equals: 0
+
+  testValueReturnInArmEwi =>
+    self assert: ((Adr0131EnumValue new) returnInArmEwi: true) equals: nil
+    self assert: ((Adr0131EnumValue new) returnInArmEwi: false) equals: 0
+
+  testValueAssignedEwi =>
+    self assert: ((Adr0131EnumValue new) assignedEwi) equals: #[nil, 3]
+
+  testValueTopEwiIndex =>
+    self assert: ((Adr0131EnumValue new) topEwiIndex) equals: 5
+
+  testValueInArmEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inArmEwiIndex: true) equals: 5
+    self assert: ((Adr0131EnumValue new) inArmEwiIndex: false) equals: 0
+
+  testValueInArmElseEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inArmElseEwiIndex: true) equals: 100
+    self assert: ((Adr0131EnumValue new) inArmElseEwiIndex: false) equals: 5
+
+  testValueInDoEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inDoEwiIndex) equals: 10
+
+  testValueInToDoEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inToDoEwiIndex) equals: 10
+
+  testValueInTimesEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inTimesEwiIndex) equals: 10
+
+  testValueInWhileEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inWhileEwiIndex) equals: 10
+
+  testValueInOnDoEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inOnDoEwiIndex) equals: 5
+
+  testValueInEnsureEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inEnsureEwiIndex) equals: 5
+
+  testValueInHandlerEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inHandlerEwiIndex) equals: 5
+
+  testValueInArmInDoEwiIndex =>
+    self assert: ((Adr0131EnumValue new) inArmInDoEwiIndex: true) equals: 10
+    self assert: ((Adr0131EnumValue new) inArmInDoEwiIndex: false) equals: 0
+
+  testValueReturnInArmEwiIndex =>
+    self assert: ((Adr0131EnumValue new) returnInArmEwiIndex: true) equals: nil
+    self assert: ((Adr0131EnumValue new) returnInArmEwiIndex: false) equals: 0
+
+  testValueAssignedEwiIndex =>
+    self assert: ((Adr0131EnumValue new) assignedEwiIndex) equals: #[nil, 5]
+
+  testValueTopDsb => self assert: ((Adr0131EnumValue new) topDsb) equals: 13
+
+  testValueInArmDsb =>
+    self assert: ((Adr0131EnumValue new) inArmDsb: true) equals: 13
+    self assert: ((Adr0131EnumValue new) inArmDsb: false) equals: 0
+
+  testValueInArmElseDsb =>
+    self assert: ((Adr0131EnumValue new) inArmElseDsb: true) equals: 100
+    self assert: ((Adr0131EnumValue new) inArmElseDsb: false) equals: 13
+
+  testValueInDoDsb => self assert: ((Adr0131EnumValue new) inDoDsb) equals: 26
+
+  testValueInToDoDsb =>
+    self assert: ((Adr0131EnumValue new) inToDoDsb) equals: 26
+
+  testValueInTimesDsb =>
+    self assert: ((Adr0131EnumValue new) inTimesDsb) equals: 26
+
+  testValueInWhileDsb =>
+    self assert: ((Adr0131EnumValue new) inWhileDsb) equals: 26
+
+  testValueInOnDoDsb =>
+    self assert: ((Adr0131EnumValue new) inOnDoDsb) equals: 13
+
+  testValueInEnsureDsb =>
+    self assert: ((Adr0131EnumValue new) inEnsureDsb) equals: 13
+
+  testValueInHandlerDsb =>
+    self assert: ((Adr0131EnumValue new) inHandlerDsb) equals: 13
+
+  testValueInArmInDoDsb =>
+    self assert: ((Adr0131EnumValue new) inArmInDoDsb: true) equals: 26
+    self assert: ((Adr0131EnumValue new) inArmInDoDsb: false) equals: 0
+
+  testValueReturnInArmDsb =>
+    self assert: ((Adr0131EnumValue new) returnInArmDsb: true) equals: nil
+    self assert: ((Adr0131EnumValue new) returnInArmDsb: false) equals: 0
+
+  testValueAssignedDsb =>
+    self assert: ((Adr0131EnumValue new) assignedDsb) equals: #[nil, 13]
+
+  testValueTopDsbSep =>
+    self assert: ((Adr0131EnumValue new) topDsbSep) equals: 20
+
+  testValueInArmDsbSep =>
+    self assert: ((Adr0131EnumValue new) inArmDsbSep: true) equals: 20
+    self assert: ((Adr0131EnumValue new) inArmDsbSep: false) equals: 0
+
+  testValueInArmElseDsbSep =>
+    self assert: ((Adr0131EnumValue new) inArmElseDsbSep: true) equals: 100
+    self assert: ((Adr0131EnumValue new) inArmElseDsbSep: false) equals: 20
+
+  testValueInDoDsbSep =>
+    self assert: ((Adr0131EnumValue new) inDoDsbSep) equals: 40
+
+  testValueInToDoDsbSep =>
+    self assert: ((Adr0131EnumValue new) inToDoDsbSep) equals: 40
+
+  testValueInTimesDsbSep =>
+    self assert: ((Adr0131EnumValue new) inTimesDsbSep) equals: 40
+
+  testValueInWhileDsbSep =>
+    self assert: ((Adr0131EnumValue new) inWhileDsbSep) equals: 40
+
+  testValueInOnDoDsbSep =>
+    self assert: ((Adr0131EnumValue new) inOnDoDsbSep) equals: 20
+
+  testValueInEnsureDsbSep =>
+    self assert: ((Adr0131EnumValue new) inEnsureDsbSep) equals: 20
+
+  testValueInHandlerDsbSep =>
+    self assert: ((Adr0131EnumValue new) inHandlerDsbSep) equals: 20
+
+  testValueInArmInDoDsbSep =>
+    self assert: ((Adr0131EnumValue new) inArmInDoDsbSep: true) equals: 40
+    self assert: ((Adr0131EnumValue new) inArmInDoDsbSep: false) equals: 0
+
+  testValueReturnInArmDsbSep =>
+    self assert: ((Adr0131EnumValue new) returnInArmDsbSep: true) equals: nil
+    self assert: ((Adr0131EnumValue new) returnInArmDsbSep: false) equals: 0
+
+  testValueAssignedDsbSep =>
+    self assert: ((Adr0131EnumValue new) assignedDsbSep) equals: #[nil, 20]
+
+  testActorTopEwi => self assert: ((Adr0131EnumActor spawn) topEwi) equals: 3
+
+  testActorInArmEwi =>
+    self assert: ((Adr0131EnumActor spawn) inArmEwi: true) equals: 3
+    self assert: ((Adr0131EnumActor spawn) inArmEwi: false) equals: 0
+
+  testActorInArmElseEwi =>
+    self assert: ((Adr0131EnumActor spawn) inArmElseEwi: true) equals: 100
+    self assert: ((Adr0131EnumActor spawn) inArmElseEwi: false) equals: 3
+
+  testActorInDoEwi => self assert: ((Adr0131EnumActor spawn) inDoEwi) equals: 6
+
+  testActorInToDoEwi =>
+    self assert: ((Adr0131EnumActor spawn) inToDoEwi) equals: 6
+
+  testActorInTimesEwi =>
+    self assert: ((Adr0131EnumActor spawn) inTimesEwi) equals: 6
+
+  testActorInWhileEwi =>
+    self assert: ((Adr0131EnumActor spawn) inWhileEwi) equals: 6
+
+  testActorInOnDoEwi =>
+    self assert: ((Adr0131EnumActor spawn) inOnDoEwi) equals: 3
+
+  testActorInEnsureEwi =>
+    self assert: ((Adr0131EnumActor spawn) inEnsureEwi) equals: 3
+
+  testActorInHandlerEwi =>
+    self assert: ((Adr0131EnumActor spawn) inHandlerEwi) equals: 3
+
+  testActorInArmInDoEwi =>
+    self assert: ((Adr0131EnumActor spawn) inArmInDoEwi: true) equals: 6
+    self assert: ((Adr0131EnumActor spawn) inArmInDoEwi: false) equals: 0
+
+  testActorReturnInArmEwi =>
+    self assert: ((Adr0131EnumActor spawn) returnInArmEwi: true) equals: nil
+    self assert: ((Adr0131EnumActor spawn) returnInArmEwi: false) equals: 0
+
+  testActorAssignedEwi =>
+    self assert: ((Adr0131EnumActor spawn) assignedEwi) equals: #[nil, 3]
+
+  testActorTopEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) topEwiIndex) equals: 5
+
+  testActorInArmEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inArmEwiIndex: true) equals: 5
+    self assert: ((Adr0131EnumActor spawn) inArmEwiIndex: false) equals: 0
+
+  testActorInArmElseEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inArmElseEwiIndex: true) equals: 100
+    self assert: ((Adr0131EnumActor spawn) inArmElseEwiIndex: false) equals: 5
+
+  testActorInDoEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inDoEwiIndex) equals: 10
+
+  testActorInToDoEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inToDoEwiIndex) equals: 10
+
+  testActorInTimesEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inTimesEwiIndex) equals: 10
+
+  testActorInWhileEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inWhileEwiIndex) equals: 10
+
+  testActorInOnDoEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inOnDoEwiIndex) equals: 5
+
+  testActorInEnsureEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inEnsureEwiIndex) equals: 5
+
+  testActorInHandlerEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inHandlerEwiIndex) equals: 5
+
+  testActorInArmInDoEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) inArmInDoEwiIndex: true) equals: 10
+    self assert: ((Adr0131EnumActor spawn) inArmInDoEwiIndex: false) equals: 0
+
+  testActorReturnInArmEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) returnInArmEwiIndex: true) equals: nil
+    self assert: ((Adr0131EnumActor spawn) returnInArmEwiIndex: false) equals: 0
+
+  testActorAssignedEwiIndex =>
+    self assert: ((Adr0131EnumActor spawn) assignedEwiIndex) equals: #[nil, 5]
+
+  testActorTopDsb => self assert: ((Adr0131EnumActor spawn) topDsb) equals: 13
+
+  testActorInArmDsb =>
+    self assert: ((Adr0131EnumActor spawn) inArmDsb: true) equals: 13
+    self assert: ((Adr0131EnumActor spawn) inArmDsb: false) equals: 0
+
+  testActorInArmElseDsb =>
+    self assert: ((Adr0131EnumActor spawn) inArmElseDsb: true) equals: 100
+    self assert: ((Adr0131EnumActor spawn) inArmElseDsb: false) equals: 13
+
+  testActorInDoDsb => self assert: ((Adr0131EnumActor spawn) inDoDsb) equals: 26
+
+  testActorInToDoDsb =>
+    self assert: ((Adr0131EnumActor spawn) inToDoDsb) equals: 26
+
+  testActorInTimesDsb =>
+    self assert: ((Adr0131EnumActor spawn) inTimesDsb) equals: 26
+
+  testActorInWhileDsb =>
+    self assert: ((Adr0131EnumActor spawn) inWhileDsb) equals: 26
+
+  testActorInOnDoDsb =>
+    self assert: ((Adr0131EnumActor spawn) inOnDoDsb) equals: 13
+
+  testActorInEnsureDsb =>
+    self assert: ((Adr0131EnumActor spawn) inEnsureDsb) equals: 13
+
+  testActorInHandlerDsb =>
+    self assert: ((Adr0131EnumActor spawn) inHandlerDsb) equals: 13
+
+  testActorInArmInDoDsb =>
+    self assert: ((Adr0131EnumActor spawn) inArmInDoDsb: true) equals: 26
+    self assert: ((Adr0131EnumActor spawn) inArmInDoDsb: false) equals: 0
+
+  testActorReturnInArmDsb =>
+    self assert: ((Adr0131EnumActor spawn) returnInArmDsb: true) equals: nil
+    self assert: ((Adr0131EnumActor spawn) returnInArmDsb: false) equals: 0
+
+  testActorAssignedDsb =>
+    self assert: ((Adr0131EnumActor spawn) assignedDsb) equals: #[nil, 13]
+
+  testActorTopDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) topDsbSep) equals: 20
+
+  testActorInArmDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inArmDsbSep: true) equals: 20
+    self assert: ((Adr0131EnumActor spawn) inArmDsbSep: false) equals: 0
+
+  testActorInArmElseDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inArmElseDsbSep: true) equals: 100
+    self assert: ((Adr0131EnumActor spawn) inArmElseDsbSep: false) equals: 20
+
+  testActorInDoDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inDoDsbSep) equals: 40
+
+  testActorInToDoDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inToDoDsbSep) equals: 40
+
+  testActorInTimesDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inTimesDsbSep) equals: 40
+
+  testActorInWhileDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inWhileDsbSep) equals: 40
+
+  testActorInOnDoDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inOnDoDsbSep) equals: 20
+
+  testActorInEnsureDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inEnsureDsbSep) equals: 20
+
+  testActorInHandlerDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inHandlerDsbSep) equals: 20
+
+  testActorInArmInDoDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) inArmInDoDsbSep: true) equals: 40
+    self assert: ((Adr0131EnumActor spawn) inArmInDoDsbSep: false) equals: 0
+
+  testActorReturnInArmDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) returnInArmDsbSep: true) equals: nil
+    self assert: ((Adr0131EnumActor spawn) returnInArmDsbSep: false) equals: 0
+
+  testActorAssignedDsbSep =>
+    self assert: ((Adr0131EnumActor spawn) assignedDsbSep) equals: #[nil, 20]

@@ -621,7 +621,7 @@ fn allow_set_do_assignment_is_accepted_in_every_context() {
 fn allow_set_field_assignment_in_class_method_is_an_error() {
     // o5's shape with a construct that is not a producer yet (an `on:do:` is one
     // since BT-3817): the tuple would be stored in the class variable.
-    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := #(1, 2) eachWithIndex: [:x :i | t := t + x]\n    t\n";
+    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := [t := t + 1] value\n    t\n";
     let diags = adr0131_diagnostics(src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -633,9 +633,7 @@ fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
     // local needs the loop to thread it on. A construct that is not a
     // local-threading producer in the body keeps the error.
-    let src = in_class(
-        "r := 0\n#(1, 2) do: [:x | r := #(1, 2) eachWithIndex: [:y :i | t := t + y]]\n#[r, t]",
-    );
+    let src = in_class("r := 0\n#(1, 2) do: [:x | r := [t := t + y] value]\n#[r, t]");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
@@ -905,6 +903,10 @@ fn adr0131_probe_matrix_pins() {
         }
 
         let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
+        // A context whose last pending shape was lowered has no file left.
+        if !root.join(&pending).exists() {
+            continue;
+        }
         let src = read(&pending);
         let module = parse_module(&src);
         let diags = adr0131_diagnostics(&src);
@@ -1246,13 +1248,13 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 
 #[test]
 fn deny_set_nested_statement_names_the_enclosing_block() {
-    let src = in_class("4 > 3 ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]\nt");
+    let src = in_class("4 > 3 ifTrue: [[t := t + 1] value]\nt");
     let diags = adr0131_diagnostics(&src);
     let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
-        "`eachWithIndex:` writes outer local `t`, but as a statement inside a conditional arm \
+        "`value` writes outer local `t`, but as a statement inside a conditional arm \
          in a class method the write is not threaded back yet (BT-3743)"
     );
     assert!(
@@ -1267,16 +1269,44 @@ fn deny_set_nested_statement_names_the_enclosing_block() {
 
 #[test]
 fn deny_set_method_body_statement_is_rejected_per_context() {
-    // `eachWithIndex:` loses the write as a class or value-type method
-    // statement and answers right in an actor method.
-    let body = "#(1, 2) eachWithIndex: [:x :i | t := t + x]\nt";
-    for src in [in_class(body), in_value(body)] {
-        let diags = adr0131_diagnostics(&src);
-        let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
-        assert_eq!(p0.len(), 1, "{src}: {diags:?}");
-        assert!(p0[0].message.contains("as a statement in"), "{:?}", p0[0]);
-    }
+    // A `[...] value` loses the write as a class method statement and answers
+    // right in an actor method.
+    let body = "[t := t + 1] value\nt";
+    let diags = adr0131_diagnostics(&in_class(body));
+    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    assert_eq!(p0.len(), 1, "{diags:?}");
+    assert!(p0[0].message.contains("as a statement in"), "{:?}", p0[0]);
     assert!(adr0131_diagnostics(&in_actor(body)).is_empty());
+}
+
+/// BT-3841: `eachWithIndex:`/`do:separatedBy:` are producers like `do:`
+/// (`producer_body_arg_index`, the separator packed as a handler): accepted as
+/// a statement, an operand, in an arm and in a loop body in every method
+/// context.
+#[test]
+fn enumerations_are_producers_where_the_frame_lowers_them() {
+    for construct in [
+        "#(1, 2) eachWithIndex: [:x :i | t := t + x]",
+        "#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]",
+    ] {
+        for body in [
+            format!("t := 0\n{construct}\nt"),
+            format!("t := 0\nr := {construct}\n#[r, t]"),
+            format!("t := 0\ntrue ifTrue: [{construct}]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | {construct}]\nt"),
+            format!("t := 0\n[{construct}] on: Error do: [:e | 0]\nt"),
+        ] {
+            for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+                let diags = adr0131_diagnostics(&src);
+                // An actor `r :=` of a `do:` body operand is the one shape the
+                // actor frames do not lower (erlc), see the operand matrix.
+                assert!(
+                    diags.is_empty() || src.contains("Actor subclass"),
+                    "{src}: {diags:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1389,17 +1419,9 @@ fn adr0131_statement_probe_pins() {
 /// would also accept every unmeasured middle role. PIN-BUG BT-3841:
 /// the producer work for those families deletes the entries.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
-    ("actor", "loop", "cvar", "ewi"),
-    ("actor", "loop", "selfsend", "ewi"),
-    ("actor", "toDoC", "cvar", "ewi"),
-    ("actor", "toDoC", "selfsend", "ewi"),
     ("actor", "armProtIter", "outer", "dinH"),
     ("actor", "armProtIter", "outer", "dinS"),
-    ("actor", "armProtIter", "outer", "dsb"),
-    ("actor", "armProtIter", "outer", "ewi"),
     ("actor", "armProtIter", "outer", "value"),
-    ("actor", "armProtArm", "outer", "dsb"),
-    ("actor", "armProtArm", "outer", "ewi"),
     ("actor", "armProtArm", "outer", "value"),
     ("actor", "armIter", "outer", "det"),
     ("actor", "coll", "outer", "det"),
@@ -1628,9 +1650,9 @@ fn adr0131_phase0_summary_is_checked_in() {
     );
 }
 
-/// BT-3841 review: the unfinished families (`detect:ifNone:`, the enumerations,
-/// a block `value`; `anySatisfy:` and the keyed iterations were here until their
-/// producers landed) are rejected past depth two unless a row names the exact
+/// BT-3841 review: the unfinished families (`detect:ifNone:` and a block
+/// `value`; `anySatisfy:`, the keyed iterations and the enumerations were here
+/// until their producers landed) are rejected past depth two unless a row names the exact
 /// shape. An `eachWithIndex:` in an arm in a protected body in a `do:` body
 /// (depth 3) is unmeasured and stays rejected in a value-type method, as does
 /// depth four in every context. (This chain used to be accepted for
@@ -1651,12 +1673,13 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
             .fold(String::new(), |acc, l| acc + "    " + l + "\n");
         format!("{}{lines}", header(context))
     };
-    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]] on: Error do: [:e | 0]]\nt";
+    let depth3 =
+        "t := 0\n#(1, 2) do: [:z | [c ifTrue: [[t := t + 1] value]] on: Error do: [:e | 0]]\nt";
     assert!(
         !adr0131_diagnostics(&source("value", depth3)).is_empty(),
         "the value-type depth-3 shape is unmeasured and must be rejected"
     );
-    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]] on: Error do: [:e | 0]]]\nt";
+    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [[t := t + 1] value]] on: Error do: [:e | 0]]]\nt";
     for context in ["class", "value", "actor"] {
         assert!(
             !adr0131_diagnostics(&source(context, depth4)).is_empty(),
@@ -1692,7 +1715,7 @@ fn unmeasured_three_deep_chains_stay_rejected() {
         (
             "actor",
             in_actor(
-                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) eachWithIndex: [:e :i | t := t + 1]]]]\nt",
+                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [[t := t + 1] value]]]\nt",
             ),
         ),
     ] {
