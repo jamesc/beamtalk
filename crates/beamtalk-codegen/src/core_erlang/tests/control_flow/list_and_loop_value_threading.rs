@@ -340,15 +340,30 @@ fn test_value_type_field_write_in_conditional_nested_in_loop_without_sibling_loc
     assert_eq!(field, "total");
 }
 
+/// BT-3827: compiles `src` (a value-type method with a field-writing fold body) through
+/// `erlc` and asserts the fold hands its `Self` back out: the body writes `total`, and the
+/// fold unwraps its `{Acc, Self}` accumulator (`FoldFamilySlots`) so the family leaves the
+/// closure in the result tuple's trailing slot.
+fn assert_fold_threads_self(src: &str) {
+    let code = codegen(src);
+    assert_compiles_through_erlc("test", &code);
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "the fold body's write must be in the generated function:\n{code}"
+    );
+    assert!(
+        code.contains("FoldPair") && code.contains("FoldAcc"),
+        "the fold must wrap and unwrap its `{{Acc, Self}}` accumulator:\n{code}"
+    );
+}
+
 #[test]
-fn test_value_type_field_write_in_foldl_body_is_compile_error() {
-    // A `Foldl*` (`do:`/`collect:`/…) accumulator has no trailing
-    // `Self` slot, so `ThreadingPlan::threads_value_self` is never set for a
-    // fold plan and EVERY value-type field write in a fold body is
-    // unthreadable — top-level statement included, unlike the `Letrec` case.
-    // Both shapes crashed `erlc` with "unbound variable 'State'" before this
-    // fix; both are now the same clean diagnostic the class-var equivalents
-    // already produced.
+fn test_value_type_field_write_in_foldl_body_threads_self_through_the_accumulator() {
+    // BT-3827 (was `..._is_compile_error`): `do:` / `collect:` / `inject:into:` accumulators
+    // now carry `Self` (`FoldFamilySlots`), so a TOP-LEVEL field write in the body compiles.
+    // A write nested below the body's top level (a conditional arm) is still the structured
+    // rejection, the same limit the Letrec loops have: the arm's `Self` rebind is scoped to
+    // the arm.
     let nested = field_assignment_rejection_field(
         concat!(
             "TestCase subclass: VtFoldlCondSelf\n",
@@ -363,41 +378,29 @@ fn test_value_type_field_write_in_foldl_body_is_compile_error() {
     );
     assert_eq!(nested, "total");
 
-    let top_level = field_assignment_rejection_field(
-        concat!(
-            "TestCase subclass: VtFoldlTopSelf\n",
-            "  field: total = 0\n\n",
-            "  computeTotal =>\n",
-            "    #(1, 2, 3) do: [:i | self.total := self.total + i]\n",
-            "    self.total\n",
-        ),
-        "bt@vtfoldltopself",
-    );
-    assert_eq!(top_level, "total");
+    assert_fold_threads_self(concat!(
+        "TestCase subclass: VtFoldlTopSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    #(1, 2, 3) do: [:i | self.total := self.total + i]\n",
+        "    self.total\n",
+    ));
 
-    // `collect:` too, so the "EVERY `Foldl*` selector" claim above is backed
-    // by a second member of the family rather than by `do:` alone — the two
-    // share `lower_foldl_body`, and this pins that they also share its
-    // rejection.
-    let collect = field_assignment_rejection_field(
-        concat!(
-            "TestCase subclass: VtFoldlCollectSelf\n",
-            "  field: total = 0\n\n",
-            "  computeTotal =>\n",
-            "    #(1, 2, 3) collect: [:i | self.total := self.total + i]\n",
-            "    self.total\n",
-        ),
-        "bt@vtfoldlcollectself",
-    );
-    assert_eq!(collect, "total");
+    assert_fold_threads_self(concat!(
+        "TestCase subclass: VtFoldlCollectSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    #(1, 2, 3) collect: [:i | self.total := self.total + i]\n",
+        "    self.total\n",
+    ));
 }
 
 #[test]
 fn test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error() {
-    // The headline repro (`do:`) and `collect:` are pinned above;
-    // this test rounds out the rest of the `Foldl*` family —
-    // `select:`/`reject:`/`inject:into:`/`detect:ifNone:`/`count:`,
-    // plus a `Range`'s own `do:` (`(1 to: n) do: [...]`, which reaches the
+    // BT-3827: `do:` / `collect:` / `inject:into:` thread `Self` now (above, and a `Range`'s
+    // own `do:` below); this test rounds out the rest of the `Foldl*` family, which keeps the
+    // rejection: `select:`/`reject:`/`detect:ifNone:`/`count:`. The `Range` `do:` note: a
+    // `Range`'s own `do:` (`(1 to: n) do: [...]`, which reaches the
     // exact same `generate_list_do_with_mutations` path as a list receiver's
     // `do:` — the dispatch is keyed on the `do:` selector and block body,
     // never on the receiver's type). All six share `lower_foldl_body` with
@@ -431,22 +434,19 @@ fn test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error() {
     );
     assert_eq!(reject, "total");
 
-    let inject_into = field_assignment_rejection_field(
-        concat!(
-            "TestCase subclass: VtFoldlInjectSelf\n",
-            "  field: total = 0\n\n",
-            "  computeTotal =>\n",
-            "    #(1, 2, 3)\n",
-            "      inject: 0\n",
-            "      into: [:acc :i |\n",
-            "        self.total := self.total + i\n",
-            "        acc + i\n",
-            "      ]\n",
-            "    self.total\n",
-        ),
-        "bt@vtfoldlinjectself",
-    );
-    assert_eq!(inject_into, "total");
+    // BT-3827: `inject:into:` carries `Self` through its accumulator now.
+    assert_fold_threads_self(concat!(
+        "TestCase subclass: VtFoldlInjectSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    #(1, 2, 3)\n",
+        "      inject: 0\n",
+        "      into: [:acc :i |\n",
+        "        self.total := self.total + i\n",
+        "        acc + i\n",
+        "      ]\n",
+        "    self.total\n",
+    ));
 
     let detect_if_none = field_assignment_rejection_field(
         concat!(
@@ -474,17 +474,15 @@ fn test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error() {
     );
     assert_eq!(count, "total");
 
-    let range_do = field_assignment_rejection_field(
-        concat!(
-            "TestCase subclass: VtFoldlRangeDoSelf\n",
-            "  field: total = 0\n\n",
-            "  computeTotal =>\n",
-            "    (1 to: 3) do: [:i | self.total := self.total + i]\n",
-            "    self.total\n",
-        ),
-        "bt@vtfoldlrangedoself",
-    );
-    assert_eq!(range_do, "total");
+    // A `Range`'s own `do:` reaches the same `generate_list_do_with_mutations` path as a list
+    // receiver's `do:`, so it threads `Self` the same way (BT-3827).
+    assert_fold_threads_self(concat!(
+        "TestCase subclass: VtFoldlRangeDoSelf\n",
+        "  field: total = 0\n\n",
+        "  computeTotal =>\n",
+        "    (1 to: 3) do: [:i | self.total := self.total + i]\n",
+        "    self.total\n",
+    ));
 }
 
 #[test]

@@ -924,6 +924,10 @@ handle_metaclass_help_selector(SelectorAtom) ->
 -doc "Resolve a class argument to an atom class name.".
 -spec resolve_class_name(term()) -> {ok, atom()} | {error, #beamtalk_error{}}.
 resolve_class_name(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
+    %% BT-3832: deliberately the blocking `class_name/1`, not `class_name_safe/1`
+    %% -- the `noproc`/`timeout` exits it raises are how this reports a dead or
+    %% unresponsive class below, and `class_name_safe/1`'s retained reverse
+    %% index would resolve a stale name for a killed class instead.
     try
         Name = beamtalk_object_class:class_name(ClassPid),
         {ok, Name}
@@ -1166,7 +1170,7 @@ a live method is never silently hidden.
     undefined | [{binary() | undefined, [atom()]}].
 own_method_categories(ClassName, ClassPid, SealedMap) ->
     try
-        ModName = beamtalk_object_class:module_name(ClassPid),
+        ModName = beamtalk_object_class:module_name_safe(ClassPid),
         case beamtalk_reflection:source_file_from_module(ModName) of
             nil ->
                 undefined;

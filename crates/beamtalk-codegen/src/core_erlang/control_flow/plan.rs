@@ -15,6 +15,7 @@ use super::super::threaded_ir::{
 };
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
+use super::family_slots::FoldFamilySlots;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
@@ -160,10 +161,12 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// object). Any body shape that populates this also always has
     /// `use_direct_params`/`use_tuple_acc`/`use_hybrid_params` all `false`,
     /// so only the `StateAcc` base-path loop generators (`while_loops.rs`,
-    /// `counted_loops.rs`) ever consult it. A `Foldl*` plan never populates
-    /// it: a fold's accumulator has no matching `Self` slot. Class methods
-    /// never populate it either: class variables live in the class process
-    /// (ADR 0130), so there is nothing to thread.
+    /// `counted_loops.rs`) ever consult it. A `Foldl*` plan is populated only
+    /// by [`Self::with_value_self_slot`] (BT-3827: `do:`/`collect:`/
+    /// `inject:into:`), which carries `Self` in a `{Acc, Self}` wrapper
+    /// around the fold's own accumulator ([`FoldFamilySlots`]) instead of a
+    /// `letrec` parameter. Class methods never populate it: class variables
+    /// live in the class process (ADR 0130), so there is nothing to thread.
     threaded_families: ThreadedFamilies,
 }
 
@@ -583,20 +586,23 @@ impl ThreadingPlan {
 
         // Whether this Letrec loop body threads a value-type `Self` mutation
         // through its own recursive tail call. Letrec-shaped plans only
-        // (`allow_direct_params`): a `Foldl*` accumulator has no trailing
-        // `Self` slot to carry the mutation out through.
+        // (`allow_direct_params`): a `Foldl*` plan opts in afterwards through
+        // `with_value_self_slot`, only for the folds `SELF_THREADING_FOLDS` names.
         let threads_value_self_answer =
             allow_direct_params && generator.loop_body_threads_value_self(body);
 
         // ADR 0122 Decision 2/3: see `Self::derived_threaded_families`.
         let threaded_families = Self::derived_threaded_families(threads_value_self_answer);
 
+        // BT-3827: a `Foldl*` plan now opts into the SAME top-level detector
+        // afterwards (`with_value_self_slot`), so the differential records that
+        // detector's answer for a fold too, not the plan's pre-opt-in `false`.
         #[cfg(test)]
         Self::record_family_detector_diff(
             generator,
             body,
             allow_direct_params,
-            threads_value_self_answer,
+            generator.loop_body_threads_value_self(body),
         );
 
         Self {
@@ -663,6 +669,42 @@ impl ThreadingPlan {
     /// [`Self::threaded_families`]'s (the field's) doc comment.
     pub(in crate::core_erlang) fn threads_value_self(&self) -> bool {
         self.threaded_families.contains(&VersionPrefix::SelfVt)
+    }
+
+    /// BT-3827: opts a `Foldl*` plan into threading a value-type `Self` mutation
+    /// through its accumulator, when `body` writes a field. Called by the
+    /// emitters of the folds [`CoreErlangGenerator::fold_threads_value_self`]
+    /// names (`do:`, `collect:`, `inject:into:`) and by no other; every other
+    /// fold keeps rejecting a field write
+    /// ([`CoreErlangGenerator::reject_unthreadable_value_self_field_write`]).
+    ///
+    /// The slot rides a `{Acc, Self}` wrapper around the kind's own accumulator,
+    /// built and unwrapped by [`FoldFamilySlots`], so no kind's accumulator
+    /// shape changes. Same detector as the Letrec loops
+    /// ([`CoreErlangGenerator::loop_body_threads_value_self`]), so a fold and a
+    /// loop cannot disagree on what a threadable write is.
+    ///
+    /// A fold that writes a field but is not being compiled by a consumer that
+    /// unpacks the result's `Self` slot is the structured rejection
+    /// ([`CoreErlangGenerator::value_self_fold_slot`]).
+    pub(in crate::core_erlang) fn with_value_self_slot(
+        mut self,
+        generator: &CoreErlangGenerator,
+        body: &beamtalk_core::ast::Block,
+    ) -> crate::core_erlang::Result<Self> {
+        if generator.value_self_fold_slot(body)? {
+            self.threaded_families = Self::derived_threaded_families(true);
+        }
+        Ok(self)
+    }
+
+    /// BT-3827: the accumulator wrapper for the families this fold plan
+    /// threads, or `None` when it threads none (every pre-existing fold).
+    pub(in crate::core_erlang) fn fold_family_slots(
+        &self,
+        generator: &mut CoreErlangGenerator,
+    ) -> Option<FoldFamilySlots> {
+        FoldFamilySlots::new(self, generator)
     }
 
     /// ADR 0122 Decision 3 (BT-3515): captures each family in

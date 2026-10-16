@@ -22,7 +22,6 @@
 //   storage_family_class_method_ensure_direct_write.bt — classState direct write in ensure:
 //   storage_family_class_method_foldl_direct_write.bt  — classState direct write in do:
 //   storage_family_value_type.bt                — TestCase field, ACCEPT cells
-//   storage_family_value_type_foldl_reject.bt      — TestCase field REJECT (do:)
 //   storage_family_value_type_match_reject.bt      — TestCase field REJECT (match:)
 //
 // Ground-truth values mirror the already-verified BUnit corpus fragments
@@ -128,8 +127,8 @@ StorageFamilyClassMethodFoldlDirectWrite doDirectWrite
 // ===========================================================================
 // FAMILY 3: value-type `TestCase` field — `to:do:`/`whileTrue:`/
 // `ifTrue:ifFalse:` (BT-3484) and `on:do:`/`ensure:` (BT-3486) accept a bare
-// top-level `self.field := ...` write; `do:`/`collect:` (BT-3487/BT-3488)
-// and `match:` (BT-3489) are compile-time rejections.
+// top-level `self.field := ...` write; `do:` threads it through the fold
+// accumulator (BT-3827); `match:` (BT-3489) is a compile-time rejection.
 // ===========================================================================
 
 :load tests/repl-protocol/fixtures/storage_family_value_type.bt
@@ -153,15 +152,11 @@ StorageFamilyClassMethodFoldlDirectWrite doDirectWrite
 (StorageFamilyValueType new) fragEnsure
 // => 1
 
-// ── REJECT: a value-type field write inside a Foldl-shaped `do:` body has
-// no matching accumulator slot to thread through — clean compile-time
-// rejection (FieldAssignmentInUnsupportedBlock) rather than the erlc
-// "unbound variable 'State'" crash it used to produce (BT-3487/BT-3488).
-:load tests/repl-protocol/fixtures/storage_family_value_type_foldl_reject.bt
-// => ERROR: Cannot assign to field 'total' inside this block
-
-_error kind
-// => compile_error
+// ── ACCEPT: a value-type field write inside a `do:` body threads `Self`
+// through the fold accumulator (BT-3827; it was a clean
+// FieldAssignmentInUnsupportedBlock rejection under BT-3487/BT-3488).
+(StorageFamilyValueType new) fragDoDirectWrite
+// => 6
 
 // ── REJECT: a value-type field write as a `match:` arm body — `match:`'s N
 // arms have no branch-merge machinery of their own the way

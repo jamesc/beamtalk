@@ -13,3 +13,4 @@ beamtalk-core = { workspace = true }
 beamtalk-codegen = { workspace = true }
 insta = { workspace = true, features = ["glob"] }
 camino = { workspace = true }
+tempfile = "3.14"

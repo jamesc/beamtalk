@@ -355,6 +355,40 @@ Erlang-interop blocks) was found but is a separate, untouched code path —
 tracked as [BT-3529](https://linear.app/beamtalk/issue/BT-3529) rather than
 folded into this fix.
 
+### Addendum: `Self` through a `Foldl*` accumulator (BT-3827)
+
+Decision 3 left a `Foldl*` accumulator without a family slot, so a value-type
+`do:`/`collect:`/`inject:into:` body that writes a field was a structured
+rejection in every position. BT-3827 threads `Self` through those three folds
+(`SELF_THREADING_FOLDS`); `select:`, `reject:`, `detect:`, `count:`, … keep the
+rejection until their emitters opt in.
+
+**Shape.** The slot does not change any fold kind's own accumulator. A fold
+that threads a family wraps it as `{Acc, Self}` (`FoldFamilySlots::wrap_init`),
+the lambda unwraps it before the body runs and the body ends in a
+`ThreadedStmt::Return` answering `{<kind's accumulator>, Self{N}}`
+(`carry_fold_families`, once, in `generate_foldl_loop_body`), and the fold's
+result tuple gains the family as its trailing slot (`FoldFamilySlots::close_tuple`)
+— the slot every consumer already reads from a Letrec loop's result
+(`extract_vt_loop_family_slot`).
+
+**Invariant, per scope kind** (the version of `Self` live after the construct):
+
+| Scope | Guarantee |
+|---|---|
+| top-level statement of a method | the fold's final `Self` is rebound by the consumer (open chain, producer prelude or last-position unwrap) |
+| `Foldl*` body (`do:`/`collect:`/`inject:into:`) | a top-level write threads through the wrapper; the next iteration starts from the previous one's `Self` |
+| `Letrec` loop body, conditional arm, `on:do:`/`ensure:` arm, bare / stored block, NLR boundary | a fold that writes a field is **rejected** (`FieldAssignmentInUnsupportedBlock`): nothing there unpacks the result's `Self` slot (`value_self_fold_slot`), exactly the limit a Letrec loop has for a write nested below its body's top level |
+| evaluated block (`[...] value`) | threads when the block itself writes a field at its top level (the fold is an open-chain statement of the spliced body); otherwise rejected as above |
+
+A fold compiled by a consumer that unpacks the slot is marked
+(`with_fold_self_slot_consumer`); a fold compiled anywhere else is refused
+rather than dropping the write. The verifier backs the lambda side
+(`FoldFamilyNotCarried`), `value_type_fold_family_corpus.rs` the whole
+construct: a fold-position x statement-shape verifier corpus with the
+`DropFoldFamilySlot` fault, and a generated fold-body corpus run against an
+oracle.
+
 ## Migration Path
 Not applicable to the language. BT-3506 changes observable behaviour (a
 dropped write becomes a kept one); that is a bug fix. The Foldl slot move

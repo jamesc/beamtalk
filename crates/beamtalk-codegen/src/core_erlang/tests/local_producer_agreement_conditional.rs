@@ -337,7 +337,7 @@ fn conditionals_that_are_not_producers_agree_with_the_core_rule_in_every_context
         for position in POSITIONS
             .iter()
             .chain(CONDITIONAL_POSITIONS)
-            .filter(|p| !p.contains("super") && !p.contains(".blk"))
+            .filter(|p| !p.contains(".blk"))
         {
             for (i, src) in sources(construct, position).iter().enumerate() {
                 compiled[i] += usize::from(check_conditional_agreement(src).is_some());
@@ -354,14 +354,9 @@ fn conditionals_that_are_not_producers_agree_with_the_core_rule_in_every_context
 fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
     let mut compiled = 0;
     for construct in ACTOR_NON_PRODUCER_CONDITIONALS {
-        // (A `super` send's argument that carries a field write trips the
-        // verifier's `StateEffectEscapesExpression` on main as well, a
-        // `generate_super_send` gap independent of conditionals-as-producers.)
-        for position in POSITIONS
-            .iter()
-            .chain(CONDITIONAL_POSITIONS)
-            .filter(|p| !p.contains("super"))
-        {
+        // `super` send positions are included: a conditional with a field write
+        // as a `super` send argument verifies cleanly (BT-3819).
+        for position in POSITIONS.iter().chain(CONDITIONAL_POSITIONS) {
             let [_, _, actor] = sources(construct, position);
             compiled += usize::from(check_conditional_agreement(&actor).is_some());
         }

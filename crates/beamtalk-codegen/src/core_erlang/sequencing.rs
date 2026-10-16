@@ -251,6 +251,17 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        // BT-3838: the never-read entry is the ROOT cause (the parent bypassed
+        // `generate_expression` for that child, so a sibling read can be a symptom of the
+        // same bypass), and the over-read report is debug-fatal: report the unused entry
+        // first so a debug run shows it instead of panicking on the secondary finding.
+        if let Some(span) = unused.first() {
+            return Err(super::CodeGenError::Internal(format!(
+                "ADR 0118 sequencing: a pre-sequenced sub-expression at {span:?} was never \
+                 substituted by its parent's compile (the parent's codegen path bypasses \
+                 generate_expression for that child)"
+            )));
+        }
         if let Some(VerifyError::PrecompiledSubexprReadMoreThanOnce { at, .. }) = over_read.first()
         {
             let at = *at;
@@ -259,13 +270,6 @@ impl CoreErlangGenerator {
                 "pre-sequenced sub-expression read back more than once",
                 at,
             );
-        }
-        if let Some(span) = unused.first() {
-            return Err(super::CodeGenError::Internal(format!(
-                "ADR 0118 sequencing: a pre-sequenced sub-expression at {span:?} was never \
-                 substituted by its parent's compile (the parent's codegen path bypasses \
-                 generate_expression for that child)"
-            )));
         }
         Ok(())
     }

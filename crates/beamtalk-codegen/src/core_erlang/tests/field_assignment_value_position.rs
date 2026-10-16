@@ -52,6 +52,26 @@ fn send_argument_field_assignment_followed_by_state_read() {
     assert_compiles_through_erlc("test", &code);
 }
 
+/// BT-3819: `^super sel: <operand>` threaded its operand through a closed
+/// argument list (the early-return `SuperSend` arm skipped the sequencing the
+/// statement form has), tripping `StateEffectEscapesExpression` when the operand
+/// wrote a field. Statement, last-statement and `^` forms all sequence it.
+#[test]
+fn super_send_operand_with_field_write_is_sequenced_in_every_statement_form() {
+    for body in [
+        "r := super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])\n    r",
+        "^super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])",
+        "super isKindOf: ((c) ifTrue: [self.n := 1. #a] ifFalse: [#b])\n    self.n",
+        "^super isKindOf: (self.n := 5)",
+    ] {
+        let src = format!(
+            "Actor subclass: SuperOperandProbe\n  state: n = 0\n\n  go: c =>\n    {body}\n"
+        );
+        let code = codegen(&src);
+        assert_compiles_through_erlc("test", &code);
+    }
+}
+
 /// A value position: a template over `EXPR`, a parenthesized field assignment.
 const POSITIONS: &[(&str, &str)] = &[
     ("self_send_arg", "self take: EXPR"),
@@ -412,16 +432,63 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "conditional_wrapping_field_rhs",
         "self.m := (EXPR > 3 ifTrue: [1] ifFalse: [2])",
     ),
-];
-
-/// Loop-shaped constructs whose BODY writes a field are rejected in every position of a value
-/// type, statement position included: their accumulator has no `Self` slot yet. A gap separate
-/// from BT-3821's value-position threading, pinned so a fix flips it.
-const VT_UNSUPPORTED_FIELD_WRITING_BODIES: &[&str] = &[
-    "self take: (#(1, 2) do: [:e | self.m := e])",
-    "xs := #(1, 2) collect: [:e | self.m := e]. xs",
-    "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
-    "#(1, 2) do: [:e | self.m := e]",
+    // BT-3827: `do:` / `collect:` / `inject:into:` bodies that write a field carry `Self` through
+    // the fold accumulator (`FoldFamilySlots`), so each compiles in every position and statement
+    // shape; the `FoldFamilyNotCarried` verifier invariant covers the lambda's tail
+    // (`value_type_fold_family_verifier_corpus.rs`).
+    ("do_field_write_statement", "#(1, 2) do: [:e | self.m := e]"),
+    (
+        "do_field_write_send_arg",
+        "self take: (#(1, 2) do: [:e | self.m := e])",
+    ),
+    (
+        "collect_field_write_assigned",
+        "xs := #(1, 2) collect: [:e | self.m := e]. xs",
+    ),
+    (
+        "inject_field_write_send_arg",
+        "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
+    ),
+    (
+        "do_field_write_reads_field",
+        "#(1, 2) do: [:e | self.m := self.m + e]",
+    ),
+    (
+        "do_two_field_writes",
+        "#(1, 2) do: [:e | self.m := e. self.n := e + 1]",
+    ),
+    (
+        "do_field_write_and_local",
+        "t := 0. #(1, 2) do: [:e | t := t + e. self.m := t]. t",
+    ),
+    (
+        "collect_field_write_and_local",
+        "t := 0. xs := #(1, 2) collect: [:e | t := t + e. self.m := t. e * 2]. xs",
+    ),
+    (
+        "inject_field_write_accumulates",
+        "#(1, 2) inject: 0 into: [:a :e | self.m := self.m + e. a + e]",
+    ),
+    (
+        "inject_field_write_binary_operand",
+        "(#(1, 2) inject: 0 into: [:a :e | self.m := e. a + e]) + 1",
+    ),
+    (
+        "inject_field_write_returned",
+        "^ #(1, 2) inject: 0 into: [:a :e | self.m := e. a + e]",
+    ),
+    (
+        "collect_field_write_returned",
+        "^ #(1, 2) collect: [:e | self.m := e. e + 1]",
+    ),
+    (
+        "do_field_write_then_field_read_operand",
+        "#(1, 2) do: [:e | self.m := e]. self.m + EXPR",
+    ),
+    (
+        "collect_field_write_empty_list",
+        "#() collect: [:e | self.m := e]",
+    ),
 ];
 
 /// Enclosing shapes, with whether a field write in the shape may be rejected with a structured
@@ -464,6 +531,31 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
     ),
     ("block_value", "    [STMT] value.\n    self.n\n", false),
 ];
+
+/// Statement-level shapes in which a field-writing fold position is a structured rejection
+/// rather than a compile (BT-3827). In both a fold's `Self` slot has no reader, and the lowering
+/// refuses it (`CoreErlangGenerator::value_self_fold_slot`) instead of dropping the write:
+///
+/// * `block_value`: an evaluated block (`[STMT] value`) whose body is lowered closed unless the
+///   block itself writes a field at its top level;
+/// * `conditional_condition`: the fold is an operand of a conditional's receiver, which is not a
+///   sequenced operand site of the method body.
+///
+/// The same rejection a fold gets in a stored block, a cascade or a receiver
+/// (`field_writing_folds_in_closed_contexts_stay_a_structured_rejection`).
+pub(super) const VT_FOLD_REJECTING_SHAPES: &[&str] = &["block_value", "conditional_condition"];
+
+/// Whether a [`VT_POSITIONS`] template is one of the BT-3827 field-writing fold positions.
+pub(super) fn is_fold_writing_position(template: &str) -> bool {
+    [
+        "do: [:e | self.",
+        "collect: [:e | self.",
+        "inject: 0 into: [:a :e | self.",
+        "[:e | t := t + e. self.",
+    ]
+    .iter()
+    .any(|fold| template.contains(fold))
+}
 
 pub(super) enum VtOutcome {
     /// Compiled through `erlc`; carries the generated Core Erlang.
@@ -576,7 +668,9 @@ fn value_type_field_assignment_value_position_corpus() {
                 "{VT_HEADER}\n  probe{i} =>\n{}",
                 shape.replace("STMT", &stmt)
             );
-            let may_reject = *shape_may_reject;
+            let may_reject = *shape_may_reject
+                || (is_fold_writing_position(position)
+                    && VT_FOLD_REJECTING_SHAPES.contains(shape_name));
             let name = format!("{shape_name} / {position_name}");
             let pinned = VT_PINNED_FAILURES.contains(&name.as_str());
             if !may_reject && !pinned {
@@ -637,19 +731,72 @@ fn value_type_field_assignment_value_position_corpus() {
     );
 }
 
-/// `do:` / `collect:` / `inject:into:` bodies that write a field are not threaded in a value type
-/// at all (their accumulator has no `Self` slot), statement position included: a gap separate
-/// from BT-3821's value-position conditional threading. They must stay a structured rejection
-/// (never a silently dropped write); the day one compiles, this fails and the entry moves to
-/// [`VT_POSITIONS`].
+/// BT-3827 (flips the former `field_writing_fold_bodies_stay_a_structured_rejection` pin): a
+/// `do:` / `collect:` / `inject:into:` body that writes a field threads `Self` through the fold
+/// accumulator in a value type, in statement position and in every value position. The shapes the
+/// pin named, now compiling, with the write surviving into the generated function.
 #[test]
-fn field_writing_fold_bodies_stay_a_structured_rejection() {
-    for body in VT_UNSUPPORTED_FIELD_WRITING_BODIES {
+fn field_writing_fold_bodies_compile_with_the_write_threaded() {
+    for body in [
+        "self take: (#(1, 2) do: [:e | self.m := e])",
+        "xs := #(1, 2) collect: [:e | self.m := e]. xs",
+        "self take: (#(1, 2) inject: 0 into: [:a :e | self.m := e. a])",
+        "#(1, 2) do: [:e | self.m := e]",
+    ] {
+        let src = format!("{VT_HEADER}\n  probe0 =>\n    {body}\n    self.n\n");
+        let VtOutcome::Compiles(code) = vt_outcome(&src) else {
+            panic!("`{body}` must compile now that fold accumulators carry `Self`:\n{src}");
+        };
+        written_fields_survive(&src, 0, &code).unwrap_or_else(|why| panic!("{why}\n{src}"));
+    }
+}
+
+/// The folds [`SELF_THREADING_FOLDS`] does not name keep the structured rejection of a field
+/// write in their body (never a silently dropped write), as does a write nested below the fold
+/// body's top level — the same limit the Letrec loops have (a conditional arm's `Self` rebind
+/// is scoped to its arm). Widening either means opting the construct in, not editing this list.
+#[test]
+fn field_writing_bodies_the_fold_slot_does_not_cover_stay_a_structured_rejection() {
+    for body in [
+        "#(1, 2) select: [:e | self.m := e. true]",
+        "#(1, 2) reject: [:e | self.m := e. true]",
+        "#(1, 2) detect: [:e | self.m := e. true]",
+        "#(1, 2) anySatisfy: [:e | self.m := e. true]",
+        "#(1, 2) count: [:e | self.m := e. true]",
+        "#(1, 2) sort: [:a :b | self.m := a. a < b]",
+        "#(1, 2) do: [:e | e > 1 ifTrue: [self.m := e]]",
+        "#(1, 2) do: [:e | self take: (self.m := e)]",
+        "#(1, 2) inject: 0 into: [:a :e | e > 1 ifTrue: [self.m := e]. a]",
+    ] {
         let src = format!("{VT_HEADER}\n  probe =>\n    {body}\n    self.n\n");
         assert!(
             matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
-            "`{body}` is expected to be rejected with a structured diagnostic; if it now \
-             compiles, move it into VT_POSITIONS:\n{src}"
+            "`{body}` is expected to be rejected with a structured diagnostic:\n{src}"
+        );
+    }
+}
+
+/// A fold that writes a field hands its `Self` back as a trailing slot of its result tuple, so it
+/// is lowered only where a consumer reads that slot (`with_fold_self_slot_consumer`). Anywhere
+/// else (a stored block, an evaluated block with no top-level write of its own, a cascade, a
+/// receiver, an `and:` argument) it is the structured rejection, never a dropped write.
+#[test]
+fn field_writing_folds_in_closed_contexts_stay_a_structured_rejection() {
+    for body in [
+        "b := [#(1, 2) do: [:e | self.m := e]]. b value",
+        "[#(1, 2) do: [:e | self.m := e]] value",
+        "c := [#(1, 2) do: [:e | self.m := e]] value. c",
+        "[:x | #(1, 2) collect: [:e | self.m := e]] value: 3",
+        "(#(1, 2) do: [:e | self.m := e]) printString; displayString",
+        "#(1, 2) do: [:e | self.m := e]; yourself",
+        "(#(1, 2) collect: [:e | self.m := e]) do: [:x | x]",
+        "(#(1, 2) do: [:e | self.m := e]) ifNil: [3]",
+        "true and: [#(1, 2) do: [:e | self.m := e]. true]",
+    ] {
+        let src = format!("{VT_HEADER}\n  probe =>\n    {body}\n    self.n\n");
+        assert!(
+            matches!(vt_outcome(&src), VtOutcome::RejectedCleanly),
+            "`{body}` is expected to be rejected with a structured diagnostic:\n{src}"
         );
     }
 }
@@ -741,9 +888,9 @@ fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
         ("[self.m := 1. t := t + 1] on: Error do: [:e | 0]", true),
         ("[self.m := 1] ensure: [0]", true),
         ("#(1, 2) do: [:e | t := t + e]", true),
-        // A field-writing `do:` body is not threaded in a value type at all (see
-        // `VT_UNSUPPORTED_FIELD_WRITING_BODIES`): a structured rejection in both spellings.
-        ("#(1, 2) do: [:e | self.m := e]", false),
+        // BT-3827: a top-level field write in a value-type `do:` body threads `Self` through the
+        // fold accumulator, so both spellings compile.
+        ("#(1, 2) do: [:e | self.m := e]", true),
         ("1 to: 3 do: [:i | t := t + i]", true),
         ("[t < 3] whileTrue: [t := t + 1]", true),
         ("3 timesRepeat: [t := t + 1]", true),
@@ -785,4 +932,123 @@ fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// BT-3838 item 1: a parenthesised LAST value-type statement keeps its written form.
+///
+/// BT-3830 unwraps parentheses only on a non-last statement, because the last statement is the
+/// method's value: a bare last field assignment answers the updated `Self`, a parenthesised one
+/// answers the assignment's value (and `(t := t + 1)` answers `t + 1`). Both stay as written
+/// there, so this pins that they still compile with no verifier diagnostic, with and without a
+/// preceding `#(1) do: [:e | ^ e]` (a non-local return, whose tail returns
+/// `{Result, FinalSelf}`), and that a field write in them survives.
+#[test]
+fn parenthesised_last_statements_compile_with_and_without_a_non_local_return() {
+    let lasts = [
+        "(self.m := 5)",
+        "(t := t + 1)",
+        "(self.m := self.m + 1)",
+        "([t < 3] whileTrue: [t := t + 1])",
+        "(c ifTrue: [self.m := 1] ifFalse: [0])",
+    ];
+    let prefixes = ["", "#(1) do: [:e | ^ e].\n    "];
+    let mut problems = Vec::new();
+    let mut k = 0;
+    for prefix in prefixes {
+        for last in lasts {
+            let src = format!(
+                "{VT_HEADER}\n  probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {prefix}{last}\n"
+            );
+            match vt_outcome(&src) {
+                VtOutcome::Compiles(code) => {
+                    if let Err(why) = written_fields_survive(&src, k, &code) {
+                        problems.push(format!("{why}\n{src}"));
+                    }
+                }
+                VtOutcome::RejectedCleanly => {}
+                VtOutcome::Fails(why) => problems.push(format!("{why}\n{src}")),
+            }
+            k += 1;
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n\n"));
+}
+
+/// BT-3838 item 2: the actor / class-method counterpart of
+/// `parenthesised_non_last_statements_lower_exactly_like_their_bare_form`. A NON-last statement's
+/// value is discarded, so `(s)` must lower exactly like `s` in an `Actor subclass:` method and a
+/// class method too, not only in a value type.
+#[test]
+fn parenthesised_non_last_statements_lower_like_bare_in_actors_and_class_methods() {
+    const ACTOR: &str = "Actor subclass: ParenProbe
+  state: n = 0
+  state: m = 0
+";
+    const CLASS: &str = "Object subclass: ParenProbe
+  classState: n = 0
+  classState: m = 0
+";
+    let forms: &[&str] = &[
+        "self.m := 5",
+        "t := t + 1",
+        "c ifTrue: [self.m := 1] ifFalse: [0]",
+        "c ifTrue: [t := t + 1]",
+        "c ifTrue: [t := t + 1. self.m := 1] ifFalse: [0]",
+        "[self.m := 1] on: Error do: [:e | 0]",
+        "[self.m := 1. t := t + 1] on: Error do: [:e | 0]",
+        "[self.m := 1] ensure: [0]",
+        "#(1, 2) do: [:e | t := t + e]",
+        "#(1, 2) do: [:e | self.m := e]",
+        "1 to: 3 do: [:i | t := t + i]",
+        "[t < 3] whileTrue: [t := t + 1]",
+        "3 timesRepeat: [t := t + 1]",
+        "3 timesRepeat: [self.m := self.m + 1]",
+        "#(1, 2) inject: 0 into: [:a :e | t := t + e. a + e]",
+    ];
+    // The generated function for `probe{k}`, so source offsets elsewhere in the module do not
+    // make two spellings differ.
+    let lower = |header: &str, class_side: bool, k: usize, stmt: &str| -> Result<String, String> {
+        let sel = if class_side { "class " } else { "" };
+        let src = format!(
+            "{header}\n  {sel}probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {stmt}.\n    t + self.m\n"
+        );
+        match vt_outcome(&src) {
+            VtOutcome::Compiles(code) => {
+                let at = code
+                    .find(&format!("probe{k}'"))
+                    .ok_or_else(|| format!("no generated function for probe{k}\n{src}"))?;
+                // Actor methods are clauses of one `dispatch`: stop at the next clause.
+                let body = code[at..].split("\n'").next().unwrap_or("");
+                Ok(body
+                    .split("<OtherSelector>")
+                    .next()
+                    .unwrap_or("")
+                    .to_string())
+            }
+            VtOutcome::RejectedCleanly => Ok("rejected".to_string()),
+            VtOutcome::Fails(why) => Err(format!("{why}\n{src}")),
+        }
+    };
+    let mut problems = Vec::new();
+    for (name, header, class_side) in [("actor", ACTOR, false), ("class method", CLASS, true)] {
+        for (k, form) in forms.iter().enumerate() {
+            let bare = lower(header, class_side, k, form);
+            let paren = lower(header, class_side, k, &format!("({form})"));
+            // The same statement parenthesised inside a conditional arm (a non-last arm statement).
+            let arm_bare = lower(header, class_side, k, &format!("c ifTrue: [{form}. 0]"));
+            let arm_paren = lower(header, class_side, k, &format!("c ifTrue: [({form}). 0]"));
+            if arm_bare != arm_paren {
+                problems.push(format!(
+                    "{name} arm statement `{form}`:\n bare: {arm_bare:?}\n paren: {arm_paren:?}"
+                ));
+            }
+            match (&bare, &paren) {
+                (Ok(b), Ok(p)) if b == p => {}
+                _ => problems.push(format!(
+                    "{name} `{form}`:\n bare: {bare:?}\n paren: {paren:?}"
+                )),
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n\n"));
 }

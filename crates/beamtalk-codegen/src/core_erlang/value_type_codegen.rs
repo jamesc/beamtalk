@@ -1181,6 +1181,17 @@ impl CoreErlangGenerator {
             return false;
         }
         match stmt.unwrap_parens() {
+            // BT-3838: a PARENTHESISED field assignment as the last statement
+            // (`(self.m := 5)`, the method's value is the assigned value, not the updated
+            // `Self`) is classified `Pure`, so no body kind owns it: it is a producer itself,
+            // exactly as in any other value position. (A bare one is `FieldAssignment`, and a
+            // non-last one is unwrapped by the body loop, so neither reaches this arm.)
+            inner @ Expression::Assignment { .. }
+                if matches!(stmt, Expression::Parenthesized { .. })
+                    && self.is_field_assignment(inner) =>
+            {
+                true
+            }
             Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
                 self.subexpr_has_field_write_producer(value)
             }
@@ -2148,7 +2159,10 @@ impl CoreErlangGenerator {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
             if sel == "do:" {
                 if let Some(Expression::Block(body)) = arguments.first() {
-                    return !self.loop_threaded_locals(body, None).is_empty();
+                    // BT-3827: a `do:` whose only mutation is a field write
+                    // returns a threaded tuple too (`{'nil', StateAcc, Self{N}}`).
+                    return !self.loop_threaded_locals(body, None).is_empty()
+                        || self.fold_threads_value_self(expr);
                 }
             }
         }
@@ -2248,10 +2262,10 @@ impl CoreErlangGenerator {
     ///    3 and rebinds it via [`Self::extract_vt_loop_family_slot`] —
     ///    matching the extra trailing tuple slot `while_loops.rs`/
     ///    `counted_loops.rs` append to the `{'nil', StateAcc, …}` result.
-    ///    Always empty for every `do:`/`collect:`/`select:`/`inject:into:`
-    ///    caller (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`)
-    ///    — those Foldl-shaped constructs' accumulator has no matching slot
-    ///    yet.
+    ///    Empty for a fold unless it writes a field and is one of
+    ///    `SELF_THREADING_FOLDS` (BT-3827: `do:`/`collect:`/`inject:into:`
+    ///    return `Self` there through `FoldFamilySlots::close_tuple`);
+    ///    `select:` and the other folds' accumulators have no such slot.
     ///
     /// When there are no threaded locals AND no extra family slot, falls
     /// back to sequencing the loop as a side effect (`let _seqN = <loop> in`).
@@ -2371,12 +2385,12 @@ impl CoreErlangGenerator {
     ) -> Result<String> {
         // ADR 0122 Decision 3: which extra trailing slot `value` carries as an
         // explicit 3rd tuple element, when it is a Letrec-shaped construct
-        // (while/counted loop) — see `vt_loop_threaded_families`.
-        // Always empty for a `Foldl*`
-        // construct (`vt_loop_threaded_families`'s own doc comment).
+        // (while/counted loop) or a field-writing `do:`/`collect:`/
+        // `inject:into:` fold (BT-3827) — see `vt_loop_threaded_families`.
         let families = self.vt_loop_threaded_families(value);
         let span = value.span();
-        let rhs_doc = self.expression_doc(value)?;
+        let rhs_doc =
+            self.with_fold_self_slot_consumer(value, |this| this.expression_doc(value))?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
         // Bind the {value, StateAcc} tuple.
@@ -2467,12 +2481,13 @@ impl CoreErlangGenerator {
     }
 
     /// ADR 0122 Decision 3: which extra trailing family the loop construct
-    /// `expr`'s result tuple carries — non-empty only for the Letrec-shaped
+    /// `expr`'s result tuple carries — non-empty for the Letrec-shaped
     /// constructs (`whileTrue:`/`whileFalse:`, `to:do:`/`to:by:do:`/
-    /// `timesRepeat:`). `do:`/`collect:`/`select:`/`inject:into:`
-    /// (Foldl-shaped) never match here — their accumulator has no matching
-    /// tuple slot — and a value-type `self.field :=` inside one is likewise
-    /// out of scope: only the Letrec shape is covered here.
+    /// `timesRepeat:`) and, since BT-3827, for a `do:`/`collect:`/
+    /// `inject:into:` fold whose body writes a field
+    /// ([`CoreErlangGenerator::fold_threads_value_self`]). Every other fold
+    /// (`select:`, …) never matches here — its accumulator has no matching
+    /// tuple slot and a value-type `self.field :=` inside one is rejected.
     /// Shares [`CoreErlangGenerator::loop_body_threads_value_self`] with
     /// `ThreadingPlan::new_impl` (`control_flow/plan.rs`) so the routing
     /// decision here and the tuple-shape decision the loop's own codegen
@@ -2488,6 +2503,10 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> ThreadedFamilies {
         let expr = expr.unwrap_parens();
+        // BT-3827: a fold's result tuple carries `Self` at the same trailing slot.
+        if self.fold_threads_value_self(expr) {
+            return ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt]);
+        }
         let body = if self.is_while_with_vt_local_threading(expr) {
             match expr {
                 Expression::MessageSend { arguments, .. } => match arguments.first() {
@@ -2570,7 +2589,9 @@ impl CoreErlangGenerator {
         if Self::foldl_list_op_body_block(expr).is_none() {
             return false;
         }
-        !self.producer_threaded_locals(expr).is_empty()
+        // BT-3827: a fold whose only mutation is a field write still returns a
+        // threaded tuple (the `Self` slot), like a counted loop does.
+        !self.producer_threaded_locals(expr).is_empty() || self.fold_threads_value_self(expr)
     }
 
     /// Returns the body block of a foldl list-op message send
@@ -2600,17 +2621,17 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3827: the `Self` family a field-writing fold carries at element 3.
+        let families = self.vt_loop_threaded_families(expr);
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
-        let loop_doc = self.expression_doc(expr)?;
+        let loop_doc = self.with_fold_self_slot_consumer(expr, |this| this.expression_doc(expr))?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
             .map(|_| self.producer_threaded_locals(expr))
             .unwrap_or_default();
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            // Foldl-shaped constructs thread no family through this tuple
-            // slot (a fold accumulator has no `Self` slot).
-            &ThreadedFamilies::default(),
+            &families,
             expr.span(),
             "FoldlListOpResult",
             "FoldlListOpState",
@@ -2687,7 +2708,9 @@ impl CoreErlangGenerator {
         // form (it needs an open let-chain, not a closed `{Value, StateAcc}`
         // return) — see this function's own doc comment — so it uses the same
         // `foldl_call_doc` every other `Foldl*` call site does.
-        let fold_plan = ThreadingPlan::new(self, body, None);
+        let fold_plan = self.with_fold_self_slot_consumer(expr, |this| {
+            ThreadingPlan::new(this, body, None).with_value_self_slot(this, body)
+        })?;
         let threaded_locals = fold_plan.threaded_locals.clone();
 
         // Phase 1: create a fresh map and pack each captured local into it.
@@ -2727,6 +2750,9 @@ impl CoreErlangGenerator {
         let lambda_var = self.fresh_temp_var("temp");
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
+        // BT-3827: a body that writes a field carries `Self` in a `{Acc, Self}`
+        // wrapper around the accumulator (`generate_list_do_with_mutations`).
+        let slots = fold_plan.fold_family_slots(self);
 
         let mut docs: Vec<Document<'static>> = vec![
             concat(pack_docs),
@@ -2748,8 +2774,16 @@ impl CoreErlangGenerator {
                 " = fun (",
                 leaf::var(item_var.clone()),
                 ", ",
-                leaf::var("StateAcc"),
+                leaf::var(
+                    slots
+                        .as_ref()
+                        .map_or("StateAcc", family_slots::FoldFamilySlots::lambda_param)
+                        .to_string()
+                ),
                 ") -> ",
+                slots
+                    .as_ref()
+                    .map_or(Document::Nil, |s| s.lambda_prologue("StateAcc")),
             ],
         ];
 
@@ -2776,12 +2810,22 @@ impl CoreErlangGenerator {
         // expression, so they shadow the pre-loop bindings and are visible to all
         // subsequent `body_parts`.
         let fold_result = self.fresh_temp_var("FoldResult");
+        let init_acc = match &slots {
+            Some(s) => s.wrap_init(leaf::var(init_state_code), self),
+            None => leaf::var(init_state_code),
+        };
         let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
             &lambda_var,
-            leaf::var(init_state_code),
+            init_acc,
             &safe_list_var,
-            &fold_result,
+            slots.as_ref().map_or(
+                fold_result.as_str(),
+                family_slots::FoldFamilySlots::result_var,
+            ),
         )];
+        if let Some(s) = &slots {
+            post_docs.push(s.unwrap_result(&fold_result));
+        }
         for var_name in &threaded_locals {
             let core_var = Self::to_core_erlang_var(var_name);
             // Update the scope so subsequent method-body expressions look up
@@ -2797,6 +2841,13 @@ impl CoreErlangGenerator {
                 leaf::var(fold_result.clone()),
                 ") in ",
             ]);
+        }
+        // BT-3827: the open chain's `Self` is the fold's final one.
+        if let Some(s) = &slots {
+            for out in s.out_vars() {
+                post_docs.push(self.rebind_value_self_from_doc(leaf::var(out.clone()), body.span));
+                post_docs.push(Document::Str(" "));
+            }
         }
         // Intentionally open — the caller's next body_part provides the continuation.
         docs.push(concat(post_docs));
@@ -3151,7 +3202,9 @@ impl CoreErlangGenerator {
                 // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
                 // statements in this branch see the updates (the value itself is discarded).
                 let families = self.vt_loop_threaded_families(body_expr);
-                let loop_doc = self.expression_doc(body_expr)?;
+                let loop_doc = self.with_fold_self_slot_consumer(body_expr, |this| {
+                    this.expression_doc(body_expr)
+                })?;
                 let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                 let doc = self.emit_vt_loop_open_extraction(
                     loop_doc,

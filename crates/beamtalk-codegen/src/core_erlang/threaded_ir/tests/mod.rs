@@ -21,6 +21,7 @@
 //! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
 //!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
 //!   `BranchArm` nodes
+//! - [`fold_family`] — BT-3827 `FoldFamilyNotCarried` over fold lambda bodies
 //! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
@@ -55,6 +56,7 @@ mod catch_boundary;
 mod class_method_scope;
 mod close_and_value;
 mod dual_run;
+mod fold_family;
 mod local_rebind;
 mod lower_and_render_shim;
 mod render_naming;

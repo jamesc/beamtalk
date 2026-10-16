@@ -430,6 +430,30 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
+    /// BT-3814 / BT-3819: the one lowering of a `super` send's operands in a
+    /// method-body statement (`super take: (self bump)`, `^super take: (c
+    /// ifTrue: [self.n := 1 ...])`). Their state-effecting sub-expressions
+    /// thread ahead of the super dispatch into `stmts` (the sequencing rule),
+    /// so the dispatch reads the post-operand `State` and an operand's rebind
+    /// is not scoped away inside the dispatch's closed argument list. The
+    /// returned scope goes back to [`Self::finish_precompiled_scope`] once the
+    /// send itself is compiled.
+    fn thread_super_send_operands(
+        &mut self,
+        send: &Expression,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<PrecompiledScope> {
+        let operands: Vec<&Expression> = if let Expression::MessageSend { arguments, .. } = send {
+            arguments.iter().collect()
+        } else {
+            Vec::new()
+        };
+        let (operand_prelude, scope) =
+            self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
+        stmts.extend(operand_prelude);
+        Ok(scope)
+    }
+
     /// Classify a body expression for state-threading dispatch.
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
@@ -713,6 +737,18 @@ impl CoreErlangGenerator {
         let body_len = body.len();
 
         for (i, expr) in body.iter().enumerate() {
+            // BT-3838: INVARIANT - classification and emission see the same node (the
+            // value-type twin is BT-3830). `classify_body_expr` and most of its predicates
+            // do not look through parentheses, so a parenthesised statement was classified
+            // `Pure` while its bare form got a threading kind: `(t := t + 1)` dropped the
+            // local write. A NON-last statement's value is discarded, so `(s)` is exactly
+            // `s`: unwrap it once here, for every kind. The last statement is the method
+            // value, so it is left as written.
+            let expr = if i == body.len() - 1 {
+                expr
+            } else {
+                &expr.unwrap_parens()
+            };
             // Classified here, just before the statement is lowered, so the
             // locals bound by the statements before it are live in scope: a
             // loop's threaded set (`threaded_locals_of`) is decided against
@@ -751,7 +787,11 @@ impl CoreErlangGenerator {
                     }
                     match value_kind {
                         BodyExprKind::SuperSend => {
+                            // BT-3819: `^super take: (c ifTrue: [self.n := 1. ...])`
+                            // sequences its operands like the statement form.
+                            let super_scope = self.thread_super_send_operands(value, &mut stmts)?;
                             let expr_str = self.expression_doc(value)?;
+                            self.finish_precompiled_scope(super_scope)?;
                             stmts.push(ThreadedStmt::Statement(
                                 docvec![
                                     "let _SuperTuple = ",
@@ -1611,15 +1651,7 @@ impl CoreErlangGenerator {
                     // statement shape here), so the dispatch reads the
                     // post-operand `State` and the operand's rebind is not
                     // scoped away inside the dispatch's argument list.
-                    let operands: Vec<&Expression> =
-                        if let Expression::MessageSend { arguments, .. } = expr {
-                            arguments.iter().collect()
-                        } else {
-                            Vec::new()
-                        };
-                    let (operand_prelude, super_scope) =
-                        self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
-                    stmts.extend(operand_prelude);
+                    let super_scope = self.thread_super_send_operands(expr, &mut stmts)?;
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(

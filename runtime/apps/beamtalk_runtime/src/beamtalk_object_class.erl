@@ -58,6 +58,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     instance_methods_safe/1,
     instance_variables_safe/1,
     local_class_method_selectors_safe/1,
+    local_instance_method_infos_safe/1,
+    compiled_method_safe/3,
     class_send/3,
     local_call/3,
     set_class_var/3,
@@ -702,6 +704,129 @@ local_class_method_selectors_safe(ClassPid) ->
             local_class_methods(ClassPid)
     end.
 
+-doc """
+Local instance methods as `selector => MethodInfo`, preferring a message-free read.
+
+Reads the per-method records the owning class published with
+`publish_reflection/1`; falls back to the `get_instance_methods` call under the
+same conditions as `instance_methods_safe/1`.
+""".
+-spec local_instance_method_infos_safe(pid()) -> #{selector() => map()}.
+local_instance_method_infos_safe(ClassPid) ->
+    case published_class_name(ClassPid) of
+        {ok, ClassName} ->
+            maps:map(
+                fun(_Sel, #{info := Info}) -> Info end,
+                beamtalk_class_metadata:lookup_method_records(ClassName, instance)
+            );
+        not_found ->
+            {ok, InstanceMethods} = gen_server:call(ClassPid, get_instance_methods),
+            InstanceMethods
+    end.
+
+-doc """
+Resolve `Selector` to a `CompiledMethod` map on `ClassPid`'s own method table
+(`Side = instance`) or, for `Side = class`, on its class-side table and then the
+superclass chain's (the walk `{class_method, Sel}` has always done). Returns
+`nil` when not found.
+
+Message-free for a published local class: reads the per-method records
+`publish_reflection/1` keeps current, so it never queues behind a busy class
+process (BT-3832 -- `beamtalk_method_resolver` runs inside class handlers via
+`Behaviour >>`). Falls back to the `{method, Sel}` / `{class_method, Sel}` call
+only for a remote pid or a class that has not published yet.
+""".
+-spec compiled_method_safe(pid(), instance | class, selector()) -> map() | 'nil'.
+compiled_method_safe(ClassPid, Side, Selector) ->
+    case published_class_name(ClassPid) of
+        {ok, ClassName} ->
+            published_compiled_method(ClassName, Side, Selector);
+        not_found ->
+            Msg =
+                case Side of
+                    instance -> {method, Selector};
+                    class -> {class_method, Selector}
+                end,
+            gen_server:call(ClassPid, Msg)
+    end.
+
+%% A class name for a pid whose reflection state is in ETS, else `not_found`.
+-spec published_class_name(pid()) -> {ok, class_name()} | not_found.
+published_class_name(ClassPid) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
+                {ok, _} -> {ok, ClassName};
+                not_found -> not_found
+            end;
+        not_found ->
+            not_found
+    end.
+
+-spec published_compiled_method(class_name(), instance | class, selector()) ->
+    map() | 'nil'.
+published_compiled_method(ClassName, instance, Selector) ->
+    local_compiled_method(ClassName, instance, Selector);
+published_compiled_method(ClassName, class, Selector) ->
+    StepFun = fun(Name, _Depth) ->
+        case local_compiled_method(Name, class, Selector) of
+            nil ->
+                case beamtalk_class_metadata:lookup_superclass(Name) of
+                    {ok, none} -> not_found;
+                    {ok, Super} -> {next, Super};
+                    not_found -> not_found
+                end;
+            Method ->
+                {found, Method}
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Method} ->
+            Method;
+        not_found ->
+            nil;
+        {max_depth_exceeded, CycleName} ->
+            ?LOG_WARNING(
+                "class-method lookup exceeded ~p levels at ~p (starting from ~p) for ~p -- possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName, Selector],
+                #{domain => [beamtalk, runtime]}
+            ),
+            nil
+    end.
+
+%% `ClassName`'s own `CompiledMethod` for `Selector` (no chain walk), or `nil`.
+-spec local_compiled_method(class_name(), instance | class, selector()) ->
+    map() | 'nil'.
+local_compiled_method(ClassName, Side, Selector) ->
+    case beamtalk_class_metadata:lookup_method_record(ClassName, Side, Selector) of
+        {ok, #{info := Info, source := Source, signature := Sig, doc := Doc}} ->
+            compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc);
+        not_found ->
+            nil
+    end.
+
+%% The one constructor for a `CompiledMethod` map, shared by the
+%% `{method, _}` / `{class_method, _}` handlers and the ETS read path.
+-spec compiled_method_map(
+    class_name(), instance | class, selector(), map(), binary(), term(), term()
+) -> map().
+compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc) ->
+    #{
+        '$beamtalk_class' => 'CompiledMethod',
+        '__selector__' => Selector,
+        '__source__' => Source,
+        '__signature__' => Sig,
+        '__method_info__' => Info,
+        '__doc__' => Doc,
+        %% ADR 0127 §12: `CompiledMethod origin` -- the protocol this method was
+        %% flattened from, or nil for a method the class wrote itself. Sourced
+        %% from `beamtalk_xref`'s `origin` field (`beamtalk_xref_methods` rows
+        %% carry `provenance := protocol, origin`), not a separate store. v1
+        %% has no class-side provided methods (ADR 0127 §13), so this reads nil
+        %% for every class-side method today; kept for shape parity.
+        '__origin__' => beamtalk_xref:method_origin(ClassName, Side =:= class, Selector)
+    }.
+
 %% The class name for a pid, from the node-local reverse index (no message).
 %% `self()` reads the process dictionary, like `class_name_safe/1`.
 -spec reflection_class_name(pid()) -> {ok, class_name()} | not_found.
@@ -791,10 +916,12 @@ Delegates to beamtalk_method_resolver.
 method(ClassRef, Selector) ->
     beamtalk_method_resolver:resolve(ClassRef, Selector).
 
--doc "Check if a class is internal (ADR 0071).".
+-doc """
+Check if a class is internal (ADR 0071). Message-free; see `class_flag/3`.
+""".
 -spec is_internal(pid()) -> boolean().
 is_internal(ClassPid) ->
-    gen_server:call(ClassPid, is_internal).
+    class_flag(ClassPid, is_internal, is_internal).
 
 -doc """
 Check if a class has a method (does not walk hierarchy).
@@ -965,38 +1092,71 @@ validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) -
 instance_variables(ClassPid) ->
     gen_server:call(ClassPid, instance_variables).
 
--doc "Check if a class is sealed (cannot be subclassed).".
+-doc "Check if a class is sealed (cannot be subclassed). Message-free; see `class_flag/3`.".
 -spec is_sealed(pid()) -> boolean().
 is_sealed(ClassPid) ->
-    gen_server:call(ClassPid, is_sealed).
+    class_flag(ClassPid, is_sealed, is_sealed).
 
 -doc """
 Return the class's declared shape version (ADR 0123 §1) — the compiled
 `shapeVersion: N` header clause or the `ClassBuilder shapeVersion:` builder
 keyword, default `1`. Backs `Behaviour >> shapeVersion`
-(`beamtalk_behaviour_intrinsics:classShapeVersion/1`).
+(`beamtalk_behaviour_intrinsics:classShapeVersion/1`), which runs in the class
+process, so this is message-free; see `class_flag/3`.
 """.
 -spec shape_version(pid()) -> pos_integer().
 shape_version(ClassPid) ->
-    gen_server:call(ClassPid, shape_version).
+    class_flag(ClassPid, shape_version, shape_version).
 
--doc "Check if a class is typed (all fields and methods require type annotations).".
+-doc "Check if a class is typed (all fields and methods require type annotations). Message-free; see `class_flag/3`.".
 -spec is_typed(pid()) -> boolean().
 is_typed(ClassPid) ->
-    gen_server:call(ClassPid, is_typed).
+    class_flag(ClassPid, is_typed, is_typed).
 
--doc "Check if a class is abstract (cannot be instantiated).".
+-doc "Check if a class is abstract (cannot be instantiated). Message-free; see `class_flag/3`.".
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->
-    gen_server:call(ClassPid, is_abstract).
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
+                {ok, IsAbstract} -> IsAbstract;
+                not_found -> gen_server:call(ClassPid, is_abstract)
+            end;
+        not_found ->
+            gen_server:call(ClassPid, is_abstract)
+    end.
 
 -doc """
 Check if a class can be instantiated via new/new:.
 Returns false for actors (use spawn) and sealed primitives.
+
+Deliberately still a `gen_server:call`: the answer is computed lazily from the
+compiled module and cached in the class process (`ensure_is_constructible/3`),
+and its only callers are outside any class handler (REPL/compiler-side checks
+and tests), so it is caller-process-only (BT-3832).
 """.
 -spec is_constructible(pid()) -> boolean().
 is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
+
+-doc """
+Read a class flag from the metadata row its owner publishes (`publish_reflection/1`),
+falling back to `gen_server:call(ClassPid, CallMsg)` only when there is no row to
+read -- a remote pid (the node-local ETS cannot name it; the cross-node call path is
+unchanged) or a class that has not published yet. A class process never makes a
+blocking call into another class process while handling a call (BT-3820/BT-3832).
+""".
+-spec class_flag(pid(), is_sealed | is_typed | is_internal | shape_version, atom()) -> term().
+class_flag(ClassPid, Flag, CallMsg) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_flag(ClassName, Flag) of
+                {ok, Value} -> Value;
+                not_found -> gen_server:call(ClassPid, CallMsg)
+            end;
+        not_found ->
+            gen_server:call(ClassPid, CallMsg)
+    end.
 
 %%====================================================================
 %% gen_server callbacks
@@ -1471,37 +1631,9 @@ handle_call(
 handle_call(
     {method, Selector},
     _From,
-    #class_state{
-        name = ClassName,
-        instance_methods = Methods,
-        method_source = Source,
-        method_signatures = Signatures,
-        method_docs = MethodDocs
-    } = State
+    #class_state{name = ClassName} = State
 ) ->
-    Result =
-        % elp:fixme W0032 maps:find with complex branch logic
-        case maps:find(Selector, Methods) of
-            {ok, MethodInfo} ->
-                #{
-                    '$beamtalk_class' => 'CompiledMethod',
-                    '__selector__' => Selector,
-                    '__source__' => maps:get(Selector, Source, <<"">>),
-                    '__signature__' => maps:get(Selector, Signatures, nil),
-                    '__method_info__' => MethodInfo,
-                    '__doc__' => maps:get(Selector, MethodDocs, nil),
-                    %% ADR 0127 §12: `CompiledMethod origin` — the protocol
-                    %% this (instance-side) method was flattened from, or nil
-                    %% for a method the class wrote itself. Sourced from
-                    %% `beamtalk_xref`'s `origin` field (ADR 0127 §12:
-                    %% `beamtalk_xref_methods` rows carry `provenance :=
-                    %% protocol, origin`), not a separate store.
-                    '__origin__' => beamtalk_xref:method_origin(ClassName, false, Selector)
-                };
-            error ->
-                nil
-        end,
-    {reply, Result, State};
+    {reply, state_compiled_method(ClassName, instance, Selector, State), State};
 %% ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
 handle_call(
     {get_method_return_type, Selector},
@@ -1532,36 +1664,16 @@ handle_call(
 handle_call(
     {class_method, Selector},
     _From,
-    #class_state{
-        name = ClassName,
-        superclass = Superclass,
-        class_methods = ClassMethods,
-        class_method_source = ClassMethodSource,
-        class_method_signatures = ClassMethodSigs,
-        class_method_docs = ClassMethodDocs
-    } = State
+    #class_state{name = ClassName, superclass = Superclass} = State
 ) ->
     Result =
-        case maps:find(Selector, ClassMethods) of
-            {ok, MethodInfo} ->
-                #{
-                    '$beamtalk_class' => 'CompiledMethod',
-                    '__selector__' => Selector,
-                    '__source__' => maps:get(Selector, ClassMethodSource, <<"">>),
-                    '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
-                    '__method_info__' => MethodInfo,
-                    '__doc__' => maps:get(Selector, ClassMethodDocs, nil),
-                    %% ADR 0127 §12: class-side counterpart of the
-                    %% instance-side `'__origin__'` above. v1 has no
-                    %% class-side provided methods (ADR 0127 §13), so this
-                    %% reads nil for every class-side method today — kept
-                    %% for shape parity with the instance-side map and ready
-                    %% for a future class-side trait phase.
-                    '__origin__' => beamtalk_xref:method_origin(ClassName, true, Selector)
-                };
-            error ->
-                %% Not found locally — walk superclass chain
-                find_inherited_class_method(Selector, Superclass)
+        case state_compiled_method(ClassName, class, Selector, State) of
+            nil ->
+                %% Not found locally -- walk the superclass chain through the
+                %% published records (no call into another class process).
+                find_inherited_class_method(Selector, Superclass);
+            Method ->
+                Method
         end,
     {reply, Result, State};
 handle_call(
@@ -1766,7 +1878,10 @@ handle_call({set_doc, DocBinary}, _From, State) ->
     {reply, ok, State#class_state{doc = DocBinary}};
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
-    {reply, ok, State#class_state{method_docs = NewMethodDocs}};
+    NewState = State#class_state{method_docs = NewMethodDocs},
+    %% BT-3832: the doc is part of the published CompiledMethod record.
+    ok = publish_reflection(NewState),
+    {reply, ok, NewState};
 %% Class method dispatch.
 %% ADR 0036 Phase 2: Also handles metaclass_method_call with identical logic.
 %% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
@@ -2273,29 +2388,17 @@ restore_dict_key(Key, Prev) ->
 -doc """
 Walk superclass chain to find an inherited class method.
 Returns a CompiledMethod-like map or nil if not found.
-Each hop is a gen_server:call to the superclass process, which handles its
-own {class_method, _} lookup.  The self() guard prevents deadlock if a
-class lists itself as its own superclass; the 5 s timeout caps any deeper
-cycle that might slip through.
+Each hop reads the superclass's published method records from ETS
+(`published_compiled_method/3`) instead of a `gen_server:call` into its process
+(BT-3832): a class process never makes a blocking call into another class
+process while handling a call. A cyclic hierarchy is cut off by the
+`?MAX_HIERARCHY_DEPTH` guard.
 """.
 -spec find_inherited_class_method(atom(), atom() | none) -> map() | nil.
 find_inherited_class_method(_Selector, none) ->
     nil;
 find_inherited_class_method(Selector, SuperName) ->
-    case beamtalk_class_registry:whereis_class(SuperName) of
-        undefined ->
-            nil;
-        SuperPid when SuperPid =:= self() ->
-            %% Guard against self-call which would deadlock
-            nil;
-        SuperPid ->
-            try
-                gen_server:call(SuperPid, {class_method, Selector}, 5000)
-            catch
-                exit:{timeout, _} -> nil;
-                exit:{noproc, _} -> nil
-            end
-    end.
+    published_compiled_method(SuperName, class, Selector).
 
 -doc """
 Check whether `class_new:/2` is exported anywhere in the superclass chain.
@@ -2406,19 +2509,84 @@ every state change to those four fields: `init/1`, `put_method`,
 `put_class_method`, `update_class` and `rename_class`.
 """.
 -spec publish_reflection(#class_state{}) -> ok.
-publish_reflection(#class_state{
-    name = ClassName,
-    instance_methods = InstanceMethods,
-    fields = Fields,
-    method_return_types = MethodReturnTypes,
-    class_method_return_types = ClassMethodReturnTypes
-}) ->
+publish_reflection(
+    #class_state{
+        name = ClassName,
+        instance_methods = InstanceMethods,
+        fields = Fields,
+        method_return_types = MethodReturnTypes,
+        class_method_return_types = ClassMethodReturnTypes,
+        class_methods = ClassMethods,
+        is_sealed = IsSealed,
+        is_typed = IsTyped,
+        is_internal = IsInternal,
+        shape_version = ShapeVersion
+    } = State
+) ->
     beamtalk_class_metadata:put_reflection(ClassName, #{
         instance_methods => maps:keys(InstanceMethods),
         instance_variables => Fields,
         method_return_types => MethodReturnTypes,
         class_method_return_types => ClassMethodReturnTypes
-    }).
+    }),
+    %% BT-3832: flags, and the per-method records behind CompiledMethod lookups.
+    beamtalk_class_metadata:put_flags(ClassName, #{
+        is_sealed => IsSealed,
+        is_typed => IsTyped,
+        is_internal => IsInternal,
+        shape_version => ShapeVersion
+    }),
+    beamtalk_class_metadata:put_method_records(
+        ClassName, instance, method_records(instance, InstanceMethods, State)
+    ),
+    beamtalk_class_metadata:put_method_records(
+        ClassName, class, method_records(class, ClassMethods, State)
+    ).
+
+%% `selector => #{info, source, signature, doc}` for one side of a class.
+-spec method_records(instance | class, #{selector() => map()}, #class_state{}) ->
+    #{selector() => beamtalk_class_metadata:method_record()}.
+method_records(Side, Methods, State) ->
+    maps:map(fun(Sel, Info) -> method_record(Side, Sel, Info, State) end, Methods).
+
+-spec method_record(instance | class, selector(), map(), #class_state{}) ->
+    beamtalk_class_metadata:method_record().
+method_record(instance, Sel, Info, #class_state{
+    method_source = Source, method_signatures = Sigs, method_docs = Docs
+}) ->
+    #{
+        info => Info,
+        source => maps:get(Sel, Source, <<"">>),
+        signature => maps:get(Sel, Sigs, nil),
+        doc => maps:get(Sel, Docs, nil)
+    };
+method_record(class, Sel, Info, #class_state{
+    class_method_source = Source, class_method_signatures = Sigs, class_method_docs = Docs
+}) ->
+    #{
+        info => Info,
+        source => maps:get(Sel, Source, <<"">>),
+        signature => maps:get(Sel, Sigs, nil),
+        doc => maps:get(Sel, Docs, nil)
+    }.
+
+%% `CompiledMethod` for `Selector` in this class's own state (no chain walk), or `nil`.
+-spec state_compiled_method(class_name(), instance | class, selector(), #class_state{}) ->
+    map() | 'nil'.
+state_compiled_method(ClassName, Side, Selector, State) ->
+    Methods =
+        case Side of
+            instance -> State#class_state.instance_methods;
+            class -> State#class_state.class_methods
+        end,
+    case Methods of
+        #{Selector := Info} ->
+            #{source := Source, signature := Sig, doc := Doc} =
+                method_record(Side, Selector, Info, State),
+            compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc);
+        _ ->
+            nil
+    end.
 
 -doc """
 Write a class's identity facts — module, superclass, is_abstract, and local

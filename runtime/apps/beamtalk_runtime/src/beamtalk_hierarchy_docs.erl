@@ -16,6 +16,13 @@ documentation — literally byte-identical apart from which lookup mechanism
 (direct `gen_server:call` vs the `beamtalk_runtime_api` facade) each used to
 reach the same class-registry/gen_server state.
 
+Every per-level read here is a message-free read of the state each class
+publishes to ETS (`beamtalk_object_class:instance_methods_safe/1`,
+`superclass_safe/1`, ...), never a `gen_server:call` into the class process
+(BT-3832): these run inside a class handler whenever user code calls
+`Beamtalk help:` from a class method, and a blocking call into another class
+process there deadlocks two busy classes until the 5s timeout.
+
 Both apps depend on `beamtalk_runtime` (see the `applications` list in each
 app's `.app.src`: `beamtalk_stdlib` depends on `beamtalk_runtime`, and
 `beamtalk_workspace` depends on both), so this module lives here as the
@@ -61,9 +68,9 @@ find_defining_class(ClassPid, Selector) ->
     ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
         CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
-        case gen_server:call(CurrentPid, {method, Selector}, 5000) of
-            nil ->
-                case gen_server:call(CurrentPid, superclass, 5000) of
+        case lists:member(Selector, beamtalk_object_class:instance_methods_safe(CurrentPid)) of
+            false ->
+                case beamtalk_object_class:superclass_safe(CurrentPid) of
                     none ->
                         {found, CurrentName};
                     SuperName ->
@@ -72,7 +79,7 @@ find_defining_class(ClassPid, Selector) ->
                             SuperPid -> {next, SuperPid}
                         end
                 end;
-            _MethodInfo ->
+            true ->
                 {found, CurrentName}
         end
     end,
@@ -97,20 +104,20 @@ find_defining_class(ClassPid, Selector) ->
 -doc """
 Find which class in the hierarchy (starting at ClassPid) defines Selector as
 a class-side method. Mirrors `find_defining_class/2` for the class side —
-walks `get_local_class_methods` at each level instead of the instance
-method table.
+walks the published local class-method selectors at each level instead of the
+instance method table.
 """.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
     ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
         CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
-        LocalClassMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
-        case maps:is_key(Selector, LocalClassMethods) of
+        LocalClassMethods = beamtalk_object_class:local_class_method_selectors_safe(CurrentPid),
+        case lists:member(Selector, LocalClassMethods) of
             true ->
                 {found, CurrentName};
             false ->
-                case gen_server:call(CurrentPid, superclass, 5000) of
+                case beamtalk_object_class:superclass_safe(CurrentPid) of
                     none ->
                         {found, CurrentName};
                     SuperName ->
@@ -152,13 +159,13 @@ naming the ancestor where the cycle was detected.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
     StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
-        {ok, LocalMethods} = gen_server:call(CurrentPid, get_instance_methods, 5000),
+        LocalMethods = beamtalk_object_class:local_instance_method_infos_safe(CurrentPid),
         LocalFlat = maps:map(fun(_Sel, Info) -> {CurrentName, Info} end, LocalMethods),
         %% AccMap already reflects every closer (lower-depth) ancestor
         %% winning over farther ones; putting it second keeps that
         %% invariant as this (farther) level's LocalFlat is folded in.
         NewAcc = maps:merge(LocalFlat, AccMap),
-        case gen_server:call(CurrentPid, superclass, 5000) of
+        case beamtalk_object_class:superclass_safe(CurrentPid) of
             none ->
                 {found, NewAcc};
             SuperName ->
@@ -204,13 +211,15 @@ above, which made the same move for the instance side earlier.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
     StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
-        LocalMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
-        LocalFlat = maps:map(fun(_Sel, _Info) -> CurrentName end, LocalMethods),
+        LocalFlat = maps:from_list([
+            {Sel, CurrentName}
+         || Sel <- beamtalk_object_class:local_class_method_selectors_safe(CurrentPid)
+        ]),
         %% AccMap already reflects every closer (lower-depth) ancestor
         %% winning over farther ones; keep that invariant as this
         %% (farther) level's LocalFlat is folded in.
         NewAcc = maps:merge(LocalFlat, AccMap),
-        case gen_server:call(CurrentPid, superclass, 5000) of
+        case beamtalk_object_class:superclass_safe(CurrentPid) of
             none ->
                 {found, NewAcc};
             SuperName ->

@@ -91,6 +91,12 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-3826: reflection facts a class process would otherwise have to be
     %% asked for with `gen_server:call` (see `put_reflection/2`).
     put_reflection/2,
+    %% BT-3832: class flags + per-method CompiledMethod records.
+    put_flags/2,
+    lookup_flag/2,
+    put_method_records/3,
+    lookup_method_record/3,
+    lookup_method_records/2,
     lookup_instance_methods/1,
     lookup_instance_variables/1,
     lookup_method_return_type/2,
@@ -137,6 +143,11 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% {Superclass, ClassName} rows, keyed on Superclass. See moduledoc "Reverse
 %% subclass index".
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
+%% BT-3832: per-method records (info / source / signature / doc) behind
+%% `CompiledMethod` lookups, an `ordered_set` keyed `{ClassName, Side,
+%% Selector}` so one method is a single-key read (never a copy of the whole
+%% class's method map) and one class's rows are a bound-prefix range.
+-define(METHOD_RECORDS, beamtalk_class_method_records).
 
 -type class_name() :: atom().
 -type superclass() :: class_name() | none.
@@ -188,8 +199,25 @@ a table deleted between an existence check and the op (teardown/shutdown).
     instance_methods :: [selector()] | undefined,
     instance_variables :: [atom()] | undefined,
     method_return_types :: #{selector() => term()} | undefined,
-    class_method_return_types :: #{selector() => term()} | undefined
+    class_method_return_types :: #{selector() => term()} | undefined,
+    %% BT-3832: class flags, mirrored from the class process like the
+    %% reflection state above. Written only by `put_flags/2`; `undefined`
+    %% until the owning class publishes. (`is_abstract` above is the same
+    %% kind of flag, written with the identity fields.)
+    is_sealed :: boolean() | undefined,
+    is_typed :: boolean() | undefined,
+    is_internal :: boolean() | undefined,
+    shape_version :: pos_integer() | undefined
 }).
+
+-type side() :: instance | class.
+-type method_record() :: #{
+    info := map(),
+    source := binary(),
+    signature := term(),
+    doc := term()
+}.
+-export_type([side/0, method_record/0]).
 
 %%====================================================================
 %% Table lifecycle
@@ -223,6 +251,13 @@ new() ->
     %% keypos 1 (Superclass). `bag` because a superclass has many subclasses.
     ensure_table(?SUBCLASS_INDEX, [
         bag,
+        public,
+        named_table,
+        {read_concurrency, true}
+    ]),
+    %% BT-3832: per-method records, {{Class, Side, Selector}, Record}.
+    ensure_table(?METHOD_RECORDS, [
+        ordered_set,
         public,
         named_table,
         {read_concurrency, true}
@@ -374,6 +409,7 @@ delete(Name) ->
     %% a class that is removed (or whose process terminates) leaves no stale
     %% dispatch entries behind.
     delete_class_method_funs(Name),
+    delete_method_records(Name),
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
@@ -455,6 +491,124 @@ put_reflection(Name, #{
             {#class_metadata.method_return_types, MethodReturnTypes},
             {#class_metadata.class_method_return_types, ClassMethodReturnTypes}
         ]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Publish a class's flags (BT-3832): `is_sealed`, `is_typed`, `is_internal` and
+`shape_version`. Same contract as `put_reflection/2` -- per-field
+`ets:update_element/3`, a missing row or table is a no-op -- and the same
+reason: another class's handler must be able to read them without a blocking
+`gen_server:call` into the owning class.
+""".
+-spec put_flags(class_name(), #{
+    is_sealed := boolean(),
+    is_typed := boolean(),
+    is_internal := boolean(),
+    shape_version := pos_integer()
+}) -> ok.
+put_flags(Name, #{
+    is_sealed := IsSealed,
+    is_typed := IsTyped,
+    is_internal := IsInternal,
+    shape_version := ShapeVersion
+}) ->
+    try
+        ets:update_element(?TABLE, Name, [
+            {#class_metadata.is_sealed, IsSealed},
+            {#class_metadata.is_typed, IsTyped},
+            {#class_metadata.is_internal, IsInternal},
+            {#class_metadata.shape_version, ShapeVersion}
+        ]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Look up a published class flag; `not_found` when the class has not published
+it (see `put_flags/2`). `is_abstract` is answered by `lookup_is_abstract/1`.
+""".
+-spec lookup_flag(class_name(), is_sealed | is_typed | is_internal | shape_version) ->
+    {ok, boolean() | pos_integer()} | not_found.
+lookup_flag(Name, Flag) ->
+    Pos =
+        case Flag of
+            is_sealed -> #class_metadata.is_sealed;
+            is_typed -> #class_metadata.is_typed;
+            is_internal -> #class_metadata.is_internal;
+            shape_version -> #class_metadata.shape_version
+        end,
+    case field(Name, Pos) of
+        undefined -> not_found;
+        Value -> {ok, Value}
+    end.
+
+-doc """
+Publish one side's per-method records for `Name` (BT-3832), replacing whatever
+that side held.
+
+The new rows are written first and only then are rows for selectors that are
+no longer present deleted, so a concurrent reader sees the old or the new
+record for a still-present selector, never a gap.
+""".
+-spec put_method_records(class_name(), side(), #{selector() => method_record()}) -> ok.
+put_method_records(Name, Side, Records) ->
+    try
+        ets:insert(
+            ?METHOD_RECORDS,
+            [{{Name, Side, Sel}, Rec} || Sel := Rec <- Records]
+        ),
+        Stale = [
+            Sel
+         || [Sel] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '_'}),
+            not is_map_key(Sel, Records)
+        ],
+        lists:foreach(fun(Sel) -> ets:delete(?METHOD_RECORDS, {Name, Side, Sel}) end, Stale),
+        ok
+    catch
+        error:badarg ->
+            %% Table not created yet (or torn down): create it and retry once.
+            new(),
+            try
+                ets:insert(
+                    ?METHOD_RECORDS,
+                    [{{Name, Side, Sel}, Rec} || Sel := Rec <- Records]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end
+    end.
+
+-doc "Look up one method record; `not_found` when `Name` has no such local method.".
+-spec lookup_method_record(class_name(), side(), selector()) -> {ok, method_record()} | not_found.
+lookup_method_record(Name, Side, Selector) ->
+    try ets:lookup(?METHOD_RECORDS, {Name, Side, Selector}) of
+        [{_, Record}] -> {ok, Record};
+        [] -> not_found
+    catch
+        error:badarg -> not_found
+    end.
+
+-doc "All of `Name`'s local method records for one side, `selector => record`.".
+-spec lookup_method_records(class_name(), side()) -> #{selector() => method_record()}.
+lookup_method_records(Name, Side) ->
+    try
+        maps:from_list([
+            {Sel, Rec}
+         || [Sel, Rec] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '$2'})
+        ])
+    catch
+        error:badarg -> #{}
+    end.
+
+-spec delete_method_records(class_name()) -> ok.
+delete_method_records(Name) ->
+    try
+        ets:match_delete(?METHOD_RECORDS, {{Name, '_', '_'}, '_'}),
         ok
     catch
         error:badarg -> ok

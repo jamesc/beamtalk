@@ -15,10 +15,10 @@
 // `to:do:`/`whileTrue:`/`ifTrue:ifFalse:` thread a bare top-level
 // `self.field := ...` write via BT-3484's `Self`/`SelfN` version chain.
 // `on:do:`/`ensure:` thread it via BT-3486's trailing family slot (ADR
-// 0122's first real `family_slots.rs` consumer). `do:`/`collect:` and
-// `match:` are RECOGNIZED shapes but REJECTED, not accepted — see
-// storage_family_value_type_foldl_reject.bt /
-// storage_family_value_type_match_reject.bt.
+// 0122's first real `family_slots.rs` consumer). A top-level write in a
+// `do:`/`collect:`/`inject:into:` body threads `Self` through the fold
+// accumulator (BT-3827). `match:` is a RECOGNIZED shape but REJECTED, not
+// accepted — see storage_family_value_type_match_reject.bt.
 
 TestCase subclass: StorageFamilyValueType
   field: total = 0
@@ -71,4 +71,9 @@ TestCase subclass: StorageFamilyValueType
       self.total := self.total + 1
       seen := seen + 1
     ] ensure: [nil]
+    self.total
+
+  // ── do: ─────────────────────────────────────────────────────────────────
+  fragDoDirectWrite =>
+    #(1, 2, 3) do: [:i | self.total := self.total + i]
     self.total

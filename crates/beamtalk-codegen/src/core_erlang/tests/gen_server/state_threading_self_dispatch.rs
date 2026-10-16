@@ -676,6 +676,36 @@ fn bt3830_a_pre_sequenced_subexpression_read_twice_is_reported() {
     let _ = generator.finish_precompiled_scope(scope);
 }
 
+/// BT-3838: a scope holding BOTH a never-read entry and an over-read one returns the
+/// never-read `CodeGenError::Internal` (the root cause) rather than panicking first on the
+/// over-read verifier report in a debug build.
+#[test]
+fn bt3838_unused_entry_error_precedes_the_over_read_report() {
+    let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go =>\n    self bump\n    self bump\n\n  internal bump => self.count\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let class = module.classes.first().expect("one class");
+    let body = &class.methods[0].body;
+    let (never_read, over_read) = (&body[0].expression, &body[1].expression);
+    let mut generator = CoreErlangGenerator::new("bt3838_error_ordering");
+    let mut scope = super::super::sequencing::PrecompiledScope::new();
+    generator
+        .register_precompiled_subexpr(&mut scope, never_read, Document::Str("'a'"), false)
+        .expect("registration succeeds");
+    generator
+        .register_precompiled_subexpr(&mut scope, over_read, Document::Str("'b'"), false)
+        .expect("registration succeeds");
+    assert!(generator.take_precompiled_subexpr(over_read).is_some());
+    assert!(generator.take_precompiled_subexpr(over_read).is_some());
+    let err = generator
+        .finish_precompiled_scope(scope)
+        .expect_err("the never-read entry must be reported");
+    assert!(
+        format!("{err:?}").contains("never substituted"),
+        "expected the never-substituted internal error, got {err:?}"
+    );
+}
+
 #[test]
 fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
     // `self record: (self bumpCount)` — the producer sequences its own

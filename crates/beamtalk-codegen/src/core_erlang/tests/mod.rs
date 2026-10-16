@@ -201,5 +201,6 @@ mod threaded_locals;
 mod threaded_locals_agreement;
 mod trait_flattening;
 mod value_type_conditional_family_verifier_corpus;
+mod value_type_fold_family_corpus;
 mod verifier_surfacing;
 mod while_condition_class_method;

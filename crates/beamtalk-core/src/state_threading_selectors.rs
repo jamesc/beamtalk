@@ -235,7 +235,10 @@ pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
 /// outer-*local* write in the condition (`[i := i + 1. i < 3] whileTrue:
 /// [nil]` in a Value/`TestCase` context) still compiles the condition as a
 /// Tier 2 closure and crashes at runtime with "function expects 1 arguments
-/// but was called with 0" (BT-3607), so the lint must keep flagging it. A block
+/// but was called with 0" (BT-3782). ADR 0131 §6 rejects that shape at
+/// compile time (`Walker::while_condition_threads`), so it never reaches
+/// codegen; it stays out of this table until the condition is lowered as a
+/// producer (BT-3743). A block
 /// literal that is merely *stored* and later sent `value` is not a literal
 /// receiver at all and is likewise outside this table — `beamtalk-lint`'s
 /// `DeadAssignment` check keeps flagging it.

@@ -233,6 +233,16 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-3827: the body-block span of the one fold a value-type consumer is
+    /// compiling right now AND will unpack the `Self` slot of
+    /// (`with_fold_self_slot_consumer`); `None` everywhere else. A fold that
+    /// writes a field ([`CoreErlangGenerator::fold_threads_value_self`]) hands
+    /// its `Self` back as a trailing result-tuple slot, so lowering it where
+    /// nothing reads that slot (a stored block, an evaluated block's body, a
+    /// receiver) would drop the write: the fold emitters refuse it instead
+    /// (`CoreErlangGenerator::value_self_fold_slot`).
+    pub(in crate::core_erlang) fold_self_slot_consumer:
+        Option<beamtalk_core::source_analysis::Span>,
     /// ADR 0131 Phase 2c (BT-3796): whether any loop or fold frame whose body
     /// is being lowered (`with_body_producer_sites`) is a fold's — the
     /// `outer_fold` input of `beamtalk_core`'s `LoopBodyContext` for the body
@@ -420,6 +430,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
+            fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             source_path: None,

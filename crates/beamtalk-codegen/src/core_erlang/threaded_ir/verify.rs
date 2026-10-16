@@ -284,6 +284,17 @@ pub(in crate::core_erlang) enum VerifyError {
     /// converse and is a hard `CodeGenError::Internal` in
     /// `finish_precompiled_scope`.
     PrecompiledSubexprReadMoreThanOnce { at: Span, reads: u32 },
+
+    /// BT-3827: a fold's lambda body (`do:`/`collect:`/`inject:into:`) advances
+    /// the `Self` family (`family`, a top-level `Bind` chain in the body's own
+    /// frame) but does not return that chain's final version out through the
+    /// fold accumulator: its last statement is not a [`ThreadedStmt::Return`]
+    /// carrying the chain's last `Bind` target. The lambda's `Self{N}` rebind
+    /// dies with the closure, so every later statement reads the pre-fold
+    /// `Self` and the field write is silently lost (`erlc`-clean) — the
+    /// shape the fold lowering used to reject rather than miscompile. Applies
+    /// to every fold of every kind; checked by [`verify_fold_family_carried`].
+    FoldFamilyNotCarried { family: VersionPrefix, at: Span },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -455,6 +466,36 @@ pub(in crate::core_erlang) fn verify_bind_frames(
             _ => None,
         })
         .collect()
+}
+
+/// BT-3827, [`VerifyError::FoldFamilyNotCarried`] over one fold lambda body
+/// (the statement list of a `Foldl*` `Threaded` node in `frame`): when the body
+/// advances the `Self` family with a top-level `Bind` chain, its last statement
+/// must be the [`ThreadedStmt::Return`] that carries the chain's final version
+/// out through the accumulator. Needs no version history (like
+/// [`verify_bind_frames`]), so it runs on the body fragment alone.
+pub(in crate::core_erlang) fn verify_fold_family_carried(
+    body: &[ThreadedStmt],
+    frame: FrameId,
+) -> Vec<VerifyError> {
+    let last_self_bind = body.iter().rev().find_map(|stmt| match stmt {
+        ThreadedStmt::Bind { target, span, .. }
+            if target.prefix == VersionPrefix::SelfVt && target.frame == frame =>
+        {
+            Some((target, *span))
+        }
+        _ => None,
+    });
+    let Some((last, at)) = last_self_bind else {
+        return Vec::new();
+    };
+    match body.last() {
+        Some(ThreadedStmt::Return(_, state, _)) if state == last => Vec::new(),
+        _ => vec![VerifyError::FoldFamilyNotCarried {
+            family: VersionPrefix::SelfVt,
+            at,
+        }],
+    }
 }
 
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
