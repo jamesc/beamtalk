@@ -322,8 +322,9 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 ///
 /// `keysAndValuesDo:`/`doWithKey:` join the table with BT-3841 (their dictionary
 /// fold answers the same `{nil, StateAcc}` carrier as `do:`), and
-/// `anySatisfy:`/`allSatisfy:` (their fold answers `{Bool, StateAcc}` and does not
-/// short-circuit when the block writes).
+/// `anySatisfy:`/`allSatisfy:` (their fold answers `{Bool, StateAcc}` and, like
+/// the `detect:` folds, stops running the block at the first decisive element,
+/// BT-3805).
 ///
 /// Not listed, deliberately: `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
 /// `inject:into:` whose spans are the original send's, so a site keyed on the

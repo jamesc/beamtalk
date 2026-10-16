@@ -1,9 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3841 (ADR 0131): `detect:ifNone:` as local-threading producers in a class method, a
-// value-type method and an actor method. The fixtures are
-// fixtures/adr0131detect_{class,value,actor}.bt.
+// BT-3841 (ADR 0131): `detect:ifNone:` as a local-threading producer in a class
+// method and a value-type method. The fixtures are
+// fixtures/adr0131detect_{class,value}.bt. There is no actor fixture: in an
+// actor method a `detect:ifNone:` in a nested position keeps the Phase 0
+// rejection (it is still measured wrong or fails to compile).
 
 TestCase subclass: Adr0131DetectTest
 

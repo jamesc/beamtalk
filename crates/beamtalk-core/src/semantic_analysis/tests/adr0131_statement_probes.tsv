@@ -21,6 +21,7 @@ actor	arm	cvarOuter	while	ok
 actor	arm	direct	and	ok
 actor	arm	direct	any	ok
 actor	arm	direct	collect	ok
+actor	arm	direct	det	ok
 actor	arm	direct	dinH	ok
 actor	arm	direct	dinS	ok
 actor	arm	direct	do	ok
@@ -39,6 +40,7 @@ actor	arm	direct	while	ok
 actor	arm	dlocal	and	ok
 actor	arm	dlocal	any	ok
 actor	arm	dlocal	collect	ok
+actor	arm	dlocal	det	ok
 actor	arm	dlocal	dinH	gap
 actor	arm	dlocal	dinS	ok
 actor	arm	dlocal	do	ok
@@ -57,6 +59,7 @@ actor	arm	dlocal	while	ok
 actor	arm	local	and	ok
 actor	arm	local	any	ok
 actor	arm	local	collect	ok
+actor	arm	local	det	ok
 actor	arm	local	dinH	gap
 actor	arm	local	dinS	ok
 actor	arm	local	do	ok
@@ -75,6 +78,7 @@ actor	arm	local	while	ok
 actor	arm	outer	and	ok
 actor	arm	outer	any	ok
 actor	arm	outer	collect	ok
+actor	arm	outer	det	ok
 actor	arm	outer	dinH	ok
 actor	arm	outer	dinS	ok
 actor	arm	outer	do	ok
@@ -101,6 +105,7 @@ actor	arm	selfsend	while	ok
 actor	armIter	direct	and	ok
 actor	armIter	direct	any	ok
 actor	armIter	direct	collect	ok
+actor	armIter	direct	det	ok
 actor	armIter	direct	dinH	ok
 actor	armIter	direct	dinS	ok
 actor	armIter	direct	do	ok
@@ -119,6 +124,7 @@ actor	armIter	direct	while	ok
 actor	armIter	dlocal	and	ok
 actor	armIter	dlocal	any	gap
 actor	armIter	dlocal	collect	gap
+actor	armIter	dlocal	det	ok
 actor	armIter	dlocal	dinH	gap
 actor	armIter	dlocal	dinS	ok
 actor	armIter	dlocal	do	gap
@@ -137,6 +143,7 @@ actor	armIter	dlocal	while	ok
 actor	armIter	local	and	ok
 actor	armIter	local	any	gap
 actor	armIter	local	collect	gap
+actor	armIter	local	det	ok
 actor	armIter	local	dinH	gap
 actor	armIter	local	dinS	ok
 actor	armIter	local	do	gap
@@ -155,6 +162,7 @@ actor	armIter	local	while	ok
 actor	armIter	outer	and	ok
 actor	armIter	outer	any	ok
 actor	armIter	outer	collect	ok
+actor	armIter	outer	det	over
 actor	armIter	outer	dinH	bad
 actor	armIter	outer	dinS	bad
 actor	armIter	outer	do	ok
@@ -173,6 +181,7 @@ actor	armIter	outer	while	ok
 actor	armLoop	local	and	gap
 actor	armLoop	local	any	gap
 actor	armLoop	local	collect	gap
+actor	armLoop	local	det	gap
 actor	armLoop	local	dinH	gap
 actor	armLoop	local	dinS	gap
 actor	armLoop	local	do	gap
@@ -191,6 +200,7 @@ actor	armLoop	local	while	gap
 actor	armLoop	outer	and	ok
 actor	armLoop	outer	any	ok
 actor	armLoop	outer	collect	ok
+actor	armLoop	outer	det	ok
 actor	armLoop	outer	dinH	ok
 actor	armLoop	outer	dinS	ok
 actor	armLoop	outer	do	ok
@@ -209,6 +219,7 @@ actor	armLoop	outer	while	ok
 actor	armNL	direct	and	ok
 actor	armNL	direct	any	ok
 actor	armNL	direct	collect	ok
+actor	armNL	direct	det	ok
 actor	armNL	direct	dinH	ok
 actor	armNL	direct	dinS	ok
 actor	armNL	direct	do	ok
@@ -227,6 +238,7 @@ actor	armNL	direct	while	ok
 actor	armNL	dlocal	and	ok
 actor	armNL	dlocal	any	ok
 actor	armNL	dlocal	collect	ok
+actor	armNL	dlocal	det	ok
 actor	armNL	dlocal	dinH	gap
 actor	armNL	dlocal	dinS	ok
 actor	armNL	dlocal	do	ok
@@ -245,6 +257,7 @@ actor	armNL	dlocal	while	ok
 actor	armNL	local	and	ok
 actor	armNL	local	any	ok
 actor	armNL	local	collect	ok
+actor	armNL	local	det	ok
 actor	armNL	local	dinH	gap
 actor	armNL	local	dinS	ok
 actor	armNL	local	do	ok
@@ -263,6 +276,7 @@ actor	armNL	local	while	ok
 actor	armNL	outer	and	ok
 actor	armNL	outer	any	ok
 actor	armNL	outer	collect	ok
+actor	armNL	outer	det	ok
 actor	armNL	outer	dinH	ok
 actor	armNL	outer	dinS	ok
 actor	armNL	outer	do	ok
@@ -281,6 +295,7 @@ actor	armNL	outer	while	ok
 actor	coll	direct	and	ok
 actor	coll	direct	any	ok
 actor	coll	direct	collect	ok
+actor	coll	direct	det	ok
 actor	coll	direct	dinH	ok
 actor	coll	direct	dinS	ok
 actor	coll	direct	do	ok
@@ -299,6 +314,7 @@ actor	coll	direct	while	ok
 actor	coll	dlocal	and	ok
 actor	coll	dlocal	any	gap
 actor	coll	dlocal	collect	gap
+actor	coll	dlocal	det	ok
 actor	coll	dlocal	dinH	gap
 actor	coll	dlocal	dinS	ok
 actor	coll	dlocal	do	gap
@@ -317,6 +333,7 @@ actor	coll	dlocal	while	ok
 actor	coll	local	and	ok
 actor	coll	local	any	gap
 actor	coll	local	collect	gap
+actor	coll	local	det	ok
 actor	coll	local	dinH	gap
 actor	coll	local	dinS	ok
 actor	coll	local	do	gap
@@ -335,6 +352,7 @@ actor	coll	local	while	ok
 actor	coll	outer	and	ok
 actor	coll	outer	any	ok
 actor	coll	outer	collect	ok
+actor	coll	outer	det	over
 actor	coll	outer	dinH	bad
 actor	coll	outer	dinS	bad
 actor	coll	outer	do	ok
@@ -353,6 +371,7 @@ actor	coll	outer	while	ok
 actor	ensBlk	direct	and	ok
 actor	ensBlk	direct	any	ok
 actor	ensBlk	direct	collect	ok
+actor	ensBlk	direct	det	ok
 actor	ensBlk	direct	dinH	ok
 actor	ensBlk	direct	dinS	ok
 actor	ensBlk	direct	do	ok
@@ -371,6 +390,7 @@ actor	ensBlk	direct	while	ok
 actor	ensBlk	dlocal	and	gap
 actor	ensBlk	dlocal	any	gap
 actor	ensBlk	dlocal	collect	gap
+actor	ensBlk	dlocal	det	gap
 actor	ensBlk	dlocal	dinH	gap
 actor	ensBlk	dlocal	dinS	gap
 actor	ensBlk	dlocal	do	gap
@@ -389,6 +409,7 @@ actor	ensBlk	dlocal	while	gap
 actor	ensBlk	local	and	gap
 actor	ensBlk	local	any	gap
 actor	ensBlk	local	collect	gap
+actor	ensBlk	local	det	gap
 actor	ensBlk	local	dinH	gap
 actor	ensBlk	local	dinS	gap
 actor	ensBlk	local	do	gap
@@ -407,6 +428,7 @@ actor	ensBlk	local	while	gap
 actor	ensBlk	outer	and	ok
 actor	ensBlk	outer	any	ok
 actor	ensBlk	outer	collect	ok
+actor	ensBlk	outer	det	ok
 actor	ensBlk	outer	dinH	ok
 actor	ensBlk	outer	dinS	ok
 actor	ensBlk	outer	do	ok
@@ -425,6 +447,7 @@ actor	ensBlk	outer	while	ok
 actor	handler	direct	and	ok
 actor	handler	direct	any	ok
 actor	handler	direct	collect	ok
+actor	handler	direct	det	bad
 actor	handler	direct	dinH	bad
 actor	handler	direct	dinS	bad
 actor	handler	direct	do	ok
@@ -443,6 +466,7 @@ actor	handler	direct	while	ok
 actor	handler	dlocal	and	gap
 actor	handler	dlocal	any	gap
 actor	handler	dlocal	collect	gap
+actor	handler	dlocal	det	gap
 actor	handler	dlocal	dinH	gap
 actor	handler	dlocal	dinS	gap
 actor	handler	dlocal	do	gap
@@ -461,6 +485,7 @@ actor	handler	dlocal	while	gap
 actor	handler	local	and	gap
 actor	handler	local	any	gap
 actor	handler	local	collect	gap
+actor	handler	local	det	gap
 actor	handler	local	dinH	gap
 actor	handler	local	dinS	gap
 actor	handler	local	do	gap
@@ -479,6 +504,7 @@ actor	handler	local	while	gap
 actor	handler	outer	and	ok
 actor	handler	outer	any	ok
 actor	handler	outer	collect	ok
+actor	handler	outer	det	bad
 actor	handler	outer	dinH	bad
 actor	handler	outer	dinS	bad
 actor	handler	outer	do	ok
@@ -513,6 +539,7 @@ actor	iter	cvarOuter	while	ok
 actor	iter	direct	and	ok
 actor	iter	direct	any	ok
 actor	iter	direct	collect	ok
+actor	iter	direct	det	ok
 actor	iter	direct	dinH	ok
 actor	iter	direct	dinS	ok
 actor	iter	direct	do	ok
@@ -531,6 +558,7 @@ actor	iter	direct	while	ok
 actor	iter	dlocal	and	ok
 actor	iter	dlocal	any	gap
 actor	iter	dlocal	collect	gap
+actor	iter	dlocal	det	ok
 actor	iter	dlocal	dinH	gap
 actor	iter	dlocal	dinS	ok
 actor	iter	dlocal	do	gap
@@ -549,6 +577,7 @@ actor	iter	dlocal	while	ok
 actor	iter	local	and	ok
 actor	iter	local	any	gap
 actor	iter	local	collect	gap
+actor	iter	local	det	ok
 actor	iter	local	dinH	gap
 actor	iter	local	dinS	ok
 actor	iter	local	do	gap
@@ -567,6 +596,7 @@ actor	iter	local	while	ok
 actor	iter	outer	and	ok
 actor	iter	outer	any	ok
 actor	iter	outer	collect	ok
+actor	iter	outer	det	over
 actor	iter	outer	dinH	bad
 actor	iter	outer	dinS	bad
 actor	iter	outer	do	ok
@@ -593,6 +623,7 @@ actor	iter	selfsend	while	ok
 actor	iterArm	direct	and	ok
 actor	iterArm	direct	any	ok
 actor	iterArm	direct	collect	ok
+actor	iterArm	direct	det	ok
 actor	iterArm	direct	dinH	ok
 actor	iterArm	direct	dinS	ok
 actor	iterArm	direct	do	ok
@@ -611,6 +642,7 @@ actor	iterArm	direct	while	ok
 actor	iterArm	dlocal	and	ok
 actor	iterArm	dlocal	any	gap
 actor	iterArm	dlocal	collect	gap
+actor	iterArm	dlocal	det	ok
 actor	iterArm	dlocal	dinH	gap
 actor	iterArm	dlocal	dinS	ok
 actor	iterArm	dlocal	do	gap
@@ -629,6 +661,7 @@ actor	iterArm	dlocal	while	ok
 actor	iterArm	local	and	gap
 actor	iterArm	local	any	gap
 actor	iterArm	local	collect	gap
+actor	iterArm	local	det	gap
 actor	iterArm	local	dinH	gap
 actor	iterArm	local	dinS	gap
 actor	iterArm	local	do	gap
@@ -647,6 +680,7 @@ actor	iterArm	local	while	gap
 actor	iterArm	outer	and	ok
 actor	iterArm	outer	any	ok
 actor	iterArm	outer	collect	ok
+actor	iterArm	outer	det	over
 actor	iterArm	outer	dinH	bad
 actor	iterArm	outer	dinS	bad
 actor	iterArm	outer	do	ok
@@ -665,6 +699,7 @@ actor	iterArm	outer	while	ok
 actor	iterIter	local	and	gap
 actor	iterIter	local	any	gap
 actor	iterIter	local	collect	gap
+actor	iterIter	local	det	gap
 actor	iterIter	local	dinH	gap
 actor	iterIter	local	dinS	gap
 actor	iterIter	local	do	gap
@@ -683,6 +718,7 @@ actor	iterIter	local	while	gap
 actor	iterIter	outer	and	ok
 actor	iterIter	outer	any	ok
 actor	iterIter	outer	collect	ok
+actor	iterIter	outer	det	over
 actor	iterIter	outer	dinH	bad
 actor	iterIter	outer	dinS	bad
 actor	iterIter	outer	do	ok
@@ -717,6 +753,7 @@ actor	loop	cvarOuter	while	ok
 actor	loop	direct	and	ok
 actor	loop	direct	any	ok
 actor	loop	direct	collect	ok
+actor	loop	direct	det	bad
 actor	loop	direct	dinH	bad
 actor	loop	direct	dinS	bad
 actor	loop	direct	do	ok
@@ -735,6 +772,7 @@ actor	loop	direct	while	ok
 actor	loop	dlocal	and	gap
 actor	loop	dlocal	any	gap
 actor	loop	dlocal	collect	gap
+actor	loop	dlocal	det	gap
 actor	loop	dlocal	dinH	gap
 actor	loop	dlocal	dinS	gap
 actor	loop	dlocal	do	gap
@@ -753,6 +791,7 @@ actor	loop	dlocal	while	gap
 actor	loop	local	and	gap
 actor	loop	local	any	gap
 actor	loop	local	collect	gap
+actor	loop	local	det	gap
 actor	loop	local	dinH	gap
 actor	loop	local	dinS	gap
 actor	loop	local	do	gap
@@ -771,6 +810,7 @@ actor	loop	local	while	gap
 actor	loop	outer	and	ok
 actor	loop	outer	any	ok
 actor	loop	outer	collect	ok
+actor	loop	outer	det	bad
 actor	loop	outer	dinH	bad
 actor	loop	outer	dinS	bad
 actor	loop	outer	do	ok
@@ -813,6 +853,7 @@ actor	prot	cvarOuter	while	ok
 actor	prot	direct	and	ok
 actor	prot	direct	any	ok
 actor	prot	direct	collect	ok
+actor	prot	direct	det	bad
 actor	prot	direct	dinH	bad
 actor	prot	direct	dinS	bad
 actor	prot	direct	do	ok
@@ -831,6 +872,7 @@ actor	prot	direct	while	ok
 actor	prot	dlocal	and	gap
 actor	prot	dlocal	any	gap
 actor	prot	dlocal	collect	gap
+actor	prot	dlocal	det	gap
 actor	prot	dlocal	dinH	gap
 actor	prot	dlocal	dinS	gap
 actor	prot	dlocal	do	gap
@@ -849,6 +891,7 @@ actor	prot	dlocal	while	gap
 actor	prot	local	and	gap
 actor	prot	local	any	gap
 actor	prot	local	collect	gap
+actor	prot	local	det	gap
 actor	prot	local	dinH	gap
 actor	prot	local	dinS	gap
 actor	prot	local	do	gap
@@ -867,6 +910,7 @@ actor	prot	local	while	gap
 actor	prot	outer	and	ok
 actor	prot	outer	any	ok
 actor	prot	outer	collect	ok
+actor	prot	outer	det	bad
 actor	prot	outer	dinH	bad
 actor	prot	outer	dinS	bad
 actor	prot	outer	do	ok
@@ -893,6 +937,7 @@ actor	prot	selfsend	while	ok
 actor	protArm	direct	and	ok
 actor	protArm	direct	any	ok
 actor	protArm	direct	collect	ok
+actor	protArm	direct	det	bad
 actor	protArm	direct	dinH	bad
 actor	protArm	direct	dinS	bad
 actor	protArm	direct	do	ok
@@ -911,6 +956,7 @@ actor	protArm	direct	while	ok
 actor	protArm	dlocal	and	gap
 actor	protArm	dlocal	any	gap
 actor	protArm	dlocal	collect	gap
+actor	protArm	dlocal	det	gap
 actor	protArm	dlocal	dinH	gap
 actor	protArm	dlocal	dinS	gap
 actor	protArm	dlocal	do	gap
@@ -929,6 +975,7 @@ actor	protArm	dlocal	while	gap
 actor	protArm	local	and	gap
 actor	protArm	local	any	gap
 actor	protArm	local	collect	gap
+actor	protArm	local	det	gap
 actor	protArm	local	dinH	gap
 actor	protArm	local	dinS	gap
 actor	protArm	local	do	gap
@@ -947,6 +994,7 @@ actor	protArm	local	while	gap
 actor	protArm	outer	and	ok
 actor	protArm	outer	any	ok
 actor	protArm	outer	collect	ok
+actor	protArm	outer	det	bad
 actor	protArm	outer	dinH	bad
 actor	protArm	outer	dinS	bad
 actor	protArm	outer	do	ok
@@ -965,6 +1013,7 @@ actor	protArm	outer	while	ok
 actor	protLast	direct	and	ok
 actor	protLast	direct	any	ok
 actor	protLast	direct	collect	ok
+actor	protLast	direct	det	bad
 actor	protLast	direct	dinH	bad
 actor	protLast	direct	dinS	bad
 actor	protLast	direct	do	ok
@@ -983,6 +1032,7 @@ actor	protLast	direct	while	ok
 actor	protLast	dlocal	and	gap
 actor	protLast	dlocal	any	gap
 actor	protLast	dlocal	collect	gap
+actor	protLast	dlocal	det	gap
 actor	protLast	dlocal	dinH	gap
 actor	protLast	dlocal	dinS	gap
 actor	protLast	dlocal	do	gap
@@ -1001,6 +1051,7 @@ actor	protLast	dlocal	while	gap
 actor	protLast	local	and	gap
 actor	protLast	local	any	gap
 actor	protLast	local	collect	gap
+actor	protLast	local	det	gap
 actor	protLast	local	dinH	gap
 actor	protLast	local	dinS	gap
 actor	protLast	local	do	gap
@@ -1019,6 +1070,7 @@ actor	protLast	local	while	gap
 actor	protLast	outer	and	ok
 actor	protLast	outer	any	ok
 actor	protLast	outer	collect	ok
+actor	protLast	outer	det	bad
 actor	protLast	outer	dinH	bad
 actor	protLast	outer	dinS	bad
 actor	protLast	outer	do	ok
@@ -1037,6 +1089,7 @@ actor	protLast	outer	while	ok
 actor	timesC	direct	and	ok
 actor	timesC	direct	any	ok
 actor	timesC	direct	collect	ok
+actor	timesC	direct	det	bad
 actor	timesC	direct	dinH	bad
 actor	timesC	direct	dinS	bad
 actor	timesC	direct	do	ok
@@ -1055,6 +1108,7 @@ actor	timesC	direct	while	ok
 actor	timesC	dlocal	and	gap
 actor	timesC	dlocal	any	gap
 actor	timesC	dlocal	collect	gap
+actor	timesC	dlocal	det	gap
 actor	timesC	dlocal	dinH	gap
 actor	timesC	dlocal	dinS	gap
 actor	timesC	dlocal	do	gap
@@ -1073,6 +1127,7 @@ actor	timesC	dlocal	while	gap
 actor	timesC	local	and	gap
 actor	timesC	local	any	gap
 actor	timesC	local	collect	gap
+actor	timesC	local	det	gap
 actor	timesC	local	dinH	gap
 actor	timesC	local	dinS	gap
 actor	timesC	local	do	gap
@@ -1091,6 +1146,7 @@ actor	timesC	local	while	gap
 actor	timesC	outer	and	ok
 actor	timesC	outer	any	ok
 actor	timesC	outer	collect	ok
+actor	timesC	outer	det	bad
 actor	timesC	outer	dinH	bad
 actor	timesC	outer	dinS	bad
 actor	timesC	outer	do	ok
@@ -1125,6 +1181,7 @@ actor	toDoC	cvarOuter	while	ok
 actor	toDoC	direct	and	ok
 actor	toDoC	direct	any	ok
 actor	toDoC	direct	collect	ok
+actor	toDoC	direct	det	bad
 actor	toDoC	direct	dinH	bad
 actor	toDoC	direct	dinS	bad
 actor	toDoC	direct	do	ok
@@ -1143,6 +1200,7 @@ actor	toDoC	direct	while	ok
 actor	toDoC	dlocal	and	gap
 actor	toDoC	dlocal	any	gap
 actor	toDoC	dlocal	collect	gap
+actor	toDoC	dlocal	det	gap
 actor	toDoC	dlocal	dinH	gap
 actor	toDoC	dlocal	dinS	gap
 actor	toDoC	dlocal	do	gap
@@ -1161,6 +1219,7 @@ actor	toDoC	dlocal	while	gap
 actor	toDoC	local	and	gap
 actor	toDoC	local	any	gap
 actor	toDoC	local	collect	gap
+actor	toDoC	local	det	gap
 actor	toDoC	local	dinH	gap
 actor	toDoC	local	dinS	gap
 actor	toDoC	local	do	gap
@@ -1179,6 +1238,7 @@ actor	toDoC	local	while	gap
 actor	toDoC	outer	and	ok
 actor	toDoC	outer	any	ok
 actor	toDoC	outer	collect	ok
+actor	toDoC	outer	det	bad
 actor	toDoC	outer	dinH	bad
 actor	toDoC	outer	dinS	bad
 actor	toDoC	outer	do	ok
@@ -1221,6 +1281,7 @@ actor	top	cvarOuter	while	ok
 actor	top	local	and	ok
 actor	top	local	any	ok
 actor	top	local	collect	ok
+actor	top	local	det	ok
 actor	top	local	dinH	gap
 actor	top	local	dinS	ok
 actor	top	local	do	ok
@@ -1239,6 +1300,7 @@ actor	top	local	while	ok
 actor	top	outer	and	ok
 actor	top	outer	any	ok
 actor	top	outer	collect	ok
+actor	top	outer	det	ok
 actor	top	outer	dinH	ok
 actor	top	outer	dinS	ok
 actor	top	outer	do	ok
@@ -1265,6 +1327,7 @@ actor	top	selfsend	while	ok
 actor	val	direct	and	ok
 actor	val	direct	any	ok
 actor	val	direct	collect	ok
+actor	val	direct	det	ok
 actor	val	direct	dinH	ok
 actor	val	direct	dinS	ok
 actor	val	direct	do	ok
@@ -1283,6 +1346,7 @@ actor	val	direct	while	ok
 actor	val	dlocal	and	ok
 actor	val	dlocal	any	ok
 actor	val	dlocal	collect	ok
+actor	val	dlocal	det	ok
 actor	val	dlocal	dinH	gap
 actor	val	dlocal	dinS	ok
 actor	val	dlocal	do	ok
@@ -1301,6 +1365,7 @@ actor	val	dlocal	while	ok
 actor	val	local	and	gap
 actor	val	local	any	gap
 actor	val	local	collect	gap
+actor	val	local	det	gap
 actor	val	local	dinH	gap
 actor	val	local	dinS	gap
 actor	val	local	do	gap
@@ -1319,6 +1384,7 @@ actor	val	local	while	gap
 actor	val	outer	and	ok
 actor	val	outer	any	bad
 actor	val	outer	collect	bad
+actor	val	outer	det	bad
 actor	val	outer	dinH	bad
 actor	val	outer	dinS	bad
 actor	val	outer	do	bad
@@ -1353,6 +1419,7 @@ class	arm	cvarOuter	while	ok
 class	arm	direct	and	ok
 class	arm	direct	any	ok
 class	arm	direct	collect	ok
+class	arm	direct	det	ok
 class	arm	direct	dinH	ok
 class	arm	direct	dinS	ok
 class	arm	direct	do	ok
@@ -1371,6 +1438,7 @@ class	arm	direct	while	ok
 class	arm	dlocal	and	gap
 class	arm	dlocal	any	gap
 class	arm	dlocal	collect	gap
+class	arm	dlocal	det	gap
 class	arm	dlocal	dinH	gap
 class	arm	dlocal	dinS	gap
 class	arm	dlocal	do	gap
@@ -1389,6 +1457,7 @@ class	arm	dlocal	while	gap
 class	arm	local	and	gap
 class	arm	local	any	gap
 class	arm	local	collect	gap
+class	arm	local	det	gap
 class	arm	local	dinH	gap
 class	arm	local	dinS	gap
 class	arm	local	do	gap
@@ -1407,6 +1476,7 @@ class	arm	local	while	gap
 class	arm	outer	and	ok
 class	arm	outer	any	ok
 class	arm	outer	collect	ok
+class	arm	outer	det	ok
 class	arm	outer	dinH	ok
 class	arm	outer	dinS	ok
 class	arm	outer	do	ok
@@ -1433,6 +1503,7 @@ class	arm	selfsend	while	ok
 class	armAnd	local	and	gap
 class	armAnd	local	any	gap
 class	armAnd	local	collect	gap
+class	armAnd	local	det	gap
 class	armAnd	local	dinH	gap
 class	armAnd	local	dinS	gap
 class	armAnd	local	do	gap
@@ -1451,6 +1522,7 @@ class	armAnd	local	while	gap
 class	armAnd	outer	and	ok
 class	armAnd	outer	any	ok
 class	armAnd	outer	collect	ok
+class	armAnd	outer	det	ok
 class	armAnd	outer	dinH	ok
 class	armAnd	outer	dinS	ok
 class	armAnd	outer	do	ok
@@ -1469,6 +1541,7 @@ class	armAnd	outer	while	ok
 class	armIter	direct	and	ok
 class	armIter	direct	any	ok
 class	armIter	direct	collect	ok
+class	armIter	direct	det	ok
 class	armIter	direct	dinH	ok
 class	armIter	direct	dinS	ok
 class	armIter	direct	do	ok
@@ -1487,6 +1560,7 @@ class	armIter	direct	while	ok
 class	armIter	dlocal	and	ok
 class	armIter	dlocal	any	gap
 class	armIter	dlocal	collect	gap
+class	armIter	dlocal	det	ok
 class	armIter	dlocal	dinH	gap
 class	armIter	dlocal	dinS	ok
 class	armIter	dlocal	do	gap
@@ -1505,6 +1579,7 @@ class	armIter	dlocal	while	ok
 class	armIter	local	and	ok
 class	armIter	local	any	gap
 class	armIter	local	collect	gap
+class	armIter	local	det	ok
 class	armIter	local	dinH	gap
 class	armIter	local	dinS	ok
 class	armIter	local	do	gap
@@ -1523,6 +1598,7 @@ class	armIter	local	while	ok
 class	armIter	outer	and	ok
 class	armIter	outer	any	ok
 class	armIter	outer	collect	ok
+class	armIter	outer	det	ok
 class	armIter	outer	dinH	ok
 class	armIter	outer	dinS	ok
 class	armIter	outer	do	ok
@@ -1541,6 +1617,7 @@ class	armIter	outer	while	ok
 class	armLoop	local	and	gap
 class	armLoop	local	any	gap
 class	armLoop	local	collect	gap
+class	armLoop	local	det	gap
 class	armLoop	local	dinH	gap
 class	armLoop	local	dinS	gap
 class	armLoop	local	do	gap
@@ -1559,6 +1636,7 @@ class	armLoop	local	while	gap
 class	armLoop	outer	and	ok
 class	armLoop	outer	any	ok
 class	armLoop	outer	collect	ok
+class	armLoop	outer	det	ok
 class	armLoop	outer	dinH	ok
 class	armLoop	outer	dinS	ok
 class	armLoop	outer	do	ok
@@ -1577,6 +1655,7 @@ class	armLoop	outer	while	ok
 class	armNL	direct	and	ok
 class	armNL	direct	any	ok
 class	armNL	direct	collect	ok
+class	armNL	direct	det	ok
 class	armNL	direct	dinH	ok
 class	armNL	direct	dinS	ok
 class	armNL	direct	do	ok
@@ -1595,6 +1674,7 @@ class	armNL	direct	while	ok
 class	armNL	dlocal	and	gap
 class	armNL	dlocal	any	gap
 class	armNL	dlocal	collect	gap
+class	armNL	dlocal	det	gap
 class	armNL	dlocal	dinH	gap
 class	armNL	dlocal	dinS	gap
 class	armNL	dlocal	do	gap
@@ -1613,6 +1693,7 @@ class	armNL	dlocal	while	gap
 class	armNL	local	and	gap
 class	armNL	local	any	gap
 class	armNL	local	collect	gap
+class	armNL	local	det	gap
 class	armNL	local	dinH	gap
 class	armNL	local	dinS	gap
 class	armNL	local	do	gap
@@ -1631,6 +1712,7 @@ class	armNL	local	while	gap
 class	armNL	outer	and	ok
 class	armNL	outer	any	ok
 class	armNL	outer	collect	ok
+class	armNL	outer	det	ok
 class	armNL	outer	dinH	ok
 class	armNL	outer	dinS	ok
 class	armNL	outer	do	ok
@@ -1649,6 +1731,7 @@ class	armNL	outer	while	ok
 class	armNil	local	and	gap
 class	armNil	local	any	gap
 class	armNil	local	collect	gap
+class	armNil	local	det	gap
 class	armNil	local	dinH	gap
 class	armNil	local	dinS	gap
 class	armNil	local	do	gap
@@ -1667,6 +1750,7 @@ class	armNil	local	while	gap
 class	armNil	outer	and	ok
 class	armNil	outer	any	ok
 class	armNil	outer	collect	ok
+class	armNil	outer	det	ok
 class	armNil	outer	dinH	ok
 class	armNil	outer	dinS	ok
 class	armNil	outer	do	ok
@@ -1685,6 +1769,7 @@ class	armNil	outer	while	ok
 class	armTF	local	and	gap
 class	armTF	local	any	gap
 class	armTF	local	collect	gap
+class	armTF	local	det	gap
 class	armTF	local	dinH	gap
 class	armTF	local	dinS	gap
 class	armTF	local	do	gap
@@ -1703,6 +1788,7 @@ class	armTF	local	while	gap
 class	armTF	outer	and	ok
 class	armTF	outer	any	ok
 class	armTF	outer	collect	ok
+class	armTF	outer	det	ok
 class	armTF	outer	dinH	ok
 class	armTF	outer	dinS	ok
 class	armTF	outer	do	ok
@@ -1721,6 +1807,7 @@ class	armTF	outer	while	ok
 class	coll	direct	and	ok
 class	coll	direct	any	ok
 class	coll	direct	collect	ok
+class	coll	direct	det	ok
 class	coll	direct	dinH	ok
 class	coll	direct	dinS	ok
 class	coll	direct	do	ok
@@ -1739,6 +1826,7 @@ class	coll	direct	while	ok
 class	coll	dlocal	and	ok
 class	coll	dlocal	any	gap
 class	coll	dlocal	collect	gap
+class	coll	dlocal	det	ok
 class	coll	dlocal	dinH	gap
 class	coll	dlocal	dinS	ok
 class	coll	dlocal	do	gap
@@ -1757,6 +1845,7 @@ class	coll	dlocal	while	ok
 class	coll	local	and	gap
 class	coll	local	any	gap
 class	coll	local	collect	gap
+class	coll	local	det	gap
 class	coll	local	dinH	gap
 class	coll	local	dinS	gap
 class	coll	local	do	gap
@@ -1775,6 +1864,7 @@ class	coll	local	while	gap
 class	coll	outer	and	ok
 class	coll	outer	any	ok
 class	coll	outer	collect	ok
+class	coll	outer	det	ok
 class	coll	outer	dinH	ok
 class	coll	outer	dinS	ok
 class	coll	outer	do	ok
@@ -1793,6 +1883,7 @@ class	coll	outer	while	ok
 class	ens	local	and	gap
 class	ens	local	any	gap
 class	ens	local	collect	gap
+class	ens	local	det	gap
 class	ens	local	dinH	gap
 class	ens	local	dinS	gap
 class	ens	local	do	gap
@@ -1811,6 +1902,7 @@ class	ens	local	while	gap
 class	ens	outer	and	ok
 class	ens	outer	any	ok
 class	ens	outer	collect	ok
+class	ens	outer	det	ok
 class	ens	outer	dinH	ok
 class	ens	outer	dinS	ok
 class	ens	outer	do	ok
@@ -1829,6 +1921,7 @@ class	ens	outer	while	ok
 class	ensBlk	direct	and	ok
 class	ensBlk	direct	any	ok
 class	ensBlk	direct	collect	ok
+class	ensBlk	direct	det	ok
 class	ensBlk	direct	dinH	ok
 class	ensBlk	direct	dinS	ok
 class	ensBlk	direct	do	ok
@@ -1847,6 +1940,7 @@ class	ensBlk	direct	while	ok
 class	ensBlk	dlocal	and	gap
 class	ensBlk	dlocal	any	gap
 class	ensBlk	dlocal	collect	gap
+class	ensBlk	dlocal	det	gap
 class	ensBlk	dlocal	dinH	gap
 class	ensBlk	dlocal	dinS	gap
 class	ensBlk	dlocal	do	gap
@@ -1865,6 +1959,7 @@ class	ensBlk	dlocal	while	gap
 class	ensBlk	local	and	gap
 class	ensBlk	local	any	gap
 class	ensBlk	local	collect	gap
+class	ensBlk	local	det	gap
 class	ensBlk	local	dinH	gap
 class	ensBlk	local	dinS	gap
 class	ensBlk	local	do	gap
@@ -1883,6 +1978,7 @@ class	ensBlk	local	while	gap
 class	ensBlk	outer	and	ok
 class	ensBlk	outer	any	ok
 class	ensBlk	outer	collect	ok
+class	ensBlk	outer	det	ok
 class	ensBlk	outer	dinH	ok
 class	ensBlk	outer	dinS	ok
 class	ensBlk	outer	do	ok
@@ -1901,6 +1997,7 @@ class	ensBlk	outer	while	ok
 class	ensLast	local	and	gap
 class	ensLast	local	any	gap
 class	ensLast	local	collect	gap
+class	ensLast	local	det	gap
 class	ensLast	local	dinH	gap
 class	ensLast	local	dinS	gap
 class	ensLast	local	do	gap
@@ -1919,6 +2016,7 @@ class	ensLast	local	while	gap
 class	ensLast	outer	and	ok
 class	ensLast	outer	any	ok
 class	ensLast	outer	collect	ok
+class	ensLast	outer	det	ok
 class	ensLast	outer	dinH	ok
 class	ensLast	outer	dinS	ok
 class	ensLast	outer	do	ok
@@ -1937,6 +2035,7 @@ class	ensLast	outer	while	ok
 class	handler	direct	and	ok
 class	handler	direct	any	ok
 class	handler	direct	collect	ok
+class	handler	direct	det	ok
 class	handler	direct	dinH	ok
 class	handler	direct	dinS	ok
 class	handler	direct	do	ok
@@ -1955,6 +2054,7 @@ class	handler	direct	while	ok
 class	handler	dlocal	and	gap
 class	handler	dlocal	any	gap
 class	handler	dlocal	collect	gap
+class	handler	dlocal	det	gap
 class	handler	dlocal	dinH	gap
 class	handler	dlocal	dinS	gap
 class	handler	dlocal	do	gap
@@ -1973,6 +2073,7 @@ class	handler	dlocal	while	gap
 class	handler	local	and	gap
 class	handler	local	any	gap
 class	handler	local	collect	gap
+class	handler	local	det	gap
 class	handler	local	dinH	gap
 class	handler	local	dinS	gap
 class	handler	local	do	gap
@@ -1991,6 +2092,7 @@ class	handler	local	while	gap
 class	handler	outer	and	ok
 class	handler	outer	any	ok
 class	handler	outer	collect	ok
+class	handler	outer	det	ok
 class	handler	outer	dinH	ok
 class	handler	outer	dinS	ok
 class	handler	outer	do	ok
@@ -2025,6 +2127,7 @@ class	iter	cvarOuter	while	ok
 class	iter	direct	and	ok
 class	iter	direct	any	ok
 class	iter	direct	collect	ok
+class	iter	direct	det	ok
 class	iter	direct	dinH	ok
 class	iter	direct	dinS	ok
 class	iter	direct	do	ok
@@ -2043,6 +2146,7 @@ class	iter	direct	while	ok
 class	iter	dlocal	and	ok
 class	iter	dlocal	any	gap
 class	iter	dlocal	collect	gap
+class	iter	dlocal	det	ok
 class	iter	dlocal	dinH	gap
 class	iter	dlocal	dinS	ok
 class	iter	dlocal	do	gap
@@ -2061,6 +2165,7 @@ class	iter	dlocal	while	ok
 class	iter	local	and	ok
 class	iter	local	any	gap
 class	iter	local	collect	gap
+class	iter	local	det	ok
 class	iter	local	dinH	gap
 class	iter	local	dinS	ok
 class	iter	local	do	gap
@@ -2079,6 +2184,7 @@ class	iter	local	while	ok
 class	iter	outer	and	ok
 class	iter	outer	any	ok
 class	iter	outer	collect	ok
+class	iter	outer	det	ok
 class	iter	outer	dinH	ok
 class	iter	outer	dinS	ok
 class	iter	outer	do	ok
@@ -2105,6 +2211,7 @@ class	iter	selfsend	while	ok
 class	iterArm	direct	and	ok
 class	iterArm	direct	any	ok
 class	iterArm	direct	collect	ok
+class	iterArm	direct	det	ok
 class	iterArm	direct	dinH	ok
 class	iterArm	direct	dinS	ok
 class	iterArm	direct	do	ok
@@ -2123,6 +2230,7 @@ class	iterArm	direct	while	ok
 class	iterArm	dlocal	and	gap
 class	iterArm	dlocal	any	gap
 class	iterArm	dlocal	collect	gap
+class	iterArm	dlocal	det	gap
 class	iterArm	dlocal	dinH	gap
 class	iterArm	dlocal	dinS	gap
 class	iterArm	dlocal	do	gap
@@ -2141,6 +2249,7 @@ class	iterArm	dlocal	while	gap
 class	iterArm	local	and	gap
 class	iterArm	local	any	gap
 class	iterArm	local	collect	gap
+class	iterArm	local	det	gap
 class	iterArm	local	dinH	gap
 class	iterArm	local	dinS	gap
 class	iterArm	local	do	gap
@@ -2159,6 +2268,7 @@ class	iterArm	local	while	gap
 class	iterArm	outer	and	ok
 class	iterArm	outer	any	ok
 class	iterArm	outer	collect	ok
+class	iterArm	outer	det	ok
 class	iterArm	outer	dinH	ok
 class	iterArm	outer	dinS	ok
 class	iterArm	outer	do	ok
@@ -2177,6 +2287,7 @@ class	iterArm	outer	while	ok
 class	iterIter	local	and	gap
 class	iterIter	local	any	gap
 class	iterIter	local	collect	gap
+class	iterIter	local	det	gap
 class	iterIter	local	dinH	gap
 class	iterIter	local	dinS	gap
 class	iterIter	local	do	gap
@@ -2195,6 +2306,7 @@ class	iterIter	local	while	gap
 class	iterIter	outer	and	ok
 class	iterIter	outer	any	ok
 class	iterIter	outer	collect	ok
+class	iterIter	outer	det	ok
 class	iterIter	outer	dinH	ok
 class	iterIter	outer	dinS	ok
 class	iterIter	outer	do	ok
@@ -2229,6 +2341,7 @@ class	loop	cvarOuter	while	ok
 class	loop	direct	and	ok
 class	loop	direct	any	ok
 class	loop	direct	collect	ok
+class	loop	direct	det	ok
 class	loop	direct	dinH	ok
 class	loop	direct	dinS	ok
 class	loop	direct	do	ok
@@ -2247,6 +2360,7 @@ class	loop	direct	while	ok
 class	loop	dlocal	and	gap
 class	loop	dlocal	any	gap
 class	loop	dlocal	collect	gap
+class	loop	dlocal	det	gap
 class	loop	dlocal	dinH	gap
 class	loop	dlocal	dinS	gap
 class	loop	dlocal	do	gap
@@ -2265,6 +2379,7 @@ class	loop	dlocal	while	gap
 class	loop	local	and	gap
 class	loop	local	any	gap
 class	loop	local	collect	gap
+class	loop	local	det	gap
 class	loop	local	dinH	gap
 class	loop	local	dinS	gap
 class	loop	local	do	gap
@@ -2283,6 +2398,7 @@ class	loop	local	while	gap
 class	loop	outer	and	ok
 class	loop	outer	any	ok
 class	loop	outer	collect	ok
+class	loop	outer	det	ok
 class	loop	outer	dinH	ok
 class	loop	outer	dinS	ok
 class	loop	outer	do	ok
@@ -2325,6 +2441,7 @@ class	prot	cvarOuter	while	ok
 class	prot	direct	and	ok
 class	prot	direct	any	ok
 class	prot	direct	collect	ok
+class	prot	direct	det	ok
 class	prot	direct	dinH	ok
 class	prot	direct	dinS	ok
 class	prot	direct	do	ok
@@ -2343,6 +2460,7 @@ class	prot	direct	while	ok
 class	prot	dlocal	and	gap
 class	prot	dlocal	any	gap
 class	prot	dlocal	collect	gap
+class	prot	dlocal	det	gap
 class	prot	dlocal	dinH	gap
 class	prot	dlocal	dinS	gap
 class	prot	dlocal	do	gap
@@ -2361,6 +2479,7 @@ class	prot	dlocal	while	gap
 class	prot	local	and	gap
 class	prot	local	any	gap
 class	prot	local	collect	gap
+class	prot	local	det	gap
 class	prot	local	dinH	gap
 class	prot	local	dinS	gap
 class	prot	local	do	gap
@@ -2379,6 +2498,7 @@ class	prot	local	while	gap
 class	prot	outer	and	ok
 class	prot	outer	any	ok
 class	prot	outer	collect	ok
+class	prot	outer	det	ok
 class	prot	outer	dinH	ok
 class	prot	outer	dinS	ok
 class	prot	outer	do	ok
@@ -2405,6 +2525,7 @@ class	prot	selfsend	while	ok
 class	protArm	direct	and	ok
 class	protArm	direct	any	ok
 class	protArm	direct	collect	ok
+class	protArm	direct	det	ok
 class	protArm	direct	dinH	ok
 class	protArm	direct	dinS	ok
 class	protArm	direct	do	ok
@@ -2423,6 +2544,7 @@ class	protArm	direct	while	ok
 class	protArm	dlocal	and	gap
 class	protArm	dlocal	any	gap
 class	protArm	dlocal	collect	gap
+class	protArm	dlocal	det	gap
 class	protArm	dlocal	dinH	gap
 class	protArm	dlocal	dinS	gap
 class	protArm	dlocal	do	gap
@@ -2441,6 +2563,7 @@ class	protArm	dlocal	while	gap
 class	protArm	local	and	gap
 class	protArm	local	any	gap
 class	protArm	local	collect	gap
+class	protArm	local	det	gap
 class	protArm	local	dinH	gap
 class	protArm	local	dinS	gap
 class	protArm	local	do	gap
@@ -2459,6 +2582,7 @@ class	protArm	local	while	gap
 class	protArm	outer	and	ok
 class	protArm	outer	any	ok
 class	protArm	outer	collect	ok
+class	protArm	outer	det	ok
 class	protArm	outer	dinH	ok
 class	protArm	outer	dinS	ok
 class	protArm	outer	do	ok
@@ -2477,6 +2601,7 @@ class	protArm	outer	while	ok
 class	protLast	direct	and	ok
 class	protLast	direct	any	ok
 class	protLast	direct	collect	ok
+class	protLast	direct	det	ok
 class	protLast	direct	dinH	ok
 class	protLast	direct	dinS	ok
 class	protLast	direct	do	ok
@@ -2495,6 +2620,7 @@ class	protLast	direct	while	ok
 class	protLast	dlocal	and	gap
 class	protLast	dlocal	any	gap
 class	protLast	dlocal	collect	gap
+class	protLast	dlocal	det	gap
 class	protLast	dlocal	dinH	gap
 class	protLast	dlocal	dinS	gap
 class	protLast	dlocal	do	gap
@@ -2513,6 +2639,7 @@ class	protLast	dlocal	while	gap
 class	protLast	local	and	gap
 class	protLast	local	any	gap
 class	protLast	local	collect	gap
+class	protLast	local	det	gap
 class	protLast	local	dinH	gap
 class	protLast	local	dinS	gap
 class	protLast	local	do	gap
@@ -2531,6 +2658,7 @@ class	protLast	local	while	gap
 class	protLast	outer	and	ok
 class	protLast	outer	any	ok
 class	protLast	outer	collect	ok
+class	protLast	outer	det	ok
 class	protLast	outer	dinH	ok
 class	protLast	outer	dinS	ok
 class	protLast	outer	do	ok
@@ -2549,6 +2677,7 @@ class	protLast	outer	while	ok
 class	timesC	direct	and	ok
 class	timesC	direct	any	ok
 class	timesC	direct	collect	ok
+class	timesC	direct	det	ok
 class	timesC	direct	dinH	ok
 class	timesC	direct	dinS	ok
 class	timesC	direct	do	ok
@@ -2567,6 +2696,7 @@ class	timesC	direct	while	ok
 class	timesC	dlocal	and	gap
 class	timesC	dlocal	any	gap
 class	timesC	dlocal	collect	gap
+class	timesC	dlocal	det	gap
 class	timesC	dlocal	dinH	gap
 class	timesC	dlocal	dinS	gap
 class	timesC	dlocal	do	gap
@@ -2585,6 +2715,7 @@ class	timesC	dlocal	while	gap
 class	timesC	local	and	gap
 class	timesC	local	any	gap
 class	timesC	local	collect	gap
+class	timesC	local	det	gap
 class	timesC	local	dinH	gap
 class	timesC	local	dinS	gap
 class	timesC	local	do	gap
@@ -2603,6 +2734,7 @@ class	timesC	local	while	gap
 class	timesC	outer	and	ok
 class	timesC	outer	any	ok
 class	timesC	outer	collect	ok
+class	timesC	outer	det	ok
 class	timesC	outer	dinH	ok
 class	timesC	outer	dinS	ok
 class	timesC	outer	do	ok
@@ -2637,6 +2769,7 @@ class	toDoC	cvarOuter	while	ok
 class	toDoC	direct	and	ok
 class	toDoC	direct	any	ok
 class	toDoC	direct	collect	ok
+class	toDoC	direct	det	ok
 class	toDoC	direct	dinH	ok
 class	toDoC	direct	dinS	ok
 class	toDoC	direct	do	ok
@@ -2655,6 +2788,7 @@ class	toDoC	direct	while	ok
 class	toDoC	dlocal	and	gap
 class	toDoC	dlocal	any	gap
 class	toDoC	dlocal	collect	gap
+class	toDoC	dlocal	det	gap
 class	toDoC	dlocal	dinH	gap
 class	toDoC	dlocal	dinS	gap
 class	toDoC	dlocal	do	gap
@@ -2673,6 +2807,7 @@ class	toDoC	dlocal	while	gap
 class	toDoC	local	and	gap
 class	toDoC	local	any	gap
 class	toDoC	local	collect	gap
+class	toDoC	local	det	gap
 class	toDoC	local	dinH	gap
 class	toDoC	local	dinS	gap
 class	toDoC	local	do	gap
@@ -2691,6 +2826,7 @@ class	toDoC	local	while	gap
 class	toDoC	outer	and	ok
 class	toDoC	outer	any	ok
 class	toDoC	outer	collect	ok
+class	toDoC	outer	det	ok
 class	toDoC	outer	dinH	ok
 class	toDoC	outer	dinS	ok
 class	toDoC	outer	do	ok
@@ -2733,6 +2869,7 @@ class	top	cvarOuter	while	ok
 class	top	local	and	gap
 class	top	local	any	gap
 class	top	local	collect	ok
+class	top	local	det	ok
 class	top	local	dinH	gap
 class	top	local	dinS	ok
 class	top	local	do	ok
@@ -2751,6 +2888,7 @@ class	top	local	while	ok
 class	top	outer	and	ok
 class	top	outer	any	ok
 class	top	outer	collect	ok
+class	top	outer	det	ok
 class	top	outer	dinH	ok
 class	top	outer	dinS	ok
 class	top	outer	do	ok
@@ -2777,6 +2915,7 @@ class	top	selfsend	while	ok
 class	val	direct	and	bad
 class	val	direct	any	bad
 class	val	direct	collect	bad
+class	val	direct	det	bad
 class	val	direct	dinH	bad
 class	val	direct	dinS	bad
 class	val	direct	do	bad
@@ -2795,6 +2934,7 @@ class	val	direct	while	bad
 class	val	dlocal	and	gap
 class	val	dlocal	any	gap
 class	val	dlocal	collect	gap
+class	val	dlocal	det	gap
 class	val	dlocal	dinH	gap
 class	val	dlocal	dinS	gap
 class	val	dlocal	do	gap
@@ -2813,6 +2953,7 @@ class	val	dlocal	while	gap
 class	val	local	and	gap
 class	val	local	any	gap
 class	val	local	collect	gap
+class	val	local	det	gap
 class	val	local	dinH	gap
 class	val	local	dinS	gap
 class	val	local	do	gap
@@ -2831,6 +2972,7 @@ class	val	local	while	gap
 class	val	outer	and	bad
 class	val	outer	any	bad
 class	val	outer	collect	bad
+class	val	outer	det	bad
 class	val	outer	dinH	bad
 class	val	outer	dinS	bad
 class	val	outer	do	bad
@@ -2849,6 +2991,7 @@ class	val	outer	while	bad
 repl	arm	outer	and	ok
 repl	arm	outer	any	bad
 repl	arm	outer	collect	bad
+repl	arm	outer	det	bad
 repl	arm	outer	dinH	ok
 repl	arm	outer	dinS	ok
 repl	arm	outer	do	bad
@@ -2867,6 +3010,7 @@ repl	arm	outer	while	ok
 repl	armNL	outer	and	ok
 repl	armNL	outer	any	bad
 repl	armNL	outer	collect	bad
+repl	armNL	outer	det	bad
 repl	armNL	outer	dinH	bad
 repl	armNL	outer	dinS	bad
 repl	armNL	outer	do	bad
@@ -2885,6 +3029,7 @@ repl	armNL	outer	while	bad
 repl	iter	outer	and	ok
 repl	iter	outer	any	bad
 repl	iter	outer	collect	bad
+repl	iter	outer	det	bad
 repl	iter	outer	dinH	bad
 repl	iter	outer	dinS	bad
 repl	iter	outer	do	bad
@@ -2903,6 +3048,7 @@ repl	iter	outer	while	bad
 repl	prot	outer	and	bad
 repl	prot	outer	any	bad
 repl	prot	outer	collect	bad
+repl	prot	outer	det	bad
 repl	prot	outer	dinH	bad
 repl	prot	outer	dinS	bad
 repl	prot	outer	do	bad
@@ -2921,6 +3067,7 @@ repl	prot	outer	while	bad
 repl	protLast	outer	and	bad
 repl	protLast	outer	any	ok
 repl	protLast	outer	collect	ok
+repl	protLast	outer	det	ok
 repl	protLast	outer	dinH	ok
 repl	protLast	outer	dinS	ok
 repl	protLast	outer	do	ok
@@ -2939,6 +3086,7 @@ repl	protLast	outer	while	ok
 repl	replLoop	outer	and	ok
 repl	replLoop	outer	any	bad
 repl	replLoop	outer	collect	bad
+repl	replLoop	outer	det	bad
 repl	replLoop	outer	dinH	bad
 repl	replLoop	outer	dinS	bad
 repl	replLoop	outer	do	bad
@@ -2957,6 +3105,7 @@ repl	replLoop	outer	while	bad
 repl	toDoC	outer	and	ok
 repl	toDoC	outer	any	bad
 repl	toDoC	outer	collect	bad
+repl	toDoC	outer	det	bad
 repl	toDoC	outer	dinH	bad
 repl	toDoC	outer	dinS	bad
 repl	toDoC	outer	do	bad
@@ -2975,6 +3124,7 @@ repl	toDoC	outer	while	bad
 repl	top	outer	and	ok
 repl	top	outer	any	ok
 repl	top	outer	collect	ok
+repl	top	outer	det	ok
 repl	top	outer	dinH	ok
 repl	top	outer	dinS	ok
 repl	top	outer	do	ok
@@ -2993,6 +3143,7 @@ repl	top	outer	while	ok
 repl	val	outer	and	ok
 repl	val	outer	any	ok
 repl	val	outer	collect	ok
+repl	val	outer	det	ok
 repl	val	outer	dinH	ok
 repl	val	outer	dinS	ok
 repl	val	outer	do	ok
@@ -3011,6 +3162,7 @@ repl	val	outer	while	ok
 value	arm	direct	and	ok
 value	arm	direct	any	ok
 value	arm	direct	collect	ok
+value	arm	direct	det	ok
 value	arm	direct	dinH	ok
 value	arm	direct	dinS	ok
 value	arm	direct	do	ok
@@ -3029,6 +3181,7 @@ value	arm	direct	while	ok
 value	arm	dlocal	and	gap
 value	arm	dlocal	any	gap
 value	arm	dlocal	collect	gap
+value	arm	dlocal	det	gap
 value	arm	dlocal	dinH	gap
 value	arm	dlocal	dinS	gap
 value	arm	dlocal	do	gap
@@ -3047,6 +3200,7 @@ value	arm	dlocal	while	gap
 value	arm	local	and	gap
 value	arm	local	any	gap
 value	arm	local	collect	gap
+value	arm	local	det	gap
 value	arm	local	dinH	gap
 value	arm	local	dinS	gap
 value	arm	local	do	gap
@@ -3065,6 +3219,7 @@ value	arm	local	while	gap
 value	arm	outer	and	ok
 value	arm	outer	any	ok
 value	arm	outer	collect	ok
+value	arm	outer	det	ok
 value	arm	outer	dinH	ok
 value	arm	outer	dinS	ok
 value	arm	outer	do	ok
@@ -3091,6 +3246,7 @@ value	arm	selfsend	while	ok
 value	armIter	direct	and	ok
 value	armIter	direct	any	ok
 value	armIter	direct	collect	ok
+value	armIter	direct	det	ok
 value	armIter	direct	dinH	ok
 value	armIter	direct	dinS	ok
 value	armIter	direct	do	ok
@@ -3109,6 +3265,7 @@ value	armIter	direct	while	ok
 value	armIter	dlocal	and	ok
 value	armIter	dlocal	any	gap
 value	armIter	dlocal	collect	gap
+value	armIter	dlocal	det	ok
 value	armIter	dlocal	dinH	gap
 value	armIter	dlocal	dinS	ok
 value	armIter	dlocal	do	gap
@@ -3127,6 +3284,7 @@ value	armIter	dlocal	while	ok
 value	armIter	local	and	ok
 value	armIter	local	any	gap
 value	armIter	local	collect	gap
+value	armIter	local	det	ok
 value	armIter	local	dinH	gap
 value	armIter	local	dinS	ok
 value	armIter	local	do	gap
@@ -3145,6 +3303,7 @@ value	armIter	local	while	ok
 value	armIter	outer	and	ok
 value	armIter	outer	any	ok
 value	armIter	outer	collect	ok
+value	armIter	outer	det	ok
 value	armIter	outer	dinH	ok
 value	armIter	outer	dinS	ok
 value	armIter	outer	do	ok
@@ -3163,6 +3322,7 @@ value	armIter	outer	while	ok
 value	armLoop	local	and	gap
 value	armLoop	local	any	gap
 value	armLoop	local	collect	gap
+value	armLoop	local	det	gap
 value	armLoop	local	dinH	gap
 value	armLoop	local	dinS	gap
 value	armLoop	local	do	gap
@@ -3181,6 +3341,7 @@ value	armLoop	local	while	gap
 value	armLoop	outer	and	ok
 value	armLoop	outer	any	ok
 value	armLoop	outer	collect	ok
+value	armLoop	outer	det	ok
 value	armLoop	outer	dinH	ok
 value	armLoop	outer	dinS	ok
 value	armLoop	outer	do	ok
@@ -3199,6 +3360,7 @@ value	armLoop	outer	while	ok
 value	armNL	direct	and	ok
 value	armNL	direct	any	ok
 value	armNL	direct	collect	ok
+value	armNL	direct	det	ok
 value	armNL	direct	dinH	ok
 value	armNL	direct	dinS	ok
 value	armNL	direct	do	ok
@@ -3217,6 +3379,7 @@ value	armNL	direct	while	ok
 value	armNL	dlocal	and	gap
 value	armNL	dlocal	any	gap
 value	armNL	dlocal	collect	gap
+value	armNL	dlocal	det	gap
 value	armNL	dlocal	dinH	gap
 value	armNL	dlocal	dinS	gap
 value	armNL	dlocal	do	gap
@@ -3235,6 +3398,7 @@ value	armNL	dlocal	while	gap
 value	armNL	local	and	gap
 value	armNL	local	any	gap
 value	armNL	local	collect	gap
+value	armNL	local	det	gap
 value	armNL	local	dinH	gap
 value	armNL	local	dinS	gap
 value	armNL	local	do	gap
@@ -3253,6 +3417,7 @@ value	armNL	local	while	gap
 value	armNL	outer	and	ok
 value	armNL	outer	any	ok
 value	armNL	outer	collect	ok
+value	armNL	outer	det	ok
 value	armNL	outer	dinH	ok
 value	armNL	outer	dinS	ok
 value	armNL	outer	do	ok
@@ -3271,6 +3436,7 @@ value	armNL	outer	while	ok
 value	coll	direct	and	ok
 value	coll	direct	any	ok
 value	coll	direct	collect	ok
+value	coll	direct	det	ok
 value	coll	direct	dinH	ok
 value	coll	direct	dinS	ok
 value	coll	direct	do	ok
@@ -3289,6 +3455,7 @@ value	coll	direct	while	ok
 value	coll	dlocal	and	ok
 value	coll	dlocal	any	gap
 value	coll	dlocal	collect	gap
+value	coll	dlocal	det	ok
 value	coll	dlocal	dinH	gap
 value	coll	dlocal	dinS	ok
 value	coll	dlocal	do	gap
@@ -3307,6 +3474,7 @@ value	coll	dlocal	while	ok
 value	coll	local	and	gap
 value	coll	local	any	gap
 value	coll	local	collect	gap
+value	coll	local	det	gap
 value	coll	local	dinH	gap
 value	coll	local	dinS	gap
 value	coll	local	do	gap
@@ -3325,6 +3493,7 @@ value	coll	local	while	gap
 value	coll	outer	and	ok
 value	coll	outer	any	ok
 value	coll	outer	collect	ok
+value	coll	outer	det	ok
 value	coll	outer	dinH	ok
 value	coll	outer	dinS	ok
 value	coll	outer	do	ok
@@ -3343,6 +3512,7 @@ value	coll	outer	while	ok
 value	ensBlk	direct	and	ok
 value	ensBlk	direct	any	ok
 value	ensBlk	direct	collect	ok
+value	ensBlk	direct	det	ok
 value	ensBlk	direct	dinH	ok
 value	ensBlk	direct	dinS	ok
 value	ensBlk	direct	do	ok
@@ -3361,6 +3531,7 @@ value	ensBlk	direct	while	ok
 value	ensBlk	dlocal	and	gap
 value	ensBlk	dlocal	any	gap
 value	ensBlk	dlocal	collect	gap
+value	ensBlk	dlocal	det	gap
 value	ensBlk	dlocal	dinH	gap
 value	ensBlk	dlocal	dinS	gap
 value	ensBlk	dlocal	do	gap
@@ -3379,6 +3550,7 @@ value	ensBlk	dlocal	while	gap
 value	ensBlk	local	and	gap
 value	ensBlk	local	any	gap
 value	ensBlk	local	collect	gap
+value	ensBlk	local	det	gap
 value	ensBlk	local	dinH	gap
 value	ensBlk	local	dinS	gap
 value	ensBlk	local	do	gap
@@ -3397,6 +3569,7 @@ value	ensBlk	local	while	gap
 value	ensBlk	outer	and	ok
 value	ensBlk	outer	any	ok
 value	ensBlk	outer	collect	ok
+value	ensBlk	outer	det	ok
 value	ensBlk	outer	dinH	ok
 value	ensBlk	outer	dinS	ok
 value	ensBlk	outer	do	ok
@@ -3415,6 +3588,7 @@ value	ensBlk	outer	while	ok
 value	handler	direct	and	ok
 value	handler	direct	any	ok
 value	handler	direct	collect	ok
+value	handler	direct	det	ok
 value	handler	direct	dinH	ok
 value	handler	direct	dinS	ok
 value	handler	direct	do	ok
@@ -3433,6 +3607,7 @@ value	handler	direct	while	ok
 value	handler	dlocal	and	gap
 value	handler	dlocal	any	gap
 value	handler	dlocal	collect	gap
+value	handler	dlocal	det	gap
 value	handler	dlocal	dinH	gap
 value	handler	dlocal	dinS	gap
 value	handler	dlocal	do	gap
@@ -3451,6 +3626,7 @@ value	handler	dlocal	while	gap
 value	handler	local	and	gap
 value	handler	local	any	gap
 value	handler	local	collect	gap
+value	handler	local	det	gap
 value	handler	local	dinH	gap
 value	handler	local	dinS	gap
 value	handler	local	do	gap
@@ -3469,6 +3645,7 @@ value	handler	local	while	gap
 value	handler	outer	and	ok
 value	handler	outer	any	ok
 value	handler	outer	collect	ok
+value	handler	outer	det	ok
 value	handler	outer	dinH	ok
 value	handler	outer	dinS	ok
 value	handler	outer	do	ok
@@ -3487,6 +3664,7 @@ value	handler	outer	while	ok
 value	iter	direct	and	ok
 value	iter	direct	any	ok
 value	iter	direct	collect	ok
+value	iter	direct	det	ok
 value	iter	direct	dinH	ok
 value	iter	direct	dinS	ok
 value	iter	direct	do	ok
@@ -3505,6 +3683,7 @@ value	iter	direct	while	ok
 value	iter	dlocal	and	ok
 value	iter	dlocal	any	gap
 value	iter	dlocal	collect	gap
+value	iter	dlocal	det	ok
 value	iter	dlocal	dinH	gap
 value	iter	dlocal	dinS	ok
 value	iter	dlocal	do	gap
@@ -3523,6 +3702,7 @@ value	iter	dlocal	while	ok
 value	iter	local	and	ok
 value	iter	local	any	gap
 value	iter	local	collect	gap
+value	iter	local	det	ok
 value	iter	local	dinH	gap
 value	iter	local	dinS	ok
 value	iter	local	do	gap
@@ -3541,6 +3721,7 @@ value	iter	local	while	ok
 value	iter	outer	and	ok
 value	iter	outer	any	ok
 value	iter	outer	collect	ok
+value	iter	outer	det	ok
 value	iter	outer	dinH	ok
 value	iter	outer	dinS	ok
 value	iter	outer	do	ok
@@ -3567,6 +3748,7 @@ value	iter	selfsend	while	ok
 value	iterArm	direct	and	ok
 value	iterArm	direct	any	ok
 value	iterArm	direct	collect	ok
+value	iterArm	direct	det	ok
 value	iterArm	direct	dinH	ok
 value	iterArm	direct	dinS	ok
 value	iterArm	direct	do	ok
@@ -3585,6 +3767,7 @@ value	iterArm	direct	while	ok
 value	iterArm	dlocal	and	gap
 value	iterArm	dlocal	any	gap
 value	iterArm	dlocal	collect	gap
+value	iterArm	dlocal	det	gap
 value	iterArm	dlocal	dinH	gap
 value	iterArm	dlocal	dinS	gap
 value	iterArm	dlocal	do	gap
@@ -3603,6 +3786,7 @@ value	iterArm	dlocal	while	gap
 value	iterArm	local	and	gap
 value	iterArm	local	any	gap
 value	iterArm	local	collect	gap
+value	iterArm	local	det	gap
 value	iterArm	local	dinH	gap
 value	iterArm	local	dinS	gap
 value	iterArm	local	do	gap
@@ -3621,6 +3805,7 @@ value	iterArm	local	while	gap
 value	iterArm	outer	and	ok
 value	iterArm	outer	any	ok
 value	iterArm	outer	collect	ok
+value	iterArm	outer	det	ok
 value	iterArm	outer	dinH	ok
 value	iterArm	outer	dinS	ok
 value	iterArm	outer	do	ok
@@ -3639,6 +3824,7 @@ value	iterArm	outer	while	ok
 value	iterIter	local	and	gap
 value	iterIter	local	any	gap
 value	iterIter	local	collect	gap
+value	iterIter	local	det	gap
 value	iterIter	local	dinH	gap
 value	iterIter	local	dinS	gap
 value	iterIter	local	do	gap
@@ -3657,6 +3843,7 @@ value	iterIter	local	while	gap
 value	iterIter	outer	and	ok
 value	iterIter	outer	any	ok
 value	iterIter	outer	collect	ok
+value	iterIter	outer	det	ok
 value	iterIter	outer	dinH	ok
 value	iterIter	outer	dinS	ok
 value	iterIter	outer	do	ok
@@ -3675,6 +3862,7 @@ value	iterIter	outer	while	ok
 value	loop	direct	and	ok
 value	loop	direct	any	ok
 value	loop	direct	collect	ok
+value	loop	direct	det	ok
 value	loop	direct	dinH	ok
 value	loop	direct	dinS	ok
 value	loop	direct	do	ok
@@ -3693,6 +3881,7 @@ value	loop	direct	while	ok
 value	loop	dlocal	and	gap
 value	loop	dlocal	any	gap
 value	loop	dlocal	collect	gap
+value	loop	dlocal	det	gap
 value	loop	dlocal	dinH	gap
 value	loop	dlocal	dinS	gap
 value	loop	dlocal	do	gap
@@ -3711,6 +3900,7 @@ value	loop	dlocal	while	gap
 value	loop	local	and	gap
 value	loop	local	any	gap
 value	loop	local	collect	gap
+value	loop	local	det	gap
 value	loop	local	dinH	gap
 value	loop	local	dinS	gap
 value	loop	local	do	gap
@@ -3729,6 +3919,7 @@ value	loop	local	while	gap
 value	loop	outer	and	ok
 value	loop	outer	any	ok
 value	loop	outer	collect	ok
+value	loop	outer	det	ok
 value	loop	outer	dinH	ok
 value	loop	outer	dinS	ok
 value	loop	outer	do	ok
@@ -3755,6 +3946,7 @@ value	loop	selfsend	while	ok
 value	prot	direct	and	ok
 value	prot	direct	any	ok
 value	prot	direct	collect	ok
+value	prot	direct	det	ok
 value	prot	direct	dinH	ok
 value	prot	direct	dinS	ok
 value	prot	direct	do	ok
@@ -3773,6 +3965,7 @@ value	prot	direct	while	ok
 value	prot	dlocal	and	gap
 value	prot	dlocal	any	gap
 value	prot	dlocal	collect	gap
+value	prot	dlocal	det	gap
 value	prot	dlocal	dinH	gap
 value	prot	dlocal	dinS	gap
 value	prot	dlocal	do	gap
@@ -3791,6 +3984,7 @@ value	prot	dlocal	while	gap
 value	prot	local	and	gap
 value	prot	local	any	gap
 value	prot	local	collect	gap
+value	prot	local	det	gap
 value	prot	local	dinH	gap
 value	prot	local	dinS	gap
 value	prot	local	do	gap
@@ -3809,6 +4003,7 @@ value	prot	local	while	gap
 value	prot	outer	and	ok
 value	prot	outer	any	ok
 value	prot	outer	collect	ok
+value	prot	outer	det	ok
 value	prot	outer	dinH	ok
 value	prot	outer	dinS	ok
 value	prot	outer	do	ok
@@ -3835,6 +4030,7 @@ value	prot	selfsend	while	ok
 value	protArm	direct	and	ok
 value	protArm	direct	any	ok
 value	protArm	direct	collect	ok
+value	protArm	direct	det	ok
 value	protArm	direct	dinH	ok
 value	protArm	direct	dinS	ok
 value	protArm	direct	do	ok
@@ -3853,6 +4049,7 @@ value	protArm	direct	while	ok
 value	protArm	dlocal	and	gap
 value	protArm	dlocal	any	gap
 value	protArm	dlocal	collect	gap
+value	protArm	dlocal	det	gap
 value	protArm	dlocal	dinH	gap
 value	protArm	dlocal	dinS	gap
 value	protArm	dlocal	do	gap
@@ -3871,6 +4068,7 @@ value	protArm	dlocal	while	gap
 value	protArm	local	and	gap
 value	protArm	local	any	gap
 value	protArm	local	collect	gap
+value	protArm	local	det	gap
 value	protArm	local	dinH	gap
 value	protArm	local	dinS	gap
 value	protArm	local	do	gap
@@ -3889,6 +4087,7 @@ value	protArm	local	while	gap
 value	protArm	outer	and	ok
 value	protArm	outer	any	ok
 value	protArm	outer	collect	ok
+value	protArm	outer	det	ok
 value	protArm	outer	dinH	ok
 value	protArm	outer	dinS	ok
 value	protArm	outer	do	ok
@@ -3907,6 +4106,7 @@ value	protArm	outer	while	ok
 value	protLast	direct	and	ok
 value	protLast	direct	any	ok
 value	protLast	direct	collect	ok
+value	protLast	direct	det	ok
 value	protLast	direct	dinH	ok
 value	protLast	direct	dinS	ok
 value	protLast	direct	do	ok
@@ -3925,6 +4125,7 @@ value	protLast	direct	while	ok
 value	protLast	dlocal	and	gap
 value	protLast	dlocal	any	gap
 value	protLast	dlocal	collect	gap
+value	protLast	dlocal	det	gap
 value	protLast	dlocal	dinH	gap
 value	protLast	dlocal	dinS	gap
 value	protLast	dlocal	do	gap
@@ -3943,6 +4144,7 @@ value	protLast	dlocal	while	gap
 value	protLast	local	and	gap
 value	protLast	local	any	gap
 value	protLast	local	collect	gap
+value	protLast	local	det	gap
 value	protLast	local	dinH	gap
 value	protLast	local	dinS	gap
 value	protLast	local	do	gap
@@ -3961,6 +4163,7 @@ value	protLast	local	while	gap
 value	protLast	outer	and	ok
 value	protLast	outer	any	ok
 value	protLast	outer	collect	ok
+value	protLast	outer	det	ok
 value	protLast	outer	dinH	ok
 value	protLast	outer	dinS	ok
 value	protLast	outer	do	ok
@@ -3979,6 +4182,7 @@ value	protLast	outer	while	ok
 value	timesC	direct	and	ok
 value	timesC	direct	any	ok
 value	timesC	direct	collect	ok
+value	timesC	direct	det	ok
 value	timesC	direct	dinH	ok
 value	timesC	direct	dinS	ok
 value	timesC	direct	do	ok
@@ -3997,6 +4201,7 @@ value	timesC	direct	while	ok
 value	timesC	dlocal	and	gap
 value	timesC	dlocal	any	gap
 value	timesC	dlocal	collect	gap
+value	timesC	dlocal	det	gap
 value	timesC	dlocal	dinH	gap
 value	timesC	dlocal	dinS	gap
 value	timesC	dlocal	do	gap
@@ -4015,6 +4220,7 @@ value	timesC	dlocal	while	gap
 value	timesC	local	and	gap
 value	timesC	local	any	gap
 value	timesC	local	collect	gap
+value	timesC	local	det	gap
 value	timesC	local	dinH	gap
 value	timesC	local	dinS	gap
 value	timesC	local	do	gap
@@ -4033,6 +4239,7 @@ value	timesC	local	while	gap
 value	timesC	outer	and	ok
 value	timesC	outer	any	ok
 value	timesC	outer	collect	ok
+value	timesC	outer	det	ok
 value	timesC	outer	dinH	ok
 value	timesC	outer	dinS	ok
 value	timesC	outer	do	ok
@@ -4051,6 +4258,7 @@ value	timesC	outer	while	ok
 value	toDoC	direct	and	ok
 value	toDoC	direct	any	ok
 value	toDoC	direct	collect	ok
+value	toDoC	direct	det	ok
 value	toDoC	direct	dinH	ok
 value	toDoC	direct	dinS	ok
 value	toDoC	direct	do	ok
@@ -4069,6 +4277,7 @@ value	toDoC	direct	while	ok
 value	toDoC	dlocal	and	gap
 value	toDoC	dlocal	any	gap
 value	toDoC	dlocal	collect	gap
+value	toDoC	dlocal	det	gap
 value	toDoC	dlocal	dinH	gap
 value	toDoC	dlocal	dinS	gap
 value	toDoC	dlocal	do	gap
@@ -4087,6 +4296,7 @@ value	toDoC	dlocal	while	gap
 value	toDoC	local	and	gap
 value	toDoC	local	any	gap
 value	toDoC	local	collect	gap
+value	toDoC	local	det	gap
 value	toDoC	local	dinH	gap
 value	toDoC	local	dinS	gap
 value	toDoC	local	do	gap
@@ -4105,6 +4315,7 @@ value	toDoC	local	while	gap
 value	toDoC	outer	and	ok
 value	toDoC	outer	any	ok
 value	toDoC	outer	collect	ok
+value	toDoC	outer	det	ok
 value	toDoC	outer	dinH	ok
 value	toDoC	outer	dinS	ok
 value	toDoC	outer	do	ok
@@ -4131,6 +4342,7 @@ value	toDoC	selfsend	while	ok
 value	top	local	and	gap
 value	top	local	any	gap
 value	top	local	collect	ok
+value	top	local	det	ok
 value	top	local	dinH	gap
 value	top	local	dinS	ok
 value	top	local	do	ok
@@ -4149,6 +4361,7 @@ value	top	local	while	ok
 value	top	outer	and	ok
 value	top	outer	any	ok
 value	top	outer	collect	ok
+value	top	outer	det	ok
 value	top	outer	dinH	ok
 value	top	outer	dinS	ok
 value	top	outer	do	ok
@@ -4175,6 +4388,7 @@ value	top	selfsend	while	ok
 value	val	direct	and	bad
 value	val	direct	any	bad
 value	val	direct	collect	bad
+value	val	direct	det	bad
 value	val	direct	dinH	bad
 value	val	direct	dinS	bad
 value	val	direct	do	bad
@@ -4193,6 +4407,7 @@ value	val	direct	while	bad
 value	val	dlocal	and	gap
 value	val	dlocal	any	gap
 value	val	dlocal	collect	gap
+value	val	dlocal	det	gap
 value	val	dlocal	dinH	gap
 value	val	dlocal	dinS	gap
 value	val	dlocal	do	gap
@@ -4211,6 +4426,7 @@ value	val	dlocal	while	gap
 value	val	local	and	gap
 value	val	local	any	gap
 value	val	local	collect	gap
+value	val	local	det	gap
 value	val	local	dinH	gap
 value	val	local	dinS	gap
 value	val	local	do	gap
@@ -4229,6 +4445,7 @@ value	val	local	while	gap
 value	val	outer	and	bad
 value	val	outer	any	bad
 value	val	outer	collect	bad
+value	val	outer	det	bad
 value	val	outer	dinH	bad
 value	val	outer	dinS	bad
 value	val	outer	do	bad
@@ -4256,9 +4473,13 @@ actor	armProtIter	local	collect	gap
 actor	protIterArm	local	collect	gap
 actor	armIterIter	local	collect	gap
 actor	armProtArm	local	collect	gap
+actor	armProtIter	local	det	gap
 actor	armProtIter	local	dinH	gap
+actor	protIterArm	local	det	gap
 actor	protIterArm	local	dinH	gap
+actor	armIterIter	local	det	gap
 actor	armIterIter	local	dinH	gap
+actor	armProtArm	local	det	gap
 actor	armProtArm	local	dinH	gap
 actor	armProtIter	local	dinS	gap
 actor	protIterArm	local	dinS	gap
@@ -4328,9 +4549,13 @@ actor	armProtIter	outer	collect	ok
 actor	protIterArm	outer	collect	ok
 actor	armIterIter	outer	collect	ok
 actor	armProtArm	outer	collect	ok
+actor	armProtIter	outer	det	over
 actor	armProtIter	outer	dinH	over
+actor	protIterArm	outer	det	bad
 actor	protIterArm	outer	dinH	bad
+actor	armIterIter	outer	det	over
 actor	armIterIter	outer	dinH	bad
+actor	armProtArm	outer	det	bad
 actor	armProtArm	outer	dinH	bad
 actor	armProtIter	outer	dinS	over
 actor	protIterArm	outer	dinS	bad
@@ -4400,9 +4625,13 @@ class	armProtIter	local	collect	gap
 class	protIterArm	local	collect	gap
 class	armIterIter	local	collect	gap
 class	armProtArm	local	collect	gap
+class	armProtIter	local	det	gap
 class	armProtIter	local	dinH	gap
+class	protIterArm	local	det	gap
 class	protIterArm	local	dinH	gap
+class	armIterIter	local	det	gap
 class	armIterIter	local	dinH	gap
+class	armProtArm	local	det	gap
 class	armProtArm	local	dinH	gap
 class	armProtIter	local	dinS	gap
 class	protIterArm	local	dinS	gap
@@ -4472,9 +4701,13 @@ class	armProtIter	outer	collect	ok
 class	protIterArm	outer	collect	ok
 class	armIterIter	outer	collect	ok
 class	armProtArm	outer	collect	ok
+class	armProtIter	outer	det	ok
 class	armProtIter	outer	dinH	ok
+class	protIterArm	outer	det	ok
 class	protIterArm	outer	dinH	ok
+class	armIterIter	outer	det	ok
 class	armIterIter	outer	dinH	ok
+class	armProtArm	outer	det	ok
 class	armProtArm	outer	dinH	ok
 class	armProtIter	outer	dinS	ok
 class	protIterArm	outer	dinS	ok
@@ -4544,9 +4777,13 @@ value	armProtIter	local	collect	gap
 value	protIterArm	local	collect	gap
 value	armIterIter	local	collect	gap
 value	armProtArm	local	collect	gap
+value	armProtIter	local	det	gap
 value	armProtIter	local	dinH	gap
+value	protIterArm	local	det	gap
 value	protIterArm	local	dinH	gap
+value	armIterIter	local	det	gap
 value	armIterIter	local	dinH	gap
+value	armProtArm	local	det	gap
 value	armProtArm	local	dinH	gap
 value	armProtIter	local	dinS	gap
 value	protIterArm	local	dinS	gap
@@ -4616,9 +4853,13 @@ value	armProtIter	outer	collect	ok
 value	protIterArm	outer	collect	ok
 value	armIterIter	outer	collect	ok
 value	armProtArm	outer	collect	ok
+value	armProtIter	outer	det	ok
 value	armProtIter	outer	dinH	ok
+value	protIterArm	outer	det	ok
 value	protIterArm	outer	dinH	ok
+value	armIterIter	outer	det	ok
 value	armIterIter	outer	dinH	ok
+value	armProtArm	outer	det	ok
 value	armProtArm	outer	dinH	ok
 value	armProtIter	outer	dinS	ok
 value	protIterArm	outer	dinS	ok

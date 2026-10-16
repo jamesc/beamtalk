@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): a plain `detect:` whose block writes an outer local, in
+// the REPL. As a statement it keeps the REPL's own lowering and stops at the
+// first match (BT-3805). In a conditional arm it leaks the fold's tuple and
+// drops the write (measured, PR 5), so the Phase 0 check keeps rejecting it
+// there (the REPL arm rows are unmeasured, BT-3823). `detect:ifNone:` in the
+// same arm answers right and keeps its writes (last cases).
+
+t := 0
+// => 0
+
+#(1, 2) detect: [:e | t := t + 1. e > 0]
+// => 1
+
+t
+// => 1
+
+#(1, 2) detect: [:e | t := t + e. e > 1]
+// => 2
+
+t
+// => 4
+
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 0]]
+// => ERROR: `detect:` writes outer local `t`, but as a statement inside a conditional arm
+
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 0] ifNone: [0]]
+// => 1
+
+t
+// => 5
+
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 100. 0]]
+// => 0
+
+t
+// => 105

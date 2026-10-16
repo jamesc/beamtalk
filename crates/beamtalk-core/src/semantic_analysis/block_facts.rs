@@ -2187,10 +2187,11 @@ pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> boo
 /// `with_body_producer_sites` and by the agreement test, so the diagnostic, the
 /// lowering and the test's expectation cannot disagree:
 ///
-/// - `detect:`/`detect:ifNone:` are not loop-body producers: a write in the
-///   search block is dropped by the `collect:` and nested `do:` frames around
-///   it, and in an actor by every frame (measured, BT-3793). They keep their
-///   statement-position rows; the short-circuit question is BT-3805.
+/// - `detect:`/`detect:ifNone:` are loop-body producers in class and value-type
+///   methods (BT-3841: the fold stops at the first match, BT-3805) but not in
+///   an actor method, where the frames around them still drop or miscompile
+///   the write (measured, BT-3793); there they keep their statement-position
+///   rows.
 /// - A `Dictionary` lookup is a producer in an arm frame but not in a loop or
 ///   fold body (ADR 0131 §6).
 /// - [`is_actor_fold_value_site`].

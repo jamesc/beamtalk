@@ -111,7 +111,8 @@ pub(crate) enum ConstructKind {
     /// The value-returning list ops: `collect:`, `select:`, `reject:`,
     /// `inject:into:`, `detect:`, `count:`, …
     ListOp,
-    /// `detect:ifNone:` when only its search block writes an outer local.
+    /// `detect:ifNone:` when only its search block writes an outer local, and a
+    /// plain `detect:`.
     DetectIfNoneSearch,
     /// `anySatisfy:`, `allSatisfy:`.
     Satisfy,
@@ -156,7 +157,8 @@ impl ConstructKind {
             "ifNil:" | "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => Self::IfNil,
             "and:" | "or:" => Self::AndOr,
             "detect:ifNone:" if handler_writes => Self::DetectIfNone,
-            "detect:ifNone:" => Self::DetectIfNoneSearch,
+            // A plain `detect:` is the same fold with no handler (BT-3841).
+            "detect:ifNone:" | "detect:" => Self::DetectIfNoneSearch,
             s if is_exception_selector(s) => Self::Exception,
             s if is_try_do_selector(s) => Self::TryDo,
             s if crate::state_threading_selectors::lookup_shape(s).is_some() => Self::Lookup,
@@ -176,7 +178,7 @@ impl fmt::Display for ConstructKind {
             Self::ListOp => "collection operation",
             Self::Satisfy => "`anySatisfy:`/`allSatisfy:` test",
             Self::DetectIfNone => "`detect:ifNone:` handler",
-            Self::DetectIfNoneSearch => "`detect:ifNone:` search",
+            Self::DetectIfNoneSearch => "`detect:`/`detect:ifNone:` search",
             Self::Enumeration => "`eachWithIndex:`/`do:separatedBy:` iteration",
             Self::IfTrue => "conditional",
             Self::IfNil => "nil test",
@@ -1776,7 +1778,8 @@ impl<'d> Walker<'d> {
         //
         // `is_loop_body_producer_site` is the one narrowing of those sites,
         // shared with codegen's `with_body_producer_sites`: `detect:`/
-        // `detect:ifNone:` stay out (they keep their statement rows), and an
+        // `detect:ifNone:` are producers there in class and value-type methods
+        // but stay out in an actor method (they keep their statement rows), and an
         // actor fold frame's value-bearing sites are not lowered by the
         // producer at all, so no other row may accept them either
         // (`r := xs inject: 0 into: [...]` in a `do:` body compiled and then
@@ -1812,6 +1815,15 @@ impl<'d> Walker<'d> {
                     if matches!(arguments.get(1), Some(Expression::Block(h)) if !self.writes_of(h).is_empty())
             );
         let kind = ConstructKind::of(&selector, handler_writes);
+        // BT-3841 PR 5: the REPL has no measured rows for the detect search
+        // (BT-3823) and a writing plain `detect:` in a REPL arm leaks the
+        // fold's tuple and drops the write, so there it stays a generic list
+        // op, which the REPL arm rows deny.
+        let kind = if self.context == Repl && selector == "detect:" {
+            ListOp
+        } else {
+            kind
+        };
         // An assignment inside a block whose construct only writes locals of
         // that same block is threaded in that block's own frame, exactly as
         // in a method body; only a write that crosses the block boundary
