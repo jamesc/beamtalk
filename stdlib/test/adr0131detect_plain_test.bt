@@ -1,0 +1,208 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): plain `detect:` as local-threading producers in a class method, a
+// value-type method and an actor method. The fixtures are
+// fixtures/adr0131detect_plain_{class,value,actor}.bt.
+
+TestCase subclass: Adr0131DetectPlainTest
+
+  testClassTopHit => self assert: (Adr0131DetectPlainClass topHit) equals: 1
+
+  testClassInArmHit =>
+    self assert: (Adr0131DetectPlainClass inArmHit: true) equals: 1
+    self assert: (Adr0131DetectPlainClass inArmHit: false) equals: 0
+
+  testClassInArmElseHit =>
+    self assert: (Adr0131DetectPlainClass inArmElseHit: true) equals: 100
+    self assert: (Adr0131DetectPlainClass inArmElseHit: false) equals: 1
+
+  testClassInDoHit => self assert: (Adr0131DetectPlainClass inDoHit) equals: 2
+
+  testClassInToDoHit =>
+    self assert: (Adr0131DetectPlainClass inToDoHit) equals: 2
+
+  testClassInTimesHit =>
+    self assert: (Adr0131DetectPlainClass inTimesHit) equals: 2
+
+  testClassInWhileHit =>
+    self assert: (Adr0131DetectPlainClass inWhileHit) equals: 2
+
+  testClassInOnDoHit =>
+    self assert: (Adr0131DetectPlainClass inOnDoHit) equals: 1
+
+  testClassInEnsureHit =>
+    self assert: (Adr0131DetectPlainClass inEnsureHit) equals: 1
+
+  testClassInHandlerHit =>
+    self assert: (Adr0131DetectPlainClass inHandlerHit) equals: 1
+
+  testClassInArmInDoHit =>
+    self assert: (Adr0131DetectPlainClass inArmInDoHit: true) equals: 2
+    self assert: (Adr0131DetectPlainClass inArmInDoHit: false) equals: 0
+
+  testClassReturnInArmHit =>
+    self assert: (Adr0131DetectPlainClass returnInArmHit: true) equals: 1
+    self assert: (Adr0131DetectPlainClass returnInArmHit: false) equals: 0
+
+  testClassAssignedHit =>
+    self assert: (Adr0131DetectPlainClass assignedHit) equals: #[1, 1]
+
+  testClassTopLate => self assert: (Adr0131DetectPlainClass topLate) equals: 3
+
+  testClassInArmLate =>
+    self assert: (Adr0131DetectPlainClass inArmLate: true) equals: 3
+    self assert: (Adr0131DetectPlainClass inArmLate: false) equals: 0
+
+  testClassInArmElseLate =>
+    self assert: (Adr0131DetectPlainClass inArmElseLate: true) equals: 100
+    self assert: (Adr0131DetectPlainClass inArmElseLate: false) equals: 3
+
+  testClassInDoLate => self assert: (Adr0131DetectPlainClass inDoLate) equals: 6
+
+  testClassInToDoLate =>
+    self assert: (Adr0131DetectPlainClass inToDoLate) equals: 6
+
+  testClassInTimesLate =>
+    self assert: (Adr0131DetectPlainClass inTimesLate) equals: 6
+
+  testClassInWhileLate =>
+    self assert: (Adr0131DetectPlainClass inWhileLate) equals: 6
+
+  testClassInOnDoLate =>
+    self assert: (Adr0131DetectPlainClass inOnDoLate) equals: 3
+
+  testClassInEnsureLate =>
+    self assert: (Adr0131DetectPlainClass inEnsureLate) equals: 3
+
+  testClassInHandlerLate =>
+    self assert: (Adr0131DetectPlainClass inHandlerLate) equals: 3
+
+  testClassInArmInDoLate =>
+    self assert: (Adr0131DetectPlainClass inArmInDoLate: true) equals: 6
+    self assert: (Adr0131DetectPlainClass inArmInDoLate: false) equals: 0
+
+  testClassReturnInArmLate =>
+    self assert: (Adr0131DetectPlainClass returnInArmLate: true) equals: 2
+    self assert: (Adr0131DetectPlainClass returnInArmLate: false) equals: 0
+
+  testClassAssignedLate =>
+    self assert: (Adr0131DetectPlainClass assignedLate) equals: #[2, 3]
+
+  testValueTopHit =>
+    self assert: ((Adr0131DetectPlainValue new) topHit) equals: 1
+
+  testValueInArmHit =>
+    self assert: ((Adr0131DetectPlainValue new) inArmHit: true) equals: 1
+    self assert: ((Adr0131DetectPlainValue new) inArmHit: false) equals: 0
+
+  testValueInArmElseHit =>
+    self assert: ((Adr0131DetectPlainValue new) inArmElseHit: true) equals: 100
+    self assert: ((Adr0131DetectPlainValue new) inArmElseHit: false) equals: 1
+
+  testValueInDoHit =>
+    self assert: ((Adr0131DetectPlainValue new) inDoHit) equals: 2
+
+  testValueInToDoHit =>
+    self assert: ((Adr0131DetectPlainValue new) inToDoHit) equals: 2
+
+  testValueInTimesHit =>
+    self assert: ((Adr0131DetectPlainValue new) inTimesHit) equals: 2
+
+  testValueInWhileHit =>
+    self assert: ((Adr0131DetectPlainValue new) inWhileHit) equals: 2
+
+  testValueInOnDoHit =>
+    self assert: ((Adr0131DetectPlainValue new) inOnDoHit) equals: 1
+
+  testValueInEnsureHit =>
+    self assert: ((Adr0131DetectPlainValue new) inEnsureHit) equals: 1
+
+  testValueInHandlerHit =>
+    self assert: ((Adr0131DetectPlainValue new) inHandlerHit) equals: 1
+
+  testValueInArmInDoHit =>
+    self assert: ((Adr0131DetectPlainValue new) inArmInDoHit: true) equals: 2
+    self assert: ((Adr0131DetectPlainValue new) inArmInDoHit: false) equals: 0
+
+  testValueReturnInArmHit =>
+    self assert: ((Adr0131DetectPlainValue new) returnInArmHit: true) equals: 1
+    self assert: ((Adr0131DetectPlainValue new) returnInArmHit: false) equals: 0
+
+  testValueAssignedHit =>
+    self assert: ((Adr0131DetectPlainValue new) assignedHit) equals: #[1, 1]
+
+  testValueTopLate =>
+    self assert: ((Adr0131DetectPlainValue new) topLate) equals: 3
+
+  testValueInArmLate =>
+    self assert: ((Adr0131DetectPlainValue new) inArmLate: true) equals: 3
+    self assert: ((Adr0131DetectPlainValue new) inArmLate: false) equals: 0
+
+  testValueInArmElseLate =>
+    self assert: ((Adr0131DetectPlainValue new) inArmElseLate: true) equals: 100
+    self assert: ((Adr0131DetectPlainValue new) inArmElseLate: false) equals: 3
+
+  testValueInDoLate =>
+    self assert: ((Adr0131DetectPlainValue new) inDoLate) equals: 6
+
+  testValueInToDoLate =>
+    self assert: ((Adr0131DetectPlainValue new) inToDoLate) equals: 6
+
+  testValueInTimesLate =>
+    self assert: ((Adr0131DetectPlainValue new) inTimesLate) equals: 6
+
+  testValueInWhileLate =>
+    self assert: ((Adr0131DetectPlainValue new) inWhileLate) equals: 6
+
+  testValueInOnDoLate =>
+    self assert: ((Adr0131DetectPlainValue new) inOnDoLate) equals: 3
+
+  testValueInEnsureLate =>
+    self assert: ((Adr0131DetectPlainValue new) inEnsureLate) equals: 3
+
+  testValueInHandlerLate =>
+    self assert: ((Adr0131DetectPlainValue new) inHandlerLate) equals: 3
+
+  testValueInArmInDoLate =>
+    self assert: ((Adr0131DetectPlainValue new) inArmInDoLate: true) equals: 6
+    self assert: ((Adr0131DetectPlainValue new) inArmInDoLate: false) equals: 0
+
+  testValueReturnInArmLate =>
+    self assert: ((Adr0131DetectPlainValue new) returnInArmLate: true) equals: 2
+    self assert: ((Adr0131DetectPlainValue new) returnInArmLate: false) equals: 0
+
+  testValueAssignedLate =>
+    self assert: ((Adr0131DetectPlainValue new) assignedLate) equals: #[2, 3]
+
+  testClassMissTop =>
+    self should: [Adr0131DetectPlainClass missTop] raise: #not_found
+
+  testClassMissInDo =>
+    self should: [Adr0131DetectPlainClass missInDo] raise: #not_found
+
+  testClassMissInArm =>
+    self should: [Adr0131DetectPlainClass missInArm: true] raise: #not_found
+
+  testClassMissInCollect =>
+    self should: [Adr0131DetectPlainClass missInCollect] raise: #not_found
+
+  testClassMissCaught =>
+    self assert: (Adr0131DetectPlainClass missCaught) equals: -1
+
+  testValueMissTop =>
+    self should: [(Adr0131DetectPlainValue new) missTop] raise: #not_found
+
+  testValueMissInDo =>
+    self should: [(Adr0131DetectPlainValue new) missInDo] raise: #not_found
+
+  testValueMissInArm =>
+    self should: [
+      (Adr0131DetectPlainValue new) missInArm: true
+    ] raise: #not_found
+
+  testValueMissInCollect =>
+    self should: [(Adr0131DetectPlainValue new) missInCollect] raise: #not_found
+
+  testValueMissCaught =>
+    self assert: ((Adr0131DetectPlainValue new) missCaught) equals: -1

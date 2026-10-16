@@ -1,0 +1,379 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): plain `detect:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131detect_plain_test.bt. The block runs up to and including
+// the first element that decides the answer (BT-3805), so a decisive first
+// element leaves the later elements' writes undone. `c` is the condition of
+// the arm shapes.
+
+Object subclass: Adr0131DetectPlainClass
+
+  class topHit =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+    t
+
+  class inArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmElseHit: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inDoHit =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inToDoHit =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inTimesHit =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inWhileHit =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inOnDoHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerHit =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class inArmInDoHit: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                true
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  class assignedHit =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+    #[r, t]
+
+  class topLate =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+    t
+
+  class inArmLate: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inArmElseLate: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inDoLate =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inToDoLate =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inTimesLate =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inWhileLate =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inOnDoLate =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class inEnsureLate =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+    ] ensure: [nil]
+    t
+
+  class inHandlerLate =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class inArmInDoLate: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                v > 1
+              ]
+          ]
+      ]
+    t
+
+  class returnInArmLate: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  class assignedLate =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+    #[r, t]
+
+  class missTop =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        false
+      ]
+    t
+
+  class missInDo =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class missInArm: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class missInCollect =>
+    t := 0
+    #(1, 2)
+      collect: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  class missCaught =>
+    t := 0
+    r := [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          false
+        ]
+    ] on: Error do: [:e | -1]
+    r

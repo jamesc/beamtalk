@@ -23,6 +23,7 @@ actor	arm	cvarOuter	while	right
 actor	arm	direct	and	right
 actor	arm	direct	any	right
 actor	arm	direct	collect	right
+actor	arm	direct	det	right
 actor	arm	direct	dinH	right
 actor	arm	direct	dinS	right
 actor	arm	direct	do	right
@@ -41,6 +42,7 @@ actor	arm	direct	while	right
 actor	arm	dlocal	and	right
 actor	arm	dlocal	any	right
 actor	arm	dlocal	collect	right
+actor	arm	dlocal	det	right
 actor	arm	dlocal	dinS	right
 actor	arm	dlocal	do	right
 actor	arm	dlocal	dsb	right
@@ -58,6 +60,7 @@ actor	arm	dlocal	while	right
 actor	arm	local	and	right
 actor	arm	local	any	right
 actor	arm	local	collect	right
+actor	arm	local	det	right
 actor	arm	local	dinS	right
 actor	arm	local	do	right
 actor	arm	local	dsb	right
@@ -75,6 +78,7 @@ actor	arm	local	while	right
 actor	arm	outer	and	right
 actor	arm	outer	any	right
 actor	arm	outer	collect	right
+actor	arm	outer	det	right
 actor	arm	outer	dinH	right
 actor	arm	outer	dinS	right
 actor	arm	outer	do	right
@@ -101,6 +105,7 @@ actor	arm	selfsend	while	right
 actor	armIter	direct	and	right
 actor	armIter	direct	any	right
 actor	armIter	direct	collect	right
+actor	armIter	direct	det	right
 actor	armIter	direct	dinH	right
 actor	armIter	direct	dinS	right
 actor	armIter	direct	do	right
@@ -117,6 +122,7 @@ actor	armIter	direct	toDo	right
 actor	armIter	direct	value	right
 actor	armIter	direct	while	right
 actor	armIter	dlocal	and	right
+actor	armIter	dlocal	det	right
 actor	armIter	dlocal	dinS	right
 actor	armIter	dlocal	dsb	right
 actor	armIter	dlocal	ensure	right
@@ -128,6 +134,7 @@ actor	armIter	dlocal	onDo	right
 actor	armIter	dlocal	value	right
 actor	armIter	dlocal	while	right
 actor	armIter	local	and	right
+actor	armIter	local	det	right
 actor	armIter	local	dinS	right
 actor	armIter	local	dsb	right
 actor	armIter	local	ensure	right
@@ -141,6 +148,7 @@ actor	armIter	local	while	right
 actor	armIter	outer	and	right
 actor	armIter	outer	any	right
 actor	armIter	outer	collect	right
+actor	armIter	outer	det	right
 actor	armIter	outer	dinH	wrong
 actor	armIter	outer	dinS	wrong
 actor	armIter	outer	do	right
@@ -159,6 +167,7 @@ actor	armIter	outer	while	right
 actor	armLoop	outer	and	right
 actor	armLoop	outer	any	right
 actor	armLoop	outer	collect	right
+actor	armLoop	outer	det	right
 actor	armLoop	outer	dinH	right
 actor	armLoop	outer	dinS	right
 actor	armLoop	outer	do	right
@@ -177,6 +186,7 @@ actor	armLoop	outer	while	right
 actor	armNL	direct	and	right
 actor	armNL	direct	any	right
 actor	armNL	direct	collect	right
+actor	armNL	direct	det	right
 actor	armNL	direct	dinH	right
 actor	armNL	direct	dinS	right
 actor	armNL	direct	do	right
@@ -195,6 +205,7 @@ actor	armNL	direct	while	right
 actor	armNL	dlocal	and	right
 actor	armNL	dlocal	any	right
 actor	armNL	dlocal	collect	right
+actor	armNL	dlocal	det	right
 actor	armNL	dlocal	dinS	right
 actor	armNL	dlocal	do	right
 actor	armNL	dlocal	dsb	right
@@ -212,6 +223,7 @@ actor	armNL	dlocal	while	right
 actor	armNL	local	and	right
 actor	armNL	local	any	right
 actor	armNL	local	collect	right
+actor	armNL	local	det	right
 actor	armNL	local	dinS	right
 actor	armNL	local	do	right
 actor	armNL	local	dsb	right
@@ -229,6 +241,7 @@ actor	armNL	local	while	right
 actor	armNL	outer	and	right
 actor	armNL	outer	any	right
 actor	armNL	outer	collect	right
+actor	armNL	outer	det	right
 actor	armNL	outer	dinH	right
 actor	armNL	outer	dinS	right
 actor	armNL	outer	do	right
@@ -247,6 +260,7 @@ actor	armNL	outer	while	right
 actor	coll	direct	and	right
 actor	coll	direct	any	right
 actor	coll	direct	collect	right
+actor	coll	direct	det	right
 actor	coll	direct	dinH	right
 actor	coll	direct	dinS	right
 actor	coll	direct	do	right
@@ -263,6 +277,7 @@ actor	coll	direct	toDo	right
 actor	coll	direct	value	erlc
 actor	coll	direct	while	right
 actor	coll	dlocal	and	right
+actor	coll	dlocal	det	right
 actor	coll	dlocal	dinS	right
 actor	coll	dlocal	dsb	right
 actor	coll	dlocal	ensure	right
@@ -273,6 +288,7 @@ actor	coll	dlocal	kv	right
 actor	coll	dlocal	onDo	right
 actor	coll	dlocal	while	right
 actor	coll	local	and	right
+actor	coll	local	det	right
 actor	coll	local	dinS	right
 actor	coll	local	dsb	right
 actor	coll	local	ensure	right
@@ -285,6 +301,7 @@ actor	coll	local	while	right
 actor	coll	outer	and	right
 actor	coll	outer	any	right
 actor	coll	outer	collect	right
+actor	coll	outer	det	right
 actor	coll	outer	dinH	wrong
 actor	coll	outer	dinS	wrong
 actor	coll	outer	do	right
@@ -303,6 +320,7 @@ actor	coll	outer	while	right
 actor	ensBlk	direct	and	right
 actor	ensBlk	direct	any	right
 actor	ensBlk	direct	collect	right
+actor	ensBlk	direct	det	right
 actor	ensBlk	direct	dinH	right
 actor	ensBlk	direct	dinS	right
 actor	ensBlk	direct	do	right
@@ -321,6 +339,7 @@ actor	ensBlk	direct	while	right
 actor	ensBlk	outer	and	right
 actor	ensBlk	outer	any	right
 actor	ensBlk	outer	collect	right
+actor	ensBlk	outer	det	right
 actor	ensBlk	outer	dinH	right
 actor	ensBlk	outer	dinS	right
 actor	ensBlk	outer	do	right
@@ -339,6 +358,7 @@ actor	ensBlk	outer	while	right
 actor	handler	direct	and	right
 actor	handler	direct	any	right
 actor	handler	direct	collect	right
+actor	handler	direct	det	wrong
 actor	handler	direct	dinH	wrong
 actor	handler	direct	dinS	wrong
 actor	handler	direct	do	right
@@ -357,6 +377,7 @@ actor	handler	direct	while	right
 actor	handler	outer	and	right
 actor	handler	outer	any	right
 actor	handler	outer	collect	right
+actor	handler	outer	det	wrong
 actor	handler	outer	dinH	wrong
 actor	handler	outer	dinS	wrong
 actor	handler	outer	do	right
@@ -391,6 +412,7 @@ actor	iter	cvarOuter	while	right
 actor	iter	direct	and	right
 actor	iter	direct	any	right
 actor	iter	direct	collect	right
+actor	iter	direct	det	right
 actor	iter	direct	dinH	right
 actor	iter	direct	dinS	right
 actor	iter	direct	do	right
@@ -407,6 +429,7 @@ actor	iter	direct	toDo	right
 actor	iter	direct	value	wrong
 actor	iter	direct	while	right
 actor	iter	dlocal	and	right
+actor	iter	dlocal	det	right
 actor	iter	dlocal	dinS	right
 actor	iter	dlocal	dsb	right
 actor	iter	dlocal	ensure	right
@@ -417,6 +440,7 @@ actor	iter	dlocal	kv	right
 actor	iter	dlocal	onDo	right
 actor	iter	dlocal	while	right
 actor	iter	local	and	right
+actor	iter	local	det	right
 actor	iter	local	dinS	right
 actor	iter	local	dsb	right
 actor	iter	local	ensure	right
@@ -429,6 +453,7 @@ actor	iter	local	while	right
 actor	iter	outer	and	right
 actor	iter	outer	any	right
 actor	iter	outer	collect	right
+actor	iter	outer	det	right
 actor	iter	outer	dinH	wrong
 actor	iter	outer	dinS	wrong
 actor	iter	outer	do	right
@@ -455,6 +480,7 @@ actor	iter	selfsend	while	right
 actor	iterArm	direct	and	right
 actor	iterArm	direct	any	right
 actor	iterArm	direct	collect	right
+actor	iterArm	direct	det	right
 actor	iterArm	direct	dinH	right
 actor	iterArm	direct	dinS	right
 actor	iterArm	direct	do	right
@@ -471,6 +497,7 @@ actor	iterArm	direct	toDo	right
 actor	iterArm	direct	value	wrong
 actor	iterArm	direct	while	right
 actor	iterArm	dlocal	and	right
+actor	iterArm	dlocal	det	right
 actor	iterArm	dlocal	dinS	right
 actor	iterArm	dlocal	dsb	right
 actor	iterArm	dlocal	ensure	right
@@ -483,6 +510,7 @@ actor	iterArm	dlocal	while	right
 actor	iterArm	outer	and	right
 actor	iterArm	outer	any	right
 actor	iterArm	outer	collect	right
+actor	iterArm	outer	det	right
 actor	iterArm	outer	dinH	wrong
 actor	iterArm	outer	dinS	wrong
 actor	iterArm	outer	do	right
@@ -501,6 +529,7 @@ actor	iterArm	outer	while	right
 actor	iterIter	outer	and	right
 actor	iterIter	outer	any	right
 actor	iterIter	outer	collect	right
+actor	iterIter	outer	det	right
 actor	iterIter	outer	dinH	wrong
 actor	iterIter	outer	dinS	wrong
 actor	iterIter	outer	do	right
@@ -535,6 +564,7 @@ actor	loop	cvarOuter	while	right
 actor	loop	direct	and	right
 actor	loop	direct	any	right
 actor	loop	direct	collect	right
+actor	loop	direct	det	wrong
 actor	loop	direct	dinH	wrong
 actor	loop	direct	dinS	wrong
 actor	loop	direct	do	right
@@ -553,6 +583,7 @@ actor	loop	direct	while	right
 actor	loop	outer	and	right
 actor	loop	outer	any	right
 actor	loop	outer	collect	right
+actor	loop	outer	det	wrong
 actor	loop	outer	dinH	wrong
 actor	loop	outer	dinS	wrong
 actor	loop	outer	do	right
@@ -595,6 +626,7 @@ actor	prot	cvarOuter	while	right
 actor	prot	direct	and	right
 actor	prot	direct	any	right
 actor	prot	direct	collect	right
+actor	prot	direct	det	erlc
 actor	prot	direct	dinH	erlc
 actor	prot	direct	dinS	erlc
 actor	prot	direct	do	right
@@ -613,6 +645,7 @@ actor	prot	direct	while	right
 actor	prot	outer	and	right
 actor	prot	outer	any	right
 actor	prot	outer	collect	right
+actor	prot	outer	det	erlc
 actor	prot	outer	dinH	erlc
 actor	prot	outer	dinS	erlc
 actor	prot	outer	do	right
@@ -639,6 +672,7 @@ actor	prot	selfsend	while	right
 actor	protArm	direct	and	right
 actor	protArm	direct	any	right
 actor	protArm	direct	collect	right
+actor	protArm	direct	det	erlc
 actor	protArm	direct	dinH	erlc
 actor	protArm	direct	dinS	erlc
 actor	protArm	direct	do	right
@@ -657,6 +691,7 @@ actor	protArm	direct	while	right
 actor	protArm	outer	and	right
 actor	protArm	outer	any	right
 actor	protArm	outer	collect	right
+actor	protArm	outer	det	erlc
 actor	protArm	outer	dinH	erlc
 actor	protArm	outer	dinS	erlc
 actor	protArm	outer	do	right
@@ -675,6 +710,7 @@ actor	protArm	outer	while	right
 actor	protLast	direct	and	right
 actor	protLast	direct	any	right
 actor	protLast	direct	collect	right
+actor	protLast	direct	det	erlc
 actor	protLast	direct	dinH	erlc
 actor	protLast	direct	dinS	erlc
 actor	protLast	direct	do	right
@@ -693,6 +729,7 @@ actor	protLast	direct	while	right
 actor	protLast	outer	and	right
 actor	protLast	outer	any	right
 actor	protLast	outer	collect	right
+actor	protLast	outer	det	erlc
 actor	protLast	outer	dinH	erlc
 actor	protLast	outer	dinS	erlc
 actor	protLast	outer	do	right
@@ -711,6 +748,7 @@ actor	protLast	outer	while	right
 actor	timesC	direct	and	right
 actor	timesC	direct	any	right
 actor	timesC	direct	collect	right
+actor	timesC	direct	det	wrong
 actor	timesC	direct	dinH	wrong
 actor	timesC	direct	dinS	wrong
 actor	timesC	direct	do	right
@@ -731,6 +769,7 @@ actor	timesC	local	kv	right
 actor	timesC	outer	and	right
 actor	timesC	outer	any	right
 actor	timesC	outer	collect	right
+actor	timesC	outer	det	wrong
 actor	timesC	outer	dinH	wrong
 actor	timesC	outer	dinS	wrong
 actor	timesC	outer	do	right
@@ -765,6 +804,7 @@ actor	toDoC	cvarOuter	while	right
 actor	toDoC	direct	and	right
 actor	toDoC	direct	any	right
 actor	toDoC	direct	collect	right
+actor	toDoC	direct	det	wrong
 actor	toDoC	direct	dinH	wrong
 actor	toDoC	direct	dinS	wrong
 actor	toDoC	direct	do	right
@@ -785,6 +825,7 @@ actor	toDoC	local	kv	right
 actor	toDoC	outer	and	right
 actor	toDoC	outer	any	right
 actor	toDoC	outer	collect	right
+actor	toDoC	outer	det	wrong
 actor	toDoC	outer	dinH	wrong
 actor	toDoC	outer	dinS	wrong
 actor	toDoC	outer	do	right
@@ -827,6 +868,7 @@ actor	top	cvarOuter	while	right
 actor	top	local	and	right
 actor	top	local	any	right
 actor	top	local	collect	right
+actor	top	local	det	right
 actor	top	local	dinS	right
 actor	top	local	do	right
 actor	top	local	dsb	right
@@ -844,6 +886,7 @@ actor	top	local	while	right
 actor	top	outer	and	right
 actor	top	outer	any	right
 actor	top	outer	collect	right
+actor	top	outer	det	right
 actor	top	outer	dinH	right
 actor	top	outer	dinS	right
 actor	top	outer	do	right
@@ -870,6 +913,7 @@ actor	top	selfsend	while	right
 actor	val	direct	and	right
 actor	val	direct	any	right
 actor	val	direct	collect	right
+actor	val	direct	det	right
 actor	val	direct	dinH	right
 actor	val	direct	dinS	right
 actor	val	direct	do	right
@@ -888,6 +932,7 @@ actor	val	direct	while	right
 actor	val	dlocal	and	right
 actor	val	dlocal	any	right
 actor	val	dlocal	collect	right
+actor	val	dlocal	det	right
 actor	val	dlocal	dinS	right
 actor	val	dlocal	do	right
 actor	val	dlocal	dsb	right
@@ -905,6 +950,7 @@ actor	val	dlocal	while	right
 actor	val	outer	and	right
 actor	val	outer	any	wrong
 actor	val	outer	collect	wrong
+actor	val	outer	det	wrong
 actor	val	outer	dinH	wrong
 actor	val	outer	dinS	wrong
 actor	val	outer	do	wrong
@@ -939,6 +985,7 @@ class	arm	cvarOuter	while	right
 class	arm	direct	and	right
 class	arm	direct	any	right
 class	arm	direct	collect	right
+class	arm	direct	det	right
 class	arm	direct	dinH	right
 class	arm	direct	dinS	right
 class	arm	direct	do	right
@@ -957,6 +1004,7 @@ class	arm	direct	while	right
 class	arm	outer	and	right
 class	arm	outer	any	right
 class	arm	outer	collect	right
+class	arm	outer	det	right
 class	arm	outer	dinH	right
 class	arm	outer	dinS	right
 class	arm	outer	do	right
@@ -983,6 +1031,7 @@ class	arm	selfsend	while	right
 class	armAnd	outer	and	right
 class	armAnd	outer	any	right
 class	armAnd	outer	collect	right
+class	armAnd	outer	det	right
 class	armAnd	outer	dinH	right
 class	armAnd	outer	dinS	right
 class	armAnd	outer	do	right
@@ -1001,6 +1050,7 @@ class	armAnd	outer	while	right
 class	armIter	direct	and	right
 class	armIter	direct	any	right
 class	armIter	direct	collect	right
+class	armIter	direct	det	right
 class	armIter	direct	dinH	right
 class	armIter	direct	dinS	right
 class	armIter	direct	do	right
@@ -1017,6 +1067,7 @@ class	armIter	direct	toDo	right
 class	armIter	direct	value	wrong
 class	armIter	direct	while	right
 class	armIter	dlocal	and	right
+class	armIter	dlocal	det	right
 class	armIter	dlocal	dinS	right
 class	armIter	dlocal	ensure	right
 class	armIter	dlocal	ifNil	right
@@ -1024,6 +1075,7 @@ class	armIter	dlocal	ifTrue	right
 class	armIter	dlocal	onDo	right
 class	armIter	dlocal	while	right
 class	armIter	local	and	right
+class	armIter	local	det	right
 class	armIter	local	dinS	right
 class	armIter	local	ensure	right
 class	armIter	local	ifNil	right
@@ -1033,6 +1085,7 @@ class	armIter	local	while	right
 class	armIter	outer	and	right
 class	armIter	outer	any	right
 class	armIter	outer	collect	right
+class	armIter	outer	det	right
 class	armIter	outer	dinH	right
 class	armIter	outer	dinS	right
 class	armIter	outer	do	right
@@ -1051,6 +1104,7 @@ class	armIter	outer	while	right
 class	armLoop	outer	and	right
 class	armLoop	outer	any	right
 class	armLoop	outer	collect	right
+class	armLoop	outer	det	right
 class	armLoop	outer	dinH	right
 class	armLoop	outer	dinS	right
 class	armLoop	outer	do	right
@@ -1069,6 +1123,7 @@ class	armLoop	outer	while	right
 class	armNL	direct	and	right
 class	armNL	direct	any	right
 class	armNL	direct	collect	right
+class	armNL	direct	det	right
 class	armNL	direct	dinH	right
 class	armNL	direct	dinS	right
 class	armNL	direct	do	right
@@ -1087,6 +1142,7 @@ class	armNL	direct	while	right
 class	armNL	outer	and	right
 class	armNL	outer	any	right
 class	armNL	outer	collect	right
+class	armNL	outer	det	right
 class	armNL	outer	dinH	right
 class	armNL	outer	dinS	right
 class	armNL	outer	do	right
@@ -1105,6 +1161,7 @@ class	armNL	outer	while	right
 class	armNil	outer	and	right
 class	armNil	outer	any	right
 class	armNil	outer	collect	right
+class	armNil	outer	det	right
 class	armNil	outer	dinH	right
 class	armNil	outer	dinS	right
 class	armNil	outer	do	right
@@ -1123,6 +1180,7 @@ class	armNil	outer	while	right
 class	armTF	outer	and	right
 class	armTF	outer	any	right
 class	armTF	outer	collect	right
+class	armTF	outer	det	right
 class	armTF	outer	dinH	right
 class	armTF	outer	dinS	right
 class	armTF	outer	do	right
@@ -1141,6 +1199,7 @@ class	armTF	outer	while	right
 class	coll	direct	and	right
 class	coll	direct	any	right
 class	coll	direct	collect	right
+class	coll	direct	det	right
 class	coll	direct	dinH	right
 class	coll	direct	dinS	right
 class	coll	direct	do	right
@@ -1157,6 +1216,7 @@ class	coll	direct	toDo	right
 class	coll	direct	value	wrong
 class	coll	direct	while	right
 class	coll	dlocal	and	right
+class	coll	dlocal	det	right
 class	coll	dlocal	dinS	right
 class	coll	dlocal	ensure	right
 class	coll	dlocal	ifNil	right
@@ -1166,6 +1226,7 @@ class	coll	dlocal	while	right
 class	coll	outer	and	right
 class	coll	outer	any	right
 class	coll	outer	collect	right
+class	coll	outer	det	right
 class	coll	outer	dinH	right
 class	coll	outer	dinS	right
 class	coll	outer	do	right
@@ -1184,6 +1245,7 @@ class	coll	outer	while	right
 class	ens	outer	and	right
 class	ens	outer	any	right
 class	ens	outer	collect	right
+class	ens	outer	det	right
 class	ens	outer	dinH	right
 class	ens	outer	dinS	right
 class	ens	outer	do	right
@@ -1202,6 +1264,7 @@ class	ens	outer	while	right
 class	ensBlk	direct	and	right
 class	ensBlk	direct	any	right
 class	ensBlk	direct	collect	right
+class	ensBlk	direct	det	right
 class	ensBlk	direct	dinH	right
 class	ensBlk	direct	dinS	right
 class	ensBlk	direct	do	right
@@ -1220,6 +1283,7 @@ class	ensBlk	direct	while	right
 class	ensBlk	outer	and	right
 class	ensBlk	outer	any	right
 class	ensBlk	outer	collect	right
+class	ensBlk	outer	det	right
 class	ensBlk	outer	dinH	right
 class	ensBlk	outer	dinS	right
 class	ensBlk	outer	do	right
@@ -1238,6 +1302,7 @@ class	ensBlk	outer	while	right
 class	ensLast	outer	and	right
 class	ensLast	outer	any	right
 class	ensLast	outer	collect	right
+class	ensLast	outer	det	right
 class	ensLast	outer	dinH	right
 class	ensLast	outer	dinS	right
 class	ensLast	outer	do	right
@@ -1256,6 +1321,7 @@ class	ensLast	outer	while	right
 class	handler	direct	and	right
 class	handler	direct	any	right
 class	handler	direct	collect	right
+class	handler	direct	det	right
 class	handler	direct	dinH	right
 class	handler	direct	dinS	right
 class	handler	direct	do	right
@@ -1274,6 +1340,7 @@ class	handler	direct	while	right
 class	handler	outer	and	right
 class	handler	outer	any	right
 class	handler	outer	collect	right
+class	handler	outer	det	right
 class	handler	outer	dinH	right
 class	handler	outer	dinS	right
 class	handler	outer	do	right
@@ -1308,6 +1375,7 @@ class	iter	cvarOuter	while	right
 class	iter	direct	and	right
 class	iter	direct	any	right
 class	iter	direct	collect	right
+class	iter	direct	det	right
 class	iter	direct	dinH	right
 class	iter	direct	dinS	right
 class	iter	direct	do	right
@@ -1324,6 +1392,7 @@ class	iter	direct	toDo	right
 class	iter	direct	value	wrong
 class	iter	direct	while	right
 class	iter	dlocal	and	right
+class	iter	dlocal	det	right
 class	iter	dlocal	dinS	right
 class	iter	dlocal	ensure	right
 class	iter	dlocal	ifNil	right
@@ -1331,6 +1400,7 @@ class	iter	dlocal	ifTrue	right
 class	iter	dlocal	onDo	right
 class	iter	dlocal	while	right
 class	iter	local	and	right
+class	iter	local	det	right
 class	iter	local	dinS	right
 class	iter	local	ensure	right
 class	iter	local	ifNil	right
@@ -1340,6 +1410,7 @@ class	iter	local	while	right
 class	iter	outer	and	right
 class	iter	outer	any	right
 class	iter	outer	collect	right
+class	iter	outer	det	right
 class	iter	outer	dinH	right
 class	iter	outer	dinS	right
 class	iter	outer	do	right
@@ -1366,6 +1437,7 @@ class	iter	selfsend	while	right
 class	iterArm	direct	and	right
 class	iterArm	direct	any	right
 class	iterArm	direct	collect	right
+class	iterArm	direct	det	right
 class	iterArm	direct	dinH	right
 class	iterArm	direct	dinS	right
 class	iterArm	direct	do	right
@@ -1384,6 +1456,7 @@ class	iterArm	direct	while	right
 class	iterArm	outer	and	right
 class	iterArm	outer	any	right
 class	iterArm	outer	collect	right
+class	iterArm	outer	det	right
 class	iterArm	outer	dinH	right
 class	iterArm	outer	dinS	right
 class	iterArm	outer	do	right
@@ -1402,6 +1475,7 @@ class	iterArm	outer	while	right
 class	iterIter	outer	and	right
 class	iterIter	outer	any	right
 class	iterIter	outer	collect	right
+class	iterIter	outer	det	right
 class	iterIter	outer	dinH	right
 class	iterIter	outer	dinS	right
 class	iterIter	outer	do	right
@@ -1436,6 +1510,7 @@ class	loop	cvarOuter	while	right
 class	loop	direct	and	right
 class	loop	direct	any	right
 class	loop	direct	collect	right
+class	loop	direct	det	right
 class	loop	direct	dinH	right
 class	loop	direct	dinS	right
 class	loop	direct	do	right
@@ -1454,6 +1529,7 @@ class	loop	direct	while	right
 class	loop	outer	and	right
 class	loop	outer	any	right
 class	loop	outer	collect	right
+class	loop	outer	det	right
 class	loop	outer	dinH	right
 class	loop	outer	dinS	right
 class	loop	outer	do	right
@@ -1496,6 +1572,7 @@ class	prot	cvarOuter	while	right
 class	prot	direct	and	right
 class	prot	direct	any	right
 class	prot	direct	collect	right
+class	prot	direct	det	right
 class	prot	direct	dinH	right
 class	prot	direct	dinS	right
 class	prot	direct	do	right
@@ -1514,6 +1591,7 @@ class	prot	direct	while	right
 class	prot	outer	and	right
 class	prot	outer	any	right
 class	prot	outer	collect	right
+class	prot	outer	det	right
 class	prot	outer	dinH	right
 class	prot	outer	dinS	right
 class	prot	outer	do	right
@@ -1540,6 +1618,7 @@ class	prot	selfsend	while	right
 class	protArm	direct	and	right
 class	protArm	direct	any	right
 class	protArm	direct	collect	right
+class	protArm	direct	det	right
 class	protArm	direct	dinH	right
 class	protArm	direct	dinS	right
 class	protArm	direct	do	right
@@ -1558,6 +1637,7 @@ class	protArm	direct	while	right
 class	protArm	outer	and	right
 class	protArm	outer	any	right
 class	protArm	outer	collect	right
+class	protArm	outer	det	right
 class	protArm	outer	dinH	right
 class	protArm	outer	dinS	right
 class	protArm	outer	do	right
@@ -1576,6 +1656,7 @@ class	protArm	outer	while	right
 class	protLast	direct	and	right
 class	protLast	direct	any	right
 class	protLast	direct	collect	right
+class	protLast	direct	det	right
 class	protLast	direct	dinH	right
 class	protLast	direct	dinS	right
 class	protLast	direct	do	right
@@ -1594,6 +1675,7 @@ class	protLast	direct	while	right
 class	protLast	outer	and	right
 class	protLast	outer	any	right
 class	protLast	outer	collect	right
+class	protLast	outer	det	right
 class	protLast	outer	dinH	right
 class	protLast	outer	dinS	right
 class	protLast	outer	do	right
@@ -1612,6 +1694,7 @@ class	protLast	outer	while	right
 class	timesC	direct	and	right
 class	timesC	direct	any	right
 class	timesC	direct	collect	right
+class	timesC	direct	det	right
 class	timesC	direct	dinH	right
 class	timesC	direct	dinS	right
 class	timesC	direct	do	right
@@ -1630,6 +1713,7 @@ class	timesC	direct	while	right
 class	timesC	outer	and	right
 class	timesC	outer	any	right
 class	timesC	outer	collect	right
+class	timesC	outer	det	right
 class	timesC	outer	dinH	right
 class	timesC	outer	dinS	right
 class	timesC	outer	do	right
@@ -1664,6 +1748,7 @@ class	toDoC	cvarOuter	while	right
 class	toDoC	direct	and	right
 class	toDoC	direct	any	right
 class	toDoC	direct	collect	right
+class	toDoC	direct	det	right
 class	toDoC	direct	dinH	right
 class	toDoC	direct	dinS	right
 class	toDoC	direct	do	right
@@ -1682,6 +1767,7 @@ class	toDoC	direct	while	right
 class	toDoC	outer	and	right
 class	toDoC	outer	any	right
 class	toDoC	outer	collect	right
+class	toDoC	outer	det	right
 class	toDoC	outer	dinH	right
 class	toDoC	outer	dinS	right
 class	toDoC	outer	do	right
@@ -1722,6 +1808,7 @@ class	top	cvarOuter	toDo	right
 class	top	cvarOuter	value	wrong
 class	top	cvarOuter	while	right
 class	top	local	collect	right
+class	top	local	det	right
 class	top	local	dinS	right
 class	top	local	do	right
 class	top	local	ensure	right
@@ -1734,6 +1821,7 @@ class	top	local	while	right
 class	top	outer	and	right
 class	top	outer	any	right
 class	top	outer	collect	right
+class	top	outer	det	right
 class	top	outer	dinH	right
 class	top	outer	dinS	right
 class	top	outer	do	right
@@ -1760,6 +1848,7 @@ class	top	selfsend	while	right
 class	val	direct	and	wrong
 class	val	direct	any	wrong
 class	val	direct	collect	wrong
+class	val	direct	det	wrong
 class	val	direct	dinH	wrong
 class	val	direct	dinS	wrong
 class	val	direct	do	wrong
@@ -1778,6 +1867,7 @@ class	val	direct	while	wrong
 class	val	outer	and	erlc
 class	val	outer	any	wrong
 class	val	outer	collect	wrong
+class	val	outer	det	wrong
 class	val	outer	dinH	wrong
 class	val	outer	dinS	wrong
 class	val	outer	do	wrong
@@ -1796,6 +1886,7 @@ class	val	outer	while	wrong
 value	arm	direct	and	right
 value	arm	direct	any	right
 value	arm	direct	collect	right
+value	arm	direct	det	right
 value	arm	direct	dinH	right
 value	arm	direct	dinS	right
 value	arm	direct	do	right
@@ -1814,6 +1905,7 @@ value	arm	direct	while	right
 value	arm	outer	and	right
 value	arm	outer	any	right
 value	arm	outer	collect	right
+value	arm	outer	det	right
 value	arm	outer	dinH	right
 value	arm	outer	dinS	right
 value	arm	outer	do	right
@@ -1840,6 +1932,7 @@ value	arm	selfsend	while	right
 value	armIter	direct	and	right
 value	armIter	direct	any	right
 value	armIter	direct	collect	right
+value	armIter	direct	det	right
 value	armIter	direct	dinH	right
 value	armIter	direct	dinS	right
 value	armIter	direct	do	right
@@ -1856,6 +1949,7 @@ value	armIter	direct	toDo	right
 value	armIter	direct	value	wrong
 value	armIter	direct	while	right
 value	armIter	dlocal	and	right
+value	armIter	dlocal	det	right
 value	armIter	dlocal	dinS	right
 value	armIter	dlocal	ensure	right
 value	armIter	dlocal	ifNil	right
@@ -1863,6 +1957,7 @@ value	armIter	dlocal	ifTrue	right
 value	armIter	dlocal	onDo	right
 value	armIter	dlocal	while	right
 value	armIter	local	and	right
+value	armIter	local	det	right
 value	armIter	local	dinS	right
 value	armIter	local	ensure	right
 value	armIter	local	ifNil	right
@@ -1872,6 +1967,7 @@ value	armIter	local	while	right
 value	armIter	outer	and	right
 value	armIter	outer	any	right
 value	armIter	outer	collect	right
+value	armIter	outer	det	right
 value	armIter	outer	dinH	right
 value	armIter	outer	dinS	right
 value	armIter	outer	do	right
@@ -1890,6 +1986,7 @@ value	armIter	outer	while	right
 value	armLoop	outer	and	right
 value	armLoop	outer	any	right
 value	armLoop	outer	collect	right
+value	armLoop	outer	det	right
 value	armLoop	outer	dinH	right
 value	armLoop	outer	dinS	right
 value	armLoop	outer	do	right
@@ -1908,6 +2005,7 @@ value	armLoop	outer	while	right
 value	armNL	direct	and	right
 value	armNL	direct	any	right
 value	armNL	direct	collect	right
+value	armNL	direct	det	right
 value	armNL	direct	dinH	right
 value	armNL	direct	dinS	right
 value	armNL	direct	do	right
@@ -1926,6 +2024,7 @@ value	armNL	direct	while	right
 value	armNL	outer	and	right
 value	armNL	outer	any	right
 value	armNL	outer	collect	right
+value	armNL	outer	det	right
 value	armNL	outer	dinH	right
 value	armNL	outer	dinS	right
 value	armNL	outer	do	right
@@ -1944,6 +2043,7 @@ value	armNL	outer	while	right
 value	coll	direct	and	right
 value	coll	direct	any	right
 value	coll	direct	collect	right
+value	coll	direct	det	right
 value	coll	direct	dinH	right
 value	coll	direct	dinS	right
 value	coll	direct	do	right
@@ -1960,6 +2060,7 @@ value	coll	direct	toDo	right
 value	coll	direct	value	wrong
 value	coll	direct	while	right
 value	coll	dlocal	and	right
+value	coll	dlocal	det	right
 value	coll	dlocal	dinS	right
 value	coll	dlocal	ensure	right
 value	coll	dlocal	ifNil	right
@@ -1969,6 +2070,7 @@ value	coll	dlocal	while	right
 value	coll	outer	and	right
 value	coll	outer	any	right
 value	coll	outer	collect	right
+value	coll	outer	det	right
 value	coll	outer	dinH	right
 value	coll	outer	dinS	right
 value	coll	outer	do	right
@@ -1987,6 +2089,7 @@ value	coll	outer	while	right
 value	ensBlk	direct	and	right
 value	ensBlk	direct	any	right
 value	ensBlk	direct	collect	right
+value	ensBlk	direct	det	right
 value	ensBlk	direct	dinH	right
 value	ensBlk	direct	dinS	right
 value	ensBlk	direct	do	right
@@ -2005,6 +2108,7 @@ value	ensBlk	direct	while	right
 value	ensBlk	outer	and	right
 value	ensBlk	outer	any	right
 value	ensBlk	outer	collect	right
+value	ensBlk	outer	det	right
 value	ensBlk	outer	dinH	right
 value	ensBlk	outer	dinS	right
 value	ensBlk	outer	do	right
@@ -2023,6 +2127,7 @@ value	ensBlk	outer	while	right
 value	handler	direct	and	right
 value	handler	direct	any	right
 value	handler	direct	collect	right
+value	handler	direct	det	right
 value	handler	direct	dinH	right
 value	handler	direct	dinS	right
 value	handler	direct	do	right
@@ -2041,6 +2146,7 @@ value	handler	direct	while	right
 value	handler	outer	and	right
 value	handler	outer	any	right
 value	handler	outer	collect	right
+value	handler	outer	det	right
 value	handler	outer	dinH	right
 value	handler	outer	dinS	right
 value	handler	outer	do	right
@@ -2059,6 +2165,7 @@ value	handler	outer	while	right
 value	iter	direct	and	right
 value	iter	direct	any	right
 value	iter	direct	collect	right
+value	iter	direct	det	right
 value	iter	direct	dinH	right
 value	iter	direct	dinS	right
 value	iter	direct	do	right
@@ -2075,6 +2182,7 @@ value	iter	direct	toDo	right
 value	iter	direct	value	wrong
 value	iter	direct	while	right
 value	iter	dlocal	and	right
+value	iter	dlocal	det	right
 value	iter	dlocal	dinS	right
 value	iter	dlocal	ensure	right
 value	iter	dlocal	ifNil	right
@@ -2082,6 +2190,7 @@ value	iter	dlocal	ifTrue	right
 value	iter	dlocal	onDo	right
 value	iter	dlocal	while	right
 value	iter	local	and	right
+value	iter	local	det	right
 value	iter	local	dinS	right
 value	iter	local	ensure	right
 value	iter	local	ifNil	right
@@ -2091,6 +2200,7 @@ value	iter	local	while	right
 value	iter	outer	and	right
 value	iter	outer	any	right
 value	iter	outer	collect	right
+value	iter	outer	det	right
 value	iter	outer	dinH	right
 value	iter	outer	dinS	right
 value	iter	outer	do	right
@@ -2117,6 +2227,7 @@ value	iter	selfsend	while	right
 value	iterArm	direct	and	right
 value	iterArm	direct	any	right
 value	iterArm	direct	collect	right
+value	iterArm	direct	det	right
 value	iterArm	direct	dinH	right
 value	iterArm	direct	dinS	right
 value	iterArm	direct	do	right
@@ -2135,6 +2246,7 @@ value	iterArm	direct	while	right
 value	iterArm	outer	and	right
 value	iterArm	outer	any	right
 value	iterArm	outer	collect	right
+value	iterArm	outer	det	right
 value	iterArm	outer	dinH	right
 value	iterArm	outer	dinS	right
 value	iterArm	outer	do	right
@@ -2153,6 +2265,7 @@ value	iterArm	outer	while	right
 value	iterIter	outer	and	right
 value	iterIter	outer	any	right
 value	iterIter	outer	collect	right
+value	iterIter	outer	det	right
 value	iterIter	outer	dinH	right
 value	iterIter	outer	dinS	right
 value	iterIter	outer	do	right
@@ -2171,6 +2284,7 @@ value	iterIter	outer	while	right
 value	loop	direct	and	right
 value	loop	direct	any	right
 value	loop	direct	collect	right
+value	loop	direct	det	right
 value	loop	direct	dinH	right
 value	loop	direct	dinS	right
 value	loop	direct	do	right
@@ -2189,6 +2303,7 @@ value	loop	direct	while	right
 value	loop	outer	and	right
 value	loop	outer	any	right
 value	loop	outer	collect	right
+value	loop	outer	det	right
 value	loop	outer	dinH	right
 value	loop	outer	dinS	right
 value	loop	outer	do	right
@@ -2215,6 +2330,7 @@ value	loop	selfsend	while	right
 value	prot	direct	and	right
 value	prot	direct	any	right
 value	prot	direct	collect	right
+value	prot	direct	det	right
 value	prot	direct	dinH	right
 value	prot	direct	dinS	right
 value	prot	direct	do	right
@@ -2233,6 +2349,7 @@ value	prot	direct	while	right
 value	prot	outer	and	right
 value	prot	outer	any	right
 value	prot	outer	collect	right
+value	prot	outer	det	right
 value	prot	outer	dinH	right
 value	prot	outer	dinS	right
 value	prot	outer	do	right
@@ -2259,6 +2376,7 @@ value	prot	selfsend	while	right
 value	protArm	direct	and	right
 value	protArm	direct	any	right
 value	protArm	direct	collect	right
+value	protArm	direct	det	right
 value	protArm	direct	dinH	right
 value	protArm	direct	dinS	right
 value	protArm	direct	do	right
@@ -2277,6 +2395,7 @@ value	protArm	direct	while	right
 value	protArm	outer	and	right
 value	protArm	outer	any	right
 value	protArm	outer	collect	right
+value	protArm	outer	det	right
 value	protArm	outer	dinH	right
 value	protArm	outer	dinS	right
 value	protArm	outer	do	right
@@ -2295,6 +2414,7 @@ value	protArm	outer	while	right
 value	protLast	direct	and	right
 value	protLast	direct	any	right
 value	protLast	direct	collect	right
+value	protLast	direct	det	right
 value	protLast	direct	dinH	right
 value	protLast	direct	dinS	right
 value	protLast	direct	do	right
@@ -2313,6 +2433,7 @@ value	protLast	direct	while	right
 value	protLast	outer	and	right
 value	protLast	outer	any	right
 value	protLast	outer	collect	right
+value	protLast	outer	det	right
 value	protLast	outer	dinH	right
 value	protLast	outer	dinS	right
 value	protLast	outer	do	right
@@ -2331,6 +2452,7 @@ value	protLast	outer	while	right
 value	timesC	direct	and	right
 value	timesC	direct	any	right
 value	timesC	direct	collect	right
+value	timesC	direct	det	right
 value	timesC	direct	dinH	right
 value	timesC	direct	dinS	right
 value	timesC	direct	do	right
@@ -2349,6 +2471,7 @@ value	timesC	direct	while	right
 value	timesC	outer	and	right
 value	timesC	outer	any	right
 value	timesC	outer	collect	right
+value	timesC	outer	det	right
 value	timesC	outer	dinH	right
 value	timesC	outer	dinS	right
 value	timesC	outer	do	right
@@ -2367,6 +2490,7 @@ value	timesC	outer	while	right
 value	toDoC	direct	and	right
 value	toDoC	direct	any	right
 value	toDoC	direct	collect	right
+value	toDoC	direct	det	right
 value	toDoC	direct	dinH	right
 value	toDoC	direct	dinS	right
 value	toDoC	direct	do	right
@@ -2385,6 +2509,7 @@ value	toDoC	direct	while	right
 value	toDoC	outer	and	right
 value	toDoC	outer	any	right
 value	toDoC	outer	collect	right
+value	toDoC	outer	det	right
 value	toDoC	outer	dinH	right
 value	toDoC	outer	dinS	right
 value	toDoC	outer	do	right
@@ -2409,6 +2534,7 @@ value	toDoC	selfsend	toDo	right
 value	toDoC	selfsend	value	wrong
 value	toDoC	selfsend	while	right
 value	top	local	collect	right
+value	top	local	det	right
 value	top	local	dinS	right
 value	top	local	do	right
 value	top	local	ensure	right
@@ -2422,6 +2548,7 @@ value	top	local	while	right
 value	top	outer	and	right
 value	top	outer	any	right
 value	top	outer	collect	right
+value	top	outer	det	right
 value	top	outer	dinH	right
 value	top	outer	dinS	right
 value	top	outer	do	right
@@ -2448,6 +2575,7 @@ value	top	selfsend	while	right
 value	val	direct	and	wrong
 value	val	direct	any	wrong
 value	val	direct	collect	wrong
+value	val	direct	det	wrong
 value	val	direct	dinH	wrong
 value	val	direct	dinS	wrong
 value	val	direct	do	wrong
@@ -2466,6 +2594,7 @@ value	val	direct	while	wrong
 value	val	outer	and	wrong
 value	val	outer	any	wrong
 value	val	outer	collect	wrong
+value	val	outer	det	wrong
 value	val	outer	dinH	wrong
 value	val	outer	dinS	wrong
 value	val	outer	do	wrong
@@ -2493,9 +2622,13 @@ actor	armProtIter	outer	collect	right
 actor	protIterArm	outer	collect	right
 actor	armIterIter	outer	collect	right
 actor	armProtArm	outer	collect	right
+actor	armProtIter	outer	det	right
 actor	armProtIter	outer	dinH	right
+actor	protIterArm	outer	det	wrong
 actor	protIterArm	outer	dinH	wrong
+actor	armIterIter	outer	det	right
 actor	armIterIter	outer	dinH	wrong
+actor	armProtArm	outer	det	erlc
 actor	armProtArm	outer	dinH	erlc
 actor	armProtIter	outer	dinS	right
 actor	protIterArm	outer	dinS	wrong
@@ -2565,9 +2698,13 @@ class	armProtIter	outer	collect	right
 class	protIterArm	outer	collect	right
 class	armIterIter	outer	collect	right
 class	armProtArm	outer	collect	right
+class	armProtIter	outer	det	right
 class	armProtIter	outer	dinH	right
+class	protIterArm	outer	det	right
 class	protIterArm	outer	dinH	right
+class	armIterIter	outer	det	right
 class	armIterIter	outer	dinH	right
+class	armProtArm	outer	det	right
 class	armProtArm	outer	dinH	right
 class	armProtIter	outer	dinS	right
 class	protIterArm	outer	dinS	right
@@ -2637,9 +2774,13 @@ value	armProtIter	outer	collect	right
 value	protIterArm	outer	collect	right
 value	armIterIter	outer	collect	right
 value	armProtArm	outer	collect	right
+value	armProtIter	outer	det	right
 value	armProtIter	outer	dinH	right
+value	protIterArm	outer	det	right
 value	protIterArm	outer	dinH	right
+value	armIterIter	outer	det	right
 value	armIterIter	outer	dinH	right
+value	armProtArm	outer	det	right
 value	armProtArm	outer	dinH	right
 value	armProtIter	outer	dinS	right
 value	protIterArm	outer	dinS	right

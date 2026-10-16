@@ -1,0 +1,380 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): plain `detect:` as local-threading producers. Each method starts
+// from `t := 0` and writes it from the block in one position; the expected
+// answers are in stdlib/test/adr0131detect_plain_test.bt. The block runs up to and including
+// the first element that decides the answer (BT-3805), so a decisive first
+// element leaves the later elements' writes undone. `c` is the condition of
+// the arm shapes.
+
+Value subclass: Adr0131DetectPlainValue
+  field: n = 0
+
+  topHit =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+    t
+
+  inArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inArmElseHit: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inDoHit =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inToDoHit =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inTimesHit =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inWhileHit =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inOnDoHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureHit =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          true
+        ]
+    ] ensure: [nil]
+    t
+
+  inHandlerHit =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  inArmInDoHit: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                true
+              ]
+          ]
+      ]
+    t
+
+  returnInArmHit: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            true
+          ]
+      ]
+    t
+
+  assignedHit =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        true
+      ]
+    #[r, t]
+
+  topLate =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+    t
+
+  inArmLate: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inArmElseLate: c =>
+    t := 0
+    c
+      ifTrue: [t := 100]
+      ifFalse: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inDoLate =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inToDoLate =>
+    t := 0
+    1
+      to: 2
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inTimesLate =>
+    t := 0
+    2
+      timesRepeat: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inWhileLate =>
+    t := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        i := i + 1
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inOnDoLate =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  inEnsureLate =>
+    t := 0
+    [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          v > 1
+        ]
+    ] ensure: [nil]
+    t
+
+  inHandlerLate =>
+    t := 0
+    [Error signal: "x"]
+      on: Error
+      do: [:e |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  inArmInDoLate: c =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        c
+          ifTrue: [
+            #(1, 2)
+              detect: [:v |
+                t := t + v
+                v > 1
+              ]
+          ]
+      ]
+    t
+
+  returnInArmLate: c =>
+    t := 0
+    c
+      ifTrue: [
+        ^#(1, 2)
+          detect: [:v |
+            t := t + v
+            v > 1
+          ]
+      ]
+    t
+
+  assignedLate =>
+    t := 0
+    r := #(1, 2)
+      detect: [:v |
+        t := t + v
+        v > 1
+      ]
+    #[r, t]
+
+  missTop =>
+    t := 0
+    #(1, 2)
+      detect: [:v |
+        t := t + v
+        false
+      ]
+    t
+
+  missInDo =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  missInArm: c =>
+    t := 0
+    c
+      ifTrue: [
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  missInCollect =>
+    t := 0
+    #(1, 2)
+      collect: [:z |
+        #(1, 2)
+          detect: [:v |
+            t := t + v
+            false
+          ]
+      ]
+    t
+
+  missCaught =>
+    t := 0
+    r := [
+      #(1, 2)
+        detect: [:v |
+          t := t + v
+          false
+        ]
+    ] on: Error do: [:e | -1]
+    r

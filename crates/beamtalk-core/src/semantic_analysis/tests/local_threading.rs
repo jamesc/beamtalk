@@ -1401,6 +1401,13 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armProtArm", "outer", "dsb"),
     ("actor", "armProtArm", "outer", "ewi"),
     ("actor", "armProtArm", "outer", "value"),
+    ("actor", "armIter", "outer", "det"),
+    ("actor", "coll", "outer", "det"),
+    ("actor", "iter", "outer", "det"),
+    ("actor", "iterArm", "outer", "det"),
+    ("actor", "iterIter", "outer", "det"),
+    ("actor", "armProtIter", "outer", "det"),
+    ("actor", "armIterIter", "outer", "det"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
