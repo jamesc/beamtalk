@@ -897,14 +897,7 @@ so the cost is bounded by the miss count rather than the workspace size.
 -spec senders_of_bt(selector()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
 senders_of_bt(Selector) when is_atom(Selector) ->
-    {Loaded, FallbackClasses} = miss_partition(sendersOf),
-    Sites = senders_of(Selector),
-    %% Stale-drop: keep only sites whose owner is still loaded.
-    IndexedRows = [
-        site_to_bt_row(Site)
-     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
-    ],
-    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
+    bt_site_result(sendersOf, senders_of(Selector)).
 
 -doc """
 Return all sites that reference `Class` (type annotations, class
@@ -944,13 +937,7 @@ map has the same two keys:
 -spec references_to_bt(class_name()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
 references_to_bt(Class) when is_atom(Class) ->
-    {Loaded, FallbackClasses} = miss_partition(referencesTo),
-    Sites = references_to(Class),
-    IndexedRows = [
-        site_to_bt_row(Site)
-     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
-    ],
-    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
+    bt_site_result(referencesTo, references_to(Class)).
 
 -doc """
 Return all `{Class, ClassSide}` pairs that implement `Selector`.
@@ -1519,6 +1506,22 @@ site_to_bt_row(Site) ->
         method => maps:get(method, Site),
         line => maps:get(line, Site)
     }.
+
+-doc """
+Apply the ADR 0087 miss-partition and stale-drop to a pre-fetched `Sites`
+list, returning the two-key result map `senders_of_bt/1` and
+`references_to_bt/1` both need.  Centralises the stale-drop list comprehension
+so the two call sites cannot drift from each other.
+""".
+-spec bt_site_result(atom(), [site()]) ->
+    #{indexed := [bt_row()], fallback_classes := [class_name()]}.
+bt_site_result(Op, Sites) ->
+    {Loaded, FallbackClasses} = miss_partition(Op),
+    IndexedRows = [
+        site_to_bt_row(Site)
+     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
+    ],
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
 Project a sent-selector / `site()` pair onto the `send_row()` the BT
