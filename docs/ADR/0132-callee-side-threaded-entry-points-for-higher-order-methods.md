@@ -138,7 +138,7 @@ rejects". Enumerated from the §6 validator (`validators/local_threading.rs`
 | I13 | cascade part, string interpolation, `match:` subject | any | §6 error (ADR 0131 close-out) | unchanged (no statement boundary for a prelude) |
 | I14 | a keyword `whileTrue:`/`whileFalse:` condition block (BT-3782) | class | §6 error | unchanged (BT-3743) |
 | I15 | a runtime-installed class method fun (ADR 0084 `put_class_method/4`) | class | n/a | no entry; structured error at run time (Open Question 2) |
-| I16 | an ADR 0127 trait provision routing the block through `self do:` | value-type: works (`self_send_hom_sackful.bt`); actor: BT-912 channel | unchanged; actor via Phase 4 |
+| I16 | an ADR 0127 trait provision routing the block through `self do:` | value-type, actor | value-type works (`self_send_hom_sackful.bt`); actor only through the BT-912 channel | value-type unchanged; actor via **Phase 4** |
 | I17 | a Tier 2 block passed to an asynchronous send (`!`, a `spawns_block` method, `Future`, `Timer`) | any | §6 error or a dropped write | §6 error, **permanent**: the block runs after the caller's frame is gone (I11's rule at run time) |
 
 ### Constraints
@@ -489,6 +489,16 @@ that walk resolves to:
   called";
 - nothing (the selector is not understood): `does_not_understand`, exactly
   as the plain send.
+
+An **actor receiver** is the same walk: a plain actor send is a synchronous
+`gen_server:call` (ADR 0006), so before Phase 4 the resolved actor module
+has no threaded `dispatch/4` clause and `send_threaded/4` raises
+`stateful_block_dispatch`; from Phase 4 it makes the same synchronous call
+and unwraps the `{Result, Acc1}` carried inside the reply. The `{Result,
+Acc}` shape is produced only by a threaded clause and consumed only by a
+threaded call, so it is never handed back as an ordinary result. The
+asynchronous forms (`!`, a `Future`-returning send) are I17: a Tier 2 block
+in one is a compile error, and no threaded variant of them exists.
 
 `perform:`-family sends are not a special case: `perform:` is resolved by
 the walk to the performed selector as today (ADR 0006), user overrides of
