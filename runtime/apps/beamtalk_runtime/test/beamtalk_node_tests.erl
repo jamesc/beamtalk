@@ -123,13 +123,82 @@ policy_refuses_off_host_without_tls_test() ->
 policy_allows_off_host_under_tls_test() ->
     ?assertEqual(ok, beamtalk_node:connect_policy(?OFF_HOST_NODE, true)).
 
-policy_refuses_unresolvable_host_without_tls_test() ->
-    %% `.invalid` is reserved (RFC 2606) and never resolves, so the host
-    %% cannot be proven local.
-    ?assertMatch(
-        {error, #beamtalk_error{kind = insecure_distribution}},
-        beamtalk_node:connect_policy('w@no-such-host.invalid', false)
+%% `.invalid` is reserved (RFC 2606 / RFC 6761 §6.4) and never resolves, so
+%% the host cannot be proven local. The policy must decide it *without* a DNS
+%% lookup: a real lookup of such a name could block in
+%% `inet_gethost_native:wait_reply` past EUnit's 5s default on a CI runner,
+%% cancelling this test (BT-3829). `assert_no_dns_lookup/1` traces
+%% `inet:getaddrs/2` so a regression to a real lookup fails deterministically
+%% instead of intermittently timing out.
+policy_refuses_unresolvable_host_without_tls_test_() ->
+    [
+        ?_assertMatch(
+            {error, #beamtalk_error{kind = insecure_distribution}},
+            assert_no_dns_lookup(fun() -> beamtalk_node:connect_policy(Node, false) end)
+        )
+     || Node <- [
+            'w@no-such-host.invalid',
+            'w@NO-SUCH-HOST.INVALID',
+            'w@no-such-host.invalid.',
+            'w@invalid'
+        ]
+    ].
+
+%% IP literals are their own address: no resolver involved either way.
+policy_decides_ip_literals_without_dns_test_() ->
+    [
+        ?_assertEqual(
+            ok,
+            assert_no_dns_lookup(fun() -> beamtalk_node:connect_policy('w@127.0.0.1', false) end)
+        ),
+        ?_assertEqual(
+            ok, assert_no_dns_lookup(fun() -> beamtalk_node:connect_policy('w@::1', false) end)
+        ),
+        ?_assertMatch(
+            {error, #beamtalk_error{kind = insecure_distribution}},
+            assert_no_dns_lookup(fun() -> beamtalk_node:connect_policy(?OFF_HOST_NODE, false) end)
+        )
+    ].
+
+%% The tracer really sees a lookup (an IP literal, so no network either).
+assert_no_dns_lookup_detects_a_lookup_test() ->
+    ?assertError(
+        {unexpected_dns_lookup, ["127.0.0.1", inet]},
+        assert_no_dns_lookup(fun() -> inet:getaddrs("127.0.0.1", inet) end)
     ).
+
+%% Run `Fun` with call tracing on `inet:getaddrs/2` for this process and fail
+%% if it was called; returns `Fun`'s result. The tracer is a separate
+%% collector process (a process tracing itself gets no call trace messages);
+%% `erlang:trace_delivered/1` makes sure every trace message has reached it
+%% before it is asked what it saw.
+assert_no_dns_lookup(Fun) ->
+    MFA = {inet, getaddrs, 2},
+    Collector = spawn_link(fun() -> collect_traces([]) end),
+    erlang:trace_pattern(MFA, true, [global]),
+    erlang:trace(self(), true, [call, {tracer, Collector}]),
+    Result =
+        try
+            Fun()
+        after
+            erlang:trace(self(), false, [call]),
+            erlang:trace_pattern(MFA, false, [global])
+        end,
+    Ref = erlang:trace_delivered(self()),
+    receive
+        {trace_delivered, _, Ref} -> ok
+    end,
+    Collector ! {report, self()},
+    receive
+        {traces, []} -> Result;
+        {traces, [Args | _]} -> erlang:error({unexpected_dns_lookup, Args})
+    end.
+
+collect_traces(Acc) ->
+    receive
+        {trace, _Pid, call, {inet, getaddrs, Args}} -> collect_traces([Args | Acc]);
+        {report, From} -> From ! {traces, lists:reverse(Acc)}
+    end.
 
 %% This VM is not started with `-proto_dist inet_tls`, so the public
 %% selectors take the non-TLS branch of the policy — and refuse *before*
