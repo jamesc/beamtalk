@@ -70,3 +70,33 @@ TestCase subclass: Adr0131DoProducerTest
 
   testSelectWithNestedLoopWrite =>
     self assert: #[Adr0131DoProducerClass selectWithNestedLoopWrite, (Adr0131DoProducerValue new) selectWithNestedLoopWrite, (Adr0131DoProducerActor spawn) selectWithNestedLoopWrite] equals: #[#[#(2, 3), 9], #[#(2, 3), 9], #[#(2, 3), 9]]
+
+  // BT-3813: `^xs do: [...]` inside a block in a class or value-type method
+  // answers `nil` (the `^` fires) or falls through to `t` (it does not).
+  testDoReturnedInArm =>
+    self assert: #[Adr0131DoProducerClass doReturnedInArm: true, (Adr0131DoProducerValue new) doReturnedInArm: true, Adr0131DoProducerClass doReturnedInArm: false, (Adr0131DoProducerValue new) doReturnedInArm: false] equals: #[nil, nil, 0, 0]
+
+  testDictDoReturnedInArm =>
+    self assert: #[Adr0131DoProducerClass dictDoReturnedInArm: true, (Adr0131DoProducerValue new) dictDoReturnedInArm: true, Adr0131DoProducerClass dictDoReturnedInArm: false, (Adr0131DoProducerValue new) dictDoReturnedInArm: false] equals: #[nil, nil, 0, 0]
+
+  testDoReturnedInHandler =>
+    self assert: #[Adr0131DoProducerClass doReturnedInHandler: true, (Adr0131DoProducerValue new) doReturnedInHandler: true, Adr0131DoProducerClass doReturnedInHandler: false, (Adr0131DoProducerValue new) doReturnedInHandler: false] equals: #[nil, nil, 10, 10]
+
+  testDictDoReturnedInHandler =>
+    self assert: #[Adr0131DoProducerClass dictDoReturnedInHandler: true, (Adr0131DoProducerValue new) dictDoReturnedInHandler: true, Adr0131DoProducerClass dictDoReturnedInHandler: false, (Adr0131DoProducerValue new) dictDoReturnedInHandler: false] equals: #[nil, nil, 10, 10]
+
+  testDoReturnedInClosure =>
+    self assert: #[Adr0131DoProducerClass doReturnedInClosure: 5, (Adr0131DoProducerValue new) doReturnedInClosure: 5, Adr0131DoProducerClass doReturnedInClosure: 0, (Adr0131DoProducerValue new) doReturnedInClosure: 0] equals: #[nil, nil, 0, 0]
+
+  testDictDoReturnedInClosure =>
+    self assert: #[Adr0131DoProducerClass dictDoReturnedInClosure: 5, (Adr0131DoProducerValue new) dictDoReturnedInClosure: 5, Adr0131DoProducerClass dictDoReturnedInClosure: 0, (Adr0131DoProducerValue new) dictDoReturnedInClosure: 0] equals: #[nil, nil, 0, 0]
+
+  testKeyedDoReturnedInClosure =>
+    self assert: #[Adr0131DoProducerClass keyedDoReturnedInClosure: 5, (Adr0131DoProducerValue new) keyedDoReturnedInClosure: 5, Adr0131DoProducerClass keyedDoReturnedInClosure: 0, (Adr0131DoProducerValue new) keyedDoReturnedInClosure: 0] equals: #[nil, nil, 0, 0]
+
+  testDoReturnedInSortBlock =>
+    self assert: #[Adr0131DoProducerClass doReturnedInSortBlock, (Adr0131DoProducerValue new) doReturnedInSortBlock] equals: #[nil, nil]
+
+  testDoWithClassVarWriteReturnedInClosure =>
+    self assert: (Adr0131DoProducerClass doWithClassVarWriteReturnedInClosure: 5) equals: nil
+    self assert: Adr0131DoProducerClass classVarN equals: 3

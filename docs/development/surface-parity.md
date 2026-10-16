@@ -603,10 +603,8 @@ reports the same message at the same span. No operation is surface-specific.
   (up to two nested blocks, in a class, value-type or actor method) instead of
   reporting `UnmigratedLocalThreading`. Inside a `[...] value` body, a closure
   (`Container::Other`), past two nested blocks and in the REPL the previous
-  verdict stands. Two shapes start reporting on every surface (CLI, REPL eval
-  and load, LSP, MCP, all from the analyser): `^kv` of a keyed iteration in a
-  plain closure in a class or value-type method (it used to compile and answer
-  `nil`; same treatment as `^xs do: [...]`, BT-3813), and a keyed iteration
+  verdict stands. One shape starts reporting on every surface (CLI, REPL eval
+  and load, LSP, MCP, all from the analyser): a keyed iteration
   whose receiver is statically known not to be a `Dictionary` (`self` outside a
   `Dictionary`, a typed `Ets`/user-class local) and whose block writes an outer
   local, a permanent §6 `Tier2BlockNoReturnChannel` error: `Ets` and any class
@@ -657,13 +655,16 @@ reports the same message at the same span. No operation is surface-specific.
   of the answers is unchanged. In an actor method a loop or fold body's
   value-bearing producer site stays an error under a fold frame
   (`is_loop_body_producer_site` in `beamtalk-core`, read by the check and by
-  codegen). One shape goes the other way: `^xs do: [...]` inside a plain
-  closure in a class or value-type method now STARTS reporting
-  `UnmigratedLocalThreading` on every surface (CLI, REPL, LSP, MCP); it used to
-  compile and answer `nil`. The same `^` in an arm of a conditional or in the
-  protected body, handler or cleanup of an `on:do:`/`ensure:` is lowered (ADR
-  0131 Phases 3 and 3b) and keeps answering `nil`. The closure case is a
-  temporary narrowing, tracked by BT-3813.
+  codegen). `^xs do: [...]` inside a block of a class or value-type method is
+  accepted and answers `nil` everywhere: in an arm of a conditional or in the
+  protected body, handler or cleanup of an `on:do:`/`ensure:` (ADR 0131 Phases
+  3 and 3b), and since BT-3813 in any other closure (a `detect:ifNone:`
+  handler, a sort block), for a list, a map literal and a keyed `do:` alike
+  (the `^` lowers the construct through the producer and throws its value).
+  BT-3796 had made the closure case, and the same `^` of a keyed iteration
+  (BT-3841 PR 2), report `UnmigratedLocalThreading`; BT-3813 removes that
+  error on every surface (CLI, REPL eval and load, LSP, MCP, all from the
+  analyser). In an actor method the shape stays an error.
 - **REPL root (ADR 0131 Phase 2d, BT-3795).** A loop or fold nested in an
   operand of a REPL input (`(xs collect: [:x | t := t + x]) size`,
   `r := t + (xs inject: ...)`) is now a local-threading producer: it answers

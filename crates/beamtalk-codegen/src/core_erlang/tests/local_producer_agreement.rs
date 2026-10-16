@@ -824,3 +824,111 @@ fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it(
         "{accepted} accepted, {rejected_count} rejected"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-3813: a `^` value inside a block (a non-local return)
+// ---------------------------------------------------------------------------
+
+/// The blocks a `^{c}` sits in: an arm, a protected body, handler and
+/// cleanup, a loop or fold body, an evaluated block, a lookup handler, and
+/// closures that are none of those (a `detect:ifNone:` handler, a sort block),
+/// bare and parenthesised.
+const RETURN_FRAMES: &[&str] = &[
+    "true ifTrue: [^{c}]\nt",
+    "[^{c}] on: Error do: [:e | nil]\nt",
+    "[nil] on: Error do: [:e | ^{c}]\nt",
+    "[nil] ensure: [^{c}]\nt",
+    "#(1, 2) do: [:k | ^{c}]\nt",
+    "#(1, 2) collect: [:k | true ifTrue: [^{c}]]\nt",
+    "[^{c}] value\nt",
+    "#{#a => 1} at: #b ifAbsent: [^{c}]\nt",
+    "#(1, 2) detect: [:x | x > 5] ifNone: [^{c}]\nt",
+    "#(1, 2) detect: [:x | x > 5] ifNone: [^({c})]\nt",
+    "#(2, 1) sort: [:a :b | ^{c}]\nt",
+];
+
+/// The `^` values of `body`'s statements, at any depth, that the core rule
+/// (`operand_producer_writes`) names a producer: each value's span and the
+/// names it threads.
+fn returned_producers(
+    body: &[beamtalk_core::ast::ExpressionStatement],
+) -> Vec<(Span, Vec<String>)> {
+    let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
+    let mut out = Vec::new();
+    for stmt in body {
+        beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Return { value, .. } = e {
+                let value = value.unwrap_parens();
+                if let Some(writes) = operand_producer_writes(value, &bound) {
+                    out.push((Expression::span(value), names_of(writes)));
+                }
+            }
+        });
+    }
+    out
+}
+
+/// BT-3813: every `^<construct>` inside a block that the Phase 0 check
+/// accepts (the `ReturnValue { nested: true }` rows of `ALLOW_SET`, or a
+/// producer site of an arm or loop frame) and that the core rule
+/// (`operand_producer_writes`) names a producer is lowered by codegen's
+/// producer threading exactly its names, so the `^` throws the construct's
+/// value and never its `{Value, StateAcc}` carrier. Fails with the BT-3813
+/// row and without `nlr_return_construct_value`: the closure cases (a
+/// `detect:ifNone:` handler, a sort block) lower no producer.
+#[test]
+fn every_nested_return_value_the_check_accepts_is_lowered_by_the_producer() {
+    let mut checked = 0;
+    let mut closures = 0;
+    for construct in CONSTRUCTS {
+        for frame in RETURN_FRAMES {
+            for src in sources(construct, frame) {
+                let (module, parse_diags) = parse(lex_with_eof(&src));
+                assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+                let analysis = analyse_full(&module, AnalysisContext::default());
+                let rejected = analysis.diagnostics.iter().any(|d| {
+                    d.severity == Severity::Error
+                        && matches!(
+                            d.category,
+                            Some(
+                                DiagnosticCategory::UnmigratedLocalThreading
+                                    | DiagnosticCategory::Tier2BlockNoReturnChannel
+                            )
+                        )
+                });
+                if rejected {
+                    continue;
+                }
+                let class = &module.classes[0];
+                let method = class
+                    .methods
+                    .iter()
+                    .chain(&class.class_methods)
+                    .next()
+                    .expect("one method");
+                let (generated, records) = recording_producers(|| {
+                    generate_module_with_warnings(&module, CodegenOptions::new("agree"))
+                });
+                assert!(generated.is_ok(), "{src}: {:?}", generated.err());
+                let lowered: HashMap<Span, Vec<String>> = records.into_iter().collect();
+                for (span, names) in returned_producers(&method.body) {
+                    assert_eq!(
+                        lowered.get(&span),
+                        Some(&names),
+                        "Phase 0 accepts `^` of the construct at {span:?}, which the core rule \
+                         names a producer threading {names:?}, but codegen lowered \
+                         {lowered:?}: the `^` would throw its carrier\n{src}"
+                    );
+                    checked += 1;
+                    if frame.contains("detect:") || frame.contains("sort:") {
+                        closures += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 30 && closures > 4,
+        "only {checked} nested `^` values compared ({closures} in a closure)"
+    );
+}

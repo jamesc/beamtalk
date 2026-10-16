@@ -110,3 +110,57 @@ Value subclass: Adr0131DoProducerValue
         x > 1
       ]
     #[r, t]
+
+  // BT-3813: `^xs do: [...]` inside a block (a non-local return) answers the
+  // `do:`'s `nil`, never its `{nil, StateAcc}` carrier: in an arm and a
+  // handler (producer frames) and in any other closure (a `detect:ifNone:`
+  // handler, a sort block), for a list, a map literal and a keyed `do:`.
+  doReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  dictDoReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#{#a => 1, #b => 2} do: [:x | t := t + x]]
+    t
+
+  doReturnedInHandler: c =>
+    t := 0
+    [
+      c ifTrue: [Error signal: "probe"]
+      t := 10
+    ] on: Error do: [:e | ^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  dictDoReturnedInHandler: c =>
+    t := 0
+    [
+      c ifTrue: [Error signal: "probe"]
+      t := 10
+    ] on: Error do: [:e | ^#{#a => 1, #b => 2} do: [:x | t := t + x]]
+    t
+
+  doReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y | y > c] ifNone: [^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  dictDoReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y |
+      y > c
+    ] ifNone: [^(#{#a => 1, #b => 2} do: [:x | t := t + x])]
+    t
+
+  keyedDoReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y |
+      y > c
+    ] ifNone: [^#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  doReturnedInSortBlock =>
+    t := 0
+    #(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]
+    t
