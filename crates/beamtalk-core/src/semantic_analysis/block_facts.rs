@@ -554,6 +554,12 @@ fn analyze_expression(
                 } else {
                     analyze_expression(receiver, analysis, ctx);
                 }
+            } else if let Some(block) = literal_block_value_arm(expr) {
+                // BT-3841: `[...] value` is the same inline activation (an arm
+                // that always runs, [`literal_block_value_arm`]), so its writes
+                // are the enclosing block's writes: a `do:` body whose only
+                // outer write is inside a nested `[...] value` threads it.
+                propagate_inline_block_writes(block, analysis, ctx);
             } else {
                 analyze_expression(receiver, analysis, ctx);
             }
@@ -866,6 +872,54 @@ pub fn is_result_try_do(receiver: &Expression, selector_name: &str) -> bool {
                 ..
             } if name.name == "Result"
         )
+}
+
+/// ADR 0118 phase 3 / BT-3845: whether a `whileTrue:`/`whileFalse:`
+/// `condition` has state effects (a field write, a self-send, a stored-block
+/// call or an opaque-callable HOM send) that the loop must thread. Only a
+/// literal block condition can; in a class method nothing does (ADR 0130 §3:
+/// a class method threads no family, and answering `true` there made the loop
+/// open a `StateAcc` whose initial state does not exist, BT-3694).
+///
+/// The one rule codegen's loop gates read (`condition_has_state_effects`:
+/// `while_loop_threads`, the stateful condition lowering, the actor
+/// statement classifier) and the one the ADR 0131 §6 validator reads through
+/// [`while_condition_writes_thread`].
+#[must_use]
+pub fn while_condition_has_state_effects(condition: &Expression, in_class_method: bool) -> bool {
+    matches!(condition, Expression::Block(block)
+        if block_condition_has_state_effects(block, in_class_method))
+}
+
+/// BT-3782/BT-3845: whether an outer-local write in the condition block of a
+/// keyword `whileTrue:`/`whileFalse:` is threaded back to the method in a
+/// compiled (non-REPL) method. It is exactly when codegen compiles the
+/// condition in the loop's own frame and packs its local writes into the
+/// loop's `StateAcc` (`generate_stateful_while_condition`): the `body`
+/// argument is a literal block (only then is the stateful lowering
+/// considered at all) and the condition has state effects
+/// ([`while_condition_has_state_effects`]).
+///
+/// A body that writes a local does **not** extend this: it also selects the
+/// stateful lowering, but with a pure condition the condition is compiled as a
+/// plain block body whose own writes are never packed, so the loop re-reads
+/// the pre-loop value forever (probed for BT-3845:
+/// `[t := t + 1. t < 3] whileTrue: [u := u + 1]` hangs in value-type, actor and
+/// class methods). Such a condition write stays a compile error; pinned by the
+/// `while_condition_*` matrix in `semantic_analysis/tests/local_threading.rs`
+/// and, for the accepted shapes, `stdlib/test/bt3746stateful_while_test.bt`.
+#[must_use]
+pub fn while_condition_writes_thread(
+    condition: &Block,
+    body: Option<&Expression>,
+    in_class_method: bool,
+) -> bool {
+    matches!(body, Some(Expression::Block(_)))
+        && block_condition_has_state_effects(condition, in_class_method)
+}
+
+fn block_condition_has_state_effects(condition: &Block, in_class_method: bool) -> bool {
+    !in_class_method && analyze_block(condition).has_state_effects()
 }
 
 /// Propagates a nested inline-compiled block's mutation
@@ -1533,6 +1587,44 @@ fn packed_writes_agree(
     (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
+/// ADR 0131 (BT-3841): the block of an *evaluated literal block*, the unary
+/// `value` sent to a block literal with no parameters (`[t := t + 1. t] value`),
+/// or `None` for any other expression.
+///
+/// The **receiver rule** of this family: the receiver is a `[...]` literal
+/// (parentheses not peeled: `([...]) value` is a block value, ADR 0131 §6), so
+/// its class is statically `Block` and no other class's `value` can run; the
+/// send is never dispatched, the block body is inlined where the send sits. A
+/// stored or computed block (`b value`, `(f at: 1) value`) is not a literal and
+/// keeps the Tier 2 protocol (`prescan_tier2_local_vars`) or the §6 error.
+/// `value:`, `value:value:` and `valueWithArguments:` are not recognized here:
+/// their arguments are evaluated outside the block and bound to its parameters,
+/// which the arm frame does not model, so they keep their own lowering.
+///
+/// The one site rule for the family: read by [`conditional_arm_blocks`] (and so
+/// by the Phase 0 check, the producer rule and the site rules) and by codegen's
+/// producer, which lowers the block as a `BranchArm` frame that always runs.
+#[must_use]
+pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
+    let Expression::MessageSend {
+        receiver,
+        selector: selector @ MessageSelector::Unary(_),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    let Expression::Block(block) = receiver.as_ref() else {
+        return None;
+    };
+    (selector.well_known() == Some(crate::ast::WellKnownSelector::Value)
+        && arguments.is_empty()
+        && block.parameters.is_empty())
+    .then_some(block)
+}
+
 /// ADR 0131 Phase 3 (BT-3738): the literal arm blocks of a conditional
 /// (`ifTrue:` … `ifNil:ifNotNil:`, `and:`/`or:`) whose every block position
 /// holds a block literal, in source order, or `None` for any other send.
@@ -1548,11 +1640,20 @@ fn packed_writes_agree(
 /// ([`lookup_arm_blocks`]).
 ///
 /// [`dictionary_inline`]: crate::state_threading_selectors::LookupShape::dictionary_inline
+///
+/// ADR 0131 (BT-3841): an evaluated literal block (`[...] value`, see
+/// [`literal_block_value_arm`]) is the degenerate conditional: one arm that
+/// always runs. Its block is the single arm, so every rule that reads this
+/// function (the conditional producer rule, the site rules, the Phase 0 check
+/// and codegen's producer) treats it as an inline arm-like frame.
 #[must_use]
 pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     let construct = local_threading_construct(expr)?;
     if construct.family == LocalThreadingFamily::Lookup {
         return lookup_arm_blocks(expr);
+    }
+    if construct.family == LocalThreadingFamily::BlockValue {
+        return literal_block_value_arm(expr).map(|block| vec![block]);
     }
     if construct.family != LocalThreadingFamily::Conditional {
         return None;
@@ -1631,8 +1732,11 @@ fn excludes(ty: &InferredType, hierarchy: &crate::semantic_analysis::ClassHierar
 /// row of [`crate::state_threading_selectors::LOOKUP_SHAPES`]), in source
 /// order, or `None` for any other send.
 ///
-/// The lowering needs every handler position to hold a block literal that takes
-/// no parameters (the handler of `at:ifAbsent:` is called with none), every
+/// The lowering needs every handler position to hold a block literal taking
+/// the parameters the primitive calls it with (the row's
+/// [`block_params`](crate::state_threading_selectors::LookupShape::block_params):
+/// none for an absent handler, the found value for an `at:ifPresent:`
+/// handler, which the lowering binds to the parameter), every
 /// other argument to be an ordinary value (a block literal there is a key that
 /// is a block value, not a handler), and a receiver that is not itself a block
 /// literal. Anything else keeps the closure lowering, which the §6 check
@@ -1655,14 +1759,18 @@ pub fn lookup_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     else {
         return None;
     };
-    let handler_is_arm = |i: usize| matches!(arguments.get(i), Some(Expression::Block(b)) if b.parameters.is_empty());
+    let handler_is_arm = |i: usize, params: usize| matches!(arguments.get(i), Some(Expression::Block(b)) if b.parameters.len() == params);
     let values_are_not_blocks = arguments
         .iter()
         .enumerate()
         .all(|(i, a)| shape.block_args.contains(&i) || !matches!(a, Expression::Block(_)));
     (!matches!(receiver.as_ref(), Expression::Block(_))
         && values_are_not_blocks
-        && shape.block_args.iter().all(|&i| handler_is_arm(i)))
+        && shape
+            .block_args
+            .iter()
+            .zip(shape.block_params)
+            .all(|(&i, &params)| handler_is_arm(i, params)))
     .then_some(construct.blocks)
 }
 

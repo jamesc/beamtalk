@@ -303,6 +303,27 @@ fn lookup_programs() -> Vec<String> {
             "#{#a => 1} at: #j ifAbsent: [{s}. 0]",
             "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
         ),
+        // BT-3824: the present handler binds the found value.
+        (
+            "{s}",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5])",
+        ),
+        (
+            "{s}",
+            "r := t + (#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "(u < 3) ifTrue: [{s}]",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5] ifAbsent: [0])",
+        ),
+        (
+            "#{#a => 1} at: #a ifPresent: [:w | {s}. w]",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "#{#a => 1} at: #j ifPresent: [:w | w] ifAbsent: [{s}. 0]",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5])",
+        ),
     ] {
         let body = format!(
             "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
@@ -373,40 +394,27 @@ fn a_lookup_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
 /// The §1a probe shape with a conditional as the right operand, at the method
 /// root and as a statement of each loop or fold frame.
 fn conditional_programs() -> Vec<String> {
-    let mut out = Vec::new();
-    for (frame, stmt) in [
-        (
-            "{s}",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "1 to: 2 do: [:i | {s}]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "#(1, 2) do: [:i | {s}]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "#(1, 2) collect: [:i | {s}. i]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "#(1, 2) inject: 0 into: [:a :i | {s}. a + i]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "[u < 2] whileTrue: [u := u + 1. {s}]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
-        (
-            "#(1, 2) do: [:i | 1 to: 2 do: [:j | {s}]]",
-            "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])",
-        ),
+    let operand = "r := t + ((u < 3) ifTrue: [t := t + 1. 5] ifFalse: [6])";
+    frame_programs(&[
+        ("{s}", operand),
+        ("1 to: 2 do: [:i | {s}]", operand),
+        ("#(1, 2) do: [:i | {s}]", operand),
+        ("#(1, 2) collect: [:i | {s}. i]", operand),
+        ("#(1, 2) inject: 0 into: [:a :i | {s}. a + i]", operand),
+        ("[u < 2] whileTrue: [u := u + 1. {s}]", operand),
+        ("#(1, 2) do: [:i | 1 to: 2 do: [:j | {s}]]", operand),
         // A statement-position conditional in each frame mode.
         ("1 to: 2 do: [:i | {s}]", "(u < 3) ifTrue: [t := t + 1]"),
         ("#(1, 2) do: [:i | {s}]", "(u < 3) ifTrue: [t := t + 1]"),
-    ] {
+    ])
+}
+
+/// The class, value-type and actor program of each `(frame, statement)` case:
+/// `statement` replaces `{s}` in `frame`, between a `t := 0` prelude and a
+/// read of `t`.
+fn frame_programs(cases: &[(&str, &str)]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (frame, stmt) in cases {
         let body = format!(
             "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",
             frame.replace("{s}", stmt)
@@ -430,8 +438,12 @@ fn conditional_programs() -> Vec<String> {
 }
 
 fn assert_conditional_reports(fault: LocalRebindFault, error: &str) {
-    for src in conditional_programs() {
-        let Some(report) = verifier_report(&src, fault) else {
+    assert_frame_reports(&conditional_programs(), fault, error);
+}
+
+fn assert_frame_reports(programs: &[String], fault: LocalRebindFault, error: &str) {
+    for src in programs {
+        let Some(report) = verifier_report(src, fault) else {
             // A statement-position conditional has no sibling read to
             // snapshot: the fault only applies to the operand probes.
             assert!(
@@ -474,4 +486,68 @@ fn a_conditional_construct_tuple_without_its_rebind_is_threaded_local_dropped() 
 #[test]
 fn a_conditional_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
     assert_conditional_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+}
+
+// ---------------------------------------------------------------------------
+// BT-3841: an evaluated literal block (`[...] value`) is the degenerate
+// conditional: its one arm is a `BranchArm` frame that always runs, and the
+// enclosing frame lowers the construct's `LocalRebind`s.
+// ---------------------------------------------------------------------------
+
+/// The §1a probe shape with an evaluated block as the right operand, at the
+/// method root and as a statement of each loop or fold frame, and the
+/// statement form in an arm.
+fn evaluated_block_programs() -> Vec<String> {
+    let operand = "r := t + ([t := t + 1. 5] value)";
+    frame_programs(&[
+        ("{s}", operand),
+        ("1 to: 2 do: [:i | {s}]", operand),
+        ("#(1, 2) do: [:i | {s}]", operand),
+        ("#(1, 2) collect: [:i | {s}. i]", operand),
+        ("#(1, 2) inject: 0 into: [:a :i | {s}. a + i]", operand),
+        ("[u < 2] whileTrue: [u := u + 1. {s}]", operand),
+        ("{s}", "[t := t + 1] value"),
+        ("1 to: 2 do: [:i | {s}]", "[t := t + 1] value"),
+        ("#(1, 2) do: [:i | {s}]", "[t := t + 1] value"),
+        ("(u < 3) ifTrue: [{s}]", "[t := t + 1] value"),
+        ("[{s}] value", "[t := t + 1] value"),
+    ])
+}
+
+#[test]
+fn the_unbroken_evaluated_block_producer_compiles_in_every_frame() {
+    for src in evaluated_block_programs() {
+        let code = codegen(&src);
+        assert!(
+            code.contains("'__local__t'") || code.contains("Tmp"),
+            "{src}\n{code}"
+        );
+    }
+}
+
+#[test]
+fn an_evaluated_block_sibling_read_in_place_is_local_read_after_sibling_rebind() {
+    assert_frame_reports(
+        &evaluated_block_programs(),
+        LocalRebindFault::SkipSiblingSnapshot,
+        "LocalReadAfterSiblingRebind",
+    );
+}
+
+#[test]
+fn an_evaluated_block_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
+    assert_frame_reports(
+        &evaluated_block_programs(),
+        LocalRebindFault::DropRebind,
+        "ThreadedLocalDropped",
+    );
+}
+
+#[test]
+fn an_evaluated_block_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
+    assert_frame_reports(
+        &evaluated_block_programs(),
+        LocalRebindFault::WrongFrame,
+        "LocalRebindFrameMismatch",
+    );
 }

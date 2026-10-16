@@ -723,7 +723,7 @@ impl CoreErlangGenerator {
     /// fold body (`is_loop_body_producer_site`).
     pub(super) fn conditional_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
-            conditional_arm_blocks, conditional_arms_lower_as_producer,
+            conditional_arm_blocks, conditional_arms_lower_as_producer, literal_block_value_arm,
         };
         if self.is_repl_mode() {
             // The REPL root threads its bindings map: a conditional at an
@@ -731,6 +731,12 @@ impl CoreErlangGenerator {
             // map whole (`lower_repl_construct_tuple`), threading no local of
             // its own, exactly as a REPL loop or fold is.
             conditional_arm_blocks(expr)?;
+            // BT-3841: an evaluated literal block is a producer in a method
+            // only; the REPL lowers `[...] value` itself (the Phase 0 check
+            // agrees, `check_construct`).
+            if literal_block_value_arm(expr).is_some() {
+                return None;
+            }
             // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
             // only; the REPL keeps the §6 rejection (the Phase 0 check agrees).
             if beamtalk_core::semantic_analysis::block_facts::lookup_arm_blocks(expr).is_some() {
@@ -745,8 +751,34 @@ impl CoreErlangGenerator {
         }) {
             return None;
         }
-        let set = self.threaded_locals_of(expr)?;
+        // BT-3841: an evaluated literal block (`[...] value`) packs its one arm
+        // like a conditional does. `threaded_locals_of` leaves the construct's
+        // `lowered` set empty (the legacy inline-block path unpacks its own
+        // tuple), so the producer reads the set off the arm directly.
+        let set = if literal_block_value_arm(expr).is_some() {
+            self.block_value_threaded_locals(&arms)?
+        } else {
+            self.threaded_locals_of(expr)?
+        };
         (set.lowered == set.names).then_some(set.lowered)
+    }
+
+    /// BT-3841: whether `expr` (paren-unwrapped) is an evaluated literal block
+    /// (`[...] value`, [`literal_block_value_arm`]) that
+    /// [`Self::threaded_expression`] lowers as a local-threading producer in the
+    /// frame being lowered ([`Self::is_producer_frame_for`]: a method root, a
+    /// registered `BranchArm` frame, or a producer site of a loop or fold body),
+    /// outside the REPL. The one predicate behind the statement classifiers
+    /// (`control_flow_has_mutations`, `is_tier2_value_call`), the prelude probe
+    /// and [`Self::inline_producer_construct`], so none of them can send a
+    /// producer to the legacy Tier 2 inline path or the other way round.
+    pub(super) fn block_value_producer_in_frame(&self, expr: &Expression) -> bool {
+        let inner = expr.unwrap_parens();
+        !self.is_repl_mode()
+            && beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(inner)
+                .is_some()
+            && self.is_producer_frame_for(self.current_frame(), inner)
+            && self.conditional_producer_locals(inner).is_some()
     }
 
     /// The kind of method body being lowered, `None` outside a class,
@@ -852,7 +884,9 @@ impl CoreErlangGenerator {
     /// `expression_doc` then answers the already-unwrapped value, not a
     /// `{Value, State}` tuple.
     pub(super) fn inline_producer_construct(&self, expr: &Expression) -> bool {
-        self.inline_control_flow_needs_threading(expr) || self.exception_producer_in_frame(expr)
+        self.inline_control_flow_needs_threading(expr)
+            || self.exception_producer_in_frame(expr)
+            || self.block_value_producer_in_frame(expr)
     }
 
     /// The outer locals the threading construct `expr` (paren-unwrapped)
@@ -873,6 +907,10 @@ impl CoreErlangGenerator {
                 self.in_actor_instance_context()
                     && self.control_flow_has_mutations(expr)
                     && !self.inline_control_flow_needs_threading(expr)
+                    // BT-3841: an evaluated literal block is lowered as a
+                    // conditional (its own prelude and rebinds), never as a
+                    // construct tuple.
+                    && !self.block_value_producer_in_frame(expr)
             };
         yields_tuple.then(|| {
             self.threaded_locals_of(expr)

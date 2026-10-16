@@ -1,18 +1,19 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Dictionary` lookups (`at:ifAbsent:`) whose handler writes an outer local,
-//! as local-threading producers.
+//! `Dictionary` lookups (`at:ifAbsent:`, `at:ifPresent:`,
+//! `at:ifPresent:ifAbsent:`) whose handler writes an outer local, as
+//! local-threading producers.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ADR 0131 Phase 2d (BT-3798). `r := d at: #k ifAbsent: [t := t + 1. 0]`
+//! ADR 0131 Phase 2d (BT-3798, BT-3824). `r := d at: #k ifAbsent: [t := t + 1. 0]`
 //! cannot hand the handler to the runtime as a closure: the handler is Tier 2
 //! (it takes and returns the `StateAcc` carrying `t`), and the primitive calls
-//! it with arity 0. The receiver type is unknown at compile time too: the
+//! it with its own arity. The receiver type is unknown at compile time too: the
 //! selector is implemented by the `Dictionary` primitive, by stdlib methods
-//! that call `block value` themselves (`Ets at:ifAbsent:`) and by any user
-//! class, and an inline lowering is only valid for the first.
+//! that call `block value` themselves (`Ets at:ifAbsent:`, `Ets at:ifPresent:`)
+//! and by any user class, and an inline lowering is only valid for the first.
 //!
 //! So the send is lowered like a conditional whose condition is a runtime
 //! receiver guard (`beamtalk_map:lookup_for_threading/3`): a `Dictionary`
@@ -25,20 +26,35 @@
 //! let Recv = <receiver> in
 //! let Key = <key> in
 //! let SeededState = <the construct's own locals> in
-//! case call 'beamtalk_map':'lookup_for_threading'(Recv, 'at:ifAbsent:', Key) of
-//!   <{'ok', Found}> when 'true' -> {Found, SeededState}
-//!   <_> when 'true' -> let StateAcc = SeededState in <handler arm>   % {Value, StateAcc'}
+//! case call 'beamtalk_map':'lookup_for_threading'(Recv, <selector>, Key) of
+//!   <{'ok', Found}> when 'true' -> <found arm>
+//!   <_> when 'true' -> <absent arm>
 //! end
 //! ```
+//!
+//! Each arm is the row's handler for that case, run as
+//! `let StateAcc = SeededState in <handler arm>` (`{Value, StateAcc'}`), or,
+//! when the selector has no handler for it, what the primitive answers there:
+//!
+//! | selector | found arm | absent arm |
+//! |---|---|---|
+//! | `at:ifAbsent:` | `{Found, SeededState}` | the handler |
+//! | `at:ifPresent:` | the handler, its parameter bound to `Found` | `{'nil', SeededState}` |
+//! | `at:ifPresent:ifAbsent:` | the present handler, its parameter bound to `Found` | the absent handler |
+//!
+//! A handler is the found arm exactly when the row's
+//! [`block_params`](beamtalk_core::state_threading_selectors::LookupShape::block_params)
+//! give it one parameter (the found value); `lookup_arm_blocks` admits a
+//! handler only with that parameter count.
 //!
 //! A receiver statically known not to be a `Dictionary` never gets here: the
 //! Phase 0 check keeps its §6 error (`receiver_statically_not_dictionary`
 //! in core), so the guard serves receivers whose class is not known.
 //!
-//! The result tuple, the handler's `BranchArm` frame and the `LocalRebind`s
+//! The result tuple, the handlers' `BranchArm` frames and the `LocalRebind`s
 //! that bring the threaded locals back are the conditional producer's
 //! (`conditional_tuple_to_threaded_value`): core's `conditional_arm_blocks`
-//! names the handler as the lookup's arm, so the Phase 0 check and this
+//! names the handlers as the lookup's arms, so the Phase 0 check and this
 //! lowering read the same rule.
 
 use super::super::threaded_expr::ProducerTail;
@@ -52,6 +68,14 @@ use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::lookup_arm_blocks;
 use beamtalk_core::state_threading_selectors::lookup_shape;
 
+/// The handlers of an inline lookup, by the case they run in.
+struct LookupArms<'a> {
+    /// Runs with the found value bound to its parameter.
+    found: Option<&'a Block>,
+    /// Runs when the key is missing.
+    absent: Option<&'a Block>,
+}
+
 impl CoreErlangGenerator {
     /// The producer lowering of the lookup send `expr` (paren-unwrapped), or
     /// `Ok(None)` when it is not one core's `lookup_arm_blocks` names. The
@@ -63,7 +87,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
         tail: ProducerTail,
     ) -> Result<Option<ThreadedValue>> {
-        let Some(arms) = lookup_arm_blocks(expr) else {
+        let Some(handlers) = lookup_arm_blocks(expr) else {
             return Ok(None);
         };
         let Expression::MessageSend {
@@ -79,24 +103,38 @@ impl CoreErlangGenerator {
         let Some(shape) = lookup_shape(&selector) else {
             return Ok(None);
         };
-        // Every `dictionary_inline` row has its own result shape; today's only
-        // one is `at:ifAbsent:` (the key, then the absent handler).
         let keys: Vec<&Expression> = arguments
             .iter()
             .enumerate()
             .filter(|(i, _)| !shape.block_args.contains(i))
             .map(|(_, a)| a)
             .collect();
-        let (&[1], [handler], [key]) = (shape.block_args, arms.as_slice(), keys.as_slice()) else {
+        // Each handler (source order, parallel to `block_params`) is the found
+        // arm when it takes the found value, else the absent arm.
+        let mut arms = LookupArms {
+            found: None,
+            absent: None,
+        };
+        let mut well_formed = handlers.len() == shape.block_params.len();
+        for (&handler, &params) in handlers.iter().zip(shape.block_params) {
+            let slot = if params == 1 {
+                &mut arms.found
+            } else {
+                &mut arms.absent
+            };
+            well_formed &= params <= 1 && slot.replace(handler).is_none();
+        }
+        let ([key], true) = (keys.as_slice(), well_formed) else {
             return Err(CodeGenError::Internal(format!(
                 "lookup `{selector}` has no inline lowering (ADR 0131 Phase 2d)"
             )));
         };
-        let span = handler.span;
+        let span = handlers[0].span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let tuple_doc = self.generate_lookup_tuple(receiver, &selector, key, handler, scratch)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[handler], tail, true)
+        let tuple_doc =
+            self.generate_lookup_tuple(receiver, &selector, key, &arms, &handlers, scratch)?;
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)
             .map(Some)
     }
 
@@ -107,7 +145,8 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &str,
         key: &Expression,
-        handler: &Block,
+        arms: &LookupArms<'_>,
+        handlers: &[&Block],
         scratch: ScratchStart,
     ) -> Result<Document<'static>> {
         let frame = self.current_frame();
@@ -123,13 +162,26 @@ impl CoreErlangGenerator {
         let key_var = self.fresh_temp_var("LookupKey");
         let found_var = self.fresh_temp_var("LookupFound");
         let outer_state = self.current_state_var();
-        // Seed the construct's own locals so the handler arm, the found path
-        // and the post-lookup extraction all see every `__local__` key.
-        let (seed_doc, base_state) = self.seed_scratch_locals(&[handler], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[handler], true);
-        let (handler_doc, _final) =
-            self.with_branch_context(|this| this.conditional_arm(handler, arm_frame.as_ref()))?;
-        let found_arm = self.conditional_baseline_tuple(leaf::var(found_var.clone()), &base_state);
+        // Seed the construct's own locals so every handler arm, the
+        // handler-less path and the post-lookup extraction all see every
+        // `__local__` key.
+        let (seed_doc, base_state) = self.seed_scratch_locals(handlers, scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(handlers, true);
+        let found_arm = match arms.found {
+            Some(handler) => self.conditional_arm_clause(
+                handler,
+                Some(&found_var),
+                arm_frame.as_ref(),
+                &base_state,
+            )?,
+            None => self.conditional_baseline_tuple(leaf::var(found_var.clone()), &base_state),
+        };
+        let absent_arm = match arms.absent {
+            Some(handler) => {
+                self.conditional_arm_clause(handler, None, arm_frame.as_ref(), &base_state)?
+            }
+            None => self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state),
+        };
         Ok(docvec![
             recv_preamble,
             "let ",
@@ -154,10 +206,8 @@ impl CoreErlangGenerator {
             leaf::var(found_var),
             "}> when 'true' -> ",
             found_arm,
-            " <_> when 'true' -> let StateAcc = ",
-            leaf::var(base_state),
-            " in ",
-            handler_doc,
+            " <_> when 'true' -> ",
+            absent_arm,
             " end",
         ])
     }

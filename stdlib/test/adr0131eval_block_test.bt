@@ -1,0 +1,107 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3841 (ADR 0131): an evaluated literal block (`[...] value`) that writes an
+// outer local is an arm-like local-threading producer: the block is a
+// `BranchArm` frame that always runs, so its writes come back through the
+// enclosing frame's `LocalRebind`s wherever the send sits (statement, last
+// expression, an assignment's value, an operand, an arm, a protected body, a
+// handler, a loop or fold body, another evaluated block). The receiver is a
+// block literal, so no other class's `value` can run. The methods under test
+// are in stdlib/test/fixtures/adr0131eval_block_{class,value,actor}.bt; the
+// expected answers are the assertions below.
+
+TestCase subclass: Adr0131EvalBlockTest
+
+  testStA =>
+    self assert: #[Adr0131EvalBlockClass stA, (Adr0131EvalBlockValue new) stA, (Adr0131EvalBlockActor spawn) stA] equals: #[1, 1, 1]
+
+  testStSeq =>
+    self assert: #[Adr0131EvalBlockClass stSeq, (Adr0131EvalBlockValue new) stSeq, (Adr0131EvalBlockActor spawn) stSeq] equals: #[11, 11, 11]
+
+  testLast =>
+    self assert: #[Adr0131EvalBlockClass last, (Adr0131EvalBlockValue new) last, (Adr0131EvalBlockActor spawn) last] equals: #[1, 1, 1]
+
+  testAssign =>
+    self assert: #[Adr0131EvalBlockClass assign, (Adr0131EvalBlockValue new) assign, (Adr0131EvalBlockActor spawn) assign] equals: #[#[7, 5], #[7, 5], #[7, 5]]
+
+  testOperand =>
+    self assert: #[Adr0131EvalBlockClass operand, (Adr0131EvalBlockValue new) operand, (Adr0131EvalBlockActor spawn) operand] equals: #[#[5, 1], #[5, 1], #[5, 1]]
+
+  testArm =>
+    self assert: #[Adr0131EvalBlockClass arm, (Adr0131EvalBlockValue new) arm, (Adr0131EvalBlockActor spawn) arm] equals: #[1, 1, 1]
+
+  testArmNotTaken =>
+    self assert: #[Adr0131EvalBlockClass armNotTaken, (Adr0131EvalBlockValue new) armNotTaken, (Adr0131EvalBlockActor spawn) armNotTaken] equals: #[0, 0, 0]
+
+  testNested =>
+    self assert: #[Adr0131EvalBlockClass nested, (Adr0131EvalBlockValue new) nested, (Adr0131EvalBlockActor spawn) nested] equals: #[11, 11, 11]
+
+  testTwoLocals =>
+    self assert: #[Adr0131EvalBlockClass twoLocals, (Adr0131EvalBlockValue new) twoLocals, (Adr0131EvalBlockActor spawn) twoLocals] equals: #[#[1, 2], #[1, 2], #[1, 2]]
+
+  testBlockLocal =>
+    self assert: #[Adr0131EvalBlockClass blockLocal, (Adr0131EvalBlockValue new) blockLocal, (Adr0131EvalBlockActor spawn) blockLocal] equals: #[5, 5, 5]
+
+  testInDo =>
+    self assert: #[Adr0131EvalBlockClass inDo, (Adr0131EvalBlockValue new) inDo, (Adr0131EvalBlockActor spawn) inDo] equals: #[6, 6, 6]
+
+  testInDoArm =>
+    self assert: #[Adr0131EvalBlockClass inDoArm, (Adr0131EvalBlockValue new) inDoArm, (Adr0131EvalBlockActor spawn) inDoArm] equals: #[5, 5, 5]
+
+  testInToDo =>
+    self assert: #[Adr0131EvalBlockClass inToDo, (Adr0131EvalBlockValue new) inToDo, (Adr0131EvalBlockActor spawn) inToDo] equals: #[6, 6, 6]
+
+  testInWhile =>
+    self assert: #[Adr0131EvalBlockClass inWhile, (Adr0131EvalBlockValue new) inWhile, (Adr0131EvalBlockActor spawn) inWhile] equals: #[6, 6, 6]
+
+  testInTimes =>
+    self assert: #[Adr0131EvalBlockClass inTimes, (Adr0131EvalBlockValue new) inTimes, (Adr0131EvalBlockActor spawn) inTimes] equals: #[3, 3, 3]
+
+  testInCollect =>
+    self assert: #[Adr0131EvalBlockClass inCollect, (Adr0131EvalBlockValue new) inCollect, (Adr0131EvalBlockActor spawn) inCollect] equals: #[306, 306, 306]
+
+  testInHandler =>
+    self assert: #[Adr0131EvalBlockClass inHandler, (Adr0131EvalBlockValue new) inHandler, (Adr0131EvalBlockActor spawn) inHandler] equals: #[100, 100, 100]
+
+  testInProtected =>
+    self assert: #[Adr0131EvalBlockClass inProtected, (Adr0131EvalBlockValue new) inProtected, (Adr0131EvalBlockActor spawn) inProtected] equals: #[1, 1, 1]
+
+  testInProtectedRaise =>
+    self assert: #[Adr0131EvalBlockClass inProtectedRaise, (Adr0131EvalBlockValue new) inProtectedRaise, (Adr0131EvalBlockActor spawn) inProtectedRaise] equals: #[0, 0, 0]
+
+  testInEnsure =>
+    self assert: #[Adr0131EvalBlockClass inEnsure, (Adr0131EvalBlockValue new) inEnsure, (Adr0131EvalBlockActor spawn) inEnsure] equals: #[11, 11, 11]
+
+  testArmDoProt =>
+    self assert: #[Adr0131EvalBlockClass armDoProt, (Adr0131EvalBlockValue new) armDoProt, (Adr0131EvalBlockActor spawn) armDoProt] equals: #[3, 3, 3]
+
+  testDoDoArm =>
+    self assert: #[Adr0131EvalBlockClass doDoArm, (Adr0131EvalBlockValue new) doDoArm, (Adr0131EvalBlockActor spawn) doDoArm] equals: #[4, 4, 4]
+
+  testLoopInValue =>
+    self assert: #[Adr0131EvalBlockClass loopInValue, (Adr0131EvalBlockValue new) loopInValue, (Adr0131EvalBlockActor spawn) loopInValue] equals: #[6, 6, 6]
+
+  testCondInValue =>
+    self assert: #[Adr0131EvalBlockClass condInValue, (Adr0131EvalBlockValue new) condInValue, (Adr0131EvalBlockActor spawn) condInValue] equals: #[1, 1, 1]
+
+  testInjectInValue =>
+    self assert: #[Adr0131EvalBlockClass injectInValue, (Adr0131EvalBlockValue new) injectInValue, (Adr0131EvalBlockActor spawn) injectInValue] equals: #[#[6, 3], #[6, 3], #[6, 3]]
+
+  testEarlyReturn =>
+    self assert: #[Adr0131EvalBlockClass earlyReturn, (Adr0131EvalBlockValue new) earlyReturn, (Adr0131EvalBlockActor spawn) earlyReturn] equals: #[1, 1, 1]
+
+  testValueInValueInArm =>
+    self assert: #[Adr0131EvalBlockClass valueInValueInArm, (Adr0131EvalBlockValue new) valueInValueInArm, (Adr0131EvalBlockActor spawn) valueInValueInArm] equals: #[3, 3, 3]
+
+  testNilArm =>
+    self assert: #[Adr0131EvalBlockClass nilArm, (Adr0131EvalBlockValue new) nilArm, (Adr0131EvalBlockActor spawn) nilArm] equals: #[1, 1, 1]
+
+  testAndArm =>
+    self assert: #[Adr0131EvalBlockClass andArm, (Adr0131EvalBlockValue new) andArm, (Adr0131EvalBlockActor spawn) andArm] equals: #[#[true, 1], #[true, 1], #[true, 1]]
+
+  testFieldMix =>
+    self assert: #[Adr0131EvalBlockClass fieldMix, (Adr0131EvalBlockActor spawn) fieldMix] equals: #[#[1, 1], #[1, 1]]
+
+  testFieldInDo =>
+    self assert: #[Adr0131EvalBlockClass fieldInDo, (Adr0131EvalBlockActor spawn) fieldInDo] equals: #[#[3, 2], #[3, 2]]

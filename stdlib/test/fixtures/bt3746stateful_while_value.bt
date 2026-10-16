@@ -26,3 +26,27 @@ Value subclass: Bt3746StatefulWhileValue
       self check: t
     ] whileTrue: [nil]
     t
+
+  // BT-3845: the other accepted shapes — `whileFalse:`, and a body that
+  // writes a local and sends to `self` alongside the stateful condition.
+  runWhileFalse =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      (self check: t) not
+    ] whileFalse: [u := u + 1]
+    #[t, u]
+
+  runSelfSendBody =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self check: t
+    ]
+      whileTrue: [
+        u := u + 1
+        self check: u
+      ]
+    #[t, u]

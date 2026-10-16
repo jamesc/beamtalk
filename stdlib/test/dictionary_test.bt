@@ -45,6 +45,48 @@ TestCase subclass: DictionaryTest
     self assert: (#{#a => 1} at: #a ifAbsent: [42]) equals: 1
     self assert: (#{#a => 1} at: #b ifAbsent: [42]) equals: 42
 
+  testAtIfPresent =>
+    self assert: (#{#a => 1} at: #a ifPresent: [:v | v * 10]) equals: 10
+    self assert: (#{#a => 1} at: #b ifPresent: [:v | v * 10]) equals: nil
+    self assert: (#{} at: #a ifPresent: [:v | v * 10]) equals: nil
+
+  testAtIfPresentStoredNilIsPresent =>
+    self assert: (#{#a => nil} at: #a ifPresent: [:v | #[v]]) equals: #[nil]
+
+  testAtIfPresentIfAbsent =>
+    self
+      assert: (#{#a => 1}
+        at: #a
+        ifPresent: [:v | v * 10]
+        ifAbsent: [0])
+      equals: 10
+    self
+      assert: (#{#a => 1}
+        at: #b
+        ifPresent: [:v | v * 10]
+        ifAbsent: [0])
+      equals: 0
+    self
+      assert: (#{#a => nil}
+        at: #a
+        ifPresent: [:v | #[v]]
+        ifAbsent: [0])
+      equals: #[nil]
+
+  testAtIfPresentRunsOnlyOneBlock =>
+    self
+      assert: (#{#a => 1}
+        at: #a
+        ifPresent: [:v | v]
+        ifAbsent: [self error: "absent ran"])
+      equals: 1
+    self
+      assert: (#{#a => 1}
+        at: #b
+        ifPresent: [:v | self error: "present ran"]
+        ifAbsent: [2])
+      equals: 2
+
   testIncludeskey =>
     self assert: (#{#a => 1, #b => 2} includesKey: #a)
     self deny: (#{#a => 1, #b => 2} includesKey: #c)

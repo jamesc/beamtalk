@@ -31,6 +31,39 @@ at_if_absent_block_not_called_when_present_test() ->
     ).
 
 %%% ============================================================================
+%%% at_if_present/3 and at_if_present_if_absent/4 (BT-3824)
+%%% ============================================================================
+
+at_if_present_found_test() ->
+    ?assertEqual(10, beamtalk_map:at_if_present(#{a => 1}, a, fun(V) -> V * 10 end)).
+
+at_if_present_missing_test() ->
+    ?assertEqual(
+        nil, beamtalk_map:at_if_present(#{a => 1}, b, fun(_) -> error(should_not_be_called) end)
+    ).
+
+at_if_present_stored_nil_is_present_test() ->
+    ?assertEqual(
+        {got, nil}, beamtalk_map:at_if_present(#{a => nil}, a, fun(V) -> {got, V} end)
+    ).
+
+at_if_present_if_absent_found_test() ->
+    ?assertEqual(
+        10,
+        beamtalk_map:at_if_present_if_absent(
+            #{a => 1}, a, fun(V) -> V * 10 end, fun() -> error(should_not_be_called) end
+        )
+    ).
+
+at_if_present_if_absent_missing_test() ->
+    ?assertEqual(
+        99,
+        beamtalk_map:at_if_present_if_absent(
+            #{a => 1}, b, fun(_) -> error(should_not_be_called) end, fun() -> 99 end
+        )
+    ).
+
+%%% ============================================================================
 %%% lookup_for_threading/3 (ADR 0131 Phase 2d, BT-3798)
 %%% ============================================================================
 
@@ -188,6 +221,26 @@ dictionary_at_if_absent_test() ->
     ),
     ?assertEqual(
         99, 'bt@stdlib@dictionary':dispatch('at:ifAbsent:', [b, fun() -> 99 end], #{a => 1})
+    ).
+
+dictionary_at_if_present_test() ->
+    ?assertEqual(
+        2, 'bt@stdlib@dictionary':dispatch('at:ifPresent:', [a, fun(V) -> V + 1 end], #{a => 1})
+    ),
+    ?assertEqual(
+        nil, 'bt@stdlib@dictionary':dispatch('at:ifPresent:', [b, fun(V) -> V + 1 end], #{a => 1})
+    ).
+
+dictionary_at_if_present_if_absent_test() ->
+    Present = fun(V) -> V + 1 end,
+    Absent = fun() -> 99 end,
+    ?assertEqual(
+        2,
+        'bt@stdlib@dictionary':dispatch('at:ifPresent:ifAbsent:', [a, Present, Absent], #{a => 1})
+    ),
+    ?assertEqual(
+        99,
+        'bt@stdlib@dictionary':dispatch('at:ifPresent:ifAbsent:', [b, Present, Absent], #{a => 1})
     ).
 
 dictionary_includes_key_test() ->

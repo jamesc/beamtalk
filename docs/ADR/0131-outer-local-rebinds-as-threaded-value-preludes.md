@@ -40,9 +40,9 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823): REPL and `match:` leftovers.** An arm or loop nested inside a REPL `on:do:`/`Result tryDo:` is still a compile error (the o7/o8 REPL pins), because REPL arms are not frames. A `match:` arm that writes an outer local is a compile error rather than `match:` being a producer (the REPL is exempt from that error and unprobed).
 5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
 6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
-7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)**: `Dictionary` does not define `at:ifPresent:`/`at:ifPresent:ifAbsent:` yet, so those handlers are not producers. `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors by decision, since an immutable `Dictionary` has no such behaviour. `Dictionary at:ifAbsent:` is the only lookup producer, and only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
+7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)** (done): `Dictionary` defines `at:ifPresent:`/`at:ifPresent:ifAbsent:`, and their handlers are producers like `at:ifAbsent:` (the present handler's parameter is bound to the found value). `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors permanently by decision, since an immutable `Dictionary` has no such behaviour. The three `Dictionary` lookups are producers only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
 8. **[BT-3835](https://linear.app/beamtalk/issue/BT-3835)**: a conditional producer's `LocalRebind` in a `StateAcc` fold frame emits a redundant identity `MapPut`.
-9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)**: a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panics the debug verifier with `StateAccLoopWithoutLocals`.
+9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)** (Done): a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panicked the debug verifier with `StateAccLoopWithoutLocals`. A loop or fold that carries nothing now lowers as a plain loop (§2, BT-3834 amendment).
 10. **[BT-3842](https://linear.app/beamtalk/issue/BT-3842)**: Phase 5a review nits (a shared block-scope helper for `arms_lower_as_producer` and `OuterWriteWalker`; a non-`Result` `tryDo:` falls through to a generic internal error).
 
 Two scope notes. `Result tryDo:` is a producer only for a literal `Result` receiver; any other receiver keeps its dynamic send and a writing block is a compile error (§5 implementation note). The `MethodBody` IR node has no production builder: it exists, is verified and rendered, but the non-REPL method root is still the implicit frame (`RebindFrame::implicit_root`) and the REPL root does not construct one either.
@@ -275,11 +275,15 @@ accepts and never sees the rejected programs). The lookups are rows of ONE table
 `beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen
 through `conditional_arm_blocks`; a row is `dictionary_inline` only when
 `Dictionary` implements the selector (a test pins that against the class
-hierarchy). `Dictionary` implements `at:ifAbsent:` only, so
-`at:ifAbsentPut:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:` and
-`removeKey:ifAbsent:` stay §6 errors until `Dictionary` gains them (they have
-no behaviour to lower); each then needs its own result shape and its flag
-flipped. The REPL keeps the §6 error, and a lookup in a loop or fold body is
+hierarchy). `Dictionary` implements `at:ifAbsent:` and, since BT-3824,
+`at:ifPresent:` and `at:ifPresent:ifAbsent:`: each row records its handlers'
+parameter counts (`block_params`), and the lowering runs a one-parameter
+handler in the found arm with the parameter bound to the found value and a
+parameterless one in the absent arm, answering what the primitive answers
+for a missing handler (the found value, or `nil`). `at:ifAbsentPut:` and
+`removeKey:ifAbsent:` stay §6 errors permanently: they assume a mutable
+dictionary, which `Dictionary` is not, so it will not define them (users
+write `at:ifAbsent:` then `at:put:`) and they have no behaviour to lower. The REPL keeps the §6 error, and a lookup in a loop or fold body is
 not a producer (it lowers at the method root and in `BranchArm` frames, like a
 conditional).
 
@@ -499,6 +503,36 @@ fire for conditionals in every loop and fold frame mode by
 (`local_producer_agreement_conditional.rs`) compare the core rule and codegen
 both ways for conditionals in every loop and fold frame, including the
 conditionals that are not producers.
+
+**BT-3834 amendment: a loop or fold that carries nothing is not a `StateAcc`
+loop.** The gate that sends a loop or fold to its threading lowering (a
+`ThreadingPlan`) was the mutation analysis of its body
+(`block_arg_needs_threading`) or a non-empty threaded set. The analysis is a
+heuristic; when it said "threads" and the threaded set was empty (a write to a
+local of an arm, an `ensure:` or an `on:do:` block nested in the body that it
+misread as an outer write: BT-3834, BT-3848), the plan fell back to `StateAcc`
+with no locals, seeded from the ambient `State`, which a class method or a
+value-type method writing no field does not have. The invariant, per scope kind:
+a loop or fold whose threaded set is empty selects a `StateAcc` plan only when
+the scope has a carrier to seed it with: the actor `State` (actor instance
+method), the REPL bindings, or a family the body threads (`SelfVt` in a
+value-type method that writes a field). In a class method or a value-type
+method writing no field it lowers as a plain loop. This holds for every
+`Letrec` loop (`timesRepeat:`, `to:do:`, `to:by:do:`, `whileTrue:`/
+`whileFalse:`) and every `Foldl` loop (`do:`, `collect:`, `inject:into:`, the
+search and keyed folds, `eachWithIndex:`/`do:separatedBy:`), whatever encloses
+it (a method body, a conditional arm, an `on:do:`/`ensure:` block, another loop
+body). One predicate decides it (`loop_body_has_carried_mutations`, with
+`loop_body_needs_threading` adding the threaded set for the counted loops and
+folds), read by every loop and fold gate and by the statement classifier
+(`control_flow_has_mutations`) for a loop or fold's block arguments, so the
+lowering and the caller that unpacks it cannot disagree. Conditional arms and
+exception blocks keep `block_arg_needs_threading`. The verifier check is the
+existing `ActorStateInClassMethod { StateAccLoopWithoutLocals }`; the
+class-variable corpus gains the `block_local` shape (a block-introduced local
+rebound inside a loop nested in that block), which with `local_touch` off
+reproduces both the BT-3834 and the BT-3848 panics on the pre-BT-3848 analysis
+without this gate and none with it.
 
 ### 3. Families are taken from context, not hard-coded
 
@@ -946,25 +980,54 @@ reproducible and every PR moves it:
   accepted), `adr0131_phase0_operand_positions_are_sound` the soundness
   direction for the operand matrix.
 
-Statement cells that do not answer right (after BT-3841 PR 5: 443, of which 21 are cells of the plain-`detect:` kind added to the matrix there; 422 after PR 4; 520 after PR
+Statement cells that do not answer right (after the evaluated literal block PR on top of the enumerations: 60, all in actor methods; 229 before the enumerations landed and 443 after PR 5, of which 21 are cells of the plain-`detect:` kind added to the matrix there; 422 after PR 4; 520 after PR
 3, 571 after PR
 2, 663 after PR 1's three-deep roles, 595 in the 5a population), by family and
 method context, with the work each needs:
 
 | Family | class | value | actor | total | Classification |
 |---|---|---|---|---|---|
-| `eachWithIndex:` / `do:separatedBy:` | 66 | 52 | 43 | 161 | (a) add to the producer table with index/separator parameters (`producer_body_arg_index`); the same frame as `do:` |
+| `eachWithIndex:` / `do:separatedBy:` | 0 | 0 | 0 | 0 | done (was 66 / 52 / 43 = 161): producers in `producer_body_arg_index` with index/separator parameters, the same frame as `do:` |
 | `detect:ifNone:` search or handler (and plain `detect:`, same fold; 241 plain-detect probe cells measured, class and value right outside the permanent shapes) | 0 | 0 | 44 | 44 | done in PR 4 for class and value-type methods (an early-exit fold, below); the 44 actor cells (nested statements in loop bodies, arms and protected bodies) wait for an actor-frame site rule |
-| `[...] value` as a statement | 58 | 39 | 35 | 132 | (a) a literal-block `value` is an inline frame like an arm (§3); one shared site rule |
-| any statement inside a `[...] value` body | 38 | 38 | 14 | 90 | (a) the evaluated-block frame must be a `BranchArm`-style frame for the constructs nested in it |
+| `[...] value` as a statement | 0 | 0 | 0 | 0 | done in PR 6 (was 58 / 39 / 35 = 132): an evaluated literal block is an arm-like producer, below |
+| any statement inside a `[...] value` body | 0 | 0 | 0 | 0 | done in PR 6 (was 38 / 38 / 14 = 90): the evaluated-block frame is a `BranchArm` frame for the constructs nested in it |
 | `keysAndValuesDo:` / `doWithKey:` | 0 | 0 | 0 | 0 | done in PR 2 (its cells inside a `[...] value` body are in the row above) |
 | `anySatisfy:` / `allSatisfy:` | 0 | 0 | 0 | 0 | done in PR 3 as producers answering their boolean; PR 4 added the early exit |
 | plain `detect:` (kind added in PR 5) | 0 | 0 | 16 | 16 | measured right in class and value everywhere but the permanent shapes; the actor cells wait with `detect:ifNone:` |
-| **total** | **162** | **129** | **152** | **443** | |
+| **total** | **0** | **0** | **60** | **60** | |
 
-By block role: loop bodies 123, evaluated blocks 90, protected bodies 78,
-arms 41, three-deep nestings 38, handlers 32, arm/loop mixes 29, the method
-body 12.
+By block role: loop bodies 24, protected bodies 18, three-deep nestings 8,
+handlers 6, arm/loop mixes 4 (123 / 78 / 38 / 32 / 29 before PR 6 and the
+enumerations; arms 41, the method body 12 and evaluated blocks 90 are 0).
+
+**Amendment, BT-3841 PR 6: an evaluated literal block is an arm-like producer.**
+`[...] value` (the unary `value` sent to a block literal with no parameters) is
+the degenerate conditional: one arm that always runs. `literal_block_value_arm`
+(`block_facts.rs`) is its one site rule, and `conditional_arm_blocks` returns the
+block as the single arm, so the conditional producer rule
+(`conditional_producer_writes`), the site rules (`sequenced_operand_sites`,
+`loop_body_producer_sites`), the Phase 0 check (arm frames in
+`Walker::expr`, `check_construct`) and codegen's producer
+(`generate_block_value_with_mutations`: the seeded scratch map, a `BranchArm`
+frame for the block, `conditional_tuple_to_threaded_value`) all read the same
+rule. The receiver rule: the receiver is a block literal (parentheses are not
+peeled), so its class is statically `Block` and no other class's `value` can run;
+`value:` / `value:value:` / `valueWithArguments:` bind arguments outside the frame
+and keep their legacy lowering and rows, as does the REPL root. The block's
+writes are also the enclosing block's writes for the mutation analysis
+(`analyze_expression` and the cross-scope collector read it like an `on:do:`
+receiver), so a `do:` body whose only outer write is inside a nested `[...] value`
+is threaded. The operand matrix moved too: the `value` kind went from 1 to 61 cells
+answering right (assignment, field, receiver, argument, operand, literal), the
+cascade, interpolation and `match:` positions stay rejected like a conditional's.
+
+Residual `gap` cells (BT-3776, a construct writing only a local of its own block):
+the kinds `value` and every kind inside a `[...] value` body are now measured with the
+other cells (`GAP_MEASURED_KINDS`, `gap_is_measured`) and held to the same rule. Of the
+134 `gap` cells of this family, 132 answer right and 2 do not: `iterIter` and
+`armIterIter` with a `local` target in an actor method (the outer `do:` does not see a
+write-only `t := u` behind a nested `do:`, the same failure for all 31 kinds there, not
+specific to `value`), which stay with BT-3776 and out of the measured set.
 
 **Amendment, BT-3841 PR 4: the satisfy and detect folds exit early.** The
 inline fold of a writing `anySatisfy:`, `allSatisfy:`, `detect:` and

@@ -17,6 +17,8 @@ Replaces the former beamtalk_map.erl hand-written dispatch module.
 
 -export([
     at_if_absent/3,
+    at_if_present/3,
+    at_if_present_if_absent/4,
     do/2,
     do_with_key/2,
     includes/2,
@@ -34,14 +36,36 @@ at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
         error -> Block()
     end.
 
+-doc "Evaluate block with the value at key if present, else answer nil.".
+-spec at_if_present(map(), term(), fun((term()) -> term())) -> term().
+at_if_present(Map, Key, Block) when is_function(Block, 1) ->
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(Key, Map) of
+        {ok, Value} -> Block(Value);
+        error -> nil
+    end.
+
+-doc "Evaluate present block with the value at key, or absent block if missing.".
+-spec at_if_present_if_absent(map(), term(), fun((term()) -> term()), fun(() -> term())) ->
+    term().
+at_if_present_if_absent(Map, Key, PresentBlock, AbsentBlock) when
+    is_function(PresentBlock, 1), is_function(AbsentBlock, 0)
+->
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(Key, Map) of
+        {ok, Value} -> PresentBlock(Value);
+        error -> AbsentBlock()
+    end.
+
 -doc """
-The receiver guard of an inlined `at:ifAbsent:` whose handler writes an
-outer local (ADR 0131 Phase 2d, BT-3798).
+The receiver guard of an inlined `at:ifAbsent:`, `at:ifPresent:` or
+`at:ifPresent:ifAbsent:` whose handler writes an outer local (ADR 0131
+Phase 2d, BT-3798; BT-3824).
 
 Compiled code runs the handler inline, in the caller's activation, so the
 write can be threaded back. That is only valid when the primitive itself would
 have run it: a `Dictionary` (an untagged map). Any other receiver would have
-dispatched to its own `at:ifAbsent:` with a closure, which cannot return the
+dispatched to its own method of that name with a closure, which cannot return the
 write, so it raises a structured `type_error` instead of dropping it.
 
 A value-type instance is also a map, but tagged with `'$beamtalk_class'`; it is

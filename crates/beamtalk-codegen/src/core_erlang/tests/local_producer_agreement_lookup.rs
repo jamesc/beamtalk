@@ -1,10 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0131 Phase 2d (BT-3798): the producer half of §6 for the lookup
-//! selectors. The sibling of `local_producer_agreement_conditional.rs`: a
-//! `Dictionary` lookup (`at:ifAbsent:`, the one row of
-//! `beamtalk-core`'s `LOOKUP_SHAPES` that is `dictionary_inline`) is a
+//! ADR 0131 Phase 2d (BT-3798, BT-3824): the producer half of §6 for the
+//! lookup selectors. The sibling of `local_producer_agreement_conditional.rs`:
+//! a `Dictionary` lookup (`at:ifAbsent:`, `at:ifPresent:`,
+//! `at:ifPresent:ifAbsent:`, the rows of `beamtalk-core`'s `LOOKUP_SHAPES`
+//! that are `dictionary_inline`) is a
 //! conditional in the core rule's eyes — its handler is the arm
 //! (`conditional_arm_blocks` / `lookup_arm_blocks`) — so the conditional
 //! agreement check compares both directions for it: every lookup the Phase 0
@@ -14,9 +15,9 @@
 //! codegen lowers no lookup as a producer anywhere else.
 //!
 //! The rest of the table must stay rejected, and the lookups the producer
-//! cannot lower with it: the four selectors `Dictionary` does not implement,
-//! a lookup in the body of a loop or fold, a handler that is not a
-//! parameterless block literal, and the REPL.
+//! cannot lower with it: the two selectors `Dictionary` does not implement,
+//! a lookup in the body of a loop or fold, a handler that is not a block
+//! literal taking the parameters the primitive passes, and the REPL.
 
 use super::local_producer_agreement::{BODY_STATEMENTS, POSITIONS, body_sources, sources};
 use super::local_producer_agreement_conditional::{
@@ -54,6 +55,26 @@ pub(super) const LOOKUPS: &[&str] = &[
     "#{#a => 1} at: #k ifAbsent: ([t := t + 1. 0])",
     "#{#a => 1} at: [t := t + 1. #k] ifAbsent: [0]",
     "#{#a => 1} at: #k ifAbsent: [:x | t := t + 1. 0]",
+    // BT-3824: the present handler takes the found value.
+    "#{#a => 1} at: #k ifPresent: [:v | t := t + v]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. v]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := v]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. u := u + v. v]",
+    "#{#a => 1} at: s ifPresent: [:v | t := t + v. 0]",
+    "(#{#a => 1} at: #a ifPresent: [:v | t := t + v. v])",
+    "#{#a => 1} at: #a ifPresent: [:v | #(1, 2) do: [:x | t := t + x + v]]",
+    "#{#a => 1} at: #a ifPresent: [:v | (s < 3) ifTrue: [t := t + v. 1] ifFalse: [2]]",
+    "#{#a => 1} at: #a ifPresent: [:v | #{#b => 2} at: #b ifPresent: [:w | t := t + v + w]]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. ^t]",
+    "(#{#a => 1} at: #a ifPresent: [:v | t := t + v. v]) + 1",
+    "#{#a => 1} at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [0]",
+    "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. v] ifAbsent: [u := u + 1. 0]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := v. v] ifAbsent: [t := 9. 0]",
+    "(#{#a => 1} at: #a ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]) + t",
+    "#{#a => 1} at: #k ifPresent: [t := t + 1. 0]",
+    "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]",
+    "#{#a => 1} at: #k ifPresent: ([:v | t := t + v. 0])",
 ];
 
 /// A cross-section of [`LOOKUPS`] for the arm-frame products, which multiply
@@ -70,6 +91,9 @@ const LOOKUP_SAMPLE: &[&str] = &[
     "#{#a => 1} at: #k ifAbsent: [[t := t + 1] on: Error do: [:e | 0]]",
     "#{#a => 1} at: #k ifAbsent: [t := t + 1. ^t]",
     "#{#a => 1} at: #k ifAbsent: ([t := t + 1. 0])",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. v]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. v] ifAbsent: [u := u + 1. 0]",
+    "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]",
 ];
 
 /// Lookups whose handler writes nothing: never producers.
@@ -78,14 +102,14 @@ const READ_ONLY_LOOKUPS: &[&str] = &[
     "#{#a => 1} at: #k ifAbsent: [t + 1]",
     "#{#a => 1} at: #k ifAbsent: [m := 0. m := m + 1. m]",
     "#{#a => 1} at: #k ifAbsent: [m := 0. #(1, 2) do: [:x | m := m + x]. m]",
+    "#{#a => 1} at: #a ifPresent: [:v | v + t]",
+    "#{#a => 1} at: #a ifPresent: [:v | m := v. m := m + 1. m] ifAbsent: [t + 1]",
 ];
 
-/// The four lookup selectors `Dictionary` does not implement.
+/// The two lookup selectors `Dictionary` does not implement (permanently: an
+/// immutable `Dictionary` has no `at:ifAbsentPut:` or `removeKey:ifAbsent:`).
 const UNIMPLEMENTED_LOOKUPS: &[&str] = &[
     "#{#a => 1} at: #k ifAbsentPut: [t := t + 1. 0]",
-    "#{#a => 1} at: #k ifPresent: [:v | t := t + v]",
-    "#{#a => 1} at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [0]",
-    "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]",
     "#{#a => 1} removeKey: #k ifAbsent: [t := t + 1. 0]",
 ];
 
@@ -99,6 +123,10 @@ const LOOKUP_ARM_FRAMES: &[&str] = &[
     "[#{#a => 1} at: #k ifAbsent: [{s}. 0]] on: Error do: [:e | 0]",
     "#{#a => 1} at: #k ifAbsent: [(s < 3) ifTrue: [{s}]]",
     "#{#a => 1} at: #k ifAbsent: [#(1, 2) do: [:k | {s}]]",
+    "#{#a => 1} at: #a ifPresent: [:v | {s}. v]",
+    "#{#a => 1} at: #a ifPresent: [:v | {s}. v] ifAbsent: [0]",
+    "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [{s}. 0]",
+    "#{#a => 1} at: #a ifPresent: [:v | t := t + v. 0] ifAbsent: [{s}. 0]",
 ];
 
 /// Frames that are a loop or fold body and not an arm: a lookup that writes
@@ -243,9 +271,10 @@ fn a_lookup_in_a_loop_or_fold_body_is_never_a_producer() {
 
 #[test]
 fn lookup_selectors_that_dictionary_does_not_implement_stay_rejected() {
-    // `Dictionary` implements `at:ifAbsent:` only, so there is no behaviour for
-    // an inline lowering of the other four to answer: a handler that writes an
-    // outer local keeps its §6 error in every position and method context.
+    // `Dictionary` does not implement `at:ifAbsentPut:` or
+    // `removeKey:ifAbsent:`, so there is no behaviour for an inline lowering of
+    // them to answer: a handler that writes an outer local keeps its §6 error
+    // in every position and method context.
     let mut checked = 0;
     for construct in UNIMPLEMENTED_LOOKUPS {
         for position in POSITIONS.iter().chain(CONDITIONAL_POSITIONS) {
@@ -266,6 +295,8 @@ const NON_DICTIONARY_RECEIVER_LOOKUPS: &[&str] = &[
     "super at: #k ifAbsent: [t := t + 1. 0]",
     "(self at: #k ifAbsent: [t := t + 1. 0])",
     "self at: #k ifAbsent: [t := 7]",
+    "self at: #k ifPresent: [:v | t := t + v. 0]",
+    "super at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]",
 ];
 
 #[test]
@@ -281,4 +312,30 @@ fn lookups_on_a_statically_non_dictionary_receiver_are_rejected_in_every_positio
         }
     }
     assert!(checked > 100, "only {checked} programs checked");
+}
+
+/// BT-3824: the `at:ifPresent:` and `at:ifPresent:ifAbsent:` handlers that
+/// write an outer local are producers (accepted by Phase 0 and lowered by the
+/// lookup producer) in every method context, unless the producer cannot lower
+/// them (a handler with the wrong parameter count, a parenthesised handler).
+#[test]
+fn if_present_lookups_are_producers_in_every_context() {
+    let cannot_lower = [
+        "#{#a => 1} at: #k ifPresent: [t := t + 1. 0]",
+        "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]",
+        "#{#a => 1} at: #k ifPresent: ([:v | t := t + v. 0])",
+    ];
+    let mut checked = 0;
+    for construct in LOOKUPS.iter().filter(|c| c.contains("ifPresent:")) {
+        for src in sources(construct, "r := {c}\n#[r, t]") {
+            if cannot_lower.contains(construct) {
+                assert!(rejected(&src), "{src}");
+            } else {
+                let sites = check_conditional_agreement(&src);
+                assert!(sites.is_some_and(|n| n > 0), "{src}: {sites:?}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 45, "only {checked} programs checked");
 }

@@ -534,6 +534,39 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// The case-clause body of one arm of a conditional or lookup producer:
+    /// `let StateAcc = <base_state> in <arm>` ([`Self::conditional_arm`] in a
+    /// branch context). When `param_value` is given, the block's parameter
+    /// (`ifNotNil: [:v | ...]`, `at:ifPresent: [:v | ...]`) is bound to that
+    /// Core Erlang variable inside the arm.
+    pub(in crate::core_erlang::control_flow) fn conditional_arm_clause(
+        &mut self,
+        block: &Block,
+        param_value: Option<&str>,
+        arm: Option<&ArmFrame>,
+        base_state: &str,
+    ) -> Result<Document<'static>> {
+        let (branch_doc, _branch_final) = self.with_branch_context(|this| {
+            let Some(value) = param_value else {
+                return this.conditional_arm(block, arm);
+            };
+            // A scope so the parameter binding is cleaned up after generation.
+            this.push_scope();
+            if let Some(param) = block.parameters.first() {
+                this.bind_var(&param.name, value);
+            }
+            let result = this.conditional_arm(block, arm);
+            this.pop_scope();
+            result
+        })?;
+        Ok(docvec![
+            "let StateAcc = ",
+            leaf::var(base_state.to_string()),
+            " in ",
+            branch_doc,
+        ])
+    }
+
     /// ADR 0131 §3: whether a conditional producer in `frame` keeps its scratch
     /// map private. True at the method root of a method that has no `State`
     /// family to continue (a class method, a value-type method): the
@@ -878,6 +911,48 @@ impl CoreErlangGenerator {
             false_tuple,
             no_match_fallback,
             " end",
+        ])
+    }
+
+    /// BT-3841: the [`ThreadedValue`] producer for an evaluated literal block
+    /// (`[block] value`, `beamtalk_core`'s `literal_block_value_arm`) that is a
+    /// local-threading producer: the degenerate conditional whose one arm always
+    /// runs. It shares the conditional producer's scratch map, arm frame and
+    /// tuple-to-`ThreadedValue` step, so the arm's locals come back through
+    /// `LocalRebind`s lowered by the enclosing frame.
+    pub(in crate::core_erlang) fn generate_block_value_with_mutations(
+        &mut self,
+        block: &Block,
+        tail: ProducerTail,
+        producer: bool,
+    ) -> Result<ThreadedValue> {
+        let span = block.span;
+        let frame = self.current_frame();
+        let scratch = self.conditional_scratch(frame);
+        let tuple_doc = self.generate_block_value_with_mutations_tuple(block, scratch, producer)?;
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
+    }
+
+    /// The `{Result, NewState}` tuple of [`Self::generate_block_value_with_mutations`]:
+    /// the seeded scratch map, then the arm. There is no `case`: the arm is
+    /// taken every time.
+    pub(in crate::core_erlang) fn generate_block_value_with_mutations_tuple(
+        &mut self,
+        block: &Block,
+        scratch: ScratchStart,
+        producer: bool,
+    ) -> Result<Document<'static>> {
+        let outer_state = self.current_state_var();
+        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&[block], producer);
+        let (branch_doc, _branch_final) =
+            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
+        Ok(docvec![
+            seed_doc,
+            "let StateAcc = ",
+            leaf::var(base_state),
+            " in ",
+            branch_doc,
         ])
     }
 
@@ -1299,14 +1374,7 @@ impl CoreErlangGenerator {
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let nil_arm = if let Some(block) = nil_block {
-            let (branch_doc, _branch_final) =
-                self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-            docvec![
-                "let StateAcc = ",
-                leaf::var(base_state.clone()),
-                " in ",
-                branch_doc,
-            ]
+            self.conditional_arm_clause(block, None, arm_frame.as_ref(), &base_state)?
         } else {
             // ADR 0122 Decision 3/BT-3514: through the shared family
             // emission helper with [State] rather than a hand-rolled splice.
@@ -1314,23 +1382,8 @@ impl CoreErlangGenerator {
         };
 
         let not_nil_arm = if let Some(block) = not_nil_block {
-            let (branch_doc, _branch_final) = self.with_branch_context(|this| {
-                // Push a scope so the block-parameter binding is cleaned up after generation
-                this.push_scope();
-                if let Some(param) = block.parameters.first() {
-                    // Bind the block parameter to the receiver value (already bound to obj_var)
-                    this.bind_var(&param.name, &obj_var);
-                }
-                let result = this.conditional_arm(block, arm_frame.as_ref());
-                this.pop_scope();
-                result
-            })?;
-            docvec![
-                "let StateAcc = ",
-                leaf::var(base_state.clone()),
-                " in ",
-                branch_doc,
-            ]
+            // The block parameter is bound to the receiver value (`obj_var`).
+            self.conditional_arm_clause(block, Some(&obj_var), arm_frame.as_ref(), &base_state)?
         } else {
             // ADR 0122 Decision 3/BT-3514: through the shared family
             // emission helper with [State] rather than a hand-rolled splice.
@@ -1469,6 +1522,7 @@ impl CoreErlangGenerator {
     /// [`Self::inline_control_flow_producer_with`] once `expr` is
     /// paren-unwrapped; `root_producer` says it is a conditional local-threading
     /// producer ([`Self::conditional_producer_locals`]).
+    #[allow(clippy::too_many_lines)] // one arm per conditional selector
     fn lower_inline_control_flow(
         &mut self,
         expr: &Expression,
@@ -1498,6 +1552,19 @@ impl CoreErlangGenerator {
         if root_producer {
             if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
                 return Ok(Some(tv));
+            }
+        }
+        // BT-3841: an evaluated literal block (`[...] value`) that is a
+        // producer here is a conditional whose one arm always runs.
+        if root_producer {
+            if let Some(block) =
+                beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr)
+            {
+                return Ok(Some(self.generate_block_value_with_mutations(
+                    block,
+                    tail,
+                    root_producer,
+                )?));
             }
         }
         let Expression::MessageSend {

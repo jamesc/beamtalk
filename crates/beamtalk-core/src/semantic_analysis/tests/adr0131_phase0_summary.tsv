@@ -4,9 +4,9 @@
 # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
 # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
 # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
-statement	block-value	actor	25	27	8
-statement	block-value	class	0	51	7
-statement	block-value	value	3	32	7
+statement	block-value	actor	86	0	0
+statement	block-value	class	98	0	0
+statement	block-value	value	76	0	0
 statement	detect-ifnone	actor	38	30	14
 statement	detect-ifnone	class	86	0	0
 statement	detect-ifnone	value	76	0	0
@@ -16,9 +16,9 @@ statement	detect-plain	value	41	0	0
 statement	enumeration	actor	154	0	0
 statement	enumeration	class	178	0	0
 statement	enumeration	value	146	0	0
-statement	evaluated-block	actor	42	14	0
-statement	evaluated-block	class	0	33	5
-statement	evaluated-block	value	0	38	0
+statement	evaluated-block	actor	76	0	0
+statement	evaluated-block	class	76	0	0
+statement	evaluated-block	value	76	0	0
 statement	keyed-do	actor	51	0	0
 statement	keyed-do	class	40	0	0
 statement	keyed-do	value	35	0	0
@@ -28,59 +28,38 @@ statement	other	value	460	0	0
 statement	satisfy	actor	40	0	0
 statement	satisfy	class	40	0	0
 statement	satisfy	value	35	0	0
-statement-group	arm	block-value	class	10
-statement-group	arm	block-value	value	5
-statement-group	arm-loop-mix	block-value	actor	3
-statement-group	arm-loop-mix	block-value	class	5
-statement-group	arm-loop-mix	block-value	value	5
 statement-group	arm-loop-mix	detect-ifnone	actor	4
-statement-group	evaluated-block	evaluated-block	actor	14
-statement-group	evaluated-block	evaluated-block	class	38
-statement-group	evaluated-block	evaluated-block	value	38
-statement-group	handler	block-value	actor	4
-statement-group	handler	block-value	class	4
-statement-group	handler	block-value	value	4
 statement-group	handler	detect-ifnone	actor	4
 statement-group	handler	detect-plain	actor	2
-statement-group	loop-body	block-value	actor	17
-statement-group	loop-body	block-value	class	20
-statement-group	loop-body	block-value	value	14
 statement-group	loop-body	detect-ifnone	actor	18
 statement-group	loop-body	detect-plain	actor	6
-statement-group	method-body	block-value	class	4
-statement-group	protected-body	block-value	actor	9
-statement-group	protected-body	block-value	class	11
-statement-group	protected-body	block-value	value	7
 statement-group	protected-body	detect-ifnone	actor	12
 statement-group	protected-body	detect-plain	actor	6
-statement-group	three-deep	block-value	actor	2
-statement-group	three-deep	block-value	class	4
-statement-group	three-deep	block-value	value	4
 statement-group	three-deep	detect-ifnone	actor	6
 statement-group	three-deep	detect-plain	actor	2
-operand	arg	actor	57	36	8	13	33	3
-operand	arg	class	57	54	3	0	54	0
-operand	arg	value	57	54	3	0	54	0
-operand	assign	actor	57	39	5	13	35	4
-operand	assign	class	57	54	3	0	54	0
-operand	assign	value	57	54	3	0	54	0
-operand	cascade	actor	57	10	47	0	0	10
-operand	cascade	class	57	8	44	5	0	8
-operand	cascade	value	57	10	44	3	0	10
-operand	field	actor	57	39	5	13	33	6
-operand	field	class	57	54	3	0	54	0
-operand	interp	actor	57	10	47	0	0	10
-operand	interp	class	57	8	44	5	0	8
-operand	interp	value	57	10	44	3	0	10
-operand	literal	actor	57	36	8	13	33	3
-operand	literal	class	57	54	3	0	54	0
-operand	literal	value	57	54	3	0	54	0
-operand	match	actor	57	10	47	0	0	10
-operand	match	class	57	8	49	0	0	8
-operand	match	value	57	10	47	0	0	10
-operand	operand	actor	57	36	8	13	33	3
-operand	operand	class	57	54	3	0	54	0
-operand	operand	value	57	54	3	0	54	0
-operand	recv	actor	57	36	8	13	33	3
-operand	recv	class	57	54	3	0	54	0
-operand	recv	value	57	54	3	0	54	0
+operand	arg	actor	57	38	6	13	35	3
+operand	arg	class	57	57	0	0	57	0
+operand	arg	value	57	57	0	0	57	0
+operand	assign	actor	57	41	3	13	37	4
+operand	assign	class	57	57	0	0	57	0
+operand	assign	value	57	57	0	0	57	0
+operand	cascade	actor	57	12	45	0	0	12
+operand	cascade	class	57	9	42	6	0	9
+operand	cascade	value	57	12	42	3	0	12
+operand	field	actor	57	41	3	13	35	6
+operand	field	class	57	57	0	0	57	0
+operand	interp	actor	57	12	45	0	0	12
+operand	interp	class	57	9	42	6	0	9
+operand	interp	value	57	12	42	3	0	12
+operand	literal	actor	57	38	6	13	35	3
+operand	literal	class	57	57	0	0	57	0
+operand	literal	value	57	57	0	0	57	0
+operand	match	actor	57	12	45	0	0	12
+operand	match	class	57	9	48	0	0	9
+operand	match	value	57	12	45	0	0	12
+operand	operand	actor	57	38	6	13	35	3
+operand	operand	class	57	57	0	0	57	0
+operand	operand	value	57	57	0	0	57	0
+operand	recv	actor	57	38	6	13	35	3
+operand	recv	class	57	57	0	0	57	0
+operand	recv	value	57	57	0	0	57	0
