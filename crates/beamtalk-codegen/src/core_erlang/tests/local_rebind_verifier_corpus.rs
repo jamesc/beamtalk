@@ -551,3 +551,47 @@ fn an_evaluated_block_rebind_recording_another_frame_is_local_rebind_frame_misma
         "LocalRebindFrameMismatch",
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-3857: `HeldRebindNotIdentity` over the IR production preludes emit.
+// ---------------------------------------------------------------------------
+
+/// Every producer position of every corpus above, in every scope kind.
+fn all_corpus_programs() -> Vec<String> {
+    let mut out: Vec<String> = programs().to_vec();
+    out.extend(loop_programs());
+    out.extend(exception_programs());
+    out.extend(lookup_programs());
+    out.extend(conditional_programs());
+    out.extend(evaluated_block_programs());
+    out
+}
+
+#[test]
+fn a_stale_held_rebind_in_any_production_prelude_is_held_rebind_not_identity() {
+    // `StaleHeld` rewrites a prelude's last `MapPut` rebind into a `MapHeld`
+    // over a version nothing produces. A program whose frames have no
+    // `MapPut` rebind (a method-root `Let`, a `LoopParam` chain) has nothing
+    // to break and compiles clean; every other one must be reported, and
+    // only as `HeldRebindNotIdentity`.
+    let mut fired = 0;
+    let mut clean = 0;
+    for src in all_corpus_programs() {
+        match verifier_report(&src, LocalRebindFault::StaleHeld) {
+            Some(report) => {
+                assert!(
+                    report.contains("HeldRebindNotIdentity"),
+                    "StaleHeld should be reported as HeldRebindNotIdentity, got: {report}\n{src}"
+                );
+                fired += 1;
+            }
+            None => clean += 1,
+        }
+    }
+    // 19 programs have a `MapPut` rebind today; a drop means the fault (or
+    // the lowering it rewrites) stopped reaching the verifier.
+    assert!(
+        fired >= 19,
+        "StaleHeld broke only {fired} programs ({clean} clean)"
+    );
+}

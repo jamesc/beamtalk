@@ -725,7 +725,8 @@ impl VerifyWalk<'_> {
 
     /// [`VerifyError::HeldRebindNotIdentity`] over one statement list: each
     /// `MapHeld` rebind must read its own `key` through `state_first ==
-    /// map`, `map` must be a `State` version of the enclosing frame, and —
+    /// map`, `map` must be a bound `State` version of the enclosing frame
+    /// (its entry version 0, or one some step produces), and —
     /// when this list steps that frame's `State` map before the rebind —
     /// the last such step's target must be `map`. A list that has not
     /// stepped the map yet inherits its current version from outside the
@@ -754,6 +755,8 @@ impl VerifyWalk<'_> {
                         let identity = state_first.as_ref() == Some(map)
                             && *slot == CarrierSlot::Key(key.clone())
                             && own_state(map)
+                            && (map.version == 0
+                                || self.producers.get(map).copied().unwrap_or(0) > 0)
                             && current.is_none_or(|c| c == map);
                         if !identity {
                             self.errors.push(VerifyError::HeldRebindNotIdentity {
