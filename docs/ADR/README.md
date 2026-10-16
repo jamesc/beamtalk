@@ -158,7 +158,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted | 2026-09-25 |
 | [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented | 2026-10-06 |
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Accepted | 2026-10-08 |
-| [0132](0132-callee-side-threading-twins-for-higher-order-methods.md) | Callee-Side Threading Twins for Higher-Order Methods | Proposed | 2026-10-16 |
+| [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Proposed | 2026-10-16 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
