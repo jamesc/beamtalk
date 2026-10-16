@@ -424,6 +424,7 @@ fn only_kinds() -> Option<Vec<String>> {
         .map(|v| v.split(',').map(str::to_string).collect())
 }
 
+#[allow(clippy::too_many_lines)] // one linear measure-and-compare flow
 fn run_matrix(matrix: Matrix, file: &str) {
     preflight();
     assert!(

@@ -83,6 +83,19 @@ fn every_repl_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer(
     check_repl_agreement(CONDITIONALS, 100);
 }
 
+/// The spans of the evaluated literal blocks (`[...] value`) in `statements`.
+fn evaluated_block_spans(statements: &[&Expression]) -> HashSet<Span> {
+    let mut spans = HashSet::new();
+    for stmt in statements {
+        beamtalk_core::ast_walker::walk_expression(stmt, &mut |e| {
+            if literal_block_value_arm(e).is_some() {
+                spans.insert(Expression::span(e.unwrap_parens()));
+            }
+        });
+    }
+    spans
+}
+
 fn check_repl_agreement(constructs: &[&str], least_named: usize) {
     let known = ["t", "u", "s", "r"];
     let bound = |name: &str| known.contains(&name);
@@ -137,14 +150,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
             // producer in a method only. The REPL root lowers it itself, so the
             // REPL producer must not fire at it (asserted below) and the sites
             // the method rule names for it are not REPL producer sites.
-            let mut block_values: HashSet<Span> = HashSet::new();
-            for stmt in &statements {
-                beamtalk_core::ast_walker::walk_expression(stmt, &mut |e| {
-                    if literal_block_value_arm(e).is_some() {
-                        block_values.insert(Expression::span(e.unwrap_parens()));
-                    }
-                });
-            }
+            let block_values = evaluated_block_spans(&statements);
             rule_named.retain(|span, _| !block_values.contains(span));
             writes_a_binding.retain(|span| !block_values.contains(span));
             // The Phase 0 check never rejects a site the rule names.

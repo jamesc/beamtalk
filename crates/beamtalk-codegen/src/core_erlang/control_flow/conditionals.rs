@@ -1511,6 +1511,7 @@ impl CoreErlangGenerator {
     /// [`Self::inline_control_flow_producer_with`] once `expr` is
     /// paren-unwrapped; `root_producer` says it is a conditional local-threading
     /// producer ([`Self::conditional_producer_locals`]).
+    #[allow(clippy::too_many_lines)] // one arm per conditional selector
     fn lower_inline_control_flow(
         &mut self,
         expr: &Expression,
