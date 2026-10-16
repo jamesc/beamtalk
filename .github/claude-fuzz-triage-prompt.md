@@ -54,7 +54,8 @@ A run can fail in several jobs. Triage each failed job separately.
 
 ## Filing in Linear
 
-Use the Linear tools. Follow the repo's conventions (`.claude/commands/create-issue/SKILL.md`).
+Use the Linear tools. Follow the repo's conventions (`.triage-config/.claude/commands/create-issue/SKILL.md`;
+the repo's own copy in the checked-out commit may be missing or older).
 
 - Search first (`list_issues`, team `BT`, query on the job name, panic text and seed or crash
   hash) for an open or recently closed issue about the same failure. If one exists, add a
