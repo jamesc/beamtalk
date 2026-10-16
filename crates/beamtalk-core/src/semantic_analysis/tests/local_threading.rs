@@ -2258,15 +2258,13 @@ fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
 
 #[test]
 fn lookup_selectors_that_dictionary_does_not_implement_stay_rejected() {
-    // `Dictionary` implements `at:ifAbsent:` only (pinned against the class
-    // hierarchy by `dictionary_inline_rows_are_dictionary_selectors`), so the
-    // other four rows have no behaviour to lower: a handler that writes an
-    // outer local is a §6 error in every context and position.
+    // `Dictionary` does not implement `at:ifAbsentPut:` or
+    // `removeKey:ifAbsent:` (permanently: it is immutable; pinned against the
+    // class hierarchy by `dictionary_inline_rows_are_dictionary_selectors`), so
+    // those rows have no behaviour to lower: a handler that writes an outer
+    // local is a §6 error in every context and position.
     for body in [
         "d := #{#a => 1}\nr := d at: #k ifAbsentPut: [t := t + 1. 0]\n#[r, t]",
-        "d := #{#a => 1}\nd at: #k ifPresent: [:v | t := t + v]\nt",
-        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]\n#[r, t]",
-        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [0]\n#[r, t]",
         "d := #{#a => 1}\nr := d removeKey: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -2278,6 +2276,58 @@ fn lookup_selectors_that_dictionary_does_not_implement_stay_rejected() {
             );
         }
     }
+}
+
+#[test]
+fn dictionary_if_present_handler_write_is_a_producer_in_every_method_context() {
+    // BT-3824: `at:ifPresent:` and `at:ifPresent:ifAbsent:` are `Dictionary`
+    // selectors, lowered like `at:ifAbsent:`; the present handler takes the
+    // found value as its one parameter.
+    for body in [
+        "d := #{#a => 1}\nd at: #k ifPresent: [:v | t := t + v]\nt",
+        "d := #{#a => 1}\nr := d at: #a ifPresent: [:v | t := t + v. v]\n#[r, t]",
+        "d := #{#a => 1}\nr := 1 + (d at: #a ifPresent: [:v | t := t + v. v])\n#[r, t]",
+        "d := #{#a => 1}\n^(d at: #a ifPresent: [:v | t := v. 5]) + t",
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [0]\n#[r, t]",
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | t := t + v. v] ifAbsent: [t := 9. 0]\n#[r, t]",
+        "d := #{#a => 1}\nr := nil\n(t < 3) ifTrue: [r := d at: #a ifPresent: [:v | t := t + v]]\n#[r, t]",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn dictionary_if_present_that_the_producer_cannot_lower_keeps_the_section6_error() {
+    for body in [
+        // The present handler takes no parameter: the primitive passes one.
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [t := t + 1. 0]\n#[r, t]",
+        // The absent handler takes a parameter: the primitive passes none.
+        "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]\n#[r, t]",
+        // A parenthesised handler is a block value.
+        "d := #{#a => 1}\nr := d at: #k ifPresent: ([:v | t := t + v. 0])\n#[r, t]",
+        // In a loop body.
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #a ifPresent: [:v | t := t + v]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(!diags.is_empty(), "{src}");
+        }
+    }
+    // A receiver statically known not to be a Dictionary.
+    let src = format!(
+        "Value subclass: Own\n  probe: cache :: Ets =>\n    t := 0\n{}\n",
+        indent("r := cache at: #k ifPresent: [:v | t := t + v. 0]\n#[r, t]")
+    );
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(
+        of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
+        1,
+        "{src}: {diags:?}"
+    );
 }
 
 #[test]

@@ -40,7 +40,7 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823): REPL and `match:` leftovers.** An arm or loop nested inside a REPL `on:do:`/`Result tryDo:` is still a compile error (the o7/o8 REPL pins), because REPL arms are not frames. A `match:` arm that writes an outer local is a compile error rather than `match:` being a producer (the REPL is exempt from that error and unprobed).
 5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
 6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
-7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)**: `Dictionary` does not define `at:ifPresent:`/`at:ifPresent:ifAbsent:` yet, so those handlers are not producers. `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors by decision, since an immutable `Dictionary` has no such behaviour. `Dictionary at:ifAbsent:` is the only lookup producer, and only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
+7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)** (done): `Dictionary` defines `at:ifPresent:`/`at:ifPresent:ifAbsent:`, and their handlers are producers like `at:ifAbsent:` (the present handler's parameter is bound to the found value). `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors permanently by decision, since an immutable `Dictionary` has no such behaviour. The three `Dictionary` lookups are producers only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
 8. **[BT-3835](https://linear.app/beamtalk/issue/BT-3835)**: a conditional producer's `LocalRebind` in a `StateAcc` fold frame emits a redundant identity `MapPut`.
 9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)**: a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panics the debug verifier with `StateAccLoopWithoutLocals`.
 10. **[BT-3842](https://linear.app/beamtalk/issue/BT-3842)**: Phase 5a review nits (a shared block-scope helper for `arms_lower_as_producer` and `OuterWriteWalker`; a non-`Result` `tryDo:` falls through to a generic internal error).
@@ -275,11 +275,15 @@ accepts and never sees the rejected programs). The lookups are rows of ONE table
 `beamtalk-core` (`LOOKUP_SHAPES`), read by the Phase 0 check and codegen
 through `conditional_arm_blocks`; a row is `dictionary_inline` only when
 `Dictionary` implements the selector (a test pins that against the class
-hierarchy). `Dictionary` implements `at:ifAbsent:` only, so
-`at:ifAbsentPut:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:` and
-`removeKey:ifAbsent:` stay §6 errors until `Dictionary` gains them (they have
-no behaviour to lower); each then needs its own result shape and its flag
-flipped. The REPL keeps the §6 error, and a lookup in a loop or fold body is
+hierarchy). `Dictionary` implements `at:ifAbsent:` and, since BT-3824,
+`at:ifPresent:` and `at:ifPresent:ifAbsent:`: each row records its handlers'
+parameter counts (`block_params`), and the lowering runs a one-parameter
+handler in the found arm with the parameter bound to the found value and a
+parameterless one in the absent arm, answering what the primitive answers
+for a missing handler (the found value, or `nil`). `at:ifAbsentPut:` and
+`removeKey:ifAbsent:` stay §6 errors permanently: they assume a mutable
+dictionary, which `Dictionary` is not, so it will not define them (users
+write `at:ifAbsent:` then `at:put:`) and they have no behaviour to lower. The REPL keeps the §6 error, and a lookup in a loop or fold body is
 not a producer (it lowers at the method root and in `BranchArm` frames, like a
 conditional).
 

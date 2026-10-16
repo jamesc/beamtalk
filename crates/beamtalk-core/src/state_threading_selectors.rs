@@ -388,6 +388,11 @@ pub struct LookupShape {
     pub selector: &'static str,
     /// The 0-based indices of its block arguments.
     pub block_args: &'static [usize],
+    /// The parameter count of each block argument, parallel to
+    /// [`Self::block_args`]: what the selector calls it with (`at:ifPresent:`
+    /// hands its block the found value, `at:ifAbsent:` hands its block
+    /// nothing). The inline lowering binds the parameter to the found value.
+    pub block_params: &'static [usize],
     /// Whether the lookup is a local-threading producer for a `Dictionary`
     /// receiver (ADR 0131 Phase 2d, BT-3798): codegen lowers it inline, guarded
     /// by a runtime receiver check, and its handler block is an arm frame.
@@ -414,37 +419,46 @@ pub struct LookupShape {
 /// value-type instance is also a map, but tagged) raises a structured
 /// `#beamtalk_error{}` when the handler writes an outer local.
 ///
-/// `Dictionary` implements `at:ifAbsent:` only. The other four rows are not
-/// `dictionary_inline`: there is no `Dictionary` behaviour for an inline
-/// lowering to answer, so they stay rejected at compile time (ADR 0131 §6)
-/// when their block writes an outer local. Flipping a row is the whole change
-/// once `Dictionary` gains the selector (the
-/// `dictionary_inline_rows_are_dictionary_selectors` test pins the invariant
-/// against the class hierarchy).
+/// `Dictionary` implements `at:ifAbsent:`, `at:ifPresent:` and
+/// `at:ifPresent:ifAbsent:` (BT-3824); those three rows are
+/// `dictionary_inline`. `at:ifAbsentPut:` and `removeKey:ifAbsent:` are not,
+/// permanently: they assume a mutable dictionary, `Dictionary` is immutable
+/// and will not define them (users write `at:ifAbsent:` then `at:put:`), so
+/// there is no `Dictionary` behaviour for an inline lowering to answer and
+/// they stay rejected at compile time (ADR 0131 §6) when their block writes
+/// an outer local. The `dictionary_inline_rows_are_dictionary_selectors` test
+/// pins the invariant against the class hierarchy.
 pub const LOOKUP_SHAPES: &[LookupShape] = &[
     LookupShape {
         selector: "at:ifAbsent:",
         block_args: &[1],
+        block_params: &[0],
         dictionary_inline: true,
     },
+    // Permanently not `dictionary_inline`: not a `Dictionary` selector.
     LookupShape {
         selector: "at:ifAbsentPut:",
         block_args: &[1],
+        block_params: &[0],
         dictionary_inline: false,
     },
     LookupShape {
         selector: "at:ifPresent:",
         block_args: &[1],
-        dictionary_inline: false,
+        block_params: &[1],
+        dictionary_inline: true,
     },
     LookupShape {
         selector: "at:ifPresent:ifAbsent:",
         block_args: &[1, 2],
-        dictionary_inline: false,
+        block_params: &[1, 0],
+        dictionary_inline: true,
     },
+    // Permanently not `dictionary_inline`: not a `Dictionary` selector.
     LookupShape {
         selector: "removeKey:ifAbsent:",
         block_args: &[1],
+        block_params: &[0],
         dictionary_inline: false,
     },
 ];
@@ -502,11 +516,28 @@ mod tests {
     fn dictionary_inline_rows_are_dictionary_selectors() {
         // BT-3798: the inline lowering answers what the `Dictionary` primitive
         // answers, so a row is `dictionary_inline` exactly when `Dictionary`
-        // implements the selector. When `Dictionary` gains `at:ifPresent:` (or
-        // another row), this fails until the row is flipped and the lowering
-        // gives it its own result shape.
+        // implements the selector. BT-3824: `Dictionary` defines
+        // `at:ifPresent:` and `at:ifPresent:ifAbsent:`; `at:ifAbsentPut:` and
+        // `removeKey:ifAbsent:` are permanently not `Dictionary` selectors (an
+        // immutable `Dictionary` has no such behaviour), so their rows stay
+        // `dictionary_inline: false`.
         let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+        let inline: Vec<&str> = LOOKUP_SHAPES
+            .iter()
+            .filter(|row| row.dictionary_inline)
+            .map(|row| row.selector)
+            .collect();
+        assert_eq!(
+            inline,
+            ["at:ifAbsent:", "at:ifPresent:", "at:ifPresent:ifAbsent:"]
+        );
         for row in LOOKUP_SHAPES {
+            assert_eq!(
+                row.block_args.len(),
+                row.block_params.len(),
+                "{}",
+                row.selector
+            );
             assert_eq!(
                 hierarchy.find_method("Dictionary", row.selector).is_some(),
                 row.dictionary_inline,

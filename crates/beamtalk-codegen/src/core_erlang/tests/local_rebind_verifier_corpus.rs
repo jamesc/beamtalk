@@ -303,6 +303,27 @@ fn lookup_programs() -> Vec<String> {
             "#{#a => 1} at: #j ifAbsent: [{s}. 0]",
             "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
         ),
+        // BT-3824: the present handler binds the found value.
+        (
+            "{s}",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5])",
+        ),
+        (
+            "{s}",
+            "r := t + (#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "(u < 3) ifTrue: [{s}]",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5] ifAbsent: [0])",
+        ),
+        (
+            "#{#a => 1} at: #a ifPresent: [:w | {s}. w]",
+            "r := t + (#{#a => 1} at: #k ifAbsent: [t := t + 1. 5])",
+        ),
+        (
+            "#{#a => 1} at: #j ifPresent: [:w | w] ifAbsent: [{s}. 0]",
+            "r := t + (#{#a => 1} at: #a ifPresent: [:v | t := t + v. 5])",
+        ),
     ] {
         let body = format!(
             "    t := 0\n    u := 0\n    r := 0\n    {}\n    #[r, t]\n",

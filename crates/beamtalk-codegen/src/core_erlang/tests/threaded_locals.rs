@@ -87,8 +87,8 @@ fn repl_returns_the_bindings_the_construct_writes() {
 fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
     let generator = make_generator(CodeGenContext::ValueType, &["t", "d"]);
     for (src, family) in [
-        // `Dictionary` implements `at:ifAbsent:` only (BT-3798): the other
-        // lookup rows are not lowered.
+        // `Dictionary` does not implement `at:ifAbsentPut:` (BT-3798,
+        // BT-3824): that lookup row is not lowered.
         (
             "d at: #k ifAbsentPut: [t := 1]",
             LocalThreadingFamily::Lookup,
@@ -112,6 +112,19 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
         ThreadedConstruct::Inline(LocalThreadingFamily::Lookup)
     );
     assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]));
+    // BT-3824: so do `at:ifPresent:` and `at:ifPresent:ifAbsent:`.
+    for src in [
+        "d at: #k ifPresent: [:v | t := v]",
+        "d at: #k ifPresent: [:v | v] ifAbsent: [t := 1]",
+    ] {
+        let set = threaded(&generator, src).expect("lookup");
+        assert_eq!(
+            set.construct,
+            ThreadedConstruct::Inline(LocalThreadingFamily::Lookup),
+            "{src}"
+        );
+        assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]), "{src}");
+    }
     // `eachWithIndex:` is lowered in an actor's own fold.
     let actor = make_generator(CodeGenContext::Actor, &["t"]);
     let set = threaded(&actor, "#(1) eachWithIndex: [:x :i | t := i]").expect("set");

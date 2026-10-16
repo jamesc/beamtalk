@@ -861,6 +861,39 @@ mod tests {
     }
 
     #[test]
+    fn test_dictionary_at_if_present() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "at:ifPresent:",
+            &["Key".to_string(), "Block".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_map':'at_if_present'(Self, Key, Block)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dictionary_at_if_present_if_absent() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Dictionary",
+            "at:ifPresent:ifAbsent:",
+            &[
+                "Key".to_string(),
+                "Present".to_string(),
+                "Absent".to_string(),
+            ],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_map':'at_if_present_if_absent'(Self, Key, Present, Absent)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
     fn test_dictionary_at_put() {
         let result = doc_to_string(generate_primitive_bif(
             "Dictionary",

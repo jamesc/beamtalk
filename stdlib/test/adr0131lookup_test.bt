@@ -8,11 +8,11 @@
 // test runs one shape (fixtures/adr0131lookup_{class,value,actor}.bt) in all
 // three contexts and asserts the answer Smalltalk semantics give.
 //
-// `Dictionary` implements `at:ifAbsent:` only; `at:ifAbsentPut:`,
-// `at:ifPresent:`, `at:ifPresent:ifAbsent:` and `removeKey:ifAbsent:` are not
-// Dictionary selectors, so there is no Dictionary behaviour to lower and a
-// handler-writing send of one stays a compile error (ADR 0131 §6, pinned by
-// `lookup_selectors_that_dictionary_does_not_implement_stay_rejected` in
+// BT-3824: `at:ifPresent:` and `at:ifPresent:ifAbsent:` are producers too
+// (the `ifPresent*` tests). `at:ifAbsentPut:` and `removeKey:ifAbsent:` are
+// not Dictionary selectors (an immutable Dictionary has no such behaviour),
+// so a handler-writing send of one stays a compile error (ADR 0131 §6, pinned
+// by `lookup_selectors_that_dictionary_does_not_implement_stay_rejected` in
 // beamtalk-core).
 
 TestCase subclass: Adr0131LookupTest
@@ -139,3 +139,69 @@ TestCase subclass: Adr0131LookupTest
     self should: [Adr0131LookupClass lookupIn: 3] raise: #type_error
     self should: [(Adr0131LookupValue new) lookupIn: 3] raise: #type_error
     self should: [(Adr0131LookupActor spawn) lookupIn: 3] raise: #type_error
+
+  // BT-3824: `at:ifPresent:` and `at:ifPresent:ifAbsent:` are Dictionary
+  // selectors and producers like `at:ifAbsent:`; the present handler runs
+  // inline with the found value bound to its parameter.
+  testIfPresentFound => self assertAll: #ifPresentFound equal: #[10, 1]
+
+  testIfPresentMissing => self assertAll: #ifPresentMissing equal: #[nil, 0]
+
+  testIfPresentStoredNil => self assertAll: #ifPresentStoredNil equal: #[nil, 1]
+
+  testIfPresentStatement => self assertAll: #ifPresentStatement equal: 1
+
+  testIfPresentOperand => self assertAll: #ifPresentOperand equal: #[5, 1]
+
+  testIfPresentIfAbsentFound =>
+    self assertAll: #ifPresentIfAbsentFound equal: #[1, 1, 0]
+
+  testIfPresentIfAbsentMissing =>
+    self assertAll: #ifPresentIfAbsentMissing equal: #[0, 0, 1]
+
+  testIfPresentNested => self assertAll: #ifPresentNested equal: #[4, 1]
+
+  testIfPresentArm =>
+    self assert: (Adr0131LookupClass ifPresentArm: true) equals: #[1, 1]
+    self assert: ((Adr0131LookupValue new) ifPresentArm: true) equals: #[1, 1]
+    self assert: ((Adr0131LookupActor spawn) ifPresentArm: true) equals: #[1, 1]
+    self assert: (Adr0131LookupClass ifPresentArm: false) equals: #[nil, 0]
+    self assert: ((Adr0131LookupValue new) ifPresentArm: false) equals: #[nil, 0]
+    self assert: ((Adr0131LookupActor spawn) ifPresentArm: false) equals: #[nil, 0]
+
+  testIfPresentEarlyReturn =>
+    self assert: (Adr0131LookupClass ifPresentEarlyReturn: #a) equals: 1
+    self assert: ((Adr0131LookupValue new) ifPresentEarlyReturn: #a) equals: 1
+    self assert: ((Adr0131LookupActor spawn) ifPresentEarlyReturn: #a) equals: 1
+    self assert: (Adr0131LookupClass ifPresentEarlyReturn: #k) equals: #[nil, 0]
+    self assert: ((Adr0131LookupValue new) ifPresentEarlyReturn: #k) equals: #[nil, 0]
+    self assert: ((Adr0131LookupActor spawn) ifPresentEarlyReturn: #k) equals: #[nil, 0]
+
+  testIfPresentDictionaryReceiver =>
+    self assert: (Adr0131LookupClass ifPresentIn: #{#k => 4}) equals: #[4, 4]
+    self assert: ((Adr0131LookupValue new) ifPresentIn: #{
+      #k => 4
+    }) equals: #[4, 4]
+    self assert: ((Adr0131LookupActor spawn) ifPresentIn: #{
+      #k => 4
+    }) equals: #[4, 4]
+    self assert: (Adr0131LookupClass ifPresentIn: #{}) equals: #[0, -1]
+    self assert: ((Adr0131LookupValue new) ifPresentIn: #{}) equals: #[0, -1]
+    self assert: ((Adr0131LookupActor spawn) ifPresentIn: #{}) equals: #[0, -1]
+
+  testIfPresentNonDictionaryReceiverRaises =>
+    self should: [
+      Adr0131LookupClass ifPresentIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+    self should: [
+      (Adr0131LookupValue new) ifPresentIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+    self should: [
+      (Adr0131LookupActor spawn) ifPresentIn: (Adr0131LookupBag new)
+    ] raise: #type_error
+    self should: [Adr0131LookupClass ifPresentIn: 3] raise: #type_error
+    self should: [(Adr0131LookupValue new) ifPresentIn: 3] raise: #type_error
+    self should: [(Adr0131LookupActor spawn) ifPresentIn: 3] raise: #type_error
+
+  testIfPresentFieldReadActor =>
+    self assert: (Adr0131LookupActor spawn) ifPresentFieldRead equals: #[1, 4, 3]
