@@ -522,20 +522,22 @@ fn map_put_rebind(
 }
 
 #[test]
-fn map_put_rebind_reading_its_own_source_map_binds_the_version_without_a_put() {
-    // BT-3835: the rebind reads `maps:get(Key, State1)` and its `MapPut` source
-    // is that same `State1`: writing the value back is an identity, so only
-    // the version alias is bound.
+fn map_held_rebind_binds_the_value_without_a_put_or_a_version_step() {
+    // BT-3835: the rebind reads `maps:get(Key, State1)` and the map is already
+    // the frame's current one: the identity put is elided, so only the value
+    // is bound and no `State2` exists.
     let frame = FrameId::ROOT;
-    let ir = vec![map_put_rebind(
-        frame,
-        Some(state(1, frame)),
-        state(1, frame),
-    )];
-    let text = render_str(&ir);
+    let mut stmt = map_put_rebind(frame, Some(state(1, frame)), state(1, frame));
+    if let ThreadedStmt::LocalRebind { lowering, .. } = &mut stmt {
+        *lowering = RebindLowering::MapHeld {
+            key: "__local__t".to_string(),
+            map: state(1, frame),
+        };
+    }
+    let text = render_str(&[stmt]);
     assert_eq!(
         text,
-        "let _T1 = call 'maps':'get'('__local__t', State1) in let State2 = State1 in "
+        "let _T1 = call 'maps':'get'('__local__t', State1) in "
     );
     assert!(
         !text.contains("'maps':'put'"),
@@ -1250,4 +1252,276 @@ fn sibling_reads_ignore_earlier_rebinds_other_locals_and_nested_frames() {
         ];
         assert_eq!(verify_sibling_reads(&siblings), Vec::new(), "{local}");
     }
+}
+
+// ── BT-3835: the identity `Put` of a rebind read through the frame's map ──
+
+/// A `StateAcc` loop node threading `names`.
+fn state_acc_threading(frame: FrameId, names: &[&str], body: Vec<ThreadedStmt>) -> ThreadedStmt {
+    ThreadedStmt::Threaded {
+        mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+        frame,
+        threads: threads(names),
+        body,
+        produces: Vec::new(),
+        span: span(),
+    }
+}
+
+/// The actor-instance shape of a `StateAcc` frame's producer prelude: the
+/// family `Bind` steps the frame's map `State0 -> State1` from `element(2,
+/// CF)`, then each rebind reads its key through `State1` (`state_first`).
+fn state_acc_family_binds(frame: FrameId) -> Vec<ThreadedStmt> {
+    extract_family_slots(
+        CARRIER,
+        1,
+        &ThreadedFamilies::from_matches(&[VersionPrefix::State]),
+        |_| FamilyVersionStep::new(state(0, frame), state(1, frame)),
+        span(),
+    )
+}
+
+#[test]
+fn a_state_acc_member_read_through_the_frames_current_map_is_held_not_put() {
+    // `maps:put(K, maps:get(K, State1), State1)` is `State1`: the rebind binds
+    // the value and leaves the map alone, so no `State` version is minted.
+    let frame = FrameId::new(1);
+    let enclosing = frame_of(&state_acc_node(frame, Vec::new()));
+    let mut asked = Vec::new();
+    let prelude = build_local_threading_prelude(
+        &enclosing,
+        CARRIER,
+        tuple_doc(),
+        &[key_slot("t", "_T1")],
+        state_acc_family_binds(frame),
+        span(),
+        |_, shape| {
+            asked.push(shape);
+            RebindLowering::Let
+        },
+    );
+    assert_eq!(asked, Vec::new(), "a held rebind mints nothing");
+    assert!(matches!(
+        &prelude[2],
+        ThreadedStmt::LocalRebind {
+            lowering: RebindLowering::MapHeld { key, map },
+            ..
+        } if key == "__local__t" && *map == state(1, frame)
+    ));
+    let ir = vec![state_acc_node(frame, prelude)];
+    let rendered = render_str(&ir);
+    assert!(!rendered.contains("'maps':'put'"), "{rendered}");
+    assert!(
+        rendered.ends_with("let _T1 = call 'maps':'get'('__local__t', State1) in "),
+        "{rendered}"
+    );
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn a_state_acc_member_read_through_the_carrier_keeps_its_put() {
+    // No family `Bind` (class method, value type): the read is `element(2,
+    // CF)`, not the frame's map, so the `Put` is a genuine write.
+    let frame = FrameId::new(1);
+    let enclosing = frame_of(&state_acc_node(frame, Vec::new()));
+    let prelude = build_local_threading_prelude(
+        &enclosing,
+        CARRIER,
+        tuple_doc(),
+        &[key_slot("t", "_T1")],
+        Vec::new(),
+        span(),
+        mint(frame, "__local__t"),
+    );
+    assert!(matches!(
+        &prelude[1],
+        ThreadedStmt::LocalRebind {
+            lowering: RebindLowering::MapPut { .. },
+            ..
+        }
+    ));
+    let ir = vec![state_acc_node(frame, prelude)];
+    assert!(render_str(&ir).contains("call 'maps':'put'('__local__t', _T1, State)"));
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn a_rebind_after_a_sibling_stepped_the_map_keeps_its_put() {
+    // A first rebind that really writes (a `Pos` read) steps the frame's map
+    // past `state_first`; the second rebind's `Put` into `State2` of the
+    // value it read from `State1` is then a genuine write and is kept.
+    let frame = FrameId::new(1);
+    let enclosing = frame_of(&state_acc_threading(frame, &["s", "t"], Vec::new()));
+    let mut next = 1;
+    let prelude = build_local_threading_prelude(
+        &enclosing,
+        CARRIER,
+        tuple_doc(),
+        &[flat_slot("s", 3, "_S1"), key_slot("t", "_T1")],
+        state_acc_family_binds(frame),
+        span(),
+        |local, shape| {
+            assert_eq!(shape, RebindShape::MapPut);
+            next += 1;
+            RebindLowering::MapPut {
+                key: CoreErlangGenerator::local_state_key(&local.local),
+                source: state(next - 1, frame),
+                target: state(next, frame),
+            }
+        },
+    );
+    assert_eq!(next, 3, "both rebinds minted a real `Put`");
+    let ir = vec![state_acc_threading(frame, &["s", "t"], prelude)];
+    let rendered = render_str(&ir);
+    assert!(
+        rendered.contains("let State3 = call 'maps':'put'('__local__t', _T1, State2) in "),
+        "{rendered}"
+    );
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn held_in_frame_map_holds_only_an_identity_put() {
+    let frame = FrameId::new(1);
+    let key = CarrierSlot::Key("__local__t".to_string());
+    let map = state(1, frame);
+    let held = RebindLowering::held_in_frame_map;
+    assert_eq!(
+        held(RebindShape::MapPut, &key, Some(&map), Some(&map), frame),
+        Some(RebindLowering::MapHeld {
+            key: "__local__t".to_string(),
+            map: map.clone(),
+        })
+    );
+    // Read through the carrier, not the frame's map.
+    assert_eq!(
+        held(RebindShape::MapPut, &key, None, Some(&map), frame),
+        None
+    );
+    // A `Pos` read: the value is not the map's own entry.
+    let pos = CarrierSlot::Pos(2);
+    assert_eq!(
+        held(RebindShape::MapPut, &pos, Some(&map), Some(&map), frame),
+        None
+    );
+    // The frame's map has moved past the read map (a stale `State1`).
+    let stepped = state(2, frame);
+    assert_eq!(
+        held(RebindShape::MapPut, &key, Some(&map), Some(&stepped), frame),
+        None
+    );
+    // Another frame's map.
+    let other = state(1, FrameId::ROOT);
+    assert_eq!(
+        held(RebindShape::MapPut, &key, Some(&other), Some(&other), frame),
+        None
+    );
+    // Not a `MapPut` cell.
+    for shape in [RebindShape::Let, RebindShape::LoopParam] {
+        assert_eq!(held(shape, &key, Some(&map), Some(&map), frame), None);
+    }
+}
+
+/// A hand-built `MapHeld` rebind of `local` reading `slot` through
+/// `state_first`, eliding its `Put` of `local`'s key into `map`.
+fn held_rebind(
+    local: &str,
+    slot: CarrierSlot,
+    state_first: Option<VersionedVar>,
+    map: VersionedVar,
+    frame: FrameId,
+) -> ThreadedStmt {
+    ThreadedStmt::LocalRebind {
+        local: local.to_string(),
+        carrier: CARRIER.to_string(),
+        slot,
+        frame,
+        value_var: "_T1".to_string(),
+        state_first,
+        lowering: RebindLowering::MapHeld {
+            key: CoreErlangGenerator::local_state_key(local),
+            map,
+        },
+        span: span(),
+    }
+}
+
+#[test]
+fn a_held_rebind_that_is_not_an_identity_put_fails_verification() {
+    let frame = FrameId::new(1);
+    let s1 = state(1, frame);
+    let t_key = || CarrierSlot::Key(CoreErlangGenerator::local_state_key("t"));
+    // `before` are the rebinds between the family `Bind` and `t`'s.
+    let ir = |before: Vec<ThreadedStmt>, t: ThreadedStmt| {
+        let mut body = vec![build_construct_tuple(
+            CARRIER,
+            tuple_doc(),
+            threads(&["s", "t"]),
+            span(),
+        )];
+        body.extend(state_acc_family_binds(frame));
+        body.extend(before);
+        body.push(t);
+        vec![state_acc_threading(frame, &["s", "t"], body)]
+    };
+    let not_identity = vec![VerifyError::HeldRebindNotIdentity {
+        local: "t".to_string(),
+        at: span(),
+    }];
+    let s_held = || {
+        held_rebind(
+            "s",
+            CarrierSlot::Key("__local__s".to_string()),
+            Some(s1.clone()),
+            s1.clone(),
+            frame,
+        )
+    };
+    // The clean shape verifies.
+    assert_eq!(
+        verify(&ir(
+            vec![s_held()],
+            held_rebind("t", t_key(), Some(s1.clone()), s1.clone(), frame)
+        )),
+        Vec::new()
+    );
+    // Read through the carrier: the elided `Put` would have written a value.
+    assert_eq!(
+        verify(&ir(
+            vec![s_held()],
+            held_rebind("t", t_key(), None, s1.clone(), frame)
+        )),
+        not_identity
+    );
+    // Read from another key than the one the `Put` would write.
+    let u_key = CarrierSlot::Key("__local__u".to_string());
+    assert_eq!(
+        verify(&ir(
+            vec![s_held()],
+            held_rebind("t", u_key, Some(s1.clone()), s1.clone(), frame)
+        )),
+        not_identity
+    );
+    // A stale map: `s`'s real `Put` stepped the frame's map to `State2`.
+    let s_put = ThreadedStmt::LocalRebind {
+        local: "s".to_string(),
+        carrier: CARRIER.to_string(),
+        slot: CarrierSlot::Pos(3),
+        frame,
+        value_var: "_S1".to_string(),
+        state_first: Some(s1.clone()),
+        lowering: RebindLowering::MapPut {
+            key: "__local__s".to_string(),
+            source: s1.clone(),
+            target: state(2, frame),
+        },
+        span: span(),
+    };
+    assert_eq!(
+        verify(&ir(
+            vec![s_put],
+            held_rebind("t", t_key(), Some(s1.clone()), s1, frame)
+        )),
+        not_identity
+    );
 }

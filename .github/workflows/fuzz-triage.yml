@@ -163,6 +163,20 @@ jobs:
         if: always()
         run: rm -f "${RUNNER_TEMP}/linear-mcp.json"
 
+      # Print the denied tool calls into the job log so they are readable without
+      # downloading the artifact below: tool name plus the first 400 characters of
+      # the input (a denied command or path). Best-effort; never fails the job.
+      - name: Show permission denials
+        if: always()
+        continue-on-error: true
+        run: |
+          f="${RUNNER_TEMP}/claude-execution-output.json"
+          if [ ! -f "$f" ]; then echo "no execution output at $f"; exit 0; fi
+          echo "== permission denials =="
+          jq -r '.. | objects | select(has("permission_denials")) | .permission_denials[]?
+                 | "DENIED \(.tool_name): \(.tool_input | tostring | .[0:400])"' "$f" || true
+          echo "== end permission denials =="
+
       # The action's step log omits the agent's tool calls and permission denials;
       # they are only in this file. Upload it so a "green but did nothing" run (for
       # example denied cargo commands) can be diagnosed. Best-effort.
