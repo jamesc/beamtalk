@@ -2054,7 +2054,21 @@ pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     sequenced_operand_sites(stmt)
         .into_iter()
         .filter(|site| Some(site.span()) != whole_value)
+        .filter(|site| !is_repl_unmeasured_enumeration(site))
         .collect()
+}
+
+/// BT-3841: `eachWithIndex:`/`do:separatedBy:` became producers for class,
+/// value-type and actor methods; the REPL's operand sites keep excluding them
+/// (they keep their statement and assignment lowering and the Phase 0 operand
+/// rows), because the REPL root's fold frames are unmeasured (BT-3823): the
+/// desugared fold's separator conditional fails the `ThreadedIr` verifier there.
+fn is_repl_unmeasured_enumeration(site: &Expression) -> bool {
+    matches!(
+        site.unwrap_parens(),
+        Expression::MessageSend { selector, .. }
+            if matches!(selector.name().as_str(), "eachWithIndex:" | "do:separatedBy:")
+    )
 }
 
 /// ADR 0131 Phase 2b (BT-3793): [`sequenced_operand_sites`] for a statement

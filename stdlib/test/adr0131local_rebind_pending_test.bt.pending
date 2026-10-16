@@ -24,17 +24,5 @@ TestCase subclass: Adr0131LocalRebindPendingTest
   // BT-3753: the statement-position shapes (each an ADR 0131 Phase 0 compile
   // error today), with their ADR Expected answers.
 
-  testStEachWithIndexClass =>
-    self assert: (Adr0131LocalRebindClassPending stEachWithIndex) equals: 3
-
-  testStEachWithIndexValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stEachWithIndex) equals: 3
-
-  testStDoSeparatedByClass =>
-    self assert: (Adr0131LocalRebindClassPending stDoSeparatedBy) equals: 13
-
-  testStDoSeparatedByValue =>
-    self assert: ((Adr0131LocalRebindValuePending new) stDoSeparatedBy) equals: 13
-
   testStBlockValueClass =>
     self assert: (Adr0131LocalRebindClassPending stBlockValue) equals: 1
