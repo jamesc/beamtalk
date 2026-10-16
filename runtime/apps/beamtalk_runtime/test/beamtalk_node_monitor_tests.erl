@@ -230,6 +230,73 @@ terminate_without_subscription_ref_is_noop_test_() ->
         end
     end}.
 
+%%====================================================================
+%% normalize_reason/1 — pure function, no gen_server needed
+%%====================================================================
+
+normalize_reason_atom_is_passed_through_test() ->
+    ?assertEqual(disconnect, beamtalk_node_monitor:normalize_reason(disconnect)),
+    ?assertEqual(net_tick_timeout, beamtalk_node_monitor:normalize_reason(net_tick_timeout)).
+
+normalize_reason_undefined_returns_unknown_test() ->
+    ?assertEqual(unknown, beamtalk_node_monitor:normalize_reason(undefined)).
+
+normalize_reason_non_atom_returns_unknown_test() ->
+    ?assertEqual(unknown, beamtalk_node_monitor:normalize_reason(<<"binary_reason">>)),
+    ?assertEqual(unknown, beamtalk_node_monitor:normalize_reason(42)).
+
+%%====================================================================
+%% handle_info — own nodeup records self-identity
+%%====================================================================
+
+%% Covers handle_info lines 176-182: when this VM becomes distributed, the
+%% matching nodeup (Node =:= node()) stores the current identity so the
+%% later own nodedown can be recognised even after node() reverts.
+own_nodeup_sets_own_name_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        fun() ->
+            OwnNode = node(),
+            beamtalk_node_monitor ! {nodeup, OwnNode, []},
+            %% Sync: a gen_server:call serialises after the handle_info.
+            beamtalk_node_monitor:skew_count('any@node'),
+            State = sys:get_state(beamtalk_node_monitor),
+            ?assertEqual(OwnNode, element(2, State))
+        end
+    end}.
+
+%%====================================================================
+%% handle_info — peer nodeup announces and spawns skew check
+%%====================================================================
+
+%% Covers handle_info lines 183-188: a peer-nodeup fires announce/2 and
+%% spawns check_shape_skew_on_connect/1. The erpc call in that spawn fails
+%% for a non-existent node, is caught and logged, and must not crash the
+%% gen_server.
+peer_nodeup_server_survives_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        fun() ->
+            beamtalk_node_monitor ! {nodeup, 'fake_peer@testhost', []},
+            %% Sync: proves the gen_server is alive after announce + spawn.
+            ?assertEqual(0, beamtalk_node_monitor:skew_count('fake_peer@testhost'))
+        end
+    end}.
+
+%%====================================================================
+%% handle_info — class_loaded spawns reload check (no-op with no peers)
+%%====================================================================
+
+%% Covers handle_info lines 201-208: a ClassLoaded event spawns
+%% check_shape_skew_on_reload/2 which hits the [] base-case immediately
+%% when no distributed peers are connected (the common unit-test scenario).
+class_loaded_info_server_survives_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        fun() ->
+            beamtalk_node_monitor ! {'$beamtalk_class_loaded', 'SomeClass'},
+            %% Sync: call proves the server processed the message and is alive.
+            ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
+        end
+    end}.
+
 wait_for_restart(Name, TimeoutMs) ->
     Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
     wait_for_restart_loop(Name, Deadline).
