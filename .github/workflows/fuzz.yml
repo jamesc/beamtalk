@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -96,82 +95,6 @@ jobs:
 
           exit $FAILED
 
-      - name: Create issue on failure
-        if: steps.fuzz.outcome == 'failure'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const fs = require('fs');
-            
-            const artifactsDir = 'fuzz/artifacts/parse_arbitrary/';
-            let files = [];
-            
-            try {
-              files = fs.readdirSync(artifactsDir);
-            } catch (e) {
-              console.log('No artifacts directory found');
-              return;
-            }
-            
-            const crashes = files.filter(f => f.startsWith('crash-'));
-            const ooms = files.filter(f => f.startsWith('oom-'));
-            const timeouts = files.filter(f => f.startsWith('timeout-'));
-            
-            if (crashes.length === 0 && ooms.length === 0 && timeouts.length === 0) {
-              console.log('No failure artifacts found, not creating issue');
-              return;
-            }
-            
-            // Build title and body based on artifact types
-            const types = [];
-            if (crashes.length > 0) types.push('crash');
-            if (ooms.length > 0) types.push('OOM');
-            if (timeouts.length > 0) types.push('timeout');
-            
-            const title = `🔀 Parser fuzzing failure: ${types.join(', ')} (run ${context.runId})`;
-            
-            let details = '';
-            if (crashes.length > 0) {
-              details += `\n### Crashes (${crashes.length})\n${crashes.map(c => `- \`${c}\``).join('\n')}\n`;
-            }
-            if (ooms.length > 0) {
-              details += `\n### Out-of-Memory (${ooms.length})\n${ooms.map(c => `- \`${c}\``).join('\n')}\nThe parser used >4GB on crafted input. Add resource limits (max AST depth, max token count).\n`;
-            }
-            if (timeouts.length > 0) {
-              details += `\n### Timeouts (${timeouts.length})\n${timeouts.map(c => `- \`${c}\``).join('\n')}\nThe parser took too long, indicating an infinite loop or pathological input.\n`;
-            }
-            
-            const body = [
-              `## Parser Fuzzing Failure`,
-              ``,
-              `The nightly fuzzer found issues in the parser.`,
-              ``,
-              `**Run:** ${context.runId}`,
-              `**Workflow:** ${context.workflow}`,
-              `**Date:** ${new Date().toISOString()}`,
-              details,
-              `### Action Required`,
-              ``,
-              `1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run`,
-              `2. Reproduce: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\``,
-              `3. Fix the issue in the parser`,
-              `4. Re-run fuzzer to verify fix`,
-              ``,
-              `### References`,
-              ``,
-              `- ADR 0011: Robustness Testing — Layered Fuzzing`,
-              `- Epic: BT-362`,
-              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            ].join('\n');
-            
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: title,
-              body: body,
-              labels: ['Bug', 'parser', 'fuzzing', 'High']
-            });
-
       - name: Add to job summary
         if: always()
         run: |
@@ -200,7 +123,7 @@ jobs:
           echo "**Duration:** 5 minutes" >> $GITHUB_STEP_SUMMARY
 
   # BT-3124: full-pipeline fuzz target (lex -> parse -> analyse -> codegen).
-  # Mirrors the `fuzz` job above (same failure-detection/artifact/issue
+  # Mirrors the `fuzz` job above (same failure-detection/artifact
   # shape) for the `compile_pipeline` target instead of `parse_arbitrary` --
   # kept as a separate job rather than a second step in `fuzz` so each
   # target's crash/timeout/OOM detection stays simple to read, matching this
@@ -285,81 +208,6 @@ jobs:
           fi
 
           exit $FAILED
-
-      - name: Create issue on failure
-        if: steps.fuzz.outcome == 'failure'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const fs = require('fs');
-
-            const artifactsDir = 'fuzz/artifacts/compile_pipeline/';
-            let files = [];
-
-            try {
-              files = fs.readdirSync(artifactsDir);
-            } catch (e) {
-              console.log('No artifacts directory found');
-              return;
-            }
-
-            const crashes = files.filter(f => f.startsWith('crash-'));
-            const ooms = files.filter(f => f.startsWith('oom-'));
-            const timeouts = files.filter(f => f.startsWith('timeout-'));
-
-            if (crashes.length === 0 && ooms.length === 0 && timeouts.length === 0) {
-              console.log('No failure artifacts found, not creating issue');
-              return;
-            }
-
-            const types = [];
-            if (crashes.length > 0) types.push('crash');
-            if (ooms.length > 0) types.push('OOM');
-            if (timeouts.length > 0) types.push('timeout');
-
-            const title = `🔀 Compile pipeline fuzzing failure: ${types.join(', ')} (run ${context.runId})`;
-
-            let details = '';
-            if (crashes.length > 0) {
-              details += `\n### Crashes / invalid Core Erlang (${crashes.length})\n${crashes.map(c => `- \`${c}\``).join('\n')}\nEither a panic in lex/parse/analyse/codegen, or generate_module returned Ok with structurally invalid Core Erlang (unbalanced delimiters, missing module/end, or a Rust format-artifact leak).\n`;
-            }
-            if (ooms.length > 0) {
-              details += `\n### Out-of-Memory (${ooms.length})\n${ooms.map(c => `- \`${c}\``).join('\n')}\nThe pipeline used >4GB on crafted input.\n`;
-            }
-            if (timeouts.length > 0) {
-              details += `\n### Timeouts (${timeouts.length})\n${timeouts.map(c => `- \`${c}\``).join('\n')}\nThe pipeline took too long, indicating an infinite loop or pathological input.\n`;
-            }
-
-            const body = [
-              `## Compile Pipeline Fuzzing Failure`,
-              ``,
-              `The nightly fuzzer found issues in the lex -> parse -> analyse -> codegen pipeline.`,
-              ``,
-              `**Run:** ${context.runId}`,
-              `**Workflow:** ${context.workflow}`,
-              `**Date:** ${new Date().toISOString()}`,
-              details,
-              `### Action Required`,
-              ``,
-              `1. Download the \`fuzz-compile-pipeline-artifacts-${context.runId}\` artifact from the workflow run`,
-              `2. Reproduce: \`cargo +nightly fuzz run compile_pipeline <artifact-file>\``,
-              `3. Fix the issue in analysis/codegen`,
-              `4. Re-run fuzzer to verify fix`,
-              ``,
-              `### References`,
-              ``,
-              `- ADR 0011: Robustness Testing — Layered Fuzzing`,
-              `- Epic: BT-3112`,
-              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            ].join('\n');
-
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: title,
-              body: body,
-              labels: ['Bug', 'codegen', 'fuzzing', 'High']
-            });
 
       - name: Add to job summary
         if: always()
@@ -472,10 +320,10 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      # continue-on-error so the issue/artifact steps below run (a plain failing
-      # step skips every later step that is not `if: always()`/`failure()`, which
-      # left runs 248-250 without an issue); "Fail on corpus failure" re-fails
-      # the job afterwards. The output is tee'd to a file so the report of
+      # continue-on-error so the artifact step below runs (a plain failing step
+      # skips every later step that is not `if: always()`/`failure()`);
+      # "Fail on corpus failure" re-fails the job afterwards. Issues are filed
+      # in Linear by fuzz-triage.yml, which runs when this workflow fails. The output is tee'd to a file so the report of
       # failing (index, seed, size) pairs and program sources is also kept as a
       # standalone artifact that is easy to download and search and survives log
       # truncation (downloading it still needs a GitHub login, like the log).
@@ -491,8 +339,6 @@ jobs:
           CV_CORPUS_CASES: 192
           PROPTEST_CASES: 2048
 
-      # Best-effort: the issue step below has an implicit `success()`, so a
-      # failed upload must not skip it.
       - name: Upload report on failure
         if: steps.corpus.outcome == 'failure'
         continue-on-error: true
@@ -502,45 +348,10 @@ jobs:
           path: target/class-var-corpus/report.log
           retention-days: 30
 
-      # Like the fuzz jobs above, a failure files an issue. The job log and the
-      # uploaded report hold the (index, seed, size) pairs and the failing
-      # program sources.
-      - name: Create issue on failure
-        if: steps.corpus.outcome == 'failure'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = [
-              `## Class-variable agreement corpus failure`,
-              ``,
-              `The nightly \`class-var-corpus\` job (\`just test-class-var-corpus\`, 192 programs on a BEAM, 2048 codegen cases) failed.`,
-              ``,
-              `**Run:** ${runUrl}`,
-              `**Date:** ${new Date().toISOString()}`,
-              ``,
-              `### Action Required`,
-              ``,
-              `1. Open the \`class-var-corpus-report-${context.runId}\` artifact (or the job log); the report lists each failing program's \`(index, seed, size)\` pair, cause and source.`,
-              `2. If the report says "probably a broken environment", check the runtime/stdlib build first.`,
-              `3. Reproduce locally with \`CV_CORPUS_CASES=192 just test-class-var-corpus\` (narrow with \`CV_CORPUS_SHAPES\`).`,
-              ``,
-              `### References`,
-              ``,
-              `- ADR 0130: class variables; BT-3705, BT-3767`,
-            ].join('\n');
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Class-var agreement corpus failure (run ${context.runId})`,
-              body: body,
-              labels: ['Bug', 'fuzzing', 'High']
-            });
-
       - name: Fail on corpus failure
         if: steps.corpus.outcome == 'failure'
         run: |
-          echo "class-var-corpus failed; see the issue filed above and the uploaded report"
+          echo "class-var-corpus failed; see the uploaded report (fuzz-triage.yml files the Linear issue)"
           exit 1
 
       - name: Add to job summary
