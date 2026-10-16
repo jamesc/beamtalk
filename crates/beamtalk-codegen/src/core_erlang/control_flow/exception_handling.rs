@@ -687,6 +687,15 @@ impl CoreErlangGenerator {
                 Self::validate_ensure_cleanup(cleanup_expr)?;
                 self.generate_ensure_with_mutations(protected, cleanup, true)
             }
+            // The producer recognizer classified this send as a `tryDo:`
+            // producer but `is_result_try_do` rejects its receiver (or its
+            // argument is not a block literal): the two disagree.
+            ("tryDo:", _, _) => Err(CodeGenError::Internal(
+                "exception producer reached `tryDo:` whose receiver is not `Result` \
+                 or whose argument is not a block literal (the producer recognizer \
+                 and `is_result_try_do` disagree)"
+                    .to_string(),
+            )),
             _ => Err(CodeGenError::Internal(format!(
                 "exception producer reached `{selector}` with non-literal blocks"
             ))),
