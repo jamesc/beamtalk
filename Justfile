@@ -1751,6 +1751,8 @@ coverage-all: coverage-runtime coverage-e2e coverage-stdlib coverage-bunit
             GOOD+=("$f")
         else
             echo "  ⚠️  Skipping unreadable coverdata (truncated or corrupt): $f"
+            # rebar3 cover imports every *.coverdata in this dir, so move it aside.
+            mv "$f" "$f.unreadable"
         fi
     done
     if [ "${#GOOD[@]}" -eq 0 ]; then
