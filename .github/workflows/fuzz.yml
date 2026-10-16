@@ -475,9 +475,10 @@ jobs:
       # continue-on-error so the issue/artifact steps below run (a plain failing
       # step skips every later step that is not `if: always()`/`failure()`, which
       # left runs 248-250 without an issue); "Fail on corpus failure" re-fails
-      # the job afterwards. The output is tee'd to a file because the report of
-      # failing (index, seed, size) pairs and program sources is only in the log,
-      # which needs a GitHub login to read.
+      # the job afterwards. The output is tee'd to a file so the report of
+      # failing (index, seed, size) pairs and program sources is also kept as a
+      # standalone artifact that is easy to download and search and survives log
+      # truncation (downloading it still needs a GitHub login, like the log).
       - name: Run class-variable agreement corpus (192 programs, 2048 codegen cases)
         id: corpus
         continue-on-error: true
