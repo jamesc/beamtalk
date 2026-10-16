@@ -24,7 +24,7 @@ statement	keyed-do	class	40	0	0
 statement	keyed-do	value	35	0	0
 statement	other	actor	590	0	0
 statement	other	class	587	0	0
-statement	other	value	460	0	0
+statement	other	value	457	0	3
 statement	satisfy	actor	40	0	0
 statement	satisfy	class	40	0	0
 statement	satisfy	value	35	0	0
@@ -47,6 +47,7 @@ statement-group	loop-body	block-value	class	20
 statement-group	loop-body	block-value	value	14
 statement-group	loop-body	detect-ifnone	actor	18
 statement-group	loop-body	detect-plain	actor	6
+statement-group	loop-body	other	value	3
 statement-group	method-body	block-value	class	4
 statement-group	protected-body	block-value	actor	9
 statement-group	protected-body	block-value	class	11
@@ -64,7 +65,7 @@ operand	arg	value	57	54	3	0	54	0
 operand	assign	actor	57	39	5	13	35	4
 operand	assign	class	57	54	3	0	54	0
 operand	assign	value	57	54	3	0	54	0
-operand	cascade	actor	57	10	45	2	0	10
+operand	cascade	actor	57	10	47	0	0	10
 operand	cascade	class	57	8	44	5	0	8
 operand	cascade	value	57	10	44	3	0	10
 operand	field	actor	57	39	5	13	33	6

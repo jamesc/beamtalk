@@ -1080,8 +1080,8 @@ actor	top	cascade	and	right
 actor	top	cascade	onDo	right
 actor	top	cascade	ensure	right
 actor	top	cascade	value	wrong
-actor	top	cascade	ewi	erlc
-actor	top	cascade	dsb	erlc
+actor	top	cascade	ewi	wrong
+actor	top	cascade	dsb	wrong
 actor	top	cascade	kv	wrong
 actor	top	cascade	dinH	wrong
 actor	top	cascade	dinS	wrong

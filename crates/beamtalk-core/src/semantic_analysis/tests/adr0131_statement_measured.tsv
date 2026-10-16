@@ -2463,8 +2463,8 @@ value	loop	outer	ifTrue	right
 value	loop	outer	inject	right
 value	loop	outer	kv	right
 value	loop	outer	onDo	right
-value	loop	outer	times	right
-value	loop	outer	toDo	right
+value	loop	outer	times	erlc
+value	loop	outer	toDo	erlc
 value	loop	outer	value	erlc
 value	loop	outer	while	right
 value	loop	selfsend	do	right
@@ -2650,7 +2650,7 @@ value	timesC	outer	onDo	right
 value	timesC	outer	times	right
 value	timesC	outer	toDo	right
 value	timesC	outer	value	erlc
-value	timesC	outer	while	right
+value	timesC	outer	while	erlc
 value	toDoC	direct	and	right
 value	toDoC	direct	any	right
 value	toDoC	direct	collect	right
