@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3848: a local that a wrapping `ensure:` / `on:do:` / conditional block
+// introduces itself is not an outer write the enclosing class-method fold
+// threads (that used to panic the ThreadedIr verifier), but an OUTER local the
+// wrapper reassigns through a nested loop still is.
+
+TestCase subclass: WrapperLocalLoopInClassMethodFoldTest
+
+  testWrapperLocalLoopInFoldCompilesAndRuns =>
+    self assert: WrapperOuterLocalThreadingHelper wrapperLocalInFold equals: 0
+
+  testEnsureThreadsOuterLocalOut =>
+    self assert: WrapperOuterLocalThreadingHelper ensureOuter equals: 3
+
+  testOnDoThreadsOuterLocalOut =>
+    self assert: WrapperOuterLocalThreadingHelper onDoOuter equals: 3
+
+  testConditionalThreadsOuterLocalOut =>
+    self assert: WrapperOuterLocalThreadingHelper conditionalOuter equals: 3

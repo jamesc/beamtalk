@@ -472,16 +472,39 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      # continue-on-error so the issue/artifact steps below run (a plain failing
+      # step skips every later step that is not `if: always()`/`failure()`, which
+      # left runs 248-250 without an issue); "Fail on corpus failure" re-fails
+      # the job afterwards. The output is tee'd to a file so the report of
+      # failing (index, seed, size) pairs and program sources is also kept as a
+      # standalone artifact that is easy to download and search and survives log
+      # truncation (downloading it still needs a GitHub login, like the log).
       - name: Run class-variable agreement corpus (192 programs, 2048 codegen cases)
         id: corpus
-        run: just test-class-var-corpus
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p target/class-var-corpus
+          just test-class-var-corpus 2>&1 | tee target/class-var-corpus/report.log
         env:
           CV_CORPUS_CASES: 192
           PROPTEST_CASES: 2048
 
-      # Like the fuzz jobs above, a failure files an issue. There are no
-      # artifacts: the job log holds the (index, seed, size) pairs and the
-      # failing program sources.
+      # Best-effort: the issue step below has an implicit `success()`, so a
+      # failed upload must not skip it.
+      - name: Upload report on failure
+        if: steps.corpus.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: class-var-corpus-report-${{ github.run_id }}
+          path: target/class-var-corpus/report.log
+          retention-days: 30
+
+      # Like the fuzz jobs above, a failure files an issue. The job log and the
+      # uploaded report hold the (index, seed, size) pairs and the failing
+      # program sources.
       - name: Create issue on failure
         if: steps.corpus.outcome == 'failure'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -498,7 +521,7 @@ jobs:
               ``,
               `### Action Required`,
               ``,
-              `1. Open the job log; the report lists each failing program's \`(index, seed, size)\` pair, cause and source.`,
+              `1. Open the \`class-var-corpus-report-${context.runId}\` artifact (or the job log); the report lists each failing program's \`(index, seed, size)\` pair, cause and source.`,
               `2. If the report says "probably a broken environment", check the runtime/stdlib build first.`,
               `3. Reproduce locally with \`CV_CORPUS_CASES=192 just test-class-var-corpus\` (narrow with \`CV_CORPUS_SHAPES\`).`,
               ``,
@@ -514,6 +537,12 @@ jobs:
               labels: ['Bug', 'fuzzing', 'High']
             });
 
+      - name: Fail on corpus failure
+        if: steps.corpus.outcome == 'failure'
+        run: |
+          echo "class-var-corpus failed; see the issue filed above and the uploaded report"
+          exit 1
+
       - name: Add to job summary
         if: always()
         run: |
@@ -522,7 +551,7 @@ jobs:
           if [ "${{ steps.corpus.outcome }}" = "success" ]; then
             echo "✅ **Success:** 192 programs agreed on the BEAM; 2048 codegen cases verified" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Failure:** see the job log for the per-program report (index, seed, size, cause, source)" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Failure:** see the class-var-corpus-report-${{ github.run_id }} artifact (or the job log) for the per-program report (index, seed, size, cause, source)" >> $GITHUB_STEP_SUMMARY
           fi
 
   extended-proptest:
