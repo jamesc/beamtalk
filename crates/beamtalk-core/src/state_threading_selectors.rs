@@ -326,9 +326,9 @@ pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
 /// the `detect:` folds, stops running the block at the first decisive element,
 /// BT-3805).
 ///
-/// Not listed, deliberately: `eachWithIndex:` and `do:separatedBy:` (desugared to a synthetic
-/// `inject:into:` whose spans are the original send's, so a site keyed on the
-/// original has no producer to lower it).
+/// `eachWithIndex:` and `do:separatedBy:` are listed too (BT-3841): codegen
+/// desugars them to a synthetic `inject:into:` fold and lowers that fold as the
+/// producer, keyed on the original send.
 ///
 /// The body block is the one whose outer-local writes the construct packs
 /// (with, for `whileTrue:`/`whileFalse:`, the condition block receiver).
@@ -344,10 +344,10 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
             | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:" | "anySatisfy:"
-            | "allSatisfy:",
+            | "allSatisfy:" | "eachWithIndex:",
             1,
         )
-        | ("detect:ifNone:", 2) => Some(0),
+        | ("detect:ifNone:" | "do:separatedBy:", 2) => Some(0),
         ("to:do:" | "inject:into:", 2) => Some(1),
         ("to:by:do:", 3) => Some(2),
         _ => None,
@@ -369,7 +369,7 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
 #[must_use]
 pub fn producer_handler_arg_index(sel: &str, arity: usize) -> Option<usize> {
     match (sel, arity) {
-        ("detect:ifNone:", 2) => Some(1),
+        ("detect:ifNone:" | "do:separatedBy:", 2) => Some(1),
         _ => None,
     }
 }

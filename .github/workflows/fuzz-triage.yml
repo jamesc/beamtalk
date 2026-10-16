@@ -163,6 +163,19 @@ jobs:
         if: always()
         run: rm -f "${RUNNER_TEMP}/linear-mcp.json"
 
+      # The action's step log omits the agent's tool calls and permission denials;
+      # they are only in this file. Upload it so a "green but did nothing" run (for
+      # example denied cargo commands) can be diagnosed. Best-effort.
+      - name: Upload Claude execution output
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-triage-execution-${{ github.run_id }}
+          path: ${{ runner.temp }}/claude-execution-output.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Add to job summary
         if: always()
         run: |
