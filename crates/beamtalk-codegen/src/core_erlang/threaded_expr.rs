@@ -1004,6 +1004,10 @@ impl CoreErlangGenerator {
     /// rebinds cannot be observed past the throw). The value is
     /// `element(1, CF)`.
     ///
+    /// A value-type construct that threads the `Self` family (a fold whose
+    /// block writes a field) is not covered either: it keeps the structured
+    /// rejection of a field-writing fold in a closed position (BT-3827).
+    ///
     /// An actor instance method is not covered here: its `^` value goes
     /// through [`Self::threaded_expression`], whose construct lowering steps
     /// the `State` family the throw carries; the REPL threads its own
@@ -1019,6 +1023,12 @@ impl CoreErlangGenerator {
         let Some(locals) = self.construct_tuple_locals(inner) else {
             return Ok(None);
         };
+        // A value-type fold that writes a field also carries `Self`; a `^`
+        // inside a block has no reader for that slot in the root frame, so it
+        // keeps its structured rejection (`value_self_fold_slot`, BT-3827).
+        if !self.vt_loop_threaded_families(inner).as_slice().is_empty() {
+            return Ok(None);
+        }
         let (prelude, value) = self.lower_local_threading_construct(
             inner,
             &locals,

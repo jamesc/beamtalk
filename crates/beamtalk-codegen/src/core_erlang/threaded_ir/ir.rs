@@ -882,7 +882,10 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// choice. Renders nothing; the consumer reads `element(1, carrier)`.
     ///
     /// Built by `lower_threaded_last` and a value-type `^` for a loop or fold
-    /// (ADR 0131 Phase 2).
+    /// (ADR 0131 Phase 2), and by a `^` inside a block of a class or
+    /// value-type method (`nlr_return_construct_value`, BT-3813): the throw
+    /// ends the method, so its prelude is lowered and verified in the root
+    /// frame.
     DiscardLocals { carrier: String, span: Span },
 
     /// ADR 0131 §2: a method's root frame, as a node rather than a side
