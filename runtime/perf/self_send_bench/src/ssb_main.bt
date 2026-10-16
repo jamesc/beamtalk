@@ -44,6 +44,10 @@ Object subclass: SsbMain
       ns: (self timeClass: SsbClassVarClass n: n)
       n: n
     self
+      report: "class_var_10r_3w_loop_threaded"
+      ns: (self timeClass: SsbClassVarThreadedLoopClass n: n)
+      n: n
+    self
       report: "instance_on_do_loop"
       ns: (self timeOnDo: SsbOnDoObject new n: n)
       n: n

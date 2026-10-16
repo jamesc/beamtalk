@@ -1298,7 +1298,7 @@ The numbers above are the final ones; nothing was re-run for the docs sweep.
 | 3. 10 reads + 3 writes per iteration | `2 * 285 = 570` ns | **582 ns** | **fails by 12 ns (2%); accepted** |
 | 4. `snapshot/0` + restore around `on:do:` | within 10% of main | +2.0% | passes |
 
-Gate 3 was accepted rather than used to reopen the single-home decision, as the ADR prescribes. The follow-up is [BT-3719](https://linear.app/beamtalk/issue/BT-3719): bind the class-variable key once per method instead of at each inlined access, then re-run gate 3 (target at or under 570 ns) and re-measure the late-bound hierarchy walk (`class_self_send_inherited_override`, 1908 ns, +17% over main), recovering or explaining it. Until then a class method that touches class variables in a hot loop costs about twice what it did on `main` before ADR 0130.
+Gate 3 was accepted rather than used to reopen the single-home decision, as the ADR prescribes. The follow-up is [BT-3719](https://linear.app/beamtalk/issue/BT-3719): bind the class-variable key once per method instead of at each inlined access, then re-run gate 3 (target at or under 570 ns) and re-measure the late-bound hierarchy walk (`class_self_send_inherited_override`, 1908 ns, +17% over main), recovering or explaining it. Until then a class method that touches class variables in a hot loop costs about twice what it did on `main` before ADR 0130. (BT-3851 re-ran gate 3 on one machine after BT-3719: 1.60x and 1.75x, met; see below.)
 
 #### Key bound once per method (BT-3719)
 
@@ -1332,6 +1332,72 @@ touches no class variable, so the key binding does not appear in it (0.98, insid
 2142-2677). The +17% over main recorded under BT-3713 comes from the runtime path around the walk
 (`class_self_send/4` plus the single-home invocation boundary), not from the inlined access lowering. It is
 accepted here, and its owner is BT-3700 (late-binding guard and walk), as ADR 0130 already assigns.
+
+### Gate 3 re-based on one machine (BT-3851)
+
+BT-3789 measured gate 3 at 884 ns against the 570 ns budget, but on a different container and `main` from BT-3713,
+so it could not say whether the loop had regressed or the machine was slower. This run puts every compiler on
+one machine in one session.
+
+Method: five compilers, each built in its own checkout (`git worktree`, debug CLI with
+`CARGO_PROFILE_DEV_DEBUG=0`, its own runtime and stdlib), each compiling a fresh copy of the same trimmed
+`SsbMain` package (the gate 3 case plus the sealed self-send as a control) and running it with
+`beamtalk run SsbMain run`, 200,000 iterations after 1,000 warm-up. Each round runs every side in turn, 7 rounds,
+one discarded warm-up run per side, medians with min-max, ns/op. The whole run was done twice.
+
+- **(a)** `f12484e06`, the parent of BT-3666 (the bench's pre-BT-3666 baseline).
+- **(p)** `ef67f1791`, the parent of the ADR 0130 merge: `main` before ADR 0130 (threaded class variables). This
+  is the gate's "today". BT-3713's 285 ns was this side (it measured `3fe282c76`, an earlier commit with the same
+  lowering); `f12484e06` was 171 ns there, so the budget is 2 x (p), not 2 x (a).
+- **(b)** `232185347`, the ADR 0130 merge (BT-3701, which includes BT-3713): the first single-home lowering.
+- **(k)** `a9ebdd4f3`, BT-3719 (key bound once per method).
+- **(c)** `02e1e23cb`, current `main`.
+
+The loop is BT-3713's shape, with the local `acc` write (now `SsbClassVarThreadedLoopClass`, case
+`class_var_10r_3w_loop_threaded`): it is the only shape that compiles on (a) and (p). The shape without `acc`
+(`SsbClassVarClass`, which BT-3766 changed `SsbMain` to time) was run on (b), (k) and (c) as well.
+
+Machine: 4 cores, nothing else running (`ps`: the agent session at about 3% CPU). 1-minute load average 1.4 to
+1.9 during run 1 (it started at 1.86, the tail of the builds) and 0.9 to 1.3 during run 2; the benchmark's own BEAM
+keeps about one core busy.
+
+| case (ns/op, median [min-max], n = 7) | run | (a) `f12484e06` | (p) pre-ADR `main` | (b) ADR 0130 | (k) BT-3719 | (c) `main` |
+|---|---|---|---|---|---|---|
+| class-variable loop, 10 reads + 3 writes (`acc`) | 1 | 186 [176-271] | 304 [261-375] | 594 [536-811] | 506 [465-861] | 485 [463-788] |
+| | 2 | 181 [174-266] | 277 [250-406] | 620 [559-822] | 496 [435-909] | 484 [439-619] |
+| same, without `acc` (`to:do:` not inlined) | 1 | n/a | n/a | 794 [640-837] | 707 [569-892] | 622 [578-1015] |
+| | 2 | n/a | n/a | 721 [647-782] | 585 [563-809] | 652 [568-814] |
+| control: sealed class self-send | 1 | 119 [114-133] | 116 [113-146] | 110 [109-123] | 115 [109-136] | 130 [112-139] |
+| | 2 | 115 [110-141] | 121 [112-149] | 116 [108-147] | 119 [111-150] | 118 [110-133] |
+
+Ratios of the loop medians (paired per-round ratio median in brackets):
+
+| ratio | run 1 | run 2 |
+|---|---|---|
+| (c)/(p), the gate | **1.60** [1.67] | **1.75** [1.76] |
+| (c)/(a) | 2.61 [2.63] | 2.67 [2.67] |
+| (b)/(p), gate 3 as BT-3713 had it | 1.95 [2.12] | 2.24 [2.12] |
+| (k)/(b), BT-3719's change | 0.85 [0.91] | 0.80 [0.76] |
+| (c)/(k), since BT-3719 | 0.96 [1.01] | 0.98 [0.97] |
+| without `acc` / with `acc`, on (c) | [1.19] | [1.31] |
+
+**Gate 3 is met on current `main`**: 485 and 484 ns against budgets of 608 and 554 ns (2 x (p)), 1.60x and 1.75x
+pre-ADR `main`. Nothing has regressed since BT-3719: (c)/(k) is 0.96 and 0.98. BT-3719 saved 15-20% (not the 30% its
+loaded-machine run showed), which is what brought the loop from about 2.1x to about 1.7x. Against the pre-BT-3666
+baseline (a) the loop costs 2.6x, but (a) never threaded class variables and is not the gate's reference.
+
+**The BT-3789 discrepancy was two things, neither a regression.** First, the machine: BT-3789's container was slower
+than BT-3713's (its instance-side `on:do:` loop, which ADR 0130 does not change, was 2770 ns against 2313 ns) and
+than this one (its sealed self-send control was 136-139 ns against 115-130 ns here). Second, the bench shape: BT-3766 dropped the `acc` write from `SsbClassVarClass`, and without it the
+`to:do:` body no longer needs threading, so codegen falls through to `Integer>>to:do:` (a block fun call per
+iteration, plus a class-variable `capture/2` at block creation) instead of an inlined `letrec`. That costs
+1.2-1.3x in this run, so BT-3789's 884 ns was a slower machine timing a different loop. The no-`acc` shape has no
+pre-ADR counterpart (it did not compile before ADR 0130), so it cannot be gated; future gate 3 re-runs use
+`class_var_10r_3w_loop_threaded`. No profile was taken, since the gate is met, and no lowering change is proposed.
+
+Limitations: the per-round spread is wide (the post-ADR sides have single rounds at 1.5-1.8x their median), so the
+two runs are given separately rather than pooled; the bench package is a trimmed `SsbMain`, not the checked-in
+one, so that all five compilers build the same source.
 
 ## BT-3766: class-variable access helpers and class self-send tag derivation
 
@@ -1387,8 +1453,10 @@ change removes. The change helps the paths that do call them (FFI class methods,
 not inlined), which no `SsbMain` case exercises, so no speed-up is claimed. The BT-3719 projection of about 410 ns
 (582 ns x 0.70) is **not confirmed** by this run: the loop is at 845-884 ns, well above both the projection and the
 budget. The figures are not directly comparable with the BT-3713 582 ns baseline (different run, container and
-`main`), and this run did not isolate why they differ, so whether gate 3 regressed since BT-3719 or the BT-3713
-machine was faster is open and needs its own follow-up.
+`main`), and this run did not isolate why they differ. BT-3851 did, in one session: nothing regressed, gate 3 is met
+on current `main` (1.60x and 1.75x pre-ADR `main`), and the 884 ns is a slower machine timing a loop shape that
+BT-3766's bench change made non-inlined; see [Gate 3 re-based on one machine
+(BT-3851)](#gate-3-re-based-on-one-machine-bt-3851).
 
 The inherited-lookup rows (0.76 and 0.67) change by more than their spread. They are reported as measured, but
 BT-3766 only removes tag derivations from the dispatch path, and the "before" modules are those of `b2d685e3b`
