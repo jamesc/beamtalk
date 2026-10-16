@@ -1679,8 +1679,11 @@ fn excludes(ty: &InferredType, hierarchy: &crate::semantic_analysis::ClassHierar
 /// row of [`crate::state_threading_selectors::LOOKUP_SHAPES`]), in source
 /// order, or `None` for any other send.
 ///
-/// The lowering needs every handler position to hold a block literal that takes
-/// no parameters (the handler of `at:ifAbsent:` is called with none), every
+/// The lowering needs every handler position to hold a block literal taking
+/// the parameters the primitive calls it with (the row's
+/// [`block_params`](crate::state_threading_selectors::LookupShape::block_params):
+/// none for an absent handler, the found value for an `at:ifPresent:`
+/// handler, which the lowering binds to the parameter), every
 /// other argument to be an ordinary value (a block literal there is a key that
 /// is a block value, not a handler), and a receiver that is not itself a block
 /// literal. Anything else keeps the closure lowering, which the §6 check
@@ -1703,14 +1706,18 @@ pub fn lookup_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     else {
         return None;
     };
-    let handler_is_arm = |i: usize| matches!(arguments.get(i), Some(Expression::Block(b)) if b.parameters.is_empty());
+    let handler_is_arm = |i: usize, params: usize| matches!(arguments.get(i), Some(Expression::Block(b)) if b.parameters.len() == params);
     let values_are_not_blocks = arguments
         .iter()
         .enumerate()
         .all(|(i, a)| shape.block_args.contains(&i) || !matches!(a, Expression::Block(_)));
     (!matches!(receiver.as_ref(), Expression::Block(_))
         && values_are_not_blocks
-        && shape.block_args.iter().all(|&i| handler_is_arm(i)))
+        && shape
+            .block_args
+            .iter()
+            .zip(shape.block_params)
+            .all(|(&i, &params)| handler_is_arm(i, params)))
     .then_some(construct.blocks)
 }
 

@@ -534,6 +534,39 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// The case-clause body of one arm of a conditional or lookup producer:
+    /// `let StateAcc = <base_state> in <arm>` ([`Self::conditional_arm`] in a
+    /// branch context). When `param_value` is given, the block's parameter
+    /// (`ifNotNil: [:v | ...]`, `at:ifPresent: [:v | ...]`) is bound to that
+    /// Core Erlang variable inside the arm.
+    pub(in crate::core_erlang::control_flow) fn conditional_arm_clause(
+        &mut self,
+        block: &Block,
+        param_value: Option<&str>,
+        arm: Option<&ArmFrame>,
+        base_state: &str,
+    ) -> Result<Document<'static>> {
+        let (branch_doc, _branch_final) = self.with_branch_context(|this| {
+            let Some(value) = param_value else {
+                return this.conditional_arm(block, arm);
+            };
+            // A scope so the parameter binding is cleaned up after generation.
+            this.push_scope();
+            if let Some(param) = block.parameters.first() {
+                this.bind_var(&param.name, value);
+            }
+            let result = this.conditional_arm(block, arm);
+            this.pop_scope();
+            result
+        })?;
+        Ok(docvec![
+            "let StateAcc = ",
+            leaf::var(base_state.to_string()),
+            " in ",
+            branch_doc,
+        ])
+    }
+
     /// ADR 0131 §3: whether a conditional producer in `frame` keeps its scratch
     /// map private. True at the method root of a method that has no `State`
     /// family to continue (a class method, a value-type method): the
@@ -1299,14 +1332,7 @@ impl CoreErlangGenerator {
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let nil_arm = if let Some(block) = nil_block {
-            let (branch_doc, _branch_final) =
-                self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-            docvec![
-                "let StateAcc = ",
-                leaf::var(base_state.clone()),
-                " in ",
-                branch_doc,
-            ]
+            self.conditional_arm_clause(block, None, arm_frame.as_ref(), &base_state)?
         } else {
             // ADR 0122 Decision 3/BT-3514: through the shared family
             // emission helper with [State] rather than a hand-rolled splice.
@@ -1314,23 +1340,8 @@ impl CoreErlangGenerator {
         };
 
         let not_nil_arm = if let Some(block) = not_nil_block {
-            let (branch_doc, _branch_final) = self.with_branch_context(|this| {
-                // Push a scope so the block-parameter binding is cleaned up after generation
-                this.push_scope();
-                if let Some(param) = block.parameters.first() {
-                    // Bind the block parameter to the receiver value (already bound to obj_var)
-                    this.bind_var(&param.name, &obj_var);
-                }
-                let result = this.conditional_arm(block, arm_frame.as_ref());
-                this.pop_scope();
-                result
-            })?;
-            docvec![
-                "let StateAcc = ",
-                leaf::var(base_state.clone()),
-                " in ",
-                branch_doc,
-            ]
+            // The block parameter is bound to the receiver value (`obj_var`).
+            self.conditional_arm_clause(block, Some(&obj_var), arm_frame.as_ref(), &base_state)?
         } else {
             // ADR 0122 Decision 3/BT-3514: through the shared family
             // emission helper with [State] rather than a hand-rolled splice.

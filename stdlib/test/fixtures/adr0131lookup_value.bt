@@ -319,3 +319,153 @@ Value subclass: Adr0131LookupValue
         0
       ]
     #[r, t]
+
+  // BT-3824: `at:ifPresent:` runs its handler with the found value.
+  ifPresentFound =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #a
+      ifPresent: [:v |
+        t := t + v
+        v * 10
+      ]
+    #[r, t]
+
+  // A miss answers nil and does not run the handler.
+  ifPresentMissing =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifPresent: [:v |
+        t := t + v
+        v * 10
+      ]
+    #[r, t]
+
+  // A stored `nil` is a hit: the handler runs with `nil`.
+  ifPresentStoredNil =>
+    t := 0
+    d := #{#k => nil}
+    r := d
+      at: #k
+      ifPresent: [:v |
+        t := t + 1
+        v
+      ]
+    #[r, t]
+
+  // As a statement.
+  ifPresentStatement =>
+    t := 0
+    d := #{#a => 1}
+    d at: #a ifPresent: [:v | t := t + v]
+    t
+
+  // As the right operand of a send whose receiver reads the local first.
+  ifPresentOperand =>
+    t := 0
+    d := #{#a => 1}
+    r := t + (d
+      at: #a
+      ifPresent: [:v |
+        t := t + v
+        5
+      ]
+      ifAbsent: [0])
+    #[r, t]
+
+  // `at:ifPresent:ifAbsent:` with both handlers writing, key present.
+  ifPresentIfAbsentFound =>
+    t := 0
+    u := 0
+    d := #{#a => 1}
+    r := d
+      at: #a
+      ifPresent: [:v |
+        t := t + v
+        v
+      ]
+      ifAbsent: [
+        u := u + 1
+        0
+      ]
+    #[r, t, u]
+
+  // `at:ifPresent:ifAbsent:` with both handlers writing, key missing.
+  ifPresentIfAbsentMissing =>
+    t := 0
+    u := 0
+    d := #{#a => 1}
+    r := d
+      at: #k
+      ifPresent: [:v |
+        t := t + v
+        v
+      ]
+      ifAbsent: [
+        u := u + 1
+        0
+      ]
+    #[r, t, u]
+
+  // The present handler holds a lookup whose absent handler writes.
+  ifPresentNested =>
+    t := 0
+    d := #{#a => 1}
+    e := #{#b => 2}
+    r := d
+      at: #a
+      ifPresent: [:v |
+        e
+          at: #z
+          ifAbsent: [
+            t := t + v
+            4
+          ]
+      ]
+    #[r, t]
+
+  // In a conditional arm.
+  ifPresentArm: flag =>
+    t := 0
+    d := #{#a => 1}
+    r := nil
+    flag
+      ifTrue: [
+        r := d
+          at: #a
+          ifPresent: [:v |
+            t := t + v
+            v
+          ]
+      ]
+    #[r, t]
+
+  // The present handler returns from the method; a miss continues.
+  ifPresentEarlyReturn: key =>
+    t := 0
+    d := #{#a => 1}
+    r := d
+      at: key
+      ifPresent: [:v |
+        t := t + v
+        ^t
+      ]
+    #[r, t]
+
+  // The receiver is whatever the caller passes: only a Dictionary can run the handler inline.
+  ifPresentIn: receiver =>
+    t := 0
+    r := receiver
+      at: #k
+      ifPresent: [:v |
+        t := t + v
+        v
+      ]
+      ifAbsent: [
+        t := t - 1
+        0
+      ]
+    #[r, t]
