@@ -1125,6 +1125,25 @@ impl RebindLowering {
         }
     }
 
+    /// Whether this is a [`Self::MapPut`] whose `Put` writes back the value it
+    /// was just read from: the rebind reads `maps:get(Key, StateN)` (the
+    /// version the family `Bind` extracted from the carrier, `state_first`)
+    /// and would `maps:put(Key, V, StateN)` into that same map. The map
+    /// already holds `V` under `Key`, so the step is a plain alias of the
+    /// version (BT-3835): no `Put` is rendered.
+    pub(in crate::core_erlang) fn is_identity_put(
+        &self,
+        slot: &CarrierSlot,
+        state_first: Option<&VersionedVar>,
+    ) -> bool {
+        match (self, slot) {
+            (Self::MapPut { key, source, .. }, CarrierSlot::Key(slot_key)) => {
+                key == slot_key && state_first == Some(source)
+            }
+            _ => false,
+        }
+    }
+
     /// The version step this lowering performs, if any (`source`, `target`)
     /// — counted by the verifier exactly like a `Bind`'s.
     pub(in crate::core_erlang) fn version_step(&self) -> Option<(&VersionedVar, &VersionedVar)> {

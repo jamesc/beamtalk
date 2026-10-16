@@ -498,6 +498,64 @@ fn actor_state_family_bind_renders_first_and_rebinds_read_the_new_state() {
     assert_eq!(verify(&ir), Vec::new());
 }
 
+// ── BT-3835: no identity put ─────────────────────────────────────────────
+
+fn map_put_rebind(
+    frame: FrameId,
+    state_first: Option<VersionedVar>,
+    source: VersionedVar,
+) -> ThreadedStmt {
+    ThreadedStmt::LocalRebind {
+        local: "t".to_string(),
+        carrier: CARRIER.to_string(),
+        slot: CarrierSlot::Key("__local__t".to_string()),
+        frame,
+        value_var: "_T1".to_string(),
+        state_first,
+        lowering: RebindLowering::MapPut {
+            key: "__local__t".to_string(),
+            source,
+            target: state(2, frame),
+        },
+        span: span(),
+    }
+}
+
+#[test]
+fn map_put_rebind_reading_its_own_source_map_binds_the_version_without_a_put() {
+    // BT-3835: the rebind reads `maps:get(Key, State1)` and its `MapPut` source
+    // is that same `State1`: writing the value back is an identity, so only
+    // the version alias is bound.
+    let frame = FrameId::ROOT;
+    let ir = vec![map_put_rebind(
+        frame,
+        Some(state(1, frame)),
+        state(1, frame),
+    )];
+    let text = render_str(&ir);
+    assert_eq!(
+        text,
+        "let _T1 = call 'maps':'get'('__local__t', State1) in let State2 = State1 in "
+    );
+    assert!(
+        !text.contains("'maps':'put'"),
+        "identity put reintroduced: {text}"
+    );
+}
+
+#[test]
+fn map_put_rebind_reading_the_carrier_keeps_its_put() {
+    // Without `state_first` the value comes out of the carrier's own map, a
+    // different map than the `MapPut` source: the put is a real write.
+    let frame = FrameId::ROOT;
+    let ir = vec![map_put_rebind(frame, None, state(1, frame))];
+    assert_eq!(
+        render_str(&ir),
+        "let _T1 = call 'maps':'get'('__local__t', call 'erlang':'element'(2, _CF3)) in \
+         let State2 = call 'maps':'put'('__local__t', _T1, State1) in "
+    );
+}
+
 // ── verify plumbing ──────────────────────────────────────────────────────
 
 #[test]

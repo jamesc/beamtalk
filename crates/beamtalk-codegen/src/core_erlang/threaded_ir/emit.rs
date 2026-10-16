@@ -354,6 +354,21 @@ fn render_local_rebind(
         RebindLowering::LoopParam { source, target } => {
             render_bind(target, source, &BindOp::Direct(ValueRef::Doc(read)), ctx)
         }
+        // BT-3835: the value was read from `source` under `key`; writing it
+        // back is an identity, so only the version alias is bound.
+        RebindLowering::MapPut { source, target, .. }
+            if lowering.is_identity_put(slot, state_first) =>
+        {
+            docvec![
+                plain_let(read),
+                render_bind(
+                    target,
+                    source,
+                    &BindOp::Direct(ValueRef::Version(source.clone())),
+                    ctx,
+                ),
+            ]
+        }
         RebindLowering::MapPut {
             key,
             source,
