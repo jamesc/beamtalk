@@ -155,7 +155,7 @@ jobs:
           claude_args: >-
             --max-turns 60
             --mcp-config ${{ runner.temp }}/linear-mcp.json
-            --allowedTools "Read,Grep,Glob,Write(triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(CV_SEED=* CV_SIZE=* CV_SHAPES=* cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+            --allowedTools "Read,Grep,Glob,Write(triage/**),Write(/${{ github.workspace }}/triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(CV_SEED=* CV_SIZE=* CV_SHAPES=* cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
             --disallowedTools "Read(//proc/**),Read(//home/runner/work/_temp/**)"
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
