@@ -7285,16 +7285,51 @@ cache at: "key" put: 42         // insert or update
 cache at: "key"                 // => 42
 cache at: "missing"             // => nil (not an error)
 cache at: "missing" ifAbsent: [0]  // => 0 (evaluate block when absent)
+cache at: "key" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)
 cache includesKey: "key"        // => true
 cache includesKey: "other"      // => false
+cache includes: 42              // => true (scan values)
 ```
+
+#### Iteration and Snapshots
+
+`Ets` conforms to `Enumerable(V)`, so collection messages work over a point-in-time snapshot of values:
+
+```beamtalk
+cache do: [:v | Transcript show: v]
+cache select: [:v | v > 10]     // => List of matching values
+cache collect: [:v | v * 2]     // => List of transformed values
+
+// Key/value iteration
+cache keysAndValuesDo: [:k :v | Transcript show: k, ' => ', v]
+
+// Snapshot to Dictionary
+d := cache asDictionary          // => Dictionary(K, V)
+
+// Snapshot values to List
+vs := cache values               // => List(V)
+```
+
+#### Atomic Operations
+
+For `#set` and `#orderedSet` tables only (raises `unsupported_table_type` on bag tables):
+
+```beamtalk
+cache at: "hits" increment: 1   // atomic add via ets:update_counter; missing key starts at 0
+cache at: "key" update: [:v | (v ifNil: [0]) + 1]  // atomic read-modify-write (CAS loop)
+```
+
+`at:update:` runs an optimistic compare-and-swap loop: the block receives the current value (`nil` if missing) and must be side-effect-free, since it may run more than once under contention.
 
 #### Other Operations
 
 ```beamtalk
 cache size                      // => number of entries
+cache isEmpty                   // => true if no entries
+cache isNotEmpty                // => true if at least one entry
 cache keys                      // => List of all keys (order unspecified for #set)
 cache removeKey: "key"          // delete entry; no-op if key is absent
+cache removeAll                 // remove all entries, keep the table
 cache delete                    // destroy the table; frees all memory
 ```
 
