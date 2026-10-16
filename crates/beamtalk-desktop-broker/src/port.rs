@@ -114,14 +114,26 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn find_free_port_returns_a_usable_nonprivileged_port() {
+    fn find_free_port_returns_a_nonprivileged_port() {
+        // No re-bind of the returned port here: it is a candidate, not a
+        // reservation, so anything else on the host may take it the moment the
+        // probe listener closes (seen as WSAEADDRINUSE on windows-2022 CI).
         let port = find_free_port().expect("should find a free port");
         assert!(port >= 1024, "port {port} should be non-privileged");
-        // The port must actually be bindable again immediately after —
-        // proves it's a real, currently-free port, not a garbage value.
-        let listener =
-            TcpListener::bind(("127.0.0.1", port)).expect("port should be bindable after probe");
-        drop(listener);
+    }
+
+    #[test]
+    fn find_free_port_never_returns_a_port_that_is_held() {
+        // A port another socket is listening on is never a candidate: it comes
+        // from a real OS bind, not a guess. Deterministic, since `held` stays
+        // bound for the whole test.
+        let held = TcpListener::bind(("127.0.0.1", 0)).expect("bind held listener");
+        let held_port = held.local_addr().expect("held local addr").port();
+        for _ in 0..32 {
+            let candidate = find_free_port().expect("should find a free port");
+            assert_ne!(candidate, held_port, "candidate collided with a held port");
+        }
+        drop(held);
     }
 
     #[test]
