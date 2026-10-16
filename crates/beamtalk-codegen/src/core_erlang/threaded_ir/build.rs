@@ -484,6 +484,17 @@ pub(in crate::core_erlang) fn build_family_construct_tuple(
 /// target identities, a `MapPut`'s key and `State` version step — minted
 /// from the live generator by a production caller). A `lower` that answers
 /// a different shape is what `VerifyError::LocalRebindModeMismatch` reports.
+///
+/// BT-3835: a `MapPut` cell whose `Put` would be an identity write
+/// ([`RebindLowering::held_in_frame_map`]: the read goes through
+/// `state_first` and `state_first` is the frame's current map) is lowered to
+/// [`RebindLowering::MapHeld`] here, without asking `lower` — so no `State`
+/// version is minted for a step that does not happen. A lone rebind's
+/// `state_first` is the frame's current map whenever it is a `State` version
+/// of this frame: the family `Bind` that produced it is the last step.
+/// Test-only: production builds rebinds a prelude at a time
+/// ([`build_family_local_threading_prelude`]).
+#[cfg(test)]
 pub(in crate::core_erlang) fn build_local_rebind(
     enclosing: &RebindFrame,
     carrier: &str,
@@ -492,6 +503,39 @@ pub(in crate::core_erlang) fn build_local_rebind(
     span: Span,
     lower: impl FnOnce(RebindShape) -> RebindLowering,
 ) -> ThreadedStmt {
+    let current = state_first.clone();
+    build_local_rebind_over(
+        enclosing,
+        carrier,
+        local,
+        state_first,
+        current.as_ref(),
+        span,
+        lower,
+    )
+}
+
+/// [`build_local_rebind`] with the frame's current `State` map at the rebind
+/// (`current`) given separately from the rebind's read map (`state_first`):
+/// they part once an earlier rebind of the same prelude has stepped the map.
+fn build_local_rebind_over(
+    enclosing: &RebindFrame,
+    carrier: &str,
+    local: &ThreadedLocalSlot,
+    state_first: Option<VersionedVar>,
+    current: Option<&VersionedVar>,
+    span: Span,
+    lower: impl FnOnce(RebindShape) -> RebindLowering,
+) -> ThreadedStmt {
+    let shape = enclosing.shape_for(&local.local);
+    let lowering = RebindLowering::held_in_frame_map(
+        shape,
+        &local.slot,
+        state_first.as_ref(),
+        current,
+        enclosing.frame,
+    )
+    .unwrap_or_else(|| lower(shape));
     ThreadedStmt::LocalRebind {
         local: local.local.clone(),
         carrier: carrier.to_string(),
@@ -499,7 +543,7 @@ pub(in crate::core_erlang) fn build_local_rebind(
         frame: enclosing.frame,
         value_var: local.value_var.clone(),
         state_first,
-        lowering: lower(enclosing.shape_for(&local.local)),
+        lowering,
         span,
     }
 }
@@ -565,15 +609,26 @@ pub(in crate::core_erlang) fn build_family_local_threading_prelude(
         span,
     ));
     prelude.extend(family_binds);
+    // BT-3835: the frame's current `State` map as the rebinds run — the
+    // family `Bind`'s target until a rebind steps the map past it.
+    let mut current = state_first.clone();
     for local in locals {
-        prelude.push(build_local_rebind(
+        let rebind = build_local_rebind_over(
             enclosing,
             carrier,
             local,
             state_first.clone(),
+            current.as_ref(),
             span,
             |shape| lower(local, shape),
-        ));
+        );
+        if let ThreadedStmt::LocalRebind { lowering, .. } = &rebind
+            && let Some((_, target)) = lowering.version_step()
+            && target.prefix == VersionPrefix::State
+        {
+            current = Some(target.clone());
+        }
+        prelude.push(rebind);
     }
     prelude
 }

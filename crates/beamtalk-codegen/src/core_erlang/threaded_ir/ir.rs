@@ -1113,6 +1113,15 @@ pub(in crate::core_erlang) enum RebindLowering {
         source: VersionedVar,
         target: VersionedVar,
     },
+    /// BT-3835: the [`RebindShape::MapPut`] cell when the rebind reads `key`
+    /// out of `map` and `map` is the frame's own current map: `let V =
+    /// maps:get(Key, Map) in` and nothing else. The `Put` it elides would be
+    /// `maps:put(Key, maps:get(Key, Map), Map)`, which is `Map` itself, so the
+    /// frame's map takes no version step. Chosen only by
+    /// [`Self::held_in_frame_map`]; `VerifyError::HeldRebindNotIdentity`
+    /// rejects one whose `map` is not the rebind's read map or not the
+    /// frame's current version.
+    MapHeld { key: String, map: VersionedVar },
 }
 
 impl RebindLowering {
@@ -1121,26 +1130,7 @@ impl RebindLowering {
         match self {
             Self::Let => RebindShape::Let,
             Self::LoopParam { .. } => RebindShape::LoopParam,
-            Self::MapPut { .. } => RebindShape::MapPut,
-        }
-    }
-
-    /// Whether this is a [`Self::MapPut`] whose `Put` writes back the value it
-    /// was just read from: the rebind reads `maps:get(Key, StateN)` (the
-    /// version the family `Bind` extracted from the carrier, `state_first`)
-    /// and would `maps:put(Key, V, StateN)` into that same map. The map
-    /// already holds `V` under `Key`, so the step is a plain alias of the
-    /// version (BT-3835): no `Put` is rendered.
-    pub(in crate::core_erlang) fn is_identity_put(
-        &self,
-        slot: &CarrierSlot,
-        state_first: Option<&VersionedVar>,
-    ) -> bool {
-        match (self, slot) {
-            (Self::MapPut { key, source, .. }, CarrierSlot::Key(slot_key)) => {
-                key == slot_key && state_first == Some(source)
-            }
-            _ => false,
+            Self::MapPut { .. } | Self::MapHeld { .. } => RebindShape::MapPut,
         }
     }
 
@@ -1148,11 +1138,46 @@ impl RebindLowering {
     /// — counted by the verifier exactly like a `Bind`'s.
     pub(in crate::core_erlang) fn version_step(&self) -> Option<(&VersionedVar, &VersionedVar)> {
         match self {
-            Self::Let => None,
+            Self::Let | Self::MapHeld { .. } => None,
             Self::LoopParam { source, target } | Self::MapPut { source, target, .. } => {
                 Some((source, target))
             }
         }
+    }
+
+    /// BT-3835, the one place the identity-`Put` rule is written down: a
+    /// [`RebindShape::MapPut`] rebind is [`Self::MapHeld`] exactly when the
+    /// value it would `Put` is the one already in the map it would `Put`
+    /// into. That holds when
+    /// - its read is a [`CarrierSlot::Key`] read through `state_first` (the
+    ///   `State` version the construct's family `Bind` extracted from the
+    ///   carrier, ADR 0131 §2's actor ordering rule), and
+    /// - `state_first` is `current`, the frame's own current `State` map at
+    ///   the rebind — a `State` version minted in `frame`, with no step of
+    ///   that map since.
+    ///
+    /// Then the `Put` would write `maps:get(Key, M)` back into `M` under the
+    /// same `Key`: `M` unchanged. Any other read (`element(2, CF)`, a
+    /// `Pos` slot) or map (another frame's, or a version a sibling rebind has
+    /// since stepped past) answers `None`, and the caller mints the real
+    /// `Put`.
+    pub(in crate::core_erlang) fn held_in_frame_map(
+        shape: RebindShape,
+        slot: &CarrierSlot,
+        state_first: Option<&VersionedVar>,
+        current: Option<&VersionedVar>,
+        frame: FrameId,
+    ) -> Option<Self> {
+        let (RebindShape::MapPut, CarrierSlot::Key(key), Some(map)) = (shape, slot, state_first)
+        else {
+            return None;
+        };
+        (current == Some(map) && map.prefix == VersionPrefix::State && map.frame == frame).then(
+            || Self::MapHeld {
+                key: key.clone(),
+                map: map.clone(),
+            },
+        )
     }
 }
 
