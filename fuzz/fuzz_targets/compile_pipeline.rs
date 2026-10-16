@@ -49,7 +49,21 @@ fuzz_target!(|data: &[u8]| {
     let source = String::from_utf8_lossy(data);
 
     let tokens = lex_with_eof(&source);
-    let (module, _parse_diagnostics) = parse(tokens);
+    let (module, parse_diagnostics) = parse(tokens);
+
+    // The real pipeline (`compute_diagnostics`) folds the parse diagnostics
+    // into the analysis diagnostics and never runs codegen when any of them is
+    // an error, so a parse error stops here too. Without this the fuzzer feeds
+    // codegen the AST the parser recovered from a malformed program (an unclosed
+    // block, say), a shape no real compile reaches; its `ThreadedIr` verifier
+    // `debug_assert!`s on those, e.g. nightly run 249's
+    // `NonLinearVersion`/`UnboundVersion` panic (BT-3847).
+    if parse_diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
+        return;
+    }
 
     // Success = no panic. We don't care whether analysis finds errors — most
     // fuzzer-mutated input will fail semantic checks, and that's fine.

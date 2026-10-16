@@ -753,32 +753,17 @@ impl CoreErlangGenerator {
                 }
             }
             for block in blocks {
-                // Exclude this wrapping block's own
-                // parameters (e.g. `on:do:`'s exception var, `ifNotNil:`'s bound
-                // value) before merging into `out` — mirrors
-                // `construct_outer_local_writes`'s block-parameter
-                // threading for the identical construct shape. Without this, a
-                // nested loop reporting a write to the wrapping block's own
-                // param (e.g. `x ifNotNil: [:v | nested do: [:i | v := v + i]]`)
-                // would be misreported as an outer-scope mutation.
-                let block_params: std::collections::HashSet<String> = block
-                    .parameters
-                    .iter()
-                    .map(|p| p.name.to_string())
-                    .collect();
-                let mut nested = std::collections::HashSet::new();
-                for stmt in &block.body {
-                    Self::collect_list_op_cross_scope_mutations_recursive(
-                        &stmt.expression,
-                        facts,
-                        &mut nested,
-                    );
-                }
-                for v in nested {
-                    if !block_params.contains(v.as_str()) {
-                        out.insert(v);
-                    }
-                }
+                // Exclude this wrapping block's own parameters (e.g.
+                // `on:do:`'s exception var, `ifNotNil:`'s bound value) and
+                // the locals it introduces itself before merging into `out`
+                // — mirrors `construct_outer_local_writes`'s block-parameter
+                // threading for the identical construct shape. Without
+                // this, a nested loop reporting a write to the wrapping
+                // block's own param (e.g. `x ifNotNil: [:v | nested do: [:i
+                // | v := v + i]]`) or own local (`[i := 0. [i < 3]
+                // whileTrue: [i := i + 1]] ensure: [...]`) would be
+                // misreported as an outer-scope mutation.
+                out.extend(Self::nested_cross_scope_writes_outside(block, facts));
             }
             return;
         }
@@ -841,25 +826,38 @@ impl CoreErlangGenerator {
         // (a counted/list op nested two or more levels deep) is still detected.
         // `analyze_block` does not propagate writes out of nested non-conditional
         // blocks, so a write buried in a doubly-nested loop is invisible above
-        // without this recursion. Block parameters of the inner block are not
-        // outer locals, so drop any cross-scope name shadowed by a block param.
+        // without this recursion.
+        out.extend(Self::nested_cross_scope_writes_outside(body_block, facts));
+    }
+
+    /// The cross-scope writes found by recursing into `block`'s statements,
+    /// minus the names `block` owns: its parameters and the locals it
+    /// introduces with a top-level assignment (`k := 0. [k < 3] whileTrue:
+    /// [...]` — crossed by the loop nested in it but belonging to neither the
+    /// enclosing constructs nor the outer scope). The one rule both the
+    /// wrapping-construct and the loop/fold branches of
+    /// [`Self::collect_list_op_cross_scope_mutations`] use.
+    fn nested_cross_scope_writes_outside(
+        block: &beamtalk_core::ast::Block,
+        facts: &beamtalk_core::semantic_analysis::SemanticFacts,
+    ) -> std::collections::HashSet<String> {
+        let analysis = facts
+            .block_profile(&block.span)
+            .cloned()
+            .unwrap_or_else(|| block_analysis::analyze_block(block));
+        let block_params: std::collections::HashSet<&str> =
+            block.parameters.iter().map(|p| p.name.as_str()).collect();
+        let introduced = Self::body_introduced_locals(block, &analysis.captured_reads);
         let mut nested = std::collections::HashSet::new();
-        for stmt in &body_block.body {
+        for stmt in &block.body {
             Self::collect_list_op_cross_scope_mutations_recursive(
                 &stmt.expression,
                 facts,
                 &mut nested,
             );
         }
-        // A local this inner block introduces itself (`k := 0. [k < 3] whileTrue:
-        // [...]`) is crossed by the loop nested in it but belongs to neither
-        // the enclosing constructs nor the outer scope.
-        let introduced = Self::body_introduced_locals(body_block, &analysis.captured_reads);
-        for v in nested {
-            if !block_params.contains(v.as_str()) && !introduced.contains(v.as_str()) {
-                out.insert(v);
-            }
-        }
+        nested.retain(|v| !block_params.contains(v.as_str()) && !introduced.contains(v.as_str()));
+        nested
     }
 
     /// The locals `body` introduces with a top-level assignment and never

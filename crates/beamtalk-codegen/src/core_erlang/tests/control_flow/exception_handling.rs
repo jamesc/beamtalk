@@ -590,3 +590,37 @@ fn test_class_method_non_mutating_self_send_nested_in_conditional_in_ensure_stil
         .expect("a provably non-class-var-mutating nested self-send must still compile");
     assert_compiles_through_erlc("bt@cvnestedpureselfsend", &code);
 }
+
+#[test]
+fn test_class_method_fold_with_wrapper_local_loop_threads_no_outer_local() {
+    // BT-3848: a local the wrapping block introduces itself (`i`, in the
+    // `ensure:` / `on:do:` / conditional block) is crossed by the loop nested
+    // in it, but is not an outer local the enclosing fold threads. Counting it
+    // made the fold take mutation threading with an empty threaded set — a
+    // locals-less `StateAcc` fold, whose seed `State` does not exist in a
+    // class method (`ActorStateInClassMethod`).
+    for (name, wrapper) in [
+        (
+            "ensure",
+            "[a] ensure: [i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a]",
+        ),
+        (
+            "ondo",
+            "[a] on: Error do: [:x | i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a]",
+        ),
+        (
+            "cond",
+            "e > 1 ifTrue: [i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a] ifFalse: [a]",
+        ),
+    ] {
+        let src = format!(
+            "Object subclass: CvWrapperLocal\n  classState: n = 0\n\n  class run =>\n    #(1, 3) inject: 0 into: [:a :e | self.n := 4. {wrapper}]\n"
+        );
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+        let module_name = format!("bt@cvwrapperlocal{name}");
+        let code = generate_module(&module, CodegenOptions::new(module_name.as_str()))
+            .unwrap_or_else(|e| panic!("{name}: wrapper-local loop in a class-method fold: {e:?}"));
+        assert_compiles_through_erlc(&module_name, &code);
+    }
+}
