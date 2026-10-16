@@ -34,7 +34,7 @@ mod tests;
 
 pub(in crate::core_erlang) use opaque_fold::OpaqueFoldOp;
 
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -181,22 +181,17 @@ impl CoreErlangGenerator {
         &mut self,
         body: &'a Expression,
     ) -> Option<&'a Block> {
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            // ADR 0131 Phase 2b: also a write buried in a nested loop or fold
-            // (`analyze_block` does not propagate it out of the nested
-            // block). The enclosing construct's threaded set
-            // (`loop_threaded_locals`) and the caller that unpacks its
-            // tuple already include it, so the builder must produce the
-            // tuple too — `block_arg_needs_threading`'s two-part check.
-            if self.needs_mutation_threading(&analysis)
-                || self.body_has_list_op_cross_scope_mutations(body_block)
-                || !self.loop_threaded_locals(body_block, None).is_empty()
-            {
-                return Some(body_block);
+        // The one loop/fold gate (BT-3834): the body's mutations, or a write
+        // buried in a nested loop or fold (ADR 0131 Phase 2b) that the
+        // enclosing construct's threaded set (`loop_threaded_locals`) and the
+        // caller that unpacks its tuple already include, and only when the
+        // fold has something to carry.
+        match body {
+            Expression::Block(body_block) if self.loop_body_needs_threading(body_block) => {
+                Some(body_block)
             }
+            _ => None,
         }
-        None
     }
 
     /// Whether a non-literal (opaque) callable forwarded to a collection HOM

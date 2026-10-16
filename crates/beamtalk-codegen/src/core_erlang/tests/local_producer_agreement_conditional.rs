@@ -469,11 +469,11 @@ fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer(
     );
 }
 
-/// Conditionals that are not producers: their arms write no outer local and
-/// hold no loop or fold (a class or value-type counted loop whose body holds a
-/// non-producer conditional with a nested loop writing an arm-local fails the
-/// verifier on `main` as well (BT-3834), a pre-existing gap independent of
-/// conditionals-as-producers).
+/// Conditionals that are not producers: their arms write no outer local. The
+/// last four hold a loop or fold writing a local of the arm (BT-3834): the
+/// enclosing loop or fold threads nothing, so in a class or value-type method
+/// it lowers as a plain loop, never as a locals-less `StateAcc` loop
+/// (`StateAccLoopWithoutLocals`).
 const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) ifTrue: [m := 0. m := m + 1. m] ifFalse: [0]",
     "(s < 3) ifTrue: [m := 5. m]",
@@ -482,6 +482,10 @@ const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
     "(s < 3) and: [m := 1. true]",
     "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 1. m]]",
     "(s < 3) ifTrue: [t] ifFalse: [u]",
+    "(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
+    "(s < 3) ifTrue: [m := 0. 1 to: 2 do: [:e | m := m + e]. m] ifFalse: [0]",
+    "s ifNotNil: [:v | m := v. [m < 5] whileTrue: [m := m + 1]. m]",
+    "(s < 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
 ];
 
 /// Conditionals that are not producers, as a statement of every loop or fold

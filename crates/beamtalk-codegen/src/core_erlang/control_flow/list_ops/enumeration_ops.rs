@@ -120,15 +120,6 @@ fn inlined_body(body: &[ExpressionStatement]) -> Vec<Expression> {
 }
 
 impl CoreErlangGenerator {
-    /// Returns `true` if `block` mutates field/local state in a way that requires
-    /// threading (and so cannot be served by a plain dispatch to the `collection.bt`
-    /// method). shares [`Self::block_arg_needs_threading`] — the same
-    /// combinator `control_flow_has_mutations` and
-    /// `conditional_needs_mutation_threading` use for their own per-block check.
-    fn enumeration_block_needs_threading(&self, block: &Block) -> bool {
-        self.block_arg_needs_threading(block)
-    }
-
     /// Returns `true` when the desugared fold threads actor `State`: an actor
     /// (`gen_server`) method body not inside a direct-params counted loop.
     ///
@@ -232,7 +223,13 @@ impl CoreErlangGenerator {
         if user_block.parameters.len() != 2 {
             return Ok(None);
         }
-        if !self.enumeration_block_needs_threading(user_block) {
+        // `loop_body_has_carried_mutations`, not `loop_body_needs_threading`
+        // (BT-3834): `eachWithIndex:`/`do:separatedBy:` are not producers
+        // (`producer_body_arg_index` leaves them out), so nothing unpacks a
+        // write-only local the threaded set alone would add, and the statement
+        // classifier (`control_flow_has_mutations`) reads this same predicate
+        // for their blocks.
+        if !self.loop_body_has_carried_mutations(user_block) {
             // falling through to `collection.bt`'s own self-hosted
             // `eachWithIndex:` (built on `do:`).
             return Ok(None);
@@ -283,8 +280,10 @@ impl CoreErlangGenerator {
         if element_block.parameters.len() != 1 || !separator_block.parameters.is_empty() {
             return Ok(None);
         }
-        if !self.enumeration_block_needs_threading(element_block)
-            && !self.enumeration_block_needs_threading(separator_block)
+        // The same gate as `eachWithIndex:` (see `try_generate_each_with_index`'s
+        // comment on it).
+        if !self.loop_body_has_carried_mutations(element_block)
+            && !self.loop_body_has_carried_mutations(separator_block)
         {
             // falling through to `collection.bt`'s own self-hosted
             // `do:separatedBy:` (built on `inject:into:`).
