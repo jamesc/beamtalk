@@ -2778,3 +2778,32 @@ fn evaluated_literal_blocks_are_producers_at_any_depth() {
     let diags = adr0131_diagnostics_with("[t := t + 1] value\n", &["t"]);
     assert!(diags.is_empty(), "{diags:?}");
 }
+
+/// BT-3823 review: an arm or loop-body statement that assigns a Tier 2 block
+/// call whose argument is a writing fold (`u := [:k | t := t + k. k] value:
+/// (xs inject: ...)`, or the same through a stored block) is rejected in class,
+/// value-type and actor methods, so codegen never lowers it there. (Codegen's
+/// C3 lowering stays for any Tier 2 call that is not itself a producer.)
+#[test]
+fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
+    let call = "[:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    let stored = "blk value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    for (header, prefix) in [
+        ("Object subclass: P", "class "),
+        ("Value subclass: P", ""),
+        ("Actor subclass: P\n  state: n = 0\n", ""),
+    ] {
+        for value in [call, stored] {
+            for stmt in [
+                format!("4 =:= 4 ifTrue: [u := {value}]"),
+                format!("#(1) do: [:z | u := {value}]"),
+                format!("u := {value}"),
+            ] {
+                let src = format!(
+                    "{header}\n  {prefix}probe =>\n    t := 0\n    u := 0\n    blk := [:k | t := t + k. k]\n    {stmt}\n    #[t, u]\n"
+                );
+                assert!(!adr0131_diagnostics(&src).is_empty(), "{src}");
+            }
+        }
+    }
+}

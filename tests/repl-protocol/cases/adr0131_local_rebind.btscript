@@ -686,6 +686,16 @@ t := 0
 r := [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. t] on: Error do: [:e | 0]
 // => 13
 
+// A block `value:` whose argument is a writing fold is not lowered: the fold is
+// an operand of a construct, not a site, so it keeps the Phase 0 error in an
+// arm (as in class, value-type and actor methods) rather than dropping the
+// block's write.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [u := [:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]). u] ifFalse: [0]
+// => ERROR: `inject:into:` writes outer local `t`
+
 // A loop body is not an arm: an `on:do:` in a `do:` in an arm keeps the Phase
 // 0 error (BT-3876).
 t := 0

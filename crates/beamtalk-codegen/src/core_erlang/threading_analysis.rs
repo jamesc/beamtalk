@@ -253,6 +253,14 @@ impl CoreErlangGenerator {
     /// (`intrinsics.rs`, which extends it with an in-loop-body-local-write
     /// disjunct). Loops and folds read it through
     /// [`Self::loop_body_has_carried_mutations`] (BT-3834).
+    ///
+    /// BT-3823: in the REPL it is also true for a block that writes a binding
+    /// anywhere, a nested construct included ([`Self::repl_blocks_write_bindings`]),
+    /// so a REPL arm whose write sits in a fold inside a nested conditional is
+    /// inlined over the bindings map. Through
+    /// [`Self::loop_body_has_carried_mutations`] this widens what a REPL loop or
+    /// fold treats as carried the same way: such a body threads the bindings map
+    /// (the REPL always has that ambient carrier).
     pub(in crate::core_erlang) fn block_arg_needs_threading(&self, block: &Block) -> bool {
         let analysis = self.block_profile_or_analyze(block);
         self.needs_mutation_threading(&analysis)

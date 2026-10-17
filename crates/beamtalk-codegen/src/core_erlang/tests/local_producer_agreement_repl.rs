@@ -70,11 +70,12 @@ const REPL_POSITIONS: &[&str] = &[
 /// site that writes a binding (the REPL treats every name as one, so a name a
 /// construct introduces counts too), at the root or in a REPL arm (BT-3823), is
 /// lowered by it, so no `{Value, Bindings}` tuple leaks and no write is
-/// dropped; and the Phase 0 check never rejects a site the rule names. (The
-/// producer may also fire inside a frame these sites do not describe, such as a
-/// conditional statement of a loop body in an arm or the separator of a
-/// desugared `do:separatedBy:`: those constructs adopt the same bindings map
-/// and answer right, `adr0131_local_rebind.btscript`.)
+/// dropped; and the Phase 0 check never rejects a site the rule names. Outside
+/// every block the producer fires at exactly the root sites that write a
+/// binding. (Inside a block it may also fire in a frame these sites do not
+/// describe, such as a conditional statement of a loop body in an arm or the
+/// separator of a desugared `do:separatedBy:`: those constructs adopt the same
+/// bindings map and answer right, `adr0131_local_rebind.btscript`.)
 ///
 /// Drives the generator's `repl_statement_with_producers` (what the REPL
 /// assembler calls) directly: the assembler's use of it is covered by the
@@ -91,6 +92,40 @@ fn every_repl_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
 #[test]
 fn every_repl_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     check_repl_agreement(CONDITIONALS, 100);
+}
+
+/// At the input root, outside every block (no arm or loop frame applies), the
+/// REPL producer fires at exactly the root sites that write a binding
+/// (`root_writes`): never at a root construct the rule does not name.
+fn assert_root_lowering_is_exact(
+    statements: &[&Expression],
+    lowered: &HashSet<Span>,
+    root_writes: &HashSet<Span>,
+    src: &str,
+) {
+    let blocks = block_spans(statements);
+    let root_lowered: HashSet<Span> = lowered
+        .iter()
+        .copied()
+        .filter(|span| !blocks.iter().any(|block| block.contains(*span)))
+        .collect();
+    assert_eq!(
+        &root_lowered, root_writes,
+        "the REPL producer fires at exactly the root construct sites that write a binding\n{src}"
+    );
+}
+
+/// The spans of every block literal in `statements`.
+fn block_spans(statements: &[&Expression]) -> Vec<Span> {
+    let mut spans = Vec::new();
+    for stmt in statements {
+        beamtalk_core::ast_walker::walk_expression(stmt, &mut |e| {
+            if let Expression::Block(block) = e {
+                spans.push(block.span);
+            }
+        });
+    }
+    spans
 }
 
 /// Whether `site` is a construct the REPL producer may lower: a
@@ -145,6 +180,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
 
             let mut rule_named: HashMap<Span, Vec<String>> = HashMap::new();
             let mut writes_binding: HashSet<Span> = HashSet::new();
+            let mut root_writes: HashSet<Span> = HashSet::new();
             for stmt in &statements {
                 for site in repl_operand_sites(stmt) {
                     if let Some(names) = rule_names(site, &bound) {
@@ -152,6 +188,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
                     }
                     if writes_a_binding(site) {
                         writes_binding.insert(Expression::span(site));
+                        root_writes.insert(Expression::span(site));
                     }
                 }
                 // BT-3823: and the REPL arm sites of the constructs whose
@@ -210,6 +247,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
                  (its write would be dropped): {:?}\n{src}",
                 writes_binding.difference(&lowered).collect::<Vec<_>>()
             );
+            assert_root_lowering_is_exact(&statements, &lowered, &root_writes, &src);
         }
     }
     assert!(
@@ -267,6 +305,9 @@ const REPL_ARM_CONSTRUCTS: &[&str] = &[
     "Result tryDo: [t := t + 1. 5]",
     "[t := t + 1. 5] value",
     "[:k | t := t + k. 5] value: 1",
+    // A Tier 2 call whose argument is a writing fold (rejected: the fold is an
+    // operand of a construct, not a site).
+    "[:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])",
     "#{#a => 1} at: #b ifAbsent: [t := t + 1. 0]",
 ];
 
