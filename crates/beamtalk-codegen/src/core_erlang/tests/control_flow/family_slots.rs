@@ -300,6 +300,36 @@ fn extract_family_slots_honors_a_nonzero_base_arity() {
 }
 
 #[test]
+fn extract_family_slots_orders_acc_last() {
+    // ADR 0132 §2: `Acc` is a trailing family, extracted after `State` and
+    // `SelfVt` whatever order the eligible set arrives in.
+    let acc = |version| VersionedVar::new(VersionPrefix::Acc, version, FrameId::ROOT);
+    let families = ThreadedFamilies::from_matches(&[
+        VersionPrefix::Acc,
+        VersionPrefix::SelfVt,
+        VersionPrefix::State,
+    ]);
+    let stmts = extract_family_slots(
+        "Tuple",
+        1,
+        &families,
+        |prefix| match prefix {
+            VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
+            VersionPrefix::SelfVt => FamilyVersionStep::new(self_vt(0), self_vt(1)),
+            VersionPrefix::Acc => FamilyVersionStep::new(acc(0), acc(1)),
+            other => panic!("unexpected family queried: {other:?}"),
+        },
+        span(),
+    );
+    assert_eq!(
+        render_extracted(&stmts),
+        "let State1 = call 'erlang':'element'(2, Tuple) in \
+         let Self1 = call 'erlang':'element'(3, Tuple) in \
+         let Acc1 = call 'erlang':'element'(4, Tuple) in "
+    );
+}
+
+#[test]
 fn extract_family_slots_produces_binds_that_verify_cleanly_when_every_target_is_consumed() {
     let families = ThreadedFamilies::from_matches(&[VersionPrefix::State, VersionPrefix::SelfVt]);
     let mut ir = extract_family_slots(
