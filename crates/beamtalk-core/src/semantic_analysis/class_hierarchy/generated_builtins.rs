@@ -136,17 +136,12 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
     )
 }
 
-/// Returns all stdlib built-in class definitions.
-///
-/// Auto-generated from parsed `lib/*.bt` ASTs.
-#[allow(clippy::too_many_lines)] // auto-generated from 32 stdlib classes
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
-pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
-    let mut classes = HashMap::new();
-
-    classes.insert(
-        "Actor".into(),
-        ClassInfo {
+fn class_info_Actor() -> ClassInfo {
+    ClassInfo {
             name: "Actor".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -209,12 +204,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ActorSpawned".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ActorSpawned() -> ClassInfo {
+    ClassInfo {
             name: "ActorSpawned".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -238,12 +236,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ActorStopped".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ActorStopped() -> ClassInfo {
+    ClassInfo {
             name: "ActorStopped".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -267,12 +268,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Announcement".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Announcement() -> ClassInfo {
+    ClassInfo {
             name: "Announcement".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -296,12 +300,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "AnnouncementNavigation".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_AnnouncementNavigation() -> ClassInfo {
+    ClassInfo {
             name: "AnnouncementNavigation".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -332,12 +339,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Announcer".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Announcer() -> ClassInfo {
+    ClassInfo {
             name: "Announcer".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -374,12 +384,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Array".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Array() -> ClassInfo {
+    ClassInfo {
             name: "Array".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -420,12 +433,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "AtomicCounter".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_AtomicCounter() -> ClassInfo {
+    ClassInfo {
             name: "AtomicCounter".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -460,12 +476,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "BEAMError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_BEAMError() -> ClassInfo {
+    ClassInfo {
             name: "BEAMError".into(),
             superclass: Some("Error".into()),
             is_sealed: false,
@@ -489,12 +508,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Bag".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Bag() -> ClassInfo {
+    ClassInfo {
             name: "Bag".into(),
             superclass: Some("Collection".into()),
             is_sealed: false,
@@ -530,12 +552,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Beamtalk".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Beamtalk() -> ClassInfo {
+    ClassInfo {
             name: "Beamtalk".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -569,12 +594,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Behaviour".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Behaviour() -> ClassInfo {
+    ClassInfo {
             name: "Behaviour".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -644,12 +672,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Binary".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Binary() -> ClassInfo {
+    ClassInfo {
             name: "Binary".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -697,12 +728,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "BindingChanged".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_BindingChanged() -> ClassInfo {
+    ClassInfo {
             name: "BindingChanged".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -726,12 +760,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "BindingsView".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_BindingsView() -> ClassInfo {
+    ClassInfo {
             name: "BindingsView".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -765,12 +802,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Block".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Block() -> ClassInfo {
+    ClassInfo {
             name: "Block".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -806,12 +846,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Boolean".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Boolean() -> ClassInfo {
+    ClassInfo {
             name: "Boolean".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -844,12 +887,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ChangeEntry".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ChangeEntry() -> ClassInfo {
+    ClassInfo {
             name: "ChangeEntry".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -927,12 +973,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ChangeLog".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ChangeLog() -> ClassInfo {
+    ClassInfo {
             name: "ChangeLog".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -982,12 +1031,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Character".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Character() -> ClassInfo {
+    ClassInfo {
             name: "Character".into(),
             superclass: Some("Integer".into()),
             is_sealed: true,
@@ -1032,12 +1084,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Class".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Class() -> ClassInfo {
+    ClassInfo {
             name: "Class".into(),
             superclass: Some("Behaviour".into()),
             is_sealed: true,
@@ -1066,12 +1121,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ClassBuilder".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ClassBuilder() -> ClassInfo {
+    ClassInfo {
             name: "ClassBuilder".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -1123,12 +1181,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ClassLoaded".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ClassLoaded() -> ClassInfo {
+    ClassInfo {
             name: "ClassLoaded".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -1152,12 +1213,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ClassRemoved".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ClassRemoved() -> ClassInfo {
+    ClassInfo {
             name: "ClassRemoved".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -1181,12 +1245,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Collection".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Collection() -> ClassInfo {
+    ClassInfo {
             name: "Collection".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -1247,12 +1314,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "CompiledMethod".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_CompiledMethod() -> ClassInfo {
+    ClassInfo {
             name: "CompiledMethod".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -1284,12 +1354,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Console".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Console() -> ClassInfo {
+    ClassInfo {
             name: "Console".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -1321,12 +1394,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "DateTime".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_DateTime() -> ClassInfo {
+    ClassInfo {
             name: "DateTime".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -1388,12 +1464,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Dictionary".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Dictionary() -> ClassInfo {
+    ClassInfo {
             name: "Dictionary".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -1435,12 +1514,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["K".into(), "V".into()],
             type_param_bounds: vec![None, None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 1 }],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Digest".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Digest() -> ClassInfo {
+    ClassInfo {
             name: "Digest".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -1470,12 +1552,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Duration".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Duration() -> ClassInfo {
+    ClassInfo {
             name: "Duration".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -1527,12 +1612,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "DynamicSupervisor".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_DynamicSupervisor() -> ClassInfo {
+    ClassInfo {
             name: "DynamicSupervisor".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1573,12 +1661,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["C".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Erlang".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Erlang() -> ClassInfo {
+    ClassInfo {
             name: "Erlang".into(),
             superclass: Some("ProtoObject".into()),
             is_sealed: true,
@@ -1604,12 +1695,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ErlangModule".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ErlangModule() -> ClassInfo {
+    ClassInfo {
             name: "ErlangModule".into(),
             superclass: Some("ProtoObject".into()),
             is_sealed: true,
@@ -1635,12 +1729,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Error".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Error() -> ClassInfo {
+    ClassInfo {
             name: "Error".into(),
             superclass: Some("Exception".into()),
             is_sealed: false,
@@ -1664,12 +1761,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Ets".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Ets() -> ClassInfo {
+    ClassInfo {
             name: "Ets".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1725,12 +1825,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["K".into(), "V".into()],
             type_param_bounds: vec![None, None],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Exception".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Exception() -> ClassInfo {
+    ClassInfo {
             name: "Exception".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1768,12 +1871,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ExitError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ExitError() -> ClassInfo {
+    ClassInfo {
             name: "ExitError".into(),
             superclass: Some("BEAMError".into()),
             is_sealed: false,
@@ -1797,12 +1903,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "False".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_False() -> ClassInfo {
+    ClassInfo {
             name: "False".into(),
             superclass: Some("Boolean".into()),
             is_sealed: true,
@@ -1834,12 +1943,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "File".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_File() -> ClassInfo {
+    ClassInfo {
             name: "File".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -1887,12 +1999,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "FileHandle".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_FileHandle() -> ClassInfo {
+    ClassInfo {
             name: "FileHandle".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -1928,12 +2043,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Float".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Float() -> ClassInfo {
+    ClassInfo {
             name: "Float".into(),
             superclass: Some("Number".into()),
             is_sealed: true,
@@ -2005,12 +2123,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "FlushCompleted".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_FlushCompleted() -> ClassInfo {
+    ClassInfo {
             name: "FlushCompleted".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -2034,12 +2155,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Inspector".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Inspector() -> ClassInfo {
+    ClassInfo {
             name: "Inspector".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2082,12 +2206,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "InspectorField".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_InspectorField() -> ClassInfo {
+    ClassInfo {
             name: "InspectorField".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -2126,12 +2253,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "InstantiationError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_InstantiationError() -> ClassInfo {
+    ClassInfo {
             name: "InstantiationError".into(),
             superclass: Some("Error".into()),
             is_sealed: false,
@@ -2155,12 +2285,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Integer".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Integer() -> ClassInfo {
+    ClassInfo {
             name: "Integer".into(),
             superclass: Some("Number".into()),
             is_sealed: true,
@@ -2238,12 +2371,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Interval".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Interval() -> ClassInfo {
+    ClassInfo {
             name: "Interval".into(),
             superclass: Some("Collection".into()),
             is_sealed: false,
@@ -2275,12 +2411,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Json".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Json() -> ClassInfo {
+    ClassInfo {
             name: "Json".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2308,12 +2447,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "List".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_List() -> ClassInfo {
+    ClassInfo {
             name: "List".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -2383,12 +2525,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Logger".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Logger() -> ClassInfo {
+    ClassInfo {
             name: "Logger".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2431,12 +2576,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Metaclass".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Metaclass() -> ClassInfo {
+    ClassInfo {
             name: "Metaclass".into(),
             superclass: Some("Class".into()),
             is_sealed: true,
@@ -2476,12 +2624,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Node".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Node() -> ClassInfo {
+    ClassInfo {
             name: "Node".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -2526,12 +2677,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "NodeDown".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_NodeDown() -> ClassInfo {
+    ClassInfo {
             name: "NodeDown".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -2555,12 +2709,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "NodeShapeSkew".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_NodeShapeSkew() -> ClassInfo {
+    ClassInfo {
             name: "NodeShapeSkew".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -2584,12 +2741,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "NodeUp".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_NodeUp() -> ClassInfo {
+    ClassInfo {
             name: "NodeUp".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -2613,12 +2773,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Number".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Number() -> ClassInfo {
+    ClassInfo {
             name: "Number".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -2663,12 +2826,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "OS".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_OS() -> ClassInfo {
+    ClassInfo {
             name: "OS".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2695,12 +2861,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Object".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Object() -> ClassInfo {
+    ClassInfo {
             name: "Object".into(),
             superclass: Some("ProtoObject".into()),
             is_sealed: false,
@@ -2755,12 +2924,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ObjectStateChanged".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ObjectStateChanged() -> ClassInfo {
+    ClassInfo {
             name: "ObjectStateChanged".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -2784,12 +2956,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Package".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Package() -> ClassInfo {
+    ClassInfo {
             name: "Package".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -2833,12 +3008,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Parallel".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Parallel() -> ClassInfo {
+    ClassInfo {
             name: "Parallel".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2866,12 +3044,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Pid".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Pid() -> ClassInfo {
+    ClassInfo {
             name: "Pid".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2906,12 +3087,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Port".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Port() -> ClassInfo {
+    ClassInfo {
             name: "Port".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -2942,12 +3126,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ProcessNavigation".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ProcessNavigation() -> ClassInfo {
+    ClassInfo {
             name: "ProcessNavigation".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -2985,12 +3172,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Program".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Program() -> ClassInfo {
+    ClassInfo {
             name: "Program".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3020,12 +3210,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ProtoObject".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ProtoObject() -> ClassInfo {
+    ClassInfo {
             name: "ProtoObject".into(),
             superclass: None,
             is_sealed: false,
@@ -3059,12 +3252,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Protocol".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Protocol() -> ClassInfo {
+    ClassInfo {
             name: "Protocol".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3095,12 +3291,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Queue".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Queue() -> ClassInfo {
+    ClassInfo {
             name: "Queue".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -3132,12 +3331,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Random".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Random() -> ClassInfo {
+    ClassInfo {
             name: "Random".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -3171,12 +3373,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ReactiveSubprocess".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ReactiveSubprocess() -> ClassInfo {
+    ClassInfo {
             name: "ReactiveSubprocess".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -3207,12 +3412,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Reference".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Reference() -> ClassInfo {
+    ClassInfo {
             name: "Reference".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3244,12 +3452,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Regex".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Regex() -> ClassInfo {
+    ClassInfo {
             name: "Regex".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -3280,12 +3491,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Result".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Result() -> ClassInfo {
+    ClassInfo {
             name: "Result".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -3336,12 +3550,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["T".into(), "E".into()],
             type_param_bounds: vec![None, None],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "RetryPolicy".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_RetryPolicy() -> ClassInfo {
+    ClassInfo {
             name: "RetryPolicy".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -3389,12 +3606,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "RuntimeError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_RuntimeError() -> ClassInfo {
+    ClassInfo {
             name: "RuntimeError".into(),
             superclass: Some("Error".into()),
             is_sealed: false,
@@ -3418,12 +3638,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Server".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Server() -> ClassInfo {
+    ClassInfo {
             name: "Server".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -3449,12 +3672,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Session".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Session() -> ClassInfo {
+    ClassInfo {
             name: "Session".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3489,12 +3715,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Set".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Set() -> ClassInfo {
+    ClassInfo {
             name: "Set".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -3537,12 +3766,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "StackFrame".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_StackFrame() -> ClassInfo {
+    ClassInfo {
             name: "StackFrame".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -3575,12 +3807,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Stream".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Stream() -> ClassInfo {
+    ClassInfo {
             name: "Stream".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3623,12 +3858,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["E".into()],
             type_param_bounds: vec![None],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "String".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_String() -> ClassInfo {
+    ClassInfo {
             name: "String".into(),
             superclass: Some("Binary".into()),
             is_sealed: true,
@@ -3725,12 +3963,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Subprocess".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Subprocess() -> ClassInfo {
+    ClassInfo {
             name: "Subprocess".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -3768,12 +4009,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Subscription".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Subscription() -> ClassInfo {
+    ClassInfo {
             name: "Subscription".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -3800,12 +4044,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SubscriptionNode".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SubscriptionNode() -> ClassInfo {
+    ClassInfo {
             name: "SubscriptionNode".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -3844,12 +4091,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SupervisionChildAdded".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SupervisionChildAdded() -> ClassInfo {
+    ClassInfo {
             name: "SupervisionChildAdded".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -3873,12 +4123,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SupervisionChildCrashed".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SupervisionChildCrashed() -> ClassInfo {
+    ClassInfo {
             name: "SupervisionChildCrashed".into(),
             superclass: Some("Announcement".into()),
             is_sealed: true,
@@ -3902,12 +4155,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SupervisionNode".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SupervisionNode() -> ClassInfo {
+    ClassInfo {
             name: "SupervisionNode".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -3956,12 +4212,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SupervisionSpec".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SupervisionSpec() -> ClassInfo {
+    ClassInfo {
             name: "SupervisionSpec".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -4013,12 +4272,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SupervisionTree".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SupervisionTree() -> ClassInfo {
+    ClassInfo {
             name: "SupervisionTree".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -4065,12 +4327,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Supervisor".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Supervisor() -> ClassInfo {
+    ClassInfo {
             name: "Supervisor".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -4112,12 +4377,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Symbol".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Symbol() -> ClassInfo {
+    ClassInfo {
             name: "Symbol".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4150,12 +4418,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "System".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_System() -> ClassInfo {
+    ClassInfo {
             name: "System".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4193,12 +4464,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SystemAnnouncer".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SystemAnnouncer() -> ClassInfo {
+    ClassInfo {
             name: "SystemAnnouncer".into(),
             superclass: Some("Announcer".into()),
             is_sealed: true,
@@ -4227,12 +4501,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "SystemNavigation".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_SystemNavigation() -> ClassInfo {
+    ClassInfo {
             name: "SystemNavigation".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4348,12 +4625,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TestCase".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TestCase() -> ClassInfo {
+    ClassInfo {
             name: "TestCase".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -4396,12 +4676,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TestResult".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TestResult() -> ClassInfo {
+    ClassInfo {
             name: "TestResult".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -4435,12 +4718,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TestRunner".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TestRunner() -> ClassInfo {
+    ClassInfo {
             name: "TestRunner".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -4469,12 +4755,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "ThrowError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ThrowError() -> ClassInfo {
+    ClassInfo {
             name: "ThrowError".into(),
             superclass: Some("BEAMError".into()),
             is_sealed: false,
@@ -4498,12 +4787,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Time".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Time() -> ClassInfo {
+    ClassInfo {
             name: "Time".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4531,12 +4823,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TimeoutProxy".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TimeoutProxy() -> ClassInfo {
+    ClassInfo {
             name: "TimeoutProxy".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -4566,12 +4861,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Timer".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Timer() -> ClassInfo {
+    ClassInfo {
             name: "Timer".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4603,12 +4901,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Tracing".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Tracing() -> ClassInfo {
+    ClassInfo {
             name: "Tracing".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4653,12 +4954,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Transcript".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Transcript() -> ClassInfo {
+    ClassInfo {
             name: "Transcript".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4688,12 +4992,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TranscriptStream".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TranscriptStream() -> ClassInfo {
+    ClassInfo {
             name: "TranscriptStream".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -4724,12 +5031,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "True".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_True() -> ClassInfo {
+    ClassInfo {
             name: "True".into(),
             superclass: Some("Boolean".into()),
             is_sealed: true,
@@ -4761,12 +5071,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Tuple".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Tuple() -> ClassInfo {
+    ClassInfo {
             name: "Tuple".into(),
             superclass: Some("Collection".into()),
             is_sealed: true,
@@ -4805,12 +5118,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "TypeError".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_TypeError() -> ClassInfo {
+    ClassInfo {
             name: "TypeError".into(),
             superclass: Some("Error".into()),
             is_sealed: false,
@@ -4834,12 +5150,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "UndefinedObject".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_UndefinedObject() -> ClassInfo {
+    ClassInfo {
             name: "UndefinedObject".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -4874,12 +5193,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Uuid".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Uuid() -> ClassInfo {
+    ClassInfo {
             name: "Uuid".into(),
             superclass: Some("Value".into()),
             is_sealed: true,
@@ -4921,12 +5243,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Value".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Value() -> ClassInfo {
+    ClassInfo {
             name: "Value".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -4955,12 +5280,15 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
-    classes.insert(
-        "Workspace".into(),
-        ClassInfo {
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Workspace() -> ClassInfo {
+    ClassInfo {
             name: "Workspace".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
@@ -5010,9 +5338,128 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],
-        },
-    );
+    }
+}
 
+/// Returns all stdlib built-in class definitions.
+///
+/// Auto-generated from parsed `lib/*.bt` ASTs.
+#[allow(clippy::too_many_lines)] // auto-generated: one insert per stdlib class
+#[rustfmt::skip] // preserve compact generated layout
+pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
+    let mut classes = HashMap::new();
+    classes.insert("Actor".into(), class_info_Actor());
+    classes.insert("ActorSpawned".into(), class_info_ActorSpawned());
+    classes.insert("ActorStopped".into(), class_info_ActorStopped());
+    classes.insert("Announcement".into(), class_info_Announcement());
+    classes.insert("AnnouncementNavigation".into(), class_info_AnnouncementNavigation());
+    classes.insert("Announcer".into(), class_info_Announcer());
+    classes.insert("Array".into(), class_info_Array());
+    classes.insert("AtomicCounter".into(), class_info_AtomicCounter());
+    classes.insert("BEAMError".into(), class_info_BEAMError());
+    classes.insert("Bag".into(), class_info_Bag());
+    classes.insert("Beamtalk".into(), class_info_Beamtalk());
+    classes.insert("Behaviour".into(), class_info_Behaviour());
+    classes.insert("Binary".into(), class_info_Binary());
+    classes.insert("BindingChanged".into(), class_info_BindingChanged());
+    classes.insert("BindingsView".into(), class_info_BindingsView());
+    classes.insert("Block".into(), class_info_Block());
+    classes.insert("Boolean".into(), class_info_Boolean());
+    classes.insert("ChangeEntry".into(), class_info_ChangeEntry());
+    classes.insert("ChangeLog".into(), class_info_ChangeLog());
+    classes.insert("Character".into(), class_info_Character());
+    classes.insert("Class".into(), class_info_Class());
+    classes.insert("ClassBuilder".into(), class_info_ClassBuilder());
+    classes.insert("ClassLoaded".into(), class_info_ClassLoaded());
+    classes.insert("ClassRemoved".into(), class_info_ClassRemoved());
+    classes.insert("Collection".into(), class_info_Collection());
+    classes.insert("CompiledMethod".into(), class_info_CompiledMethod());
+    classes.insert("Console".into(), class_info_Console());
+    classes.insert("DateTime".into(), class_info_DateTime());
+    classes.insert("Dictionary".into(), class_info_Dictionary());
+    classes.insert("Digest".into(), class_info_Digest());
+    classes.insert("Duration".into(), class_info_Duration());
+    classes.insert("DynamicSupervisor".into(), class_info_DynamicSupervisor());
+    classes.insert("Erlang".into(), class_info_Erlang());
+    classes.insert("ErlangModule".into(), class_info_ErlangModule());
+    classes.insert("Error".into(), class_info_Error());
+    classes.insert("Ets".into(), class_info_Ets());
+    classes.insert("Exception".into(), class_info_Exception());
+    classes.insert("ExitError".into(), class_info_ExitError());
+    classes.insert("False".into(), class_info_False());
+    classes.insert("File".into(), class_info_File());
+    classes.insert("FileHandle".into(), class_info_FileHandle());
+    classes.insert("Float".into(), class_info_Float());
+    classes.insert("FlushCompleted".into(), class_info_FlushCompleted());
+    classes.insert("Inspector".into(), class_info_Inspector());
+    classes.insert("InspectorField".into(), class_info_InspectorField());
+    classes.insert("InstantiationError".into(), class_info_InstantiationError());
+    classes.insert("Integer".into(), class_info_Integer());
+    classes.insert("Interval".into(), class_info_Interval());
+    classes.insert("Json".into(), class_info_Json());
+    classes.insert("List".into(), class_info_List());
+    classes.insert("Logger".into(), class_info_Logger());
+    classes.insert("Metaclass".into(), class_info_Metaclass());
+    classes.insert("Node".into(), class_info_Node());
+    classes.insert("NodeDown".into(), class_info_NodeDown());
+    classes.insert("NodeShapeSkew".into(), class_info_NodeShapeSkew());
+    classes.insert("NodeUp".into(), class_info_NodeUp());
+    classes.insert("Number".into(), class_info_Number());
+    classes.insert("OS".into(), class_info_OS());
+    classes.insert("Object".into(), class_info_Object());
+    classes.insert("ObjectStateChanged".into(), class_info_ObjectStateChanged());
+    classes.insert("Package".into(), class_info_Package());
+    classes.insert("Parallel".into(), class_info_Parallel());
+    classes.insert("Pid".into(), class_info_Pid());
+    classes.insert("Port".into(), class_info_Port());
+    classes.insert("ProcessNavigation".into(), class_info_ProcessNavigation());
+    classes.insert("Program".into(), class_info_Program());
+    classes.insert("ProtoObject".into(), class_info_ProtoObject());
+    classes.insert("Protocol".into(), class_info_Protocol());
+    classes.insert("Queue".into(), class_info_Queue());
+    classes.insert("Random".into(), class_info_Random());
+    classes.insert("ReactiveSubprocess".into(), class_info_ReactiveSubprocess());
+    classes.insert("Reference".into(), class_info_Reference());
+    classes.insert("Regex".into(), class_info_Regex());
+    classes.insert("Result".into(), class_info_Result());
+    classes.insert("RetryPolicy".into(), class_info_RetryPolicy());
+    classes.insert("RuntimeError".into(), class_info_RuntimeError());
+    classes.insert("Server".into(), class_info_Server());
+    classes.insert("Session".into(), class_info_Session());
+    classes.insert("Set".into(), class_info_Set());
+    classes.insert("StackFrame".into(), class_info_StackFrame());
+    classes.insert("Stream".into(), class_info_Stream());
+    classes.insert("String".into(), class_info_String());
+    classes.insert("Subprocess".into(), class_info_Subprocess());
+    classes.insert("Subscription".into(), class_info_Subscription());
+    classes.insert("SubscriptionNode".into(), class_info_SubscriptionNode());
+    classes.insert("SupervisionChildAdded".into(), class_info_SupervisionChildAdded());
+    classes.insert("SupervisionChildCrashed".into(), class_info_SupervisionChildCrashed());
+    classes.insert("SupervisionNode".into(), class_info_SupervisionNode());
+    classes.insert("SupervisionSpec".into(), class_info_SupervisionSpec());
+    classes.insert("SupervisionTree".into(), class_info_SupervisionTree());
+    classes.insert("Supervisor".into(), class_info_Supervisor());
+    classes.insert("Symbol".into(), class_info_Symbol());
+    classes.insert("System".into(), class_info_System());
+    classes.insert("SystemAnnouncer".into(), class_info_SystemAnnouncer());
+    classes.insert("SystemNavigation".into(), class_info_SystemNavigation());
+    classes.insert("TestCase".into(), class_info_TestCase());
+    classes.insert("TestResult".into(), class_info_TestResult());
+    classes.insert("TestRunner".into(), class_info_TestRunner());
+    classes.insert("ThrowError".into(), class_info_ThrowError());
+    classes.insert("Time".into(), class_info_Time());
+    classes.insert("TimeoutProxy".into(), class_info_TimeoutProxy());
+    classes.insert("Timer".into(), class_info_Timer());
+    classes.insert("Tracing".into(), class_info_Tracing());
+    classes.insert("Transcript".into(), class_info_Transcript());
+    classes.insert("TranscriptStream".into(), class_info_TranscriptStream());
+    classes.insert("True".into(), class_info_True());
+    classes.insert("Tuple".into(), class_info_Tuple());
+    classes.insert("TypeError".into(), class_info_TypeError());
+    classes.insert("UndefinedObject".into(), class_info_UndefinedObject());
+    classes.insert("Uuid".into(), class_info_Uuid());
+    classes.insert("Value".into(), class_info_Value());
+    classes.insert("Workspace".into(), class_info_Workspace());
     classes
 }
 
