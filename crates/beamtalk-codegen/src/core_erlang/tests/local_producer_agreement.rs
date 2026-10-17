@@ -20,7 +20,7 @@ use beamtalk_core::semantic_analysis::block_facts::{
     LoopBodyContext, RootMethodKind, conditional_arm_blocks, conditional_producer_writes,
     exception_arm_blocks, exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, loop_body_producer_sites,
-    operand_producer_writes, sequenced_operand_sites,
+    operand_producer_writes, producer_body_arm_handler, sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -140,23 +140,13 @@ pub(super) fn core_producers(
 /// lowers a loop or fold there through the same construct tuple (a method-body
 /// assignment's whole value), which the sites rule does not name.
 pub(super) fn whole_values(stmt: &Expression, out: &mut HashSet<Span>) {
-    // `do:separatedBy:` is desugared to an `inject:into:` whose body starts with
-    // `first ifFalse: [separator]`: that synthetic conditional is a producer in
-    // the fold's body and carries the separator block's span (BT-3841), so the
-    // separator spans of every `do:separatedBy:` in the statement are lowerings
-    // codegen performs for the construct, not sites of the core rule.
+    // A handler the producer runs as a conditional statement of its own body
+    // frame (core's `producer_body_arm_handler`: `do:separatedBy:`'s separator,
+    // BT-3841/BT-3855) is lowered by the construct at the handler's span, like
+    // a statement of its body.
     beamtalk_core::ast_walker::walk_expression(stmt, &mut |e| {
-        if let Expression::MessageSend {
-            selector,
-            arguments,
-            ..
-        } = e
-        {
-            if selector.name() == "do:separatedBy:" {
-                if let Some(Expression::Block(separator)) = arguments.get(1) {
-                    out.insert(separator.span);
-                }
-            }
+        if let Some(handler) = producer_body_arm_handler(e) {
+            out.insert(handler.span);
         }
     });
     let inner = stmt.unwrap_parens();

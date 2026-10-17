@@ -973,6 +973,12 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
 /// allow-set and with it the pending allow-set shapes.
 #[test]
 fn adr0131_probe_matrix_pins() {
+    // The contexts whose last pending shape was lowered, so they have no
+    // pending fixture left (the actor column's last shape, s1, moved to the
+    // compiled fixture with BT-3798). Pinned explicitly (BT-3855): a context
+    // not listed must have its pending fixture, so deleting one by accident
+    // fails here instead of skipping the context.
+    const NO_PENDING_FIXTURE: &[&str] = &["class", "value", "actor"];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
@@ -982,15 +988,14 @@ fn adr0131_probe_matrix_pins() {
         let compiled = format!("adr0131local_rebind_{context}.bt");
         let diags = adr0131_diagnostics(&read(&compiled));
         assert!(diags.is_empty(), "{compiled}: {diags:?}");
-        // (The actor column has no pending fixture left: its last shape, s1,
-        // moved to the compiled fixture with BT-3798.)
-        if context == "actor" {
-            continue;
-        }
 
         let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
-        // A context whose last pending shape was lowered has no file left.
-        if !root.join(&pending).exists() {
+        if NO_PENDING_FIXTURE.contains(&context) {
+            assert!(
+                !root.join(&pending).exists(),
+                "{pending} exists, but `{context}` is pinned as having no pending \
+                 fixture: drop it from NO_PENDING_FIXTURE"
+            );
             continue;
         }
         let src = read(&pending);

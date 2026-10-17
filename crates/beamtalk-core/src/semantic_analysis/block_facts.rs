@@ -1658,6 +1658,33 @@ pub fn producer_packed_blocks(expr: &Expression) -> Vec<&Block> {
     packed
 }
 
+/// BT-3855: the handler block of the producer `expr` when the producer runs it
+/// inside its own body frame as the arm of a conditional statement
+/// ([`crate::state_threading_selectors::producer_handler_is_body_arm`]:
+/// `do:separatedBy:`'s separator), or `None`.
+///
+/// That conditional is a statement of the fold body, lowered by the body's
+/// frame at the handler block's span: a lowering the producer performs for its
+/// own construct, like the statements of its body, not a site of the sites
+/// rule. Codegen's `do:separatedBy:` desugar gives the conditional this span,
+/// and the producer agreement test reads the same rule.
+#[must_use]
+pub fn producer_body_arm_handler(expr: &Expression) -> Option<&Block> {
+    let (sel, _) = producer_body_block(expr)?;
+    let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() else {
+        return None;
+    };
+    if !crate::state_threading_selectors::producer_handler_is_body_arm(&sel, arguments.len()) {
+        return None;
+    }
+    let index =
+        crate::state_threading_selectors::producer_handler_arg_index(&sel, arguments.len())?;
+    match arguments.get(index) {
+        Some(Expression::Block(handler)) => Some(handler),
+        _ => None,
+    }
+}
+
 /// ADR 0131 Phase 2 (BT-3749): the threaded set of a loop or fold that
 /// codegen lowers as a local-threading producer in operand position, or
 /// `None` when `expr` is not one.
