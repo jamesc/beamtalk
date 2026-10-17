@@ -35,8 +35,11 @@
 //!   outside any nested block, the same rule codegen's
 //!   `prescan_tier2_local_vars` reads ([`stored_block_var_uses`]), and `b` is not
 //!   mentioned before the binding;
-//! - no later statement assigns a local the block reads or writes, so
-//!   evaluating the block at the send reads the locals the block closed over;
+//! - no later statement (before the last send) assigns, destructures or
+//!   pattern-binds ANY name the block mentions at any depth (`BlockMentions`:
+//!   every identifier, nested-block parameter, pattern binder and nested
+//!   assignment, not only the locals it reads or writes), so evaluating the
+//!   block at the send reads the locals the block closed over;
 //! - a `value:`-family send passes exactly as many arguments as the block has
 //!   parameters, and (for a block with parameters) no other binder of the
 //!   parameter names exists in the method.
@@ -564,7 +567,10 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
             // lost" case), so do not narrow this. A `^` is refused
             // conservatively: non-local return inside the inlined producer is
             // unverified. Nested blocks are walked too, so a block-local
-            // assignment in an argument is refused as well.
+            // assignment in an argument is refused as well. So is any use of
+            // the stored local itself inside an argument (`b value: (b value:
+            // 1)`): the rewrite would nest two inlined copies whose parameters
+            // share a span, and accepted shapes must be verified.
             let mut scope_sensitive = false;
             for arg in arguments.iter() {
                 walk_expression(arg, &mut |a| {
@@ -573,7 +579,8 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
                         Expression::Assignment { .. }
                             | Expression::DestructureAssignment { .. }
                             | Expression::Return { .. }
-                    ) {
+                    ) || matches!(a, Expression::Identifier(i) if i.name == name)
+                    {
                         scope_sensitive = true;
                     }
                 });
@@ -667,6 +674,16 @@ mod tests {
     }
 
     #[test]
+    fn sibling_sends_are_both_inlined() {
+        let out = inlined(
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: 1\n    b value: 2\n    t",
+        )
+        .unwrap();
+        assert!(out.contains("n := 1") && out.contains("n := 2"), "{out}");
+        assert!(!out.contains("b :="), "{out}");
+    }
+
+    #[test]
     fn cascade_is_split_into_sends() {
         let out =
             inlined("    t := 0\n    b := [:n | t := t + n]\n    b value: 1; value: 2\n    t")
@@ -712,7 +729,7 @@ mod tests {
             "    t := 0\n    b := [:n | t := t + n]\n    b value: ({z, y} := Tuple withAll: #(1, 2))\n    z",
             // ... an assignment inside a block nested in an argument.
             "    t := 0\n    b := [:n | t := t + n]\n    b value: ([z := 1] value)\n    z",
-            // A `^` in an argument returns from the method, not the inlined block.
+            // A `^` in an argument is refused conservatively (NLR in the inlined producer is unverified).
             "    t := 0\n    b := [:n | t := t + n]\n    b value: (t > 5 ifTrue: [^0] ifFalse: [1])\n    t",
             // A block-local temp that a later method-level assignment would turn
             // into an outer write once the body is inlined.
@@ -736,6 +753,10 @@ mod tests {
             "    t := 0\n    b := [#(1) do: [:e | self.count := e]. t := t + 1]\n    b value\n    t",
             // A nested block reads a field and a field write comes before the send.
             "    t := 0\n    b := [#(1) do: [:e | t := t + self.count]]\n    self.count := 5\n    b value\n    t",
+            // A send of the stored block nested in its own argument.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (b value: 1)\n    t",
+            // ... deeper in the argument.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (Array with: (b value: 1))\n    t",
             // A block parameter named like the stored local.
             "    t := 0\n    b := [t := t + 1]\n    #(1) do: [:b | b printString]\n    b value\n    t",
             // A block-local assignment of the stored local's name in a nested block.
