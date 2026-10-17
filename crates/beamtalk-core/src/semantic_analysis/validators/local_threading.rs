@@ -57,6 +57,7 @@ use crate::semantic_analysis::block_facts::{
     local_threading_construct, loop_body_producer_sites, operand_producer_writes,
     outer_local_writes, producer_body_block, receiver_statically_not_dictionary,
     repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
+    value_blocks,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
@@ -1165,8 +1166,18 @@ struct Walker<'d> {
     /// How many times each name is assigned anywhere in the method.
     assign_counts: HashMap<EcoString, usize>,
     tier2_locals: HashMap<EcoString, Tier2Local>,
-    /// Tier 2 locals already reported (one diagnostic per binding).
-    reported_locals: HashSet<EcoString>,
+    /// For the escape check alone (BT-3806): the latest binding of each local,
+    /// in walk order, whose value may be a block literal writing an outer
+    /// local ([`value_blocks`]: `b := [..]`, `b := c ifTrue: [[..]] ifFalse:
+    /// [..]`), however often the local is assigned (`b := nil. b := [t := 1].
+    /// ^b` returns the block). Any other assignment to the local forgets it,
+    /// so a block replaced before the local escapes is not reported; one
+    /// replaced only in a branch is not either (the check stays syntactic).
+    /// Its entries' `promotable` is unused.
+    escape_bindings: HashMap<EcoString, Tier2Local>,
+    /// The bindings of Tier 2 locals already reported (one diagnostic per
+    /// binding).
+    reported_locals: HashSet<Span>,
     /// For each method-body statement `b := [...]`, whether every later use
     /// of `b` in the method body is a safe `value` send
     /// ([`stored_block_var_uses`], shared with codegen's
@@ -1256,6 +1267,7 @@ impl<'d> Walker<'d> {
             direct_blocks: Vec::new(),
             assign_counts,
             tier2_locals: HashMap::new(),
+            escape_bindings: HashMap::new(),
             reported_locals: HashSet::new(),
             safe_stored_uses,
             operand_sites: HashSet::new(),
@@ -1398,6 +1410,7 @@ impl<'d> Walker<'d> {
         self.scope.pop();
         let depth = self.scope.len();
         self.tier2_locals.retain(|_, local| local.frame < depth);
+        self.escape_bindings.retain(|_, local| local.frame < depth);
     }
 
     /// Walks `expr` as an operand: a block literal is walked as a block (of
@@ -1441,6 +1454,7 @@ impl<'d> Walker<'d> {
                 let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
                 for id in ids {
                     self.define(&id.name);
+                    self.escape_bindings.remove(&id.name);
                 }
             }
             Expression::Return { value, .. } => {
@@ -1614,7 +1628,8 @@ impl<'d> Walker<'d> {
 
     /// `name := value`: remembers `name` as a Tier 2 block-valued local when
     /// `value` is a block literal that writes an outer local and `name` is
-    /// assigned nowhere else in the method.
+    /// assigned nowhere else in the method; and, whatever the assign count, as
+    /// the binding the escape check reads ([`Walker::escape_bindings`]).
     ///
     /// The binding is *promotable* (an actor may then send it `value`) only
     /// in the shape codegen's `prescan_tier2_local_vars` promotes: a
@@ -1628,15 +1643,30 @@ impl<'d> Walker<'d> {
         binding: Span,
         top_statement: bool,
     ) {
+        self.escape_bindings.remove(name);
+        let Some(frame) = self.binding_frame(name) else {
+            return;
+        };
+        let escaping_write = value_blocks(value)
+            .into_iter()
+            .find_map(|block| self.writes_of(block).into_iter().next());
+        if let Some(write) = escaping_write {
+            self.escape_bindings.insert(
+                name.clone(),
+                Tier2Local {
+                    binding,
+                    write,
+                    frame,
+                    promotable: false,
+                },
+            );
+        }
         let Expression::Block(block) = value else {
             return;
         };
         if self.assign_counts.get(name).copied() != Some(1) {
             return;
         }
-        let Some(frame) = self.binding_frame(name) else {
-            return;
-        };
         let writes = self.writes_of(block);
         let Some(write) = writes.first().cloned() else {
             return;
@@ -2306,7 +2336,7 @@ impl<'d> Walker<'d> {
         if shape == EscapeShape::StoredLocal {
             return;
         }
-        let Some((binding, write)) = self.tier2_local_to_report(local) else {
+        let Some((binding, write)) = self.binding_to_report(local, true) else {
             return;
         };
         let name = &write.name;
@@ -2327,20 +2357,30 @@ impl<'d> Walker<'d> {
     }
 
     /// The binding and first write of the Tier 2 block-valued local `local`
+    /// (for an `escape`, its latest block binding, [`Walker::escape_bindings`])
     /// if it has not been reported yet (one diagnostic per binding); `None`
     /// for a name that is not one, or that a block parameter or match binding
     /// of the same name shadows.
-    fn tier2_local_to_report(&mut self, local: &EcoString) -> Option<(Span, OuterLocalWrite)> {
-        let info = self.tier2_locals.get(local)?;
+    fn binding_to_report(
+        &mut self,
+        local: &EcoString,
+        escape: bool,
+    ) -> Option<(Span, OuterLocalWrite)> {
+        let bindings = if escape {
+            &self.escape_bindings
+        } else {
+            &self.tier2_locals
+        };
+        let info = bindings.get(local)?;
         if self.binding_frame(local) != Some(info.frame) {
             return None;
         }
         let found = (info.binding, info.write.clone());
-        self.reported_locals.insert(local.clone()).then_some(found)
+        self.reported_locals.insert(found.0).then_some(found)
     }
 
     fn report_local(&mut self, local: &EcoString, selector: &str, use_span: Span) {
-        let Some((binding, write)) = self.tier2_local_to_report(local) else {
+        let Some((binding, write)) = self.binding_to_report(local, false) else {
             return;
         };
         let name = &write.name;
@@ -2364,12 +2404,26 @@ impl<'d> Walker<'d> {
 
 /// The [`escape_sites`] of a method body that §6 inspects (BT-3756). A REPL
 /// expression list is skipped: its locals are session bindings, and the value
-/// of its last expression goes to the display, not to a caller.
+/// of its last expression goes to the display, not to a caller (whether the
+/// REPL should reject these is open for the maintainer, BT-3858; the
+/// repl-protocol case `adr0131_section6_escape_pins` records what it does
+/// today).
+///
+/// An operand listed with several shapes (`^(b := [..])` is returned and
+/// stored in a local, BT-3806) keeps the one that leaves the method: a store
+/// into a local is not an escape by itself.
 fn escape_map(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<Span, EscapeShape> {
+    let mut escapes = HashMap::new();
     if context == Repl {
-        return HashMap::new();
+        return escapes;
     }
-    escape_sites(body).into_iter().collect()
+    for (span, shape) in escape_sites(body) {
+        let entry = escapes.entry(span).or_insert(shape);
+        if *entry == EscapeShape::StoredLocal {
+            *entry = shape;
+        }
+    }
+    escapes
 }
 
 /// How a block escapes, for the §6 message.

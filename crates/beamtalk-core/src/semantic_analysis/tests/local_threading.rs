@@ -1996,6 +1996,16 @@ fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
 /// `Cannot call 'value' on Block ... captures mutable state` on the first
 /// later `value`, in class, value-type and actor methods, except the actor
 /// `b := [...]. self.f := b`, which ran and silently lost the write.
+///
+/// BT-3806 added the rows from "returned via last-statement assignment" on: a
+/// returned value followed through a local assignment, the arms of an inlined
+/// conditional, an evaluated literal block, an `on:do:`/`ensure:` body or a
+/// `match:` arm, and a local bound more than once. Probed on a real build
+/// before the fix (a `BUnit` probe calling `value` twice on the answer): every
+/// one raised `Cannot call 'value' on Block via perform: (... the block
+/// captures mutable state ...)` in class, value-type and actor methods,
+/// except the actor's last-statement `b := [...]`, which answered `nil` (the
+/// block was lost, and `nil value` raised `does_not_understand`).
 /// Each is `(name, body)`.
 const ESCAPE_SHAPES: &[(&str, &str)] = &[
     ("explicit return", "^[t := t + 1]"),
@@ -2014,6 +2024,60 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
     ),
     ("write-only block", "^[t := 5]"),
     ("parenthesized", "^([t := t + 1])"),
+    (
+        "returned via last-statement assignment",
+        "b := [t := t + 1]",
+    ),
+    ("returned assignment", "^(b := [t := t + 1])"),
+    ("returned unparenthesized assignment", "^b := [t := t + 1]"),
+    (
+        "local returned through an assignment",
+        "b := [t := t + 1]\n^(c := b)",
+    ),
+    (
+        "implicit branch value",
+        "true ifTrue: [[t := t + 1]] ifFalse: [[0]]",
+    ),
+    (
+        "returned branch value",
+        "^true ifTrue: [[t := t + 1]] ifFalse: [[0]]",
+    ),
+    ("one-armed branch value", "true ifTrue: [[t := t + 1]]"),
+    (
+        "nil-test branch value",
+        "nil ifNil: [[t := t + 1]] ifNotNil: [:v | [v]]",
+    ),
+    (
+        "nested branch value",
+        "true ifTrue: [false ifTrue: [0] ifFalse: [[t := t + 1]]] ifFalse: [0]",
+    ),
+    (
+        "branch assigning the block",
+        "true ifTrue: [b := [t := t + 1]] ifFalse: [nil]",
+    ),
+    (
+        "branch value stored in a local",
+        "b := true ifTrue: [[t := t + 1]] ifFalse: [[0]]\n^b",
+    ),
+    ("evaluated block value", "[[t := t + 1]] value"),
+    (
+        "on:do: body value",
+        "[[t := t + 1]] on: Error do: [:e | nil]",
+    ),
+    (
+        "on:do: handler value",
+        "[nil] on: Error do: [:e | [t := t + 1]]",
+    ),
+    ("ensure: body value", "[[t := t + 1]] ensure: [nil]"),
+    (
+        "match arm value",
+        "#a match: [#a -> [t := t + 1]; _ -> nil]",
+    ),
+    ("reassigned local", "b := nil\nb := [t := t + 1]\n^b"),
+    (
+        "local in a branch",
+        "b := [t := t + 1]\ntrue ifTrue: [b] ifFalse: [nil]",
+    ),
 ];
 
 #[test]
@@ -2123,6 +2187,10 @@ fn section6_escaping_blocks_that_write_no_outer_local_are_accepted() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
+    // BT-3806 item 4: §6 accepts these, and codegen rejects every one
+    // (`FieldAssignmentInUnsupportedBlock`, pinned by
+    // `test_escaping_field_writing_actor_block_is_compile_error_in_every_shape`),
+    // so none compiles to a block that loses its field write.
     for body in [
         "^[self.n := self.n + 1]",
         "b := [self.n := self.n + 1]\n^b",
@@ -2141,6 +2209,55 @@ fn section6_non_escaping_uses_are_not_escapes() {
     assert_eq!(
         section6_errors(&in_class("#(1, 2) do: [:x | t := t + x]\n#[t, t]")),
         0
+    );
+}
+
+/// BT-3806: the value a returned operand is followed through is only what the
+/// method answers. A block that is not the value of the last statement of an
+/// arm, the cleanup of an `ensure:`, a block rebound to something else before
+/// it escapes, and a block that is the value of a block that is only stored,
+/// never returned, stay accepted (a stored, never-sent block is the
+/// dead-block-assignment lint's).
+#[test]
+fn section6_values_that_are_not_returned_are_not_escapes() {
+    for body in [
+        "true ifTrue: [[t := t + 1]. 0] ifFalse: [0]",
+        "[0] ensure: [[t := t + 1]]",
+        "b := [t := t + 1]\nb := nil\n^b",
+        "b := [t := t + 1]\nc := b\nnil",
+        "x := [[t := t + 1]]\nnil",
+        "x := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nnil",
+        "true ifTrue: [t := t + 1] ifFalse: [t := 0]",
+        "b := [t := t + 1] value",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                0,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
+    }
+}
+
+/// BT-3806: a local assigned more than once is reported for the binding that
+/// escapes, once per binding.
+#[test]
+fn section6_escape_reports_the_escaping_binding_of_a_reassigned_local() {
+    let src = in_class("b := [t := t + 1]\nb := [t := t + 2]\n^b");
+    let s6: Vec<_> = adr0131_diagnostics(&src)
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+        .collect();
+    let escaping = s6
+        .iter()
+        .filter(|d| d.message.contains("returned from the method"))
+        .collect::<Vec<_>>();
+    assert_eq!(escaping.len(), 1, "{s6:?}");
+    assert_eq!(
+        escaping[0].span.start() as usize,
+        src.find("b := [t := t + 2]").unwrap()
     );
 }
 

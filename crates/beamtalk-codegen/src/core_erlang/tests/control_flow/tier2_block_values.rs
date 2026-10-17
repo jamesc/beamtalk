@@ -64,6 +64,42 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
     );
 }
 
+/// BT-3806 (ADR 0131 §6 item 4): an actor block that writes a field and
+/// escapes the method without a send is accepted by the §6 check (a field
+/// has a home that outlives the method frame), and rejected here instead, in
+/// every escape shape, not only `^[...]`: run, it would write the field of a
+/// state map no actor sees. Probed on a real build: every one of these fails
+/// to compile with this error. (A block stored in a field and run by a later
+/// call of the same actor, `self.h := [self.n := self.n + 1]`, is the shape
+/// that works: `adr0131section6escape_test.bt` `testActorStoredFieldWriter`.)
+#[test]
+fn test_escaping_field_writing_actor_block_is_compile_error_in_every_shape() {
+    for body in [
+        "^[self.total := self.total + 1]",
+        "[self.total := self.total + 1]",
+        "^[:x | self.total := x]",
+        "#[[self.total := self.total + 1]]",
+        "c ifTrue: [[self.total := self.total + 1]] ifFalse: [[0]]",
+        "b := [self.total := self.total + 1]\n    ^b",
+    ] {
+        let src =
+            format!("Actor subclass: Ctr\n  state: total = 0\n\n  makeBlock: c =>\n    {body}\n");
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let result = crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+            ),
+            "{body}: an escaping field-writing actor block must not compile. Got: {result:?}"
+        );
+    }
+}
+
 #[test]
 fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles() {
     // PR review follow-up: a block with BOTH a captured-local
