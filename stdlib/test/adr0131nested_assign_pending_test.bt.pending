@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3799 / BT-3860 (ADR 0131): a local assignment in value position (a
+// receiver, an operand, a literal element, an assignment's value) such as
+// `(t := t + 1) > 1 ifTrue: [u := 9]` must rebind `t` before anything after it
+// reads it, at the method root and in every loop or fold body, in a class,
+// value-type and actor method alike (the three columns,
+// fixtures/adr0131nested_assign_*_pending.bt.pending).
+//
+// Inert: the runner discovers only `.bt`. Until BT-3860 every fixture method is
+// a `ValuePositionLocalAssignment` compile error (the BT-3864 stopgap, pinned
+// by `adr0131_nested_assign_pins` in
+// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs). Each
+// test asserts the correct answer; BT-3860 drops the `.pending` suffixes. The
+// hoisted forms are tested in adr0131nested_assign_test.bt, and the REPL pins
+// are in tests/repl-protocol/cases/adr0131_nested_assign.btscript.
+
+TestCase subclass: Adr0131NestedAssignPendingTest
+
+  testRootPlain =>
+    self assert: #[Adr0131NestedAssignPendingClass rootPlain, (Adr0131NestedAssignPendingValue new) rootPlain, (Adr0131NestedAssignPendingActor spawn) rootPlain] equals: #[#[1, 2], #[1, 2], #[1, 2]]
+
+  testRootLiteral =>
+    self assert: #[Adr0131NestedAssignPendingClass rootLiteral, (Adr0131NestedAssignPendingValue new) rootLiteral, (Adr0131NestedAssignPendingActor spawn) rootLiteral] equals: #[#[0, 7, 7], #[0, 7, 7], #[0, 7, 7]]
+
+  testDoPlain =>
+    self assert: #[Adr0131NestedAssignPendingClass doPlain, (Adr0131NestedAssignPendingValue new) doPlain, (Adr0131NestedAssignPendingActor spawn) doPlain] equals: #[2, 2, 2]
+
+  testRootIf =>
+    self assert: #[Adr0131NestedAssignPendingClass rootIf, (Adr0131NestedAssignPendingValue new) rootIf, (Adr0131NestedAssignPendingActor spawn) rootIf] equals: #[#[1, 9], #[1, 9], #[1, 9]]
+
+  // BT-3799's shape.
+  testDoIf =>
+    self assert: #[Adr0131NestedAssignPendingClass doIf, (Adr0131NestedAssignPendingValue new) doIf, (Adr0131NestedAssignPendingActor spawn) doIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testDoIfElse =>
+    self assert: #[Adr0131NestedAssignPendingClass doIfElse, (Adr0131NestedAssignPendingValue new) doIfElse, (Adr0131NestedAssignPendingActor spawn) doIfElse] equals: #[#[2, 10], #[2, 10], #[2, 10]]
+
+  testDoAnd =>
+    self assert: #[Adr0131NestedAssignPendingClass doAnd, (Adr0131NestedAssignPendingValue new) doAnd, (Adr0131NestedAssignPendingActor spawn) doAnd] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testDoIfFalse =>
+    self assert: #[Adr0131NestedAssignPendingClass doIfFalse, (Adr0131NestedAssignPendingValue new) doIfFalse, (Adr0131NestedAssignPendingActor spawn) doIfFalse] equals: #[#[2, 2], #[2, 2], #[2, 2]]
+
+  testToDoIf =>
+    self assert: #[Adr0131NestedAssignPendingClass toDoIf, (Adr0131NestedAssignPendingValue new) toDoIf, (Adr0131NestedAssignPendingActor spawn) toDoIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testTimesIf =>
+    self assert: #[Adr0131NestedAssignPendingClass timesIf, (Adr0131NestedAssignPendingValue new) timesIf, (Adr0131NestedAssignPendingActor spawn) timesIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testWhileIf =>
+    self assert: #[Adr0131NestedAssignPendingClass whileIf, (Adr0131NestedAssignPendingValue new) whileIf, (Adr0131NestedAssignPendingActor spawn) whileIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testCollectIf =>
+    self assert: #[Adr0131NestedAssignPendingClass collectIf, (Adr0131NestedAssignPendingValue new) collectIf, (Adr0131NestedAssignPendingActor spawn) collectIf] equals: #[#[2, 9, #(1, 2)], #[2, 9, #(1, 2)], #[2, 9, #(1, 2)]]
+
+  testInjectIf =>
+    self assert: #[Adr0131NestedAssignPendingClass injectIf, (Adr0131NestedAssignPendingValue new) injectIf, (Adr0131NestedAssignPendingActor spawn) injectIf] equals: #[#[2, 9, 3], #[2, 9, 3], #[2, 9, 3]]

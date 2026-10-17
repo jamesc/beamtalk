@@ -575,7 +575,7 @@ is surface-specific.
 
 ### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
 
-Two compile errors, computed in `beamtalk-core` semantic analysis
+Three compile errors, computed in `beamtalk-core` semantic analysis
 (`analyse_full`, `validators/local_threading.rs`), so every surface that
 reports semantic diagnostics (CLI `build`/`check`/`lint`/`test`, REPL eval and
 load, LSP `textDocument/publishDiagnostics`, MCP `lint`/`diagnostic_summary`)
@@ -587,6 +587,29 @@ reports the same message at the same span. No operation is surface-specific.
   local-threading construct whose blocks write an outer local sits in a
   position that does not thread the write back yet, including the statement
   positions that lose the write (BT-3753).
+- Category `ValuePositionLocalAssignment` (temporary stopgap, BT-3864;
+  BT-3860 removes it): a local assignment in value position (an operand, a
+  literal or interpolated element, another assignment's or `^`'s value, a
+  receiver, a `match:` arm), whose write codegen drops, is an error in class,
+  value-type and actor methods **and in the REPL**. Message: "assignment to
+  local `t` is used as a value in <context>, but it would not rebind `t`
+  (BT-3860)", with the hint to hoist the assignment into its own statement.
+  The rule is one predicate, `value_position_local_assignments` in
+  `beamtalk-core`'s `block_facts`, proved equal to the assignments codegen
+  drops by the `value_position_assignment_agreement` tests in
+  `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace). Like the
+  other two it is the analyser's verdict, so CLI, REPL eval and load, LSP and
+  MCP report the same message at the same span.
+  - **REPL behaviour change (approved by the maintainer, 2026-10-17).** REPL
+    input that was accepted before, and answered a silently wrong value
+    (`x := (t := t + 1) + 1` left `t` unchanged), is now a compile error, and
+    BT-3799's `#(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]` no longer
+    reaches the debug compiler's verifier panic (its hoisted form, a REPL
+    loop body whose statement is a conditional with a writing arm, still
+    does: BT-3877). The input is rejected before
+    it runs, so no binding changes. This is the only REPL change: every other
+    REPL display, prompt and output is unchanged
+    (`tests/repl-protocol/cases/adr0131_nested_assign.btscript`).
 - **Narrowing (BT-3841).** The statement-position half of the temporary
   check was measured on a BEAM (`just measure-adr0131-statements`, tables
   `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in
@@ -643,7 +666,7 @@ reports the same message at the same span. No operation is surface-specific.
   from a standalone `Ac >> method` is always an error, even when the callee is
   `sealed` in the same module: codegen's class pre-scan reads only the methods
   in the class body.
-- Both are errors with no `[diagnostics]` key and no `@expect` category.
+- All three are errors with no `[diagnostics]` key and no `@expect` category.
 - **`do:` as a producer (ADR 0131 Phase 2c, BT-3796).** `do:` joined the
   loop-and-fold producer table (`producer_body_arg_index`), so a `do:` whose
   block writes an outer local answers `nil` and keeps its writes in every

@@ -42,6 +42,10 @@ proptest.workspace = true
 # unifies them into one built instance with `test` enabled only for dev/test
 # builds of this crate, never for its production library.
 beamtalk-core = { workspace = true, features = ["test"] }
+# why: BT-3864 — the value-position assignment agreement test records the
+# assignments the REPL drops with `core_erlang::dropped_assignment_probe`,
+# which the `test` feature exposes (same unification as `beamtalk-core` above).
+beamtalk-codegen = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true
