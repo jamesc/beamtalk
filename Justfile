@@ -1067,28 +1067,35 @@ test-rust: (_test-rust "")
 test-rust-platform: (_test-rust "--workspace --exclude beamtalk-codegen --exclude beamtalk-repl")
 
 # ARGS is the cargo package selection, e.g. `--workspace --exclude <crate>`.
+# Benches stay on `cargo test`: nextest lists a `harness = false` binary by
+# running it with `--list`, and `benches/build_bench.rs` builds the stdlib
+# before it parses arguments, which fails under that invocation (macOS CI).
+# `cargo test --benches` runs them in criterion's test mode exactly as the old
+# `cargo test --all-targets` did (it is what caught BT-3868's Windows stack
+# overflow), and `--doc` runs the doctests nextest does not.
 [unix]
 _test-rust ARGS:
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --all-targets --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }} || exit $?
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }} || exit $?
+        rest="--benches"
     else
         echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower)"
-        output=$(cargo test --all-targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
+        rest="--all-targets"
+    fi
+    for targets in "$rest" "--doc"; do
+        output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
         echo "$output" | grep -E '^test result:|FAILED|^error' || true
         if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
-    fi
-    output=$(cargo test --doc --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
-    echo "$output" | grep -E '^test result:|FAILED|^error' || true
-    if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
+    done
     echo "✅ Rust tests complete"
 
 [windows]
 _test-rust ARGS:
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --all-targets --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $output = cargo test --benches --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
 
