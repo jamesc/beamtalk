@@ -666,11 +666,13 @@ reports the same message at the same span. No operation is surface-specific.
   in a loop or counted-loop body (directly, or as the innermost block under
   an arm, a `do:` body or another loop). Where measured, the newly rejected
   shapes failed `erlc` or read the local unchanged (a silent wrong answer);
-  elsewhere the rows are conservatively coarser than the measurement (an arm
-  in a counted-loop body, and innermost protected-body, handler and loop
-  rows under outer roles that were not measured, inferred from the measured
-  shapes that share their lowering). A `do:` body, a `collect:` body or an
-  evaluated block inside a loop body answers right and stays accepted.
+  elsewhere the rows are conservatively coarser than the measurement (under
+  a counted loop every inner role stays rejected, and innermost
+  protected-body, handler and loop rows under outer roles that were not
+  measured are inferred from the measured shapes that share their
+  lowering). A `do:` body, a `collect:` body or an evaluated block inside a
+  counted-loop body answers right but is over-rejected until BT-3878; inside
+  a `whileTrue:` body it answers right and stays accepted.
   The verdict is the analyser's, so it is the same
   on every surface (CLI, REPL load of a class definition, LSP, MCP). REPL
   expressions (the REPL root) are not affected, and the REPL display is

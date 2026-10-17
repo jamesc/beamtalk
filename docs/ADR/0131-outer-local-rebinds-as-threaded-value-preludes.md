@@ -1082,9 +1082,13 @@ the innermost role too) until BT-3878 lowers those folds as producers. A second 
 round added the reverse nesting, a `do:` body, a `collect:` body or an evaluated block
 innermost in a `whileTrue:` or `timesRepeat:` body (`iterLoop`, `collLoop`, `valLoop`,
 `iterTimes`, `collTimes`, `valTimes`, 684 cells): every cell answers right in every
-context, so those stay accepted. The rows are coarser than the measurement where it is
-silent: an arm in a counted-loop body, and the innermost protected-body, handler and loop
-rows under the list-op and
+context. Under a `whileTrue:` body they stay accepted; under a counted loop the row keeps
+every inner role rejected, because `DoBody` / `ListOpBody` also name the keyed,
+enumeration, fold, select and satisfy blocks, unmeasured there, so the 18 actor detect
+cells of `iterTimes` / `collTimes` / `valTimes` are over-rejected (`KNOWN_OVER_REJECTED`)
+until BT-3878. The rows are coarser than the measurement where it is silent: every inner
+role under a counted loop, and the innermost protected-body, handler and loop rows under
+the list-op and
 evaluated-block outer roles (and the protected-body and handler ones under a `do:` body
 or a loop), inferred from the measured shapes that share their lowering. The `iterIter` /
 `armIterIter` actor cells above answer right since. The re-measurement also found twelve

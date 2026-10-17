@@ -1379,13 +1379,14 @@ fn deny_set_block_local_writes_are_judged_by_the_measurement() {
             ),
             true,
         ),
-        // ... but a `do:` body inside a counted-loop body answers right
-        // (`iterTimes`), and so does an arm inside a `whileTrue:` body
-        // (`armLoop`).
+        // A `do:` body inside a counted-loop body answers right (`iterTimes`)
+        // but stays rejected with every inner role there (over-rejected until
+        // BT-3878).
         (
             format!("2 timesRepeat: [#(1, 2) do: [:z | u := 0. {detect}. t := u]]\nt"),
-            false,
+            true,
         ),
+        // ... but an arm inside a `whileTrue:` body answers right (`armLoop`).
         (
             format!(
                 "i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"
@@ -1543,6 +1544,28 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "armIterIter", "local", "det"),
     ("actor", "armIterIter", "local", "dinH"),
     ("actor", "armIterIter", "local", "dinS"),
+    // BT-3878: a `do:`/`collect:` body or an evaluated block in a counted-loop
+    // body answers right, but the counted-loop `deny_block_local` row rejects
+    // every inner role (the keyed, fold, select and satisfy blocks that share
+    // `DoBody`/`ListOpBody` are unmeasured there).
+    ("actor", "iterTimes", "local", "det"),
+    ("actor", "iterTimes", "local", "dinH"),
+    ("actor", "iterTimes", "local", "dinS"),
+    ("actor", "iterTimes", "dlocal", "det"),
+    ("actor", "iterTimes", "dlocal", "dinH"),
+    ("actor", "iterTimes", "dlocal", "dinS"),
+    ("actor", "collTimes", "local", "det"),
+    ("actor", "collTimes", "local", "dinH"),
+    ("actor", "collTimes", "local", "dinS"),
+    ("actor", "collTimes", "dlocal", "det"),
+    ("actor", "collTimes", "dlocal", "dinH"),
+    ("actor", "collTimes", "dlocal", "dinS"),
+    ("actor", "valTimes", "local", "det"),
+    ("actor", "valTimes", "local", "dinH"),
+    ("actor", "valTimes", "local", "dinS"),
+    ("actor", "valTimes", "dlocal", "det"),
+    ("actor", "valTimes", "dlocal", "dinH"),
+    ("actor", "valTimes", "dlocal", "dinS"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
