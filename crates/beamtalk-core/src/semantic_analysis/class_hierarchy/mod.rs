@@ -574,7 +574,7 @@ impl ClassHierarchy {
     /// for cross-file hierarchy resolution in Pass 2.
     #[must_use]
     pub fn extract_class_infos(module: &Module) -> Vec<ClassInfo> {
-        let threading = ThreadingIndex::build(&module.classes);
+        let threading = ThreadingIndex::build(&module.classes, &|_, _, _| false);
         module
             .classes
             .iter()
@@ -836,7 +836,7 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        let threading = ThreadingIndex::build(&module.classes);
+        let threading = ThreadingIndex::build(&module.classes, &|_, _, _| false);
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.

@@ -709,7 +709,8 @@ struct MethodMeta {
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
     /// ADR 0132 §1: argument positions this method threads a Tier 2 block
-    /// through (`MethodInfo::threading_params`). Empty until Phase 1b.
+    /// through (`MethodInfo::threading_params`), computed by
+    /// `ThreadingIndex` (never for a `spawns_block` method).
     threading_params: Vec<usize>,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<DeclaredType>,
@@ -750,7 +751,7 @@ fn method_def_to_meta(
 ) -> MethodMeta {
     let selector = m.selector.name();
     MethodMeta {
-        selector: m.selector.name().to_string(),
+        selector: selector.to_string(),
         arity: m.selector.arity(),
         kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: m.is_sealed,
@@ -885,8 +886,6 @@ fn mark_spawns_for_selectors(
     for m in methods.iter_mut() {
         if selectors.iter().any(|&s| s == m.selector) {
             m.spawns_block = true;
-            // The block runs in another process: it is never threaded.
-            m.threading_params.clear();
         }
     }
     let missing: Vec<&str> = selectors
@@ -908,7 +907,29 @@ fn mark_spawns_for_selectors(
 /// Replaces hardcoded list in `validators.rs` so the self-capture validator
 /// can skip false-positive warnings.
 fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(class_methods, &["after:do:", "every:do:"], "Timer")
+    mark_spawns_for_selectors(class_methods, TIMER_SPAWN_SELECTORS, "Timer")
+}
+
+/// `Timer` class methods that run their block in another process.
+const TIMER_SPAWN_SELECTORS: &[&str] = &["after:do:", "every:do:"];
+/// `Parallel` class methods that run their blocks in other processes.
+const PARALLEL_SPAWN_SELECTORS: &[&str] = &["all:", "all:timeout:", "any:"];
+/// `Collection` instance methods that delegate to `Parallel all:`.
+const COLLECTION_SPAWN_SELECTORS: &[&str] =
+    &["parallelCollect:", "parallelCollect:maxConcurrency:"];
+
+/// Whether the stdlib method `class`>>`selector` runs its block argument in
+/// another process (`MethodInfo::spawns_block`). The one table behind the
+/// `mark_*_spawns` markers and `ThreadingIndex::build`, which must exclude
+/// such a method (and so its same-unit forwarders) before its fixpoint.
+fn stdlib_spawns_block(class: &str, class_side: bool, selector: &str) -> bool {
+    let selectors = match (class, class_side) {
+        ("Timer", true) => TIMER_SPAWN_SELECTORS,
+        ("Parallel", true) => PARALLEL_SPAWN_SELECTORS,
+        ("Collection", false) => COLLECTION_SPAWN_SELECTORS,
+        _ => return false,
+    };
+    selectors.contains(&selector)
 }
 
 /// Mark `Parallel` class methods that spawn their block arguments in separate
@@ -919,7 +940,7 @@ fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// risk: an actor blocks in `Parallel all:`, a block does a synchronous send back
 /// to the same actor, and hangs).
 fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(class_methods, &["all:", "all:timeout:", "any:"], "Parallel")
+    mark_spawns_for_selectors(class_methods, PARALLEL_SPAWN_SELECTORS, "Parallel")
 }
 
 /// Mark `Collection>>parallelCollect:` and `parallelCollect:maxConcurrency:`
@@ -932,11 +953,7 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// against doesn't apply to their own call sites the way it does to the two
 /// public entry points.
 fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(
-        methods,
-        &["parallelCollect:", "parallelCollect:maxConcurrency:"],
-        "Collection",
-    )
+    mark_spawns_for_selectors(methods, COLLECTION_SPAWN_SELECTORS, "Collection")
 }
 
 /// A single stdlib type-alias declaration collected by
@@ -1257,7 +1274,7 @@ fn extract_class_metadata(
         );
     }
 
-    let threading = ThreadingIndex::build(&module.classes);
+    let threading = ThreadingIndex::build(&module.classes, &stdlib_spawns_block);
     let class_name_str = class.name.name.as_str();
     let mut methods: Vec<MethodMeta> = class
         .methods
@@ -3285,6 +3302,16 @@ mod tests {
             code.contains("param_types: vec![]"),
             "Should emit empty param_types. Got: {code}"
         );
+    }
+
+    #[test]
+    fn test_stdlib_spawns_block_matches_the_markers() {
+        assert!(stdlib_spawns_block("Timer", true, "after:do:"));
+        assert!(stdlib_spawns_block("Parallel", true, "all:"));
+        assert!(stdlib_spawns_block("Collection", false, "parallelCollect:"));
+        assert!(!stdlib_spawns_block("Collection", false, "do:"));
+        assert!(!stdlib_spawns_block("Timer", false, "after:do:"));
+        assert!(!stdlib_spawns_block("List", false, "all:"));
     }
 
     #[test]

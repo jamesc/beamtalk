@@ -311,15 +311,8 @@ impl Ctx<'_> {
                 ..
             } => {
                 let sel = selector.name();
-                if is_opaque_callable_hom_send(expr) {
-                    let callable = opaque_fold_callable_arg(&sel, arguments);
-                    if callable.is_some_and(|c| is_name(c, self.name)) {
-                        return !self.mentions(receiver)
-                            && arguments
-                                .iter()
-                                .filter(|a| !is_name(a, self.name))
-                                .all(|a| !self.mentions(a));
-                    }
+                if let Some(ok) = callable_hom_use(expr, self.name) {
+                    return ok;
                 }
                 match (sel.as_str(), receiver.as_ref()) {
                     ("ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifFalse:ifTrue:", _) => {
@@ -383,8 +376,19 @@ pub struct ThreadingIndex {
 impl ThreadingIndex {
     /// Compute the index for `classes` (one module's classes): forwards resolve
     /// within this set only.
+    ///
+    /// `spawns_block(class, class_side, selector)` says which methods run
+    /// their block in another process (`MethodInfo::spawns_block`). Such a
+    /// method is never a candidate, **before** the fixpoint, so a same-unit
+    /// forwarder to it is non-threading too (ADR 0132 §1: a callee that runs
+    /// the block after the caller's frame is gone). A unit of user classes
+    /// passes `|_, _, _| false`: `spawns_block` is only ever set for stdlib
+    /// methods.
     #[must_use]
-    pub fn build(classes: &[ClassDefinition]) -> Self {
+    pub fn build(
+        classes: &[ClassDefinition],
+        spawns_block: &dyn Fn(&str, bool, &str) -> bool,
+    ) -> Self {
         let mut methods: MethodTable<'_> = HashMap::new();
         for class in classes {
             for (class_side, list) in [(false, &class.methods), (true, &class.class_methods)] {
@@ -399,6 +403,9 @@ impl ThreadingIndex {
         // parameter has nothing to thread).
         let mut candidates: HashSet<ParamKey> = HashSet::new();
         for ((class, class_side, selector), (_, method)) in &methods {
+            if spawns_block(class, *class_side, selector) {
+                continue;
+            }
             for (index, param) in method.parameters.iter().enumerate() {
                 let name = param.name.name.as_str();
                 if method
@@ -529,15 +536,8 @@ impl RootCtx<'_> {
                     return true;
                 }
                 let sel = selector.name();
-                if is_opaque_callable_hom_send(expr)
-                    && opaque_fold_callable_arg(&sel, arguments)
-                        .is_some_and(|c| is_name(c, self.name))
-                {
-                    return !self.mentions(receiver)
-                        && arguments
-                            .iter()
-                            .filter(|a| !is_name(a, self.name))
-                            .all(|a| !self.mentions(a));
+                if let Some(ok) = callable_hom_use(expr, self.name) {
+                    return ok;
                 }
                 if let Some((class, class_side)) = self.forward_target(receiver) {
                     let mut bare = arguments
@@ -591,6 +591,41 @@ fn direct_invocation(expr: &Expression, name: &str, accepts: fn(&MessageSelector
         }
         _ => false,
     }
+}
+
+/// `Some(ok)` when `expr` is a collection-HOM send ([`is_opaque_callable_hom_send`])
+/// whose callable argument is exactly the identifier `name`; `ok` is whether
+/// that is the parameter's only mention (neither the receiver nor any other
+/// argument, a seed included, mentions it). `None` for any other expression.
+/// The callable argument is excluded by identity, not by name, so
+/// `items inject: b into: b` is not accepted. Shared by the actor-channel
+/// predicate and [`ThreadingIndex`].
+fn callable_hom_use(expr: &Expression, name: &str) -> Option<bool> {
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    if !is_opaque_callable_hom_send(expr) {
+        return None;
+    }
+    let callable = opaque_fold_callable_arg(&selector.name(), arguments)?;
+    if !is_name(callable, name) {
+        return None;
+    }
+    let mentions = |e: &Expression| stored_block_var_uses(e, name) != (false, false);
+    Some(
+        !mentions(receiver)
+            && arguments
+                .iter()
+                .filter(|a| !std::ptr::eq(*a, callable))
+                .all(|a| !mentions(a)),
+    )
 }
 
 fn is_name(expr: &Expression, name: &str) -> bool {
@@ -660,7 +695,7 @@ mod tests {
     }
 
     fn index(src: &str) -> ThreadingIndex {
-        ThreadingIndex::build(&parse(src).classes)
+        ThreadingIndex::build(&parse(src).classes, &|_, _, _| false)
     }
 
     fn inst(idx: &ThreadingIndex, class: &str, sel: &str) -> Vec<usize> {
@@ -712,7 +747,8 @@ mod tests {
              inArm: b => true ifTrue: [b value]\n  \
              nested: b =>\n    f := [b value]\n    f value\n  \
              unused: b => 1\n  \
-             outside: b => other foo: b\n  literal: b => #(b)\n",
+             outside: b => other foo: b\n  literal: b => #(b)\n  \
+             seedToo: b => ^self items inject: b into: b\n",
         );
         for sel in [
             "stored:",
@@ -727,6 +763,7 @@ mod tests {
             "unused:",
             "outside:",
             "literal:",
+            "seedToo:",
         ] {
             assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
         }
@@ -826,6 +863,36 @@ mod tests {
         );
         assert_eq!(idx.params("A", false, "go:"), vec![0]);
         assert_eq!(idx.params("B", true, "run:"), vec![0]);
+    }
+
+    #[test]
+    fn forwarder_to_a_spawning_method_is_non_threading() {
+        let src = "Object subclass: C\n  parallelCollect: b => self parallelCollect: b maxConcurrency: 4\n  \
+                   parallelCollect: b maxConcurrency: n => b value\n  \
+                   viaClass: b => C go: b\n  class go: b => b value\n";
+        let module = parse(src);
+        let spawning = |class: &str, class_side: bool, sel: &str| {
+            class == "C" && !class_side && sel == "parallelCollect:maxConcurrency:"
+        };
+        let idx = ThreadingIndex::build(&module.classes, &spawning);
+        // The spawning callee and its forwarder both refuse; unrelated methods
+        // are unaffected.
+        assert!(inst(&idx, "C", "parallelCollect:maxConcurrency:").is_empty());
+        assert!(inst(&idx, "C", "parallelCollect:").is_empty());
+        assert_eq!(inst(&idx, "C", "viaClass:"), vec![0]);
+        // Without the spawn information the forwarder would thread.
+        assert_eq!(inst(&index(src), "C", "parallelCollect:"), vec![0]);
+    }
+
+    #[test]
+    fn actor_channel_rejects_the_callable_also_used_as_a_seed() {
+        let module = parse(
+            "Actor subclass: Ac\n  sealed fold: b => ^self items inject: b into: b\n  \
+             sealed ok: b => ^self items inject: 0 into: b\n",
+        );
+        let class = &module.classes[0];
+        assert!(!callee_threads_block_param(class, "fold:", 0));
+        assert!(callee_threads_block_param(class, "ok:", 0));
     }
 
     #[test]
