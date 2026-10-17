@@ -303,7 +303,7 @@ impl CoreErlangGenerator {
         let auto_methods = compute_auto_slot_methods(class);
 
         // Collect all function exports for the module header.
-        let exports = Self::build_value_type_exports(
+        let exports = self.build_value_type_exports(
             class,
             auto_methods.as_ref(),
             has_explicit_new,
@@ -418,6 +418,7 @@ impl CoreErlangGenerator {
     /// Includes constructors (`new/0`, `new/1`), instance methods, auto-generated
     /// slot methods (`dispatch/3`, `has_method/1`, `superclass/0`, `register_class/0`), and class methods.
     fn build_value_type_exports(
+        &self,
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
         has_explicit_new: bool,
@@ -483,6 +484,14 @@ impl CoreErlangGenerator {
                 let mut class_fn_name = String::from("class_");
                 class_fn_name.push_str(&method.selector.name());
                 parts.push(leaf::fname(class_fn_name, arity));
+                // ADR 0132 §2: the threaded entry takes ClassSelf, the user
+                // params and `Acc`.
+                if !self.threaded_entry_positions(class, method).is_empty() {
+                    parts.push(leaf::fname(
+                        super::selector_mangler::threaded_class_fn_name(&method.selector.name()),
+                        arity + 1,
+                    ));
+                }
             }
         }
 
@@ -512,12 +521,7 @@ impl CoreErlangGenerator {
         // `-type` declarations for those (plus transitive deps) instead of
         // every pre-loaded alias in the compilation unit.
         let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
-        let spec_attrs = spec_codegen::generate_class_specs(
-            class,
-            true,
-            Some(&self.alias_registry),
-            Some(&referenced_aliases),
-        );
+        let spec_attrs = self.class_spec_attrs(class, true, &referenced_aliases);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 

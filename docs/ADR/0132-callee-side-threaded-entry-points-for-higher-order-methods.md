@@ -15,7 +15,7 @@ Accepted (2026-10-17); Proposed 2026-10-16
 | 0c | [BT-3868](https://linear.app/beamtalk/issue/BT-3868) | Runtime floor (`send_threaded/4`, `call_threaded/3`), metadata keys, `MethodInfo::threading_params`, wire check, baselines | M | |
 | 1a | [BT-3869](https://linear.app/beamtalk/issue/BT-3869) | `VersionPrefix::Acc`, `ScopeKind::Threaded`, the `MethodBody` builder, four verifier checks | M | |
 | 1b | [BT-3870](https://linear.app/beamtalk/issue/BT-3870) | Generalize `callee_threads_block_param` (greatest fixpoint); populate `threading_params` | M | |
-| 1c | [BT-3871](https://linear.app/beamtalk/issue/BT-3871) | Threaded entry for class methods | M | |
+| 1c | [BT-3871](https://linear.app/beamtalk/issue/BT-3871) | Threaded entry for class methods | M | PR pending |
 | 1d | [BT-3872](https://linear.app/beamtalk/issue/BT-3872) | Threaded entry for value-type methods | M | |
 | 1e | [BT-3873](https://linear.app/beamtalk/issue/BT-3873) | Caller-side `callee_threaded_send` producer; §6 narrowed for exact receivers; actor locals-only rule | M | |
 | 1f | [BT-3874](https://linear.app/beamtalk/issue/BT-3874) | Corpus with oracle, pin flips, repl-protocol case, measurement, docs | M | |

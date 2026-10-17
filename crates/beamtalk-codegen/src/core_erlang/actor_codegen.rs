@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use super::method_frame::{MethodBoundary, MethodFrame};
-use super::selector_mangler::{safe_class_method_fn_name, sealed_fn_name};
+use super::selector_mangler::{safe_class_method_fn_name, sealed_fn_name, threaded_class_fn_name};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
@@ -21,7 +21,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, fname};
 use beamtalk_cerl_doc::{Document, INDENT, join, line, nest};
-use beamtalk_core::ast::{MethodKind, Module};
+use beamtalk_core::ast::{ClassDefinition, MethodKind, Module};
 
 impl CoreErlangGenerator {
     /// Generates a full actor module with `gen_server` behaviour.
@@ -84,7 +84,7 @@ impl CoreErlangGenerator {
         // Build sealed method exports
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // Build class method exports
-        let class_method_export_doc = Self::build_class_method_export_doc(module);
+        let class_method_export_doc = self.build_class_method_export_doc(module);
         // Synthesize class_supervisionSpec for Actor subclasses that don't define it
         let needs_spec_synthesis = self.needs_supervision_spec_synthesis(module);
         let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
@@ -172,14 +172,7 @@ impl CoreErlangGenerator {
         let spec_attrs = module
             .classes
             .first()
-            .map(|class| {
-                spec_codegen::generate_class_specs(
-                    class,
-                    false,
-                    Some(&self.alias_registry),
-                    Some(&referenced_aliases),
-                )
-            })
+            .map(|class| self.class_spec_attrs(class, false, &referenced_aliases))
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
@@ -462,11 +455,23 @@ impl CoreErlangGenerator {
 
     /// Builds the export fragment for class-side method functions.
     pub(in crate::core_erlang) fn build_class_method_export_doc(
+        &self,
         module: &Module,
     ) -> Document<'static> {
         let Some(class) = module.classes.first() else {
             return Document::Nil;
         };
+        self.class_method_exports_doc(class)
+    }
+
+    /// The export fragment (`, 'class_<sel>'/N` per primary class method, plus
+    /// the ADR 0132 threaded entry `, '__t2_class_<sel>'/N+1` of each method with
+    /// a threading parameter) — the one place every module kind builds its
+    /// class-method exports, so an entry that is emitted is always exported.
+    pub(in crate::core_erlang) fn class_method_exports_doc(
+        &self,
+        class: &ClassDefinition,
+    ) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(class.class_methods.len());
         for m in class
             .class_methods
@@ -474,13 +479,25 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
         {
             // Class method takes ClassSelf + user params (ADR 0130 §3)
+            let selector = m.selector.name();
             parts.push(docvec![
                 ", ",
                 fname(
-                    safe_class_method_fn_name(m.selector.name().as_ref()),
+                    safe_class_method_fn_name(selector.as_ref()),
                     m.selector.arity() + 1
                 ),
             ]);
+            // ADR 0132 §2: the threaded entry takes ClassSelf, the user
+            // params and `Acc`.
+            if !self.threaded_entry_positions(class, m).is_empty() {
+                parts.push(docvec![
+                    ", ",
+                    fname(
+                        threaded_class_fn_name(selector.as_ref()),
+                        m.selector.arity() + 2
+                    ),
+                ]);
+            }
         }
         Document::Vec(parts)
     }

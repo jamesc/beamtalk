@@ -349,6 +349,14 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
+    /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
+    /// unpacks. A throw always carries the state its boundary hands back (the
+    /// family tuple inside a threaded body, [`Self::NlrSlotShapeMismatch`]; the
+    /// scope's own single state elsewhere). Reported separately from the shape
+    /// check because the shape is only constrained inside a threaded `MethodBody`.
+    NlrThrowWithoutSlot { at: Span },
+
     /// ADR 0132 §3, "Actor instance method": a block compiled for a threaded
     /// entry ([`ScopeKind::ThreadedBlock`] with an actor caller) reads or
     /// writes the actor `State` family. Such a block is compiled locals-only:
@@ -1315,6 +1323,10 @@ impl VerifyWalk<'_> {
             ThreadedStmt::NlrThrow {
                 value, slot, span, ..
             } => {
+                if slot.is_empty() {
+                    self.errors
+                        .push(VerifyError::NlrThrowWithoutSlot { at: *span });
+                }
                 for v in slot {
                     self.check_use(v, *span);
                 }
@@ -1357,6 +1369,7 @@ impl VerifyWalk<'_> {
                 threads,
                 families,
                 body,
+                span,
             } => {
                 let threaded = *kind == MethodBodyKind::Threaded;
                 if threaded {
@@ -1365,7 +1378,7 @@ impl VerifyWalk<'_> {
                             defect: AccSeedDefect::ThreadedBodyThreadsLocals {
                                 threads: threads.clone(),
                             },
-                            at: Span::default(),
+                            at: *span,
                         });
                     }
                     self.threaded_slots.push(threaded_nlr_slot(families));

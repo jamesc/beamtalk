@@ -148,7 +148,18 @@ call_threaded_test_() ->
                         E
                     )
             end
-        end}
+        end},
+        {"a plain block one argument too many raises arity_mismatch, not a badarg downstream",
+            fun() ->
+                %% `fun(X) -> X end` called with no arguments has arity N+1, so the
+                %% gate applies it as a Tier 2 fun; its reply is not `{Result, Map}`.
+                try beamtalk_dispatch:call_threaded(fun(X) -> X end, [], #{}) of
+                    R -> ?assertEqual(raised, {returned, R})
+                catch
+                    error:#{error := #beamtalk_error{} = E} ->
+                        ?assertMatch(#beamtalk_error{kind = arity_mismatch, class = 'Block'}, E)
+                end
+            end}
     ]}.
 
 %%====================================================================
@@ -374,18 +385,24 @@ assert_conformance_case(Case) ->
             Sel = binary_to_atom(SelBin, utf8),
             ?assertEqual(
                 error, beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Sel, [b])
-            ),
+            )
+        end,
+        maps:get(<<"unthreaded_selectors">>, Case)
+    ),
+    lists:foreach(
+        fun(SelBin) ->
+            Sel = binary_to_atom(SelBin, utf8),
             ?assertEqual(
                 error, beamtalk_class_dispatch:lookup_threaded_class_entry(Pid, Sel, [b])
             )
         end,
-        maps:get(<<"unthreaded_selectors">>, Case)
+        maps:get(<<"unthreaded_class_selectors">>, Case)
     ),
     maps:foreach(
         fun(Sel, {EntryFn, _Positions}) ->
             ?assertEqual(
                 {ok, Module, EntryFn},
-                beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Sel, [b])
+                beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Sel, args_for(Sel))
             )
         end,
         ExpectedInstance
@@ -394,11 +411,15 @@ assert_conformance_case(Case) ->
         fun(Sel, {EntryFn, _Positions}) ->
             ?assertEqual(
                 {ok, Module, EntryFn},
-                beamtalk_class_dispatch:lookup_threaded_class_entry(Pid, Sel, [b])
+                beamtalk_class_dispatch:lookup_threaded_class_entry(Pid, Sel, args_for(Sel))
             )
         end,
         ExpectedClass
     ).
+
+%% Placeholder arguments of the selector's arity (the entry's arity is checked).
+args_for(Selector) ->
+    lists:duplicate(length([C || C <- atom_to_list(Selector), C =:= $:]), b).
 
 %% `{"sel": {"entry_fn": "...", "positions": [..]}}` -> `#{sel => {entry_fn, [..]}}`.
 expected_entries(Json) ->

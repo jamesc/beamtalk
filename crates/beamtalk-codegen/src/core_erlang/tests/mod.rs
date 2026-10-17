@@ -197,6 +197,7 @@ mod protocol_registration_conformance;
 mod recv_type;
 mod sibling_snapshot;
 mod supervisor;
+mod threaded_class_entry;
 mod threaded_locals;
 mod threaded_locals_agreement;
 mod trait_flattening;

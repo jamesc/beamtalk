@@ -796,7 +796,8 @@ parameter, answering `{Result, Acc1}`:
 - a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
   `{Result, Acc}` unchanged;
 - a fun of arity `length(Args) + 1` (Tier 2) is applied to `Args ++ [Acc]` and
-  answers its own `{Result, Acc1}`;
+  answers its own `{Result, Acc1}`; a reply of any other shape means the fun was
+  a plain block of the wrong arity, and raises the structured `arity_mismatch`;
 - any other fun raises a structured `arity_mismatch`, never a raw `badarity`;
 - a non-fun callable (a `Symbol`, an object answering `value:`, ADR 0128's
   opaque callables) gets the ordinary `value`-family send and answers
@@ -809,7 +810,15 @@ call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args), is_map(A
         {arity, N} ->
             {erlang:apply(Block, Args), Acc};
         {arity, N1} when N1 =:= N + 1 ->
-            erlang:apply(Block, Args ++ [Acc]);
+            %% A Tier 2 fun answers `{Result, Acc1}`. A plain block that merely
+            %% takes one argument more than it is called with answers anything
+            %% else: that is the arity mistake the plain path has always
+            %% reported, not a Tier 2 block, so it raises the same structured
+            %% error instead of a raw `badarg` at the caller's `element/2`.
+            case erlang:apply(Block, Args ++ [Acc]) of
+                {_Result, Acc1} = Reply when is_map(Acc1) -> Reply;
+                _NotATier2Reply -> raise_block_arity_mismatch(N1, N)
+            end;
         {arity, Arity} ->
             raise_block_arity_mismatch(Arity, N)
     end;

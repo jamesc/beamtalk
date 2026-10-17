@@ -73,12 +73,12 @@ fn nlr_catch(slot: Vec<VersionPrefix>) -> ThreadedStmt {
 
 #[test]
 fn acc_versions_render_with_their_own_counter_including_version_zero() {
-    assert_eq!(acc(0, FrameId::ROOT).render_name(), "Acc0");
-    assert_eq!(acc(3, FrameId::ROOT).render_name(), "Acc3");
+    assert_eq!(acc(0, FrameId::ROOT).render_name(), "Acc@0");
+    assert_eq!(acc(3, FrameId::ROOT).render_name(), "Acc@3");
     let mut counter = VersionCounter::new();
-    assert_eq!(counter.current_var(VersionPrefix::Acc), "Acc0");
-    assert_eq!(counter.next_var(VersionPrefix::Acc), "Acc1");
-    assert_eq!(counter.next_var(VersionPrefix::Acc), "Acc2");
+    assert_eq!(counter.current_var(VersionPrefix::Acc), "Acc@0");
+    assert_eq!(counter.next_var(VersionPrefix::Acc), "Acc@1");
+    assert_eq!(counter.next_var(VersionPrefix::Acc), "Acc@2");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn acc_renders_the_same_in_and_out_of_a_loop_body() {
     let plain = render(&ir, &mut RenderCtx::new(&mut generator)).to_pretty_string();
     generator.in_loop_body = true;
     let in_loop = render(&ir, &mut RenderCtx::new(&mut generator)).to_pretty_string();
-    assert_eq!(plain, "let Acc1 = <call_threaded> in ");
+    assert_eq!(plain, "let Acc@1 = <call_threaded> in ");
     assert_eq!(plain, in_loop);
 }
 
@@ -227,7 +227,7 @@ fn threaded_method_body_builder_puts_acc_last_and_threads_nothing() {
             vec![VersionPrefix::State, VersionPrefix::Acc],
         ),
     ] {
-        let node = build_threaded_method_body(FrameId::ROOT, &families, Vec::new());
+        let node = build_threaded_method_body(FrameId::ROOT, &families, Vec::new(), span());
         assert_eq!(
             node,
             ThreadedStmt::MethodBody {
@@ -236,6 +236,7 @@ fn threaded_method_body_builder_puts_acc_last_and_threads_nothing() {
                 threads: Vec::new(),
                 families: expected,
                 body: Vec::new(),
+                span: span(),
             }
         );
         // Every rebind in it is the `Let` cell: `Acc` is never a rebind target.
@@ -251,7 +252,7 @@ fn threaded_method_body_renders_its_body_straight_line_and_verifies_clean() {
         bind(acc(1, frame), acc(0, frame), direct_doc()),
         bind(acc(2, frame), acc(1, frame), direct_doc()),
     ];
-    let node = build_threaded_method_body(frame, &[], body.clone());
+    let node = build_threaded_method_body(frame, &[], body.clone(), span());
     assert_eq!(
         lower_and_render(std::slice::from_ref(&node)).to_pretty_string(),
         lower_and_render(&body).to_pretty_string()
@@ -300,6 +301,7 @@ fn a_threaded_class_or_value_type_body_keeps_rejecting_the_state_family() {
         frame,
         &[],
         vec![bind(state(1, frame), state(0, frame), direct_doc())],
+        span(),
     )];
     let state_family = vec![VerifyError::ActorStateInClassMethod {
         defect: ClassMethodDefect::FamilyVersion(VersionPrefix::State),
@@ -586,7 +588,7 @@ fn acc_as_scratch_seed_rejects_a_map_put_rebind_over_acc() {
 
 #[test]
 fn acc_as_scratch_seed_rejects_a_threaded_body_that_threads_locals() {
-    let mut node = build_threaded_method_body(FrameId::ROOT, &[], Vec::new());
+    let mut node = build_threaded_method_body(FrameId::ROOT, &[], Vec::new(), span());
     if let ThreadedStmt::MethodBody { threads, .. } = &mut node {
         threads.push("t".to_string());
     }
@@ -596,7 +598,8 @@ fn acc_as_scratch_seed_rejects_a_threaded_body_that_threads_locals() {
             defect: AccSeedDefect::ThreadedBodyThreadsLocals {
                 threads: vec!["t".to_string()],
             },
-            at: Span::default(),
+            // Reported at the body's own span, not offset 0.
+            at: span(),
         }]
     );
 }
@@ -673,6 +676,7 @@ fn value_type_body(stmts: Vec<ThreadedStmt>) -> Vec<ThreadedStmt> {
         FrameId::ROOT,
         &[VersionPrefix::SelfVt],
         stmts,
+        span(),
     )]
 }
 
@@ -748,6 +752,7 @@ fn nlr_slot_shape_reaches_a_throw_nested_in_a_frame_of_the_body() {
             frame,
             vec![nlr_throw(vec![state(0, frame)])],
         )],
+        span(),
     )];
     assert_eq!(
         verify_in_scope(
@@ -772,15 +777,87 @@ fn nlr_slots_outside_a_threaded_body_are_unconstrained() {
 }
 
 #[test]
+fn an_nlr_throw_with_an_empty_slot_is_rejected_in_every_scope() {
+    // `render_nlr_throw` would render the slot as `{}`: an empty tuple no catch
+    // unpacks. Reported whether or not the throw sits in a threaded body (the
+    // shape check `NlrSlotShapeMismatch` only fires inside one).
+    let empty = vec![nlr_throw(Vec::new())];
+    for scope in [
+        ScopeKind::ClassMethod,
+        ScopeKind::ValueType,
+        ScopeKind::Instance,
+    ] {
+        assert_eq!(
+            verify_in_scope(&empty, scope),
+            vec![VerifyError::NlrThrowWithoutSlot { at: span() }],
+            "{scope:?}"
+        );
+    }
+    let in_body = vec![build_threaded_method_body(
+        FrameId::ROOT,
+        &[],
+        vec![nlr_throw(Vec::new())],
+        span(),
+    )];
+    let errors = verify_in_scope(
+        &in_body,
+        ScopeKind::Threaded {
+            kind: ThreadedBodyKind::Class,
+        },
+    );
+    assert!(
+        errors.contains(&VerifyError::NlrThrowWithoutSlot { at: span() }),
+        "{errors:?}"
+    );
+    // A throw that names its slot is fine outside a threaded body.
+    let named = vec![nlr_throw(vec![state(0, FrameId::ROOT)])];
+    assert_eq!(verify_in_scope(&named, ScopeKind::Instance), Vec::new());
+}
+
+#[test]
+fn acc_never_renders_as_a_beamtalk_local_does() {
+    // `to_core_var` only capitalises a local, so `acc`, `acc0` and `acc1`
+    // render `Acc`, `Acc0` and `Acc1`; an `Acc` version must be none of them,
+    // in any version, or a local would shadow the caller's map.
+    let frame = FrameId::ROOT;
+    let mut rendered_locals = std::collections::HashSet::new();
+    for name in ["acc", "acc0", "acc1", "acc2", "_acc", "_acc0"] {
+        for version in 0..=3 {
+            let local = VersionedVar::new(VersionPrefix::Local(name.to_string()), version, frame);
+            rendered_locals.insert(local.render_name());
+        }
+    }
+    for version in 0..=12 {
+        let rendered = acc(version, frame).render_name();
+        assert!(
+            !rendered_locals.contains(&rendered),
+            "Acc version {version} renders as the local `{rendered}`"
+        );
+        assert_eq!(rendered, format!("Acc@{version}"));
+    }
+    // A local bind beside an `Acc` bind in one body keeps both names.
+    let local =
+        |version| VersionedVar::new(VersionPrefix::Local("acc".to_string()), version, frame);
+    let ir = vec![
+        bind(local(1), local(0), direct_doc()),
+        bind(acc(1, frame), acc(0, frame), direct_doc()),
+    ];
+    assert_eq!(
+        lower_and_render(&ir).to_pretty_string(),
+        "let Acc1 = <call_threaded> in let Acc@1 = <call_threaded> in "
+    );
+}
+
+#[test]
 fn nlr_throw_renders_its_slot_bare_or_as_a_tuple() {
     let frame = FrameId::ROOT;
     assert_eq!(
         lower_and_render(&[nlr_throw(vec![acc(2, frame)])]).to_pretty_string(),
-        "let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, Acc2}) in "
+        "let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, Acc@2}) in "
     );
     assert_eq!(
         lower_and_render(&[nlr_throw(vec![self_var(1, frame), acc(2, frame)])]).to_pretty_string(),
-        "let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, {Self1, Acc2}}) in "
+        "let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, {Self1, Acc@2}}) in "
     );
 }
 
@@ -896,6 +973,10 @@ fn every_new_finding_reaches_the_release_diagnostic_by_name() {
                 at: span(),
             },
             "ActorStateInThreadedBlock",
+        ),
+        (
+            VerifyError::NlrThrowWithoutSlot { at: span() },
+            "NlrThrowWithoutSlot",
         ),
     ];
     for (error, name) in findings {

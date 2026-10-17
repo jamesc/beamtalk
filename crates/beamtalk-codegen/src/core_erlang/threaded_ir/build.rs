@@ -660,6 +660,7 @@ pub(in crate::core_erlang) fn build_method_body(
         threads,
         families: Vec::new(),
         body,
+        span: Span::default(),
     }
 }
 
@@ -677,11 +678,11 @@ pub(in crate::core_erlang) fn build_method_body(
 /// The non-REPL root of a method with no threading parameter stays the
 /// implicit root (`RebindFrame::implicit_root`); this builder is for the
 /// threaded entry only.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_threaded_method_body(
     frame: FrameId,
     families: &[VersionPrefix],
     body: Vec<ThreadedStmt>,
+    span: Span,
 ) -> ThreadedStmt {
     let mut with_acc = families.to_vec();
     with_acc.push(VersionPrefix::Acc);
@@ -691,6 +692,7 @@ pub(in crate::core_erlang) fn build_threaded_method_body(
         threads: Vec::new(),
         families: canonical_families(&with_acc),
         body,
+        span,
     }
 }
 

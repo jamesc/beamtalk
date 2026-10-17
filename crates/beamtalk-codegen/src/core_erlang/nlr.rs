@@ -12,6 +12,7 @@
 //! `{'$bt_nlr', Token, Value, State}` throw. See ADR 0041.
 
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::threaded_ir::VersionPrefix;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::{Document, INDENT, line, nest};
@@ -70,10 +71,29 @@ pub(in crate::core_erlang) enum NlrBoundary {
 /// [`NlrCatchVars::format_catch_suffix`].
 ///
 /// Use Document/docvec! — never format!() for Core Erlang fragments.
-fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Document<'static> {
+///
+/// `slot` names the families the catch unpacks from the throw's state slot
+/// (`ThreadedStmt::NlrCatch::slot`): empty for every catch outside a threaded
+/// entry. ADR 0132 §2: a class method's threaded body throws its `Acc`, so its
+/// `ClassMethod` catch answers `{Val, AccAtThrow}` (the plain entry's wrapper
+/// takes `element(1, ...)` of it), the caller's writes made before the `^`
+/// kept.
+fn nlr_arm_result(
+    val_var: &str,
+    state_var: &str,
+    boundary: NlrBoundary,
+    slot: &[VersionPrefix],
+) -> Document<'static> {
     match boundary {
         NlrBoundary::ActorReply => docvec![
             "{'reply', ",
+            leaf::var(val_var.to_string()),
+            ", ",
+            leaf::var(state_var.to_string()),
+            "}",
+        ],
+        NlrBoundary::ClassMethod if slot == [VersionPrefix::Acc] => docvec![
+            "{",
             leaf::var(val_var.to_string()),
             ", ",
             leaf::var(state_var.to_string()),
@@ -127,6 +147,16 @@ impl NlrCatchVars {
     ///   end
     /// ```
     pub fn format_catch_suffix(&self, boundary: NlrBoundary) -> Document<'static> {
+        self.format_catch_suffix_with_slot(boundary, &[])
+    }
+
+    /// [`Self::format_catch_suffix`] for a catch that unpacks the families
+    /// `slot` from the throw's state slot (ADR 0132 §2; see [`nlr_arm_result`]).
+    pub fn format_catch_suffix_with_slot(
+        &self,
+        boundary: NlrBoundary,
+        slot: &[VersionPrefix],
+    ) -> Document<'static> {
         docvec![
             nest(INDENT, line()),
             "of ",
@@ -160,7 +190,7 @@ impl NlrCatchVars {
             ", ",
             leaf::var(self.token_var.clone()),
             ") -> ",
-            nlr_arm_result(&self.val_var, &self.state_var, boundary),
+            nlr_arm_result(&self.val_var, &self.state_var, boundary, slot),
             nest(INDENT + 4, line()),
             "<",
             leaf::var(self.ot_pair_var.clone()),
@@ -206,11 +236,16 @@ impl CoreErlangGenerator {
     /// `boundary` selects via [`nlr_arm_result`].
     ///
     /// Use Document/docvec! — never format!() for Core Erlang fragments.
+    ///
+    /// `slot` names the families the catch unpacks from the throw's state slot
+    /// ([`NlrCatchVars::format_catch_suffix_with_slot`]): empty everywhere but a
+    /// threaded entry's body.
     pub(in crate::core_erlang) fn wrap_body_with_nlr_catch(
         &mut self,
         body_doc: Document<'static>,
         token_var: &str,
         boundary: NlrBoundary,
+        slot: &[VersionPrefix],
     ) -> Document<'static> {
         // ADR 0111 Phase D: this is the true call site
         // `ThreadedStmt::NlrCatch` faithfully models (module docs on
@@ -226,7 +261,7 @@ impl CoreErlangGenerator {
         docvec![
             vars.format_try_prefix(),
             body_doc,
-            vars.format_catch_suffix(boundary),
+            vars.format_catch_suffix_with_slot(boundary, slot),
         ]
     }
 
@@ -263,19 +298,26 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_actor_reply_yields_reply_tuple() {
-        let doc = nlr_arm_result("Val", "St", NlrBoundary::ActorReply);
+        let doc = nlr_arm_result("Val", "St", NlrBoundary::ActorReply, &[]);
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
     }
 
     #[test]
     fn nlr_arm_result_class_method_yields_bare_value() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod);
+        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod, &[]);
         assert_eq!(doc.to_pretty_string(), "V");
     }
 
     #[test]
+    fn nlr_arm_result_class_method_threaded_body_yields_value_acc_pair() {
+        // ADR 0132 §2: the threaded body's catch answers `{Val, AccAtThrow}`.
+        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod, &[VersionPrefix::Acc]);
+        assert_eq!(doc.to_pretty_string(), "{V, S}");
+    }
+
+    #[test]
     fn nlr_arm_result_value_type_yields_value_state_tuple() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType);
+        let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType, &[]);
         assert_eq!(doc.to_pretty_string(), "{V, S}");
     }
 

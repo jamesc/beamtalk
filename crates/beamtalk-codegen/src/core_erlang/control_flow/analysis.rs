@@ -172,9 +172,14 @@ impl CoreErlangGenerator {
     ///   [`Self::eligible_families`] alone decides it and this always
     ///   answers `true` once asked (see
     ///   [`Self::body_threaded_families`]'s use of this).
-    /// * `Acc` — no shape of its own either, like `State`: a threaded body
-    ///   carries the caller's map through every construct (ADR 0132 §2's
-    ///   per-scope-kind table), so once eligible it always answers `true`.
+    /// * `Acc` — a *use of a threading parameter* (ADR 0132 §2's per-scope-kind
+    ///   table): the identifier of one of the threaded body's parameters. A
+    ///   construct carries `Acc` as a trailing slot only when it holds a use, so
+    ///   a loop, conditional or handler that never invokes a threading
+    ///   parameter is lowered exactly as in a body with none (it cannot change
+    ///   `Acc`), and `Acc` is threaded exactly where a `call_threaded/3` can
+    ///   write it. Unlike `State` this is a per-expression answer, not
+    ///   "always".
     /// * `Local`/`Gensym` — not a storage family this detector answers for;
     ///   always `false`.
     ///
@@ -188,7 +193,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> bool {
         match prefix {
-            VersionPrefix::State | VersionPrefix::Acc => true,
+            VersionPrefix::State => true,
+            VersionPrefix::Acc => self.is_threading_param_read(expr),
             VersionPrefix::SelfVt => {
                 !self.in_class_method()
                     && matches!(self.context, CodeGenContext::ValueType)
@@ -228,7 +234,8 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|prefix| {
                 // `State` needs no body walk at all — see
-                // `Self::is_family_mutation`'s doc comment.
+                // `Self::is_family_mutation`'s doc comment (`Acc` does: it is
+                // threaded only through a construct that holds a use).
                 matches!(prefix, VersionPrefix::State)
                     || body.body.iter().any(|stmt| {
                         let mut hit = false;
