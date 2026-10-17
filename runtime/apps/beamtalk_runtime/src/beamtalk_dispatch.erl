@@ -65,7 +65,9 @@ super(Selector, Args, Self, State, CurrentClass)
     super_value/4,
     responds_to/2,
     invoke_extension/6,
-    check_extension/2
+    check_extension/2,
+    send_threaded/4,
+    call_threaded/3
 ]).
 
 -include("beamtalk.hrl").
@@ -674,6 +676,169 @@ check_extension(ClassName, Selector) ->
             %% ETS table doesn't exist yet (early bootstrap)
             not_found
     end.
+
+%%% ============================================================================
+%%% Threaded sends (ADR 0132)
+%%% ============================================================================
+
+-doc """
+Send `Selector` to `Receiver` through its threaded entry (ADR 0132 §4).
+
+The threaded form of a plain send whose arguments include a Tier 2 (stateful)
+block: `Acc` is the caller's map of outer locals the block writes, and the
+answer is `{Result, Acc1}` with the block's writes applied. The entry is found
+by **metadata**, never by fun arity: the receiver's class must advertise it in
+`tier2_methods` / `tier2_class_methods` and export it
+(`beamtalk_class_dispatch:lookup_threaded_entry/3` and
+`lookup_threaded_class_entry/3`, both guarded by `erlang:function_exported/3`).
+
+Anything without an entry raises `#beamtalk_error{kind =
+stateful_block_dispatch}` naming the receiver's class and the selector, never a
+silent drop of the block's writes and never an `undef`.
+
+**ADR 0132 Phase 0 floor.** This resolves at the receiver's exact class only,
+and only where the plain send runs in the caller: a class method that
+`class_send/3` would direct-call (ADR 0129 Phase 0b), or a value's own class
+with no extension (ADR 0066) shadowing the selector. Actor instances,
+metaclasses, gen_server-dispatched class methods and inherited methods all
+raise until the Phase 2 (resolution walk) and Phase 4 (processes) paths exist.
+No compiled module advertises an entry before ADR 0132 Phase 1, so for every
+compiled receiver this raises.
+""".
+-spec send_threaded(term(), selector(), args(), map()) -> {term(), map()}.
+send_threaded(Receiver, Selector, Args, Acc) when
+    is_atom(Selector), is_list(Args), is_map(Acc)
+->
+    case threaded_target(Receiver, Selector, Args) of
+        {ok, Module, EntryFn, Self} ->
+            erlang:apply(Module, EntryFn, [Self | Args] ++ [Acc]);
+        error ->
+            raise_no_threaded_entry(Receiver, Selector)
+    end.
+
+-spec threaded_target(term(), selector(), args()) ->
+    {ok, module(), atom(), term()} | error.
+threaded_target(#beamtalk_object{pid = ClassPid} = Receiver, Selector, Args) ->
+    case beamtalk_class_registry:is_class_object(Receiver) of
+        true ->
+            %% Only where the plain send is a direct call in the caller (and
+            %% so runs with `ClassSelf = nil`, as `class_send/3` does). A class
+            %% method that runs in its class process needs the threaded
+            %% gen_server variant (ADR 0132 Phase 4).
+            case beamtalk_class_dispatch:lookup_direct_call(ClassPid, Selector, Args) of
+                {ok, _, _} ->
+                    with_self(
+                        beamtalk_class_dispatch:lookup_threaded_class_entry(
+                            ClassPid, Selector, Args
+                        ),
+                        nil
+                    );
+                error ->
+                    error
+            end;
+        false ->
+            %% An actor instance or a metaclass: no threaded path before
+            %% ADR 0132 Phase 4.
+            error
+    end;
+threaded_target(Receiver, Selector, Args) ->
+    ClassName = beamtalk_primitive:class_of(Receiver),
+    case check_extension(ClassName, Selector) of
+        {ok, _Fun} ->
+            %% An extension shadows the compiled method and has no entry.
+            error;
+        not_found ->
+            with_self(
+                beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Selector, Args),
+                Receiver
+            )
+    end.
+
+with_self({ok, Module, EntryFn}, Self) -> {ok, Module, EntryFn, Self};
+with_self(error, _Self) -> error.
+
+-spec raise_no_threaded_entry(term(), selector()) -> no_return().
+raise_no_threaded_entry(Receiver, Selector) ->
+    Class = beamtalk_primitive:class_of(Receiver),
+    Error0 = beamtalk_error:new(stateful_block_dispatch, Class, Selector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        beamtalk_error:generate_message(stateful_block_dispatch, Class, {threaded, Selector})
+    ),
+    %% atom_to_binary rather than io_lib:format: see handle_class_self_call/1
+    %% in beamtalk_class_dispatch for why error construction must not badarg.
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary([
+            <<"`">>,
+            atom_to_binary(Selector, utf8),
+            <<"` on `">>,
+            atom_to_binary(Class, utf8),
+            <<
+                "` does not thread its block: return the new value from the "
+                "block and assign it where it is called"
+            >>
+        ])
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_details(Error2, #{reason => no_threaded_entry})
+    ).
+
+-doc """
+Invoke a callable that may be a Tier 2 block, threading `Acc` (ADR 0132 §2).
+
+The per-invocation tier gate every threaded entry uses for a threading
+parameter, answering `{Result, Acc1}`:
+
+- a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
+  `{Result, Acc}` unchanged;
+- a fun of arity `length(Args) + 1` (Tier 2) is applied to `Args ++ [Acc]` and
+  answers its own `{Result, Acc1}`;
+- any other fun raises a structured `arity_mismatch`, never a raw `badarity`;
+- a non-fun callable (a `Symbol`, an object answering `value:`, ADR 0128's
+  opaque callables) gets the ordinary `value`-family send and answers
+  `{Result, Acc}`.
+""".
+-spec call_threaded(term(), args(), map()) -> {term(), map()}.
+call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args), is_map(Acc) ->
+    N = length(Args),
+    case erlang:fun_info(Block, arity) of
+        {arity, N} ->
+            {erlang:apply(Block, Args), Acc};
+        {arity, N1} when N1 =:= N + 1 ->
+            erlang:apply(Block, Args ++ [Acc]);
+        {arity, Arity} ->
+            raise_block_arity_mismatch(Arity, N)
+    end;
+call_threaded(Callable, Args, Acc) when is_list(Args), is_map(Acc) ->
+    {beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)), Acc}.
+
+-spec value_selector(non_neg_integer()) -> selector().
+value_selector(0) -> value;
+value_selector(1) -> 'value:';
+value_selector(2) -> 'value:value:';
+value_selector(3) -> 'value:value:value:';
+value_selector(_) -> 'valueWithArguments:'.
+
+-spec value_args(args()) -> args().
+value_args(Args) when length(Args) =< 3 -> Args;
+value_args(Args) -> [Args].
+
+-spec raise_block_arity_mismatch(non_neg_integer(), non_neg_integer()) -> no_return().
+raise_block_arity_mismatch(Arity, N) ->
+    Error0 = beamtalk_error:new(arity_mismatch, 'Block', value_selector(N)),
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        iolist_to_binary([
+            <<"The block takes ">>,
+            integer_to_binary(Arity),
+            <<" argument(s) but was called with ">>,
+            integer_to_binary(N)
+        ])
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_details(Error1, #{arity => Arity, arg_count => N})
+    ).
 
 -doc """
 Return true if Self is an actor instance (a #beamtalk_object{} with a pid).

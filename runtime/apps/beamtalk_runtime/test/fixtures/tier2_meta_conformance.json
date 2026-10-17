@@ -1,0 +1,11 @@
+[
+  {
+    "class_name": "ThreadedMetaFixture",
+    "fixture": "threaded_meta_fixture",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_meta_fixture.bt",
+    "tier2_methods": {},
+    "tier2_class_methods": {},
+    "unthreaded_selectors": ["twice:"],
+    "why": "ADR 0132 Phase 0c (BT-3868): every compiled module emits both keys, empty until Phase 1c/1d generates entries. Each expected map is `selector => {\"entry_fn\": name, \"positions\": [0-based arg positions]}`; `unthreaded_selectors` are real methods of the class that must resolve to no threaded entry on either side."
+  }
+]

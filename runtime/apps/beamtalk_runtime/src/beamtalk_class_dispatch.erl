@@ -23,6 +23,8 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -export([
     class_send/3,
     lookup_direct_call/3,
+    lookup_threaded_entry/3,
+    lookup_threaded_class_entry/3,
     class_self_dispatch/3,
     class_self_dispatch/4,
     class_self_send/3,
@@ -147,6 +149,58 @@ lookup_direct_call(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args
             error
     end;
 lookup_direct_call(_ClassPid, _Selector, _Args) ->
+    error.
+
+-doc """
+Resolve an instance-side threaded entry for `ClassName` (ADR 0132 §4).
+
+Answers `{ok, Module, EntryFn}` when the class's `tier2_methods` lists the
+selector and `Module:EntryFn` is exported at the entry's arity (`Self`, the
+arguments, then `Acc`): the `function_exported/3` guard against a module
+reloaded between the metadata cache and the call, as `lookup_direct_call/3`
+does. Anything else (no entry, a module compiled before ADR 0132, an arity
+mismatch, an unknown class) answers `error`.
+""".
+-spec lookup_threaded_entry(class_name(), selector(), list()) ->
+    {ok, module(), atom()} | error.
+lookup_threaded_entry(ClassName, Selector, Args) when is_atom(ClassName), is_list(Args) ->
+    exported_threaded_entry(
+        beamtalk_class_metadata:lookup_tier2_method(ClassName, instance, Selector), Args
+    );
+lookup_threaded_entry(_ClassName, _Selector, _Args) ->
+    error.
+
+-doc """
+Resolve a class-side threaded entry for the class at `ClassPid` (ADR 0132 §4).
+
+The class-side twin of `lookup_threaded_entry/3`, keyed by class pid like
+`lookup_direct_call/3`: `{ok, Module, EntryFn}` when `tier2_class_methods`
+lists the selector and `Module:EntryFn` is exported at `ClassSelf`, the
+arguments, then `Acc`; otherwise `error`.
+""".
+-spec lookup_threaded_class_entry(pid(), selector(), list()) ->
+    {ok, module(), atom()} | error.
+lookup_threaded_class_entry(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            exported_threaded_entry(
+                beamtalk_class_metadata:lookup_tier2_method(ClassName, class, Selector), Args
+            );
+        not_found ->
+            error
+    end;
+lookup_threaded_class_entry(_ClassPid, _Selector, _Args) ->
+    error.
+
+%% The receiver (`Self` / `ClassSelf`), the arguments, and the trailing `Acc`.
+-spec exported_threaded_entry({ok, module(), atom()} | error, list()) ->
+    {ok, module(), atom()} | error.
+exported_threaded_entry({ok, Module, EntryFn} = Found, Args) ->
+    case erlang:function_exported(Module, EntryFn, length(Args) + 2) of
+        true -> Found;
+        false -> error
+    end;
+exported_threaded_entry(error, _Args) ->
     error.
 
 -doc """

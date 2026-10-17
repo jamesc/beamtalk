@@ -707,6 +707,9 @@ struct MethodMeta {
     is_internal: bool,
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
+    /// ADR 0132 §1: argument positions this method threads a Tier 2 block
+    /// through (`MethodInfo::threading_params`). Empty until Phase 1b.
+    threading_params: Vec<usize>,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<DeclaredType>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
@@ -746,6 +749,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
+        threading_params: Vec::new(),
         return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
@@ -793,6 +797,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                 param_types: vec![],
                 doc: Some(getter_doc),
@@ -813,6 +818,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple(class_name)),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
@@ -852,6 +858,7 @@ fn synthesize_value_auto_methods(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple(class_name)),
             param_types,
             doc: Some(ctor_doc),
@@ -2106,11 +2113,18 @@ fn generate_method_list(
             Some(doc) => format!("Some({}.into())", rust_str_lit(doc)),
             None => "None".to_string(),
         };
+        let threading_params_expr = if m.threading_params.is_empty() {
+            "vec![]".to_string()
+        } else {
+            let parts: Vec<_> = m.threading_params.iter().map(usize::to_string).collect();
+            format!("vec![{}]", parts.join(", "))
+        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
+             threading_params: {threading_params_expr}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None }},",
             arity = m.arity,
@@ -2937,6 +2951,7 @@ mod tests {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: None,
                     param_types: vec![],
                     doc: None,
@@ -2948,6 +2963,7 @@ mod tests {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("Counter")),
                     param_types: vec![Some(DeclaredType::simple("Integer"))],
                     doc: None,
@@ -2960,6 +2976,7 @@ mod tests {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple("Counter")),
                 param_types: vec![],
                 doc: None,
@@ -3183,6 +3200,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Counter")),
             param_types: vec![Some(DeclaredType::simple("Integer"))],
             doc: None,
@@ -3208,6 +3226,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -3233,6 +3252,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: true,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![Some(DeclaredType::simple("Integer")), None],
             doc: None,
@@ -3257,6 +3277,7 @@ mod tests {
             is_sealed: false,
             is_internal: true,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Dictionary")),
             param_types: vec![Some(DeclaredType::simple("Symbol"))],
             doc: None,
@@ -3737,6 +3758,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -4299,6 +4321,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: Some("Line one\nLine \"two\"\tend\r".to_string()),

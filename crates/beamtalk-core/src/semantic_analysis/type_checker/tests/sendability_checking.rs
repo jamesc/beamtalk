@@ -44,6 +44,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             // Untyped parameter: the sendability check must fire regardless.
             param_types: vec![None],
