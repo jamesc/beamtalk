@@ -735,12 +735,10 @@ walker now records each value block's write while it is at the block, the
 same walk the literal path reports from. And a local that aliases a
 block-valued local (`c := b. ^c`, `c := x ifTrue: [b] ifFalse: [nil]`, an
 arm-local `b` included) now counts as that block, reported at the block's own
-binding. A current limitation, not specified semantics: an actor method
-answers `nil` for a last-statement local assignment where class and
-value-type methods answer the value (a bug tracked in BT-3882, pinned as
-`PIN-BUG BT-3882` in `adr0131section6escape_test.bt`), so in an actor a
-block that is that value is dropped unrun rather than returned; §6 still
-rejects it, saying the block never runs, until that bug is fixed.
+binding. A method whose last statement is a local assignment answers the
+assigned value in class, value-type and actor methods alike (an actor method
+answered `nil` there until BT-3882), so a block that is that value is
+returned from the method and §6 reports it so in every context.
 
 **A `whileTrue:`/`whileFalse:` condition block (BT-3782).** The loop's
 *body* is a §1 construct, but its keyword *condition* is a block receiver

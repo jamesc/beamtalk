@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3882: an actor method whose last statement is a local assignment
+// answers the assigned value, as class and value-type methods do. The
+// methods cover the actor body-lowering arms that reply with the bound
+// local (`BodyExprKind::LocalAssign*` in gen_server/methods.rs): pure,
+// field-write RHS, self-send, Tier 2 self-send, conditional, fold and loop.
+// Asserted in bt3882last_assignment_test.bt.
+
+Actor subclass: Bt3882LastAssignmentActor
+  state: n = 0
+
+  n => self.n
+
+  sealed opaqueInject: initial into: block =>
+    #(1, 2, 3) inject: initial into: block
+
+  // LocalAssignPure
+  pure => _r := 5
+
+  // LocalAssignPure, field-write RHS
+  fieldWrite => _r := (self.n := 4)
+
+  // LocalAssignSelfSend
+  selfSend =>
+    self.n := 9
+    _r := self n
+
+  // LocalAssignSelfSend, Tier 2 block argument
+  tier2SelfSend =>
+    t := 0
+    _r := self
+      opaqueInject: 0
+      into: [:a :i |
+        t := t + i
+        a + i
+      ]
+
+  // LocalAssignControlFlow, conditional with a field write
+  conditional: c =>
+    _r := c
+      ifTrue: [
+        self.n := 1
+        2
+      ]
+      ifFalse: [3]
+
+  // LocalAssignControlFlow, fold with a field write
+  fold =>
+    _r := #(1, 2, 3)
+      inject: 0
+      into: [:a :i |
+        self.n := i
+        a + i
+      ]
+
+  // LocalAssignControlFlow, loop threading a local
+  loop =>
+    t := 0
+    _r := 1 to: 3 do: [:i | t := t + i]
+
+  // A value send to a block parameter. (A last-statement `b := [..]` has no
+  // later use, so it is never a promoted LocalAssignTier2Block.)
+  tier2Value: blk => _r := blk value: 1

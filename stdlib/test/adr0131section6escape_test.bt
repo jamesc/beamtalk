@@ -48,12 +48,11 @@ TestCase subclass: Adr0131Section6EscapeTest
   testValueLiteral =>
     self assert: (Adr0131Section6EscapeValue new literalOfPure first value: 4) equals: 5
 
-  // BT-3859: a method whose last statement is a local assignment answers the
-  // assigned value in a class or value-type method. An actor method answers
-  // `nil` there today, a bug tracked in BT-3882 (pinned below), so ADR 0131
-  // §6 reports a Tier 2 block there as dropped in an actor rather than
-  // returned. An assignment that is the last statement of a conditional arm
-  // answers the value in all three.
+  // BT-3859, BT-3882: a method whose last statement is a local assignment
+  // answers the assigned value in class, value-type and actor methods alike,
+  // so ADR 0131 §6 reports a Tier 2 block there as returned in all three. An
+  // assignment that is the last statement of a conditional arm answers the
+  // value too.
   testLastStatementAssignmentAnswersClass =>
     self assert: Adr0131Section6EscapeClass lastStatementAssignment equals: 5
     self assert: (Adr0131Section6EscapeClass lastStatementBlockAssignment value: 1) equals: 2
@@ -67,8 +66,6 @@ TestCase subclass: Adr0131Section6EscapeTest
 
   testLastStatementAssignmentAnswersActor =>
     a := Adr0131Section6EscapeActor spawn
-    // PIN-BUG BT-3882: correct answer 5.
-    self assert: a lastStatementAssignment equals: nil
-    // PIN-BUG BT-3882: correct answer the block (`value: 1` answers 2).
-    self assert: a lastStatementBlockAssignment equals: nil
+    self assert: a lastStatementAssignment equals: 5
+    self assert: (a lastStatementBlockAssignment value: 1) equals: 2
     self assert: (a lastStatementArmAssignment: true) equals: 7
