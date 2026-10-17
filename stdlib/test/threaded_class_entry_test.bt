@@ -137,6 +137,21 @@ TestCase subclass: ThreadedClassEntryTest
     c := ThreadedEntryFixture
     self should: [c twice: [:x | x]] raise: #stateful_block_dispatch
 
+  // The same through an INHERITED class method: the subclass resolves `twice:` to
+  // the parent's module and its plain wrapper.
+  testAWritingBlockSentToAnInheritedClassMethodIsRefusedNotDropped =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryChild
+    self should: [c twice: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAPureBlockThroughAnInheritedClassMethodStillWorks =>
+    c := ThreadedEntryChild
+    self assert: (c twice: [9]) equals: 9
+
   testAPureBlockThroughADynamicReceiverStillWorks =>
     c := ThreadedEntryFixture
     self assert: (c twice: [5]) equals: 5
