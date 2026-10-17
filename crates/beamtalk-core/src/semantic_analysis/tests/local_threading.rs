@@ -392,34 +392,48 @@ fn section6_standalone_method_actor_self_send_is_an_error() {
     assert_eq!(section6_errors(src), 1);
 }
 
-/// The inert pending fixture holds the rejected callee shapes as runtime
-/// programs: every `probe*` method is rejected and its `callee*` helpers are
-/// not.
+/// PIN-BUG BT-3865 (ADR 0132 Phase 0a, BT-3866): the inert
+/// `adr0132section6_*.bt.pending` fixtures hold the §6 inventory shapes
+/// (I1-I4, I6-I8) as runtime programs over class, value-type and actor
+/// methods: every `probe*` method is rejected with `Tier2BlockNoReturnChannel`
+/// and every `callee*` method compiles clean. An ADR 0132 phase that makes a
+/// shape compile moves its probe out of the pending file, which keeps this
+/// green.
 #[test]
-fn adr0131_section6_callee_pins() {
+fn adr0132_section6_inventory_pins() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
-    let name = "adr0131section6callee_actor_pending.bt.pending";
-    let src = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-    let module = parse_module(&src);
-    let diags = adr0131_diagnostics(&src);
-    let (mut probes, mut callees) = (0, 0);
-    for method in &module.classes[0].methods {
-        let selector = method.selector.name();
-        let rejected = diags
-            .iter()
-            .any(|d| method.span.start() <= d.span.start() && d.span.end() <= method.span.end());
-        if selector.starts_with("probe") {
-            probes += 1;
-            assert!(rejected, "{name}: `{selector}` is no longer rejected");
-        } else {
-            callees += 1;
-            assert!(!rejected, "{name}: helper `{selector}` is rejected");
+    for context in ["class", "value", "actor"] {
+        let name = format!("adr0132section6_{context}.bt.pending");
+        let src =
+            std::fs::read_to_string(root.join(&name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let module = parse_module(&src);
+        let diags = adr0131_diagnostics(&src);
+        let class = &module.classes[0];
+        let (mut probes, mut callees) = (0, 0);
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            let selector = method.selector.name();
+            let within = |d: &Diagnostic| {
+                method.span.start() <= d.span.start() && d.span.end() <= method.span.end()
+            };
+            if selector.starts_with("probe") {
+                probes += 1;
+                let rejected = diags.iter().any(|d| {
+                    d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel) && within(d)
+                });
+                assert!(rejected, "{name}: `{selector}` is no longer rejected");
+            } else {
+                callees += 1;
+                assert!(
+                    !diags.iter().any(within),
+                    "{name}: helper `{selector}` is rejected"
+                );
+            }
         }
+        assert!(
+            probes >= 2 && callees >= 2,
+            "{name}: {probes} probes, {callees} callees"
+        );
     }
-    assert!(
-        probes >= 4 && callees >= 4,
-        "{probes} probes, {callees} callees"
-    );
 }
 
 #[test]

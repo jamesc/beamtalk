@@ -1,0 +1,71 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3755 (ADR 0131 §6), generalized by BT-3866 (ADR 0132 Phase 0a, epic
+// BT-3865): actor column of the ADR 0132 §"The inventory" shapes ADR 0131 §6
+// rejects today (see adr0132section6_class.bt.pending for the shape key).
+// Each `probe*` method compiled and answered 0 (write dropped) or raised before
+// BT-3755 (probed on the debug build); each is now a §6 compile error. The
+// `callee*` methods are the callees; they compile on their own. I2 is
+// BT-3755's four probes; I3 is a callee that is not `sealed` (overridable);
+// I6 is a stored block as the callable of `do:`. I1 and a same-class I4 chain
+// to a `sealed` direct-invoking callee already compile (BT-3755, see
+// adr0131section6exemptions_actor.bt) and I7/I8 are class-side only. Inert:
+// the runner discovers only `.bt`. ADR 0132 moves each shape it fixes into a
+// compiled fixture.
+//
+// `adr0132_section6_inventory_pins` in beamtalk-core checks that every
+// `probe*` method is rejected and no `callee*` method is.
+//
+// Not representable here (one class per file), pinned by
+// `section6_actor_self_send_to_a_non_threading_callee_is_an_error` instead:
+// a callee inherited from a superclass raises `stateful_block_dispatch`, and
+// an override in a subclass raises a `perform:` arity error. A callee that
+// passes the block on to another same-class callee that does not itself
+// thread it (BT-3755) is rejected too.
+
+Actor subclass: Adr0132Section6Actor
+  state: n = 0
+
+  sealed calleeDo: b => #(1) do: [:x | b value]
+
+  sealed calleeCond: b => 4 > 3 ifTrue: [b value]
+
+  sealed calleeOperand: b => (b value) + 1
+
+  sealed calleeNested: b =>
+    f := [b value]
+    f value
+
+  probeDo =>
+    t := 0
+    self calleeDo: [t := t + 1]
+    t
+
+  probeCond =>
+    t := 0
+    self calleeCond: [t := t + 1]
+    t
+
+  probeOperand =>
+    t := 0
+    self calleeOperand: [t := t + 1]
+    t
+
+  probeNested =>
+    t := 0
+    self calleeNested: [t := t + 1]
+    t
+
+  calleeOpen: b => b value
+
+  probeOpen =>
+    t := 0
+    self calleeOpen: [t := t + 1]
+    t
+
+  probeStored =>
+    t := 0
+    blk := [:x | t := t + x]
+    #(1, 2) do: blk
+    t

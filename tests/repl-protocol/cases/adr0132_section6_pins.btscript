@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3866 (ADR 0132 Phase 0a, epic BT-3865): the REPL-side shapes of the ADR
+// 0132 §"The inventory". A class is loaded from source, then I1 (a block that
+// writes a session binding handed to a user higher-order class method) and I6
+// (a stored block as the callable of a collection message) are sent from the
+// prompt. Both are ADR 0131 §6 compile errors today; ADR 0132 Phase 2 makes
+// the REPL root a caller of a threaded send and flips them (CLAUDE.md § REPL
+// output: the error display is pinned so the flip is deliberate). The
+// class, value-type and actor shapes are the pending fixtures
+// stdlib/test/fixtures/adr0132section6_*.bt.pending.
+//
+// @load tests/repl-protocol/fixtures/adr0132_section6_callee.bt
+
+t := 0
+// => 0
+
+// I1: a user HOM that invokes its parameter directly.
+// PIN-BUG BT-3865: correct answer 1.
+Adr0132ReplCallee calleeDirect: [t := t + 1]
+// => ERROR: block writes outer local `t`, but `calleeDirect:` cannot return the write
+
+// PIN-BUG BT-3865: correct answer 1.
+t
+// => 0
+
+// I2 (the REPL root as caller): the callee invokes the parameter in a `do:`.
+// PIN-BUG BT-3865: correct answer 1.
+Adr0132ReplCallee calleeDo: [t := t + 1]
+// => ERROR: block writes outer local `t`, but `calleeDo:` cannot return the write
+
+// I6: a stored block as the callable of a collection message.
+// (The REPL compiles the stored Tier 2 block with its state accumulator as an
+// extra parameter, hence `Block/2`.)
+blk := [:x | t := t + x]
+// => Block/2
+
+// PIN-BUG BT-3865: not a compile error in the REPL today but a run-time
+// failure (the accumulator the block expects is never supplied). Correct
+// answer: 3.
+#(1, 2) do: blk
+// => ERROR: key not found: '__local__t'
+
+// PIN-BUG BT-3865: correct answer 3 after the loop above (1 from I1/I2 if
+// they have flipped too).
+t
+// => 0
