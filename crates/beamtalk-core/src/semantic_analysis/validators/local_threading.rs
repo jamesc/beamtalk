@@ -1343,8 +1343,10 @@ struct Walker<'d> {
     /// Actor methods only: the operands that are the value of the method
     /// body's last statement when that statement is a local assignment. An
     /// actor method answers `nil` there, not the value (BT-3882), so a block
-    /// among them is dropped unrun rather than returned (BT-3859).
-    actor_dropped: HashSet<Span>,
+    /// among them is dropped unrun rather than returned (BT-3859). Each maps
+    /// to whether it is the assignment's whole value, a block literal
+    /// (`b := [..]`): only then can a `b value` before the method ends run it.
+    actor_dropped: HashMap<Span, bool>,
     /// The bindings of Tier 2 locals already reported (one diagnostic per
     /// binding).
     reported_locals: HashSet<Span>,
@@ -2600,7 +2602,10 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
-        let dropped = self.actor_dropped.contains(&block.span);
+        let dropped = match self.actor_dropped.get(&block.span) {
+            Some(&direct) if shape == EscapeShape::Returned => Dropped::Yes { send_value: direct },
+            _ => Dropped::No,
+        };
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
@@ -2625,7 +2630,15 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
-        let dropped = self.actor_dropped.contains(&use_span);
+        // An alias or a local bound through an arm is not a Tier 2 local
+        // codegen promotes, so `value` on it would not hand the write back:
+        // only the field advice holds.
+        let dropped =
+            if shape == EscapeShape::Returned && self.actor_dropped.contains_key(&use_span) {
+                Dropped::Yes { send_value: false }
+            } else {
+                Dropped::No
+            };
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
@@ -2734,52 +2747,79 @@ fn escape_phrase(shape: EscapeShape) -> &'static str {
 /// body's last statement when it is a local assignment (`b := [..]`,
 /// `b := c ifTrue: [[..]] ...`, `c := b`), which an actor method answers
 /// `nil` for (BT-3882) where a class or value-type method answers the value.
+/// Each maps to whether it is that assignment's whole value, a block literal.
 /// Empty in any other context.
-fn actor_dropped(context: MethodContext, body: &[ExpressionStatement]) -> HashSet<Span> {
+fn actor_dropped(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<Span, bool> {
     if context != Actor {
-        return HashSet::new();
+        return HashMap::new();
     }
     let Some(Expression::Assignment { target, value, .. }) = body.last().map(|s| &s.expression)
     else {
-        return HashSet::new();
+        return HashMap::new();
     };
     if !matches!(target.as_ref(), Expression::Identifier(_)) {
-        return HashSet::new();
+        return HashMap::new();
     }
+    let direct = match value.as_ref() {
+        Expression::Block(block) => Some(block.span),
+        _ => None,
+    };
     value_blocks(value)
         .into_iter()
-        .map(|b| b.span)
-        .chain(value_locals(value).into_iter().map(|id| id.span))
+        .map(|b| (b.span, Some(b.span) == direct))
+        .chain(value_locals(value).into_iter().map(|id| (id.span, false)))
         .collect()
+}
+
+/// Whether a §6 escape is one an actor method drops ([`actor_dropped`]),
+/// decided once per report so its message and hint agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dropped {
+    /// The block escapes as its [`EscapeShape`] says.
+    No,
+    /// The block is the value of an actor method's last-statement assignment
+    /// and is dropped unrun. `send_value`: sending the bound local `value`
+    /// before the method ends would run it (`b := [..]` written directly, a
+    /// Tier 2 local codegen promotes).
+    Yes { send_value: bool },
 }
 
 /// What follows "but" in a §6 escape message for `subject` (`it`, or a
 /// local): how it escapes, or for an operand an actor method drops
-/// ([`actor_dropped`]) that the block is never run.
-fn escape_clause(subject: &str, shape: EscapeShape, dropped: bool) -> String {
-    if dropped && shape == EscapeShape::Returned {
+/// ([`Dropped`]) that the block is never run.
+fn escape_clause(subject: &str, shape: EscapeShape, dropped: Dropped) -> String {
+    if dropped == Dropped::No {
+        format!(
+            "{subject} is {} and nothing can return the write",
+            escape_phrase(shape)
+        )
+    } else {
         format!(
             "{subject} is the value of the method's last-statement assignment, which an actor \
              method drops (it answers `nil`), so the block never runs and nothing can return \
              the write"
         )
-    } else {
-        format!(
-            "{subject} is {} and nothing can return the write",
-            escape_phrase(shape)
-        )
     }
 }
 
-/// The ADR 0131 §6 help text for a block that escapes the method, or (for
-/// `dropped`, [`actor_dropped`]) that an actor method drops.
-fn escape_help(name: &str, dropped: bool) -> String {
-    if dropped {
-        return format!(
-            "the block is dropped when the method ends, so `{name}` never changes: send it \
-             `value` before the method ends, or keep the state in a field \
-             (`self.{name} := self.{name} + 1`)"
-        );
+/// The ADR 0131 §6 help text for a block that escapes the method, or that
+/// an actor method drops ([`Dropped`]).
+fn escape_help(name: &str, dropped: Dropped) -> String {
+    match dropped {
+        Dropped::Yes { send_value: true } => {
+            return format!(
+                "the block is dropped when the method ends, so `{name}` never changes: send it \
+                 `value` before the method ends, or keep the state in a field \
+                 (`self.{name} := self.{name} + 1`)"
+            );
+        }
+        Dropped::Yes { send_value: false } => {
+            return format!(
+                "the block is dropped when the method ends, so `{name}` never changes: keep the \
+                 state in a field (`self.{name} := self.{name} + 1`)"
+            );
+        }
+        Dropped::No => {}
     }
     format!(
         "once the method returns, no later call of the block can hand `{name}` back: keep the \
