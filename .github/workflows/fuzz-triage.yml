@@ -145,14 +145,14 @@ jobs:
           # Trust boundary: the agent reads untrusted data (logs, fuzz inputs, fuzzed
           # source), so the tool list stays small and the secret-exposing tools are
           # left out. It can read files with the Read, Grep and Glob tools (not
-          # /proc), run cargo (except install/login/publish/owner/yank), just, the
-          # one repro script below and read-only git, and use the Linear issue tools.
+          # /proc), run `cargo fuzz`, `cargo test` and `cargo build`, `just
+          # test-class-var-corpus`, the one repro script below and read-only git, and
+          # use the Linear issue tools.
           # Not allowed: Write/Edit (it reports only through Linear), cat/find/head/
           # tail or other shell, env-prefixed commands, git writes, the web. The
           # script exists because `VAR=value cargo ...` cannot be allowed by pattern;
           # it validates its arguments (they come from untrusted logs) and sets the
-          # variables itself. cargo is allowed in full because reproducing a failure
-          # needs fuzz, test, build and run. It executes this repo's code (the
+          # variables itself. Those cargo subcommands run this repo's code (the
           # checked-out commit, which the agent cannot modify), and the OAuth token
           # and Linear key are in the job's environment, so injected instructions
           # could in principle still reach them through cargo; that residual risk is
