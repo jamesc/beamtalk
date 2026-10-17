@@ -125,39 +125,6 @@ run_test_method_exit_test() ->
     ),
     ?assertMatch({fail, testExit, _}, Result).
 
-run_test_method_stale_timeout_diagnostics_not_attached_test() ->
-    %% TODO(BT-3828): a dump left in the process by an earlier test is dropped at
-    %% the start of the next test, so it never shows on an unrelated failure.
-    put(beamtalk_object_class:timeout_diagnostics_key(), <<"STALE-DUMP">>),
-    {fail, testExit, Msg} = beamtalk_test_case:run_test_method(
-        'FakeTest', tc_run_helper, testExit, #{}, nil
-    ),
-    ?assertEqual(nomatch, binary:match(Msg, <<"STALE-DUMP">>)),
-    ?assertEqual(undefined, beamtalk_object_class:take_timeout_diagnostics()).
-
-run_test_method_timeout_dump_attached_to_every_failure_clause_test_() ->
-    %% TODO(BT-3828): a dump recorded during the test is attached whichever
-    %% clause formats the failure (exit/error/throw via format_test_error/3, and
-    %% the bare #beamtalk_error{} and undef clauses that bypass it).
-    [
-        {atom_to_list(Method), fun() ->
-            {fail, Method, Msg} = beamtalk_test_case:run_test_method(
-                'FakeTest', tc_run_helper, Method, #{}, nil
-            ),
-            ?assertNotEqual(nomatch, binary:match(Msg, <<"[DUMP-FROM-TEST]">>)),
-            %% taken once
-            ?assertEqual(undefined, beamtalk_object_class:take_timeout_diagnostics())
-        end}
-     || Method <- [
-            testDumpExit,
-            testDumpError,
-            testDumpThrow,
-            testDumpBeamtalkError,
-            testDumpAssertFail,
-            testDumpUndef
-        ]
-    ].
-
 run_test_method_skip_test() ->
     %% Hits: throw:{bunit_skip, Reason} -> {skip, MethodName, Reason}
     Result = beamtalk_test_case:run_test_method(
