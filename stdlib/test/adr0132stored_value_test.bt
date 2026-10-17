@@ -46,3 +46,9 @@ TestCase subclass: Adr0132StoredValueTest
   // harmless (see `inline_send`).
   testMixedSites =>
     self assert: #[Adr0132StoredValueClass stMixed, (Adr0132StoredValueValue new) stMixed] equals: #[#[6, 16], #[6, 16]]
+
+  // A name only a nested block of the stored block binds stays block-local
+  // when it is bound at method level after the send. (Bound before the send,
+  // the shape is left as a compile error, pinned in the core tests.)
+  testNestedLocal =>
+    self assert: #[Adr0132StoredValueClass stNestedLocal, (Adr0132StoredValueValue new) stNestedLocal] equals: #[#[1, 5], #[1, 5]]

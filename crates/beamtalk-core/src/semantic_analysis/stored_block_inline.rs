@@ -54,8 +54,8 @@ use crate::ast::{
 };
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::semantic_analysis::block_facts::{
-    analyze_block, captured_local_mutations, is_safe_value_family_selector, normalize_cascade,
-    outer_local_writes, stored_block_var_uses,
+    captured_local_mutations, is_safe_value_family_selector, normalize_cascade, outer_local_writes,
+    stored_block_var_uses,
 };
 use crate::semantic_analysis::{extract_match_arm_bindings, extract_pattern_bindings};
 use ecow::EcoString;
@@ -171,8 +171,11 @@ fn binding_is_promotable(
     if writes.is_empty() || !writes.iter().all(|w| captured.iter().any(|c| *c == w.name)) {
         return false;
     }
-    let analysis = analyze_block(block);
-    if !analysis.field_writes.is_empty() {
+    // Everything below reads `mentions`, a full-walk over-approximation of the
+    // block (see `BlockMentions`), never `analyze_block`: its facts omit what
+    // nested blocks bind, which is exactly what the inlined form would capture.
+    let mentions = BlockMentions::of(block);
+    if mentions.writes_field {
         return false;
     }
     // The block closed over the locals as they were at the binding: an
@@ -180,9 +183,7 @@ fn binding_is_promotable(
     // inlined block. Past the last send nothing reads the block, and the last
     // send's own statement may assign the value of the send to such a local
     // (`t := b value`), which happens after the block ran.
-    let mut touched: HashSet<&str> = HashSet::new();
-    touched.extend(analysis.captured_reads.iter().map(String::as_str));
-    touched.extend(analysis.local_writes.iter().map(String::as_str));
+    let touched: HashSet<&str> = mentions.names.iter().map(EcoString::as_str).collect();
     // A pattern binder (a `match:` arm, a destructuring assignment) of a name
     // the block touches would capture the inlined block's reads and writes.
     if binds_any_of(&stmts[index + 1..], &touched) {
@@ -192,7 +193,7 @@ fn binding_is_promotable(
         .rev()
         .find(|&j| stored_block_var_uses(&stmts[j].expression, name).1)
         .unwrap_or(index);
-    let reads_fields = !analysis.field_reads.is_empty();
+    let reads_fields = mentions.reads_self_state;
     let assigns_touched = |expr: &Expression| {
         let mut found = false;
         walk_expression(expr, &mut |e| match e {
@@ -227,6 +228,58 @@ fn binding_is_promotable(
         return false;
     }
     parameters_are_unambiguous(stmts, index, block, params)
+}
+
+/// An over-approximation of everything a stored block mentions, from a full
+/// walk that descends into every nested block, match arm and pattern. Over-
+/// including a name only means fewer blocks are inlined, which is safe;
+/// leaving one out lets the inlined form capture it (BT-3867).
+struct BlockMentions {
+    /// EVERY name the block mentions: each identifier (assignment targets
+    /// included), each parameter of the block and of any nested block, and each
+    /// name a `match:` arm or destructuring pattern binds, at any depth.
+    names: HashSet<EcoString>,
+    /// An assignment to a field (`self.x := ...`) anywhere in the block.
+    writes_field: bool,
+    /// The block can observe `self` or a field (`self`, `super`, `self.x`
+    /// anywhere in it), and so the `self` it closed over at the binding.
+    reads_self_state: bool,
+}
+
+impl BlockMentions {
+    fn of(block: &Block) -> Self {
+        let mut m = BlockMentions {
+            names: block.parameters.iter().map(|p| p.name.clone()).collect(),
+            writes_field: false,
+            reads_self_state: false,
+        };
+        for stmt in &block.body {
+            walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Identifier(i) => {
+                    if i.name == "self" {
+                        m.reads_self_state = true;
+                    }
+                    m.names.insert(i.name.clone());
+                }
+                Expression::Block(b) => {
+                    m.names.extend(b.parameters.iter().map(|p| p.name.clone()));
+                }
+                Expression::Assignment { target, .. }
+                    if matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
+                {
+                    m.writes_field = true;
+                }
+                Expression::FieldAccess { .. } | Expression::Super(..) => {
+                    m.reads_self_state = true;
+                }
+                Expression::Match { .. } | Expression::DestructureAssignment { .. } => {
+                    m.names.extend(pattern_binders(e));
+                }
+                _ => {}
+            });
+        }
+        m
+    }
 }
 
 /// Whether `id` is assigned exactly once in `stmts` and no block parameter,
@@ -667,6 +720,22 @@ mod tests {
             // A field write between the binding and the send (the closure
             // captured the old self).
             "    t := 0\n    b := [t := t + self.count]\n    self.count := 5\n    b value\n    t",
+            // A name only a NESTED block of the stored block binds: first-assigned
+            // inside the `do:` body it is block-local, but a later method-level
+            // binding before the send would turn it into an outer write.
+            "    t := 0\n    b := [#(1, 2) do: [:e | y := e]. t := t + 1]\n    y := 5\n    b value\n    #[t, y]",
+            // ... written then read inside the nested block.
+            "    t := 0\n    b := [#(1, 2) do: [:e | y := e. y]. t := t + 1]\n    y := 5\n    b value\n    #[t, y]",
+            // ... bound by a `match:` arm inside a nested block.
+            "    t := 0\n    b := [#(1) do: [:e | e match: [y -> y]]. t := t + 1]\n    y := 5\n    b value\n    #[t, y]",
+            // ... bound by a destructuring assignment inside a nested block.
+            "    t := 0\n    b := [#(1) do: [:e | {y, z} := Tuple withAll: #(1, 2)]. t := t + 1]\n    y := 5\n    b value\n    #[t, y]",
+            // ... a nested block's own parameter.
+            "    t := 0\n    b := [#(1) do: [:y | y printString]. t := t + 1]\n    y := 5\n    b value\n    #[t, y]",
+            // A field write inside a nested block of the stored block.
+            "    t := 0\n    b := [#(1) do: [:e | self.count := e]. t := t + 1]\n    b value\n    t",
+            // A nested block reads a field and a field write comes before the send.
+            "    t := 0\n    b := [#(1) do: [:e | t := t + self.count]]\n    self.count := 5\n    b value\n    t",
             // A block parameter named like the stored local.
             "    t := 0\n    b := [t := t + 1]\n    #(1) do: [:b | b printString]\n    b value\n    t",
             // A block-local assignment of the stored local's name in a nested block.
@@ -674,5 +743,188 @@ mod tests {
         ] {
             assert!(inlined(body).is_none(), "{body}");
         }
+    }
+
+    // -- Differential: binder identity before and after inlining ------------
+    //
+    // The invariant the whole rewrite rests on: every identifier occurrence of
+    // the program resolves to the SAME binder (the span of the assignment,
+    // parameter or pattern variable that defines it) in the stored form and in
+    // the inlined form. A mini resolver mirrors `NameResolver`'s scoping:
+    // an assignment defines its target in the current scope unless the name is
+    // already visible; a block, and a `match:` arm, open a scope.
+
+    use crate::ast::MatchArm;
+    use crate::source_analysis::Span;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct Resolver {
+        scopes: Vec<HashMap<EcoString, Span>>,
+        /// identifier occurrence span -> (name, defining span or `None`)
+        out: HashMap<Span, (EcoString, Option<Span>)>,
+    }
+
+    impl Resolver {
+        fn lookup(&self, name: &str) -> Option<Span> {
+            self.scopes.iter().rev().find_map(|s| s.get(name).copied())
+        }
+
+        fn define(&mut self, name: &EcoString, span: Span) {
+            self.scopes
+                .last_mut()
+                .expect("a scope")
+                .insert(name.clone(), span);
+        }
+
+        fn body(&mut self, stmts: &[ExpressionStatement]) {
+            for stmt in stmts {
+                self.expr(&stmt.expression);
+            }
+        }
+
+        fn expr(&mut self, e: &Expression) {
+            match e {
+                Expression::Identifier(i) => {
+                    let def = self.lookup(&i.name);
+                    self.out.insert(i.span, (i.name.clone(), def));
+                }
+                Expression::Assignment { target, value, .. } => {
+                    if let Expression::Identifier(i) = target.as_ref() {
+                        if self.lookup(&i.name).is_none() {
+                            self.define(&i.name, i.span);
+                        }
+                        let def = self.lookup(&i.name);
+                        self.out.insert(i.span, (i.name.clone(), def));
+                    } else {
+                        self.expr(target);
+                    }
+                    self.expr(value);
+                }
+                Expression::Block(b) => {
+                    self.scopes.push(HashMap::new());
+                    for p in &b.parameters {
+                        self.define(&p.name, p.span);
+                    }
+                    self.body(&b.body);
+                    self.scopes.pop();
+                }
+                Expression::Match { value, arms, .. } => {
+                    self.expr(value);
+                    for arm in arms {
+                        self.arm(arm);
+                    }
+                }
+                Expression::MessageSend {
+                    receiver,
+                    arguments,
+                    ..
+                } => {
+                    self.expr(receiver);
+                    for a in arguments {
+                        self.expr(a);
+                    }
+                }
+                Expression::Parenthesized { expression, .. } => self.expr(expression),
+                Expression::Return { value, .. } => self.expr(value),
+                Expression::ListLiteral { elements, .. }
+                | Expression::ArrayLiteral { elements, .. } => {
+                    for a in elements {
+                        self.expr(a);
+                    }
+                }
+                Expression::Literal(..) | Expression::ClassReference { .. } => {}
+                other => panic!("the generator does not produce {other:?}"),
+            }
+        }
+
+        fn arm(&mut self, arm: &MatchArm) {
+            self.scopes.push(HashMap::new());
+            for id in extract_match_arm_bindings(&arm.pattern).0 {
+                self.define(&id.name, id.span);
+            }
+            if let Some(g) = &arm.guard {
+                self.expr(g);
+            }
+            self.expr(&arm.body);
+            self.scopes.pop();
+        }
+    }
+
+    fn resolve(stmts: &[ExpressionStatement]) -> HashMap<Span, (EcoString, Option<Span>)> {
+        let mut r = Resolver::default();
+        r.scopes.push(HashMap::new());
+        r.body(stmts);
+        r.out
+    }
+
+    /// Every program of a small template grammar: a stored block over a mix of
+    /// nested blocks and names, an intervening statement that assigns or binds
+    /// one of those names, and one send.
+    #[test]
+    fn inlining_never_changes_which_binder_a_name_resolves_to() {
+        let body_pieces = [
+            "t := t + 1",
+            "y := 1",
+            "z := y",
+            "#(1, 2) do: [:e | y := e]",
+            "#(1, 2) do: [:e | y := e. y]",
+            "#(1) do: [:y | y printString]",
+            "#(1) do: [:e | e match: [y -> y]]",
+            "#(1) do: [:e | #(2) do: [:f | z := f]]",
+        ];
+        let prefixes = [
+            "",
+            "    y := 0\n",
+            "    z := 0\n",
+            "    y := 0\n    z := 0\n",
+        ];
+        let betweens = [
+            "",
+            "    y := 5\n",
+            "    z := 5\n",
+            "    t := 10\n",
+            "    #(1) do: [:y | y printString]\n",
+            "    r := [9] match: [y -> y]\n",
+            "    w := 7\n",
+        ];
+        let sends = ["b value\n", "q := b value\n"];
+        let (mut accepted, mut refused) = (0, 0);
+        for first in body_pieces {
+            for second in body_pieces {
+                for prefix in prefixes {
+                    for between in betweens {
+                        for send in sends {
+                            let src = format!(
+                                "    t := 0\n{prefix}    b := [{first}. {second}. t := t + 1]\n{between}    {send}    #[t, y, z]"
+                            );
+                            let full = format!("Object subclass: P\n  class m =>\n{src}\n");
+                            let module = parse_bt(&full);
+                            let method = &module.classes[0].class_methods[0];
+                            let Some(out) = inline_stored_tier2_values(&method.body, &[]) else {
+                                refused += 1;
+                                continue;
+                            };
+                            accepted += 1;
+                            let before = resolve(&method.body);
+                            let after = resolve(&out);
+                            for (span, (name, def)) in &before {
+                                if name == "b" {
+                                    continue;
+                                }
+                                let got = after.get(span).unwrap_or_else(|| {
+                                    panic!("occurrence of `{name}` lost by inlining:\n{src}")
+                                });
+                                assert_eq!(
+                                    got.1, *def,
+                                    "`{name}` resolves to a different binder after inlining:\n{src}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(accepted > 100 && refused > 100, "{accepted} / {refused}");
     }
 }

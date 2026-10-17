@@ -93,3 +93,17 @@ Value subclass: Adr0132StoredValueValue
     b value: "abcd"
     r := (b value: #(1, 2)) + 10
     #[t, r]
+
+  stNestedLocal =>
+    t := 0
+    b := [
+      #(1, 2)
+        do: [:e |
+          y := e
+          y
+        ]
+      t := t + 1
+    ]
+    b value
+    y := 5
+    #[t, y]
