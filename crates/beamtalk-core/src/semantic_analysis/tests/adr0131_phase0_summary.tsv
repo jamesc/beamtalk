@@ -4,39 +4,42 @@
 # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
 # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
 # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
-statement	block-value	actor	86	0	0
-statement	block-value	class	98	0	0
-statement	block-value	value	76	0	0
-statement	detect-ifnone	actor	38	30	14
-statement	detect-ifnone	class	86	0	0
-statement	detect-ifnone	value	76	0	0
-statement	detect-plain	actor	31	9	7
-statement	detect-plain	class	46	0	0
-statement	detect-plain	value	41	0	0
-statement	enumeration	actor	154	0	0
-statement	enumeration	class	178	0	0
-statement	enumeration	value	146	0	0
+statement	block-value	actor	112	0	0
+statement	block-value	class	122	0	0
+statement	block-value	value	100	0	0
+statement	detect-ifnone	actor	96	64	28
+statement	detect-ifnone	class	208	0	0
+statement	detect-ifnone	value	188	0	0
+statement	detect-plain	actor	48	32	14
+statement	detect-plain	class	104	0	0
+statement	detect-plain	value	94	0	0
+statement	enumeration	actor	206	0	0
+statement	enumeration	class	226	0	0
+statement	enumeration	value	194	0	0
 statement	evaluated-block	actor	76	0	0
 statement	evaluated-block	class	76	0	0
 statement	evaluated-block	value	76	0	0
-statement	keyed-do	actor	51	0	0
-statement	keyed-do	class	40	0	0
-statement	keyed-do	value	35	0	0
-statement	other	actor	590	0	0
-statement	other	class	587	0	0
-statement	other	value	460	0	0
-statement	satisfy	actor	40	0	0
-statement	satisfy	class	40	0	0
-statement	satisfy	value	35	0	0
-statement-group	arm-loop-mix	detect-ifnone	actor	4
-statement-group	handler	detect-ifnone	actor	4
-statement-group	handler	detect-plain	actor	2
-statement-group	loop-body	detect-ifnone	actor	18
-statement-group	loop-body	detect-plain	actor	6
-statement-group	protected-body	detect-ifnone	actor	12
-statement-group	protected-body	detect-plain	actor	6
-statement-group	three-deep	detect-ifnone	actor	6
-statement-group	three-deep	detect-plain	actor	2
+statement	keyed-do	actor	94	0	0
+statement	keyed-do	class	104	0	0
+statement	keyed-do	value	94	0	0
+statement	other	actor	1142	0	0
+statement	other	class	1252	0	0
+statement	other	value	1070	0	0
+statement	satisfy	actor	94	0	0
+statement	satisfy	class	104	0	0
+statement	satisfy	value	94	0	0
+statement-group	arm-loop-mix	detect-ifnone	actor	8
+statement-group	arm-loop-mix	detect-plain	actor	4
+statement-group	handler	detect-ifnone	actor	12
+statement-group	handler	detect-plain	actor	6
+statement-group	loop-body	detect-ifnone	actor	24
+statement-group	loop-body	detect-plain	actor	12
+statement-group	nested-loop	detect-ifnone	actor	16
+statement-group	nested-loop	detect-plain	actor	8
+statement-group	protected-body	detect-ifnone	actor	24
+statement-group	protected-body	detect-plain	actor	12
+statement-group	three-deep	detect-ifnone	actor	8
+statement-group	three-deep	detect-plain	actor	4
 operand	arg	actor	57	38	6	13	35	3
 operand	arg	class	57	57	0	0	57	0
 operand	arg	value	57	57	0	0	57	0
