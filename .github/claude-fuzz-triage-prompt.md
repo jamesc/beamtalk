@@ -34,7 +34,10 @@ inputs are only ever passed as a file argument to `cargo fuzz run`.
   `bash .triage-config/.github/scripts/repro-class-var.sh <seed> <size> <shapes|all>` (take the shapes
   from the `shapes` list in the report header, e.g. `do,fold,to_do,...`; the script validates its
   arguments). This shows the program, not whether it compiles: say so, and do not claim the failure
-  is fixed or still present on the strength of it.
+  is fixed or still present on the strength of it. Put the printed program source and the reference
+  answer in the issue (in a code block, under "Reproduction"), and name the commit it was printed
+  at. A seed alone is not a reproduction: the generator changes, and the same seed then draws a
+  different program, so a seed-only issue cannot be reproduced or pinned later.
 - `corpus-through-erlc`: generated Core Erlang that erlc/core_lint rejects.
 - `extended-proptest`: a proptest property failed; the shrunk case is in the log.
 
