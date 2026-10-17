@@ -691,7 +691,7 @@ The escape classification is `block_facts::escape_sites`, the one behind
 `escaping_blocks`; a REPL expression list is not checked (BT-3806 pinned what
 the REPL does, the same runtime error, in the repl-protocol case
 `adr0131_section6_escape_pins`; rejecting it there waits on a maintainer
-decision).
+decision, BT-3858).
 
 BT-3806 follows a returned value through what makes it up (`escape_sites`
 only; `escaping_blocks`, the census's and the class-state-abroad lint's,

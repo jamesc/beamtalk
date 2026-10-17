@@ -2398,7 +2398,7 @@ impl<'d> Walker<'d> {
 /// The [`escape_sites`] of a method body that §6 inspects (BT-3756). A REPL
 /// expression list is skipped: its locals are session bindings, and the value
 /// of its last expression goes to the display, not to a caller (whether the
-/// REPL should reject these is BT-3806's open question for the maintainer;
+/// REPL should reject these is open for the maintainer, BT-3858;
 /// the repl-protocol case `adr0131_section6_escape_pins` records what it does today).
 ///
 /// An operand listed with several shapes (`^(b := [..])` is returned and

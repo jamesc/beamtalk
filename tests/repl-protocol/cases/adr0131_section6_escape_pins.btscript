@@ -9,7 +9,7 @@
 // a method's escaping block raised before §6; the binding is never written.
 // Whether the REPL should reject these at compile time instead is an open
 // question for the maintainer (CLAUDE.md: REPL behaviour changes need
-// confirmation), tracked as a follow-up to BT-3806. This case pins today's
+// confirmation), tracked as BT-3858. This case pins today's
 // behaviour so that decision changes it on purpose.
 
 t := 0
