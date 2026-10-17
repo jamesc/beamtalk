@@ -799,7 +799,13 @@ bench:
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Lint Elixir: format check
+# Lint Elixir: format check. On success the stamp scripts/lint-stamp.sh keeps
+# for the pre-push hook is written, so `git push` does not run it again.
+[unix]
+lint-elixir: fmt-check-elixir
+    @scripts/lint-stamp.sh write elixir
+
+[windows]
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
@@ -886,16 +892,41 @@ lint-workaround-comments:
 lint-workaround-comments:
     @echo "lint-workaround-comments: skipped on Windows (covered by Linux CI)"
 
-# Lint Beamtalk: formatting check
+# Lint Beamtalk: formatting check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-beamtalk: fmt-check-beamtalk
+    @scripts/lint-stamp.sh write beamtalk
+
+[windows]
 lint-beamtalk: fmt-check-beamtalk
 
-# Lint Rust: clippy + formatting check
+# Lint Rust: clippy + formatting check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-rust: clippy fmt-check-rust
+    @scripts/lint-stamp.sh write rust
+
+[windows]
 lint-rust: clippy fmt-check-rust
 
 # Lint Erlang: Dialyzer type checking + format check + generated spec validation
+# (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
+    @scripts/lint-stamp.sh write erlang
+
+[windows]
 lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
 
-# Lint JS/TS: Biome lint + format check
+# Lint JS/TS: Biome lint + format check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+[working-directory: 'editors/vscode']
+lint-js: fmt-check-js
+    @echo "🔍 Running Biome lint..."
+    npm run lint
+    @echo "✅ Biome lint passed"
+    @../../scripts/lint-stamp.sh write js
+
+[windows]
 [working-directory: 'editors/vscode']
 lint-js: fmt-check-js
     @echo "🔍 Running Biome lint..."
@@ -1086,6 +1117,11 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # Linux `check` job run them only when those crates change; `just ci` always
 # runs both tiers. The set is one nextest filterset, defined once here.
 test-rust: (_test-rust "")
+
+# The fast tier of one crate, for the edit loop (`just test-rust-crate
+# beamtalk-codegen`): the skills run this after each change and leave the
+# whole workspace to `just ci-changed`, the one full local run of a PR.
+test-rust-crate CRATE: (_test-rust "-p " + CRATE)
 
 # The slow tier (see `test-rust`). Linux-only in CI; no platform subset.
 [unix]
