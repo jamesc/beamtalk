@@ -281,6 +281,20 @@ fn bt_3737_ci_seeds_pass_verified_codegen() {
     }
 }
 
+/// BT-3848: the program the nightly `class-var-corpus` job failed on (run
+/// 38526955101: `CvAdlOpen`, an `inject:into:` fold whose body holds an
+/// `ensure:` with a wrapper-local loop; the verifier reported
+/// `StateAccLoopWithoutLocals`). Nightly settings: size 3, all shapes.
+#[test]
+fn bt_3848_nightly_seed_passes_verified_codegen() {
+    use beamtalk_core::test_helpers::class_var_program::gen_program;
+    let seed = 2_572_192_693_659_237_561_u64;
+    let program = gen_program(seed, 3, Shapes::ENABLED);
+    if let Err(e) = check_program(0, &program) {
+        panic!("seed {seed}: {e}");
+    }
+}
+
 /// The first line of a failure, with names and numbers dropped, so equal
 /// causes group together in [`measure_failure_rate`].
 fn cause(error: &str) -> String {
