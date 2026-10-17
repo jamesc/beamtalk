@@ -233,6 +233,12 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
+        // BT-3823: in a REPL arm a block of another arity raises `badarity`.
+        if let Expression::Block(block) = receiver
+            && self.repl_arm_applies_block(receiver, 0)
+        {
+            return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
+        }
         // Inline Tier 2 block literal with mutations.
         if let Expression::Block(block) = receiver
             && !Self::captured_mutations_for_block(block).is_empty()
@@ -241,11 +247,13 @@ impl CoreErlangGenerator {
             return Ok(Some(doc));
         }
         // Block literal with field mutations (actor state threading), or, in
-        // the REPL, one that writes a binding anywhere, a nested construct
-        // included (BT-3823: inlined over the bindings map as a REPL arm).
+        // the REPL, one of this arity that writes a binding anywhere, a nested
+        // construct included (BT-3823: inlined over the bindings map as a REPL
+        // arm; `beamtalk_core`'s `repl_evaluated_block`).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            if self.needs_mutation_threading(&analysis)
+                || (block.parameters.is_empty() && self.repl_blocks_write_bindings(&[block]))
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
                 return Ok(Some(doc));
@@ -449,6 +457,12 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
+        // BT-3823: in a REPL arm a block of another arity raises `badarity`.
+        if let Expression::Block(block) = receiver
+            && self.repl_arm_applies_block(receiver, arguments.len())
+        {
+            return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
+        }
         // Inline Tier 2 block literal with mutations (keyword variant)
         if let Expression::Block(block) = receiver
             && !Self::captured_mutations_for_block(block).is_empty()
@@ -457,10 +471,13 @@ impl CoreErlangGenerator {
             return Ok(Some(doc));
         }
         // Block literal with field mutations (actor state threading), or, in
-        // the REPL, one that writes a binding anywhere (BT-3823, as above).
+        // the REPL, one of this arity that writes a binding anywhere (BT-3823,
+        // as above).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            if self.needs_mutation_threading(&analysis)
+                || (block.parameters.len() == arguments.len()
+                    && self.repl_blocks_write_bindings(&[block]))
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
                 return Ok(Some(doc));
@@ -818,6 +835,45 @@ impl CoreErlangGenerator {
 
         parts.push(docvec!["apply ", leaf::var(fun_var), " (", args_doc, ")",]);
         Ok(Document::Vec(parts))
+    }
+
+    /// BT-3823: a block literal sent a `value` selector of another arity in a
+    /// REPL arm ([`Self::repl_arm_applies_block`]): its arguments are evaluated
+    /// and applied to a stand-in `fun` of the block's own arity, so the send
+    /// raises the same structured `badarity` error (`Wrong number of
+    /// arguments: block expects N but was called with M`) as any other block
+    /// called with the wrong number of arguments. The block itself is never
+    /// compiled: its body cannot run.
+    ///
+    /// ```erlang
+    /// let _Arity = fun (_P1, ..., _Pn) -> 'nil' in apply _Arity (<args>)
+    /// ```
+    fn generate_block_arity_mismatch(
+        &mut self,
+        block: &Block,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let fun_var = self.fresh_temp_var("Arity");
+        let params: Vec<Document<'static>> = block
+            .parameters
+            .iter()
+            .map(|_| leaf::var(self.fresh_temp_var("P")))
+            .collect();
+        let mut arg_docs = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            arg_docs.push(self.expression_doc(arg)?);
+        }
+        Ok(docvec![
+            "let ",
+            leaf::var(fun_var.clone()),
+            " = fun (",
+            join(params, &Document::Str(", ")),
+            ") -> 'nil' in apply ",
+            leaf::var(fun_var),
+            " (",
+            join(arg_docs, &Document::Str(", ")),
+            ")",
+        ])
     }
 
     /// Returns true if `expr` is a compile-time Erlang FFI proxy expression.
@@ -1631,12 +1687,13 @@ impl CoreErlangGenerator {
             return Ok(Document::Vec(parts));
         }
 
-        // Actor/REPL context: use StateAcc-based inlining (generate_conditional_branch_inline)
+        // Actor/REPL context: use StateAcc-based inlining (`generate_repl_arm_inline`,
+        // which is `generate_conditional_branch_inline` outside the REPL)
         let outer_state = self.current_state_var();
 
         // ADR 0111 Addendum 5: REPL-mode conditional-branch
-        // inlining — reaches the SAME `generate_conditional_branch_inline`
-        // single-arm helper, which now builds, `verify()`s, and `render()`s
+        // inlining — reaches the SAME single-arm helper
+        // (`generate_repl_arm_inline`, BT-3823), which builds, `verify()`s, and `render()`s
         // this arm's real per-frame ThreadedIr internally; the scalar
         // `check_branch_frame_linearity` scaffolding check that used to run
         // here is gone.

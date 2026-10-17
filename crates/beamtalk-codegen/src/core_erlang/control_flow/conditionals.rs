@@ -1871,11 +1871,15 @@ impl CoreErlangGenerator {
         // C3 — Tier 2 block-call RHS returns {Result, NewStateAcc};
         // the sanctioned Gensym two-hop (ADR 0111 Addendum 5's "opaque
         // nested-construct state extraction feeding a maps:put" idiom).
-        // A REPL arm's evaluated block that is itself a producer there
-        // (BT-3823) is threaded ahead by C2 below instead, like a loop or
-        // fold. Only the value itself: a Tier 2 call whose *operand* is a
-        // producer keeps this lowering as before BT-3823, so the call's own
-        // `NewState` is never closed away by C2.
+        // In every frame, a value that is itself a local-threading producer
+        // here is threaded ahead by C2 below instead, like a loop or fold
+        // (BT-3823). In a method frame that never changes the verdict: an
+        // evaluated block that is a producer there is not a Tier 2 call
+        // (`is_tier2_value_call` defers to `block_value_producer_in_frame`). In
+        // a REPL arm it routes the evaluated block to the REPL producer. Only
+        // the value itself counts: a Tier 2 call whose *operand* is a producer
+        // keeps this lowering, so the call's own `NewState` is never closed
+        // away by C2.
         if self.is_tier2_value_call(value) && self.local_producer_locals(value).is_none() {
             let t2_tuple = self.fresh_temp_var("T2");
             let t2_state = self.fresh_temp_var("T2St");

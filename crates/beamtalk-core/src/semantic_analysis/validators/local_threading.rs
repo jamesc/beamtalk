@@ -56,9 +56,9 @@ use crate::semantic_analysis::block_facts::{
     is_safe_value_family_selector, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
     operand_producer_writes, outer_local_writes, producer_body_block,
-    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_operand_sites,
-    repl_producer_writes, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
-    value_blocks, value_position_local_assignments,
+    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
+    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
+    stored_block_var_uses, value_blocks, value_position_local_assignments,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
@@ -1125,16 +1125,12 @@ fn report_value_position_assignments(
     }
 }
 
-/// BT-3823: whether `expr` is a `value`-family send to a bare block literal,
-/// whose block the REPL inlines over its bindings map when it writes a binding
-/// (codegen's `generate_block_value_inline_with_mutations`, a REPL arm there):
-/// so it is a REPL arm construct, whatever its arity.
+/// BT-3823: whether `expr` is an evaluated block in the REPL sense
+/// ([`repl_evaluated_block`]: a `value`-family send of the block's own arity to
+/// a bare block literal), whose block the REPL inlines over its bindings map
+/// when it writes a binding: a REPL arm construct.
 fn is_repl_evaluated_block(expr: &Expression) -> bool {
-    matches!(
-        expr.unwrap_parens(),
-        Expression::MessageSend { receiver, .. } if matches!(receiver.as_ref(), Expression::Block(_))
-    ) && local_threading_construct(expr.unwrap_parens())
-        .is_some_and(|c| c.family == LocalThreadingFamily::BlockValue)
+    repl_evaluated_block(expr).is_some()
 }
 
 /// The `(selector, parameter index)` pairs of `class`'s instance methods that

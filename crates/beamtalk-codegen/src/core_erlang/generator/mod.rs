@@ -254,6 +254,12 @@ pub struct CoreErlangGenerator {
     /// agreement test's arm, closure and protected-body (`ensure:`, `on:do:`
     /// body and handler) two-level FRAMES pin that the two sides agree.
     pub(in crate::core_erlang) in_fold_frame: bool,
+    /// BT-3823: whether a REPL arm (`with_repl_arm_producer_sites`) is being
+    /// lowered. In one, a block literal sent a `value` selector of another
+    /// arity is applied, never inlined, so it raises `badarity` like any other
+    /// block (`repl_arm_applies_block`); the REPL root keeps its own inlining
+    /// (BT-3881).
+    pub(in crate::core_erlang) in_repl_arm: bool,
     /// ADR 0131 Phase 2b (BT-3793): the frame a local-threading producer's
     /// `LocalRebind`s are lowered by (§2's table), for every loop or fold
     /// body frame currently being lowered, keyed by that body's
@@ -432,6 +438,7 @@ impl CoreErlangGenerator {
             local_producer_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
             in_fold_frame: false,
+            in_repl_arm: false,
             rebind_frames: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),

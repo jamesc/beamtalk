@@ -2850,9 +2850,17 @@ impl CoreErlangGenerator {
             return false;
         }
         if let Expression::MessageSend {
-            receiver, selector, ..
+            receiver,
+            selector,
+            arguments,
+            ..
         } = expr
         {
+            // BT-3823: a block of another arity in a REPL arm is applied
+            // (`repl_arm_applies_block`), answering a plain value.
+            if self.repl_arm_applies_block(receiver, arguments.len()) {
+                return false;
+            }
             if selector.is_block_invocation() {
                 // Tier 2 block parameter (variable holding a stateful block)
                 // Or a local variable this method itself assigned a Tier 2

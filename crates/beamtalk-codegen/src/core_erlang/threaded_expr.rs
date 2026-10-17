@@ -1445,9 +1445,29 @@ impl CoreErlangGenerator {
             );
         }
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let saved_arm = std::mem::replace(&mut self.in_repl_arm, true);
         let out = f(self);
         self.local_producer_sites = saved;
+        self.in_repl_arm = saved_arm;
         out
+    }
+
+    /// BT-3823: whether `receiver`, sent a `value`-family selector with
+    /// `arity` arguments, is a block literal of another arity inside a REPL arm
+    /// (`in_repl_arm`). Such a send is applied (`generate_block_value_call`),
+    /// never inlined, so it raises `badarity` at run time. The codegen side of
+    /// `beamtalk_core`'s `repl_evaluated_block` arity rule, which keeps the
+    /// same send out of the REPL producer rule (`repl_producer_writes`) and out
+    /// of the REPL arm constructs. The REPL root keeps its own inlining
+    /// (BT-3881).
+    pub(in crate::core_erlang) fn repl_arm_applies_block(
+        &self,
+        receiver: &Expression,
+        arity: usize,
+    ) -> bool {
+        self.is_repl_mode()
+            && self.in_repl_arm
+            && matches!(receiver, Expression::Block(block) if block.parameters.len() != arity)
     }
 
     /// Whether `expr` is a local-threading producer

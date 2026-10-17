@@ -732,7 +732,11 @@ reports the same message at the same span. No operation is surface-specific.
   inputs in a handler or cleanup that raised (`invalid argument`) or dropped
   their write silently (a nested `on:do:`/`ensure:`, a loop or fold, a
   `[:k | ...] value: 4`) now answer right. No input that answered right
-  changes, no new error, and the display format is unchanged. The verdict is
+  changes, no new compile error, and the display format is unchanged. A
+  `value`-family send of another arity to a block literal in an arm (`[t := t
+  + 1] value: 1` in a handler) is applied rather than inlined, so it raises
+  the run-time arity error any block raises instead of ignoring the argument
+  (wrong to right); the input root still inlines it (BT-3881). The verdict is
   the analyser's, so CLI/LSP/MCP diagnostics for the same top-level
   expressions change together. Still errors: a construct in a REPL loop or fold
   body (BT-3876), and an outer-local write in a `match:` arm (the

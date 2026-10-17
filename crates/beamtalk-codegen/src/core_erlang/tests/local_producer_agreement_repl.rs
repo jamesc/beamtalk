@@ -23,7 +23,7 @@ use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingFamily, conditional_arm_blocks, construct_outer_local_writes,
     exception_arm_blocks, local_threading_construct, lookup_arm_blocks, repl_arm_producer_sites,
-    repl_operand_sites, repl_producer_writes,
+    repl_evaluated_block, repl_operand_sites, repl_producer_writes,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -283,8 +283,10 @@ const REPL_ARMS: &[&str] = &[
 
 /// Where a construct `{c}` sits in an arm statement: the statement itself, an
 /// operand, an assignment's value, a literal's element, an evaluated block
-/// (itself a REPL arm, BT-3823, of either arity); and positions that are not
-/// arm sites (a loop body, a cascade), which stay Phase 0 errors.
+/// (itself a REPL arm, BT-3823); and positions that are not arm sites (a loop
+/// body, a cascade), which stay Phase 0 errors. (A block sent a `value`
+/// selector of another arity is applied and raises `badarity`: pinned at run
+/// time in `adr0131_local_rebind.btscript`.)
 const ARM_STATEMENTS: &[&str] = &[
     "{c}",
     "({c}) printString size",
@@ -292,7 +294,6 @@ const ARM_STATEMENTS: &[&str] = &[
     "#[{c}, t]",
     "0 max: ({c}) printString size",
     "#(1) do: [:z | {c}]",
-    "[{c}] value: 1",
     "[:z | {c}] value: 1",
     "({c}) printString; yourself",
 ];
@@ -322,20 +323,9 @@ fn repl_arm_sites<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
     if lookup_arm_blocks(inner).is_some() || !writes_a_binding(inner) {
         return;
     }
-    // BT-3823: an evaluated block (a `value`-family send to a bare block
-    // literal, of any arity) is a REPL arm too.
-    let evaluated = match inner {
-        Expression::MessageSend { receiver, .. } => match receiver.as_ref() {
-            Expression::Block(block)
-                if local_threading_construct(inner)
-                    .is_some_and(|c| c.family == LocalThreadingFamily::BlockValue) =>
-            {
-                Some(vec![block])
-            }
-            _ => None,
-        },
-        _ => None,
-    };
+    // BT-3823: an evaluated block (a `value`-family send of its own arity to
+    // a bare block literal) is a REPL arm too.
+    let evaluated = repl_evaluated_block(inner).map(|block| vec![block]);
     let Some(blocks) = conditional_arm_blocks(inner)
         .or_else(|| exception_arm_blocks(inner))
         .or(evaluated)

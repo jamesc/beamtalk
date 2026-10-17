@@ -2292,11 +2292,38 @@ pub fn repl_producer_writes(
     match construct.family {
         LocalThreadingFamily::Lookup => None,
         LocalThreadingFamily::BlockValue => {
+            repl_evaluated_block(inner)?;
             let writes = construct_outer_local_writes(&construct, bound_outside);
             (!writes.is_empty()).then_some(writes)
         }
         _ => root_producer_writes(inner, bound_outside, RootMethodKind::Actor),
     }
+}
+
+/// BT-3823: the block of an *evaluated block* in the REPL sense: a
+/// `value`-family send to a bare block literal (`[...] value`,
+/// `[:k | ...] value: x`) whose arity matches the block's, or `None`. The REPL
+/// inlines such a block over its bindings map when it writes a binding (a REPL
+/// arm); a block sent a selector of another arity is applied instead, and
+/// raises `badarity` (codegen's `repl_arm_applies_block`; the REPL root still
+/// inlines it, BT-3881). The one rule the Phase 0 check and codegen read.
+#[must_use]
+pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
+    let inner = expr.unwrap_parens();
+    let Expression::MessageSend {
+        receiver,
+        arguments,
+        ..
+    } = inner
+    else {
+        return None;
+    };
+    let Expression::Block(block) = receiver.as_ref() else {
+        return None;
+    };
+    (local_threading_construct(inner)?.family == LocalThreadingFamily::BlockValue
+        && block.parameters.len() == arguments.len())
+    .then_some(block)
 }
 
 /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): the sub-expressions of
