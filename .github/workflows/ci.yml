@@ -75,7 +75,11 @@ jobs:
             macOS) platform=mac ;;
             Windows) platform=windows-tar ;;
           esac
-          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          # On Windows CARGO_HOME is a native path (C:\Users\...); Git Bash's tar
+          # needs the POSIX spelling.
+          if [ "${{ runner.os }}" = "Windows" ]; then cargo_home="$(cygpath -u "$cargo_home")"; fi
+          bin="$cargo_home/bin"
           mkdir -p "$bin"
           curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
             "https://get.nexte.st/0.9.148/${platform}" | tar -xz -C "$bin"
