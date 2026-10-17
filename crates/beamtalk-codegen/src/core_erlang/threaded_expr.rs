@@ -686,14 +686,8 @@ impl CoreErlangGenerator {
         {
             return None;
         }
-        // BT-3823: in the REPL, the one rule the Phase 0 check reads
-        // (`repl_producer_writes`): every family adopts the bindings map whole
-        // and threads no local of its own (`lower_repl_construct_tuple`).
         if self.is_repl_mode() {
-            beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(inner, &|name| {
-                self.binds_threadable_local(name)
-            })?;
-            return self.threaded_locals_of(inner).map(|_| Vec::new());
+            return self.repl_producer_locals(inner);
         }
         // ADR 0131 Phase 3 (BT-3738): a conditional at a method-root site.
         if let Some(locals) = self.conditional_producer_locals(inner) {
@@ -716,6 +710,18 @@ impl CoreErlangGenerator {
             None => Some(locals),
             Some(set) => (set.lowered == set.names).then_some(set.lowered),
         }
+    }
+
+    /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): the threaded locals of
+    /// `expr` when it is a REPL producer by the one rule the Phase 0 check
+    /// reads too (`beamtalk_core`'s `repl_producer_writes`): none, since every
+    /// family adopts the bindings map whole (`lower_repl_construct_tuple`)
+    /// and threads no local of its own; `None` when it is not one.
+    fn repl_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
+        beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(expr, &|name| {
+            self.binds_threadable_local(name)
+        })?;
+        self.threaded_locals_of(expr).map(|_| Vec::new())
     }
 
     /// ADR 0131 Phase 3 (BT-3738): the threaded locals of the conditional
@@ -741,19 +747,11 @@ impl CoreErlangGenerator {
             conditional_arm_blocks, conditional_arms_lower_as_producer, literal_block_value_arm,
         };
         if self.is_repl_mode() {
-            // The REPL root threads its bindings map: a conditional at an
-            // operand site that writes a binding is a producer that adopts the
-            // map whole (`lower_repl_construct_tuple`), threading no local of
-            // its own, exactly as a REPL loop or fold is. So is an evaluated
-            // literal block (`[...] value`, BT-3823): its block is inlined over
-            // the same map.
+            // The REPL threads its bindings map: a conditional (or an
+            // evaluated literal block) at a REPL site is a producer that adopts
+            // the map whole (`repl_producer_locals`).
             conditional_arm_blocks(expr)?;
-            // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
-            // only; the REPL keeps the §6 rejection (the Phase 0 check agrees).
-            if beamtalk_core::semantic_analysis::block_facts::lookup_arm_blocks(expr).is_some() {
-                return None;
-            }
-            return self.threaded_locals_of(expr).map(|_| Vec::new());
+            return self.repl_producer_locals(expr);
         }
         let kind = self.root_method_kind()?;
         let arms = conditional_arm_blocks(expr)?;
@@ -828,7 +826,7 @@ impl CoreErlangGenerator {
         };
         let arms = exception_arm_blocks(expr)?;
         if self.is_repl_mode() {
-            return self.threaded_locals_of(expr).map(|_| Vec::new());
+            return self.repl_producer_locals(expr);
         }
         let kind = self.root_method_kind()?;
         if !exception_send_lowers_as_producer(expr, &arms, kind, &|name| {

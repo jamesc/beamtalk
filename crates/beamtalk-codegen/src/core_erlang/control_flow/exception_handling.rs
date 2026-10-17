@@ -1618,20 +1618,20 @@ impl CoreErlangGenerator {
         frame: Option<&ArmFrame>,
         entry: Option<&ArmEntry>,
     ) -> Result<ExceptionArm> {
-        self.with_branch_context(|this| match frame {
+        let statements = super::super::util::collect_body_exprs(&body.body);
+        self.with_branch_context(|this| {
             // ADR 0131 §2 (Phase 3b): a `BranchArm` frame of an exception
             // producer. Registers the arm's `RebindFrame` and the arm
             // statements' producer sites (the rule a conditional arm uses), so a
             // loop, fold, conditional or `on:do:` in the arm is a producer whose
             // `LocalRebind`s this frame lowers.
-            Some(arm) => {
+            if let Some(arm) = frame {
                 let rebind = RebindFrame {
                     frame: this.current_branch_frame(),
                     kind: RebindFrameKind::BranchArm,
                     threads: arm.threads.clone(),
                 };
-                let statements = super::super::util::collect_body_exprs(&body.body);
-                this.with_rebind_frame(rebind, |this| {
+                return this.with_rebind_frame(rebind, |this| {
                     this.with_body_producer_sites(&statements, false, true, |this| {
                         this.generate_exception_body_with_threading_inner(
                             body,
@@ -1640,17 +1640,14 @@ impl CoreErlangGenerator {
                             entry,
                         )
                     })
-                })
+                });
             }
             // BT-3823: in the REPL the block is inlined over the bindings map,
             // and a producer at one of its statements' sites adopts it
             // (`with_repl_arm_producer_sites`; a no-op outside the REPL).
-            None => {
-                let statements = super::super::util::collect_body_exprs(&body.body);
-                this.with_repl_arm_producer_sites(&statements, |this| {
-                    this.generate_exception_body_with_threading_inner(body, families, None, entry)
-                })
-            }
+            this.with_repl_arm_producer_sites(&statements, |this| {
+                this.generate_exception_body_with_threading_inner(body, families, None, entry)
+            })
         })
     }
 
