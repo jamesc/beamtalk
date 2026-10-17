@@ -9,10 +9,9 @@
 //
 // Each wrong answer pins today's answer under `PIN-BUG BT-3860` and names the
 // correct one; the fix for BT-3860 flips them all. BT-3799's own shape, a loop
-// body whose conditional's receiver assigns (`#(1, 2) do: [:x | (t := t + 1) >
-// 1 ifTrue: [u := 9]]`), trips the ThreadedIr verifier in a debug compiler
-// (the compiler port exits), so it is pinned in
-// crates/beamtalk-repl/tests/repl_nested_assign_pin.rs instead of here.
+// body whose conditional's receiver assigns, is the last case (it tripped the
+// ThreadedIr verifier until BT-3823; crates/beamtalk-repl/tests/
+// repl_nested_assign_pin.rs checks that every entry point compiles it).
 
 t := 0
 // => 0
@@ -66,3 +65,20 @@ t := 0
 // PIN-BUG BT-3860: correct answer 2.
 t
 // => 0
+
+// BT-3799's own shape: a loop body whose conditional's receiver assigns. It
+// tripped the ThreadedIr verifier in a debug compiler until BT-3823 lowered the
+// conditional as a producer of the fold body; it now compiles and, like the
+// shapes above, never rebinds `t`.
+t := 0
+// => 0
+
+u := 0
+// => 0
+
+#(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
+// => _
+
+// PIN-BUG BT-3860: correct answer #[2, 9].
+#[t, u]
+// => #[0, 0]

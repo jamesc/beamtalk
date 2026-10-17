@@ -15,8 +15,8 @@
 // An expression whose answer differs from the ADR today pins today's answer
 // under a `PIN-BUG` marker that cites the open issue and names the correct
 // answer. Each phase of the BT-3743 epic flipped the pins it fixed; the rest
-// are the REPL arms (BT-3823) and the Phase 0 position diagnostic that
-// BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
+// are the REPL loop and fold bodies (BT-3876), `match:` arms (BT-3875) and the
+// Phase 0 position diagnostic that BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
 // shape's wrong answer does not change the next shape's input (the ADR
 // transcript is the exception: it is one stateful sequence, as the ADR writes
 // it).
@@ -95,30 +95,30 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: the inner tuple leaked, raised, and the outer handler
-// answered 3 (a silent wrong answer) until BT-3745; since then a compile
-// error naming the conditional. The REPL's protected body and conditional
-// arm are not producer frames yet (the compiled contexts answer 7 and 1,
-// `o7*` in adr0131local_rebind_test.bt). Correct answer: 7.
+// The inner tuple leaked, raised, and the outer handler answered 3 (a silent
+// wrong answer) until BT-3745, and it was a compile error naming the
+// conditional until BT-3823 made the REPL's arms producer frames: the
+// protected body and the conditional arm are inlined over the bindings map,
+// and the inner `on:do:` at an operand site of the arm adopts it
+// (`repl_arm_producer_sites`), as in the compiled contexts (`o7*` in
+// adr0131local_rebind_test.bt).
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
-// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
+// => 7
 
-// PIN-BUG BT-3823: correct answer 1.
 t
-// => 0
+// => 1
 
 // o8: as o7 without the trailing `7`.
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: a silent wrong answer (3) before BT-3745, a compile error
-// since (see o7). Correct answer: 2.
+// A silent wrong answer (3) before BT-3745, a compile error until BT-3823
+// (see o7).
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
-// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
+// => 2
 
-// PIN-BUG BT-3823: correct answer 1.
 t
-// => 0
+// => 1
 
 // o11: the statement-position control. A conditional, then `ensure:`.
 t := 0
@@ -334,14 +334,14 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: leaked the bindings map as its value and left `t` at 0;
-// since BT-3753 it is an ADR 0131 Phase 0 compile error. Correct answer: 3.
+// Leaked the bindings map as its value and left `t` at 0, then was an ADR
+// 0131 Phase 0 compile error from BT-3753 until BT-3823: the `do:` is the
+// statement of a REPL arm, a producer that adopts the bindings map.
 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]
-// => ERROR: `do:` writes outer local `t`, but as a statement inside a conditional arm
+// => _
 
-// PIN-BUG BT-3823: correct answer 3.
 t
-// => 0
+// => 3
 
 // A loop in a `do:` body.
 t := 0
@@ -481,8 +481,9 @@ r := 0. r := r + ((4 =:= 4) ifTrue: [t := t + 1. 2] ifFalse: [3]). #[r, t]
 // => #[2, 1]
 
 // `on:do:` / `ensure:` as a statement of a REPL loop body is still a Phase 0
-// error (the REPL's loop frames are not exception producers yet; BT-3823), so
-// nothing reaches codegen to mis-thread the loop's accumulator.
+// error (the REPL's loop frames are not producer frames yet, BT-3876; its arms
+// are since BT-3823), so nothing reaches codegen to mis-thread the loop's
+// accumulator.
 t := 0. #(1, 2, 3) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t
 // => ERROR: `on:do:` writes outer local `t`
 
@@ -529,7 +530,151 @@ t
 (Result tryDo: [fresh := 1. 1 / 0]) isError
 // => true
 
-// A nested loop writing the binding keeps the Phase 0 error, as in an
-// `on:do:` protected body (the REPL's arms are not frames yet, BT-3823).
+// A nested loop writing the binding was a Phase 0 error until BT-3823 made the
+// `tryDo:` block a REPL arm: the `do:` is a producer there.
 t := 0. Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]
-// => ERROR: `do:` writes outer local `t`
+// => Result ok: 3
+
+t
+// => 3
+
+// ===========================================================================
+// BT-3823: the REPL's arms are producer frames
+// ===========================================================================
+//
+// A conditional arm, an `on:do:` protected body, handler or `ensure:` cleanup
+// and a `Result tryDo:` block are inlined over the bindings map (their
+// `StateAcc` *is* the map). A loop, fold, conditional, exception construct or
+// evaluated block at one of an arm statement's sites (`repl_arm_producer_sites`:
+// the statement itself, an assignment's value, a send's operands) adopts that
+// map, as one at an operand site of the input does. Each of these was a Phase 0
+// compile error, a raise, or (in a handler) a silently dropped write.
+
+// A fold as an operand in a handler.
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]
+// => 4
+
+t
+// => 3
+
+// An `on:do:` as a statement of a handler (silently dropped before BT-3823).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [t := t + 1] on: Error do: [:e2 | 0]. t]
+// => 1
+
+// A loop in an `ensure:` cleanup.
+t := 0
+// => 0
+
+r := [7] ensure: [#(1, 2) do: [:x | t := t + x]]
+// => 7
+
+t
+// => 3
+
+// A block `value:` in a handler (raised `invalid argument` before BT-3823).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [:k | t := t + k] value: 4. t]
+// => 4
+
+// An evaluated block in a conditional arm, and as an operand of the input.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [[t := t + 1] value. t * 10] ifFalse: [0]
+// => 10
+
+r := ([t := t + 1. 5] value) + 1
+// => 6
+
+t
+// => 2
+
+// A fold as an assignment's value in an arm: the arm binds the new local too.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [u := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. u + 1] ifFalse: [0]
+// => 4
+
+#[t, u]
+// => #[3, 3]
+
+// `tryDo:` as an operand in an arm; a raise discards its write.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [(Result tryDo: [t := t + 1. 5]) unwrap + 1] ifFalse: [0]
+// => 6
+
+r := 4 =:= 4 ifTrue: [(Result tryDo: [t := t + 10. 1 / 0]) isError] ifFalse: [false]
+// => true
+
+t
+// => 1
+
+// Arms nested three deep; a raise in the protected body discards the writes
+// of the arms inside it.
+t := 0
+// => 0
+
+r := [4 =:= 4 ifTrue: [[nil ifNil: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]] ensure: [t := t + 10]] ifFalse: [0]] on: Error do: [:e | 9]
+// => 4
+
+t
+// => 13
+
+r := [4 =:= 4 ifTrue: [(#(1, 2) collect: [:x | t := t + x. x]) size. 1 / 0] ifFalse: [0]] on: Error do: [:e | 9]
+// => 9
+
+t
+// => 13
+
+// A conditional statement of a loop body in an arm, and a `do:separatedBy:`
+// in a protected body, adopt the same map.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | 4 =:= 4 ifTrue: [t := t + x]]. t] ifFalse: [0]
+// => 3
+
+t := 0
+// => 0
+
+r := [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. t] on: Error do: [:e | 0]
+// => 13
+
+// A loop body is not an arm: an `on:do:` in a `do:` in an arm keeps the Phase
+// 0 error (BT-3876).
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t] ifFalse: [0]
+// => ERROR: `on:do:` writes outer local `t`
+
+// ===========================================================================
+// `match:` arms (BT-3817, BT-3823)
+// ===========================================================================
+//
+// A `match:` arm is an expression, not a block: no construct threads a write
+// in it back. Class, value-type and actor methods reject one with a structured
+// error (BT-3817); the REPL is exempt from that error.
+
+t := 0
+// => 0
+
+// PIN-BUG BT-3875: the arm's write is dropped silently. Correct answer: 9
+// (and `t` 9).
+r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
+// => 9
+
+// PIN-BUG BT-3875: correct answer 9.
+t
+// => 0

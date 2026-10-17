@@ -176,9 +176,12 @@ impl CoreErlangGenerator {
                             c.family,
                             LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
                         )
-                    }) && self
-                        .threaded_locals_of(site)
-                        .is_some_and(|set| !set.lowered.is_empty())
+                    }) && self.threaded_locals_of(site).is_some_and(|set| {
+                        // BT-3823: a REPL loop or fold threads the bindings
+                        // map, so its `lowered` set is empty; it writes a
+                        // binding when `names` is not.
+                        !set.lowered.is_empty() || (self.is_repl_mode() && !set.names.is_empty())
+                    })
                 });
             loop_or_fold || self.statement_catch_boundary_writes(stmt, &body_defined)
         })
@@ -254,6 +257,10 @@ impl CoreErlangGenerator {
         let analysis = self.block_profile_or_analyze(block);
         self.needs_mutation_threading(&analysis)
             || self.body_has_list_op_cross_scope_mutations(block)
+            // BT-3823: in the REPL, a block that writes a binding anywhere (a
+            // conditional arm whose write sits in a fold inside a nested
+            // conditional) threads the bindings map, so it is a REPL arm.
+            || self.repl_blocks_write_bindings(&[block])
     }
 
     /// BT-3834: whether a loop or fold over `body` has something to carry, so
@@ -559,6 +566,23 @@ impl CoreErlangGenerator {
         )
         .map(|t| t.lowered)
         .unwrap_or_default()
+    }
+
+    /// BT-3823: whether `blocks` (a conditional's arms or an
+    /// `on:do:`/`ensure:`'s blocks) write a REPL binding anywhere, a nested
+    /// loop or fold included: the [`Self::threaded_locals_of_blocks`] kernel's
+    /// `names`. The REPL threads its bindings map, not `__local__` keys, so
+    /// its `lowered` set ([`Self::branch_threaded_locals`]) is empty for a
+    /// binding and cannot answer this.
+    pub(in crate::core_erlang) fn repl_blocks_write_bindings(&self, blocks: &[&Block]) -> bool {
+        self.is_repl_mode()
+            && self
+                .threaded_locals_of_blocks(
+                    ThreadedConstruct::Inline(LocalThreadingFamily::Conditional),
+                    blocks,
+                    blocks,
+                )
+                .is_some()
     }
 
     /// The blocks of `construct` (recognized from `expr`) whose writes

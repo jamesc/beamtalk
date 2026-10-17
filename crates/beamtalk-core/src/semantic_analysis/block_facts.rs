@@ -2269,11 +2269,77 @@ pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
         .collect()
 }
 
+/// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): the threaded set of `expr`
+/// when it is a local-threading producer at a REPL site (an operand site of
+/// the input, [`repl_operand_sites`], or a REPL arm site,
+/// [`repl_arm_producer_sites`]), or `None`.
+///
+/// The REPL threads its bindings map, so its producer adopts the construct's
+/// next map whole whatever the family (codegen's `lower_repl_construct_tuple`):
+/// a loop, fold, conditional or exception construct by the method rule
+/// ([`root_producer_writes`], read as in an actor method, whose `State` the
+/// bindings map plays), and a `value`-family send to a block literal with or
+/// without parameters (`[:k | t := t + k] value: 4`), whose block the REPL
+/// inlines over the map. A lookup is not one: the REPL keeps its §6 rejection.
+/// The one rule the Phase 0 check and codegen's REPL producer both read.
+#[must_use]
+pub fn repl_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Option<Vec<OuterLocalWrite>> {
+    let inner = expr.unwrap_parens();
+    let construct = local_threading_construct(inner)?;
+    match construct.family {
+        LocalThreadingFamily::Lookup => None,
+        LocalThreadingFamily::BlockValue => {
+            let writes = construct_outer_local_writes(&construct, bound_outside);
+            (!writes.is_empty()).then_some(writes)
+        }
+        _ => root_producer_writes(inner, bound_outside, RootMethodKind::Actor),
+    }
+}
+
+/// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): the sub-expressions of
+/// `stmt`, a statement of a *REPL arm* — a block the REPL inlines over its
+/// bindings map (the arms of a conditional, the protected body, handler and
+/// cleanup of an `on:do:`/`ensure:`, the block of a `Result tryDo:`) — where a
+/// local-threading producer adopts that map: the statement's
+/// [`sequenced_operand_sites`], and the statement itself when it is a
+/// local-threading construct ([`local_threading_construct`]; whether it is a
+/// producer there is [`repl_producer_writes`]). The arm's `StateAcc` *is* the
+/// bindings map, so a producer there continues it exactly as one at an operand
+/// site of the input does (codegen's `lower_repl_construct_tuple`).
+///
+/// Unlike the input root ([`repl_operand_sites`]), the whole value of an
+/// assignment is a site (no assembler unpacks it in an arm) and so are
+/// `eachWithIndex:`/`do:separatedBy:` (measured right in every REPL arm,
+/// BT-3823). The value of a `self.f := V` write is not: a field write has no
+/// REPL meaning.
+///
+/// The one rule the Phase 0 check and codegen's REPL arms
+/// (`with_repl_arm_producer_sites`) both read.
+#[must_use]
+pub fn repl_arm_producer_sites(stmt: &Expression) -> Vec<&Expression> {
+    let inner = stmt.unwrap_parens();
+    if let Expression::Assignment { target, .. } = inner {
+        if is_self_field_target(target) {
+            return Vec::new();
+        }
+    }
+    let mut sites = sequenced_operand_sites(stmt);
+    if local_threading_construct(inner).is_some() {
+        sites.push(inner);
+    }
+    sites
+}
+
 /// BT-3841: `eachWithIndex:`/`do:separatedBy:` became producers for class,
 /// value-type and actor methods; the REPL's operand sites keep excluding them
 /// (they keep their statement and assignment lowering and the Phase 0 operand
-/// rows), because the REPL root's fold frames are unmeasured (BT-3823): the
+/// rows), because the REPL root's fold frames are unmeasured (BT-3876): the
 /// desugared fold's separator conditional fails the `ThreadedIr` verifier there.
+/// (In a REPL arm, [`repl_arm_producer_sites`], both are producers and answer
+/// right, BT-3823.)
 fn is_repl_unmeasured_enumeration(site: &Expression) -> bool {
     matches!(
         site.unwrap_parens(),

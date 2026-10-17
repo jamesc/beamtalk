@@ -686,6 +686,15 @@ impl CoreErlangGenerator {
         {
             return None;
         }
+        // BT-3823: in the REPL, the one rule the Phase 0 check reads
+        // (`repl_producer_writes`): every family adopts the bindings map whole
+        // and threads no local of its own (`lower_repl_construct_tuple`).
+        if self.is_repl_mode() {
+            beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(inner, &|name| {
+                self.binds_threadable_local(name)
+            })?;
+            return self.threaded_locals_of(inner).map(|_| Vec::new());
+        }
         // ADR 0131 Phase 3 (BT-3738): a conditional at a method-root site.
         if let Some(locals) = self.conditional_producer_locals(inner) {
             return Some(locals);
@@ -735,14 +744,10 @@ impl CoreErlangGenerator {
             // The REPL root threads its bindings map: a conditional at an
             // operand site that writes a binding is a producer that adopts the
             // map whole (`lower_repl_construct_tuple`), threading no local of
-            // its own, exactly as a REPL loop or fold is.
+            // its own, exactly as a REPL loop or fold is. So is an evaluated
+            // literal block (`[...] value`, BT-3823): its block is inlined over
+            // the same map.
             conditional_arm_blocks(expr)?;
-            // BT-3841: an evaluated literal block is a producer in a method
-            // only; the REPL lowers `[...] value` itself (the Phase 0 check
-            // agrees, `check_construct`).
-            if literal_block_value_arm(expr).is_some() {
-                return None;
-            }
             // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
             // only; the REPL keeps the §6 rejection (the Phase 0 check agrees).
             if beamtalk_core::semantic_analysis::block_facts::lookup_arm_blocks(expr).is_some() {
@@ -1175,7 +1180,7 @@ impl CoreErlangGenerator {
         let children = Self::sequenced_send_children(expr).unwrap_or_default();
         let (mut prelude, scope) = self.sequence_children(&children, frame)?;
         let (stmts, value) = if self.is_repl_mode() {
-            self.lower_repl_construct_tuple(expr)?
+            self.lower_repl_construct_tuple(expr, frame)?
         } else {
             self.lower_construct_tuple(expr, locals, tail, frame)?
         };
@@ -1205,9 +1210,15 @@ impl CoreErlangGenerator {
     ///
     /// A construct that does not compile to a tuple (the flag stayed unset)
     /// is a plain value with no prelude.
+    ///
+    /// `frame` is the frame the prelude is spliced into: the REPL root, or
+    /// (BT-3823) a REPL arm, whose `StateAcc` is the bindings map itself
+    /// ([`Self::with_repl_arm_producer_sites`]), so the adoption is the same
+    /// there: element 2 is the arm's next `StateAcc`.
     fn lower_repl_construct_tuple(
         &mut self,
         expr: &Expression,
+        frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
         let span = expr.span();
         let enclosing = self.repl_loop_mutated();
@@ -1236,12 +1247,8 @@ impl CoreErlangGenerator {
         let prelude = vec![
             threaded_ir::build_construct_tuple(carrier.clone(), doc, Vec::new(), span),
             ThreadedStmt::Bind {
-                target: VersionedVar::new(
-                    VersionPrefix::State,
-                    self.state_version(),
-                    FrameId::ROOT,
-                ),
-                source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
+                target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
                 op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
                 span,
             },
@@ -1408,6 +1415,36 @@ impl CoreErlangGenerator {
         let out = f(self);
         self.local_producer_sites = saved;
         self.in_fold_frame = saved_fold;
+        out
+    }
+
+    /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): runs `f` (the lowering
+    /// of a REPL arm: a conditional arm, an `on:do:`/`ensure:` block or a
+    /// `tryDo:` block, inlined over the bindings map) with the arm statements'
+    /// `repl_arm_producer_sites` added to the local-producer sites, so a loop,
+    /// fold, conditional or exception construct there that writes a binding is
+    /// a producer adopting the arm's `StateAcc` (the bindings map itself,
+    /// [`Self::lower_repl_construct_tuple`]) instead of leaking its
+    /// `{Value, Bindings}` tuple into an operand. A no-op outside the REPL.
+    pub(super) fn with_repl_arm_producer_sites<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if !self.is_repl_mode() {
+            return f(self);
+        }
+        let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
+        for stmt in body {
+            sites.extend(
+                beamtalk_core::semantic_analysis::block_facts::repl_arm_producer_sites(stmt)
+                    .into_iter()
+                    .map(Expression::span),
+            );
+        }
+        let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let out = f(self);
+        self.local_producer_sites = saved;
         out
     }
 

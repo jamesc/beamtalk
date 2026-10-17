@@ -337,10 +337,11 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
 /// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` compiles to its
 /// `{Value, Bindings}` tuple (`beamtalk_result:'tryDo:'/2`) only where the REPL
 /// root unpacks one: a statement, an assignment's value, a producer operand
-/// site. This codegen is reached with the Phase 0 check bypassed, so it must
-/// not depend on that check keeping a `tryDo:` out of a closure, an argument
-/// or an arm. (A `tryDo:` in a REPL loop body is the Phase 0 error the other
-/// REPL exception constructs have, BT-3823: the loop frame does not lower it.)
+/// site, or (BT-3823) a producer site of a REPL arm or fold body, whose
+/// producer unpacks it the same way. This codegen is reached with the Phase 0 check bypassed, so it
+/// must not depend on that check keeping a `tryDo:` out of a closure or an
+/// argument. (A `tryDo:` in a REPL loop body is the Phase 0 error the other
+/// REPL exception constructs have, BT-3876: the loop frame does not lower it.)
 #[test]
 fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     let tuple_call = "call 'beamtalk_result':'tryDo:'(fun (StateAcc)";
@@ -350,6 +351,12 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
         "r := Result tryDo: [t := t + 1. 1]\nr",
         "(Result tryDo: [t := t + 1. 1]) isOk",
         "Transcript show: (Result tryDo: [t := t + 1. 1]) printString",
+        "true ifTrue: [Result tryDo: [t := t + 1. 1]]",
+        "r := [(Result tryDo: [t := t + 1. 1]) isOk] on: Error do: [:e | false]",
+        // A statement of a REPL fold body, whose `StateAcc` is the bindings map
+        // too: the producer adopts element 2 (the Phase 0 check still rejects
+        // the input, BT-3876).
+        "#(1) do: [:x | Result tryDo: [t := t + 1. 1]]",
     ] {
         for (entry, code) in both_outputs("try_do_root", src, true) {
             assert!(code.contains(tuple_call), "{entry}: {src}\n{code}");
@@ -357,7 +364,7 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     }
     for src in [
         "blk := [Result tryDo: [t := t + 1. 1]]",
-        "true ifTrue: [Result tryDo: [t := t + 1. 1]]",
+        "#(1) collect: [:x | [Result tryDo: [t := t + 1. 1]] value: x]",
     ] {
         for (entry, code) in both_outputs("try_do_nested", src, false) {
             assert!(!code.contains(tuple_call), "{entry}: {src}\n{code}");

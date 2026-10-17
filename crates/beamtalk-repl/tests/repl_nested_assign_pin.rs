@@ -4,20 +4,16 @@
 //! BT-3799 / BT-3860 (ADR 0131): a REPL loop body whose conditional's
 //! receiver assigns a binding (`(t := t + 1) > 1 ifTrue: [u := 9]`).
 //!
-//! A local assignment in value position never rebinds its local (BT-3860).
-//! In this shape the REPL's `do:` fold body also binds a `State` version tagged
-//! with the root frame inside the fold's own frame, which the `ThreadedIr`
-//! verifier reports as a `BindFrameMismatch` ("foldl body mode/shape
-//! mismatch"): a debug compiler panics (the
-//! workspace's compiler port exits), a release compiler emits the code and the
-//! REPL answers `t` = 0.
+//! The REPL's `do:` fold body used to bind a `State` version tagged with the
+//! root frame inside the fold's own frame, which the `ThreadedIr` verifier
+//! reported as a `BindFrameMismatch` (a debug compiler panicked). Since BT-3823
+//! the conditional is a producer of the fold body whose prelude binds in the
+//! frame it is spliced into, so every entry point compiles it. A local
+//! assignment in value position still never rebinds its local (BT-3860): the
+//! answer is pinned at run time in
+//! `tests/repl-protocol/cases/adr0131_nested_assign.btscript`.
 //!
-//! PIN-BUG BT-3860: the correct behaviour is no verifier error and `t` = 2,
-//! `u` = 9 after the loop. The fix for BT-3860 turns this into a test that the
-//! input compiles in every entry point. The other REPL shapes of BT-3860 are
-//! pinned at runtime in `tests/repl-protocol/cases/adr0131_nested_assign.btscript`.
-//!
-//! Debug builds only: a release compiler has no verifier panic to pin.
+//! Debug builds only: a release compiler has no verifier panic to check for.
 #![cfg(debug_assertions)]
 
 use beamtalk_core::ast::Expression;
@@ -51,7 +47,7 @@ fn panic_message(f: impl FnOnce()) -> Option<String> {
 }
 
 #[test]
-fn a_conditional_receiver_assignment_in_a_repl_loop_body_trips_the_verifier() {
+fn a_conditional_receiver_assignment_in_a_repl_loop_body_compiles() {
     let expressions = statements(INPUT);
     let eval = panic_message(|| {
         let _ = generate_repl_expressions(&expressions, "repl_nested_assign");
@@ -65,11 +61,6 @@ fn a_conditional_receiver_assignment_in_a_repl_loop_body_trips_the_verifier() {
         );
     });
     for (entry, message) in [("eval", eval), ("trace", trace)] {
-        let message =
-            message.unwrap_or_else(|| panic!("{entry}: BT-3860 is fixed? flip this PIN-BUG"));
-        assert!(
-            message.contains("BindFrameMismatch"),
-            "{entry}: unexpected panic: {message}"
-        );
+        assert!(message.is_none(), "{entry}: {message:?}");
     }
 }

@@ -54,9 +54,10 @@ use crate::semantic_analysis::block_facts::{
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
     is_safe_value_family_selector, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, loop_body_producer_sites, operand_producer_writes,
-    outer_local_writes, producer_body_block, receiver_statically_not_dictionary,
-    repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
+    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
+    operand_producer_writes, outer_local_writes, producer_body_block,
+    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_operand_sites,
+    repl_producer_writes, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
     value_blocks,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
@@ -913,9 +914,10 @@ fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext
         return true;
     }
     if let Position::NestedStatement { depth, .. } = position {
-        // The REPL rows are unmeasured past depth one (BT-3823) and keep the
-        // coarse rows' verdict, which may accept unmeasured three-deep shapes
-        // until BT-3823 measures them.
+        // The REPL rows are unmeasured past depth one and keep the coarse
+        // rows' verdict, which may accept unmeasured three-deep shapes; a
+        // construct at a REPL arm site never reaches them (it is a producer,
+        // BT-3823), and REPL loop bodies are BT-3876.
         if depth >= 3 && context != Repl && UNFINISHED_FAMILIES.contains(&kind) {
             return false;
         }
@@ -1354,6 +1356,13 @@ impl<'d> Walker<'d> {
                     sequenced_operand_sites(&stmt.expression)
                 };
                 self.operand_sites = sites.into_iter().map(Expression::span).collect();
+            } else if let (Repl, Some(Some(frame))) = (self.context, self.frame_sites.last_mut()) {
+                // BT-3823: a REPL arm's sites (codegen's
+                // `with_repl_arm_producer_sites` reads the same rule).
+                frame.sites = repl_arm_producer_sites(&stmt.expression)
+                    .into_iter()
+                    .map(Expression::span)
+                    .collect();
             } else if let Some(Some(frame)) = self.frame_sites.last_mut() {
                 frame.statement = LoopBodyContext::new(&stmt.expression, false, false, false);
                 if frame.arm {
@@ -1691,6 +1700,9 @@ impl<'d> Walker<'d> {
     /// therefore `BranchArm` frames (ADR 0131 §2, Phase 3 and 3b). The REPL
     /// keeps its own lowering.
     fn is_arm_frame_conditional(&self, expr: &Expression, position: Position) -> bool {
+        if self.context == Repl {
+            return self.is_repl_arm_construct(expr, position);
+        }
         let Some(kind) = self.root_method_kind() else {
             return false;
         };
@@ -1714,6 +1726,56 @@ impl<'d> Walker<'d> {
             Actor => Some(RootMethodKind::Actor),
             Repl => None,
         }
+    }
+
+    /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): whether `expr` is a
+    /// REPL construct whose blocks are *REPL arms*: a conditional (not a
+    /// lookup, not an evaluated literal block, whose block the REPL inlines
+    /// through its own path) or an `on:do:`/`ensure:`/`Result tryDo:` that
+    /// writes a binding, so
+    /// codegen inlines its blocks over the bindings map
+    /// (`generate_repl_arm_inline`, `with_repl_arm_producer_sites`), at a
+    /// position whose lowering compiles it that way: a statement, an
+    /// assignment's whole value or an operand site of the input
+    /// ([`repl_operand_sites`]), or a site of a REPL arm it is nested in
+    /// ([`repl_arm_producer_sites`]).
+    fn is_repl_arm_construct(&self, expr: &Expression, position: Position) -> bool {
+        let inner = expr.unwrap_parens();
+        if lookup_arm_blocks(inner).is_some() || literal_block_value_arm(inner).is_some() {
+            return false;
+        }
+        if conditional_arm_blocks(inner).is_none() && exception_arm_blocks(inner).is_none() {
+            return false;
+        }
+        let writes = local_threading_construct(inner).is_some_and(|c| {
+            !construct_outer_local_writes(&c, &|name| self.is_bound(name)).is_empty()
+        });
+        if !writes {
+            return false;
+        }
+        if self.depth == 0 {
+            return matches!(
+                position,
+                Position::Statement | Position::AssignValue { nested: false }
+            ) || self.operand_sites.contains(&inner.span());
+        }
+        self.at_repl_arm_site(inner)
+    }
+
+    /// BT-3823: whether every enclosing block is a REPL arm and `expr` is one
+    /// of the current arm statement's [`repl_arm_producer_sites`].
+    fn at_repl_arm_site(&self, expr: &Expression) -> bool {
+        self.context == Repl
+            && !self.frame_sites.is_empty()
+            && self
+                .frame_sites
+                .iter()
+                .all(|frame| frame.as_ref().is_some_and(|f| f.arm))
+            && self
+                .frame_sites
+                .last()
+                .and_then(Option::as_ref)
+                .is_some_and(|frame| frame.sites.contains(&expr.unwrap_parens().span()))
     }
 
     /// Whether `expr`, a conditional or `on:do:`/`ensure:` at a site of the
@@ -1797,14 +1859,15 @@ impl<'d> Walker<'d> {
         let bound = |name: &str| self.is_bound(name);
         let root_producer = match self.context {
             // ADR 0131 Phase 2d (BT-3798): a lookup is a producer in a method
-            // only; the REPL keeps the §6 rejection. So does an evaluated
-            // literal block (BT-3841): the REPL root threads its bindings map
-            // and lowers `[...] value` itself (codegen's
+            // only; the REPL keeps the §6 rejection (codegen's
             // `conditional_producer_locals` agrees).
-            Repl if is_lookup || literal_block_value_arm(expr).is_some() => None,
-            // The REPL's conditionals at an operand site (`repl_operand_sites`)
-            // are producers that adopt the bindings map whole.
-            Repl | Actor => root_producer_writes(expr, &bound, RootMethodKind::Actor),
+            // The REPL's constructs at an operand site (`repl_operand_sites`)
+            // or a REPL arm site (`repl_arm_producer_sites`) are producers that
+            // adopt the bindings map whole (BT-3823: `repl_producer_writes`,
+            // the rule codegen's REPL producer reads, a `value` send to a block
+            // literal included).
+            Repl => repl_producer_writes(expr, &bound),
+            Actor => root_producer_writes(expr, &bound, RootMethodKind::Actor),
             Class => root_producer_writes(expr, &bound, RootMethodKind::Class),
             ValueType => root_producer_writes(expr, &bound, RootMethodKind::ValueType),
         };
@@ -1845,6 +1908,14 @@ impl<'d> Walker<'d> {
                 .is_some_and(|frame| frame.sites.contains(&expr.span()))
             && (operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
                 || self.arm_frame_conditional_producer(expr));
+        // BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): in a REPL arm — every
+        // enclosing block an arm of a REPL construct inlined over the bindings
+        // map (`is_repl_arm_construct`) — a construct at one of the statement's
+        // `repl_arm_producer_sites` is a producer that adopts that map, as one
+        // at an operand site of the input is.
+        if self.depth > 0 && root_producer.is_some() && self.at_repl_arm_site(expr) {
+            return;
+        }
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
         if frame_site && is_loop_body_producer_site(expr, &ctx) {
@@ -1865,10 +1936,10 @@ impl<'d> Walker<'d> {
                     if matches!(arguments.get(1), Some(Expression::Block(h)) if !self.writes_of(h).is_empty())
             );
         let kind = ConstructKind::of(&selector, handler_writes);
-        // BT-3841 PR 5: the REPL has no measured rows for the detect search
-        // (BT-3823) and a writing plain `detect:` in a REPL arm leaks the
-        // fold's tuple and drops the write, so there it stays a generic list
-        // op, which the REPL arm rows deny.
+        // BT-3841 PR 5: the REPL has no measured rows for the detect search,
+        // so a writing plain `detect:` that is not a producer here (one at a
+        // REPL arm site is, BT-3823) stays a generic list op, which the REPL
+        // rows deny.
         let kind = if self.context == Repl && selector == "detect:" {
             ListOp
         } else {
@@ -2160,7 +2231,12 @@ impl<'d> Walker<'d> {
 
     /// A `match:` arm that assigns an outer local. The arm is an expression,
     /// not a block, so no construct threads its write back to the method
-    /// (BT-3817): compiling it would drop the write silently. Walks the whole
+    /// (BT-3817): compiling it would drop the write silently. BT-3823 kept this
+    /// error rather than lowering `match:` as a producer: that needs a `match:`
+    /// family in the shared producer rule and a frame per arm in codegen's
+    /// `match_lowering`, which is BT-3875. The REPL is exempt (it may not turn
+    /// accepted input into an error), and drops the write there (pinned in
+    /// `adr0131_local_rebind.btscript`, BT-3875). Walks the whole
     /// arm (guard and body) without entering a nested block literal, whose
     /// writes are the constructs' own business; the arm's pattern variables
     /// (the innermost scope frame, already pushed) are the arm's own.
