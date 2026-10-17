@@ -1059,8 +1059,6 @@ struct ReceiverFacts<'a> {
     self_is_dictionary: bool,
 }
 
-/// Walks one method body (or module-level expression list) whose
-/// outermost frame binds `params`.
 /// [`check_body`] for one method. ADR 0132 Phase 0b (BT-3867): in a class or
 /// value-type method a stored Tier 2 block sent `value` is an inline producer,
 /// so the body is checked with each promotable one inlined at its sends
@@ -1089,6 +1087,8 @@ fn check_method(
     );
 }
 
+/// Walks one method body (or module-level expression list) whose
+/// outermost frame binds `params`.
 fn check_body(
     context: MethodContext,
     params: Vec<EcoString>,

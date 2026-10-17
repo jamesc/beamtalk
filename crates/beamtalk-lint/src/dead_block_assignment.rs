@@ -183,7 +183,10 @@ fn check_method(method: &MethodDefinition, out: &mut Out<'_>) {
     }
     // ADR 0132 Phase 0b (BT-3867): a stored block sent `value` in the method
     // body is evaluated in place (`inline_stored_tier2_values`, the rule the
-    // §6 check and codegen read), so the lint sees the evaluated literal.
+    // §6 check and codegen read for class and value-type methods), so the lint
+    // sees the evaluated literal. Those two skip actor instance methods; the
+    // rewrite is applied here to every method this pass checks, and `check`
+    // already skips Actor classes, so the lint and §6 agree.
     let params: Vec<_> = method
         .parameters
         .iter()

@@ -57,6 +57,7 @@ use crate::semantic_analysis::block_facts::{
     analyze_block, captured_local_mutations, is_safe_value_family_selector, normalize_cascade,
     outer_local_writes, stored_block_var_uses,
 };
+use crate::semantic_analysis::{extract_match_arm_bindings, extract_pattern_bindings};
 use ecow::EcoString;
 use std::collections::HashSet;
 
@@ -125,23 +126,7 @@ fn binding_is_promotable(
     params: &[EcoString],
 ) -> bool {
     let name = id.name.as_str();
-    // Bound once, never a block parameter, never mentioned by its own block.
-    let mut assigns = 0usize;
-    let mut shadowed = false;
-    for stmt in stmts {
-        walk_expression(&stmt.expression, &mut |e| match e {
-            Expression::Assignment { target, .. } => {
-                if matches!(target.as_ref(), Expression::Identifier(t) if t.name == id.name) {
-                    assigns += 1;
-                }
-            }
-            Expression::Block(b) if b.parameters.iter().any(|p| p.name == id.name) => {
-                shadowed = true;
-            }
-            _ => {}
-        });
-    }
-    if assigns != 1 || shadowed {
+    if !bound_once_and_unshadowed(stmts, id) {
         return false;
     }
     let mut self_use = false;
@@ -198,6 +183,11 @@ fn binding_is_promotable(
     let mut touched: HashSet<&str> = HashSet::new();
     touched.extend(analysis.captured_reads.iter().map(String::as_str));
     touched.extend(analysis.local_writes.iter().map(String::as_str));
+    // A pattern binder (a `match:` arm, a destructuring assignment) of a name
+    // the block touches would capture the inlined block's reads and writes.
+    if binds_any_of(&stmts[index + 1..], &touched) {
+        return false;
+    }
     let last_use = (index + 1..stmts.len())
         .rev()
         .find(|&j| stored_block_var_uses(&stmts[j].expression, name).1)
@@ -229,6 +219,71 @@ fn binding_is_promotable(
         return false;
     }
     parameters_are_unambiguous(stmts, index, block, params)
+}
+
+/// Whether `id` is assigned exactly once in `stmts` and no block parameter,
+/// `match:` arm or destructuring pattern binds its name.
+fn bound_once_and_unshadowed(stmts: &[ExpressionStatement], id: &Identifier) -> bool {
+    // Bound once, never a block parameter, never mentioned by its own block.
+    let mut assigns = 0usize;
+    let mut shadowed = false;
+    for stmt in stmts {
+        walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Assignment { target, .. } => {
+                if matches!(target.as_ref(), Expression::Identifier(t) if t.name == id.name) {
+                    assigns += 1;
+                }
+            }
+            Expression::Block(b) if b.parameters.iter().any(|p| p.name == id.name) => {
+                shadowed = true;
+            }
+            // Every other binder the NameResolver defines fresh: `match:` arm
+            // patterns and destructuring patterns.
+            Expression::Match { .. } | Expression::DestructureAssignment { .. }
+                if pattern_binders(e).contains(&id.name) =>
+            {
+                shadowed = true;
+            }
+            _ => {}
+        });
+    }
+    assigns == 1 && !shadowed
+}
+
+/// Whether a `match:` arm or destructuring assignment in `stmts` binds one of
+/// `names`.
+fn binds_any_of(stmts: &[ExpressionStatement], names: &HashSet<&str>) -> bool {
+    let mut clash = false;
+    for stmt in stmts {
+        walk_expression(&stmt.expression, &mut |e| {
+            if pattern_binders(e)
+                .iter()
+                .any(|n| names.contains(n.as_str()))
+            {
+                clash = true;
+            }
+        });
+    }
+    clash
+}
+
+/// The names a `match:` expression's arm patterns or a destructuring
+/// assignment's pattern bind (empty for any other expression), via the same
+/// helpers the `NameResolver` defines them with.
+fn pattern_binders(e: &Expression) -> Vec<EcoString> {
+    match e {
+        Expression::Match { arms, .. } => arms
+            .iter()
+            .flat_map(|arm| extract_match_arm_bindings(&arm.pattern).0)
+            .map(|id| id.name)
+            .collect(),
+        Expression::DestructureAssignment { pattern, .. } => extract_pattern_bindings(pattern)
+            .0
+            .into_iter()
+            .map(|id| id.name)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// A block with parameters becomes `[p := arg. ...] value`: each parameter is
@@ -536,6 +591,20 @@ mod tests {
             "    b := [3]\n    b value",
             // A cascade nested in another expression.
             "    t := 0\n    b := [:n | t := t + n]\n    (b value: 1; value: 2) + 1\n    t",
+            // A `match:` arm binder with the stored local's name shadows it.
+            "    t := 0\n    b := [t := t + 1]\n    b value\n    r := [99] match: [b -> b value]\n    #[r, t]",
+            // ... also when the arm binder is nested in a larger pattern.
+            "    t := 0\n    b := [t := t + 1]\n    b value\n    r := [99] match: [{1, b} -> b value]\n    #[r, t]",
+            // A destructuring assignment rebinds the stored local.
+            "    t := 0\n    b := [t := t + 1]\n    {b, c} := Tuple withAll: #(1, 2)\n    b value\n    t",
+            // A match arm binder named like a local the block touches.
+            "    t := 0\n    b := [t := t + 1]\n    r := [99] match: [t -> b value]\n    #[r, t]",
+            // A destructuring assignment rebinding a local the block touches.
+            "    t := 0\n    b := [t := t + 1]\n    {t, c} := Tuple withAll: #(1, 2)\n    b value\n    t",
+            // A block parameter named like the stored local.
+            "    t := 0\n    b := [t := t + 1]\n    #(1) do: [:b | b printString]\n    b value\n    t",
+            // A block-local assignment of the stored local's name in a nested block.
+            "    t := 0\n    b := [t := t + 1]\n    [b := 5] value\n    b value\n    t",
         ] {
             assert!(inlined(body).is_none(), "{body}");
         }
