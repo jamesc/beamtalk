@@ -42,7 +42,7 @@
 //! Non-mutating calls return `None` here and fall through to the ordinary dispatch
 //! to the `collection.bt` method, preserving existing behaviour.
 
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
@@ -325,8 +325,15 @@ impl CoreErlangGenerator {
         }
         let original_send = enumeration_send(receiver, selector, arguments);
         // Always the separator: the selector, arity and block shapes are checked.
+        // A miss here must not fall back to `collection.bt`'s un-threaded
+        // `do:separatedBy:`: the gate above found carried mutations, and the
+        // fallback would drop them (the BT-3834 class of bug).
         let Some(arm_handler) = producer_body_arm_handler(&original_send) else {
-            return Ok(None);
+            return Err(CodeGenError::Internal(
+                "do:separatedBy: with carried mutations: core's producer_body_arm_handler \
+                 names no separator, so its writes cannot be threaded"
+                    .to_string(),
+            ));
         };
 
         let span = element_block.span;

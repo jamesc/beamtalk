@@ -382,7 +382,7 @@ pub fn producer_handler_arg_index(sel: &str, arity: usize) -> Option<usize> {
 /// `detect:ifNone:`'s `ifNone:` handler is not.
 #[must_use]
 pub fn producer_handler_is_body_arm(sel: &str, arity: usize) -> bool {
-    producer_handler_arg_index(sel, arity).is_some() && sel == "do:separatedBy:"
+    matches!((sel, arity), ("do:separatedBy:", 2))
 }
 
 /// Whether `sel` is a counted loop in [`producer_body_arg_index`]'s table
