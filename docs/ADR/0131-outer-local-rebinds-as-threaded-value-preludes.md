@@ -721,9 +721,21 @@ of these raised the same `Cannot call 'value' on Block ... captures mutable
 state` at the first `value` in class, value-type and actor methods (the
 actor's last-statement `b := [...]` answered `nil`). Still not seen: a local
 rebound to something else in only one branch before it escapes (any rebind
-forgets the block), a local that is the value of a conditional arm (an
-alias, `c ifTrue: [b] ...` stored in another local), and a block that is the
-value of a non-inlined send.
+forgets the block), and a block that is the value of a non-inlined send.
+
+BT-3859 closes two gaps in that binding map. A block bound through a
+conditional arm whose write targets a local first bound in that arm
+(`b := c ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]. ^b`) had its writes
+taken after the arm's scope was gone, so `u` looked like the block's own: the
+walker now records each value block's write while it is at the block, the
+same walk the literal path reports from. And a local that aliases a
+block-valued local (`c := b. ^c`, `c := x ifTrue: [b] ifFalse: [nil]`, an
+arm-local `b` included) now counts as that block, reported at the block's own
+binding. An actor method answers `nil` for a last-statement local assignment
+where class and value-type methods answer the value (BT-3882, pinned by
+`adr0131section6escape_test.bt`), so in an actor a block that is that value
+is dropped unrun rather than returned; §6 still rejects it, saying the block
+never runs.
 
 **A `whileTrue:`/`whileFalse:` condition block (BT-3782).** The loop's
 *body* is a §1 construct, but its keyword *condition* is a block receiver

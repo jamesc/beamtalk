@@ -961,6 +961,7 @@ sealed typed Value subclass: Foo
     ///
     /// [`analyse`]: beamtalk_core::semantic_analysis::analyse
     #[test]
+    #[allow(clippy::too_many_lines)] // one shape table, one row per shape
     fn lint_and_section6_agree() {
         use Owner::{CompileError, Either, Lint, Neither};
         let shapes: &[(&str, Owner)] = &[
@@ -988,6 +989,26 @@ sealed typed Value subclass: Foo
             ("blk := [x := 2]\n    #[blk]", CompileError),
             ("blk := [x := 2]\n    ^blk", CompileError),
             ("blk := [x := 2]\n    self.f := blk", CompileError),
+            // BT-3859: a write to a local first bound in an arm the value
+            // passes through, and a local aliasing the block.
+            (
+                "blk := x > 0 ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\n    ^blk",
+                CompileError,
+            ),
+            ("blk := [x := 2]\n    c := blk\n    ^c", CompileError),
+            ("blk := [x := 2]\n    c := blk\n    #[c]", CompileError),
+            (
+                "blk := [x := 2]\n    c := x > 0 ifTrue: [blk] ifFalse: [nil]\n    ^c",
+                CompileError,
+            ),
+            // Neither escapes, so both stay the lint's never-sent blocks: an
+            // alias that is stored and never sent, and an arm-local block that
+            // is not the arm's value.
+            ("blk := [x := 2]\n    c := blk", Lint),
+            (
+                "blk := x > 0 ifTrue: [u := 0. [u := u + 1]. 0] ifFalse: [nil]",
+                Lint,
+            ),
             ("^[x := 2]", CompileError),
             ("#[[x := 2]]", CompileError),
             ("#([x := 2])", CompileError),
@@ -1024,6 +1045,12 @@ sealed typed Value subclass: Foo
             ("[[x := 2]] value", CompileError),
             ("blk := nil\n    blk := [x := 2]", CompileError),
             ("blk := [x := 2]\n    blk := nil", Lint),
+            // BT-3859.
+            (
+                "blk := x > 0 ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]",
+                CompileError,
+            ),
+            ("blk := [x := 2]\n    c := blk", CompileError),
             ("blk := [:t | t := 1. t]", Neither),
         ];
         let compile_error_categories = [

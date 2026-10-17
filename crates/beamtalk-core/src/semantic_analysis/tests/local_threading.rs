@@ -2217,36 +2217,118 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
         "local in a branch",
         "b := [t := t + 1]\ntrue ifTrue: [b] ifFalse: [nil]",
     ),
+    // BT-3859: a local that aliases a block-valued local, directly or through
+    // a conditional arm, counts as that block.
+    ("returned alias", "b := [t := t + 1]\nc := b\n^c"),
+    ("alias in a literal", "b := [t := t + 1]\nc := b\n#[c]"),
+    (
+        "alias of a branch value",
+        "b := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nc := b\n^c",
+    ),
+    (
+        "alias through a branch",
+        "b := [t := t + 1]\nc := true ifTrue: [b] ifFalse: [nil]\n^c",
+    ),
+    (
+        "alias of an arm-local binding",
+        "c := true ifTrue: [b := [t := t + 1]. b] ifFalse: [nil]\n^c",
+    ),
+    ("alias as the last statement", "b := [t := t + 1]\nc := b"),
+    (
+        "branch value as the last statement",
+        "b := true ifTrue: [[t := t + 1]] ifFalse: [[0]]",
+    ),
+];
+
+/// The [`ESCAPE_SHAPES`] whose block is the value of the method body's last
+/// statement, a local assignment: an actor method answers `nil` there, not
+/// the block (BT-3882), so in an actor the block is dropped unrun and the
+/// error says so rather than "returned" (BT-3859).
+const ACTOR_DROPPED_SHAPES: &[&str] = &[
+    "returned via last-statement assignment",
+    "alias as the last statement",
+    "branch value as the last statement",
+];
+
+/// BT-3859: the [`ESCAPE_SHAPES`] whose block writes `u`, a local first bound
+/// in a conditional arm the value passes through, rather than the method
+/// local `t`. Probed before the fix: each compiled, and the first `value` of
+/// the answer raised `captures mutable state` in class, value-type and actor
+/// methods.
+const ARM_LOCAL_ESCAPE_SHAPES: &[(&str, &str)] = &[
+    (
+        "arm-local write in a returned binding",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\n^b",
+    ),
+    (
+        "arm-local write in a binding in a literal",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\n#[b]",
+    ),
+    (
+        "arm-local write through an alias",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\nc := b\n^c",
+    ),
+    (
+        "arm-local write in a nested arm",
+        "b := true ifTrue: [u := 0. false ifTrue: [0] ifFalse: [[u := u + 1]]] ifFalse: [nil]\n^b",
+    ),
 ];
 
 #[test]
 fn section6_escaping_blocks_are_errors_in_every_context() {
-    for (name, body) in ESCAPE_SHAPES {
+    let rows = ESCAPE_SHAPES
+        .iter()
+        .map(|&(name, body)| (name, body, "t"))
+        .chain(
+            ARM_LOCAL_ESCAPE_SHAPES
+                .iter()
+                .map(|&(name, body)| (name, body, "u")),
+        );
+    for (name, body, local) in rows {
         for (context, src) in [
             ("class", in_class(body)),
             ("value", in_value(body)),
             ("actor", in_actor(body)),
         ] {
+            let dropped = context == "actor" && ACTOR_DROPPED_SHAPES.contains(&name);
             let diags = adr0131_diagnostics(&src);
             let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
             assert_eq!(s6.len(), 1, "{name} in {context}: {src}\n{diags:?}");
             let d = s6[0];
             assert_eq!(d.severity, Severity::Error, "{name} in {context}");
             assert!(
-                d.message.contains("writes outer local `t`")
+                d.message.contains(&format!("writes outer local `{local}`"))
                     && d.message.contains("nothing can return the write"),
                 "{name} in {context}: {}",
                 d.message
             );
-            let hint = d.hint.as_deref().unwrap_or_default();
+            assert_eq!(
+                d.message
+                    .contains("an actor method drops (it answers `nil`)"),
+                dropped,
+                "{name} in {context}: {}",
+                d.message
+            );
             assert!(
-                hint.contains("`self.t := self.t + 1`") && hint.contains("assign it where"),
+                !dropped || !d.message.contains("returned from the method"),
+                "{name} in {context}: {}",
+                d.message
+            );
+            let hint = d.hint.as_deref().unwrap_or_default();
+            let field = format!("`self.{local} := self.{local} + 1`");
+            let way_out = if dropped {
+                "send it `value` before the method ends"
+            } else {
+                "assign it where"
+            };
+            assert!(
+                hint.contains(&field) && hint.contains(way_out),
                 "{name} in {context}: {hint}"
             );
             assert!(
                 d.notes
                     .iter()
-                    .any(|n| n.message.contains("`t` is written here")),
+                    .any(|n| n.message.contains(&format!("`{local}` is written here"))),
                 "{name} in {context}"
             );
         }
@@ -2273,6 +2355,24 @@ fn section6_escape_points_at_the_block_or_its_binding() {
             .notes
             .iter()
             .any(|n| n.message.contains("`b` escapes here")),
+        "{diags:?}"
+    );
+
+    // BT-3859: an alias is reported at the block's own binding, naming the
+    // alias that escapes.
+    let src = in_class("b := [t := t + 1]\nc := b\n^c");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].span.start() as usize, src.find("b := [").unwrap());
+    assert!(
+        diags[0].message.contains("block stored in `c`"),
+        "{diags:?}"
+    );
+    assert!(
+        diags[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("`c` escapes here")),
         "{diags:?}"
     );
 
@@ -2368,6 +2468,10 @@ fn section6_values_that_are_not_returned_are_not_escapes() {
         "x := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nnil",
         "true ifTrue: [t := t + 1] ifFalse: [t := 0]",
         "b := [t := t + 1] value",
+        // BT-3859: an alias rebound before it escapes, and a block parameter
+        // that shadows the block-valued local.
+        "b := [t := t + 1]\nc := b\nc := nil\n^c",
+        "b := [t := t + 1]\nc := nil\n#(1) do: [:b | c := b]\n^c",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             assert_eq!(

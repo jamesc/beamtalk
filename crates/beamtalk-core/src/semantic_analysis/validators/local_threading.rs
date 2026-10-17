@@ -58,7 +58,7 @@ use crate::semantic_analysis::block_facts::{
     operand_producer_writes, outer_local_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    stored_block_var_uses, value_blocks, value_position_local_assignments,
+    stored_block_var_uses, value_blocks, value_locals, value_position_local_assignments,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
@@ -1237,6 +1237,7 @@ fn param_names(method: &crate::ast::MethodDefinition) -> Vec<EcoString> {
 }
 
 /// A local bound (once) to a block literal that writes an outer local.
+#[derive(Clone)]
 struct Tier2Local {
     /// The `b := [...]` assignment.
     binding: Span,
@@ -1317,12 +1318,33 @@ struct Walker<'d> {
     /// For the escape check alone (BT-3806): the latest binding of each local,
     /// in walk order, whose value may be a block literal writing an outer
     /// local ([`value_blocks`]: `b := [..]`, `b := c ifTrue: [[..]] ifFalse:
-    /// [..]`), however often the local is assigned (`b := nil. b := [t := 1].
-    /// ^b` returns the block). Any other assignment to the local forgets it,
+    /// [..]`), or aliasing such a local (`c := b`, BT-3859, recorded with
+    /// `b`'s binding), however often the local is assigned (`b := nil.
+    /// b := [t := 1]. ^b` returns the block). Any other assignment to the local forgets it,
     /// so a block replaced before the local escapes is not reported; one
     /// replaced only in a branch is not either (the check stays syntactic).
     /// Its entries' `promotable` is unused.
     escape_bindings: HashMap<EcoString, Tier2Local>,
+    /// The spans of the block literals and bare locals that make up the value
+    /// of some `x := ...` in the method ([`value_blocks`], [`value_locals`]):
+    /// the operands [`Walker::note_tier2_binding`] reads (BT-3859).
+    value_operands: HashSet<Span>,
+    /// For each block in [`Walker::value_operands`], its first outer-local
+    /// write, taken while the walk is at the block, with the scope it is
+    /// written in (BT-3859): by the time the assignment's binding is noted,
+    /// the frames of the conditional arms the value passes through have been
+    /// popped, so a local first bound in an arm (`b := c ifTrue: [u := 0.
+    /// [u := u + 1]] ...`) would look like the block's own.
+    value_block_writes: HashMap<Span, OuterLocalWrite>,
+    /// For each local in [`Walker::value_operands`], the escape binding it
+    /// held where it is read (BT-3859): `c := b` makes `c` the block of `b`
+    /// even when `b` was bound in an arm that has since been popped.
+    value_local_bindings: HashMap<Span, Tier2Local>,
+    /// Actor methods only: the operands that are the value of the method
+    /// body's last statement when that statement is a local assignment. An
+    /// actor method answers `nil` there, not the value (BT-3882), so a block
+    /// among them is dropped unrun rather than returned (BT-3859).
+    actor_dropped: HashSet<Span>,
     /// The bindings of Tier 2 locals already reported (one diagnostic per
     /// binding).
     reported_locals: HashSet<Span>,
@@ -1404,6 +1426,17 @@ impl<'d> Walker<'d> {
                 .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
             safe_stored_uses.insert(id.name.clone(), has_safe && !has_unsafe);
         }
+        let mut value_operands = HashSet::new();
+        for stmt in body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Assignment { target, value, .. } = e {
+                    if matches!(target.as_ref(), Expression::Identifier(_)) {
+                        value_operands.extend(value_blocks(value).into_iter().map(|b| b.span));
+                        value_operands.extend(value_locals(value).into_iter().map(|id| id.span));
+                    }
+                }
+            });
+        }
         Self {
             context,
             scope: Vec::new(),
@@ -1416,6 +1449,10 @@ impl<'d> Walker<'d> {
             assign_counts,
             tier2_locals: HashMap::new(),
             escape_bindings: HashMap::new(),
+            value_operands,
+            value_block_writes: HashMap::new(),
+            value_local_bindings: HashMap::new(),
+            actor_dropped: actor_dropped(context, body),
             reported_locals: HashSet::new(),
             safe_stored_uses,
             operand_sites: HashSet::new(),
@@ -1527,6 +1564,11 @@ impl<'d> Walker<'d> {
     fn block(&mut self, block: &Block, container: Container) {
         if let Some(shape) = self.escapes.get(&block.span).copied() {
             self.report_escaping_literal(block, shape);
+        }
+        if self.value_operands.contains(&block.span) {
+            if let Some(write) = self.writes_of(block).into_iter().next() {
+                self.value_block_writes.insert(block.span, write);
+            }
         }
         let frame_body = self.pending_frame_body.take();
         self.frame_sites.push(frame_body.map(|body| FrameSites {
@@ -1771,6 +1813,11 @@ impl<'d> Walker<'d> {
                 if let Some(shape) = self.escapes.get(&expr.span()).copied() {
                     self.report_escaping_local(&id.name, shape, expr.span());
                 }
+                if self.value_operands.contains(&id.span) {
+                    if let Some(local) = self.live_escape_binding(&id.name) {
+                        self.value_local_bindings.insert(id.span, local.clone());
+                    }
+                }
             }
             Expression::Literal(..)
             | Expression::ClassReference { .. }
@@ -1803,10 +1850,27 @@ impl<'d> Walker<'d> {
         let Some(frame) = self.binding_frame(name) else {
             return;
         };
-        let escaping_write = value_blocks(value)
+        // A block value: its write as seen where the block was walked
+        // (`value_block_writes`), else as seen here (`b := [b := b + 1]`
+        // writes the `b` this assignment binds). An alias (`c := b`): the
+        // binding `b` held where it was read, reported at that binding.
+        let escaping = value_blocks(value)
             .into_iter()
-            .find_map(|block| self.writes_of(block).into_iter().next());
-        if let Some(write) = escaping_write {
+            .find_map(|block| {
+                self.value_block_writes
+                    .get(&block.span)
+                    .cloned()
+                    .or_else(|| self.writes_of(block).into_iter().next())
+                    .map(|write| (binding, write))
+            })
+            .or_else(|| {
+                value_locals(value).into_iter().find_map(|id| {
+                    self.value_local_bindings
+                        .get(&id.span)
+                        .map(|local| (local.binding, local.write.clone()))
+                })
+            });
+        if let Some((binding, write)) = escaping {
             self.escape_bindings.insert(
                 name.clone(),
                 Tier2Local {
@@ -2536,16 +2600,16 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
+        let dropped = self.actor_dropped.contains(&block.span);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "block writes outer local `{name}`, but it is {} and nothing can return \
-                     the write",
-                    escape_phrase(shape)
+                    "block writes outer local `{name}`, but {}",
+                    escape_clause("it", shape, dropped)
                 ),
                 block.span,
             )
-            .with_hint(escape_help(name))
+            .with_hint(escape_help(name, dropped))
             .with_note(format!("`{name}` is written here"), Some(write.span))
             .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
         );
@@ -2561,16 +2625,16 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
+        let dropped = self.actor_dropped.contains(&use_span);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "block stored in `{local}` writes outer local `{name}`, but `{local}` is {} \
-                     and nothing can return the write",
-                    escape_phrase(shape)
+                    "block stored in `{local}` writes outer local `{name}`, but {}",
+                    escape_clause(&format!("`{local}`"), shape, dropped)
                 ),
                 binding,
             )
-            .with_hint(escape_help(name))
+            .with_hint(escape_help(name, dropped))
             .with_note(format!("`{name}` is written here"), Some(write.span))
             .with_note(format!("`{local}` escapes here"), Some(use_span))
             .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
@@ -2582,6 +2646,14 @@ impl<'d> Walker<'d> {
     /// if it has not been reported yet (one diagnostic per binding); `None`
     /// for a name that is not one, or that a block parameter or match binding
     /// of the same name shadows.
+    /// The escape binding of `local` ([`Walker::escape_bindings`]) when the
+    /// name in scope here is the local it was recorded for (not a block
+    /// parameter or match binding of the same name).
+    fn live_escape_binding(&self, local: &str) -> Option<&Tier2Local> {
+        let info = self.escape_bindings.get(local)?;
+        (self.binding_frame(local) == Some(info.frame)).then_some(info)
+    }
+
     fn binding_to_report(
         &mut self,
         local: &EcoString,
@@ -2657,8 +2729,57 @@ fn escape_phrase(shape: EscapeShape) -> &'static str {
     }
 }
 
-/// The ADR 0131 §6 help text for a block that escapes the method.
-fn escape_help(name: &str) -> String {
+/// The operands an actor method drops (BT-3859): the value of the method
+/// body's last statement when it is a local assignment (`b := [..]`,
+/// `b := c ifTrue: [[..]] ...`, `c := b`), which an actor method answers
+/// `nil` for (BT-3882) where a class or value-type method answers the value.
+/// Empty in any other context.
+fn actor_dropped(context: MethodContext, body: &[ExpressionStatement]) -> HashSet<Span> {
+    if context != Actor {
+        return HashSet::new();
+    }
+    let Some(Expression::Assignment { target, value, .. }) = body.last().map(|s| &s.expression)
+    else {
+        return HashSet::new();
+    };
+    if !matches!(target.as_ref(), Expression::Identifier(_)) {
+        return HashSet::new();
+    }
+    value_blocks(value)
+        .into_iter()
+        .map(|b| b.span)
+        .chain(value_locals(value).into_iter().map(|id| id.span))
+        .collect()
+}
+
+/// What follows "but" in a §6 escape message for `subject` (`it`, or a
+/// local): how it escapes, or for an operand an actor method drops
+/// ([`actor_dropped`]) that the block is never run.
+fn escape_clause(subject: &str, shape: EscapeShape, dropped: bool) -> String {
+    if dropped && shape == EscapeShape::Returned {
+        format!(
+            "{subject} is the value of the method's last-statement assignment, which an actor \
+             method drops (it answers `nil`), so the block never runs and nothing can return \
+             the write"
+        )
+    } else {
+        format!(
+            "{subject} is {} and nothing can return the write",
+            escape_phrase(shape)
+        )
+    }
+}
+
+/// The ADR 0131 §6 help text for a block that escapes the method, or (for
+/// `dropped`, [`actor_dropped`]) that an actor method drops.
+fn escape_help(name: &str, dropped: bool) -> String {
+    if dropped {
+        return format!(
+            "the block is dropped when the method ends, so `{name}` never changes: send it \
+             `value` before the method ends, or keep the state in a field \
+             (`self.{name} := self.{name} + 1`)"
+        );
+    }
     format!(
         "once the method returns, no later call of the block can hand `{name}` back: keep the \
          state in a field (`self.{name} := self.{name} + 1`) or return the new value from the \
