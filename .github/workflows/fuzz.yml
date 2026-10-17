@@ -32,6 +32,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked --version 0.13.1
@@ -143,6 +145,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked --version 0.13.1
@@ -264,6 +268,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Generate .core corpus
         run: |
@@ -319,6 +325,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       # continue-on-error so the artifact step below runs (a plain failing step
       # skips every later step that is not `if: always()`/`failure()`);
@@ -381,6 +389,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Run extended proptest (10,000 cases)
         id: proptest
