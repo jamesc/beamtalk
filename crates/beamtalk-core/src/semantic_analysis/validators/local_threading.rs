@@ -1366,16 +1366,6 @@ struct Walker<'d> {
     /// held where it is read (BT-3859): `c := b` makes `c` the block of `b`
     /// even when `b` was bound in an arm that has since been popped.
     value_local_bindings: HashMap<Span, Tier2Local>,
-    /// Actor methods only: the operands that are the value of the method
-    /// body's last statement when that statement is a local assignment. An
-    /// actor method answers `nil` there, not the value (a bug tracked in
-    /// BT-3882), so a block among them is dropped unrun rather than returned
-    /// (BT-3859). Each maps
-    /// to the assigned local when it is the assignment's whole value, a block
-    /// literal (`b := [..]`): only then can a `b value` before the method
-    /// ends run it, and only if the binding is promotable
-    /// ([`Walker::promotable_binding`]).
-    actor_dropped: HashMap<Span, Option<EcoString>>,
     /// The bindings of Tier 2 locals already reported (one diagnostic per
     /// binding).
     reported_locals: HashSet<Span>,
@@ -1483,7 +1473,6 @@ impl<'d> Walker<'d> {
             value_operands,
             value_block_writes: HashMap::new(),
             value_local_bindings: HashMap::new(),
-            actor_dropped: actor_dropped(context, body),
             reported_locals: HashSet::new(),
             safe_stored_uses,
             operand_sites: HashSet::new(),
@@ -1941,7 +1930,7 @@ impl<'d> Walker<'d> {
     /// is used later: `name` is assigned exactly once in the method and the
     /// block threads every outer local it writes (`writes`,
     /// [`threads_all`]). The one copy of that rule, for
-    /// [`Walker::note_tier2_binding`] and the §6 dropped-block hint.
+    /// [`Walker::note_tier2_binding`].
     fn promotable_binding(&self, name: &str, block: &Block, writes: &[OuterLocalWrite]) -> bool {
         self.assign_counts.get(name).copied() == Some(1) && threads_all(block, writes)
     }
@@ -2641,23 +2630,15 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
-        let dropped = match self.actor_dropped.get(&block.span) {
-            Some(direct) if shape == EscapeShape::Returned => Dropped::Yes {
-                send_value: direct.as_ref().is_some_and(|local| {
-                    self.promotable_binding(local, block, &self.writes_of(block))
-                }),
-            },
-            _ => Dropped::No,
-        };
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
                     "block writes outer local `{name}`, but {}",
-                    escape_clause("it", shape, dropped)
+                    escape_clause("it", shape)
                 ),
                 block.span,
             )
-            .with_hint(escape_help(name, dropped))
+            .with_hint(escape_help(name))
             .with_note(format!("`{name}` is written here"), Some(write.span))
             .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
         );
@@ -2673,24 +2654,15 @@ impl<'d> Walker<'d> {
             return;
         };
         let name = &write.name;
-        // An alias or a local bound through an arm is not a Tier 2 local
-        // codegen promotes, so `value` on it would not hand the write back:
-        // only the field advice holds.
-        let dropped =
-            if shape == EscapeShape::Returned && self.actor_dropped.contains_key(&use_span) {
-                Dropped::Yes { send_value: false }
-            } else {
-                Dropped::No
-            };
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
                     "block stored in `{local}` writes outer local `{name}`, but {}",
-                    escape_clause(&format!("`{local}`"), shape, dropped)
+                    escape_clause(&format!("`{local}`"), shape)
                 ),
                 binding,
             )
-            .with_hint(escape_help(name, dropped))
+            .with_hint(escape_help(name))
             .with_note(format!("`{name}` is written here"), Some(write.span))
             .with_note(format!("`{local}` escapes here"), Some(use_span))
             .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
@@ -2786,87 +2758,17 @@ fn escape_phrase(shape: EscapeShape) -> &'static str {
     }
 }
 
-/// The operands an actor method drops (BT-3859): the value of the method
-/// body's last statement when it is a local assignment (`b := [..]`,
-/// `b := c ifTrue: [[..]] ...`, `c := b`), which an actor method answers
-/// `nil` for today (a bug tracked in BT-3882) where a class or value-type
-/// method answers the value. Each maps to the assigned local when it is that
-/// assignment's whole value, a block literal. Empty in any other context.
-fn actor_dropped(
-    context: MethodContext,
-    body: &[ExpressionStatement],
-) -> HashMap<Span, Option<EcoString>> {
-    if context != Actor {
-        return HashMap::new();
-    }
-    let Some(Expression::Assignment { target, value, .. }) = body.last().map(|s| &s.expression)
-    else {
-        return HashMap::new();
-    };
-    let Expression::Identifier(local) = target.as_ref() else {
-        return HashMap::new();
-    };
-    let direct = match value.as_ref() {
-        Expression::Block(block) => Some(block.span),
-        _ => None,
-    };
-    value_blocks(value)
-        .into_iter()
-        .map(|b| (b.span, (Some(b.span) == direct).then(|| local.name.clone())))
-        .chain(value_locals(value).into_iter().map(|id| (id.span, None)))
-        .collect()
-}
-
-/// Whether a §6 escape is one an actor method drops ([`actor_dropped`]),
-/// decided once per report so its message and hint agree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dropped {
-    /// The block escapes as its [`EscapeShape`] says.
-    No,
-    /// The block is the value of an actor method's last-statement assignment
-    /// and is dropped unrun. `send_value`: sending the bound local `value`
-    /// before the method ends would run it (`b := [..]` written directly and
-    /// [`Walker::promotable_binding`]).
-    Yes { send_value: bool },
-}
-
 /// What follows "but" in a §6 escape message for `subject` (`it`, or a
-/// local): how it escapes, or for an operand an actor method drops
-/// ([`Dropped`]) that the block is never run.
-fn escape_clause(subject: &str, shape: EscapeShape, dropped: Dropped) -> String {
-    if dropped == Dropped::No {
-        format!(
-            "{subject} is {} and nothing can return the write",
-            escape_phrase(shape)
-        )
-    } else {
-        format!(
-            "{subject} is the value of the method's last-statement assignment, which an actor \
-             method drops (it answers `nil`), so the block never runs and nothing can return \
-             the write"
-        )
-    }
+/// local): how it escapes.
+fn escape_clause(subject: &str, shape: EscapeShape) -> String {
+    format!(
+        "{subject} is {} and nothing can return the write",
+        escape_phrase(shape)
+    )
 }
 
-/// The ADR 0131 §6 help text for a block that escapes the method, or that
-/// an actor method drops ([`Dropped`]).
-fn escape_help(name: &str, dropped: Dropped) -> String {
-    match dropped {
-        Dropped::Yes { send_value: true } => {
-            return format!(
-                "the block is dropped when the method ends, so `{name}` never changes: send it \
-                 `value` before the method ends, or keep the state in a field \
-                 (`self.{name} := self.{name} + 1`)"
-            );
-        }
-        Dropped::Yes { send_value: false } => {
-            return format!(
-                "the block is dropped when the method ends, so `{name}` never changes: keep the \
-                 state in a field (`self.{name} := self.{name} + 1`)"
-            );
-        }
-        Dropped::No => {}
-    }
+/// The ADR 0131 §6 help text for a block that escapes the method.
+fn escape_help(name: &str) -> String {
     format!(
         "once the method returns, no later call of the block can hand `{name}` back: keep the \
          state in a field (`self.{name} := self.{name} + 1`) or return the new value from the \
