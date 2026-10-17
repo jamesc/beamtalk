@@ -28,9 +28,11 @@
 //!
 //! What is left for the lint (pinned by `lint_and_section6_agree` below):
 //!
-//! - a block stored in a local and never sent (`blk := [x := 2]`, followed by
-//!   another statement): it does not leave the method, so §6 has nothing to
-//!   reject (a block that is returned, stored in a field, or placed in a
+//! - a block stored in a local and never sent `value` (`blk := [x := 2]`,
+//!   followed by another statement; a stored block that is sent `value` in a
+//!   class or value-type method body is evaluated in place and is not
+//!   warned about, ADR 0132 Phase 0b): it does not leave the method, so §6 has
+//!   nothing to reject (a block that is returned, stored in a field, or placed in a
 //!   collection literal is a §6 error since BT-3756; so is one that is the
 //!   method's value through a last-statement `blk := [..]` or a conditional
 //!   arm, since BT-3806);
@@ -66,6 +68,7 @@ use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
+use beamtalk_core::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use beamtalk_core::semantic_analysis::{
     extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
 };
@@ -177,7 +180,16 @@ fn check_method(method: &MethodDefinition, out: &mut Out<'_>) {
     for param in &method.parameters {
         scope.define(param.name.name.as_str());
     }
-    walk_expr_seq(&method.body, &mut scope, out);
+    // ADR 0132 Phase 0b (BT-3867): a stored block sent `value` in the method
+    // body is evaluated in place (`inline_stored_tier2_values`, the rule the
+    // §6 check and codegen read), so the lint sees the evaluated literal.
+    let params: Vec<_> = method
+        .parameters
+        .iter()
+        .map(|p| p.name.name.clone())
+        .collect();
+    let inlined = inline_stored_tier2_values(&method.body, &params);
+    walk_expr_seq(inlined.as_deref().unwrap_or(&method.body), &mut scope, out);
     scope.pop();
 }
 
@@ -977,6 +989,12 @@ sealed typed Value subclass: Foo
             ("self run: [x := 1]; yourself", CompileError),
             ("blk := [x := 1]\n    blk value", CompileError),
             ("blk := [x := 1]\n    self run: blk", CompileError),
+            // ADR 0132 Phase 0b (BT-3867): a stored block that reads the local
+            // it writes and is sent `value` in a non-actor method body is
+            // evaluated in place, an accepted shape the lint steps back from.
+            ("blk := [x := x + 1]\n    blk value", Neither),
+            ("blk := [:n | x := x + n]\n    blk value: 2", Neither),
+            ("blk := [x := x + 1]\n    self run: blk", CompileError),
             // §6 (BT-3756): a block value that escapes the method with no send.
             ("blk := [x := 2]\n    #[blk]", CompileError),
             ("blk := [x := 2]\n    ^blk", CompileError),

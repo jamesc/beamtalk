@@ -59,6 +59,7 @@ use crate::semantic_analysis::block_facts::{
     repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
     value_blocks,
 };
+use crate::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -983,20 +984,18 @@ pub(crate) fn check_local_threading(
             HashSet::new()
         };
         for method in &class.methods {
-            check_body(
+            check_method(
                 context,
-                param_names(method),
-                &method.body,
+                method,
                 &callees,
                 &facts(class_name, false),
                 diagnostics,
             );
         }
         for method in &class.class_methods {
-            check_body(
+            check_method(
                 Class,
-                param_names(method),
-                &method.body,
+                method,
                 &HashSet::new(),
                 &facts(class_name, true),
                 diagnostics,
@@ -1010,10 +1009,9 @@ pub(crate) fn check_local_threading(
             instance_context(standalone.class_name.name.as_str())
         };
         let method = &standalone.method;
-        check_body(
+        check_method(
             context,
-            param_names(method),
-            &method.body,
+            method,
             &HashSet::new(),
             &facts(
                 standalone.class_name.name.as_str(),
@@ -1050,6 +1048,34 @@ struct ReceiverFacts<'a> {
 
 /// Walks one method body (or module-level expression list) whose
 /// outermost frame binds `params`.
+/// [`check_body`] for one method. ADR 0132 Phase 0b (BT-3867): in a class or
+/// value-type method a stored Tier 2 block sent `value` is an inline producer,
+/// so the body is checked with each promotable one inlined at its sends
+/// ([`inline_stored_tier2_values`], the rule `lower_module_for_codegen`
+/// applies before codegen).
+fn check_method(
+    context: MethodContext,
+    method: &crate::ast::MethodDefinition,
+    callees: &HashSet<(EcoString, usize)>,
+    receivers: &ReceiverFacts<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let params = param_names(method);
+    let inlined = if context == Actor {
+        None
+    } else {
+        inline_stored_tier2_values(&method.body, &params)
+    };
+    check_body(
+        context,
+        params,
+        inlined.as_deref().unwrap_or(&method.body),
+        callees,
+        receivers,
+        diagnostics,
+    );
+}
+
 fn check_body(
     context: MethodContext,
     params: Vec<EcoString>,

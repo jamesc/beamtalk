@@ -119,23 +119,37 @@ fn section6_applies_in_value_type_methods_and_to_write_only_blocks() {
 }
 
 #[test]
-fn section6_stored_closure_invoked_directly_is_an_error_outside_actors() {
-    // s4: `b := [t := t + 1]. b value` — reported at the binding.
+fn section6_stored_closure_invoked_directly_is_an_inline_producer_outside_actors() {
+    // s4: `b := [t := t + 1]. b value` has no callee, so ADR 0132 Phase 0b
+    // (I5, BT-3867) evaluates the stored block in place: the same producer as
+    // `[t := t + 1] value`, in a class or value-type method.
     for src in [
         in_class("b := [t := t + 1]\nb value\nt"),
         in_value("b := [t := t + 1]\nb value\nt"),
+        in_class("b := [:n | t := t + n]\nb value: 2\nt"),
+        in_value("b := [:n :m | t := t + n + m]\nb value: 1 value: 2\nt"),
+        in_class("b := [:n | t := t + n]\nb value: 1; value: 2\nt"),
+        in_class("b := [t := t + 1. t]\nr := b value\n#[r, t]"),
+        in_value("b := [t := t + 1. t]\n^b value"),
     ] {
         let diags = adr0131_diagnostics(&src);
-        let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-        assert_eq!(s6.len(), 1, "{src}: {diags:?}");
-        assert_eq!(
-            s6[0].message.as_str(),
-            "block stored in `b` writes outer local `t`, but `value` cannot return the write"
-        );
-        assert_eq!(
-            s6[0].span.start() as usize,
-            src.find("b := [").unwrap(),
-            "the diagnostic points at the binding"
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+#[test]
+fn section6_stored_closure_in_a_position_the_producer_rejects_keeps_its_error() {
+    // A `value` inside another block is not promotable (it compiles through a
+    // path with no tuple unpacking), and a block that is never sent `value`
+    // escapes.
+    for src in [
+        in_class("b := [t := t + 1]\n#(1) do: [:e | b value]\nt"),
+        in_class("b := [t := t + 1]\nb"),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error),
+            "{src}: {diags:?}"
         );
     }
 }
@@ -836,7 +850,6 @@ fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
     // operands, and on a receiver other than the `Result` class.
     for body in [
         "CvA ap: [Result tryDo: [t := t + 1. 1]]\nt",
-        "blk := [Result tryDo: [t := t + 1. 1]]\nblk value\nt",
         "r := Set tryDo: [t := t + 1. 1]\nt",
     ] {
         for src in [in_class(body), in_value(body)] {
@@ -956,14 +969,22 @@ fn adr0131_probe_matrix_pins() {
     );
 }
 
-/// ADR 0131 §6 is permanent for s4 in class and value-type methods (a
-/// stored closure invoked directly): the `BUnit` matrix no longer has a cell
-/// for it, so it is pinned here.
+/// ADR 0131 probe s4 in class and value-type methods (a stored closure
+/// invoked directly) was a permanent §6 error until ADR 0132 Phase 0b (I5,
+/// BT-3867): the stored block is evaluated in place, so it is accepted. A
+/// stored block passed as an argument stays an error (I4/I6).
 #[test]
-fn adr0131_probe_s4_is_a_permanent_section6_error() {
+fn adr0131_probe_s4_is_an_inline_producer() {
     for src in [
         "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
         "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
+    ] {
+        let diags = adr0131_diagnostics(src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+    for src in [
+        "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    P hom: b\n    t\n",
+        "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    #(1) do: b\n    t\n",
     ] {
         let diags = adr0131_diagnostics(src);
         assert_eq!(
