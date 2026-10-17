@@ -118,6 +118,24 @@ pub struct CoreErlangGenerator {
     /// is the first setter, so every method compiles exactly as before. That
     /// setter must scope it to the one body it lowers (set on entry, restored
     /// on exit, including on error), or the next method inherits `Acc`.
+    ///
+    /// **The first setter must generalise these single-family sites first.**
+    /// While set, `eligible_families` adds `Acc` (so a class body's set is
+    /// `[Acc]` and a value-type or actor body's has two entries), but these
+    /// consumers assume at most one family or read a non-empty set as "this is
+    /// a value-type/actor construct", and would silently miscompile (no
+    /// `debug_assert!`: CLAUDE.md forbids one, and `verify()` cannot see a
+    /// dropped slot):
+    /// - read only `families.as_slice().first()`, dropping every later family
+    ///   (`Acc` is last, so it is the one lost):
+    ///   `control_flow/exception_handling.rs` lines 179, 283 and 1159, and
+    ///   `value_type_codegen.rs` line 1353 (`extract_vt_loop_family_slot`);
+    /// - gate on `families.as_slice().is_empty()`, which flips to "has a
+    ///   family" for a class body that now carries `Acc`:
+    ///   `control_flow/conditionals.rs` line 766 and `value_type_codegen.rs`
+    ///   lines 2281, 3486, 4120 and 4226.
+    ///
+    /// Tracked on BT-3871 (class methods) and BT-3872 (value-type methods).
     pub(in crate::core_erlang) in_threaded_body: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per

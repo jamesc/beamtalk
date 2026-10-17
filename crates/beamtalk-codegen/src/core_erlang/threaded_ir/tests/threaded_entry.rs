@@ -438,6 +438,85 @@ fn acc_as_scratch_seed_rejects_a_put_into_or_unpack_out_of_acc() {
 }
 
 #[test]
+fn acc_as_scratch_seed_rejects_an_unpack_into_an_acc_target_from_another_family() {
+    // The cross-family check runs for every op, not only `Direct`: an `Unpack`
+    // reading a key of a scratch map into an `Acc` version seeds `Acc` from it.
+    let frame = FrameId::new(1);
+    let ir = vec![state_acc_frame(
+        frame,
+        vec![bind(
+            acc(1, frame),
+            state(0, frame),
+            BindOp::Unpack {
+                field: "__local__t".to_string(),
+            },
+        )],
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::AccAsScratchSeed {
+            defect: AccSeedDefect::CrossFamilyStep {
+                from: state(0, frame),
+                to: acc(1, frame),
+            },
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn acc_as_scratch_seed_rejects_acc_stored_as_a_put_value() {
+    // `Put { value: Version(Acc0) }` stores the caller's map under a key of
+    // another map, whatever the target's family.
+    let frame = FrameId::new(1);
+    let ir = vec![state_acc_frame(
+        frame,
+        vec![bind(
+            state(1, frame),
+            state(0, frame),
+            BindOp::Put {
+                field: "__local__t".to_string(),
+                value: ValueRef::Version(acc(0, frame)),
+            },
+        )],
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::AccAsScratchSeed {
+            defect: AccSeedDefect::StoredAsValue {
+                acc: acc(0, frame),
+                into: state(1, frame),
+            },
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn acc_as_scratch_seed_rejects_a_direct_rebind_of_acc_into_another_family() {
+    // `Direct(Version(Acc0))` into a `State` target is the other half of (b).
+    let frame = FrameId::new(1);
+    let ir = vec![state_acc_frame(
+        frame,
+        vec![bind(
+            state(1, frame),
+            state(0, frame),
+            BindOp::Direct(ValueRef::Version(acc(0, frame))),
+        )],
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::AccAsScratchSeed {
+            defect: AccSeedDefect::CrossFamilyStep {
+                from: acc(0, frame),
+                to: state(1, frame),
+            },
+            at: span(),
+        }]
+    );
+}
+
+#[test]
 fn acc_as_scratch_seed_rejects_a_map_put_rebind_over_acc() {
     // `RebindShape::for_frame`: `Acc` is never a rebind target.
     let frame = FrameId::new(1);

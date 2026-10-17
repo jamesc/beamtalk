@@ -376,6 +376,13 @@ pub(in crate::core_erlang) enum AccSeedDefect {
         from: VersionedVar,
         to: VersionedVar,
     },
+    /// A `Put` whose stored `value` is an `Acc` version (`into` is the map
+    /// version the put produces): the caller's map is written under a key of
+    /// another map instead of being threaded.
+    StoredAsValue {
+        acc: VersionedVar,
+        into: VersionedVar,
+    },
     /// A `maps:put` of a non-`'__local__'` key into an `Acc` version.
     PutInto { acc: VersionedVar, key: String },
     /// A `maps:get` of a non-`'__local__'` key out of an `Acc` version.
@@ -1068,24 +1075,41 @@ impl VerifyWalk<'_> {
                 }
             };
             self.errors.push(error);
-            return;
         }
-        // A whole-value step between `Acc` and another family.
-        if let BindOp::Direct(value) = op {
-            let from = match value {
-                ValueRef::Version(v) if is_acc(v) != is_acc(target) => Some(v),
-                _ if is_acc(source) != is_acc(target) => Some(source),
-                _ => None,
-            };
-            if let Some(from) = from {
-                self.errors.push(VerifyError::AccAsScratchSeed {
-                    defect: AccSeedDefect::CrossFamilyStep {
-                        from: from.clone(),
-                        to: target.clone(),
-                    },
-                    at,
-                });
-            }
+        // An `Acc` version stored as a value: a `Put` writes the caller's map
+        // into another map's key, where it would outlive the call and alias.
+        if let BindOp::Put {
+            value: ValueRef::Version(stored),
+            ..
+        } = op
+            && is_acc(stored)
+        {
+            self.errors.push(VerifyError::AccAsScratchSeed {
+                defect: AccSeedDefect::StoredAsValue {
+                    acc: stored.clone(),
+                    into: target.clone(),
+                },
+                at,
+            });
+        }
+        // A whole-value step between `Acc` and another family, for every op:
+        // a `Direct` rebind's value, or the `Bind`'s source and target whatever
+        // the op (an `Unpack` into an `Acc` target from a scratch map reads a
+        // key of one family into the other). A keyed access already reported
+        // above names its `Acc` side, so it is not reported twice.
+        let from = match op {
+            BindOp::Direct(ValueRef::Version(v)) if is_acc(v) != is_acc(target) => Some(v),
+            _ if keyed.is_none() && is_acc(source) != is_acc(target) => Some(source),
+            _ => None,
+        };
+        if let Some(from) = from {
+            self.errors.push(VerifyError::AccAsScratchSeed {
+                defect: AccSeedDefect::CrossFamilyStep {
+                    from: from.clone(),
+                    to: target.clone(),
+                },
+                at,
+            });
         }
     }
 
