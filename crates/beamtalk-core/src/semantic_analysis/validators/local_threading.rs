@@ -1320,8 +1320,8 @@ struct Walker<'d> {
     /// local ([`value_blocks`]: `b := [..]`, `b := c ifTrue: [[..]] ifFalse:
     /// [..]`), or aliasing such a local (`c := b`, BT-3859, recorded with
     /// `b`'s binding), however often the local is assigned (`b := nil.
-    /// b := [t := 1]. ^b` returns the block). Any other assignment to the local forgets it,
-    /// so a block replaced before the local escapes is not reported; one
+    /// b := [t := 1]. ^b` returns the block). Any other assignment to the
+    /// local forgets it, so a block replaced before the local escapes is not reported; one
     /// replaced only in a branch is not either (the check stays syntactic).
     /// Its entries' `promotable` is unused.
     escape_bindings: HashMap<EcoString, Tier2Local>,
@@ -1814,7 +1814,7 @@ impl<'d> Walker<'d> {
                     self.report_escaping_local(&id.name, shape, expr.span());
                 }
                 if self.value_operands.contains(&id.span) {
-                    if let Some(local) = self.live_escape_binding(&id.name) {
+                    if let Some(local) = self.live_binding(&self.escape_bindings, &id.name) {
                         self.value_local_bindings.insert(id.span, local.clone());
                     }
                 }
@@ -2646,14 +2646,6 @@ impl<'d> Walker<'d> {
     /// if it has not been reported yet (one diagnostic per binding); `None`
     /// for a name that is not one, or that a block parameter or match binding
     /// of the same name shadows.
-    /// The escape binding of `local` ([`Walker::escape_bindings`]) when the
-    /// name in scope here is the local it was recorded for (not a block
-    /// parameter or match binding of the same name).
-    fn live_escape_binding(&self, local: &str) -> Option<&Tier2Local> {
-        let info = self.escape_bindings.get(local)?;
-        (self.binding_frame(local) == Some(info.frame)).then_some(info)
-    }
-
     fn binding_to_report(
         &mut self,
         local: &EcoString,
@@ -2664,12 +2656,21 @@ impl<'d> Walker<'d> {
         } else {
             &self.tier2_locals
         };
-        let info = bindings.get(local)?;
-        if self.binding_frame(local) != Some(info.frame) {
-            return None;
-        }
+        let info = self.live_binding(bindings, local)?;
         let found = (info.binding, info.write.clone());
         self.reported_locals.insert(found.0).then_some(found)
+    }
+
+    /// `bindings`' entry for `local` when the name in scope here is the local
+    /// it was recorded for (not a block parameter or match binding of the
+    /// same name).
+    fn live_binding<'a>(
+        &self,
+        bindings: &'a HashMap<EcoString, Tier2Local>,
+        local: &str,
+    ) -> Option<&'a Tier2Local> {
+        let info = bindings.get(local)?;
+        (self.binding_frame(local) == Some(info.frame)).then_some(info)
     }
 
     fn report_local(&mut self, local: &EcoString, selector: &str, use_span: Span) {
