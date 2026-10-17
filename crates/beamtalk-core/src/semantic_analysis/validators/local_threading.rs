@@ -1108,8 +1108,9 @@ fn report_value_position_assignments(
             )
             .with_hint(if found.returned {
                 format!(
-                    "nothing can read `{name}` after the return: \
-                     return the value itself (`^expr` instead of `^{name} := expr`)"
+                    "return the value directly: `^expr` instead of `^{name} := expr` \
+                     (or assign `{name}` in its own statement first if something still \
+                     reads it, e.g. an `ensure:` cleanup)"
                 )
             } else {
                 format!(
