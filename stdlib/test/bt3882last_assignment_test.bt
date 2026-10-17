@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3882: an actor method whose last statement is `x := expr` answers the
+// value of `expr` (it answered `nil`), on every body-lowering arm. See
+// fixtures/bt3882last_assignment_actor.bt.
+
+TestCase subclass: Bt3882LastAssignmentTest
+
+  testPure => self assert: Bt3882LastAssignmentActor spawn pure equals: 5
+
+  testFieldWrite =>
+    a := Bt3882LastAssignmentActor spawn
+    self assert: a fieldWrite equals: 4
+    self assert: a n equals: 4
+
+  testSelfSend =>
+    self assert: Bt3882LastAssignmentActor spawn selfSend equals: 9
+
+  testTier2SelfSend =>
+    self assert: Bt3882LastAssignmentActor spawn tier2SelfSend equals: 6
+
+  testConditional =>
+    a := Bt3882LastAssignmentActor spawn
+    self assert: (a conditional: true) equals: 2
+    self assert: a n equals: 1
+    self assert: (a conditional: false) equals: 3
+
+  testFold =>
+    a := Bt3882LastAssignmentActor spawn
+    self assert: a fold equals: 6
+    self assert: a n equals: 3
+
+  testLoop => self assert: Bt3882LastAssignmentActor spawn loop equals: nil
+
+  testTier2Value =>
+    self assert: (Bt3882LastAssignmentActor spawn tier2Value: [:x |
+      x + 1
+    ]) equals: 2

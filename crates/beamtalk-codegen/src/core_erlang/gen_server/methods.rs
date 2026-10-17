@@ -1412,7 +1412,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.local_assign_reply_doc(expr);
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1465,7 +1465,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.local_assign_reply_doc(expr);
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1502,7 +1502,7 @@ impl CoreErlangGenerator {
                                     span,
                                 ));
                                 if is_last {
-                                    let reply = self.local_assign_reply_doc(expr);
+                                    let reply = self.local_assign_reply_doc(expr)?;
                                     stmts.push(ThreadedStmt::Statement(reply, span));
                                 }
                                 continue;
@@ -1522,7 +1522,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.local_assign_reply_doc(expr);
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1552,7 +1552,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.local_assign_reply_doc(expr);
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1616,7 +1616,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.local_assign_reply_doc(expr);
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1958,9 +1958,10 @@ impl CoreErlangGenerator {
     /// Emit the `{'reply', Var, State}` close for a local assignment
     /// `x := expr` in last position, once its open let chain has bound `x`:
     /// an assignment evaluates to the assigned value, so the method answers
-    /// it, as class and value-type methods do (BT-3882).
-    fn local_assign_reply_doc(&mut self, expr: &Expression) -> Document<'static> {
-        let post_state = self.current_state_var();
+    /// it, as class and value-type methods do (BT-3882). Every caller has
+    /// bound an identifier target, so an unbound one is an internal error
+    /// rather than a silent `nil`.
+    fn local_assign_reply_doc(&mut self, expr: &Expression) -> Result<Document<'static>> {
         let value = match expr {
             Expression::Assignment { target, .. } => match target.as_ref() {
                 Expression::Identifier(id) => self.lookup_var(&id.name).cloned(),
@@ -1968,16 +1969,20 @@ impl CoreErlangGenerator {
             },
             _ => None,
         };
-        match value {
-            Some(var) => docvec![
-                "{'reply', ",
-                leaf::var(var),
-                ", ",
-                leaf::var(post_state),
-                "}"
-            ],
-            None => docvec!["{'reply', 'nil', ", leaf::var(post_state), "}"],
-        }
+        let var = value.ok_or_else(|| {
+            CodeGenError::Internal(
+                "local_assign_reply_doc: last-statement assignment target is not a bound local"
+                    .to_string(),
+            )
+        })?;
+        let post_state = self.current_state_var();
+        Ok(docvec![
+            "{'reply', ",
+            leaf::var(var),
+            ", ",
+            leaf::var(post_state),
+            "}"
+        ])
     }
 
     /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
