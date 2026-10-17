@@ -1,7 +1,28 @@
 # ADR 0132: Callee-Side Threaded Entry Points for Higher-Order Methods
 
 ## Status
-Proposed (2026-10-16)
+Accepted (2026-10-17); Proposed 2026-10-16
+
+## Implementation Tracking
+
+**Epic (Phases 0 and 1):** [BT-3865](https://linear.app/beamtalk/issue/BT-3865)
+**Status:** Planned. Phases 2 to 6 are not scheduled: Open Question 5 asks for a count of real §6 hits first.
+
+| Phase | Issue | Description | Size | PR |
+|---|---|---|---|---|
+| 0a | [BT-3866](https://linear.app/beamtalk/issue/BT-3866) | Pin the §6 inventory (I1–I4, I6–I8) as `PIN-BUG` BUnit and repl-protocol cases | S | |
+| 0b | [BT-3867](https://linear.app/beamtalk/issue/BT-3867) | I5: a stored Tier 2 block sent `value` in a class or value-type method as an inline producer | M | |
+| 0c | [BT-3868](https://linear.app/beamtalk/issue/BT-3868) | Runtime floor (`send_threaded/4`, `call_threaded/3`), metadata keys, `MethodInfo::threading_params`, wire check, baselines | M | |
+| 1a | [BT-3869](https://linear.app/beamtalk/issue/BT-3869) | `VersionPrefix::Acc`, `ScopeKind::Threaded`, the `MethodBody` builder, four verifier checks | M | |
+| 1b | [BT-3870](https://linear.app/beamtalk/issue/BT-3870) | Generalize `callee_threads_block_param` (greatest fixpoint); populate `threading_params` | M | |
+| 1c | [BT-3871](https://linear.app/beamtalk/issue/BT-3871) | Threaded entry for class methods | M | |
+| 1d | [BT-3872](https://linear.app/beamtalk/issue/BT-3872) | Threaded entry for value-type methods | M | |
+| 1e | [BT-3873](https://linear.app/beamtalk/issue/BT-3873) | Caller-side `callee_threaded_send` producer; §6 narrowed for exact receivers; actor locals-only rule | M | |
+| 1f | [BT-3874](https://linear.app/beamtalk/issue/BT-3874) | Corpus with oracle, pin flips, repl-protocol case, measurement, docs | M | |
+
+Dependency order: {3866, 3867, 3868, 3869} → 3870 (after 3868) → {3871, 3872} → 3873 → 3874.
+
+Two file references in the text below are corrected by this tracking entry: `call_threaded/3` lives in `beamtalk_dispatch.erl` (there is no `beamtalk_block.erl`), and the generated builtins file is `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`.
 
 ## Context
 
@@ -274,9 +295,9 @@ For a class method:
 ```erlang
 %% The body, lowered once over Acc. ABlock is a threading parameter.
 '__t2_class_twice:'/3 = fun (ClassSelf, ABlock, Acc0) ->
-    case call 'beamtalk_block':'call_threaded'(ABlock, [], Acc0) of
+    case call 'beamtalk_dispatch':'call_threaded'(ABlock, [], Acc0) of
       <{_V1, Acc1}> when 'true' ->
-        case call 'beamtalk_block':'call_threaded'(ABlock, [], Acc1) of
+        case call 'beamtalk_dispatch':'call_threaded'(ABlock, [], Acc1) of
           <{V2, Acc2}> when 'true' -> {V2, Acc2}
         end
     end
@@ -286,7 +307,7 @@ For a class method:
     call 'erlang':'element'(1, apply '__t2_class_twice:'/3 (ClassSelf, ABlock, ~{}~))
 ```
 
-`beamtalk_block:call_threaded(B, Args, Acc)` is the per-invocation tier
+`beamtalk_dispatch:call_threaded(B, Args, Acc)` is the per-invocation tier
 gate: `is_function(B, n)` applies a Tier 1 fun and answers `{Result, Acc}`
 unchanged; `is_function(B, n+1)` applies a Tier 2 fun with `Acc`; anything
 else is the dynamic `value`-family send (`beamtalk_dispatch`), answering
@@ -895,7 +916,7 @@ and the per-invocation gate makes one entry accept any mix.
 
 | Phase | Scope | Proof | Size |
 |---|---|---|---|
-| 0 | **Pins, the floor, I5 and the wire check.** Move the four `adr0131section6callee` pending fixtures and the class/value-type shapes of I1–I4, I6–I8 into `PIN-BUG` BUnit files over all three method kinds and the REPL. Add `tier2_methods`/`tier2_class_methods` to `'__beamtalk_meta'/0` (empty), `MethodInfo::threading_params` (empty), and `beamtalk_dispatch:send_threaded/4` and `beamtalk_block:call_threaded/3` raising the precise `stateful_block_dispatch`. §6 unchanged. I5 as ADR 0131's inline `value` producer over a fresh map. Wire check: one hand-written Erlang entry (`'__t2_class_twice:'/3` in a test module with a hand-written metadata entry) reached through `send_threaded/4` from a compiled class method whose Tier 2 block is packed and unpacked by hand in the fixture, proving the walk, the lookup, the `function_exported/3` guard, the entry call and the map round trip before any codegen exists. Baseline build time, `.beam` sizes, `self_send_bench`. | Every pin red as a compile error or the structured runtime error; I5 green; the wire check green; no silent wrong answer. | S |
+| 0 | **Pins, the floor, I5 and the wire check.** Move the four `adr0131section6callee` pending fixtures and the class/value-type shapes of I1–I4, I6–I8 into `PIN-BUG` BUnit files over all three method kinds and the REPL. Add `tier2_methods`/`tier2_class_methods` to `'__beamtalk_meta'/0` (empty), `MethodInfo::threading_params` (empty), and `beamtalk_dispatch:send_threaded/4` and `beamtalk_dispatch:call_threaded/3` raising the precise `stateful_block_dispatch`. §6 unchanged. I5 as ADR 0131's inline `value` producer over a fresh map. Wire check: one hand-written Erlang entry (`'__t2_class_twice:'/3` in a test module with a hand-written metadata entry) reached through `send_threaded/4` from a compiled class method whose Tier 2 block is packed and unpacked by hand in the fixture, proving the walk, the lookup, the `function_exported/3` guard, the entry call and the map round trip before any codegen exists. Baseline build time, `.beam` sizes, `self_send_bench`. | Every pin red as a compile error or the structured runtime error; I5 green; the wire check green; no silent wrong answer. | S |
 | 1 | **Static entries (Alternative G as scope).** `VersionPrefix::Acc`, `ScopeKind::Threaded`, `eligible_families`; the `MethodBody` builder; `call_threaded/3`; the predicate generalized to the §1 direct-invocation, callable-argument and same-module pass-on uses with the greatest-fixpoint rule; one body with two entries, metadata and `threading_params` emission (stdlib via `generated_builtins.rs`); the `callee_threaded_send` producer (§3) for statically bound same-module sends and exact-receiver direct-called class methods, guarded by `function_exported/3` across modules; the §6 narrowing for exact receivers with "why" help; the actor locals-only rule for blocks bound for an entry. Verifier: `AccAsScratchSeed`, `OwnLocalKeyInAcc`, `NlrSlotShapeMismatch`, `ActorStateInThreadedBlock`. | I1, I4 (same module), I7 (sealed) pins green in class and value-type; the agreement test extended; `just verify-threaded-ir`; the `local_touch` corpus gains `hom_call`, same-named caller/callee locals, recursion and NLR shapes, with the **oracle** that the explicit-accumulator spelling of each program (`t := X hom: [... t + 1]` via `inject:into:`) answers the same; plain-path cost, `.beam` size and build-time measured. | L |
 | 2 | **Resolution.** `send_threaded/4` as the `dispatch/3` walk with the entry lookup at the resolved implementation (extensions, runtime funs and DNU proxies → structured error; DNU → `does_not_understand`); `super_threaded/5`; the non-exact-receiver warning; cross-module forwards and forwards to unknown receivers inside a body; I6 (the ADR 0128 fold seeded from the pack, with `call_threaded` as its gate, in class, value-type, REPL and actor context); the REPL bindings-map rule. | I1 and I4 for unknown and cross-module receivers, I6 pins; `send_threaded` benchmarked against the ~65 ns budget; a module-skew test (new caller, old callee; old caller, new callee; reload mid-cache). | M |
 | 3 | **Callee frames: `Acc` capability per site.** Lift the trailing-family rejections for `Acc` at `Letrec` bodies, the search and keyed folds, arms holding a fold, `on:do:`/`ensure:` arms, bare and stored blocks (Tier 2 by containment with the `'__acc__'` nesting) and the NLR boundary; `Block`'s own intrinsics with a non-literal receiver or argument; `arity`/`respondsTo:` lowering. | I2 and the I9 intrinsic row; a per-site capability corpus (site × fold kind × body × position × tier mix), as BT-3827's; `.core` diff harness lists the expected diffs. | L |
@@ -924,7 +945,7 @@ Affected components: `beamtalk-core` (`semantic_analysis/tier2_callee.rs`,
 `spec_codegen.rs` for the entry's `-spec`,
 `control_flow/list_ops/opaque_fold.rs`, `intrinsics.rs`), the runtime
 (`beamtalk_dispatch.erl` `send_threaded/4` and `super_threaded/5`,
-`beamtalk_block.erl` `call_threaded/3`, `beamtalk_actor.erl`
+`call_threaded/3` beside it, `beamtalk_actor.erl`
 `safe_dispatch_threaded`, `beamtalk_class_dispatch.erl`,
 `beamtalk_object_class.erl` for the threaded class call,
 `beamtalk_error.erl`), stdlib natives per Phase 5, BUnit fixtures,
