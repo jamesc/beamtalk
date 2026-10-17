@@ -14,6 +14,7 @@ use std::fs;
 
 use super::manifest::PackageManifest;
 use crate::beam_compiler::escape_erlang_string;
+use crate::commands::util::format_sorted_atom_list;
 
 /// Metadata for a class discovered during compilation.
 ///
@@ -141,7 +142,7 @@ fn format_app_file(
     );
     let version = escape_erlang_string(&manifest.version);
 
-    let modules_list = format_modules_list(module_names);
+    let modules_list = format_sorted_atom_list(module_names);
     let classes_list = format_classes_list(class_metadata);
     let native_modules_entry = format_native_modules_entry(native_module_names);
     let type_aliases_entry = format_type_aliases_entry(alias_metadata);
@@ -188,19 +189,6 @@ fn format_supervisor_entry(supervisor_class: Option<&str>) -> String {
     supervisor_class.map_or_else(String::new, |class_name| {
         format!(",\n        {{supervisor, '{class_name}'}}")
     })
-}
-
-/// Format the module list for the `.app` file.
-///
-/// Module names are quoted atoms since they contain `@` characters.
-fn format_modules_list(module_names: &[String]) -> String {
-    let mut sorted = module_names.to_vec();
-    sorted.sort();
-    sorted
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Format the `{applications, [...]}` list for the `.app` file.
@@ -448,15 +436,15 @@ mod tests {
     }
 
     #[test]
-    fn test_format_modules_list_sorted() {
+    fn test_format_sorted_atom_list_sorted() {
         let modules = vec!["bt@app@zebra".to_string(), "bt@app@alpha".to_string()];
-        let result = format_modules_list(&modules);
+        let result = format_sorted_atom_list(&modules);
         assert_eq!(result, "'bt@app@alpha', 'bt@app@zebra'");
     }
 
     #[test]
-    fn test_format_modules_list_empty() {
-        let result = format_modules_list(&[]);
+    fn test_format_sorted_atom_list_empty() {
+        let result = format_sorted_atom_list(&[]);
         assert_eq!(result, "");
     }
 

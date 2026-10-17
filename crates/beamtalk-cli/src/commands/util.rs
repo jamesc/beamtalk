@@ -37,6 +37,22 @@ pub(crate) fn bt_module_name_from_stem(stem: &str) -> String {
     format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
 }
 
+/// Format a sorted, single-quoted Erlang atom list (`'a', 'b', …`).
+///
+/// Shared by `app_file` (module list in `.app` files) and `build_stdlib`
+/// (module and protocol-module lists in `beamtalk_stdlib.app`). Extracted
+/// here so the two call sites share one canonical definition rather than
+/// carrying identical private copies (architecture-principles §6).
+pub(crate) fn format_sorted_atom_list(names: &[String]) -> String {
+    let mut sorted = names.to_vec();
+    sorted.sort();
+    sorted
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Build the package-qualified BEAM module name (`bt@<pkg>@<rel>`).
 ///
 /// ADR 0026: package-mode modules use the `bt@<package>@<relative-path>` naming

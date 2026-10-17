@@ -17,6 +17,7 @@ use crate::beam_compiler::{
 };
 use crate::commands::app_file;
 use crate::commands::build::build_alias_metadata;
+use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
@@ -1405,19 +1406,6 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
         .map(format_stdlib_class_entry)
         .collect::<Vec<_>>()
         .join(separator)
-}
-
-/// Format a sorted, quoted Erlang atom list (`'a', 'b', …`).
-///
-/// Same layout-independence rationale as [`format_stdlib_classes_list`].
-fn format_sorted_atom_list(names: &[String]) -> String {
-    let mut sorted = names.to_vec();
-    sorted.sort();
-    sorted
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
