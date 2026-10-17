@@ -39,7 +39,7 @@
 
 Value subclass: ReplRemoveClassDemo
   greet => "hi"
-// => _
+// => ReplRemoveClassDemo
 
 ReplRemoveClassDemo new greet
 // => hi
@@ -50,7 +50,7 @@ Object allSubclasses includes: ReplRemoveClassDemo
 // Save a reference before removal (`allSubclasses includes:` after removal
 // needs something to compare against — the name itself no longer resolves).
 replRemoveClassDemoRef := ReplRemoveClassDemo
-// => _
+// => ReplRemoveClassDemo
 
 // ===========================================================================
 // :remove-class — alias for `<Class> removeFromSystem`
