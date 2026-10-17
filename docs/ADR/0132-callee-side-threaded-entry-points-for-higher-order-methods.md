@@ -24,6 +24,8 @@ Dependency order: {3866, 3867, 3868, 3869} → 3870 (after 3868) → {3871, 3872
 
 Two file references in the text below are corrected by this tracking entry: `call_threaded/3` lives in `beamtalk_dispatch.erl` (there is no `beamtalk_block.erl`), and the generated builtins file is `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`.
 
+**Deviation from §2 (BT-3871 review, #4361):** the plain `class_<sel>` wrapper does not hand the body an empty map. With `~{}~` a Tier 2 block reaching the plain entry from a late-bound send ran through `call_threaded/3` and its writes were dropped silently, which §4 forbids. The wrapper passes the atom `plain` as `Acc@0`; `call_threaded/3` with `plain` applies an arity-N fun as before, raises `stateful_block_dispatch` for an arity-N+1 fun without running it, and sends `value` to a non-fun callable. `plain` is threaded through `Acc` unchanged and never used as a map.
+
 ## Context
 
 ### Problem statement
@@ -209,7 +211,9 @@ body with two entry points. The body is lowered as a `ThreadedIr`
 caller hands over; every invocation of the parameter is gated per
 invocation on the block's tier and threads `Acc` through every construct
 the body contains. The plain entry (today's function name and arity) calls
-the body with an empty map and answers the bare result; the threaded entry
+the body with no map (the `plain` sentinel, see the deviation note in the
+tracking section: an empty map would silently drop a Tier 2 block's
+writes) and answers the bare result; the threaded entry
 (`'__t2_<sel>'`, one arity higher) takes `Acc` and answers `{Result,
 Acc1}`. Threaded entries are advertised in `'__beamtalk_meta'/0` and
 resolved through the same late-bound dispatch walk a plain send uses. A
@@ -862,7 +866,7 @@ and the per-invocation gate makes one entry accept any mix.
 
 ### Negative
 - **The plain path of a threading HOM pays one tuple per block invocation**
-  and threads an empty `Acc` through its body's constructs (a trailing
+  and threads the `plain` sentinel as `Acc` through its body's constructs (a trailing
   slot in each loop or fold tuple). Phase 1 measures it against today's
   structural fallback on the same body.
 - **Code size** grows by the `Acc` threading in each threading HOM's body

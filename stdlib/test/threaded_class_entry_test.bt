@@ -79,5 +79,64 @@ TestCase subclass: ThreadedClassEntryTest
 
   // A block of the wrong arity raises a structured error rather than a raw
   // `badarity` (the gate is `beamtalk_dispatch:call_threaded/3`).
-  testABlockOfTheWrongArityRaisesAStructuredError =>
-    self should: [ThreadedEntryFixture twice: [:x | x]] raise: #arity_mismatch
+  testABlockOfAnImpossibleArityRaisesAStructuredError =>
+    self should: [
+      ThreadedEntryFixture twice: [:x :y | x]
+    ] raise: #arity_mismatch
+
+  // --- the plain entry refuses a Tier 2 block (BT-3871 review) ---------------
+  //
+  // The plain entry has no caller map to thread: a block that assigns a captured
+  // variable reaching it through a late-bound send must raise the error the plain
+  // path always raised, with the block unrun, never run with its writes dropped.
+  // ADR 0131 section 6 rejects the direct shapes at compile time, so each block is
+  // laundered through an Erlang FFI tuple (exempt from section 6), as in
+  // blocks_test.bt; if that exemption narrows, these tests must change.
+  testAWritingBlockSentToADynamicReceiverIsRefusedNotDropped =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryFixture
+    self should: [c twice: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockSentByPerformIsRefusedNotDropped =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryFixture
+    self should: [
+      c perform: #twice: withArguments: (Erlang lists duplicate: 1 of: laundered)
+    ] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockPassedOnThroughAForwardIsRefused =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryFixture
+    self should: [c twiceVia: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockGivenToACollectionCallableIsRefused =>
+    t := 0
+    @expect dead_assignment
+    writer := [:x | t := t + x]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryFixture
+    self should: [c each: #(1, 2) do: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  // A wrong-arity block (one argument too many) is the same error (it is
+  // indistinguishable from a Tier 2 block by arity); that it is not run first is
+  // asserted in beamtalk_threaded_class_entries_tests.erl.
+  testAWrongArityBlockIsRefused =>
+    c := ThreadedEntryFixture
+    self should: [c twice: [:x | x]] raise: #stateful_block_dispatch
+
+  testAPureBlockThroughADynamicReceiverStillWorks =>
+    c := ThreadedEntryFixture
+    self assert: (c twice: [5]) equals: 5

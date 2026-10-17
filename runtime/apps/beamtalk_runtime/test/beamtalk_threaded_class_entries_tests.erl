@@ -271,6 +271,102 @@ tier_gate_test_() ->
     ]}.
 
 %%====================================================================
+%% The plain entry refuses a Tier 2 block (BT-3871 review blocker)
+%%====================================================================
+
+%% A Tier 2 block records that it ran; the plain entry has no caller map to
+%% thread, so it must be refused *before* it runs, as it was before ADR 0132.
+ran_t2(Arity) ->
+    Ran = fun() -> put(ran, true) end,
+    case Arity of
+        0 ->
+            fun(Acc) ->
+                Ran(),
+                {nil, Acc}
+            end;
+        1 ->
+            fun(_A, Acc) ->
+                Ran(),
+                {nil, Acc}
+            end
+    end.
+
+refused(Fun) ->
+    erase(ran),
+    try
+        Fun(),
+        ok
+    catch
+        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
+    end.
+
+plain_refuses_tier2_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a Tier 2 block to a plain entry raises stateful_block_dispatch unrun", fun() ->
+            ?assertEqual(
+                stateful_block_dispatch, refused(fun() -> ?MOD:'class_twice:'(nil, ran_t2(0)) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"so does a forward through the plain entry", fun() ->
+            ?assertEqual(
+                stateful_block_dispatch,
+                refused(fun() -> ?MOD:'class_twiceVia:'(nil, ran_t2(0)) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"and the callable of a collection fold", fun() ->
+            ?assertEqual(
+                stateful_block_dispatch,
+                refused(fun() -> ?MOD:'class_each:do:'(nil, [1, 2], ran_t2(1)) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"a side-effecting block of the wrong arity does not run before the error", fun() ->
+            Wrong = fun(_A) ->
+                put(ran, true),
+                1
+            end,
+            ?assertEqual(
+                stateful_block_dispatch, refused(fun() -> ?MOD:'class_twice:'(nil, Wrong) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"a dynamic class send of a Tier 2 block raises and runs nothing", fun() ->
+            Pid = beamtalk_class_registry:whereis_class(?CLASS),
+            ?assertEqual(
+                stateful_block_dispatch,
+                refused(fun() -> beamtalk_class_dispatch:class_send(Pid, 'twice:', [ran_t2(0)]) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"a block of an impossible arity is an arity_mismatch, unrun", fun() ->
+            Wrong = fun(_A, _B, _C) ->
+                put(ran, true),
+                1
+            end,
+            ?assertEqual(arity_mismatch, refused(fun() -> ?MOD:'class_twice:'(nil, Wrong) end)),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"call_threaded/3 with the sentinel never answers a map", fun() ->
+            ?assertEqual({3, plain}, beamtalk_dispatch:call_threaded(fun() -> 3 end, [], plain)),
+            ?assertEqual(
+                {3, plain}, beamtalk_dispatch:call_threaded(fun(X) -> X end, [3], plain)
+            ),
+            ?assertEqual(
+                stateful_block_dispatch,
+                refused(fun() -> beamtalk_dispatch:call_threaded(ran_t2(0), [], plain) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"a real Acc map still threads a Tier 2 block", fun() ->
+            ?assertEqual(
+                {nil, #{}}, beamtalk_dispatch:call_threaded(ran_t2(0), [], #{})
+            )
+        end}
+    ]}.
+
+%%====================================================================
 %% The compiled metadata resolves the entry
 %%====================================================================
 
