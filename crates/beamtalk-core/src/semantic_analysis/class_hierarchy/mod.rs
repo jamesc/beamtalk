@@ -208,6 +208,7 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
@@ -224,6 +225,7 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
@@ -650,6 +652,7 @@ impl ClassHierarchy {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 // `ExtensionTypeInfo` stores flattened strings (compilation-layer
                 // metadata, outside `DeclaredType`'s scope) — parse back into
                 // structure rather than carrying the string through as an

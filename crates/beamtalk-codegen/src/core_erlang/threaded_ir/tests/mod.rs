@@ -22,6 +22,9 @@
 //!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
 //!   `BranchArm` nodes
 //! - [`fold_family`] — BT-3827 `FoldFamilyNotCarried` over fold lambda bodies
+//! - [`threaded_entry`] — ADR 0132 §2/§3: the `Acc` family, `ScopeKind::Threaded`,
+//!   the threaded `MethodBody` builder, and `AccAsScratchSeed` / `OwnLocalKeyInAcc` /
+//!   `NlrSlotShapeMismatch` / `ActorStateInThreadedBlock`
 //! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
@@ -61,6 +64,7 @@ mod local_rebind;
 mod lower_and_render_shim;
 mod render_naming;
 mod simple_bind;
+mod threaded_entry;
 mod tuple_acc;
 mod verifier_diagnostic;
 mod verify_walk;

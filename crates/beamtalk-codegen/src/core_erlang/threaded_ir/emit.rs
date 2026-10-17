@@ -82,9 +82,10 @@ impl<'g> RenderCtx<'g> {
                 self.generator.in_loop_body,
                 var.version,
             ),
-            VersionPrefix::SelfVt | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => {
-                var.render_name()
-            }
+            VersionPrefix::SelfVt
+            | VersionPrefix::Acc
+            | VersionPrefix::Local(_)
+            | VersionPrefix::Gensym(_) => var.render_name(),
         }
     }
 
@@ -274,9 +275,53 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::MethodBody { body, .. } | ThreadedStmt::BranchArm { body, .. } => {
                 docs.push(render(body, ctx));
             }
+            ThreadedStmt::NlrThrow { .. } => docs.push(render_nlr_throw(stmt, ctx)),
         }
     }
     Document::Vec(docs)
+}
+
+/// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
+/// 'erlang':'throw'({'$bt_nlr', Tok, Val, Slot}) in`, where `Slot` is the one
+/// slot version bare, or every slot version as a tuple in order (ADR 0132 §2:
+/// `{SelfN, AccN}`, `{StateN, AccN}`).
+fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
+    let ThreadedStmt::NlrThrow {
+        token,
+        value,
+        slot,
+        result_var,
+        ..
+    } = stmt
+    else {
+        return Document::Nil;
+    };
+    let slot_doc = match slot.as_slice() {
+        [one] => leaf::var(ctx.resolve_prefix(one)),
+        many => {
+            let mut parts: Vec<Document<'static>> = Vec::with_capacity(many.len() * 2 + 1);
+            parts.push(Document::Str("{"));
+            for (i, var) in many.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Document::Str(", "));
+                }
+                parts.push(leaf::var(ctx.resolve_prefix(var)));
+            }
+            parts.push(Document::Str("}"));
+            Document::Vec(parts)
+        }
+    };
+    docvec![
+        "let ",
+        leaf::var(result_var.clone()),
+        " = call 'erlang':'throw'({'$bt_nlr', ",
+        leaf::var(token.name().to_string()),
+        ", ",
+        render_value(value, ctx),
+        ", ",
+        slot_doc,
+        "}) in ",
+    ]
 }
 
 /// ADR 0131 §2's `<read>`: `maps:get(Key, element(2, CF))` for a

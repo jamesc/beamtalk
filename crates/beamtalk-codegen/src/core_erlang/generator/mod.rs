@@ -110,6 +110,39 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
     pub(in crate::core_erlang) in_loop_body: bool,
+    /// ADR 0132 §2: whether the method body being lowered is a threaded
+    /// entry's body (one `MethodBody` frame over the trailing `Acc` family).
+    /// Read only through [`Self::threaded_body_kind`], which derives the
+    /// body's kind from `context`/`in_class_method`. Never set in
+    /// production yet: the threaded body lowering (ADR 0132 Phases 1c/1d)
+    /// is the first setter, so every method compiles exactly as before. That
+    /// setter must scope it to the one body it lowers (set on entry, restored
+    /// on exit, including on error), or the next method inherits `Acc`.
+    ///
+    /// **The first setter must generalise these single-family sites first.**
+    /// While set, `eligible_families` adds `Acc` (so a class body's set is
+    /// `[Acc]` and a value-type or actor body's has two entries), but these
+    /// consumers assume at most one family or read a non-empty set as "this is
+    /// a value-type/actor construct", and would silently miscompile (no
+    /// `debug_assert!`: CLAUDE.md forbids one, and `verify()` cannot see a
+    /// dropped slot):
+    /// - read only `families.as_slice().first()`, dropping every later family
+    ///   (`Acc` is last, so it is the one lost): the readers in
+    ///   `control_flow/exception_handling.rs` (the `exception_family_slot`
+    ///   family and the `on:do:`/`ensure:` cleanup baseline) and
+    ///   `value_type_codegen.rs` (`extract_vt_loop_family_slot`);
+    /// - gate on `families.as_slice().is_empty()`, which flips to "has a
+    ///   family" for a class body that now carries `Acc`: the gates in
+    ///   `control_flow/conditionals.rs` and in `value_type_codegen.rs`.
+    ///
+    /// Find them with `grep -n 'families.as_slice().first()'` and
+    /// `grep -n 'families.as_slice().is_empty()'` over
+    /// `crates/beamtalk-codegen/src/core_erlang`. One `is_empty()` gate is
+    /// excluded: `FoldFamilySlots::new` (`control_flow/family_slots.rs`) was
+    /// checked and handles multiple families.
+    ///
+    /// Tracked on BT-3871 (class methods) and BT-3872 (value-type methods).
+    pub(in crate::core_erlang) in_threaded_body: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -415,6 +448,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
+            in_threaded_body: false,
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),

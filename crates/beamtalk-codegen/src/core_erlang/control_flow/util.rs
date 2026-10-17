@@ -11,14 +11,19 @@
 //! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::CoreErlangGenerator;
+use super::super::threaded_ir::LOCAL_STATE_KEY_PREFIX;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 
 impl CoreErlangGenerator {
     /// Returns the state map key for a local variable.
-    /// Uses a `__local__` prefix to prevent collision with actor field names.
+    /// Uses the `__local__` prefix ([`LOCAL_STATE_KEY_PREFIX`]) to prevent
+    /// collision with actor field names.
     pub(in crate::core_erlang) fn local_state_key(var_name: &str) -> String {
-        format!("__local__{var_name}")
+        let mut key = String::with_capacity(LOCAL_STATE_KEY_PREFIX.len() + var_name.len());
+        key.push_str(LOCAL_STATE_KEY_PREFIX);
+        key.push_str(var_name);
+        key
     }
 
     /// ADR 0111 Addendum 5 (rebind idiom): rebinds

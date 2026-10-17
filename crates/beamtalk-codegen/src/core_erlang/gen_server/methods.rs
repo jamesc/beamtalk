@@ -296,6 +296,7 @@ impl CoreErlangGenerator {
                     boundary: super::super::NlrBoundary::ActorReply,
                     token: threaded_ir::TokenId::new(token_var.to_string()),
                     frame: threaded_ir::FrameId::ROOT,
+                    slot: Vec::new(),
                     span,
                 },
             );
@@ -2499,6 +2500,7 @@ impl CoreErlangGenerator {
                         boundary: super::super::NlrBoundary::ClassMethod,
                         token: threaded_ir::TokenId::new(token_var.to_string()),
                         frame: threaded_ir::FrameId::ROOT,
+                        slot: Vec::new(),
                         span: method.span,
                     },
                 );

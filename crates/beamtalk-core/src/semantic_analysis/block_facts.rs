@@ -2930,6 +2930,151 @@ pub fn is_control_flow_construct(
     }
 }
 
+/// ADR 0131 stopgap (BT-3864): every local (identifier-target) assignment in
+/// `body` whose write codegen drops (BT-3860), because it sits in *value
+/// position*. `root` is the kind of method `body` is the body of, or `None`
+/// for a top-level expression list (a REPL input or a script).
+///
+/// A local assignment is in statement position when it is, bare, a statement
+/// of a body: a method body, a block body or a top-level expression list.
+/// Every body lowering binds the local there. Parentheses around a statement
+/// that is not the body's last are unwrapped only at the root of a value-type
+/// or actor method (BT-3830, BT-3838: `(t := t + 1)` followed by `t`) and in
+/// an inlined arm ([`conditional_arm_blocks`]: a conditional's arm, a lookup
+/// handler, a `[...] value` body); the class-method root, the REPL root, a
+/// last statement and every other block body (a loop or fold body, an
+/// exception body, a closure) compile a parenthesised statement as an
+/// expression. Anywhere else the assignment is
+/// in value position: an operand (`x := (t := t + 1) + 1`), a collection-literal
+/// element (`#[t, (t := 7), t]`), the value of another assignment (`x := t := 7`)
+/// or of `^`, a conditional's or a cascade's receiver
+/// (`(t := t + 1) > 0 ifTrue: [...]`), an interpolated segment, a `match:`
+/// subject or arm. There `generate_expression` compiles only the value, and the
+/// local keeps its old binding. A field assignment (`self.x := ...`) is never
+/// one: it threads `State` (BT-3803's producer).
+///
+/// The one rule the Phase 0 check reports and the agreement tests
+/// (`beamtalk-codegen`'s and `beamtalk-repl`'s
+/// `value_position_assignment_agreement`) compare, both ways, with the
+/// assignments codegen drops. BT-3860 makes the shape a producer and deletes
+/// it.
+#[must_use]
+pub fn value_position_local_assignments(
+    body: &[ExpressionStatement],
+    root: Option<RootMethodKind>,
+) -> Vec<ValuePositionAssignment> {
+    let mut finder = ValuePositionAssignments::default();
+    let unwraps_parens = matches!(
+        root,
+        Some(RootMethodKind::ValueType | RootMethodKind::Actor)
+    );
+    finder.body(body, unwraps_parens);
+    finder.found
+}
+
+/// One local assignment [`value_position_local_assignments`] names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValuePositionAssignment {
+    /// The local it assigns.
+    pub name: ecow::EcoString,
+    /// The whole assignment (`t := t + 1`, without enclosing parentheses).
+    pub span: Span,
+    /// Whether the assignment is the whole value of a `^` (`^t := e`), whose
+    /// usual rewrite is `^e` (an `ensure:` cleanup can still read `t`, so it
+    /// is rejected all the same).
+    pub returned: bool,
+}
+
+/// The walk behind [`value_position_local_assignments`].
+#[derive(Default)]
+struct ValuePositionAssignments {
+    found: Vec<ValuePositionAssignment>,
+}
+
+impl ValuePositionAssignments {
+    /// The statements of a body; `unwraps_parens` is whether its lowering
+    /// binds a parenthesised local assignment that is not its last statement.
+    fn body(&mut self, body: &[ExpressionStatement], unwraps_parens: bool) {
+        use crate::ast::visitor::Visitor;
+        for (i, stmt) in body.iter().enumerate() {
+            let expr = if unwraps_parens && i + 1 < body.len() {
+                stmt.expression.unwrap_parens()
+            } else {
+                &stmt.expression
+            };
+            match expr {
+                // Binds its local: only its value is judged.
+                Expression::Assignment { target, value, .. }
+                    if matches!(target.as_ref(), Expression::Identifier(_)) =>
+                {
+                    self.visit_expr(value);
+                }
+                other => self.visit_expr(other),
+            }
+        }
+    }
+}
+
+impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
+    fn visit_expr(&mut self, expr: &'ast Expression) {
+        // `^t := e`: the same value position, told apart only for the hint.
+        if let Expression::Return {
+            value: returned, ..
+        } = expr
+            && let assignment @ Expression::Assignment {
+                target,
+                value: assigned,
+                ..
+            } = returned.unwrap_parens()
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            self.found.push(ValuePositionAssignment {
+                name: id.name.clone(),
+                span: assignment.span(),
+                returned: true,
+            });
+            self.visit_expr(assigned);
+            return;
+        }
+        if let Expression::Assignment { target, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            self.found.push(ValuePositionAssignment {
+                name: id.name.clone(),
+                span: expr.span(),
+                returned: false,
+            });
+        }
+        // An inlined arm (a conditional's, a lookup handler, `[...] value`)
+        // is lowered like a method root: a parenthesised statement that is
+        // not the arm's value binds its local.
+        if let Some(arms) = conditional_arm_blocks(expr)
+            && let Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } = expr.unwrap_parens()
+        {
+            for operand in std::iter::once(receiver.as_ref()).chain(arguments) {
+                match operand {
+                    Expression::Block(block)
+                        if arms.iter().any(|arm| std::ptr::eq(*arm, block)) =>
+                    {
+                        self.body(&block.body, true);
+                    }
+                    other => self.visit_expr(other),
+                }
+            }
+            return;
+        }
+        crate::ast::visitor::walk_expr(self, expr);
+    }
+
+    fn visit_block(&mut self, block: &'ast Block) {
+        self.body(&block.body, false);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

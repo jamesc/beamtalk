@@ -1,58 +1,82 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3799 / BT-3860 (ADR 0131): a REPL loop body whose conditional's
+//! BT-3799 / BT-3860 / BT-3864 (ADR 0131): a REPL loop body whose conditional's
 //! receiver assigns a binding (`(t := t + 1) > 1 ifTrue: [u := 9]`).
 //!
-//! A local assignment in value position never rebinds its local (BT-3860).
-//! In this shape the REPL's `do:` fold body also binds a `State` version tagged
+//! A local assignment in value position never rebinds its local (BT-3860). In
+//! this shape the REPL's `do:` fold body also binds a `State` version tagged
 //! with the root frame inside the fold's own frame, which the `ThreadedIr`
 //! verifier reports as a `BindFrameMismatch` ("foldl body mode/shape
-//! mismatch"): a debug compiler panics (the
-//! workspace's compiler port exits), a release compiler emits the code and the
-//! REPL answers `t` = 0.
+//! mismatch"): a debug compiler panics (the workspace's compiler port exits),
+//! a release compiler emits the code and the REPL answers `t` = 0.
 //!
-//! PIN-BUG BT-3860: the correct behaviour is no verifier error and `t` = 2,
-//! `u` = 9 after the loop. The fix for BT-3860 turns this into a test that the
-//! input compiles in every entry point. The other REPL shapes of BT-3860 are
-//! pinned at runtime in `tests/repl-protocol/cases/adr0131_nested_assign.btscript`.
+//! Since BT-3864 the Phase 0 check rejects the input with a
+//! `ValuePositionLocalAssignment` error, so the compiler port never reaches
+//! codegen for it (pinned at runtime in
+//! `tests/repl-protocol/cases/adr0131_nested_assign.btscript`).
 //!
-//! Debug builds only: a release compiler has no verifier panic to pin.
-#![cfg(debug_assertions)]
+//! PIN-BUG BT-3860: the correct behaviour is no error and `t` = 2, `u` = 9
+//! after the loop. The fix for BT-3860 deletes the rejection and turns these
+//! into a test that the input compiles in every entry point.
 
-use beamtalk_core::ast::Expression;
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
-use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
+use beamtalk_core::source_analysis::{DiagnosticCategory, lex_with_eof, parse};
 
 const INPUT: &str = "#(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]";
 
-fn statements(src: &str) -> Vec<Expression> {
-    let (module, diags) = parse(lex_with_eof(src));
-    assert!(diags.is_empty(), "{src}: {diags:?}");
-    module
+#[test]
+fn a_conditional_receiver_assignment_in_a_repl_loop_body_is_a_compile_error() {
+    let (module, _) = parse(lex_with_eof(INPUT));
+    let diags = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&["t", "u"]),
+    )
+    .diagnostics;
+    let rejected: Vec<_> = diags
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::ValuePositionLocalAssignment))
+        .collect();
+    assert_eq!(
+        rejected.len(),
+        1,
+        "BT-3860 is fixed? flip this PIN-BUG: {diags:?}"
+    );
+    let span = rejected[0].span;
+    assert_eq!(
+        &INPUT[span.start() as usize..span.end() as usize],
+        "t := t + 1"
+    );
+}
+
+/// The codegen half, with the check bypassed: a debug compiler's verifier
+/// still panics on the shape in both the eval and the trace entry points.
+#[cfg(debug_assertions)]
+#[test]
+fn bypassing_the_rejection_still_trips_the_verifier() {
+    use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
+    use std::collections::HashMap;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    /// The panic message of `f`, if it panicked.
+    fn panic_message(f: impl FnOnce()) -> Option<String> {
+        let payload = catch_unwind(AssertUnwindSafe(f)).err()?;
+        Some(
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                .unwrap_or_default(),
+        )
+    }
+
+    let (module, diags) = parse(lex_with_eof(INPUT));
+    assert!(diags.is_empty(), "{diags:?}");
+    let expressions: Vec<_> = module
         .expressions
         .into_iter()
         .map(|s| s.expression)
-        .collect()
-}
-
-/// The panic message of `f`, if it panicked.
-fn panic_message(f: impl FnOnce()) -> Option<String> {
-    let payload = catch_unwind(AssertUnwindSafe(f)).err()?;
-    Some(
-        payload
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
-            .unwrap_or_default(),
-    )
-}
-
-#[test]
-fn a_conditional_receiver_assignment_in_a_repl_loop_body_trips_the_verifier() {
-    let expressions = statements(INPUT);
+        .collect();
     let eval = panic_message(|| {
         let _ = generate_repl_expressions(&expressions, "repl_nested_assign");
     });

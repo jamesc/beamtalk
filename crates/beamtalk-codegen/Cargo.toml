@@ -44,5 +44,11 @@ tempfile = "3.14"
 # against.
 serde_json.workspace = true
 
+[features]
+## ADR 0131 stopgap (BT-3864): exposes `core_erlang::dropped_assignment_probe`
+## to dependent crates' agreement tests (`beamtalk-repl`); add
+## `beamtalk-codegen = { features = ["test"] }` to their dev-dependencies.
+test = []
+
 [lints]
 workspace = true

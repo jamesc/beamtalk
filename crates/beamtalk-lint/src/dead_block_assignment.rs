@@ -21,9 +21,10 @@
 //!   the one codegen's `threaded_locals_of` reads.
 //! - **Shapes a compile error rejects** are never warned about: a write
 //!   inside the span of a [`local_threading_diagnostics`] error (§6
-//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`) is
+//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`, the
+//!   BT-3864 stopgap `ValuePositionLocalAssignment`) is
 //!   that error's to report, so `beamtalk lint` and `beamtalk build` never
-//!   flag the same write twice, and when a later phase widens either error
+//!   flag the same write twice, and when a later phase widens any of them
 //!   this lint steps back without a change here.
 //!
 //! What is left for the lint (pinned by `lint_and_section6_agree` below):
@@ -637,16 +638,22 @@ Object subclass: Foo
         assert!(diags[0].message.contains("`x`"));
     }
 
-    /// Dead assignment inside a non-block message argument within a stored block.
+    /// An assignment in a message argument within a stored block is in value
+    /// position: since BT-3864 it is a `ValuePositionLocalAssignment` compile
+    /// error, which owns the report, so the lint steps back.
     #[test]
-    fn assignment_in_msg_arg_inside_block_warns() {
-        let diags = lint("x := 0.\nblk := [foo bar: (x := 1)]");
-        assert_eq!(
-            diags.len(),
-            1,
-            "Expected 1 lint for assignment in msg arg inside block, got: {diags:?}"
+    fn assignment_in_msg_arg_inside_block_is_the_compile_errors() {
+        let src = "x := 0.\nblk := [foo bar: (x := 1)]";
+        let diags = lint(src);
+        assert!(diags.is_empty(), "the compile error reports it: {diags:?}");
+        let (module, _) = parse(lex_with_eof(src));
+        let errors = beamtalk_core::semantic_analysis::analyse(&module).diagnostics;
+        assert!(
+            errors.iter().any(|d| d.category
+                == Some(DiagnosticCategory::ValuePositionLocalAssignment)
+                && d.message.contains("`x`")),
+            "{errors:?}"
         );
-        assert!(diags[0].message.contains("`x`"));
     }
 
     /// Match arm pattern variables are scoped to the arm — verify parsing and
@@ -1040,6 +1047,7 @@ sealed typed Value subclass: Foo
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,
             DiagnosticCategory::UnmigratedLocalThreading,
+            DiagnosticCategory::ValuePositionLocalAssignment,
         ];
         let mut failures = Vec::new();
         let tailed = shapes

@@ -181,6 +181,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![None, None],
             doc: None,

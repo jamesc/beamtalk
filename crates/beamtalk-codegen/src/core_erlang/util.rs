@@ -73,13 +73,21 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
     if version == 0 {
         prefix.to_string()
     } else {
-        // Pre-allocate: prefix length + up to 4 digits (handles version ≤ 9999).
-        let mut s = String::with_capacity(prefix.len() + 4);
-        s.push_str(prefix);
-        // Write the counter directly instead of using format!.
-        let _ = write!(s, "{version}");
-        s
+        indexed_var(prefix, version)
     }
+}
+
+/// [`versioned_var`] without the bare-prefix version 0: always
+/// `prefix{version}` (`Acc0`, `Acc1`, …). For a family whose entry parameter
+/// is named by its version too (ADR 0132's `Acc`). The one `prefix{version}`
+/// namer; [`versioned_var`] delegates to it for every non-zero version.
+pub(super) fn indexed_var(prefix: &str, version: usize) -> String {
+    // Pre-allocate: prefix length + up to 4 digits (handles version ≤ 9999).
+    let mut s = String::with_capacity(prefix.len() + 4);
+    s.push_str(prefix);
+    // Write the counter directly instead of using format!.
+    let _ = write!(s, "{version}");
+    s
 }
 
 /// Builds the metaclass tag string `"{class_name} class"`.

@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3868 (ADR 0132 Phase 0c) fixture: the Rust/Erlang conformance row for
+// the `tier2_methods`/`tier2_class_methods` keys of `__beamtalk_meta/0`
+// (runtime/apps/beamtalk_runtime/test/fixtures/tier2_meta_conformance.json).
+// Both sides of the boundary are pinned to the same expected maps: the Rust
+// emission test (`class_meta::tests`) asserts this class compiles to them,
+// and `beamtalk_threaded_dispatch_tests` asserts the runtime caches and
+// resolves them through the registry accessors. `twice:` on both sides is
+// the ADR's running example; no phase-0 module carries an entry for it.
+
+sealed Object subclass: ThreadedMetaFixture
+  twice: aBlock =>
+    aBlock value.
+    aBlock value
+
+  class twice: aBlock =>
+    aBlock value.
+    aBlock value

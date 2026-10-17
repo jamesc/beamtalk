@@ -707,6 +707,9 @@ struct MethodMeta {
     is_internal: bool,
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
+    /// ADR 0132 §1: argument positions this method threads a Tier 2 block
+    /// through (`MethodInfo::threading_params`). Empty until Phase 1b.
+    threading_params: Vec<usize>,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<DeclaredType>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
@@ -746,6 +749,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
+        threading_params: Vec::new(),
         return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
@@ -793,6 +797,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                 param_types: vec![],
                 doc: Some(getter_doc),
@@ -813,6 +818,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple(class_name)),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
@@ -852,6 +858,7 @@ fn synthesize_value_auto_methods(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple(class_name)),
             param_types,
             doc: Some(ctor_doc),
@@ -1647,19 +1654,34 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
     }
     code.push_str("\n    )\n}\n\n");
 
+    // One helper function per class, so that no single stack frame holds the
+    // struct-literal temporaries of every stdlib method at once. A single
+    // `generated_builtin_classes()` body that built all ~100 classes inline
+    // had a ~970 KB debug-build frame (each `MethodInfo` literal gets its own
+    // slot), which overflowed the 1 MB Windows main-thread stack once
+    // `MethodInfo` grew a field (BT-3868).
+    for meta in &sorted_meta {
+        generate_class_entry(&mut code, meta);
+    }
+
     // Generate generated_builtin_classes()
     code.push_str(
         "/// Returns all stdlib built-in class definitions.\n\
          ///\n\
          /// Auto-generated from parsed `lib/*.bt` ASTs.\n\
-         #[allow(clippy::too_many_lines)] // auto-generated from 32 stdlib classes\n\
+         #[allow(clippy::too_many_lines)] // auto-generated: one insert per stdlib class\n\
          #[rustfmt::skip] // preserve compact generated layout\n\
          pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {\n\
-         \x20   let mut classes = HashMap::new();\n\n",
+         \x20   let mut classes = HashMap::new();\n",
     );
 
     for meta in &sorted_meta {
-        generate_class_entry(&mut code, meta);
+        let _ = writeln!(
+            code,
+            "    classes.insert(\"{name}\".into(), {func}());",
+            name = meta.class_name,
+            func = class_info_fn_name(&meta.class_name),
+        );
     }
 
     code.push_str("    classes\n}\n");
@@ -1731,7 +1753,14 @@ fn generate_class_vars_keys_hrl() -> Result<()> {
     )
 }
 
-/// Generate a single class entry for `generated_builtin_classes()`.
+/// Name of the generated per-class helper function that builds `class_name`'s
+/// `ClassInfo` (see [`generate_class_entry`]).
+fn class_info_fn_name(class_name: &str) -> String {
+    format!("class_info_{class_name}")
+}
+
+/// Generate the per-class helper function (`class_info_<Name>() -> ClassInfo`)
+/// that `generated_builtin_classes()` calls for this class.
 #[allow(clippy::too_many_lines)] // one contiguous struct-literal emission
 fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
     let superclass = if meta.superclass_name == "none" {
@@ -1742,9 +1771,12 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
 
     let _ = write!(
         code,
-        "    classes.insert(\n\
-         \x20       \"{name}\".into(),\n\
-         \x20       ClassInfo {{\n\
+        "#[allow(non_snake_case)] // named after the stdlib class\n\
+         #[allow(clippy::too_many_lines)] // auto-generated: one literal per method\n\
+         #[inline(never)] // keep each class's literal temporaries in their own frame\n\
+         #[rustfmt::skip] // preserve compact generated layout\n\
+         fn {func}() -> ClassInfo {{\n\
+         \x20   ClassInfo {{\n\
          \x20           name: \"{name}\".into(),\n\
          \x20           superclass: {superclass},\n\
          \x20           is_sealed: {sealed},\n\
@@ -1756,6 +1788,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_native: {is_native},\n\
          \x20           handle_scope: {handle_scope},\n\
          \x20           surface_incomplete: false,\n",
+        func = class_info_fn_name(&meta.class_name),
         name = meta.class_name,
         sealed = meta.modifiers.is_sealed,
         abstract_ = meta.modifiers.is_abstract,
@@ -1916,7 +1949,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
 
     generate_superclass_type_args(code, &meta.superclass_type_args, &meta.type_params);
 
-    code.push_str("        },\n    );\n\n");
+    code.push_str("    }\n}\n\n");
 }
 
 /// Emit the `generated_stdlib_alias_sources()` function body: one
@@ -2106,11 +2139,18 @@ fn generate_method_list(
             Some(doc) => format!("Some({}.into())", rust_str_lit(doc)),
             None => "None".to_string(),
         };
+        let threading_params_expr = if m.threading_params.is_empty() {
+            "vec![]".to_string()
+        } else {
+            let parts: Vec<_> = m.threading_params.iter().map(usize::to_string).collect();
+            format!("vec![{}]", parts.join(", "))
+        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
+             threading_params: {threading_params_expr}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None }},",
             arity = m.arity,
@@ -2937,6 +2977,7 @@ mod tests {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: None,
                     param_types: vec![],
                     doc: None,
@@ -2948,6 +2989,7 @@ mod tests {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
+                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("Counter")),
                     param_types: vec![Some(DeclaredType::simple("Integer"))],
                     doc: None,
@@ -2960,6 +3002,7 @@ mod tests {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple("Counter")),
                 param_types: vec![],
                 doc: None,
@@ -3183,6 +3226,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Counter")),
             param_types: vec![Some(DeclaredType::simple("Integer"))],
             doc: None,
@@ -3208,6 +3252,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -3233,6 +3278,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: true,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![Some(DeclaredType::simple("Integer")), None],
             doc: None,
@@ -3257,6 +3303,7 @@ mod tests {
             is_sealed: false,
             is_internal: true,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Dictionary")),
             param_types: vec![Some(DeclaredType::simple("Symbol"))],
             doc: None,
@@ -3737,6 +3784,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -4299,6 +4347,7 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: Some("Line one\nLine \"two\"\tend\r".to_string()),

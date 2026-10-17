@@ -8,9 +8,11 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
+use crate::core_erlang::threaded_ir::ThreadedBodyKind;
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -26,6 +28,10 @@ impl CoreErlangGenerator {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
             direct_class_methods: &self.own_direct_class_methods,
+            // ADR 0132 Phase 0: no threaded entries are generated yet; Phase
+            // 1c/1d fill these from the threading predicate.
+            tier2_methods: &[],
+            tier2_class_methods: &[],
         }
     }
 
@@ -314,6 +320,25 @@ impl CoreErlangGenerator {
     /// Sets the in-class-method flag.
     pub(in crate::core_erlang) fn set_in_class_method(&mut self, value: bool) {
         self.class_context_mut().in_class_method = value;
+    }
+
+    /// ADR 0132 §2: the kind of threaded entry body being lowered, or `None`
+    /// outside one (every method today). Derived, never stored: a class
+    /// method's body is [`ThreadedBodyKind::Class`], a value-type instance
+    /// method's [`ThreadedBodyKind::ValueType`], an actor instance method's
+    /// [`ThreadedBodyKind::Actor`]. REPL context compiles no threaded entry.
+    pub(in crate::core_erlang) fn threaded_body_kind(&self) -> Option<ThreadedBodyKind> {
+        if !self.in_threaded_body {
+            return None;
+        }
+        if self.in_class_method() {
+            return Some(ThreadedBodyKind::Class);
+        }
+        match self.context {
+            CodeGenContext::ValueType => Some(ThreadedBodyKind::ValueType),
+            CodeGenContext::Actor => Some(ThreadedBodyKind::Actor),
+            CodeGenContext::Repl => None,
+        }
     }
 
     /// ADR 0084: the builder class name when lowering a programmatic

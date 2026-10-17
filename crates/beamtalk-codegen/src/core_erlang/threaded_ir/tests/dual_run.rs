@@ -522,6 +522,7 @@ fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
             boundary: NlrBoundary::ActorReply,
             token: TokenId::new(render_token),
             frame,
+            slot: Vec::new(),
             span: span(),
         },
         ThreadedStmt::Bind {
