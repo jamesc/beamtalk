@@ -40,15 +40,20 @@ doctor:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# The slow tier of the Rust tests as a nextest filterset (see `test-rust` and
+# `test-corpus`): in the three compiler packages only, the lib/unit tests whose
+# module path says agreement or corpus, and the integration binaries that are
+# nothing but such proofs. Scoped by package so that a same-named test in another
+# crate (beamtalk-examples' class_corpus, beamtalk-cli's cli_class_var_agreement)
+# stays in the fast tier, where its own crate's changes run it; the gate that
+# decides when this tier runs (scripts/ci/corpus-gate.sh) watches exactly these
+# three crates.
+corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/))"
+
 # Run local CI checks (combination of GitHub Actions check + test jobs)
 # Matches: just build clippy fmt-check test (check job)
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
-# The slow tier of the Rust tests as a nextest filterset (see `test-rust` and
-# `test-corpus`): lib/unit tests whose module path says agreement or corpus,
-# and the integration binaries that are nothing but such proofs.
-corpus_tests := "test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/)"
-
 [unix]
 ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
 
@@ -132,19 +137,13 @@ ci-changed:
       echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
     fi
 
-    # The Rust corpus tier (`test-corpus`: the ADR 0111/0131 agreement and
-    # corpus proofs, ~13 min on 4 cores) calls the compiler in-process and
-    # never touches the runtime, the CLI or the stdlib sources, so only a
-    # change to the compiler crates (or to the build/test configuration) can
-    # change its verdict. CI's Linux `check` job applies the same gate.
-    CORPUS_PATTERNS=(
-      'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*'
-      'Cargo.toml' 'Cargo.lock' 'Justfile'
-    )
-    if matches_any "${CORPUS_PATTERNS[@]}"; then
+    # The Rust corpus tier (`test-corpus`, ~13 min on 4 cores) runs only when
+    # scripts/ci/corpus-gate.sh says the changed paths can affect it; ci.yml's
+    # Linux `check` job calls the same script, so the path list has one home.
+    if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
       just test-corpus
     else
-      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job gates it the same way)"
+      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job runs the same gate)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.

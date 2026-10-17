@@ -49,11 +49,10 @@ jobs:
           persist-credentials: false
 
       # The Rust corpus tier (`just test-corpus`, the state-threading agreement and
-      # corpus proofs, ~13 min) calls the compiler in-process and never touches the
-      # runtime, the CLI or the stdlib sources, so only a change to the compiler
-      # crates or the build/test configuration can change its verdict. On a PR it
-      # runs only when such paths changed (same gate as `just ci-changed`); on a
-      # push to main it always runs. Linux only (the tests are OS-independent).
+      # corpus proofs, ~13 min) runs on a PR only when scripts/ci/corpus-gate.sh says
+      # the changed paths can affect it (the same script `just ci-changed` calls, so
+      # the path list has one home); on a push to main it always runs. Linux only
+      # (the tests are OS-independent).
       - name: Decide whether the Rust corpus tier runs
         id: corpus
         shell: bash
@@ -62,9 +61,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
-               crates/beamtalk-core/ crates/beamtalk-codegen/ crates/beamtalk-repl/ \
-               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml | grep -q .; then
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | scripts/ci/corpus-gate.sh; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
