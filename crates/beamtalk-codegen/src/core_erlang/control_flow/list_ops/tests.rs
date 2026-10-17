@@ -1553,6 +1553,100 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
     );
 }
 
+#[test]
+fn test_value_type_collect_non_literal_callable_generates_map_wrapper() {
+    // ValueType + collect: with a non-literal callable uses the plain-value wrapper
+    // (`generate_non_literal_callable_erlang_wrapper` with operation "map"), not the
+    // ADR 0128 state fold — ValueType has no `State` map to thread.
+    // Exercises the "map" arm of `generate_simple_list_op_footer`'s selector match
+    // and the corresponding BIF dispatch, covering lines that the `do:` (foreach)
+    // test does not reach.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items collect: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'map'"),
+        "ValueType collect: with non-literal callable should use lists:map. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "ValueType collect: with non-literal callable must NOT use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "ValueType collect: non-literal callable should emit is_function/2 arity check. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_list'"),
+        "ValueType collect: should guard with erlang:is_list for list dispatch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_message_dispatch':'send'("),
+        "ValueType collect: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'collect:'"),
+        "ValueType collect: fallback should use 'collect:' selector. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_select_non_literal_callable_generates_filter_wrapper() {
+    // ValueType + select: with a non-literal callable uses the plain-value wrapper
+    // (`generate_non_literal_callable_erlang_wrapper` with operation "filter"), not the
+    // ADR 0128 state fold.
+    // Exercises the "filter" arm of `generate_simple_list_op_footer`'s selector match,
+    // covering the third distinct operation path through these two functions.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items select: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "ValueType select: with non-literal callable should use lists:filter. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "ValueType select: with non-literal callable must NOT use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "ValueType select: non-literal callable should emit is_function/2 arity check. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_list'"),
+        "ValueType select: should guard with erlang:is_list for list dispatch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_message_dispatch':'send'("),
+        "ValueType select: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'select:'"),
+        "ValueType select: fallback should use 'select:' selector. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_class_method_collect_non_literal_callable_does_not_fold() {
+    // A class method forwarding a non-literal callable to `collect:` must NOT use the
+    // ADR 0128 fold rewrite — class methods have no `State`/`StateAcc` parameter.
+    // Mirrors `test_class_method_do_non_literal_callable_does_not_fold` for the
+    // "map" operation path.
+    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'map'"),
+        "Non-literal callable collect: in a class method should use lists:map (no fold). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Non-literal callable collect: in a class method must NOT fold — class methods have no \
+         State/StateAcc to seed the accumulator from. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable collect: should still emit is_function/2 arity check. Got:\n{code}"
+    );
+}
+
 // ── ADR 0128 / BT-3615: opaque-callable fold for the remaining HOMs ────
 
 /// Every collection HOM covered by `beamtalk-core`'s `opaque_fold_callable_arg`
