@@ -71,6 +71,7 @@ jobs:
           path: .triage-config
           sparse-checkout: |
             .github/claude-fuzz-triage-prompt.md
+            .github/scripts/repro-class-var.sh
             .claude/commands/create-issue/SKILL.md
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -142,20 +143,24 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Trust boundary: the agent reads untrusted data (logs, fuzz inputs, fuzzed
-          # source), so the tool list is kept small. It can read files with the Read,
-          # Grep and Glob tools (not /proc), write only under triage/, run only
-          # cargo fuzz/test/build (including the env-prefixed `CV_SEED=… cargo test`
-          # repro form), just and read-only git, and use the Linear
-          # issue tools. Not allowed: find, cat, other shell, git writes, the web.
-          # `cargo` still executes this repo's build scripts (the checked-out
-          # default-branch commit, which the agent cannot modify), and the OAuth token
+          # source), so the tool list stays small and the secret-exposing tools are
+          # left out. It can read files with the Read, Grep and Glob tools (not
+          # /proc), run cargo (except install/login/publish/owner/yank), just, the
+          # one repro script below and read-only git, and use the Linear issue tools.
+          # Not allowed: Write/Edit (it reports only through Linear), cat/find/head/
+          # tail or other shell, env-prefixed commands, git writes, the web. The
+          # script exists because `VAR=value cargo ...` cannot be allowed by pattern;
+          # it validates its arguments (they come from untrusted logs) and sets the
+          # variables itself. cargo is allowed in full because reproducing a failure
+          # needs fuzz, test, build and run. It executes this repo's code (the
+          # checked-out commit, which the agent cannot modify), and the OAuth token
           # and Linear key are in the job's environment, so injected instructions
-          # could in principle still reach them through those tools; that residual
-          # risk is why the prompt marks all fetched data as untrusted.
+          # could in principle still reach them through cargo; that residual risk is
+          # why the prompt marks all fetched data as untrusted.
           claude_args: >-
             --max-turns 60
             --mcp-config ${{ runner.temp }}/linear-mcp.json
-            --allowedTools "Read,Grep,Glob,Write(triage/**),Write(/${{ github.workspace }}/triage/**),Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(CV_SEED=* CV_SIZE=* CV_SHAPES=* cargo test:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+            --allowedTools "Read,Grep,Glob,Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(bash .triage-config/.github/scripts/repro-class-var.sh:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
             --disallowedTools "Read(//proc/**),Read(//home/runner/work/_temp/**)"
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
@@ -196,4 +201,5 @@ jobs:
           echo "## Fuzz triage for run ${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f triage/result.md ]; then cat triage/result.md >> "$GITHUB_STEP_SUMMARY"; else echo "Claude wrote no triage/result.md; see the job log." >> "$GITHUB_STEP_SUMMARY"; fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The agent reports in Linear (comments end with an \"Automated triage\" line); the agent's tool calls and denials are in the \"Show permission denials\" step and the execution-output artifact." >> "$GITHUB_STEP_SUMMARY"
