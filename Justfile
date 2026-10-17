@@ -40,15 +40,25 @@ doctor:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# The slow tier of the Rust tests as a nextest filterset (see `test-rust` and
+# `test-corpus`): in the three compiler packages only, the lib/unit tests whose
+# module path says agreement or corpus, and the integration binaries that are
+# nothing but such proofs. Scoped by package so that a same-named test in another
+# crate (beamtalk-examples' class_corpus, beamtalk-cli's cli_class_var_agreement)
+# stays in the fast tier, where its own crate's changes run it; the gate that
+# decides when this tier runs (scripts/ci/corpus-gate.sh) watches exactly these
+# three crates.
+corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/))"
+
 # Run local CI checks (combination of GitHub Actions check + test jobs)
 # Matches: just build clippy fmt-check test (check job)
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
+ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
 
 [windows]
-ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
+ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
 # suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
@@ -125,6 +135,15 @@ ci-changed:
       just test-parity
     else
       echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
+    fi
+
+    # The Rust corpus tier (`test-corpus`, ~13 min on 4 cores) runs only when
+    # scripts/ci/corpus-gate.sh says the changed paths can affect it; ci.yml's
+    # Linux `check` job calls the same script, so the path list has one home.
+    if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
+      just test-corpus
+    else
+      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job runs the same gate)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.
@@ -779,7 +798,13 @@ bench:
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Lint Elixir: format check
+# Lint Elixir: format check. On success the stamp scripts/lint-stamp.sh keeps
+# for the pre-push hook is written, so `git push` does not run it again.
+[unix]
+lint-elixir: fmt-check-elixir
+    @scripts/lint-stamp.sh write elixir
+
+[windows]
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
@@ -866,16 +891,41 @@ lint-workaround-comments:
 lint-workaround-comments:
     @echo "lint-workaround-comments: skipped on Windows (covered by Linux CI)"
 
-# Lint Beamtalk: formatting check
+# Lint Beamtalk: formatting check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-beamtalk: fmt-check-beamtalk
+    @scripts/lint-stamp.sh write beamtalk
+
+[windows]
 lint-beamtalk: fmt-check-beamtalk
 
-# Lint Rust: clippy + formatting check
+# Lint Rust: clippy + formatting check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-rust: clippy fmt-check-rust
+    @scripts/lint-stamp.sh write rust
+
+[windows]
 lint-rust: clippy fmt-check-rust
 
 # Lint Erlang: Dialyzer type checking + format check + generated spec validation
+# (stamped for the pre-push hook, see lint-elixir)
+[unix]
+lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
+    @scripts/lint-stamp.sh write erlang
+
+[windows]
 lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
 
-# Lint JS/TS: Biome lint + format check
+# Lint JS/TS: Biome lint + format check (stamped for the pre-push hook, see lint-elixir)
+[unix]
+[working-directory: 'editors/vscode']
+lint-js: fmt-check-js
+    @echo "🔍 Running Biome lint..."
+    npm run lint
+    @echo "✅ Biome lint passed"
+    @../../scripts/lint-stamp.sh write js
+
+[windows]
 [working-directory: 'editors/vscode']
 lint-js: fmt-check-js
     @echo "🔍 Running Biome lint..."
@@ -1042,22 +1092,105 @@ dialyzer-specs:
 test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 
 # Run Rust tests (unit + integration, skip slow E2E)
-# Output: summary lines + failures only (reduces ~74 lines to ~10)
+# cargo-nextest schedules every binary's tests through one runner, so the
+# serial erlc-bound binaries (beamtalk-repl's assembler corpora, the CLI
+# integration tests) overlap the CPU-bound beamtalk-codegen corpus instead of
+# queuing behind it (`cargo test` runs binaries one at a time). nextest does not
+# run doctests, so they run through `cargo test --doc` afterwards. Falls back to
+# `cargo test` when cargo-nextest is absent (scripts/setup-cloud.sh and the
+# devcontainer install it; CI installs it from get.nexte.st).
+# `test-rust` and `test-rust-platform` take no parameters on purpose: CI chains
+# them with other recipes (`just build clippy fmt-check test-rust lint-...`),
+# and a variadic recipe would swallow every following recipe name as a test
+# filter (nextest then runs 0 tests and the later recipes never run). The
+# package selection is the one parameter of the hidden `_test-rust`.
+# Output: failures + the summary line only.
+#
+# Two tiers. `test-rust` is the fast tier: everything except `corpus_tests`.
+# `test-corpus` is the slow tier: the ADR 0111/0131 state-threading agreement
+# and corpus proofs (`local_producer_agreement*`, `*_corpus`,
+# `class_var_agreement`, `repl_local_producer`, ...), about 90 tests that
+# enumerate frames x constructs x statements and compile every cell: roughly
+# 13 of the suite's 21 minutes on a 4-core runner. They only prove things
+# about the compiler crates they call in-process, so `ci-changed` and CI's
+# Linux `check` job run them only when those crates change; `just ci` always
+# runs both tiers. The set is one nextest filterset, defined once here.
+test-rust: (_test-rust "")
+
+# The fast tier of one crate, for the edit loop (`just test-rust-crate
+# beamtalk-codegen`): the skills run this after each change and leave the
+# whole workspace to `just ci-changed`, the one full local run of a PR.
+test-rust-crate CRATE: (_test-rust "-p " + CRATE)
+
+# The slow tier (see `test-rust`). Linux-only in CI; no platform subset.
 [unix]
-test-rust:
+test-corpus:
+    #!/usr/bin/env bash
+    set -o pipefail
+    echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' || exit $?
+    else
+        echo "⏭️  cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)"
+    fi
+    echo "✅ Rust corpus tier complete"
+
+[windows]
+test-corpus:
+    @echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
+    @echo "✅ Rust corpus tier complete"
+
+# The platform-sensitive subset of the Rust tests: every crate except the pure
+# compiler crates whose tests are platform-independent and dominate the run
+# (beamtalk-codegen's corpus agreement tests, beamtalk-repl's erlc-backed
+# assembler corpora: ~15 of `test-rust`'s ~21 minutes on a 4-core runner).
+# CI runs this on macOS and Windows and the full `test-rust` on Linux; nothing
+# about those two crates' tests depends on the OS, so running them three times
+# bought nothing. New crates are included here by default.
+test-rust-platform: (_test-rust "--workspace --exclude beamtalk-codegen --exclude beamtalk-repl")
+
+# ARGS is the cargo package selection, e.g. `--workspace --exclude <crate>`.
+# `cargo test --doc` runs the doctests nextest does not. The criterion bench
+# smoke is not here: see `test-benches-smoke` (nightly only, BT-3886).
+[unix]
+_test-rust ARGS:
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
-    output=$(cargo test --all-targets --quiet 2>&1) && rc=0 || rc=$?
-    echo "$output" | grep -E '^test result:|FAILED|^error' || true
-    if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }} || exit $?
+        rest=()
+    else
+        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier and the bench smoke too)"
+        rest=(--all-targets)
+    fi
+    for targets in "${rest[@]}" "--doc"; do
+        output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
+        echo "$output" | grep -E '^test result:|FAILED|^error' || true
+        if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
+    done
     echo "✅ Rust tests complete"
 
 [windows]
-test-rust:
+_test-rust ARGS:
     @echo "🧪 Running Rust tests (fast)..."
-    @$output = cargo test --all-targets --quiet 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
+
+# Bench smoke (BT-3886): every criterion bench binary once, in test mode
+# (`cargo test --benches` runs each benchmark function a single time, as the
+# old `cargo test --all-targets` did). It is what caught BT-3868's Windows
+# main-thread stack overflow, so nightly.yml runs it on its macOS/Windows
+# matrix; it is ~5 minutes of serial wall time (`benches/build_bench.rs`
+# cold-builds the stdlib), which is why it is not part of `test-rust`.
+# nextest cannot run these: it lists a `harness = false` binary with
+# `--list`, and build_bench builds the stdlib before it parses arguments.
+test-benches-smoke:
+    @echo "🧪 Running criterion benches in test mode (bench smoke, ~5 min)..."
+    cargo test --benches --quiet
+    @echo "✅ Bench smoke complete"
 
 # Run REPL protocol tests (slow - full pipeline, ~50s)
 test-repl-protocol: build-stdlib

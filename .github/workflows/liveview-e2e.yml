@@ -88,6 +88,8 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5

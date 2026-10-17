@@ -16,6 +16,32 @@ exclude = ["fuzz", "desktop/src-tauri"]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 
+# Optimise the dependencies and the two compiler crates the corpus tests run
+# through, and nothing else. The codegen corpus tests (thousands of generated
+# programs per test, each lexed, analysed, generated and verified) are
+# CPU-bound; measured on a 4-core machine for the beamtalk-codegen unit tests
+# (`cargo test -p beamtalk-codegen --lib`) against a workspace-only rebuild
+# (`cargo build --all-targets` with dependencies cached):
+#
+#   opt-level 0 everywhere .................. tests 571 s, workspace build  83 s
+#   deps 1, workspace 0 ..................... tests 484 s, workspace build  81 s
+#   core + codegen 1, rest 0 ................ tests 371 s, workspace build 151 s
+#   deps 1 + core + codegen 1 (this) ........ tests 246 s, workspace build 162 s
+#   opt-level 1 everywhere .................. tests 223 s, workspace build 301 s
+#
+# Dependencies cost nothing per run once rust-cache holds them (ci.yml keys
+# that cache on this file), so the only per-run price is the two crates. Debug
+# assertions (the ThreadedIr verifier's panics) are unaffected; `profile.test`
+# inherits all of this, so `cargo test` and `cargo nextest` get it too.
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev.package.beamtalk-core]
+opt-level = 1
+
+[profile.dev.package.beamtalk-codegen]
+opt-level = 1
+
 [profile.release]
 strip = "debuginfo"
 

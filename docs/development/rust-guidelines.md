@@ -61,7 +61,7 @@ cargo fmt --all -- --check
 # Step 3: Run clippy with warnings as errors (MUST match CI)
 cargo clippy --all-targets -- -D warnings
 
-# Step 4: Run all tests
+# Step 4: Run all tests (`just test-rust` runs the same set through cargo-nextest, faster)
 cargo test --all-targets
 ```
 
