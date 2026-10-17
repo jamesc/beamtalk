@@ -32,7 +32,7 @@ Or individual steps:
 cargo build --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo test --all-targets
+just test-rust           # cargo-nextest over every test binary + doctests (`cargo test --all-targets` works too, slower: one binary at a time)
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)
 just test-parity         # Cross-surface parity tests (BT-2077, ~30s)

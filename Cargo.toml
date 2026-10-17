@@ -13,6 +13,14 @@ members = ["crates/*", "crates/beamtalk-examples/build-corpus", "test-package-co
 exclude = ["fuzz", "desktop/src-tauri"]
 
 [profile.dev]
+# opt-level 1: the codegen corpus tests (thousands of generated programs per
+# test, each lexed, analysed, generated and verified) are CPU-bound and ran 2.6x
+# faster at opt-level 1 than at 0 (beamtalk-codegen unit tests: 571 s -> 223 s
+# on a 4-core runner; the heaviest family 175 s -> 45 s). opt-level 2 gained only
+# another 5% for the same build time, so 1 is the floor that pays. Debug
+# assertions (the ThreadedIr verifier's panics) are unaffected. `profile.test`
+# inherits this, so `cargo test` and `cargo nextest` get it too.
+opt-level = 1
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 

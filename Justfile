@@ -1042,22 +1042,48 @@ dialyzer-specs:
 test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 
 # Run Rust tests (unit + integration, skip slow E2E)
-# Output: summary lines + failures only (reduces ~74 lines to ~10)
+# cargo-nextest schedules every binary's tests through one runner, so the
+# serial erlc-bound binaries (beamtalk-repl's assembler corpora, the CLI
+# integration tests) overlap the CPU-bound beamtalk-codegen corpus instead of
+# queuing behind it (`cargo test` runs binaries one at a time). nextest does not
+# run doctests, so they run through `cargo test --doc` afterwards. Falls back to
+# `cargo test` when cargo-nextest is absent (scripts/setup-cloud.sh and the
+# devcontainer install it; CI installs it from get.nexte.st).
+# ARGS go to the cargo package selection, e.g. `--workspace --exclude <crate>`.
+# Output: failures + the summary line only.
 [unix]
-test-rust:
+test-rust *ARGS:
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
-    output=$(cargo test --all-targets --quiet 2>&1) && rc=0 || rc=$?
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo nextest run --all-targets --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }} || exit $?
+    else
+        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower)"
+        output=$(cargo test --all-targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
+        echo "$output" | grep -E '^test result:|FAILED|^error' || true
+        if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
+    fi
+    output=$(cargo test --doc --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
     echo "$output" | grep -E '^test result:|FAILED|^error' || true
     if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     echo "✅ Rust tests complete"
 
 [windows]
-test-rust:
+test-rust *ARGS:
     @echo "🧪 Running Rust tests (fast)..."
-    @$output = cargo test --all-targets --quiet 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --all-targets --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
+
+# The platform-sensitive subset of the Rust tests: every crate except the pure
+# compiler crates whose tests are platform-independent and dominate the run
+# (beamtalk-codegen's corpus agreement tests, beamtalk-repl's erlc-backed
+# assembler corpora: ~15 of `test-rust`'s ~21 minutes on a 4-core runner).
+# CI runs this on macOS and Windows and the full `test-rust` on Linux; nothing
+# about those two crates' tests depends on the OS, so running them three times
+# bought nothing. New crates are included here by default.
+test-rust-platform: (test-rust "--workspace --exclude beamtalk-codegen --exclude beamtalk-repl")
 
 # Run REPL protocol tests (slow - full pipeline, ~50s)
 test-repl-protocol: build-stdlib
