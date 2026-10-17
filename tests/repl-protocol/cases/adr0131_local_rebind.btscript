@@ -704,6 +704,28 @@ t := 0
 r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t] ifFalse: [0]
 // => ERROR: `on:do:` writes outer local `t`
 
+// A REPL loop whose only write sits in a fold behind a nested conditional. Its
+// body now threads the bindings map (BT-3823 widened what a REPL loop treats
+// as carried), but the fold in the arm of a loop body is not a site yet, so the
+// Phase 0 check keeps the error (BT-3876). With the check bypassed, codegen
+// compiles it (no verifier error) and answers `t` = 1.
+t := 0
+// => 0
+
+#(1, 2) do: [:k | (k > 1) ifTrue: [#(1) do: [:j | t := t + j]]]
+// => ERROR: `do:` writes outer local `t`
+
+// The same body with the write as the arm's own assignment of a fold's value
+// is accepted and keeps it.
+t := 0
+// => 0
+
+#(1, 2) do: [:k | (k > 1) ifTrue: [t := (#(1, 5) inject: t into: [:a :j | a + j])]]
+// => _
+
+t
+// => 6
+
 // ===========================================================================
 // `match:` arms (BT-3817, BT-3823)
 // ===========================================================================

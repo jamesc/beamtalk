@@ -686,6 +686,7 @@ impl CoreErlangGenerator {
         {
             return None;
         }
+        // BT-3823: the REPL's one rule, for every family.
         if self.is_repl_mode() {
             return self.repl_producer_locals(inner);
         }
@@ -698,9 +699,6 @@ impl CoreErlangGenerator {
             return Some(locals);
         }
         beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner)?;
-        if self.is_repl_mode() {
-            return self.threaded_locals_of(inner).map(|_| Vec::new());
-        }
         let locals = self.construct_tuple_locals(inner)?;
         // A construct that writes no outer local still compiles to a tuple
         // when it threads a family (an actor fold's `State`, a value-type
@@ -748,8 +746,10 @@ impl CoreErlangGenerator {
         };
         if self.is_repl_mode() {
             // The REPL threads its bindings map: a conditional (or an
-            // evaluated literal block) at a REPL site is a producer that adopts
-            // the map whole (`repl_producer_locals`).
+            // evaluated literal block) is a producer by the REPL's one rule
+            // (`repl_producer_locals`). Reached here only from the inline
+            // conditional lowering (`inline_control_flow_producer_with`);
+            // `local_producer_locals` answers for the REPL itself.
             conditional_arm_blocks(expr)?;
             return self.repl_producer_locals(expr);
         }
@@ -817,17 +817,15 @@ impl CoreErlangGenerator {
     /// local, the set its blocks pack is the whole set
     /// (`ThreadedLocals::lowered == names`, so no write is dropped), and the
     /// blocks are ones the producer can lower in this kind of method
-    /// (`exception_send_lowers_as_producer`). In the REPL it answers for a
-    /// construct that writes a binding: a producer that adopts the bindings map
-    /// whole (`lower_repl_construct_tuple`) and threads no local of its own.
+    /// (`exception_send_lowers_as_producer`). In the REPL it answers `None`:
+    /// every REPL producer is decided by [`Self::repl_producer_locals`]
+    /// (`local_producer_locals`), and every other caller is gated on a method
+    /// frame.
     pub(super) fn exception_producer_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         use beamtalk_core::semantic_analysis::block_facts::{
             exception_arm_blocks, exception_send_lowers_as_producer,
         };
         let arms = exception_arm_blocks(expr)?;
-        if self.is_repl_mode() {
-            return self.repl_producer_locals(expr);
-        }
         let kind = self.root_method_kind()?;
         if !exception_send_lowers_as_producer(expr, &arms, kind, &|name| {
             self.binds_threadable_local(name)

@@ -2806,4 +2806,26 @@ fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
             }
         }
     }
+    // The third Tier 2 receiver codegen recognises, an actor field
+    // (`self.blk value: ...`), whose block the §6 check does not see: the
+    // writing fold in its argument is rejected all the same (probed on a BEAM:
+    // the root, an arm and a loop body all report it).
+    let field = "self.blk value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    for stmt in [
+        format!("4 =:= 4 ifTrue: [u := {field}]"),
+        format!("#(1) do: [:z | u := {field}]"),
+        format!("u := {field}"),
+    ] {
+        let src = format!(
+            "Actor subclass: P\n  state: blk = nil\n\n  probe =>\n    t := 0\n    u := 0\n    {stmt}\n    #[t, u]\n"
+        );
+        assert!(
+            !of_category(
+                &adr0131_diagnostics(&src),
+                DiagnosticCategory::UnmigratedLocalThreading
+            )
+            .is_empty(),
+            "{src}"
+        );
+    }
 }
