@@ -187,7 +187,7 @@ impl CoreErlangGenerator {
         // caller that unpacks its tuple already include, and only when the
         // fold has something to carry.
         match body {
-            Expression::Block(body_block) if self.loop_body_needs_threading(body_block) => {
+            Expression::Block(body_block) if self.loop_body_has_carried_mutations(body_block) => {
                 Some(body_block)
             }
             _ => None,

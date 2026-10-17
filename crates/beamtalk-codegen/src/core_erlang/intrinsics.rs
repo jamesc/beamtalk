@@ -539,7 +539,7 @@ impl CoreErlangGenerator {
             // write to an outer local (including write-only `[last := i]`)
             // the mutation analysis misses, and only when the loop has
             // something to carry.
-            if self.loop_body_needs_threading(body_block) {
+            if self.loop_body_has_carried_mutations(body_block) {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
@@ -565,7 +565,7 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[1] {
             // The one loop/fold gate (see `try_generate_times_repeat`).
-            if self.loop_body_needs_threading(body_block) {
+            if self.loop_body_has_carried_mutations(body_block) {
                 let doc =
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
@@ -592,7 +592,7 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[2] {
             // The one loop/fold gate (see `try_generate_times_repeat`).
-            if self.loop_body_needs_threading(body_block) {
+            if self.loop_body_has_carried_mutations(body_block) {
                 let doc = self.generate_to_by_do_with_mutations(
                     receiver,
                     &arguments[0],
@@ -726,10 +726,10 @@ impl CoreErlangGenerator {
                     // return `None` and let the ordinary dispatch reach the collection.bt
                     // method.
                     "eachWithIndex:" if arguments.len() == 1 => {
-                        self.try_generate_each_with_index(receiver, &arguments[0])
+                        self.try_generate_each_with_index(receiver, selector, arguments)
                     }
                     "do:separatedBy:" if arguments.len() == 2 => {
-                        self.try_generate_do_separated_by(receiver, &arguments[0], &arguments[1])
+                        self.try_generate_do_separated_by(receiver, selector, arguments)
                     }
                     _ => Ok(None),
                 }
