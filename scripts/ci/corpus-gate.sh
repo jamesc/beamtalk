@@ -14,11 +14,16 @@
 # only those crates and the build/test configuration are listed.
 set -euo pipefail
 
+# Read every line before exiting: both callers pipe into this script under
+# `pipefail`, and exiting on the first hit would SIGPIPE a producer still
+# writing a long list, turning a match into a non-zero pipeline (a silent
+# "skip" for the tier). The gate must fail closed, never open.
+hit=1
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
   case "$path" in
-    crates/beamtalk-core/*|crates/beamtalk-codegen/*|crates/beamtalk-repl/*) exit 0 ;;
-    Cargo.toml|Cargo.lock|Justfile|.github/workflows/ci.yml|scripts/ci/corpus-gate.sh) exit 0 ;;
+    crates/beamtalk-core/*|crates/beamtalk-codegen/*|crates/beamtalk-repl/*) hit=0 ;;
+    Cargo.toml|Cargo.lock|Justfile|.github/workflows/ci.yml|scripts/ci/corpus-gate.sh) hit=0 ;;
   esac
 done
-exit 1
+exit "$hit"
