@@ -1027,6 +1027,9 @@ pub fn outer_local_writes(
 /// (`_b := [i := 0. [i < 3] whileTrue: [i := i + 1]]` stores a closure whose
 /// `i` is not the statement's). The block-scope rule is [`OuterWriteWalker`]'s,
 /// the one encoding of "every nested `Block` opens its own binding scope".
+/// A name assigned inside a `match:` arm body is not counted either: the
+/// walker gives each arm its own frame and pops it after the arm, matching
+/// the name resolver's per-arm scope.
 fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
     let mut walker = OuterWriteWalker {
         bound_outside: &|_| false,
