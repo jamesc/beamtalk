@@ -314,6 +314,66 @@ fn every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked() {
     assert!(compared >= 60, "only {compared} outputs compared");
 }
 
+/// BT-3823: the REPL arms whose sites hold a producer, for the arm-site half of
+/// the invariant above, with the number of carriers one producer in the arm
+/// compiles to: one, except in an `ensure:` cleanup, which is lowered twice
+/// (after the protected body succeeds, and before re-raising), plus one for a
+/// construct around the arm that is itself a producer.
+const REPL_ARMS: &[(&str, usize)] = &[
+    ("r := (s < 3) ifTrue: [{p}. 7] ifFalse: [0]", 1),
+    ("r := (s < 3) and: [{p}. true]", 1),
+    ("r := s ifNotNil: [:v | {p}. v]", 1),
+    ("r := [{p}. 7] on: Error do: [:e | 3]", 1),
+    ("r := [7] ensure: [{p}]", 2),
+    ("r := [1 / 0] on: Error do: [:e | {p}. 7]", 1),
+    // An evaluated block is a REPL arm too, of either arity.
+    ("r := [:z | {p}. 7] value: 1", 1),
+    ("r := [{p}. 7] value", 1),
+    // The `tryDo:` is itself a producer at an operand site of the input.
+    ("r := (Result tryDo: [{p}. 7]) unwrap", 2),
+];
+
+/// BT-3823: every construct at a REPL arm site (the statement itself, an
+/// operand and an assignment's value) compiles to a `{Value, Bindings}`
+/// carrier the arm adopts: a family that reached the producer without setting
+/// `repl_loop_mutated` would leave no carrier and drop its write. Every family
+/// of [`CONSTRUCTS`] plus `tryDo:`, in every arm kind, in the eval and the
+/// trace module, `erlc`-checked.
+#[test]
+fn every_construct_at_a_repl_arm_site_produces_its_carrier() {
+    let mut compared = 0;
+    let constructs = CONSTRUCTS
+        .iter()
+        .copied()
+        .chain(["Result tryDo: [t := t + 1. 5]"]);
+    for (c, value) in constructs.enumerate() {
+        for (a, (arm, expected)) in REPL_ARMS.iter().enumerate() {
+            for (k, stmt) in [
+                value.to_string(),
+                format!("({value}) printString size"),
+                format!("u := {value}"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let src = format!(
+                    "t := 0\nu := 0\ns := 1\n{}\n#[t, u]",
+                    arm.replace("{p}", &stmt)
+                );
+                for (entry, code) in both_outputs(&format!("arm_{c}_{a}_{k}"), &src, true) {
+                    assert_eq!(
+                        carriers(&code),
+                        *expected,
+                        "{entry}: the arm-site producer's carrier\n{src}\n{code}"
+                    );
+                    compared += 1;
+                }
+            }
+        }
+    }
+    assert!(compared >= 500, "only {compared} outputs compared");
+}
+
 /// A fold that writes no binding is a plain value: no tuple, nothing to
 /// unpack, and the output of an input that answered correctly is unchanged.
 #[test]
@@ -335,12 +395,13 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
 }
 
 /// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` compiles to its
-/// `{Value, Bindings}` tuple (`beamtalk_result:'tryDo:'/2`) only where the REPL
-/// root unpacks one: a statement, an assignment's value, a producer operand
-/// site. This codegen is reached with the Phase 0 check bypassed, so it must
-/// not depend on that check keeping a `tryDo:` out of a closure, an argument
-/// or an arm. (A `tryDo:` in a REPL loop body is the Phase 0 error the other
-/// REPL exception constructs have, BT-3823: the loop frame does not lower it.)
+/// `{Value, Bindings}` tuple (`beamtalk_result:'tryDo:'/2`) only where the
+/// REPL unpacks one: a statement, an assignment's value, a producer operand
+/// site, or (BT-3823) a producer site of a REPL arm or fold body, whose
+/// producer unpacks it the same way. This codegen is reached with the Phase 0
+/// check bypassed, so it must not depend on that check keeping a `tryDo:` out
+/// of a closure or an argument. (A `tryDo:` in a REPL loop body is the Phase 0
+/// error the other REPL exception constructs have, BT-3876.)
 #[test]
 fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     let tuple_call = "call 'beamtalk_result':'tryDo:'(fun (StateAcc)";
@@ -350,6 +411,14 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
         "r := Result tryDo: [t := t + 1. 1]\nr",
         "(Result tryDo: [t := t + 1. 1]) isOk",
         "Transcript show: (Result tryDo: [t := t + 1. 1]) printString",
+        "true ifTrue: [Result tryDo: [t := t + 1. 1]]",
+        "r := [(Result tryDo: [t := t + 1. 1]) isOk] on: Error do: [:e | false]",
+        // A statement of a REPL fold body, whose `StateAcc` is the bindings map
+        // too: the producer adopts element 2 (the Phase 0 check still rejects
+        // the input, BT-3876).
+        "#(1) do: [:x | Result tryDo: [t := t + 1. 1]]",
+        // An evaluated block is a REPL arm (BT-3823).
+        "#(1) collect: [:x | [Result tryDo: [t := t + 1. 1]] value: x]",
     ] {
         for (entry, code) in both_outputs("try_do_root", src, true) {
             assert!(code.contains(tuple_call), "{entry}: {src}\n{code}");
@@ -357,7 +426,7 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     }
     for src in [
         "blk := [Result tryDo: [t := t + 1. 1]]",
-        "true ifTrue: [Result tryDo: [t := t + 1. 1]]",
+        "#(1) collect: [:x | [:y | Result tryDo: [t := t + y. y]]]",
     ] {
         for (entry, code) in both_outputs("try_do_nested", src, false) {
             assert!(!code.contains(tuple_call), "{entry}: {src}\n{code}");

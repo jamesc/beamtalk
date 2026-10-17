@@ -5,11 +5,13 @@
 //! receiver assigns a binding (`(t := t + 1) > 1 ifTrue: [u := 9]`).
 //!
 //! A local assignment in value position never rebinds its local (BT-3860). In
-//! this shape the REPL's `do:` fold body also binds a `State` version tagged
+//! this shape the REPL's `do:` fold body also bound a `State` version tagged
 //! with the root frame inside the fold's own frame, which the `ThreadedIr`
-//! verifier reports as a `BindFrameMismatch` ("foldl body mode/shape
-//! mismatch"): a debug compiler panics (the workspace's compiler port exits),
-//! a release compiler emits the code and the REPL answers `t` = 0.
+//! verifier reported as a `BindFrameMismatch` in a debug compiler. Since
+//! BT-3823 the conditional is a producer of the fold body bound in that body's
+//! frame, so codegen no longer trips the verifier (the same fix covers BT-3877,
+//! pinned at runtime in `adr0131_local_rebind.btscript`): the debug-only test
+//! below compiles the input with the check bypassed, in both entry points.
 //!
 //! Since BT-3864 the Phase 0 check rejects the input with a
 //! `ValuePositionLocalAssignment` error, so the compiler port never reaches
@@ -49,26 +51,15 @@ fn a_conditional_receiver_assignment_in_a_repl_loop_body_is_a_compile_error() {
     );
 }
 
-/// The codegen half, with the check bypassed: a debug compiler's verifier
-/// still panics on the shape in both the eval and the trace entry points.
+/// The codegen half, with the check bypassed: since BT-3823 neither the eval
+/// nor the trace entry point trips the debug verifier on the shape, so it is
+/// ready for the day BT-3860 lifts the rejection.
 #[cfg(debug_assertions)]
 #[test]
-fn bypassing_the_rejection_still_trips_the_verifier() {
+fn bypassing_the_rejection_compiles_without_a_verifier_panic() {
     use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
     use std::collections::HashMap;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    /// The panic message of `f`, if it panicked.
-    fn panic_message(f: impl FnOnce()) -> Option<String> {
-        let payload = catch_unwind(AssertUnwindSafe(f)).err()?;
-        Some(
-            payload
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                .unwrap_or_default(),
-        )
-    }
 
     let (module, diags) = parse(lex_with_eof(INPUT));
     assert!(diags.is_empty(), "{diags:?}");
@@ -77,23 +68,20 @@ fn bypassing_the_rejection_still_trips_the_verifier() {
         .into_iter()
         .map(|s| s.expression)
         .collect();
-    let eval = panic_message(|| {
-        let _ = generate_repl_expressions(&expressions, "repl_nested_assign");
-    });
-    let trace = panic_message(|| {
-        let _ = generate_repl_expressions_traced(
-            &expressions,
-            INPUT,
-            "repl_nested_assign",
-            HashMap::new(),
-        );
-    });
-    for (entry, message) in [("eval", eval), ("trace", trace)] {
-        let message =
-            message.unwrap_or_else(|| panic!("{entry}: BT-3860 is fixed? flip this PIN-BUG"));
-        assert!(
-            message.contains("BindFrameMismatch"),
-            "{entry}: unexpected panic: {message}"
-        );
-    }
+    let eval = catch_unwind(AssertUnwindSafe(|| {
+        generate_repl_expressions(&expressions, "repl_nested_assign")
+    }));
+    let trace = catch_unwind(AssertUnwindSafe(|| {
+        generate_repl_expressions_traced(&expressions, INPUT, "repl_nested_assign", HashMap::new())
+    }));
+    assert!(
+        matches!(eval, Ok(Ok(_))),
+        "eval: {:?}",
+        eval.map(Result::err)
+    );
+    assert!(
+        matches!(trace, Ok(Ok(_))),
+        "trace: {:?}",
+        trace.map(Result::err)
+    );
 }

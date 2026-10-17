@@ -252,9 +252,13 @@ t
 (#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]
 // => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
 
-// Inside a block that is not a loop or fold body.
+// Inside an evaluated block: a REPL arm since BT-3823 (a Phase 0 error
+// before), so the fold at its operand site is a producer.
 [(#(1, 2) collect: [:x | t := t + x]) size] value
-// => ERROR: `collect:` writes outer local `t`, but as the receiver of a message
+// => 2
+
+t
+// => 8
 
 // The receiver of a construct that is the statement.
 (#(1, 2) collect: [:x | t := t + x]) do: [:e | u := u + e]
@@ -265,4 +269,4 @@ t
 // => ERROR: `collect:` writes outer local `t`
 
 t
-// => 5
+// => 8

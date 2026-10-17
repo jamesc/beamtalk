@@ -524,6 +524,11 @@ impl CoreErlangGenerator {
             // including for a write-only local that `needs_mutation_threading`
             // does not count.
             || (self.in_class_method() && !self.branch_threaded_locals(&[block]).is_empty())
+            // BT-3823: in the REPL, a block that writes a binding anywhere,
+            // a nested loop or fold included (`analyze_block` does not see
+            // through one), is inlined over the bindings map: a REPL arm whose
+            // producers adopt it.
+            || (self.is_repl_mode() && self.repl_blocks_write_bindings(&[block]))
     }
 
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
@@ -773,7 +778,7 @@ impl CoreErlangGenerator {
         self.set_repl_loop_mutated(true);
         let bindings = self.current_state_var();
         let (arm_doc, _final_version) =
-            self.with_branch_context(|this| this.generate_conditional_branch_inline(body))?;
+            self.with_branch_context(|this| this.generate_repl_arm_inline(body))?;
         Ok(Self::try_do_tier2_call(arm_doc, bindings))
     }
 
@@ -786,9 +791,10 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
-        // Only where the REPL root unpacks the tuple (a statement, an
-        // assignment's value, a REPL producer's construct): never in a closure,
-        // an argument or an arm, whatever the Phase 0 check accepts.
+        // Only where the REPL unpacks the tuple (a statement, an assignment's
+        // value, a REPL producer's construct, the root's or a REPL arm site's,
+        // BT-3823): never in a closure or a plain argument, whatever the Phase 0
+        // check accepts.
         if !self.is_repl_mode() || !self.is_repl_unpack_site(expr.span()) {
             return Ok(None);
         }
@@ -1613,20 +1619,20 @@ impl CoreErlangGenerator {
         frame: Option<&ArmFrame>,
         entry: Option<&ArmEntry>,
     ) -> Result<ExceptionArm> {
-        self.with_branch_context(|this| match frame {
+        let statements = super::super::util::collect_body_exprs(&body.body);
+        self.with_branch_context(|this| {
             // ADR 0131 §2 (Phase 3b): a `BranchArm` frame of an exception
             // producer. Registers the arm's `RebindFrame` and the arm
             // statements' producer sites (the rule a conditional arm uses), so a
             // loop, fold, conditional or `on:do:` in the arm is a producer whose
             // `LocalRebind`s this frame lowers.
-            Some(arm) => {
+            if let Some(arm) = frame {
                 let rebind = RebindFrame {
                     frame: this.current_branch_frame(),
                     kind: RebindFrameKind::BranchArm,
                     threads: arm.threads.clone(),
                 };
-                let statements = super::super::util::collect_body_exprs(&body.body);
-                this.with_rebind_frame(rebind, |this| {
+                return this.with_rebind_frame(rebind, |this| {
                     this.with_body_producer_sites(&statements, false, true, |this| {
                         this.generate_exception_body_with_threading_inner(
                             body,
@@ -1635,9 +1641,14 @@ impl CoreErlangGenerator {
                             entry,
                         )
                     })
-                })
+                });
             }
-            None => this.generate_exception_body_with_threading_inner(body, families, None, entry),
+            // BT-3823: in the REPL the block is inlined over the bindings map,
+            // and a producer at one of its statements' sites adopts it
+            // (`with_repl_arm_producer_sites`; a no-op outside the REPL).
+            this.with_repl_arm_producer_sites(&statements, |this| {
+                this.generate_exception_body_with_threading_inner(body, families, None, entry)
+            })
         })
     }
 
@@ -1857,8 +1868,11 @@ impl CoreErlangGenerator {
                     // Last expression with no direct field assignments.
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
+                    // A producer of this arm (a `BranchArm` frame, or a REPL arm,
+                    // BT-3823) goes to `thread_ahead` below instead.
                     if self.control_flow_has_mutations(expr)
-                        && !(arm.is_some() && self.local_producer_locals(expr).is_some())
+                        && !((arm.is_some() || self.is_repl_mode())
+                            && self.local_producer_locals(expr).is_some())
                     {
                         // E5 — nested mutation construct returns {Result,
                         // State} tuple; C10-last's shape with ExResult

@@ -506,9 +506,10 @@ impl CoreErlangGenerator {
     /// registered `BranchArm` frame) or in a loop or fold body (ADR 0131 Phase 3c).
     /// `producer` says whether the construct is one
     /// ([`Self::conditional_producer_locals`]): a conditional the Phase 0 check
-    /// does not name as a producer keeps the legacy arm, as do the arms in the REPL
-    /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
-    /// unpack their own tuples).
+    /// does not name as a producer keeps the legacy arm. The arms in the REPL
+    /// are not `BranchArm` frames either: they are REPL arms
+    /// ([`Self::generate_repl_arm_inline`], BT-3823), whose producers adopt the
+    /// bindings map.
     pub(in crate::core_erlang::control_flow) fn conditional_arm_frame(
         &self,
         blocks: &[&Block],
@@ -530,7 +531,7 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, usize)> {
         match arm {
             Some(arm) => self.generate_conditional_arm(block, arm),
-            None => self.generate_conditional_branch_inline(block),
+            None => self.generate_repl_arm_inline(block),
         }
     }
 
@@ -1870,7 +1871,16 @@ impl CoreErlangGenerator {
         // C3 — Tier 2 block-call RHS returns {Result, NewStateAcc};
         // the sanctioned Gensym two-hop (ADR 0111 Addendum 5's "opaque
         // nested-construct state extraction feeding a maps:put" idiom).
-        if self.is_tier2_value_call(value) {
+        // In every frame, a value that is itself a local-threading producer
+        // here is threaded ahead by C2 below instead, like a loop or fold
+        // (BT-3823). In a method frame that never changes the verdict: an
+        // evaluated block that is a producer there is not a Tier 2 call
+        // (`is_tier2_value_call` defers to `block_value_producer_in_frame`). In
+        // a REPL arm it routes the evaluated block to the REPL producer. Only
+        // the value itself counts: a Tier 2 call whose *operand* is a producer
+        // keeps this lowering, so the call's own `NewState` is never closed
+        // away by C2.
+        if self.is_tier2_value_call(value) && self.local_producer_locals(value).is_none() {
             let t2_tuple = self.fresh_temp_var("T2");
             let t2_state = self.fresh_temp_var("T2St");
             let value_code = self.generate_tier2_value_call_doc(value)?;
@@ -2053,6 +2063,22 @@ impl CoreErlangGenerator {
         self.generate_conditional_arm_statements(block, None)
     }
 
+    /// BT-3823: [`Self::generate_conditional_branch_inline`] for a *REPL arm*
+    /// (a conditional arm, an `on:do:`/`ensure:` block or a `tryDo:` block,
+    /// inlined over the bindings map): a producer at one of its statements'
+    /// `repl_arm_producer_sites` adopts that map
+    /// ([`Self::with_repl_arm_producer_sites`]). Outside the REPL it is
+    /// [`Self::generate_conditional_branch_inline`].
+    pub(in crate::core_erlang) fn generate_repl_arm_inline(
+        &mut self,
+        block: &Block,
+    ) -> Result<(Document<'static>, usize)> {
+        let body = super::super::util::collect_body_exprs(&block.body);
+        self.with_repl_arm_producer_sites(&body, |this| {
+            this.generate_conditional_arm_statements(block, None)
+        })
+    }
+
     /// ADR 0131 §2 (Phase 3): one arm of a conditional that is a
     /// local-threading producer in a class or value-type method, lowered as a
     /// `BranchArm` frame. Registers the arm's [`RebindFrame`] (its `threads`
@@ -2131,6 +2157,19 @@ impl CoreErlangGenerator {
             // catch boundary or loop in the statement is judged against the
             // scope (ADR 0131 Phase 4, BT-3840).
             let kind = self.classify_body_expr(expr);
+            // BT-3823: a statement of a REPL arm that is itself a producer there
+            // (`with_repl_arm_producer_sites`) is lowered by the producer
+            // branch below, whatever the classifier says (the REPL has no
+            // dispatch facts, so a loop is not `ControlFlowWithMutations`, and
+            // an evaluated literal block is a `Tier2ValueCall`).
+            let kind = if arm.is_none()
+                && self.is_repl_mode()
+                && self.local_producer_locals(expr).is_some()
+            {
+                BodyExprKind::ControlFlowWithMutations
+            } else {
+                kind
+            };
             let is_last = i == body.len() - 1;
             let span = expr.span();
 
@@ -2587,8 +2626,12 @@ impl CoreErlangGenerator {
                 // prelude (the construct tuple and one `LocalRebind` per local,
                 // lowered by this arm) is spliced, so the arm's `StateAcc` keeps
                 // every other key it carries.
+                // BT-3823: so is one that is a statement of a REPL arm
+                // (`generate_repl_arm_inline`): its prelude adopts the bindings
+                // map the arm's `StateAcc` is.
                 BodyExprKind::ControlFlowWithMutations
-                    if arm.is_some() && self.local_producer_locals(expr).is_some() =>
+                    if (arm.is_some() || self.is_repl_mode())
+                        && self.local_producer_locals(expr).is_some() =>
                 {
                     let tv = self.threaded_expression(expr, frame)?;
                     stmts.extend(tv.prelude);

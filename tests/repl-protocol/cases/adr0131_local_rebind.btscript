@@ -15,8 +15,8 @@
 // An expression whose answer differs from the ADR today pins today's answer
 // under a `PIN-BUG` marker that cites the open issue and names the correct
 // answer. Each phase of the BT-3743 epic flipped the pins it fixed; the rest
-// are the REPL arms (BT-3823) and the Phase 0 position diagnostic that
-// BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
+// are the REPL loop and fold bodies (BT-3876), `match:` arms (BT-3875) and the
+// Phase 0 position diagnostic that BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
 // shape's wrong answer does not change the next shape's input (the ADR
 // transcript is the exception: it is one stateful sequence, as the ADR writes
 // it).
@@ -95,30 +95,30 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: the inner tuple leaked, raised, and the outer handler
-// answered 3 (a silent wrong answer) until BT-3745; since then a compile
-// error naming the conditional. The REPL's protected body and conditional
-// arm are not producer frames yet (the compiled contexts answer 7 and 1,
-// `o7*` in adr0131local_rebind_test.bt). Correct answer: 7.
+// The inner tuple leaked, raised, and the outer handler answered 3 (a silent
+// wrong answer) until BT-3745, and it was a compile error naming the
+// conditional until BT-3823 made the REPL's arms producer frames: the
+// protected body and the conditional arm are inlined over the bindings map,
+// and the inner `on:do:` at an operand site of the arm adopts it
+// (`repl_arm_producer_sites`), as in the compiled contexts (`o7*` in
+// adr0131local_rebind_test.bt).
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]. 7] on: Error do: [:x | 3]
-// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
+// => 7
 
-// PIN-BUG BT-3823: correct answer 1.
 t
-// => 0
+// => 1
 
 // o8: as o7 without the trailing `7`.
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: a silent wrong answer (3) before BT-3745, a compile error
-// since (see o7). Correct answer: 2.
+// A silent wrong answer (3) before BT-3745, a compile error until BT-3823
+// (see o7).
 r := [false ifTrue: [2] ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 1]] on: Error do: [:x | 3]
-// => ERROR: `ifTrue:ifFalse:` writes outer local `t`, but as a statement inside a protected body
+// => 2
 
-// PIN-BUG BT-3823: correct answer 1.
 t
-// => 0
+// => 1
 
 // o11: the statement-position control. A conditional, then `ensure:`.
 t := 0
@@ -334,14 +334,14 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3823: leaked the bindings map as its value and left `t` at 0;
-// since BT-3753 it is an ADR 0131 Phase 0 compile error. Correct answer: 3.
+// Leaked the bindings map as its value and left `t` at 0, then was an ADR
+// 0131 Phase 0 compile error from BT-3753 until BT-3823: the `do:` is the
+// statement of a REPL arm, a producer that adopts the bindings map.
 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]
-// => ERROR: `do:` writes outer local `t`, but as a statement inside a conditional arm
+// => _
 
-// PIN-BUG BT-3823: correct answer 3.
 t
-// => 0
+// => 3
 
 // A loop in a `do:` body.
 t := 0
@@ -481,8 +481,9 @@ r := 0. r := r + ((4 =:= 4) ifTrue: [t := t + 1. 2] ifFalse: [3]). #[r, t]
 // => #[2, 1]
 
 // `on:do:` / `ensure:` as a statement of a REPL loop body is still a Phase 0
-// error (the REPL's loop frames are not exception producers yet; BT-3823), so
-// nothing reaches codegen to mis-thread the loop's accumulator.
+// error (the REPL's loop frames are not producer frames yet, BT-3876; its arms
+// are since BT-3823), so nothing reaches codegen to mis-thread the loop's
+// accumulator.
 t := 0. #(1, 2, 3) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t
 // => ERROR: `on:do:` writes outer local `t`
 
@@ -529,7 +530,296 @@ t
 (Result tryDo: [fresh := 1. 1 / 0]) isError
 // => true
 
-// A nested loop writing the binding keeps the Phase 0 error, as in an
-// `on:do:` protected body (the REPL's arms are not frames yet, BT-3823).
+// A nested loop writing the binding was a Phase 0 error until BT-3823 made the
+// `tryDo:` block a REPL arm: the `do:` is a producer there.
 t := 0. Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]
+// => Result ok: 3
+
+t
+// => 3
+
+// ===========================================================================
+// BT-3823: the REPL's arms are producer frames
+// ===========================================================================
+//
+// A conditional arm, an `on:do:` protected body, handler or `ensure:` cleanup
+// and a `Result tryDo:` block are inlined over the bindings map (their
+// `StateAcc` *is* the map). A loop, fold, conditional, exception construct or
+// evaluated block at one of an arm statement's sites (`repl_arm_producer_sites`:
+// the statement itself, an assignment's value, a send's operands) adopts that
+// map, as one at an operand site of the input does. Each of these was a Phase 0
+// compile error, a raise, or (in a handler) a silently dropped write.
+
+// A fold as an operand in a handler.
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]
+// => 4
+
+t
+// => 3
+
+// An `on:do:` as a statement of a handler (silently dropped before BT-3823).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [t := t + 1] on: Error do: [:e2 | 0]. t]
+// => 1
+
+// A loop in an `ensure:` cleanup.
+t := 0
+// => 0
+
+r := [7] ensure: [#(1, 2) do: [:x | t := t + x]]
+// => 7
+
+t
+// => 3
+
+// A block `value:` in a handler (raised `invalid argument` before BT-3823).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [:k | t := t + k] value: 4. t]
+// => 4
+
+// An evaluated block in a conditional arm, and as an operand of the input.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [[t := t + 1] value. t * 10] ifFalse: [0]
+// => 10
+
+r := ([t := t + 1. 5] value) + 1
+// => 6
+
+t
+// => 2
+
+// A fold as an assignment's value in an arm: the arm binds the new local too.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [u := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. u + 1] ifFalse: [0]
+// => 4
+
+#[t, u]
+// => #[3, 3]
+
+// `tryDo:` as an operand in an arm; a raise discards its write.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [(Result tryDo: [t := t + 1. 5]) unwrap + 1] ifFalse: [0]
+// => 6
+
+r := 4 =:= 4 ifTrue: [(Result tryDo: [t := t + 10. 1 / 0]) isError] ifFalse: [false]
+// => true
+
+t
+// => 1
+
+// Arms nested three deep; a raise in the protected body discards the writes
+// of the arms inside it.
+t := 0
+// => 0
+
+r := [4 =:= 4 ifTrue: [[nil ifNil: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]] ensure: [t := t + 10]] ifFalse: [0]] on: Error do: [:e | 9]
+// => 4
+
+t
+// => 13
+
+r := [4 =:= 4 ifTrue: [(#(1, 2) collect: [:x | t := t + x. x]) size. 1 / 0] ifFalse: [0]] on: Error do: [:e | 9]
+// => 9
+
+t
+// => 13
+
+// The other arm kinds: `ifFalse:`, `and:`, `or:` and the parameter arms of
+// the nil family, with a producer at an operand site of the arm.
+t := 0
+// => 0
+
+r := 4 =:= 5 ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 6]
+// => 7
+
+r := (4 =:= 4) and: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) > 2]
+// => true
+
+r := (4 =:= 5) or: [([t := t + 10. 5] ensure: [nil]) > 2]
+// => true
+
+t
+// => 14
+
+t := 0
+// => 0
+
+r := 5 ifNotNil: [:v | (#(1, 2) collect: [:x | t := t + x + v. x]) size + v]
+// => 7
+
+r := nil ifNil: [0] ifNotNil: [:v | ([t := t + v] on: Error do: [:e | 0]) + 1]
+// => 0
+
+r := 3 ifNil: [0] ifNotNil: [:v | ([t := t + v. v] on: Error do: [:e | 0]) + 1]
+// => 4
+
+r := 2 ifNotNil: [:v | (Result tryDo: [t := t + v. v]) unwrap * 10] ifNil: [0]
+// => 20
+
+t
+// => 18
+
+// A conditional statement of a loop body in an arm, and a `do:separatedBy:`
+// in a protected body, adopt the same map.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | 4 =:= 4 ifTrue: [t := t + x]]. t] ifFalse: [0]
+// => 3
+
+t := 0
+// => 0
+
+r := [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. t] on: Error do: [:e | 0]
+// => 13
+
+// An evaluated block (`[...] value`, `[:k | ...] value: x`) that writes a
+// binding is a REPL arm too: inlined over the bindings map, its sites hold
+// producers, even when the write sits behind a nested conditional's loop (in a
+// handler that raised `invalid argument` before BT-3823). A block sent a
+// `value` selector of another arity is applied, not inlined, so it raises the
+// arity error and writes nothing (the input root still inlines it: BT-3881).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [:z | 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value: 1. t]
+// => 3
+
+r := [1 / 0] on: Error do: [:e | [4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value. t]
+// => 6
+
+[:z | 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value: 1
+// => _
+
+t
+// => 9
+
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [t := t + 1] value: 1. t]
+// => ERROR: Wrong number of arguments: block expects 0 but was called with 1
+
+r := [7] ensure: [[t := t + 1] value: 1]
+// => ERROR: Wrong number of arguments: block expects 0 but was called with 1
+
+r := [1 / 0] on: Error do: [:e | [:k | t := t + k] value. t]
+// => ERROR: Wrong number of arguments: block expects 1 but was called with 0
+
+r := 4 =:= 4 ifTrue: [[:k | t := t + k] value] ifFalse: [0]
+// => ERROR: Wrong number of arguments: block expects 1 but was called with 0
+
+r := [1 / 0] on: Error do: [:e | [#(1, 2) collect: [:x | t := t + x]] value: 1. t]
+// => ERROR: Wrong number of arguments: block expects 0 but was called with 1
+
+t
+// => 0
+
+// PIN-BUG BT-3881: at the input root a block sent a `value` selector of another
+// arity is still inlined: the argument is ignored (or the parameter reads the
+// workspace binding of the same name) and the write kept. Correct: the arity
+// error, as in an arm above.
+[t := t + 1] value: 1
+// => 1
+
+t
+// => 1
+
+pinArg := 100
+// => 100
+
+t := 0
+// => 0
+
+[:pinArg | t := t + pinArg] value
+// => 100
+
+t
+// => 100
+
+// A block `value:` whose argument is a writing fold is not lowered: the fold is
+// an operand of a construct, not a site, so it keeps the Phase 0 error in an
+// arm (as in class, value-type and actor methods) rather than dropping the
+// block's write.
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [u := [:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]). u] ifFalse: [0]
+// => ERROR: `inject:into:` writes outer local `t`
+
+// A loop body is not an arm: an `on:do:` in a `do:` in an arm keeps the Phase
+// 0 error (BT-3876).
+t := 0
+// => 0
+
+r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t] ifFalse: [0]
+// => ERROR: `on:do:` writes outer local `t`
+
+// A REPL loop whose only write sits in a fold behind a nested conditional. Its
+// body now threads the bindings map (BT-3823 widened what a REPL loop treats
+// as carried), but the fold in the arm of a loop body is not a site yet, so the
+// Phase 0 check keeps the error (BT-3876). With the check bypassed, codegen
+// compiles it (no verifier error) and answers `t` = 1.
+t := 0
+// => 0
+
+#(1, 2) do: [:k | (k > 1) ifTrue: [#(1) do: [:j | t := t + j]]]
 // => ERROR: `do:` writes outer local `t`
+
+// BT-3877: a conditional statement of a REPL loop body that writes a binding
+// tripped the debug verifier (`BindFrameMismatch`). Since BT-3823 the
+// conditional is a producer of the fold body, bound in that body's frame.
+t := 5
+// => 5
+
+u := 0
+// => 0
+
+#(1, 2) do: [:k | t > 1 ifTrue: [u := 9]]
+// => _
+
+u
+// => 9
+
+// The same body with the write as the arm's own assignment of a fold's value
+// is accepted and keeps it.
+t := 0
+// => 0
+
+#(1, 2) do: [:k | (k > 1) ifTrue: [t := (#(1, 5) inject: t into: [:a :j | a + j])]]
+// => _
+
+t
+// => 6
+
+// ===========================================================================
+// `match:` arms (BT-3817, BT-3823)
+// ===========================================================================
+//
+// A `match:` arm is an expression, not a block: no construct threads a write
+// in it back. Class, value-type and actor methods reject one with a structured
+// error (BT-3817); the REPL is exempt from that error, and dropped the write
+// silently until BT-3864 made an assignment used as a value (here the arm's
+// value) a compile error everywhere. BT-3875 makes `match:` arms producers.
+
+t := 0
+// => 0
+
+r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
+// => ERROR: assignment to local `t` is used as a value in a top-level expression
+
+t
+// => 0

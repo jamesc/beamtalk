@@ -1145,6 +1145,13 @@ fn repl_operand_sites_are_producers() {
         "(#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]) + 1\n",
         // Several statements in one input.
         "t := 0\nr := (#(1, 2) collect: [:x | t := t + x]) size\n#[r, t]\n",
+        // BT-3823: at an operand site of a REPL arm (a conditional arm, an
+        // `on:do:` block), where the producer adopts the bindings map.
+        "true ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]\n",
+        "r := [(#(1, 2) collect: [:x | t := t + x]) size] on: Error do: [:e | 0]\n",
+        "r := [1 / 0] on: Error do: [:e | [:k | t := t + k] value: 4. t]\n",
+        // An evaluated block is a REPL arm too.
+        "[(#(1, 2) collect: [:x | t := t + x]) size] value\n",
     ] {
         let diags = adr0131_diagnostics_with(src, &known);
         assert!(diags.is_empty(), "{src}: {diags:?}");
@@ -1155,9 +1162,9 @@ fn repl_operand_sites_are_producers() {
 fn repl_producer_sites_stop_at_blocks_conditionals_and_statement_constructs() {
     let known = ["t", "u"];
     for src in [
-        // Inside a block that is not a loop or fold body.
-        "[(#(1, 2) collect: [:x | t := t + x]) size] value\n",
-        "true ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]\n",
+        // Inside a block that is not a REPL arm: a loop body, a stored block.
+        "#(1) do: [:z | (#(1, 2) collect: [:x | t := t + x]) size]\n",
+        "b := [(#(1, 2) collect: [:x | t := t + x]) size]\n",
         // A conditional's receiver is threaded by the conditional (Phase 3).
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\n",
         // Under a cascade.
@@ -2904,6 +2911,57 @@ fn evaluated_literal_blocks_are_producers_at_any_depth() {
     // The REPL keeps its own lowering and its verdict.
     let diags = adr0131_diagnostics_with("[t := t + 1] value\n", &["t"]);
     assert!(diags.is_empty(), "{diags:?}");
+}
+
+/// BT-3823 review: an arm or loop-body statement that assigns a Tier 2 block
+/// call whose argument is a writing fold (`u := [:k | t := t + k. k] value:
+/// (xs inject: ...)`, or the same through a stored block) is rejected in class,
+/// value-type and actor methods, so codegen never lowers it there. (Codegen's
+/// C3 lowering stays for any Tier 2 call that is not itself a producer.)
+#[test]
+fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
+    let call = "[:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    let stored = "blk value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    for (header, prefix) in [
+        ("Object subclass: P", "class "),
+        ("Value subclass: P", ""),
+        ("Actor subclass: P\n  state: n = 0\n", ""),
+    ] {
+        for value in [call, stored] {
+            for stmt in [
+                format!("4 =:= 4 ifTrue: [u := {value}]"),
+                format!("#(1) do: [:z | u := {value}]"),
+                format!("u := {value}"),
+            ] {
+                let src = format!(
+                    "{header}\n  {prefix}probe =>\n    t := 0\n    u := 0\n    blk := [:k | t := t + k. k]\n    {stmt}\n    #[t, u]\n"
+                );
+                assert!(!adr0131_diagnostics(&src).is_empty(), "{src}");
+            }
+        }
+    }
+    // The third Tier 2 receiver codegen recognises, an actor field
+    // (`self.blk value: ...`), whose block the §6 check does not see: the
+    // writing fold in its argument is rejected all the same (probed on a BEAM:
+    // the root, an arm and a loop body all report it).
+    let field = "self.blk value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x])";
+    for stmt in [
+        format!("4 =:= 4 ifTrue: [u := {field}]"),
+        format!("#(1) do: [:z | u := {field}]"),
+        format!("u := {field}"),
+    ] {
+        let src = format!(
+            "Actor subclass: P\n  state: blk = nil\n\n  probe =>\n    t := 0\n    u := 0\n    {stmt}\n    #[t, u]\n"
+        );
+        assert!(
+            !of_category(
+                &adr0131_diagnostics(&src),
+                DiagnosticCategory::UnmigratedLocalThreading
+            )
+            .is_empty(),
+            "{src}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

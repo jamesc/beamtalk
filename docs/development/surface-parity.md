@@ -735,6 +735,32 @@ reports the same message at the same span. No operation is surface-specific.
   trace and the repl-protocol suite agree; no other
   surface compiles REPL input, and no REPL display changes for an input that
   answered correctly.
+- **REPL arms as producer frames (ADR 0131, BT-3823).** A REPL conditional arm,
+  `on:do:` protected body, handler, `ensure:` cleanup, `Result tryDo:` block
+  and evaluated block (`[...] value`, `[:k | ...] value: x`) is inlined over
+  the bindings map, and a loop, fold, conditional, exception
+  construct or `value`-family send to a block literal at one of an arm
+  statement's sites (`repl_arm_producer_sites`: the statement itself, an
+  assignment's value, a send's operands) is a producer that adopts that map
+  (`repl_producer_writes`, the rule the analyser and the REPL producer share).
+  REPL-visible, wrong to right only: inputs that were an
+  `UnmigratedLocalThreading` error (o7/o8: an `on:do:` in an arm inside another
+  `on:do:` now answers 7 and 2 and keeps its write; a `do:` or `detect:` as a
+  statement of a conditional arm; a loop in a `tryDo:` block; an evaluated
+  block as an operand of the input) now answer and keep their writes, and
+  inputs in a handler or cleanup that raised (`invalid argument`) or dropped
+  their write silently (a nested `on:do:`/`ensure:`, a loop or fold, a
+  `[:k | ...] value: 4`) now answer right. No input that answered right
+  changes, no new compile error, and the display format is unchanged. A
+  `value`-family send of another arity to a block literal in an arm (`[t := t
+  + 1] value: 1` in a handler) is applied rather than inlined, so it raises
+  the run-time arity error any block raises instead of ignoring the argument
+  (wrong to right); the input root still inlines it (BT-3881). The verdict is
+  the analyser's, so CLI/LSP/MCP diagnostics for the same top-level
+  expressions change together. Still errors: a construct in a REPL loop or fold
+  body (BT-3876), and an outer-local write in a `match:` arm (the
+  value-position error of BT-3864 in the REPL, the BT-3817 error in class,
+  value-type and actor methods; BT-3875 makes `match:` arms producers).
 - The REPL sees only the current input: a stored block bound in one input and
   sent `value` in a later one is not seen by the §6 check and still raises
   `stateful_block_dispatch` at run time.
