@@ -82,6 +82,16 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
     }
 }
 
+/// [`versioned_var`] without the bare-prefix version 0: always
+/// `prefix{version}` (`Acc0`, `Acc1`, …). For a family whose entry parameter
+/// is named by its version too (ADR 0132's `Acc`).
+pub(super) fn indexed_var(prefix: &str, version: usize) -> String {
+    let mut s = String::with_capacity(prefix.len() + 4);
+    s.push_str(prefix);
+    let _ = write!(s, "{version}");
+    s
+}
+
 /// Builds the metaclass tag string `"{class_name} class"`.
 ///
 /// This is the naming convention for metaclass atoms throughout the Beamtalk runtime
