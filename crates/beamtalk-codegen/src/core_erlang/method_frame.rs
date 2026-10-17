@@ -163,6 +163,8 @@ impl Drop for MethodFrame<'_> {
     /// run unconditionally once the guard goes out of scope regardless of
     /// which path the guarded region took.
     fn drop(&mut self) {
+        // ADR 0132 §2: a threaded body never outlives its frame, on any path.
+        self.generator.end_threaded_class_body();
         self.generator.pop_scope();
         if self.boundary == MethodBoundary::ClassMethod {
             self.generator.set_in_class_method(false);

@@ -325,7 +325,7 @@ fn extract_family_slots_orders_acc_last() {
         render_extracted(&stmts),
         "let State1 = call 'erlang':'element'(2, Tuple) in \
          let Self1 = call 'erlang':'element'(3, Tuple) in \
-         let Acc1 = call 'erlang':'element'(4, Tuple) in "
+         let Acc@1 = call 'erlang':'element'(4, Tuple) in "
     );
 }
 

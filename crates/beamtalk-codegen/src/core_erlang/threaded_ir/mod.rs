@@ -83,9 +83,8 @@ pub(super) use build::{
 };
 #[cfg(test)]
 pub(super) use build::{build_local_rebind, build_method_body};
-// ADR 0132 §2's threaded `MethodBody` builder: no production caller until the
-// threaded body lowering (Phases 1c/1d).
-#[cfg(test)]
+// ADR 0132 §2's threaded `MethodBody` builder: the class-method threaded body
+// (Phase 1c) is its first production caller.
 pub(super) use build::build_threaded_method_body;
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.

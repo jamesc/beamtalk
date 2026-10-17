@@ -146,7 +146,11 @@ main([]) ->
         %% BT-3868 (ADR 0132 Phase 0c) - the tier2_methods /
         %% tier2_class_methods Rust/Erlang conformance row
         %% (test/fixtures/tier2_meta_conformance.json).
-        "threaded_meta_fixture"
+        "threaded_meta_fixture",
+        %% BT-3871 (ADR 0132 Phase 1c) - class methods with a threaded entry:
+        %% the metadata conformance row and the direct-entry EUnit tests
+        %% (beamtalk_threaded_class_entries_tests).
+        "threaded_class_entries_fixture"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

@@ -80,6 +80,16 @@
 //! `on:do:`/`ensure:` or `tryDo:` block) and **a use inside a nested block
 //! literal**.
 //!
+//! One more shape disqualifies **every** parameter of a method: a block literal
+//! anywhere in its body that does `^`, or a `^` in a `match:` arm (a non-local
+//! return; `facts::body_has_block_nlr`, the recognizer codegen's NLR wrapper uses).
+//! A threaded body's `^` throws the `Acc` version current where its block is
+//! lowered, but a threaded callee can run the block after a later `Acc` step (as
+//! an argument of the use, `b value: [:x | ^x]`; stored by any path,
+//! `h := Array with: [:x | ^x]`; kept by a callee), and the body cannot know the
+//! live `Acc` at the throw. Such a method keeps its plain entry and compiles as
+//! before ADR 0132; carrying the live `Acc` is Phase 3.
+//!
 //! The answer is a **greatest fixpoint** over the unit: every candidate starts
 //! as threading and is removed when one of its uses fails against the current
 //! assumption, until nothing changes. A cycle of forwards (self-recursion,
@@ -494,6 +504,7 @@ impl ThreadingIndex {
             name: param.name.name.as_str(),
         };
         method.body.iter().all(|s| ctx.expr_ok(&s.expression))
+            && !crate::semantic_analysis::facts::body_has_block_nlr(&method.body)
     }
 
     /// The threading parameter positions (0-based, ascending) of `class`'s
@@ -505,6 +516,135 @@ impl ThreadingIndex {
             .get(&(class.into(), class_side, selector.into()))
             .cloned()
             .unwrap_or_default()
+    }
+}
+
+/// How a method-root expression node uses a threading parameter (ADR 0132 §1,
+/// the Phase 1 subset). The **one recognizer**: [`ThreadingIndex`] accepts a
+/// method by it and codegen's threaded entry lowers by it, so the predicate and
+/// the lowering cannot disagree about what a "use" is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadingUse {
+    /// `b value`, `b value: x`, `b valueWithArguments: xs`, or a cascade of
+    /// those: a direct invocation.
+    Invocation,
+    /// A collection HOM whose callable argument is exactly `b` (`items do: b`,
+    /// `items inject: 0 into: b`; [`is_opaque_callable_hom_send`]).
+    CallableHom,
+    /// `receiver selector: ... b ...` where `receiver` resolves inside the unit
+    /// ([`forward_target_of`]) and `b` is the bare argument at `position`: a
+    /// forward to a callee that threads that position or does not.
+    Forward {
+        /// 0-based position of the bare argument.
+        position: usize,
+    },
+}
+
+/// What [`classify_threading_use`] says about one node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UseShape {
+    /// The node does not mention the parameter, or mentions it only inside an
+    /// operand the caller must look at (`(b value) + 1`, `self foo: (b value)`).
+    NotAUse,
+    /// The node mentions the parameter in a way no Phase 1 use covers (a
+    /// cascade of other messages, a cast, two bare forwards, the parameter
+    /// also inside another argument): the parameter is not a threading parameter.
+    Malformed,
+    /// The node is a use.
+    Use(ThreadingUse),
+}
+
+/// The `(class, class side)` a send to `receiver` resolves to inside the
+/// compilation unit: `self` (`own_class`, on the side the method is on), or a
+/// literal class `in_unit` defines (its class side). A class outside the unit
+/// does not resolve (its callee is unknown, Phase 2). The one rule behind the
+/// index's forwards and codegen's.
+#[must_use]
+pub fn forward_target_of(
+    receiver: &Expression,
+    own_class: &EcoString,
+    class_side: bool,
+    in_unit: &dyn Fn(&str) -> bool,
+) -> Option<(EcoString, bool)> {
+    match receiver {
+        Expression::Identifier(id) if id.name == "self" => Some((own_class.clone(), class_side)),
+        Expression::ClassReference {
+            name,
+            package: None,
+            ..
+        } if in_unit(name.name.as_str()) => Some((name.name.clone(), true)),
+        _ => None,
+    }
+}
+
+/// Classifies one `MessageSend` or `Cascade` node against the threading
+/// parameter `name`. `resolves_forward(receiver)` says whether a send to that
+/// receiver resolves inside the unit ([`forward_target_of`]).
+///
+/// The order is the predicate's: a direct invocation first; then, for a
+/// receiver that resolves inside the unit, a bare argument is a forward judged
+/// by its real callee (`C do: b` is C's own class-side `do:`, not a collection
+/// fold); only then a collection HOM with `b` as callable. Other nodes
+/// (`Assignment`, `Return`, `Parenthesized`, ...) are [`UseShape::NotAUse`]:
+/// the caller recurses into them.
+#[must_use]
+pub fn classify_threading_use(
+    expr: &Expression,
+    name: &str,
+    resolves_forward: &dyn Fn(&Expression) -> bool,
+) -> UseShape {
+    let mentions = |e: &Expression| stored_block_var_uses(e, name) != (false, false);
+    match expr {
+        Expression::Cascade { .. } => {
+            if !mentions(expr) {
+                UseShape::NotAUse
+            } else if direct_invocation(expr, name, MessageSelector::is_block_invocation) {
+                UseShape::Use(ThreadingUse::Invocation)
+            } else {
+                UseShape::Malformed
+            }
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            is_cast,
+            ..
+        } => {
+            if !mentions(expr) {
+                return UseShape::NotAUse;
+            }
+            if *is_cast {
+                return UseShape::Malformed;
+            }
+            if direct_invocation(expr, name, MessageSelector::is_block_invocation) {
+                return UseShape::Use(ThreadingUse::Invocation);
+            }
+            if resolves_forward(receiver) {
+                let mut bare = arguments
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| is_name(a, name))
+                    .map(|(i, _)| i);
+                if let Some(position) = bare.next() {
+                    return if bare.next().is_none()
+                        && arguments
+                            .iter()
+                            .enumerate()
+                            .all(|(i, a)| i == position || !mentions(a))
+                    {
+                        UseShape::Use(ThreadingUse::Forward { position })
+                    } else {
+                        UseShape::Malformed
+                    };
+                }
+            }
+            match callable_hom_use(expr, name) {
+                Some(true) => UseShape::Use(ThreadingUse::CallableHom),
+                Some(false) => UseShape::Malformed,
+                None => UseShape::NotAUse,
+            }
+        }
+        _ => UseShape::NotAUse,
     }
 }
 
@@ -522,25 +662,12 @@ impl RootCtx<'_> {
         stored_block_var_uses(expr, self.name) != (false, false)
     }
 
-    fn is_direct_invocation(&self, expr: &Expression) -> bool {
-        direct_invocation(expr, self.name, MessageSelector::is_block_invocation)
-    }
-
     /// The `(class, class side)` a send to `receiver` resolves to inside the
-    /// unit: `self`, or a literal class defined in the unit. A class outside
-    /// the unit does not resolve (its callee is unknown, Phase 2).
+    /// unit ([`forward_target_of`]).
     fn forward_target(&self, receiver: &Expression) -> Option<(EcoString, bool)> {
-        match receiver {
-            Expression::Identifier(id) if id.name == "self" => {
-                Some((self.class.name.name.clone(), self.class_side))
-            }
-            Expression::ClassReference {
-                name,
-                package: None,
-                ..
-            } if self.unit_classes.contains(&name.name) => Some((name.name.clone(), true)),
-            _ => None,
-        }
+        forward_target_of(receiver, &self.class.name.name, self.class_side, &|c| {
+            self.unit_classes.contains(c)
+        })
     }
 
     /// Whether every mention of the parameter in `expr` is one of the
@@ -555,45 +682,41 @@ impl RootCtx<'_> {
             Expression::Assignment { target, value, .. } => {
                 !self.mentions(target) && self.expr_ok(value)
             }
-            Expression::Cascade { .. } => self.is_direct_invocation(expr),
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                is_cast: false,
-                ..
-            } => {
-                if self.is_direct_invocation(expr) {
-                    return true;
-                }
-                let sel = selector.name();
-                // A receiver that resolves inside the unit is judged by its real
-                // callee first (`C do: b` is C's own class-side `do:`, not a
-                // collection fold); only an unresolved receiver is taken as an
-                // opaque collection message.
-                if let Some((class, class_side)) = self.forward_target(receiver) {
-                    let mut bare = arguments
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, a)| is_name(a, self.name))
-                        .map(|(i, _)| i);
-                    if let Some(position) = bare.next() {
-                        return bare.next().is_none()
-                            && arguments
-                                .iter()
-                                .enumerate()
-                                .all(|(i, a)| i == position || !self.mentions(a))
-                            && self.assumed.contains(&(class, class_side, sel, position));
+            Expression::Cascade { .. } | Expression::MessageSend { .. } => {
+                match classify_threading_use(expr, self.name, &|r| self.forward_target(r).is_some())
+                {
+                    UseShape::Malformed => false,
+                    UseShape::Use(ThreadingUse::Invocation | ThreadingUse::CallableHom) => true,
+                    UseShape::Use(ThreadingUse::Forward { position }) => {
+                        let Expression::MessageSend {
+                            receiver, selector, ..
+                        } = expr
+                        else {
+                            return false;
+                        };
+                        self.forward_target(receiver)
+                            .is_some_and(|(class, class_side)| {
+                                self.assumed.contains(&(
+                                    class,
+                                    class_side,
+                                    selector.name(),
+                                    position,
+                                ))
+                            })
                     }
+                    // Any other send: the parameter may only appear inside an
+                    // operand that is itself an allowed use (`(b value) + 1`,
+                    // `self foo: (b value: 2)`). A bare occurrence, or one
+                    // inside a block literal, falls through to `false`.
+                    UseShape::NotAUse => match expr {
+                        Expression::MessageSend {
+                            receiver,
+                            arguments,
+                            ..
+                        } => self.expr_ok(receiver) && arguments.iter().all(|a| self.expr_ok(a)),
+                        _ => false,
+                    },
                 }
-                if let Some(ok) = callable_hom_use(expr, self.name) {
-                    return ok;
-                }
-                // Any other send: the parameter may only appear inside an
-                // operand that is itself an allowed use (`(b value) + 1`,
-                // `self foo: (b value: 2)`). A bare occurrence, or one inside
-                // a block literal, falls through to `false` below.
-                self.expr_ok(receiver) && arguments.iter().all(|a| self.expr_ok(a))
             }
             _ => false,
         }
@@ -802,6 +925,39 @@ mod tests {
         ] {
             assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
         }
+    }
+
+    #[test]
+    fn a_method_with_a_return_block_does_not_thread() {
+        let idx = index(
+            "Object subclass: C\n  apply: b to: x => b value: x\n  \
+             arg: b =>\n    b value: [:x | ^x]\n    nil\n  \
+             fwd: b =>\n    self apply: b to: [:x | ^x]\n    nil\n  \
+             fold: b over: xs =>\n    xs detect: b ifNone: [^0]\n    nil\n  \
+             stored: b =>\n    f := [:x | ^x]\n    b value\n    f value: 1\n  \
+             kept: b =>\n    h := Array with: [:x | ^x]\n    b value: 1\n  \
+             chosen: b flag: c =>\n    f := c ifTrue: [[^1]] ifFalse: [[^2]]\n    b value\n  \
+             inPlace: b flag: f =>\n    f ifTrue: [^0]\n    b value\n  \
+             after: b over: xs =>\n    b value\n    xs do: [:x | ^x]\n    nil\n  \
+             rootReturn: b =>\n    ^b value\n  \
+             inMatchArm: b x: x =>\n    b value\n    x match: [1 -> ^0; _ -> 1]\n",
+        );
+        for sel in [
+            "arg:",
+            "fwd:",
+            "fold:over:",
+            "stored:",
+            "kept:",
+            "chosen:flag:",
+            "inPlace:flag:",
+            "after:over:",
+            "inMatchArm:x:",
+        ] {
+            assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
+        }
+        // A root `^` is not a block's non-local return.
+        assert_eq!(inst(&idx, "C", "rootReturn:"), vec![0]);
+        assert_eq!(inst(&idx, "C", "apply:to:"), vec![0]);
     }
 
     #[test]

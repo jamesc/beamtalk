@@ -44,7 +44,7 @@ impl CoreErlangGenerator {
         let has_classes = !module.classes.is_empty();
 
         // Build class method exports
-        let class_method_export_doc = Self::build_class_method_export_doc(module);
+        let class_method_export_doc = self.build_class_method_export_doc(module);
 
         // Generate spec attributes from type annotations
         // use the generator's cross-module-aware alias
@@ -62,14 +62,7 @@ impl CoreErlangGenerator {
         let spec_attrs = module
             .classes
             .first()
-            .map(|class| {
-                spec_codegen::generate_class_specs(
-                    class,
-                    false,
-                    Some(&self.alias_registry),
-                    Some(&referenced_aliases),
-                )
-            })
+            .map(|class| self.class_spec_attrs(class, false, &referenced_aliases))
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);

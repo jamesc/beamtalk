@@ -172,7 +172,7 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// Value-type fields (`Self`, `Self1`, …).
     SelfVt,
     /// ADR 0132 §2: the opaque map a threaded entry's caller hands over
-    /// (`Acc0`, `Acc1`, …), threaded through the body as a **trailing**
+    /// (`Acc@0`, `Acc@1`, …), threaded through the body as a **trailing**
     /// family slot exactly as `SelfVt` is, and read or written only by
     /// `beamtalk_dispatch:call_threaded/3` and by forwards. It is never the
     /// slot-2 scratch `StateAcc` map of a loop or fold
@@ -181,14 +181,17 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// holds a `'__local__'` key of the body's own
     /// ([`VerifyError::OwnLocalKeyInAcc`](super::verify::VerifyError::OwnLocalKeyInAcc)).
     /// Context-independent: it renders the same in and out of a loop body.
-    /// Version 0 is the entry's own parameter, spelled `Acc0` as ADR 0132
-    /// spells it (a bare `Acc` would also be the name a direct-params loop
-    /// gives a local `acc`).
+    /// Version 0 is the entry's own parameter. The spelling is
+    /// [`ACC_VAR_PREFIX`] (`Acc@0`): a name no Beamtalk local can produce.
+    /// `to_core_var` only capitalises an identifier, so a local `acc0` renders
+    /// `Acc0` and a bare `Acc` is what a direct-params loop gives a local
+    /// `acc`; and `fresh_temp_var` spells `_Acc7`. `@` is legal in a Core
+    /// Erlang variable but never in a Beamtalk identifier, so `Acc@N` collides
+    /// with neither (`acc_version_spelling_never_collides_with_a_local` pins it).
     ///
     /// Eligible only inside a threaded body
-    /// (`CoreErlangGenerator::eligible_families`), which no production
-    /// lowering enters yet: the threaded body lowering (ADR 0132 Phases
-    /// 1c/1d) is the first to mint an `Acc` version.
+    /// (`CoreErlangGenerator::eligible_families`): the class-method threaded
+    /// body (ADR 0132 Phase 1c) is the first to mint an `Acc` version.
     Acc,
     /// A directly-named loop-threaded local (`Sum`, `Count`, …) as produced
     /// by `ThreadingPlan::threaded_locals` in direct-params / hybrid mode.
@@ -263,7 +266,7 @@ impl VersionedVar {
         match &self.prefix {
             VersionPrefix::State => super::super::util::versioned_var("State", self.version),
             VersionPrefix::SelfVt => super::super::util::versioned_var("Self", self.version),
-            VersionPrefix::Acc => super::super::util::indexed_var("Acc", self.version),
+            VersionPrefix::Acc => super::super::util::indexed_var(ACC_VAR_PREFIX, self.version),
             VersionPrefix::Local(name) => {
                 let core_name = super::super::CoreErlangGenerator::to_core_erlang_var(name);
                 super::super::util::versioned_var(&core_name, self.version)
@@ -272,6 +275,10 @@ impl VersionedVar {
         }
     }
 }
+
+/// The Core Erlang spelling of an `Acc` version is `{ACC_VAR_PREFIX}{version}`
+/// (`Acc@0`). See [`VersionPrefix::Acc`] for why it contains an `@`.
+pub(in crate::core_erlang) const ACC_VAR_PREFIX: &str = "Acc@";
 
 // ─── Storage-family slot order (ADR 0122 Decision 2, ADR 0132 §2) ─────────
 
@@ -641,8 +648,8 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// (the boundary's own single-state shape); a catch inside a threaded
     /// `MethodBody` must name the body's family tuple with `Acc` last
     /// ([`VerifyError::NlrSlotShapeMismatch`](super::verify::VerifyError::NlrSlotShapeMismatch)).
-    /// Rendering ignores it until the threaded entry's catch is emitted (ADR
-    /// 0132 Phases 1c/1d).
+    /// Rendering: the `ClassMethod` boundary with slot `[Acc]` answers
+    /// `{Val, AccAtThrow}` (ADR 0132 Phase 1c); any other slot is bare.
     NlrCatch {
         boundary: NlrBoundary,
         token: TokenId,
@@ -966,18 +973,20 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// [`MethodBodyKind::Plain`] body has empty `families`. Rendering ignores
     /// `kind` and `families`.
     ///
-    /// No production caller yet: the non-REPL method root is the implicit
-    /// frame of the top-level slice (`RebindFrame::implicit_root`) for every
-    /// method without a threading parameter; the REPL root, which threads its
-    /// bindings, and the threaded entry body (ADR 0132 Phases 1c/1d) are the
-    /// first explicit ones.
-    #[allow(dead_code)]
+    /// The non-REPL method root is the implicit frame of the top-level slice
+    /// (`RebindFrame::implicit_root`) for every method without a threading
+    /// parameter; the REPL root, which threads its bindings, and the threaded
+    /// entry body (ADR 0132 Phase 1c: a class method's) are the explicit ones.
     MethodBody {
         kind: MethodBodyKind,
         frame: FrameId,
         threads: Vec<String>,
         families: Vec<VersionPrefix>,
         body: Vec<ThreadedStmt>,
+        /// The method's span, where a verifier finding about the body as a
+        /// whole is reported (`ThreadedBodyThreadsLocals`). `Span::default()`
+        /// for a hand-built or REPL root.
+        span: Span,
     },
 
     /// ADR 0041 §State-Carrying NLR / ADR 0132 §2: a `^` throw, `let

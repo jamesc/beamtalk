@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3871 review: inherits `twice:` (a class method with a threaded entry) from
+// ThreadedEntryParent without overriding it.
+
+ThreadedEntryParent subclass: ThreadedEntryChild
+
+  class marker => 1

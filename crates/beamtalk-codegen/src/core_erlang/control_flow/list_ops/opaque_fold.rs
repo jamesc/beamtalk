@@ -35,6 +35,17 @@
 //! `allSatisfy:`) keep their short-circuit *call* semantics: once the answer
 //! is decided, the fold passes the accumulator through unchanged without
 //! invoking the callable for the remaining elements.
+//!
+//! # ADR 0132 Phase 1c: the same fold over `Acc`
+//!
+//! In a threaded class body the callable is a *threading parameter*, and the
+//! map the fold threads is the body's `Acc` (the caller's map) instead of an
+//! actor `State` ([`FoldCarrier::Acc`]): the fold is seeded from the current
+//! `Acc` version and answers `{Result, NewAcc}`, and the per-element tier
+//! gate is `beamtalk_dispatch:call_threaded/3` (the one gate every threaded
+//! entry uses) instead of the inline `is_function/2` pair. Everything else —
+//! the accumulator layout, the short-circuit guards, the receiver conversion —
+//! is this one implementation.
 
 use super::super::super::threaded_ir::StateAccFallbackReason;
 use super::super::super::{CoreErlangGenerator, Result};
@@ -66,6 +77,17 @@ pub(in crate::core_erlang) enum OpaqueFoldOp<'a> {
     Satisfy { is_all: bool },
 }
 
+/// The map an opaque-callable fold threads (see the module docs).
+#[derive(Clone)]
+pub(in crate::core_erlang) enum FoldCarrier {
+    /// ADR 0128: an actor instance method's `State`, discriminating the
+    /// callable's tier inline with `erlang:is_function/2`.
+    ActorState,
+    /// ADR 0132 §2: a threaded body's `Acc`, seeded from `seed` (its current
+    /// version's variable) and gated per element by `call_threaded/3`.
+    Acc { seed: String },
+}
+
 /// Type of the fold-accumulator continuation: `k(Result, NewStAcc)`.
 type AccContinuation = dyn Fn(Document<'static>, Document<'static>) -> Document<'static>;
 
@@ -84,7 +106,62 @@ impl CoreErlangGenerator {
         callable: &Expression,
     ) -> bool {
         Self::extract_block_literal(callable).is_none()
-            && self.opaque_callable_list_op_needs_state_fold()
+            && (self.opaque_callable_list_op_needs_state_fold()
+                // ADR 0132 §2: a threaded body's threading parameter folds
+                // over its `Acc`. Deliberately not part of
+                // `opaque_callable_list_op_needs_state_fold`, which also gates
+                // ADR 0118's `State`-prelude producer (an actor-only family).
+                || self.is_threading_param_read(callable))
+    }
+
+    /// Which map the opaque-callable fold of `callable` threads (see
+    /// [`FoldCarrier`]): the threaded body's current `Acc` when `callable` is
+    /// one of its threading parameters, the actor `State` otherwise.
+    pub(in crate::core_erlang) fn opaque_fold_carrier(&self, callable: &Expression) -> FoldCarrier {
+        if self.is_threading_param_read(callable) {
+            FoldCarrier::Acc {
+                seed: self.current_acc_var_name(),
+            }
+        } else {
+            FoldCarrier::ActorState
+        }
+    }
+
+    /// `detect:ifNone:`'s `ifNone:` handler in a fold over `Acc`: the handler
+    /// is a plain zero-argument callable (a threading parameter is never used
+    /// inside it, [`beamtalk_core::semantic_analysis::tier2_callee`]), so its
+    /// answer pairs with the fold's final `Acc` unchanged.
+    fn generate_if_none_value_with_acc(
+        &mut self,
+        if_none: &Expression,
+        acc_var: &str,
+    ) -> Result<Document<'static>> {
+        // A handler that writes an outer local is a stateful (arity-1) fun this
+        // `apply … ()` could not call: reject it loudly rather than crash at
+        // run time (the ADR 0131 producer for it is Phase 3's, ADR 0132 §2).
+        if let Expression::Block(block) = if_none.unwrap_parens()
+            && !Self::captured_mutations_for_block(block).is_empty()
+        {
+            return Err(crate::core_erlang::CodeGenError::UnsupportedFeature {
+                feature: "a detect:ifNone: handler that assigns an outer local, in a method \
+                          that forwards its block parameter as the detect: predicate"
+                    .to_string(),
+                span: Some(if_none.span()),
+            });
+        }
+        let none_code = self.expression_doc(if_none)?;
+        let none_result = self.fresh_temp_var("NoneResult");
+        Ok(docvec![
+            "let ",
+            leaf::var(none_result.clone()),
+            " = apply ",
+            none_code,
+            " () in {",
+            leaf::var(none_result),
+            ", ",
+            leaf::var(acc_var.to_string()),
+            "}",
+        ])
     }
 
     /// Whether `expr` (paren-unwrapped here) is a whole collection-HOM send
@@ -157,8 +234,39 @@ impl CoreErlangGenerator {
         callable_var: &str,
         args: &[String],
         st_acc_var: &str,
+        carrier: &FoldCarrier,
         k: &AccContinuation,
     ) -> Document<'static> {
+        if matches!(carrier, FoldCarrier::Acc { .. }) {
+            // ADR 0132 §2: the per-element gate is `call_threaded/3`, which
+            // answers `{Result, Acc1}` for a Tier 1 fun, a Tier 2 fun and a
+            // non-fun callable alike.
+            let tuple = self.fresh_temp_var("T");
+            let result = self.fresh_temp_var("R");
+            let next_acc = self.fresh_temp_var("NewSt");
+            let arg_docs: Vec<Document<'static>> =
+                args.iter().map(|a| leaf::var(a.clone())).collect();
+            return docvec![
+                "let ",
+                leaf::var(tuple.clone()),
+                " = call 'beamtalk_dispatch':'call_threaded'(",
+                leaf::var(callable_var.to_string()),
+                ", [",
+                beamtalk_cerl_doc::join(arg_docs, &Document::Str(", ")),
+                "], ",
+                leaf::var(st_acc_var.to_string()),
+                ") in let ",
+                leaf::var(result.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(tuple.clone()),
+                ") in let ",
+                leaf::var(next_acc.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple),
+                ") in ",
+                k(leaf::var(result), leaf::var(next_acc)),
+            ];
+        }
         let tier1_result = self.fresh_temp_var("R");
         let tier2_tuple = self.fresh_temp_var("T");
         let tier2_result = self.fresh_temp_var("R");
@@ -269,8 +377,17 @@ impl CoreErlangGenerator {
         };
 
         let callable_var = self.fresh_temp_var("Callable");
-        let raw_code = self.expression_doc(callable)?;
-        let seed_state = self.current_field_read_state_var();
+        // ADR 0132 §2: a threading parameter of a threaded body folds over its
+        // `Acc`; every other opaque callable folds over the actor `State`.
+        let carrier = self.opaque_fold_carrier(callable);
+        let raw_code = match &carrier {
+            FoldCarrier::ActorState => self.expression_doc(callable)?,
+            FoldCarrier::Acc { .. } => self.threading_param_value_doc(callable)?,
+        };
+        let seed_state = match &carrier {
+            FoldCarrier::ActorState => self.current_field_read_state_var(),
+            FoldCarrier::Acc { seed } => seed.clone(),
+        };
         docs.push(docvec![
             "let ",
             leaf::var(callable_var.clone()),
@@ -378,7 +495,8 @@ impl CoreErlangGenerator {
                 ]
             }),
         };
-        let body = self.opaque_callable_apply_doc(&callable_var, &args, &st_acc, k.as_ref());
+        let body =
+            self.opaque_callable_apply_doc(&callable_var, &args, &st_acc, &carrier, k.as_ref());
 
         // Short-circuit guard: once the answer is decided, pass the
         // accumulator through without invoking the callable again.
@@ -523,7 +641,14 @@ impl CoreErlangGenerator {
                 ]);
             }
             OpaqueFoldOp::DetectIfNone { if_none } => {
-                let if_none_arm = self.generate_if_none_branch_tuple(if_none, &final_state)?;
+                let if_none_arm = match &carrier {
+                    FoldCarrier::ActorState => {
+                        self.generate_if_none_branch_tuple(if_none, &final_state)?
+                    }
+                    FoldCarrier::Acc { .. } => {
+                        self.generate_if_none_value_with_acc(if_none, &final_state)?
+                    }
+                };
                 docs.push(docvec![
                     "case call 'erlang':'element'(2, ",
                     leaf::var(fold_result_var.clone()),

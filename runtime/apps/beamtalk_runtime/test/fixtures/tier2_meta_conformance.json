@@ -4,8 +4,38 @@
     "fixture": "threaded_meta_fixture",
     "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_meta_fixture.bt",
     "tier2_methods": {},
-    "tier2_class_methods": {},
+    "tier2_class_methods": {
+      "twice:": {"entry_fn": "__t2_class_twice:", "positions": [0]}
+    },
     "unthreaded_selectors": ["twice:"],
-    "why": "ADR 0132 Phase 0c (BT-3868): every compiled module emits both keys, empty until Phase 1c/1d generates entries. Each expected map is `selector => {\"entry_fn\": name, \"positions\": [0-based arg positions]}`; `unthreaded_selectors` are real methods of the class that must resolve to no threaded entry on either side."
+    "unthreaded_class_selectors": [],
+    "why": "ADR 0132 Phase 1c (BT-3871): the class-side `twice:` invokes its block parameter at the method root, so its module advertises the threaded entry `'__t2_class_twice:'` in `tier2_class_methods`. The instance-side `twice:` threads too (its `MethodInfo::threading_params` is [0]) but gets its entry with ADR 0132 Phase 1d, so `tier2_methods` is still empty. Each expected map is `selector => {\"entry_fn\": name, \"positions\": [0-based arg positions]}`; `unthreaded_selectors` are instance methods and `unthreaded_class_selectors` class methods that must resolve to no threaded entry on either side."
+  },
+  {
+    "class_name": "ThreadedClassEntriesFixture",
+    "fixture": "threaded_class_entries_fixture",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_class_entries_fixture.bt",
+    "tier2_methods": {},
+    "tier2_class_methods": {
+      "afterEnsure:": {"entry_fn": "__t2_class_afterEnsure:", "positions": [0]},
+      "apply:to:": {"entry_fn": "__t2_class_apply:to:", "positions": [0]},
+      "bothOf:": {"entry_fn": "__t2_class_bothOf:", "positions": [0]},
+      "branch:": {"entry_fn": "__t2_class_branch:", "positions": [0]},
+      "cascade:": {"entry_fn": "__t2_class_cascade:", "positions": [0]},
+      "collectIn:with:": {"entry_fn": "__t2_class_collectIn:with:", "positions": [1]},
+      "countIn:with:": {"entry_fn": "__t2_class_countIn:with:", "positions": [1]},
+      "detectIn:with:": {"entry_fn": "__t2_class_detectIn:with:", "positions": [1]},
+      "doubled:": {"entry_fn": "__t2_class_doubled:", "positions": [0]},
+      "each:do:": {"entry_fn": "__t2_class_each:do:", "positions": [1]},
+      "selectIn:with:": {"entry_fn": "__t2_class_selectIn:with:", "positions": [1]},
+      "sumOver:with:": {"entry_fn": "__t2_class_sumOver:with:", "positions": [1]},
+      "twice:": {"entry_fn": "__t2_class_twice:", "positions": [0]},
+      "twiceVia:": {"entry_fn": "__t2_class_twiceVia:", "positions": [0]},
+      "viaOwn:": {"entry_fn": "__t2_class_viaOwn:", "positions": [0]},
+      "withLocals:": {"entry_fn": "__t2_class_withLocals:", "positions": [0]}
+    },
+    "unthreaded_selectors": [],
+    "unthreaded_class_selectors": ["plain:", "storeAway:", "callThen:firstPositiveIn:", "guarded:flag:", "find:", "nlrForward:", "nlrFold:with:"],
+    "why": "ADR 0132 Phase 1c (BT-3871): a class method with a threading parameter (an invocation, the callable of a collection HOM, a same-class pass-on, as a conditional's receiver, in a cascade) advertises its entry and positions; `plain:` (no block), `storeAway:` (stores the block, ADR 0132 section 1) and every method whose body holds a block that does `^` (`callThen:firstPositiveIn:`, `guarded:flag:`, `find:`, `nlrForward:`, `nlrFold:with:`: the `^` could answer a stale `Acc`, BT-3871 review; ADR 0132 Phase 3) advertise none."
   }
 ]

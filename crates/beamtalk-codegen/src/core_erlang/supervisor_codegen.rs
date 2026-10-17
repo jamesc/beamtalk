@@ -24,13 +24,12 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use super::selector_mangler::safe_class_method_fn_name;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf::{atom, fname};
-use beamtalk_core::ast::{MethodKind, Module, SupervisorKind};
+use beamtalk_cerl_doc::leaf::atom;
+use beamtalk_core::ast::{Module, SupervisorKind};
 
 impl CoreErlangGenerator {
     /// Generates an OTP supervisor module for `Supervisor subclass:` or
@@ -71,19 +70,7 @@ impl CoreErlangGenerator {
         let module_name = self.module_name.clone();
 
         // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
-        let mut class_method_exports: Document<'static> = Document::Nil;
-        for m in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
-            let arity = m.selector.arity() + 1; // +1 for ClassSelf
-            class_method_exports = docvec![
-                class_method_exports,
-                ", ",
-                fname(safe_class_method_fn_name(m.selector.name().as_ref()), arity),
-            ];
-        }
+        let class_method_exports: Document<'static> = self.class_method_exports_doc(class);
 
         // Module attributes
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
@@ -101,12 +88,7 @@ impl CoreErlangGenerator {
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
         let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
-        let spec_attrs = spec_codegen::generate_class_specs(
-            class,
-            true,
-            Some(&self.alias_registry),
-            Some(&referenced_aliases),
-        );
+        let spec_attrs = self.class_spec_attrs(class, true, &referenced_aliases);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
         // Every class module that could contain a `user_type`
@@ -172,19 +154,7 @@ impl CoreErlangGenerator {
         let module_name = self.module_name.clone();
 
         // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
-        let mut class_method_exports: Document<'static> = Document::Nil;
-        for m in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
-            let arity = m.selector.arity() + 1;
-            class_method_exports = docvec![
-                class_method_exports,
-                ", ",
-                fname(safe_class_method_fn_name(m.selector.name().as_ref()), arity),
-            ];
-        }
+        let class_method_exports: Document<'static> = self.class_method_exports_doc(class);
 
         // Module attributes
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
@@ -202,12 +172,7 @@ impl CoreErlangGenerator {
         // declarations for those (plus transitive deps) instead of every
         // pre-loaded alias in the compilation unit.
         let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
-        let spec_attrs = spec_codegen::generate_class_specs(
-            class,
-            true,
-            Some(&self.alias_registry),
-            Some(&referenced_aliases),
-        );
+        let spec_attrs = self.class_spec_attrs(class, true, &referenced_aliases);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
         // Every class module that could contain a `user_type`
