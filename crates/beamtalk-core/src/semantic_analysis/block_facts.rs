@@ -344,6 +344,21 @@ pub fn value_blocks(expr: &Expression) -> Vec<&Block> {
     found
 }
 
+/// The bare local-variable references `expr` may evaluate to, followed as
+/// [`value_blocks`] follows it (`c := b`, `c := x ifTrue: [b] ifFalse: [..]`):
+/// ADR 0131 §6 reads it for a local that aliases a block-valued local
+/// (BT-3859).
+#[must_use]
+pub fn value_locals(expr: &Expression) -> Vec<&crate::ast::Identifier> {
+    let mut found = Vec::new();
+    visit_returned(expr, ReturnedOperands::ThroughValue, &mut |operand, _| {
+        if let Expression::Identifier(id) = operand {
+            found.push(id);
+        }
+    });
+    found
+}
+
 /// Calls `visit` with every operand of a method body (nested blocks included)
 /// that is returned or stored, and how it escapes: the one classification
 /// behind [`escaping_blocks`] and [`escape_sites`], so they cannot disagree
@@ -4421,5 +4436,17 @@ mod tests {
             .collect();
         assert_eq!(found, vec!["[1]", "[2]"]);
         assert!(value_blocks(&parse_first_expr("[1] value")).is_empty());
+    }
+
+    #[test]
+    fn value_locals_are_the_locals_a_returned_expression_evaluates_to() {
+        let src = "c ifTrue: [b] ifFalse: [d := e]";
+        let expr = parse_first_expr(src);
+        let found: Vec<String> = value_locals(&expr)
+            .into_iter()
+            .map(|id| span_text(src, id.span))
+            .collect();
+        assert_eq!(found, vec!["b", "e"]);
+        assert!(value_locals(&parse_first_expr("b value")).is_empty());
     }
 }

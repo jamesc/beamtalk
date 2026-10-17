@@ -20,3 +20,11 @@ Object subclass: Adr0131Section6EscapeClass
     ^[:x | x + t]
 
   class literalOfPure => #([:x | x + 1], [:x | x * 2])
+
+  // BT-3859: what a method whose last statement is a local assignment
+  // answers (pinned in adr0131section6escape_test.bt; BT-3882).
+  class lastStatementAssignment => _r := 5
+
+  class lastStatementBlockAssignment => _b := [:x | x + 1]
+
+  class lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]

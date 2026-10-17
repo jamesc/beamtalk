@@ -2799,7 +2799,7 @@ count := CvA ap: [count + 1]
 10 timesRepeat: [count := count + 1]
 ```
 
-**A block that escapes the method is also a compile error** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block that writes an outer local and escapes the method without being sent — returned via `^`, implicit last expression, stored in a field or class variable, or placed in a collection literal — is rejected at compile time:
+**A block that escapes the method is also a compile error** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block that writes an outer local and escapes the method without being sent — returned via `^`, implicit last expression, stored in a field or class variable, or placed in a collection literal — is rejected at compile time. A local bound to such a block counts as the block, whether bound directly (`b := [..]. ^b`), through a conditional arm (`b := c ifTrue: [[..]] ifFalse: [nil]`) or through another local (`c := b. ^c`). In an actor method the error says the block is dropped unrun rather than returned: a current limitation, tracked in [BT-3882](https://linear.app/beamtalk/issue/BT-3882), makes an actor method whose last statement is a local assignment answer `nil` instead of the assigned value:
 
 ```text
 error: block writes outer local `count`, but it is returned from the method and nothing can return the write
