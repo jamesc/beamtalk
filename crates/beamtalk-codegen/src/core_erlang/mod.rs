@@ -332,6 +332,13 @@ impl CoreErlangGenerator {
                         .contains_key(&value.unwrap_parens().span());
                     let (val_preamble, value_doc) = if value_already_sequenced {
                         (Document::Nil, self.expression_doc(value)?)
+                    } else if let Some(tv) = self.nlr_return_construct_value(value)? {
+                        // BT-3813: a loop or fold `^` value in a class or
+                        // value-type method answers its construct tuple; the
+                        // throw carries its value (element 1), never the
+                        // carrier, wherever the `^` sits.
+                        let prelude_doc = self.verified_root_prelude_doc(&tv.prelude, *span);
+                        (prelude_doc, self.threaded_value_doc(&tv.value))
                     } else if self.in_class_method() {
                         // A class method threads nothing (ADR 0130 §3): the
                         // value is compiled as an ordinary expression, with

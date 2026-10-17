@@ -539,18 +539,13 @@ fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
 }
 
 #[test]
-fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
-    // BT-3796: `do:` answers the `{nil, StateAcc}` carrier in class and
-    // value-type methods, which only a producer site unpacks. A `^` inside a
-    // handler or closure is not one (the carrier was returned raw, and before
-    // this change `do:` answered a plain `nil` there), so the shape is a
-    // Phase 0 error; the keyed `do:` forms still answer `nil` and stay
-    // accepted (`keyedDoReturnedInArm` in `adr0131do_producer_test.bt`).
+fn a_returned_do_inside_a_block_is_accepted_in_class_and_value_methods() {
+    // BT-3796 made `do:` a producer whose closed form answers the
+    // `{nil, StateAcc}` carrier in class and value-type methods.
     //
     // BT-3738 (ADR 0131 Phase 3): the arm of a conditional is a `BranchArm`
     // frame whose statements are producer sites, so `c ifTrue: [^xs do: ...]`
-    // is lowered as a producer and answers `nil` (BT-3813's arm case; the
-    // handler case below is still BT-3813).
+    // is lowered as a producer and answers `nil`.
     let in_arm = "c ifTrue: [^#(1, 2) do: [:x | t := t + x]]\nt";
     for src in [in_class(in_arm), in_value(in_arm), in_actor(in_arm)] {
         assert!(adr0131_diagnostics_with(&src, &["c"]).is_empty(), "{src}");
@@ -558,7 +553,7 @@ fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
     //
     // BT-3817 (ADR 0131 Phase 3b): the protected body, handler and cleanup of an
     // `on:do:`/`ensure:` that is a producer are `BranchArm` frames too, so a
-    // `^xs do: [...]` in one is lowered the same way (BT-3813's handler case).
+    // `^xs do: [...]` in one is lowered the same way.
     for body in [
         "[^#(1, 2) do: [:x | t := t + x]] on: Error do: [:e | nil]\nt",
         "[nil] on: Error do: [:e | ^#(1, 2) do: [:x | t := t + x]]\nt",
@@ -572,6 +567,30 @@ fn a_returned_do_inside_a_block_is_an_error_in_class_and_value_methods() {
     let keyed = "c ifTrue: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]\nt";
     for src in [in_class(keyed), in_value(keyed)] {
         assert!(adr0131_diagnostics_with(&src, &["c"]).is_empty(), "{src}");
+    }
+    //
+    // BT-3813: in any other closure (a `detect:ifNone:` handler, a sort block)
+    // codegen lowers the `^` value through the producer with the `Discard`
+    // tail (`nlr_return_construct_value`), so the `ALLOW_SET` row accepts it
+    // in class and value-type methods (the BUnit pins are `doReturnedInClosure`
+    // and friends in `adr0131do_producer_test.bt`). An actor method keeps the
+    // error: its row lists only the conditionals.
+    for body in [
+        "#(1) detect: [:y | y > c] ifNone: [^#(1, 2) do: [:x | t := t + x]]\nt",
+        "#(1) detect: [:y | y > c] ifNone: [^(#{#a => 1} do: [:x | t := t + x])]\nt",
+        "#(1) detect: [:y | y > c] ifNone: [^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]]\nt",
+        "#(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            let diags = adr0131_diagnostics_with(&src, &["c"]);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics_with(&src, &["c"]);
+        assert!(
+            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            "{src}: {diags:?}"
+        );
     }
 }
 

@@ -127,3 +127,75 @@ Object subclass: Adr0131DoProducerClass
         x > 1
       ]
     #[r, t]
+
+  // BT-3813: `^xs do: [...]` inside a block (a non-local return) answers the
+  // `do:`'s `nil`, never its `{nil, StateAcc}` carrier: in an arm and a
+  // handler (producer frames) and in any other closure (a `detect:ifNone:`
+  // handler, a sort block), for a list, a map literal and a keyed `do:`.
+  class doReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  class dictDoReturnedInArm: c =>
+    t := 0
+    c ifTrue: [^#{#a => 1, #b => 2} do: [:x | t := t + x]]
+    t
+
+  class doReturnedInHandler: c =>
+    t := 0
+    [
+      c ifTrue: [Error signal: "probe"]
+      t := 10
+    ] on: Error do: [:e | ^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  class dictDoReturnedInHandler: c =>
+    t := 0
+    [
+      c ifTrue: [Error signal: "probe"]
+      t := 10
+    ] on: Error do: [:e | ^#{#a => 1, #b => 2} do: [:x | t := t + x]]
+    t
+
+  class doReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y | y > c] ifNone: [^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  class dictDoReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y |
+      y > c
+    ] ifNone: [^(#{#a => 1, #b => 2} do: [:x | t := t + x])]
+    t
+
+  class keyedDoReturnedInClosure: c =>
+    t := 0
+    #(1, 2) detect: [:y |
+      y > c
+    ] ifNone: [^#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | t := t + v]]
+    t
+
+  class doReturnedInSortBlock =>
+    t := 0
+    #(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]
+    t
+
+  // BT-3813: the class-variable write in the returned `do:` is written in
+  // place (ADR 0130), so it is kept past the `^`.
+  class doWithClassVarWriteReturnedInClosure: c =>
+    self.n := 0
+    t := 0
+    #(1, 2)
+      detect: [:y | y > c]
+      ifNone: [
+        ^#(1, 2)
+          do: [:x |
+            t := t + x
+            self.n := self.n + x
+          ]
+      ]
+    t
+
+  class classVarN => self.n

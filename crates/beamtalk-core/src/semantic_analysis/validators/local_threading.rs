@@ -479,19 +479,26 @@ const ALLOW_SET: &[Allowed] = &[
         position: Position::ReturnValue { nested: false },
         contexts: &[Actor],
     },
-    // `^<construct>` inside a block (a non-local return). `Do` is not here
-    // (BT-3796): it is a producer now and its closed form answers the
-    // `{nil, StateAcc}` carrier, which only a producer site unpacks. A `^` in
-    // an arm of a conditional or the protected body, handler or cleanup of an
-    // `on:do:`/`ensure:` producer is one (a `BranchArm` frame's statement,
-    // ADR 0131 Phase 3 / 3b, BT-3813's arm and handler cases), so it never
-    // reaches this row; a `^` inside any other closure is not, and its
-    // carrier would be returned raw (BT-3813's remaining closure case). The
-    // keyed `do:` forms are producers too (BT-3841).
+    // `^<construct>` inside a block (a non-local return).
     Allowed {
         kinds: &[IfTrue, IfNil, AndOr],
         position: Position::ReturnValue { nested: true },
         contexts: &[Actor],
+    },
+    // BT-3813: `^xs do: [...]` (and the keyed `do:` forms, BT-3841) inside a
+    // block of a class or value-type method. `do:` is a producer (BT-3796)
+    // and its closed form answers the `{nil, StateAcc}` carrier; a `^` at a
+    // producer site of an arm or loop frame is sequenced by that frame, and
+    // every other `^` lowers its construct through the producer with the
+    // `Discard` tail (codegen's `nlr_return_construct_value`, the `^` ends
+    // the method), so the throw carries `nil`, never the carrier. The
+    // agreement test `every_nested_return_value_the_check_accepts_is_lowered_by_the_producer`
+    // pins that codegen lowers every construct this row accepts that the
+    // core rule (`operand_producer_writes`) names a producer.
+    Allowed {
+        kinds: &[Do, KeyedDo],
+        position: Position::ReturnValue { nested: true },
+        contexts: &[Class, ValueType],
     },
 ];
 
