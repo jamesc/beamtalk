@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3839 (ADR 0131): a `Dictionary` lookup (`at:ifAbsent:`, `at:ifPresent:`,
+// `at:ifPresent:ifAbsent:`) whose handler writes an outer local is a
+// local-threading producer in a loop or fold body, lowered by the frame's
+// mode: a counted, `timesRepeat:` or `whileTrue:` loop (DirectParams), a
+// `do:`/`collect:`/`inject:into:` fold (TupleAcc), a loop body that writes an
+// actor field (StateAcc) and one that reads a field (Hybrid). Each method
+// walks `#a`, `#b`, `#c` over `#{#a => 10}`, so the handler is skipped for the
+// present key and its write is kept for each absent one. The receivers (class,
+// value type, actor; fixtures/adr0131lookup_loop_{class,value,actor}.bt) must
+// agree.
+
+TestCase subclass: Adr0131LookupLoopTest
+
+  answersOf: selector =>
+    #[Adr0131LookupLoopClass perform: selector, (Adr0131LookupLoopValue new) perform: selector, (Adr0131LookupLoopActor spawn) perform: selector]
+
+  assertAll: selector equal: expected =>
+    self assert: (self answersOf: selector) equals: #[expected, expected, expected]
+
+  testToDoStatement => self assertAll: #toDoStatement equal: 2
+
+  testToDoOperand => self assertAll: #toDoOperand equal: #[12, 2]
+
+  testTimesRepeatStatement => self assertAll: #timesRepeatStatement equal: 5
+
+  testWhileStatement => self assertAll: #whileStatement equal: 5
+
+  testDoStatement => self assertAll: #doStatement equal: 2
+
+  testDoAllPresent => self assertAll: #doAllPresent equal: 0
+
+  testCollectLast => self assertAll: #collectLast equal: #[10, 0, 2]
+
+  testInjectStatement => self assertAll: #injectStatement equal: #[3, 2]
+
+  testInjectOperand =>
+    self assert: #[Adr0131LookupLoopClass injectOperand, (Adr0131LookupLoopValue new) injectOperand] equals: #[#[12, 2], #[12, 2]]
+
+  testToDoInDo => self assertAll: #toDoInDo equal: 6
+
+  testArmInToDo => self assertAll: #armInToDo equal: 1
+
+  testDoInArm => self assertAll: #doInArm equal: 2
+
+  testIfPresentInDo => self assertAll: #ifPresentInDo equal: 40
+
+  testIfPresentIfAbsentInDo =>
+    self assertAll: #ifPresentIfAbsentInDo equal: #[10, 2]
+
+  testTwoLocalsInDo => self assertAll: #twoLocalsInDo equal: #[2, 4]
+
+  testHandlerHoldsLoopInDo => self assertAll: #handlerHoldsLoopInDo equal: 6
+
+  testEarlyReturnInDo => self assertAll: #earlyReturnInDo equal: 1
+
+  testFieldReadInToDo =>
+    self assert: #[(Adr0131LookupLoopValue new) fieldReadInToDo, (Adr0131LookupLoopActor spawn) fieldReadInToDo] equals: #[8, 8]
+
+  testFieldWriteInToDo =>
+    self assert: (Adr0131LookupLoopActor spawn) fieldWriteInToDo equals: #[5, 3]

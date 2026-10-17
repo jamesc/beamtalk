@@ -36,7 +36,7 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 
 1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841): the Phase 0 position diagnostic is retained** (`DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`, message "`X` writes outer local `t`, but as <position> in <context> the write is not threaded back yet (BT-3743)"). Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
 2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833): three legacy write-back paths are still alive**: the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`. The "delete the remaining write-back paths" goal of Phases 3b and 3c is therefore only partly met.
-3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839): lookups and `detect:ifNone:` handler writes in loop or fold bodies are still errors**: `keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]` is a §6 error, and a `detect:ifNone:` handler write inside a counted loop body is an `UnmigratedLocalThreading` error.
+3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839)** (done): a `Dictionary` lookup whose handler writes an outer local is a producer in a loop or fold body in class, value-type and actor methods (`keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]`), under the same site rule as a conditional (an actor fold body's value-bearing sites stay errors, `is_actor_fold_value_site`). A lookup inside a closure that is not inlined keeps its §6 error ([BT-3862](https://linear.app/beamtalk/issue/BT-3862)), and a `detect:ifNone:` handler write in an actor loop or fold body keeps its `UnmigratedLocalThreading` error (measured `bad` in `adr0131_statement_probes.tsv`; [BT-3861](https://linear.app/beamtalk/issue/BT-3861)); class and value-type methods lower it since BT-3841. The verifier check that a fold body returns its accumulator is [BT-3863](https://linear.app/beamtalk/issue/BT-3863).
 4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823): REPL and `match:` leftovers.** An arm or loop nested inside a REPL `on:do:`/`Result tryDo:` is still a compile error (the o7/o8 REPL pins), because REPL arms are not frames. A `match:` arm that writes an outer local is a compile error rather than `match:` being a producer (the REPL is exempt from that error and unprobed).
 5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
 6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
@@ -283,9 +283,23 @@ parameterless one in the absent arm, answering what the primitive answers
 for a missing handler (the found value, or `nil`). `at:ifAbsentPut:` and
 `removeKey:ifAbsent:` stay §6 errors permanently: they assume a mutable
 dictionary, which `Dictionary` is not, so it will not define them (users
-write `at:ifAbsent:` then `at:put:`) and they have no behaviour to lower. The REPL keeps the §6 error, and a lookup in a loop or fold body is
-not a producer (it lowers at the method root and in `BranchArm` frames, like a
-conditional).
+write `at:ifAbsent:` then `at:put:`) and they have no behaviour to lower. The REPL keeps the §6 error.
+
+**Amendment, BT-3839: lookups in loop and fold bodies.** A lookup is a producer
+wherever a conditional is: at the method root, in `BranchArm` frames and at a
+loop or fold body's producer sites (`is_loop_body_producer_site`, no lookup
+exception), its handlers' `LocalRebind`s lowered by the frame's mode. The one
+codegen gap was that a loop had two gates: the lowering threaded a loop when
+its threaded set (`loop_threaded_locals`) was non-empty, while the statement
+classifier (`control_flow_has_mutations`) asked the block-level mutation
+heuristic, which does not see through a lookup's handler (a block argument of a
+send it does not inline). An actor `do:` around a handler-writing lookup (in
+an arm, or behind a nested loop) was then lowered as a threaded fold that its
+statement never unpacked, so the write was dropped. Both now read one rule
+(`loop_body_has_carried_mutations`: the threaded set, or the heuristic when the
+scope has a map to carry). A lookup
+inside a closure that is not inlined (a stored block, a block sent `value:`)
+has no frame for the producer and keeps the §6 error.
 
 **Amendment, BT-3841: keyed iteration got the same guarded-inline decision.**
 `keysAndValuesDo:` and `doWithKey:` are dictionary folds inlined for a

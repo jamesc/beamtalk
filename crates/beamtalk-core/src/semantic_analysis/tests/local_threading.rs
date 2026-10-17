@@ -2382,11 +2382,45 @@ fn dictionary_lookup_handler_write_is_a_producer_in_every_method_context() {
         "d := #{#a => 1}\nr := d at: #k ifAbsent: [#(1, 2) do: [:x | t := t + x]. 0]\n#[r, t]",
         "d := #{#a => 1}\nr := d at: #k ifAbsent: [(t < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]]\n#[r, t]",
         "d := #{#a => 1}\nr := d at: #k ifAbsent: [d at: #z ifAbsent: [t := t + 1. 4]]\n#[r, t]",
+        // BT-3839: a statement of a loop or fold body, in an arm of a
+        // conditional producer around the loop, and nested in two frames.
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #k ifAbsent: [t := t + x]]\nt",
+        "d := #{#a => 1}\n(t < 3) ifTrue: [#(1, 2) do: [:x | d at: #k ifAbsent: [t := t + x]]]\nt",
+        "d := #{#a => 1}\n1 to: 2 do: [:i | #(1, 2) do: [:x | d at: x ifAbsent: [t := t + 1]]]\nt",
+        "d := #{#a => 1}\n[t < 3] whileTrue: [d at: #k ifAbsent: [t := t + 1]]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
+    }
+}
+
+#[test]
+fn dictionary_lookup_handler_write_in_a_loop_or_fold_body_is_a_producer() {
+    // BT-3839: the value of an assignment or an operand in a letrec loop body
+    // is a producer site in every method context; the same sites in an actor
+    // fold body are value-bearing sites the actor fold frame does not lower
+    // (`is_actor_fold_value_site`, BT-3797), so the actor keeps the error there,
+    // exactly as for a conditional.
+    for body in [
+        "d := #{#a => 1}\n1 to: 2 do: [:i | r := d at: #k ifAbsent: [t := t + i. 0]]\nt",
+        "d := #{#a => 1}\n2 timesRepeat: [r := 1 + (d at: #k ifAbsent: [t := t + 1. 0])]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+    }
+    for body in [
+        "d := #{#a => 1}\n#(1, 2) do: [:x | r := d at: #k ifAbsent: [t := t + x. 0]]\nt",
+        "d := #{#a => 1}\nr := #(1, 2) inject: 0 into: [:a :x | a + (d at: x ifAbsent: [t := t + 1. 0])]\n#[r, t]",
+    ] {
+        for src in [in_class(body), in_value(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+        assert!(!adr0131_diagnostics(&in_actor(body)).is_empty(), "{body}");
     }
 }
 
@@ -2401,12 +2435,12 @@ fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
         "d := #{#a => 1}\nr := d at: #k ifAbsent: [:x | t := t + 1. 0]\n#[r, t]",
         // A cascade message is never inlined.
         "d := #{#a => 1}\nd at: #k ifAbsent: [t := t + 1]; yourself\nt",
-        // In the body of a loop or fold: the lookup producer lowers at the
-        // method root and in arm frames only.
-        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #k ifAbsent: [t := t + x]]\nt",
-        "d := #{#a => 1}\n1 to: 2 do: [:i | r := d at: #k ifAbsent: [t := t + i. 0]]\nt",
-        // In a closure.
+        // In a closure that is not inlined (BT-3839 keeps this: the lookup
+        // producer has no frame there), alone and in a loop body.
         "d := #{#a => 1}\nb := [d at: #k ifAbsent: [t := t + 1. 0]]\nb value",
+        "d := #{#a => 1}\n#(1, 2) do: [:x | [:z | d at: z ifAbsent: [t := t + 1. 0]] value: x]\nt",
+        // A parenthesised handler in a loop body.
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: x ifAbsent: ([t := t + 1. 0])]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
@@ -2468,8 +2502,8 @@ fn dictionary_if_present_that_the_producer_cannot_lower_keeps_the_section6_error
         "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]\n#[r, t]",
         // A parenthesised handler is a block value.
         "d := #{#a => 1}\nr := d at: #k ifPresent: ([:v | t := t + v. 0])\n#[r, t]",
-        // In a loop body.
-        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #a ifPresent: [:v | t := t + v]]\nt",
+        // The present handler takes no parameter, in a loop body.
+        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #a ifPresent: [t := t + 1]]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
