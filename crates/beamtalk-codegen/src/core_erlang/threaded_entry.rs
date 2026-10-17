@@ -602,14 +602,24 @@ impl CoreErlangGenerator {
         for (selector, arguments) in messages {
             let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
             prelude.extend(arg_prelude);
-            // `valueWithArguments: xs` hands `call_threaded/3` the list itself.
-            let args_doc = if selector.name() == "valueWithArguments:" {
-                arg_refs.into_iter().next().unwrap_or(Document::Str("[]"))
+            // `valueWithArguments: xs` hands the list itself to the gate that
+            // keeps the plain lowering's behaviour for a non-list `xs` and a
+            // non-fun callable (`call_threaded_with_arguments/3`).
+            let (gate, args_doc) = if selector.name() == "valueWithArguments:" {
+                (
+                    "call_threaded_with_arguments",
+                    arg_refs.into_iter().next().unwrap_or(Document::Str("[]")),
+                )
             } else {
-                docvec!["[", Self::join_docs_with_commas(arg_refs), "]"]
+                (
+                    "call_threaded",
+                    docvec!["[", Self::join_docs_with_commas(arg_refs), "]"],
+                )
             };
             let call = docvec![
-                "call 'beamtalk_dispatch':'call_threaded'(",
+                "call 'beamtalk_dispatch':",
+                leaf::atom(gate),
+                "(",
                 block_doc.clone(),
                 ", ",
                 args_doc,
@@ -783,71 +793,6 @@ impl CoreErlangGenerator {
             return Err(Self::use_in_construct_error(span));
         }
         Ok(())
-    }
-
-    /// ADR 0132 §2, the NLR row: the body's `^` (a non-local return from a block)
-    /// carries the `Acc` version **in scope where the block is created**, and the
-    /// body's catch answers `{Val, AccAtThrow}`. That is the caller's writes made
-    /// before the `^` exactly when no use of a threading parameter runs between
-    /// the block's creation and its invocation.
-    ///
-    /// A block that is consumed in the statement that creates it is safe: the
-    /// statement's uses are sequenced ahead of the expression that holds the
-    /// block (`threaded_expression`), so the block captures the version after
-    /// them. A block *stored in a local* (`f := [... ^x]`) may be invoked after a
-    /// later statement's use stepped `Acc`, and would answer the stale version —
-    /// the caller's later writes lost. That shape is refused.
-    ///
-    /// (A block handed to a callee that itself stores it and calls it after a
-    /// later use is the same hazard, and not detectable here; the callee would
-    /// have to outlive the statement that passed it.)
-    pub(in crate::core_erlang) fn reject_stale_nlr_capture(
-        &self,
-        method: &MethodDefinition,
-    ) -> Result<()> {
-        let mut stored: Option<Span> = None;
-        for statement in &method.body {
-            let expr = &statement.expression;
-            if stored.is_some() && self.expr_mentions_threading_param(expr) {
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "a block that does `^` is stored in a local before a later use of a \
-                              threading block parameter (ADR 0132 §2): the stored block would \
-                              answer the parameter's caller a stale state. Pass the block \
-                              directly to the message that uses it"
-                        .to_string(),
-                    span: stored,
-                });
-            }
-            if let Expression::Assignment {
-                target,
-                value,
-                span,
-                ..
-            } = expr.unwrap_parens()
-                && matches!(target.as_ref(), Expression::Identifier(_))
-                && let Expression::Block(_) = value.unwrap_parens()
-                && Self::expression_has_return(value)
-            {
-                stored = Some(*span);
-            }
-        }
-        Ok(())
-    }
-
-    /// Whether `expr` mentions any threading parameter of the body.
-    fn expr_mentions_threading_param(&self, expr: &Expression) -> bool {
-        self.threaded_body.params.iter().any(|name| {
-            beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, name)
-                != (false, false)
-        })
-    }
-
-    fn expression_has_return(expr: &Expression) -> bool {
-        let mut found = false;
-        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
-            found |= matches!(e, Expression::Return { .. });
-        });
-        found
     }
 
     /// `{Value, Acc}` as the threaded body's answer, replacing the value

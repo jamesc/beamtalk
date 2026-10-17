@@ -686,6 +686,35 @@ fn value_type_scope() -> ScopeKind {
     }
 }
 
+/// The verifier's errors other than [`VerifyError::NlrInThreadedBody`] (which
+/// every NLR node in a threaded body raises): the slot-shape check alone.
+fn verify_nlr_shape(ir: &[ThreadedStmt], scope: ScopeKind) -> Vec<VerifyError> {
+    verify_in_scope(ir, scope)
+        .into_iter()
+        .filter(|e| !matches!(e, VerifyError::NlrInThreadedBody { .. }))
+        .collect()
+}
+
+#[test]
+fn any_nlr_node_in_a_threaded_body_is_refused() {
+    // Phase 1c (BT-3871 review): a `^` throw carries the `Acc` version current
+    // where its block is lowered, which a threaded callee can outrun. A
+    // threaded body holds no NLR throw or catch at all, however well shaped.
+    let frame = FrameId::ROOT;
+    for ir in [
+        value_type_body(vec![nlr_throw(vec![self_var(0, frame), acc(0, frame)])]),
+        value_type_body(vec![nlr_catch(vec![
+            VersionPrefix::SelfVt,
+            VersionPrefix::Acc,
+        ])]),
+    ] {
+        assert_eq!(
+            verify_in_scope(&ir, value_type_scope()),
+            vec![VerifyError::NlrInThreadedBody { at: span() }]
+        );
+    }
+}
+
 #[test]
 fn nlr_slot_shape_mismatch_rejects_a_throw_without_acc_last() {
     // A value-type body's `^` must throw `{SelfN, AccN}`.
@@ -699,7 +728,7 @@ fn nlr_slot_shape_mismatch_rejects_a_throw_without_acc_last() {
         ),
     ] {
         assert_eq!(
-            verify_in_scope(&value_type_body(vec![nlr_throw(slot)]), value_type_scope()),
+            verify_nlr_shape(&value_type_body(vec![nlr_throw(slot)]), value_type_scope()),
             vec![VerifyError::NlrSlotShapeMismatch {
                 expected: expected.clone(),
                 found,
@@ -708,7 +737,7 @@ fn nlr_slot_shape_mismatch_rejects_a_throw_without_acc_last() {
         );
     }
     assert_eq!(
-        verify_in_scope(
+        verify_nlr_shape(
             &value_type_body(vec![nlr_throw(vec![self_var(0, frame), acc(0, frame)])]),
             value_type_scope()
         ),
@@ -719,7 +748,7 @@ fn nlr_slot_shape_mismatch_rejects_a_throw_without_acc_last() {
 #[test]
 fn nlr_slot_shape_mismatch_rejects_a_catch_that_does_not_unpack_acc() {
     assert_eq!(
-        verify_in_scope(
+        verify_nlr_shape(
             &value_type_body(vec![nlr_catch(Vec::new())]),
             value_type_scope()
         ),
@@ -730,7 +759,7 @@ fn nlr_slot_shape_mismatch_rejects_a_catch_that_does_not_unpack_acc() {
         }]
     );
     assert_eq!(
-        verify_in_scope(
+        verify_nlr_shape(
             &value_type_body(vec![nlr_catch(vec![
                 VersionPrefix::SelfVt,
                 VersionPrefix::Acc
@@ -755,7 +784,7 @@ fn nlr_slot_shape_reaches_a_throw_nested_in_a_frame_of_the_body() {
         span(),
     )];
     assert_eq!(
-        verify_in_scope(
+        verify_nlr_shape(
             &ir,
             ScopeKind::Threaded {
                 kind: ThreadedBodyKind::Class

@@ -2143,7 +2143,6 @@ impl CoreErlangGenerator {
             let positions = frame.threaded_entry_positions(class, method);
             if !positions.is_empty() {
                 frame.begin_threaded_class_body(method, &positions);
-                frame.reject_stale_nlr_capture(method)?;
             }
             let acc_entry_var = frame.current_acc_var_name();
 

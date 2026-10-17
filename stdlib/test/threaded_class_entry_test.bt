@@ -152,6 +152,27 @@ TestCase subclass: ThreadedClassEntryTest
     c := ThreadedEntryChild
     self assert: (c twice: [9]) equals: 9
 
+  // --- valueWithArguments: as before ADR 0132 ---------------------------------
+  testValueWithArgumentsOnABlock =>
+    self assert: (ThreadedEntryFixture spread: [:x :y |
+      x + y
+    ] with: #(3, 4)) equals: 7
+
+  // A non-block callable is sent `valueWithArguments:` itself, never `value:value:`.
+  testValueWithArgumentsOnACallableThatAnswersOnlyValueWithArguments =>
+    self assert: (ThreadedEntryFixture spreadUnthreaded: ArgsOnlyCallable new with: #(1, 2)) equals: 2
+    self assert: (ThreadedEntryFixture spread: ArgsOnlyCallable new with: #(1, 2)) equals: 2
+
+  // A non-list argument raises what the unthreaded expression raises.
+  testValueWithArgumentsOfANonListRaisesWhatThePlainPathRaises =>
+    plain := [
+      ThreadedEntryFixture spreadUnthreaded: [:x | x] with: 5
+    ] on: Exception do: [:e | e kind]
+    threaded := [
+      ThreadedEntryFixture spread: [:x | x] with: 5
+    ] on: Exception do: [:e | e kind]
+    self assert: threaded equals: plain
+
   testAPureBlockThroughADynamicReceiverStillWorks =>
     c := ThreadedEntryFixture
     self assert: (c twice: [5]) equals: 5

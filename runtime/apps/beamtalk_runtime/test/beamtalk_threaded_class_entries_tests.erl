@@ -20,8 +20,9 @@ pure block, and assert that
   same, and the `Acc` the block threaded comes back (every invocation advanced
   it exactly once, in order, whatever the method does around the invocation);
 - keys of `Acc` the block never touched survive;
-- a `^` (non-local return) carries the `Acc` version at the throw, and a
-  foreign token's NLR is re-raised untouched;
+- a method whose body holds a `^` block has no entry (Phase 1c ships no
+  NLR-carrying threaded body; ADR 0132 Phase 3), and a foreign token's NLR is
+  re-raised untouched;
 - the compiled metadata resolves the entry through `send_threaded/4`.
 """.
 
@@ -189,53 +190,41 @@ entries_test_() ->
     ]}.
 
 %%====================================================================
-%% Non-local return
+%% Non-local return: a method whose body holds a `^` block has no entry
 %%====================================================================
+
+%% ADR 0132 Phase 1c (BT-3871 review): a `^` throws the `Acc` version current
+%% where its block is lowered, which a threaded callee can outrun, so the index
+%% gives such a method no threaded entry; it is the plain method it always was.
+no_entry(Selector, Arity) ->
+    Pid = beamtalk_class_registry:whereis_class(?CLASS),
+    {_Instance, ClassSide} = beamtalk_class_metadata:lookup_tier2_methods(?CLASS),
+    ?assertNot(maps:is_key(Selector, ClassSide)),
+    ?assertNot(erlang:function_exported(?MOD, entry_fn(Selector), Arity + 2)),
+    ?assertEqual(
+        error,
+        beamtalk_class_dispatch:lookup_threaded_class_entry(
+            Pid, Selector, lists:duplicate(Arity, x)
+        )
+    ).
 
 nlr_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"a ^ after an invocation answers {Val, AccAtThrow}: the writes before it are kept",
-            fun() ->
-                {R, Log, Acc} = differential(
-                    'callThen:firstPositiveIn:', [[-1, 0, 7, 8]], 0, 0, fun() -> ok end
-                ),
-                ?assertEqual(7, R),
-                ?assertEqual([[]], Log),
-                ?assertEqual([[]], maps:get(log, Acc))
-            end},
-        {"a body that finishes without the ^ answers nil and the final Acc", fun() ->
-            {R, Log, _} = differential(
-                'callThen:firstPositiveIn:', [[-1, 0]], 0, 0, fun() -> ok end
-            ),
-            ?assertEqual(nil, R),
-            ?assertEqual([[]], Log)
-        end},
-        {"a ^ before any invocation carries the entry's Acc", fun() ->
-            {R, Log, Acc} = differential('guarded:flag:', [true], 0, 0, fun() -> 1 end),
-            ?assertEqual(0, R),
-            ?assertEqual([], Log),
-            ?assertEqual([], maps:get(log, Acc))
-        end},
-        {"a guarded body without the ^ invokes the block", fun() ->
-            {R, Log, _} = differential('guarded:flag:', [false], 0, 0, fun() -> 1 end),
-            ?assertEqual(1, R),
-            ?assertEqual([[]], Log)
-        end},
-        {"a foreign token's NLR is re-raised untouched, from both entries", fun() ->
-            Foreign = {'$bt_nlr', make_ref(), foreign_value, nil},
-            Throwing2 = fun(Acc) ->
-                erlang:throw(Foreign),
-                {nil, Acc}
-            end,
-            Throwing1 = fun() -> erlang:throw(Foreign) end,
+        {"a ^ after an invocation: no entry, the plain method answers the ^", fun() ->
+            no_entry('callThen:firstPositiveIn:', 2),
             ?assertEqual(
-                {thrown, Foreign},
-                try
-                    ?MOD:'__t2_class_callThen:firstPositiveIn:'(nil, Throwing2, [1], #{})
-                catch
-                    throw:T -> {thrown, T}
-                end
+                7, ?MOD:'class_callThen:firstPositiveIn:'(nil, fun() -> ok end, [-1, 0, 7, 8])
             ),
+            ?assertEqual(nil, ?MOD:'class_callThen:firstPositiveIn:'(nil, fun() -> ok end, [-1, 0]))
+        end},
+        {"a ^ in a conditional arm: no entry, the plain method is unchanged", fun() ->
+            no_entry('guarded:flag:', 2),
+            ?assertEqual(0, ?MOD:'class_guarded:flag:'(nil, fun() -> 1 end, true)),
+            ?assertEqual(1, ?MOD:'class_guarded:flag:'(nil, fun() -> 1 end, false))
+        end},
+        {"a foreign token's NLR is re-raised untouched", fun() ->
+            Foreign = {'$bt_nlr', make_ref(), foreign_value, nil},
+            Throwing1 = fun() -> erlang:throw(Foreign) end,
             ?assertEqual(
                 {thrown, Foreign},
                 try
@@ -362,6 +351,56 @@ plain_refuses_tier2_test_() ->
         {"a real Acc map still threads a Tier 2 block", fun() ->
             ?assertEqual(
                 {nil, #{}}, beamtalk_dispatch:call_threaded(ran_t2(0), [], #{})
+            )
+        end}
+    ]}.
+
+%%====================================================================
+%% A `^` block that flows into a use never answers a stale Acc
+%% (BT-3871 review blocker 2)
+%%====================================================================
+
+bump(Acc) -> Acc#{count => maps:get(count, Acc, 0) + 1}.
+
+%% If `Selector` had a threaded entry, a Tier 2 caller block that writes to its
+%% Acc and then runs the method's `^` block would have to get its write back (it
+%% did not: the throw carried the Acc the block was created at). With the fix
+%% the method has no entry, and its plain entry answers as it always did.
+nlr_case(Selector, EntryArgs, Expected, PlainArgs, PlainExpected) ->
+    Entry = entry_fn(Selector),
+    Arity = length(EntryArgs) + 2,
+    case erlang:function_exported(?MOD, Entry, Arity) of
+        true ->
+            ?assertEqual(
+                Expected, erlang:apply(?MOD, Entry, [nil | EntryArgs] ++ [#{count => 0}])
+            );
+        false ->
+            ok
+    end,
+    no_entry(Selector, length(EntryArgs)),
+    ?assertEqual(PlainExpected, erlang:apply(?MOD, plain_fn(Selector), [nil | PlainArgs])).
+
+nlr_into_use_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"the review repro: find: hands the caller block a ^ block", fun() ->
+            %% `[:k | count := count + 1. k value: 42]` as a Tier 2 fun.
+            T2 = fun(K, Acc) ->
+                Acc1 = bump(Acc),
+                {K(42), Acc1}
+            end,
+            nlr_case('find:', [T2], {42, #{count => 1}}, [fun(K) -> K(42) end], 42)
+        end},
+        {"a ^ block passed on through a forward", fun() ->
+            T2 = fun(K, Acc) ->
+                Acc1 = bump(Acc),
+                {K(6), Acc1}
+            end,
+            nlr_case('nlrForward:', [T2], {6, #{count => 1}}, [fun(K) -> K(6) end], 6)
+        end},
+        {"a ^ block as a fold's ifNone: handler", fun() ->
+            T2 = fun(_X, Acc) -> {false, bump(Acc)} end,
+            nlr_case(
+                'nlrFold:with:', [[1, 2], T2], {0, #{count => 2}}, [[1, 2], fun(_) -> false end], 0
             )
         end}
     ]}.

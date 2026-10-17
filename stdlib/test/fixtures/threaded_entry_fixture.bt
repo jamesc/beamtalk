@@ -48,6 +48,15 @@ sealed Object subclass: ThreadedEntryFixture
     items do: [:x | (b value: x) ifTrue: [^x]]
     nil
 
+  // `valueWithArguments:` through the threaded entry, and the same expression
+  // in a method whose block parameter is also stored (so it has no entry),
+  // compiled as before ADR 0132: the control the threaded one must match.
+  class sealed spread: b with: xs => b valueWithArguments: xs
+
+  class sealed spreadUnthreaded: b with: xs =>
+    #(1) collect: [:i | b]
+    b valueWithArguments: xs
+
   // No block parameter: compiled exactly as before.
   class sealed plain: n => n + 1
 

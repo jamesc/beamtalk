@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3871 review: a callable that answers only `valueWithArguments:` (no
+// `value`, `value:`, ...), used by threaded_class_entry_test.bt to check that
+// `b valueWithArguments: xs` in a threaded class method still sends it
+// `valueWithArguments:`.
+
+Value subclass: ArgsOnlyCallable
+
+  valueWithArguments: xs => xs size

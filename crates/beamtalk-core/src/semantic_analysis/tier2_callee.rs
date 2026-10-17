@@ -80,6 +80,15 @@
 //! `on:do:`/`ensure:` or `tryDo:` block) and **a use inside a nested block
 //! literal**.
 //!
+//! One more shape disqualifies **every** parameter of a method: a block literal
+//! anywhere in its body that does `^` (a non-local return; [`nlr_block_in`]).
+//! A threaded body's `^` throws the `Acc` version current where its block is
+//! lowered, but a threaded callee can run the block after a later `Acc` step (as
+//! an argument of the use, `b value: [:x | ^x]`; stored by any path,
+//! `h := Array with: [:x | ^x]`; kept by a callee), and the body cannot know the
+//! live `Acc` at the throw. Such a method keeps its plain entry and compiles as
+//! before ADR 0132; carrying the live `Acc` is Phase 3.
+//!
 //! The answer is a **greatest fixpoint** over the unit: every candidate starts
 //! as threading and is removed when one of its uses fails against the current
 //! assumption, until nothing changes. A cycle of forwards (self-recursion,
@@ -96,6 +105,7 @@ use crate::ast::{
 use crate::semantic_analysis::block_facts::{
     is_safe_value_family_selector, normalize_cascade, stored_block_var_uses,
 };
+use crate::source_analysis::Span;
 use crate::state_threading_selectors::{is_opaque_callable_hom_send, opaque_fold_callable_arg};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -494,6 +504,7 @@ impl ThreadingIndex {
             name: param.name.name.as_str(),
         };
         method.body.iter().all(|s| ctx.expr_ok(&s.expression))
+            && nlr_block_in(&method.body).is_none()
     }
 
     /// The threading parameter positions (0-based, ascending) of `class`'s
@@ -635,6 +646,35 @@ pub fn classify_threading_use(
         }
         _ => UseShape::NotAUse,
     }
+}
+
+/// ADR 0132 §2, the NLR row as Phase 1c ships it: the span of the first block
+/// literal in `body`, at any depth, that holds a `^`, or `None`. A method with
+/// one has no threading parameters (see the module docs: its `^` could answer a
+/// stale `Acc`). Deliberately over-approximate: a `^` in a conditional arm that
+/// runs where it is created disqualifies the method too.
+#[must_use]
+pub fn nlr_block_in(body: &[ExpressionStatement]) -> Option<Span> {
+    let mut found: Option<Span> = None;
+    for statement in body {
+        crate::ast_walker::walk_expression(&statement.expression, &mut |e| {
+            if found.is_none() && matches!(e, Expression::Block(_)) && holds_return(e) {
+                found = Some(e.span());
+            }
+        });
+        if found.is_some() {
+            break;
+        }
+    }
+    found
+}
+
+fn holds_return(expr: &Expression) -> bool {
+    let mut found = false;
+    crate::ast_walker::walk_expression(expr, &mut |e| {
+        found |= matches!(e, Expression::Return { .. });
+    });
+    found
 }
 
 /// Method-root use checker for [`ThreadingIndex`].
@@ -914,6 +954,37 @@ mod tests {
         ] {
             assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
         }
+    }
+
+    #[test]
+    fn a_method_with_a_return_block_does_not_thread() {
+        let idx = index(
+            "Object subclass: C\n  apply: b to: x => b value: x\n  \
+             arg: b =>\n    b value: [:x | ^x]\n    nil\n  \
+             fwd: b =>\n    self apply: b to: [:x | ^x]\n    nil\n  \
+             fold: b over: xs =>\n    xs detect: b ifNone: [^0]\n    nil\n  \
+             stored: b =>\n    f := [:x | ^x]\n    b value\n    f value: 1\n  \
+             kept: b =>\n    h := Array with: [:x | ^x]\n    b value: 1\n  \
+             chosen: b flag: c =>\n    f := c ifTrue: [[^1]] ifFalse: [[^2]]\n    b value\n  \
+             inPlace: b flag: f =>\n    f ifTrue: [^0]\n    b value\n  \
+             after: b over: xs =>\n    b value\n    xs do: [:x | ^x]\n    nil\n  \
+             rootReturn: b =>\n    ^b value\n",
+        );
+        for sel in [
+            "arg:",
+            "fwd:",
+            "fold:over:",
+            "stored:",
+            "kept:",
+            "chosen:flag:",
+            "inPlace:flag:",
+            "after:over:",
+        ] {
+            assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
+        }
+        // A root `^` is not a block's non-local return.
+        assert_eq!(inst(&idx, "C", "rootReturn:"), vec![0]);
+        assert_eq!(inst(&idx, "C", "apply:to:"), vec![0]);
     }
 
     #[test]

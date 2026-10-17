@@ -12,7 +12,9 @@
 //!   parameter is emitted exactly as before;
 //! - the metadata, the export list, the definitions and the specs all being
 //!   one answer, equal to the index's, over a fixture and over the stdlib;
-//! - the NLR row (`Acc` rides the throw, the catch answers `{Val, AccAtThrow}`);
+//! - the NLR row as Phase 1c ships it: a method whose body holds a block that
+//!   does `^` has no threaded entry and compiles as before (its `^` could
+//!   answer a stale `Acc`; carrying the live one is Phase 3);
 //! - `Acc`'s spelling never colliding with a Beamtalk local;
 //! - `Acc` being a family of a construct only where a use is (the
 //!   generalisation of the single-family consumers: no construct a threaded
@@ -281,7 +283,8 @@ fn assert_entries_equal_the_index(src: &str, code: &str) {
 fn tier2_class_methods_equals_the_threading_index_for_a_fixture_class() {
     let code = codegen(FIXTURE);
     assert_entries_equal_the_index(FIXTURE, &code);
-    assert_eq!(index_class_side(FIXTURE).len(), 4);
+    // `callThen:firstPositiveIn:` holds a `^` block: no entry (`nlr_block_in`).
+    assert_eq!(index_class_side(FIXTURE).len(), 3);
     assert_compiles_through_erlc("test", &code);
 }
 
@@ -408,75 +411,67 @@ fn every_stdlib_class_method_entry_is_defined_exported_advertised_and_in_the_ind
 
 // ─── The NLR row ───────────────────────────────────────────────────────────
 
-#[test]
-fn a_return_inside_a_block_carries_acc_and_the_catch_answers_value_and_acc() {
-    let code = codegen(FIXTURE);
-    let body = function_text(&code, "'__t2_class_callThen:firstPositiveIn:'/4");
-    // The throw carries the `Acc` version in scope — after the invocation.
-    assert!(
-        body.contains("call 'erlang':'throw'({'$bt_nlr', _NlrToken"),
-        "{body}"
-    );
-    assert!(body.contains(", _x"), "{body}");
-    assert!(body.contains(", Acc@1})"), "{body}");
-    // The catch answers `{Val, AccAtThrow}`; a foreign token's NLR is re-raised.
-    assert!(
-        body.contains("-> {_NlrVal") && body.contains(", _NlrState"),
-        "{body}"
-    );
-    assert!(
-        body.contains("primop 'raw_raise'(_NlrCls"),
-        "a foreign NLR must be re-raised untouched: {body}"
-    );
-    // The normal path answers `{Result, AccN}` as well.
-    assert!(body.contains("{_ThAnswer"), "{body}");
-    // The plain entry takes the bare value out of the body's answer.
-    let plain = function_text(&code, "'class_callThen:firstPositiveIn:'/3");
-    assert!(plain.contains("'element'(1, apply"), "{plain}");
-}
-
-#[test]
-fn a_return_before_any_invocation_carries_the_entry_acc() {
-    let code = codegen(
-        "sealed Object subclass: Early
-  class sealed early: b flag: f =>
-    f ifTrue: [^0].
-    b value
-",
-    );
-    let body = function_text(&code, "'__t2_class_early:flag:'/4");
-    assert!(body.contains(", Acc@0})"), "{body}");
-    assert!(body.contains("-> {_NlrVal"), "{body}");
-}
-
-#[test]
-fn a_block_that_does_a_return_stored_before_a_later_invocation_is_refused() {
-    // The stored block would answer the `Acc` version in scope where it was
-    // created, losing the invocation's writes made before it runs.
-    let err = try_codegen(
-        "sealed Object subclass: Stale
+/// A class whose every method other than `apply:to:` has a block literal that
+/// does `^` (`tier2_callee::nlr_block_in`): an argument of the use itself
+/// (invocation, forward, fold handler), a stored block, a block kept in a
+/// collection, a block chosen by a conditional, and a `^` that runs in place.
+/// None gets a threaded entry (its `^` could answer a stale `Acc`); each
+/// compiles as a plain method, exactly as before ADR 0132.
+const NLR_BLOCKS: &str = "sealed Object subclass: Stale
+  class sealed apply: b to: x => b value: x
+  class sealed arg: b =>
+    b value: [:x | ^x].
+    nil
+  class sealed fwd: b =>
+    self apply: b to: [:x | ^x].
+    nil
+  class sealed fold: b items: items =>
+    items detect: b ifNone: [^0].
+    nil
   class sealed stale: b items: items =>
     f := [:x | ^x].
     b value.
     f value: 1
-",
-    )
-    .expect_err("a stored `^` block before a use must be refused");
-    let message = format!("{err}");
-    assert!(message.contains("stored in a local"), "{message}");
-}
-
-#[test]
-fn a_block_that_does_a_return_stored_after_the_last_invocation_is_fine() {
-    let code = codegen(
-        "sealed Object subclass: Late
+  class sealed kept: b items: items =>
+    k := items collect: [:i | [^i]].
+    b value.
+    k first value
+  class sealed chosen: b flag: c =>
+    f := c ifTrue: [[^1]] ifFalse: [[^2]].
+    b value.
+    f value
+  class sealed inPlace: b flag: c =>
+    c ifTrue: [^0].
+    b value
   class sealed late: b items: items =>
     b value.
-    f := [:x | ^x].
-    f value: 1
-",
-    );
-    assert!(code.contains("__t2_class_late:items:"), "{code}");
+    items do: [:x | ^x].
+    nil
+";
+
+#[test]
+fn a_method_with_a_block_that_does_a_return_has_no_entry_and_compiles() {
+    let code = codegen(NLR_BLOCKS);
+    for selector in [
+        "arg:",
+        "fwd:",
+        "fold:items:",
+        "stale:items:",
+        "kept:items:",
+        "chosen:flag:",
+        "inPlace:flag:",
+        "late:items:",
+    ] {
+        assert!(
+            !code.contains(&format!("'__t2_class_{selector}'")),
+            "`{selector}` must not get a threaded entry:\n{code}"
+        );
+        assert!(code.contains(&format!("'class_{selector}'")), "{code}");
+    }
+    // The callee the forward reaches still threads.
+    assert!(code.contains("'__t2_class_apply:to:'"), "{code}");
+    assert_entries_equal_the_index(NLR_BLOCKS, &code);
+    assert_compiles_through_erlc("test", &code);
 }
 
 // ─── Acc's spelling ────────────────────────────────────────────────────────
@@ -616,7 +611,8 @@ const AROUND: &[&str] = &[
     "[1 / 0] on: Error do: [:e | 0]",
     "[nil] ensure: [nil]",
     "f ifTrue: [self note: 1] ifFalse: [self note: 2]",
-    "items do: [:y | y > 1 ifTrue: [^y]]",
+    // (A block that does `^` gives the method no entry at all: `NLR_BLOCKS`.)
+    "n := n + 1",
     "total := 0. #(1, 2) do: [:i | total := total + i]",
     "k := items collect: [:y | y + 1]. k size",
 ];

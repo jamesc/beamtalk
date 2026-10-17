@@ -15,7 +15,7 @@
 // The shapes cover ADR 0132 section 1's Phase 1 uses: a direct invocation, the
 // callable argument of a collection message, a same-class pass-on, invocations
 // as an operand, as an assigned value and as a conditional's receiver, a
-// cascade, and a block that does `^` beside an invocation. `plain:` (no block)
+// cascade. `plain:` (no block)
 // and `storeAway:` (the block is stored, so it is not a threading parameter)
 // have no entry.
 
@@ -67,6 +67,23 @@ sealed Object subclass: ThreadedClassEntriesFixture
   class sealed afterEnsure: b =>
     [1] ensure: [2].
     b value: 5
+
+  // A block that does `^` and flows into a use (an invocation's argument, a
+  // forward's argument, a fold's ifNone: handler): a threaded callee could run
+  // it after writing to `Acc`, and its `^` would answer the `Acc` version it was
+  // created at. ADR 0132 Phase 3 can carry it; until then a method whose body
+  // holds any `^` block has no entry (`callThen:` and `guarded:` above too).
+  class sealed find: b =>
+    b value: [:found | ^found].
+    nil
+
+  class sealed nlrForward: b =>
+    self apply: b to: [:x | ^x].
+    nil
+
+  class sealed nlrFold: items with: b =>
+    items detect: b ifNone: [^0].
+    nil
 
   class sealed plain: n => n + 1
 

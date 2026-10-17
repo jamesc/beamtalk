@@ -67,7 +67,8 @@ super(Selector, Args, Self, State, CurrentClass)
     invoke_extension/6,
     check_extension/2,
     send_threaded/4,
-    call_threaded/3
+    call_threaded/3,
+    call_threaded_with_arguments/3
 ]).
 
 -include("beamtalk.hrl").
@@ -852,6 +853,23 @@ call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args), is_map(A
     end;
 call_threaded(Callable, Args, Acc) when is_list(Args), is_map(Acc) ->
     {beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)), Acc}.
+
+-doc """
+`call_threaded/3` for `Callable valueWithArguments: Xs` (ADR 0132 §2).
+
+A fun with a list `Xs` is gated exactly as `call_threaded(Callable, Xs, Acc)`.
+Everything else keeps the behaviour of the plain `valueWithArguments:`
+lowering: a fun with a non-list `Xs` is applied as it always was (raising the
+same error), and a non-fun callable is sent `valueWithArguments:` itself,
+never `value:`/`value:value:`, with `Acc` unchanged.
+""".
+-spec call_threaded_with_arguments(term(), term(), map() | plain) -> {term(), map() | plain}.
+call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block), is_list(Xs) ->
+    call_threaded(Block, Xs, Acc);
+call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block) ->
+    {erlang:apply(Block, Xs), Acc};
+call_threaded_with_arguments(Callable, Xs, Acc) ->
+    {beamtalk_message_dispatch:send(Callable, 'valueWithArguments:', [Xs]), Acc}.
 
 -spec block_arity(function()) -> non_neg_integer().
 block_arity(Block) ->
