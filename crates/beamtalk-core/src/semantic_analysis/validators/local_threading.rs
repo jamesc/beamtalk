@@ -772,6 +772,20 @@ const DENY_SET: &[Denied] = &[
     deny_block_local(LoopBody, Some(Handler), None, &[Actor], DETECT_KINDS),
     deny_block_local(EvaluatedBlock, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
     deny_block_local(EvaluatedBlock, Some(Handler), None, &[Actor], DETECT_KINDS),
+    // A loop as the innermost block (BT-3776 review): measured wrong under an
+    // arm, a `do:` body and another loop (`loopArm`, `timesArm`, `loopIter`,
+    // `timesIter`, `loopLoop`, `timesLoop`, every one of the 36 cells); the
+    // list-op and evaluated-block outer roles are inferred.
+    deny_block_local(Arm, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(Arm, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(DoBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(DoBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(ListOpBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(ListOpBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(LoopBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(LoopBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(EvaluatedBlock, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(EvaluatedBlock, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
 ];
 
 /// A statement shape (a construct kind at a [`Position::Statement`] or

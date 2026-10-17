@@ -1073,9 +1073,16 @@ cell (the `GAP_MEASURED_KINDS` / `ADR0131_MEASURE_GAPS` scaffolding is gone). Ev
 class and value-type cell answers right, and so does every actor cell except
 `detect:` / `detect:ifNone:` (search block or handler) in a protected body (erlc), a
 handler or `ensure:` block, or directly in a loop or counted-loop body (the fold answers
-`{Value, State}` with the local packed into a state the body discards): 48 cells, now
-rejected by the `deny_block_local` rows of `DENY_SET` (`crosses: false`, keyed on the
-innermost role too) until BT-3878 lowers those folds as producers. The `iterIter` /
+`{Value, State}` with the local packed into a state the body discards): 48 cells. The
+review added six containers with a loop as the innermost block (`loopArm`, `timesArm`,
+`loopIter`, `timesIter`, `loopLoop`, `timesLoop`, 684 cells): every class, value-type
+and actor cell answers right except the 36 actor detect ones, which answer wrong. All 84
+are rejected by the `deny_block_local` rows of `DENY_SET` (`crosses: false`, keyed on
+the innermost role too) until BT-3878 lowers those folds as producers. The rows are
+coarser than the measurement where it is silent: a counted-loop body at any depth, and
+the innermost protected-body, handler and loop rows under the list-op and
+evaluated-block outer roles (and the protected-body and handler ones under a `do:` body
+or a loop), inferred from the measured shapes that share their lowering. The `iterIter` /
 `armIterIter` actor cells above answer right since. The re-measurement also found twelve
 actor `outer` `detect:ifNone:` cells in `do:` / `collect:` roles that answer right but
 were recorded `wrong`; they are `over` (`KNOWN_OVER_REJECTED`) until BT-3841 carves them

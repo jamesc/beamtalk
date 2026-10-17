@@ -1368,6 +1368,24 @@ fn deny_set_block_local_writes_are_judged_by_the_measurement() {
             format!("2 timesRepeat: [u := 0. {detect}. t := u]\nt"),
             true,
         ),
+        // A loop as the innermost block, under an arm or a `do:` body.
+        (
+            format!("4 > 3 ifTrue: [2 timesRepeat: [u := 0. {detect}. t := u]]\nt"),
+            true,
+        ),
+        (
+            format!(
+                "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]]\nt"
+            ),
+            true,
+        ),
+        // ... but an arm inside a `whileTrue:` body answers right (`armLoop`).
+        (
+            format!(
+                "i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"
+            ),
+            false,
+        ),
         (
             format!("i := 0\n[i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]\nt"),
             true,

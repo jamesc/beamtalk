@@ -663,9 +663,14 @@ reports the same message at the same span. No operation is surface-specific.
   statement shape. One family starts reporting `UnmigratedLocalThreading`: an
   actor-method `detect:` / `detect:ifNone:` whose search block or handler
   writes such a local, in a protected body, a handler or `ensure:` block, or
-  directly in a loop or counted-loop body. Those shapes failed `erlc` or read
-  the local unchanged (a silent wrong answer), so the only code newly
-  rejected was broken. The verdict is the analyser's, so it is the same
+  in a loop or counted-loop body (directly, or as the innermost block under
+  an arm, a `do:` body or another loop). Where measured, the newly rejected
+  shapes failed `erlc` or read the local unchanged (a silent wrong answer);
+  elsewhere the rows are conservatively coarser than the measurement (a
+  counted-loop body at any depth, and innermost protected-body, handler and
+  loop rows under outer roles that were not measured, inferred from the
+  measured shapes that share their lowering).
+  The verdict is the analyser's, so it is the same
   on every surface (CLI, REPL load of a class definition, LSP, MCP). REPL
   expressions (the REPL root) are not affected, and the REPL display is
   unchanged. Tracked for lowering in BT-3878.

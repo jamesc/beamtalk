@@ -90,6 +90,7 @@ pub fn statement_family(container: &str, kind: &str) -> &'static str {
 /// The block-role group of a statement-matrix container: where the statement
 /// sits (`method-body`, `arm`, `protected-body`, `handler`, `loop-body`,
 /// `arm-loop-mix` for an arm around a loop or a loop around an arm,
+/// `nested-loop` for a loop in a `do:` body or in another loop,
 /// `evaluated-block`).
 #[must_use]
 pub fn container_group(container: &str) -> &'static str {
@@ -99,7 +100,8 @@ pub fn container_group(container: &str) -> &'static str {
         "prot" | "protLast" | "ens" | "ensLast" | "protArm" => "protected-body",
         "handler" | "ensBlk" => "handler",
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "iterIter" => "loop-body",
-        "armIter" | "iterArm" | "armLoop" => "arm-loop-mix",
+        "armIter" | "iterArm" | "armLoop" | "loopArm" | "timesArm" => "arm-loop-mix",
+        "loopIter" | "timesIter" | "loopLoop" | "timesLoop" => "nested-loop",
         "val" => "evaluated-block",
         "armProtIter" | "protIterArm" | "armIterIter" | "armProtArm" => "three-deep",
         _ => "other",
@@ -113,8 +115,8 @@ pub fn container_group(container: &str) -> &'static str {
 pub fn container_runs(container: &str) -> i64 {
     match container {
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "armIter" | "iterArm" | "armLoop"
-        | "armProtIter" | "protIterArm" => 2,
-        "iterIter" | "armIterIter" => 4,
+        | "armProtIter" | "protIterArm" | "loopArm" | "timesArm" => 2,
+        "iterIter" | "armIterIter" | "loopIter" | "timesIter" | "loopLoop" | "timesLoop" => 4,
         _ => 1,
     }
 }
@@ -454,6 +456,26 @@ pub const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
     (
         "armProtArm",
         "%c ifTrue: [[%c ifTrue: [S]] on: Error do: [:e | 0]]",
+    ),
+    // A loop as the innermost block (BT-3776 review): under an arm, a `do:`
+    // body or another loop.
+    (
+        "loopArm",
+        "%c ifTrue: [i := 0. [i < 2] whileTrue: [i := i + 1. S]]",
+    ),
+    ("timesArm", "%c ifTrue: [2 timesRepeat: [S]]"),
+    (
+        "loopIter",
+        "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. S]]",
+    ),
+    ("timesIter", "#(1, 2) do: [:z | 2 timesRepeat: [S]]"),
+    (
+        "loopLoop",
+        "i := 0. [i < 2] whileTrue: [i := i + 1. j := 0. [j < 2] whileTrue: [j := j + 1. S]]",
+    ),
+    (
+        "timesLoop",
+        "i := 0. [i < 2] whileTrue: [i := i + 1. 2 timesRepeat: [S]]",
     ),
     // REPL-only roles.
     ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
