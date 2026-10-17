@@ -16,6 +16,9 @@
 //! `u` = 9 after the loop. The fix for BT-3860 turns this into a test that the
 //! input compiles in every entry point. The other REPL shapes of BT-3860 are
 //! pinned at runtime in `tests/repl-protocol/cases/adr0131_nested_assign.btscript`.
+//!
+//! Debug builds only: a release compiler has no verifier panic to pin.
+#![cfg(debug_assertions)]
 
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -47,32 +50,23 @@ fn panic_message(f: impl FnOnce()) -> Option<String> {
     )
 }
 
-#[cfg(debug_assertions)]
 #[test]
 fn a_conditional_receiver_assignment_in_a_repl_loop_body_trips_the_verifier() {
     let expressions = statements(INPUT);
-    let entries: [(&str, Box<dyn Fn()>); 2] = [
-        (
-            "eval",
-            Box::new(|| {
-                let _ = generate_repl_expressions(&expressions, "repl_nested_assign");
-            }),
-        ),
-        (
-            "trace",
-            Box::new(|| {
-                let _ = generate_repl_expressions_traced(
-                    &expressions,
-                    INPUT,
-                    "repl_nested_assign",
-                    HashMap::new(),
-                );
-            }),
-        ),
-    ];
-    for (entry, generate) in entries {
-        let message = panic_message(generate)
-            .unwrap_or_else(|| panic!("{entry}: BT-3860 is fixed? flip this PIN-BUG"));
+    let eval = panic_message(|| {
+        let _ = generate_repl_expressions(&expressions, "repl_nested_assign");
+    });
+    let trace = panic_message(|| {
+        let _ = generate_repl_expressions_traced(
+            &expressions,
+            INPUT,
+            "repl_nested_assign",
+            HashMap::new(),
+        );
+    });
+    for (entry, message) in [("eval", eval), ("trace", trace)] {
+        let message =
+            message.unwrap_or_else(|| panic!("{entry}: BT-3860 is fixed? flip this PIN-BUG"));
         assert!(
             message.contains("BindFrameMismatch"),
             "{entry}: unexpected panic: {message}"
