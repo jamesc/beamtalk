@@ -1329,14 +1329,57 @@ fn enumerations_are_producers_where_the_frame_lowers_them() {
     }
 }
 
+/// BT-3776: a construct that writes only a local of its own enclosing block
+/// (`crosses: false`) is judged by the measurement like every other cell. It
+/// answers right, and is accepted, everywhere except an actor `detect:` /
+/// `detect:ifNone:` in a protected body, a handler or a loop body, which the
+/// `deny_block_local` rows reject (there it read the local unchanged or
+/// failed erlc).
 #[test]
-fn deny_set_block_local_writes_are_not_in_scope() {
-    // A construct that writes only a local of its own enclosing block
-    // (`crosses: false`) is BT-3776, not rejected here.
-    let src = in_value(
-        "4 > 3 ifTrue: [\n  n := 0\n  #(1, 2) collect: [:i | n := n + 1. i]\n  t := t + n\n]\nt",
-    );
-    assert!(adr0131_diagnostics(&src).is_empty());
+fn deny_set_block_local_writes_are_judged_by_the_measurement() {
+    let collect =
+        "4 > 3 ifTrue: [\n  u := 0\n  #(1, 2) collect: [:i | u := u + 1. i]\n  t := t + u\n]\nt";
+    for src in [in_class(collect), in_value(collect), in_actor(collect)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+    }
+    let detect = "#(1, 2) detect: [:e | u := u + 1. e > 5] ifNone: [nil]";
+    for (body, rejected_in_actor) in [
+        (
+            format!("4 > 3 ifTrue: [u := 0. {detect}. t := u]\nt"),
+            false,
+        ),
+        (
+            format!("#(1, 2) do: [:z | u := 0. {detect}. t := u]\nt"),
+            false,
+        ),
+        (
+            format!("[u := 0. {detect}. t := u] on: Error do: [:e | 0]\nt"),
+            true,
+        ),
+        (
+            format!("[Error signal: \"x\"] on: Error do: [:e | u := 0. {detect}. t := u]\nt"),
+            true,
+        ),
+        (
+            format!("2 timesRepeat: [u := 0. {detect}. t := u]\nt"),
+            true,
+        ),
+        (
+            format!("i := 0\n[i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]\nt"),
+            true,
+        ),
+    ] {
+        for src in [in_class(&body), in_value(&body)] {
+            assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        }
+        let diags = adr0131_diagnostics(&in_actor(&body));
+        let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+        assert_eq!(
+            p0.len(),
+            usize::from(rejected_in_actor),
+            "{body}: {diags:?}"
+        );
+    }
 }
 
 #[test]
@@ -1384,10 +1427,11 @@ fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -
 /// an ADR 0131 diagnostic, and every shape it records as answering right
 /// (`ok`) is not, except where a [`DENY_SET`] row is coarser than one
 /// measurement (`over`: the row's kind family or block role also covers
-/// shapes measured wrong). `gap` lines (a construct that writes only a local
-/// of its own enclosing block, which the enclosing block then loses) are
-/// wrong today but not in BT-3753's scope; BT-3776 rejects or fixes them and
-/// flips them to `bad` or `ok`. A phase that makes a shape answer right
+/// shapes measured wrong). The block-local cells (targets `local` and
+/// `dlocal`, a construct that writes only a local of its own enclosing block)
+/// were `gap` lines until BT-3776 measured them and flipped them to `ok`,
+/// `bad` or `over`; the only `gap` lines left are two REPL method-body rows
+/// (unmeasured, BT-3823), which this test does not judge. A phase that makes a shape answer right
 /// deletes or narrows its row and flips its line to `ok`, which keeps this
 /// green.
 #[test]
@@ -1448,6 +1492,29 @@ const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
     ("actor", "iterIter", "outer", "det"),
     ("actor", "armProtIter", "outer", "det"),
     ("actor", "armIterIter", "outer", "det"),
+    // BT-3776 re-measurement: the `detect:ifNone:` (search and handler)
+    // cells of the same `do:`/`collect:` roles answer right since the
+    // checked-in table was last blessed, like the plain `detect:` ones above.
+    ("actor", "armIter", "outer", "dinH"),
+    ("actor", "armIter", "outer", "dinS"),
+    ("actor", "coll", "outer", "dinH"),
+    ("actor", "coll", "outer", "dinS"),
+    ("actor", "iter", "outer", "dinH"),
+    ("actor", "iter", "outer", "dinS"),
+    ("actor", "iterArm", "outer", "dinH"),
+    ("actor", "iterArm", "outer", "dinS"),
+    ("actor", "iterIter", "outer", "dinH"),
+    ("actor", "iterIter", "outer", "dinS"),
+    ("actor", "armIterIter", "outer", "dinH"),
+    ("actor", "armIterIter", "outer", "dinS"),
+    // BT-3776: the block-local (`local`) detect cells of the same three-deep
+    // roles answer right too, and the depth gate rejects them the same way.
+    ("actor", "armProtIter", "local", "det"),
+    ("actor", "armProtIter", "local", "dinH"),
+    ("actor", "armProtIter", "local", "dinS"),
+    ("actor", "armIterIter", "local", "det"),
+    ("actor", "armIterIter", "local", "dinH"),
+    ("actor", "armIterIter", "local", "dinS"),
 ];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.

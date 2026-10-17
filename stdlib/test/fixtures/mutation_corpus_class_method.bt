@@ -105,15 +105,16 @@ Object subclass: MutationCorpusClassMethod
   // var (the inner loop touches only its own local) — the compiling
   // counterpart of BT-3172's rejected inner-mutates shape. Class-var threading
   // is top-level-body-only by design (`loop_body_threads_class_vars`), so this
-  // shape threads correctly and must keep doing so.
+  // shape threads correctly and must keep doing so. The outer body reads the
+  // inner loop's local back (`+ j`), so a lost inner write shows (BT-3776).
   class nestedWhileTrueOuterOnlyClassVarReadWrite =>
     self.runs := 0
     i := 0
     [i < 3]
       whileTrue: [
-        self.runs := self.runs + 1
         j := 0
         [j < 3] whileTrue: [j := j + 1]
+        self.runs := self.runs + j
         i := i + 1
       ]
     self.runs

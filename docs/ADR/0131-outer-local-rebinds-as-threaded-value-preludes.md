@@ -1065,6 +1065,22 @@ other cells (`GAP_MEASURED_KINDS`, `gap_is_measured`) and held to the same rule.
 write-only `t := u` behind a nested `do:`, the same failure for all 31 kinds there, not
 specific to `value`), which stay with BT-3776 and out of the measured set.
 
+**Amendment, BT-3776: the block-local cells are measured, and the `gap` verdict is
+retired for them.** Every former `gap` line (targets `local` and `dlocal`) was run on a
+BEAM with the check bypassed and joined the measured table, so
+`adr0131_phase0_agrees_with_measured_answers` holds them to the same rule as every other
+cell (the `GAP_MEASURED_KINDS` / `ADR0131_MEASURE_GAPS` scaffolding is gone). Every
+class and value-type cell answers right, and so does every actor cell except
+`detect:` / `detect:ifNone:` (search block or handler) in a protected body (erlc), a
+handler or `ensure:` block, or directly in a loop or counted-loop body (the fold answers
+`{Value, State}` with the local packed into a state the body discards): 48 cells, now
+rejected by the `deny_block_local` rows of `DENY_SET` (`crosses: false`, keyed on the
+innermost role too) until BT-3878 lowers those folds as producers. The `iterIter` /
+`armIterIter` actor cells above answer right since. The re-measurement also found twelve
+actor `outer` `detect:ifNone:` cells in `do:` / `collect:` roles that answer right but
+were recorded `wrong`; they are `over` (`KNOWN_OVER_REJECTED`) until BT-3841 carves them
+out. The only `gap` lines left are two REPL method-body rows (unmeasured, BT-3823).
+
 **Amendment, BT-3841 PR 4: the satisfy and detect folds exit early.** The
 inline fold of a writing `anySatisfy:`, `allSatisfy:`, `detect:` and
 `detect:ifNone:` is a `lists:foldl`, which has no early exit, so the first

@@ -658,6 +658,17 @@ reports the same message at the same span. No operation is surface-specific.
   REPL root keep their previous verdict and lowering. No new error on any
   surface (CLI, REPL eval and load, LSP, MCP, all from the analyser); the REPL
   display is unchanged.
+- **Block-local writes (ADR 0131, BT-3776).** A construct whose block writes
+  only a local of its own enclosing block is now measured like every other
+  statement shape. One family starts reporting `UnmigratedLocalThreading`: an
+  actor-method `detect:` / `detect:ifNone:` whose search block or handler
+  writes such a local, in a protected body, a handler or `ensure:` block, or
+  directly in a loop or counted-loop body. Those shapes failed `erlc` or read
+  the local unchanged (a silent wrong answer), so the only code newly
+  rejected was broken. The verdict is the analyser's, so it is the same
+  on every surface (CLI, REPL load of a class definition, LSP, MCP). REPL
+  expressions (the REPL root) are not affected, and the REPL display is
+  unchanged. Tracked for lowering in BT-3878.
 - An actor instance self-send of a block that writes an outer local is
   accepted only for a callee of the same class that threads the block
   (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every

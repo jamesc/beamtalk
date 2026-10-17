@@ -438,14 +438,8 @@ fn only_kinds() -> Option<Vec<String>> {
 #[allow(clippy::too_many_lines)] // one linear measure-and-compare flow
 fn run_matrix(matrix: Matrix, file: &str) {
     preflight();
-    assert!(
-        !(beamtalk_core::test_helpers::statement_probes::include_gaps()
-            && std::env::var_os("ADR0131_MEASURE_BLESS").is_some()),
-        "ADR0131_MEASURE_GAPS runs cells that are not in the measured table: do not bless"
-    );
     let full = cells(matrix);
     assert!(full.len() > 1000, "only {} cells", full.len());
-    let gaps = beamtalk_core::test_helpers::statement_probes::include_gaps();
     let only = only_kinds();
     let order: Vec<Cell> = full
         .iter()
@@ -492,7 +486,7 @@ fn run_matrix(matrix: Matrix, file: &str) {
         eprintln!("{context}\t{answer}\t{n}");
     }
 
-    if only.is_some() || gaps {
+    if only.is_some() {
         for (cell, answer) in &answers {
             if *answer != "right" {
                 eprintln!("NOT RIGHT\t{}", cell.line(answer));

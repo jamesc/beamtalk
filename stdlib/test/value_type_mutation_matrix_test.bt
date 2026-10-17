@@ -826,10 +826,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
   //  ClassVarMutationLostAcrossNestedLoop compile-error regression tests).
   // ════════════════════════════════════════════════════════════════════════
   testNestedWhileTrueOuterOnlyStateReadWriteActor =>
-    self assert: self actorCorpus nestedWhileTrueOuterOnlyStateReadWrite equals: 3
+    self assert: self actorCorpus nestedWhileTrueOuterOnlyStateReadWrite equals: 9
 
   testNestedWhileTrueOuterOnlyClassVarReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod nestedWhileTrueOuterOnlyClassVarReadWrite equals: 3
+    self assert: MutationCorpusClassMethod nestedWhileTrueOuterOnlyClassVarReadWrite equals: 9
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 2 — self-send as the mutation mechanism (not a direct
