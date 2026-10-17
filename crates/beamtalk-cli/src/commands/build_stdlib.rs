@@ -20,6 +20,10 @@ use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+use beamtalk_core::semantic_analysis::tier2_callee::{
+    COLLECTION_SPAWN_SELECTORS, PARALLEL_SPAWN_SELECTORS, TIMER_SPAWN_SELECTORS, ThreadingIndex,
+    stdlib_spawns_block,
+};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -708,7 +712,8 @@ struct MethodMeta {
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
     /// ADR 0132 §1: argument positions this method threads a Tier 2 block
-    /// through (`MethodInfo::threading_params`). Empty until Phase 1b.
+    /// through (`MethodInfo::threading_params`), computed by
+    /// `ThreadingIndex` (never for a `spawns_block` method).
     threading_params: Vec<usize>,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<DeclaredType>,
@@ -741,15 +746,21 @@ impl MethodKindMeta {
 }
 
 /// Convert an AST method definition to `MethodMeta`.
-fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
+fn method_def_to_meta(
+    m: &beamtalk_core::ast::MethodDefinition,
+    class_name: &str,
+    class_side: bool,
+    threading: &ThreadingIndex,
+) -> MethodMeta {
+    let selector = m.selector.name();
     MethodMeta {
-        selector: m.selector.name().to_string(),
+        selector: selector.to_string(),
         arity: m.selector.arity(),
         kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
-        threading_params: Vec::new(),
+        threading_params: threading.params(class_name, class_side, &selector),
         return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
@@ -899,7 +910,7 @@ fn mark_spawns_for_selectors(
 /// Replaces hardcoded list in `validators.rs` so the self-capture validator
 /// can skip false-positive warnings.
 fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(class_methods, &["after:do:", "every:do:"], "Timer")
+    mark_spawns_for_selectors(class_methods, TIMER_SPAWN_SELECTORS, "Timer")
 }
 
 /// Mark `Parallel` class methods that spawn their block arguments in separate
@@ -910,7 +921,7 @@ fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// risk: an actor blocks in `Parallel all:`, a block does a synchronous send back
 /// to the same actor, and hangs).
 fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(class_methods, &["all:", "all:timeout:", "any:"], "Parallel")
+    mark_spawns_for_selectors(class_methods, PARALLEL_SPAWN_SELECTORS, "Parallel")
 }
 
 /// Mark `Collection>>parallelCollect:` and `parallelCollect:maxConcurrency:`
@@ -923,11 +934,7 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// against doesn't apply to their own call sites the way it does to the two
 /// public entry points.
 fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
-    mark_spawns_for_selectors(
-        methods,
-        &["parallelCollect:", "parallelCollect:maxConcurrency:"],
-        "Collection",
-    )
+    mark_spawns_for_selectors(methods, COLLECTION_SPAWN_SELECTORS, "Collection")
 }
 
 /// A single stdlib type-alias declaration collected by
@@ -1248,9 +1255,18 @@ fn extract_class_metadata(
         );
     }
 
-    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
-    let mut class_methods: Vec<MethodMeta> =
-        class.class_methods.iter().map(method_def_to_meta).collect();
+    let threading = ThreadingIndex::build(&module.classes, &stdlib_spawns_block);
+    let class_name_str = class.name.name.as_str();
+    let mut methods: Vec<MethodMeta> = class
+        .methods
+        .iter()
+        .map(|m| method_def_to_meta(m, class_name_str, false, &threading))
+        .collect();
+    let mut class_methods: Vec<MethodMeta> = class
+        .class_methods
+        .iter()
+        .map(|m| method_def_to_meta(m, class_name_str, true, &threading))
+        .collect();
 
     let state = class
         .state
