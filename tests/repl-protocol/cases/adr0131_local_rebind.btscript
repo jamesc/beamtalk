@@ -637,6 +637,41 @@ r := [4 =:= 4 ifTrue: [(#(1, 2) collect: [:x | t := t + x. x]) size. 1 / 0] ifFa
 t
 // => 13
 
+// The other arm kinds: `ifFalse:`, `and:`, `or:` and the parameter arms of
+// the nil family, with a producer at an operand site of the arm.
+t := 0
+// => 0
+
+r := 4 =:= 5 ifFalse: [([t := t + 1. 1] on: Error do: [:e | 0]) + 6]
+// => 7
+
+r := (4 =:= 4) and: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) > 2]
+// => true
+
+r := (4 =:= 5) or: [([t := t + 10. 5] ensure: [nil]) > 2]
+// => true
+
+t
+// => 14
+
+t := 0
+// => 0
+
+r := 5 ifNotNil: [:v | (#(1, 2) collect: [:x | t := t + x + v. x]) size + v]
+// => 7
+
+r := nil ifNil: [0] ifNotNil: [:v | ([t := t + v] on: Error do: [:e | 0]) + 1]
+// => 0
+
+r := 3 ifNil: [0] ifNotNil: [:v | ([t := t + v. v] on: Error do: [:e | 0]) + 1]
+// => 4
+
+r := 2 ifNotNil: [:v | (Result tryDo: [t := t + v. v]) unwrap * 10] ifNil: [0]
+// => 20
+
+t
+// => 18
+
 // A conditional statement of a loop body in an arm, and a `do:separatedBy:`
 // in a protected body, adopt the same map.
 t := 0

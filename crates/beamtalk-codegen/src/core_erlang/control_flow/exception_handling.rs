@@ -791,9 +791,10 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
-        // Only where the REPL root unpacks the tuple (a statement, an
-        // assignment's value, a REPL producer's construct): never in a closure,
-        // an argument or an arm, whatever the Phase 0 check accepts.
+        // Only where the REPL unpacks the tuple (a statement, an assignment's
+        // value, a REPL producer's construct, the root's or a REPL arm site's,
+        // BT-3823): never in a closure or a plain argument, whatever the Phase 0
+        // check accepts.
         if !self.is_repl_mode() || !self.is_repl_unpack_site(expr.span()) {
             return Ok(None);
         }

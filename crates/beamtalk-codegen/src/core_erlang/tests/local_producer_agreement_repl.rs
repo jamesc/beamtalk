@@ -226,6 +226,12 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
 const REPL_ARMS: &[&str] = &[
     "r := (s < 3) ifTrue: [{p}. 7] ifFalse: [0]",
     "(s < 3) ifTrue: [{p}]",
+    "r := (s < 3) ifFalse: [{p}. 7]",
+    "r := (s < 3) and: [{p}. true]",
+    "r := (s < 3) or: [{p}. true]",
+    "r := s ifNotNil: [:v | {p}. v]",
+    "r := s ifNil: [0] ifNotNil: [:v | {p}. v]",
+    "r := s ifNotNil: [:v | {p}. v] ifNil: [0]",
     "r := [{p}. 7] on: Error do: [:e | 3]",
     "r := [{p}] on: Error do: [:e | 3]",
     "r := [1 / 0] on: Error do: [:e | {p}. 7]",
