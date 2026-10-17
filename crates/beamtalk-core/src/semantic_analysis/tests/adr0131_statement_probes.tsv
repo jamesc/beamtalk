@@ -3,7 +3,8 @@
 # verdict. See `adr0131_statement_probe_pins` (local_threading.rs) for the
 # probe each line stands for and what each verdict asserts.
 # The REPL rows of the arm and protected-body roles were re-measured on a
-# BEAM for BT-3823, when the REPL's arms became producer frames.
+# BEAM for BT-3823, when the REPL's arms (and evaluated blocks) became
+# producer frames.
 actor	arm	cvar	do	ok
 actor	arm	cvar	ewi	ok
 actor	arm	cvar	ifTrue	ok
@@ -3150,13 +3151,13 @@ repl	val	outer	dinH	ok
 repl	val	outer	dinS	ok
 repl	val	outer	do	ok
 repl	val	outer	dsb	ok
-repl	val	outer	ensure	bad
+repl	val	outer	ensure	ok
 repl	val	outer	ewi	ok
 repl	val	outer	ifNil	ok
 repl	val	outer	ifTrue	ok
 repl	val	outer	inject	ok
 repl	val	outer	kv	ok
-repl	val	outer	onDo	bad
+repl	val	outer	onDo	ok
 repl	val	outer	times	ok
 repl	val	outer	toDo	ok
 repl	val	outer	value	ok

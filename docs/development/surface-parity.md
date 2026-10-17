@@ -717,8 +717,9 @@ reports the same message at the same span. No operation is surface-specific.
   surface compiles REPL input, and no REPL display changes for an input that
   answered correctly.
 - **REPL arms as producer frames (ADR 0131, BT-3823).** A REPL conditional arm,
-  `on:do:` protected body, handler, `ensure:` cleanup and `Result tryDo:` block
-  is inlined over the bindings map, and a loop, fold, conditional, exception
+  `on:do:` protected body, handler, `ensure:` cleanup, `Result tryDo:` block
+  and evaluated block (`[...] value`, `[:k | ...] value: x`) is inlined over
+  the bindings map, and a loop, fold, conditional, exception
   construct or `value`-family send to a block literal at one of an arm
   statement's sites (`repl_arm_producer_sites`: the statement itself, an
   assignment's value, a send's operands) is a producer that adopts that map

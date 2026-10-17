@@ -686,6 +686,39 @@ t := 0
 r := [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. t] on: Error do: [:e | 0]
 // => 13
 
+// An evaluated block (`[...] value`, `[:k | ...] value: x`) that writes a
+// binding is a REPL arm too: inlined over the bindings map, its sites hold
+// producers, even when the write sits behind a nested conditional's loop (in a
+// handler that raised `invalid argument` before BT-3823). A block sent a
+// `value` selector of another arity is inlined the same way, as at the input
+// root (the argument is ignored and the write kept).
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [:z | 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value: 1. t]
+// => 3
+
+r := [1 / 0] on: Error do: [:e | [4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value. t]
+// => 6
+
+[:z | 4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x]]] value: 1
+// => _
+
+t
+// => 9
+
+t := 0
+// => 0
+
+r := [1 / 0] on: Error do: [:e | [t := t + 1] value: 1. t]
+// => 1
+
+r := [7] ensure: [[t := t + 1] value: 1]
+// => 7
+
+r := [1 / 0] on: Error do: [:e | [#(1, 2) collect: [:x | t := t + x]] value: 1. t]
+// => 5
+
 // A block `value:` whose argument is a writing fold is not lowered: the fold is
 // an operand of a construct, not a site, so it keeps the Phase 0 error in an
 // arm (as in class, value-type and actor methods) rather than dropping the

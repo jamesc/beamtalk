@@ -22,8 +22,8 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingFamily, conditional_arm_blocks, construct_outer_local_writes,
-    exception_arm_blocks, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
-    repl_arm_producer_sites, repl_operand_sites, repl_producer_writes,
+    exception_arm_blocks, local_threading_construct, lookup_arm_blocks, repl_arm_producer_sites,
+    repl_operand_sites, repl_producer_writes,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -282,9 +282,9 @@ const REPL_ARMS: &[&str] = &[
 ];
 
 /// Where a construct `{c}` sits in an arm statement: the statement itself, an
-/// operand, an assignment's value, a literal's element; and positions that are
-/// not arm sites (a loop body, a closure, a cascade), which stay Phase 0
-/// errors.
+/// operand, an assignment's value, a literal's element, an evaluated block
+/// (itself a REPL arm, BT-3823, of either arity); and positions that are not
+/// arm sites (a loop body, a cascade), which stay Phase 0 errors.
 const ARM_STATEMENTS: &[&str] = &[
     "{c}",
     "({c}) printString size",
@@ -293,6 +293,7 @@ const ARM_STATEMENTS: &[&str] = &[
     "0 max: ({c}) printString size",
     "#(1) do: [:z | {c}]",
     "[{c}] value: 1",
+    "[:z | {c}] value: 1",
     "({c}) printString; yourself",
 ];
 
@@ -312,19 +313,33 @@ const REPL_ARM_CONSTRUCTS: &[&str] = &[
 ];
 
 /// The REPL arm sites of `expr` and of the arms nested in them: for a
-/// conditional (not a lookup, not an evaluated literal block) or an
-/// `on:do:`/`ensure:`/`tryDo:` whose blocks write a binding, every
+/// conditional (not a lookup), an `on:do:`/`ensure:`/`tryDo:` or an evaluated
+/// block whose blocks write a binding, every
 /// `repl_arm_producer_sites` site of every statement of its blocks, recursing
 /// into a site that is itself such a construct.
 fn repl_arm_sites<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
     let inner = expr.unwrap_parens();
-    if lookup_arm_blocks(inner).is_some()
-        || literal_block_value_arm(inner).is_some()
-        || !writes_a_binding(inner)
-    {
+    if lookup_arm_blocks(inner).is_some() || !writes_a_binding(inner) {
         return;
     }
-    let Some(blocks) = conditional_arm_blocks(inner).or_else(|| exception_arm_blocks(inner)) else {
+    // BT-3823: an evaluated block (a `value`-family send to a bare block
+    // literal, of any arity) is a REPL arm too.
+    let evaluated = match inner {
+        Expression::MessageSend { receiver, .. } => match receiver.as_ref() {
+            Expression::Block(block)
+                if local_threading_construct(inner)
+                    .is_some_and(|c| c.family == LocalThreadingFamily::BlockValue) =>
+            {
+                Some(vec![block])
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(blocks) = conditional_arm_blocks(inner)
+        .or_else(|| exception_arm_blocks(inner))
+        .or(evaluated)
+    else {
         return;
     };
     for block in blocks {

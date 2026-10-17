@@ -1156,19 +1156,12 @@ impl CoreErlangGenerator {
         tail: ProducerTail,
         frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
+        // A REPL producer is recorded by `lower_repl_construct_tuple` once it
+        // knows the construct produced its `{Value, Bindings}` carrier.
         #[cfg(test)]
-        fault::record_producer(
-            expr.span(),
-            &if self.is_repl_mode() {
-                // The REPL producer threads no local on its own: record the
-                // bindings the construct writes.
-                self.threaded_locals_of(expr)
-                    .map(|set| set.names)
-                    .unwrap_or_default()
-            } else {
-                locals.to_vec()
-            },
-        );
+        if !self.is_repl_mode() {
+            fault::record_producer(expr.span(), locals);
+        }
         // The construct's own receiver and non-block arguments evaluate
         // before it packs its locals (ADR 0118 §Decision 3): they are
         // sequenced here, for every tail, so `Rebind` and `Discard` cannot
@@ -1229,6 +1222,19 @@ impl CoreErlangGenerator {
         if !yields_tuple {
             return Ok((Vec::new(), ValueRef::Doc(doc)));
         }
+        // BT-3823 review: recorded only once the carrier exists, so an
+        // agreement test counts a REPL site as lowered only when its bindings
+        // map is adopted (a site the producer reached without a carrier would
+        // drop its write). The bindings the construct writes are recorded: the
+        // REPL producer threads no local of its own.
+        #[cfg(test)]
+        fault::record_producer(
+            span,
+            &self
+                .threaded_locals_of(expr)
+                .map(|set| set.names)
+                .unwrap_or_default(),
+        );
         let carrier = self.fresh_temp_var("ThreadedResult");
         let element = |k: i64, carrier: &str| {
             docvec![

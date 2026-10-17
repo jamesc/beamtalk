@@ -240,10 +240,13 @@ impl CoreErlangGenerator {
             let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
             return Ok(Some(doc));
         }
-        // Block literal with field mutations (actor state threading).
+        // Block literal with field mutations (actor state threading), or, in
+        // the REPL, one that writes a binding anywhere, a nested construct
+        // included (BT-3823: inlined over the bindings map as a REPL arm).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) {
+            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            {
                 let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
                 return Ok(Some(doc));
             }
@@ -453,10 +456,12 @@ impl CoreErlangGenerator {
             let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
             return Ok(Some(doc));
         }
-        // Block literal with field mutations (actor state threading)
+        // Block literal with field mutations (actor state threading), or, in
+        // the REPL, one that writes a binding anywhere (BT-3823, as above).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) {
+            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            {
                 let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
                 return Ok(Some(doc));
             }
@@ -1640,7 +1645,9 @@ impl CoreErlangGenerator {
             if this.is_repl_mode() {
                 this.set_repl_loop_mutated(true);
             }
-            this.generate_conditional_branch_inline(block)
+            // BT-3823: in the REPL the block is a REPL arm, whose producers
+            // adopt the bindings map (`generate_repl_arm_inline`).
+            this.generate_repl_arm_inline(block)
         })?;
 
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arg_bindings.len() + 2);

@@ -1136,6 +1136,8 @@ fn repl_operand_sites_are_producers() {
         "true ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]\n",
         "r := [(#(1, 2) collect: [:x | t := t + x]) size] on: Error do: [:e | 0]\n",
         "r := [1 / 0] on: Error do: [:e | [:k | t := t + k] value: 4. t]\n",
+        // An evaluated block is a REPL arm too.
+        "[(#(1, 2) collect: [:x | t := t + x]) size] value\n",
     ] {
         let diags = adr0131_diagnostics_with(src, &known);
         assert!(diags.is_empty(), "{src}: {diags:?}");
@@ -1146,9 +1148,9 @@ fn repl_operand_sites_are_producers() {
 fn repl_producer_sites_stop_at_blocks_conditionals_and_statement_constructs() {
     let known = ["t", "u"];
     for src in [
-        // Inside a block that is not a loop or fold body, nor a REPL arm.
-        "[(#(1, 2) collect: [:x | t := t + x]) size] value\n",
+        // Inside a block that is not a REPL arm: a loop body, a stored block.
         "#(1) do: [:z | (#(1, 2) collect: [:x | t := t + x]) size]\n",
+        "b := [(#(1, 2) collect: [:x | t := t + x]) size]\n",
         // A conditional's receiver is threaded by the conditional (Phase 3).
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\n",
         // Under a cascade.

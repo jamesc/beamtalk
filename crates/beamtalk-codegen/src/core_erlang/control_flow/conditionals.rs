@@ -506,9 +506,10 @@ impl CoreErlangGenerator {
     /// registered `BranchArm` frame) or in a loop or fold body (ADR 0131 Phase 3c).
     /// `producer` says whether the construct is one
     /// ([`Self::conditional_producer_locals`]): a conditional the Phase 0 check
-    /// does not name as a producer keeps the legacy arm, as do the arms in the REPL
-    /// ([`Self::generate_conditional_branch_inline`], whose nested constructs
-    /// unpack their own tuples).
+    /// does not name as a producer keeps the legacy arm. The arms in the REPL
+    /// are not `BranchArm` frames either: they are REPL arms
+    /// ([`Self::generate_repl_arm_inline`], BT-3823), whose producers adopt the
+    /// bindings map.
     pub(in crate::core_erlang::control_flow) fn conditional_arm_frame(
         &self,
         blocks: &[&Block],

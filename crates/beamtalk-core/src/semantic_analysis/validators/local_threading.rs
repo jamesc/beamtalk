@@ -1125,6 +1125,18 @@ fn report_value_position_assignments(
     }
 }
 
+/// BT-3823: whether `expr` is a `value`-family send to a bare block literal,
+/// whose block the REPL inlines over its bindings map when it writes a binding
+/// (codegen's `generate_block_value_inline_with_mutations`, a REPL arm there):
+/// so it is a REPL arm construct, whatever its arity.
+fn is_repl_evaluated_block(expr: &Expression) -> bool {
+    matches!(
+        expr.unwrap_parens(),
+        Expression::MessageSend { receiver, .. } if matches!(receiver.as_ref(), Expression::Block(_))
+    ) && local_threading_construct(expr.unwrap_parens())
+        .is_some_and(|c| c.family == LocalThreadingFamily::BlockValue)
+}
+
 /// The `(selector, parameter index)` pairs of `class`'s instance methods that
 /// thread a Tier 2 block passed to them ([`callee_threads_block_param`], the
 /// predicate codegen's class pre-scan reads as well).
@@ -1566,7 +1578,8 @@ impl<'d> Walker<'d> {
                     Expression::Block(_)
                         if arm_frames
                             && (exception_arm_blocks(expr).is_some()
-                                || literal_block_value_arm(expr).is_some()) =>
+                                || literal_block_value_arm(expr).is_some()
+                                || (self.context == Repl && is_repl_evaluated_block(expr))) =>
                     {
                         Some(FrameBody {
                             fold: false,
@@ -1784,9 +1797,9 @@ impl<'d> Walker<'d> {
 
     /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): whether `expr` is a
     /// REPL construct whose blocks are *REPL arms*: a conditional (not a
-    /// lookup, not an evaluated literal block, whose block the REPL inlines
-    /// through its own path) or an `on:do:`/`ensure:`/`Result tryDo:` that
-    /// writes a binding, so
+    /// lookup), an `on:do:`/`ensure:`/`Result tryDo:` or a `value`-family send
+    /// to a block literal ([`is_repl_evaluated_block`]) that writes a binding,
+    /// so
     /// codegen inlines its blocks over the bindings map
     /// (`generate_repl_arm_inline`, `with_repl_arm_producer_sites`), at a
     /// position whose lowering compiles it that way: a statement, an
@@ -1795,10 +1808,13 @@ impl<'d> Walker<'d> {
     /// ([`repl_arm_producer_sites`]).
     fn is_repl_arm_construct(&self, expr: &Expression, position: Position) -> bool {
         let inner = expr.unwrap_parens();
-        if lookup_arm_blocks(inner).is_some() || literal_block_value_arm(inner).is_some() {
+        if lookup_arm_blocks(inner).is_some() {
             return false;
         }
-        if conditional_arm_blocks(inner).is_none() && exception_arm_blocks(inner).is_none() {
+        if conditional_arm_blocks(inner).is_none()
+            && exception_arm_blocks(inner).is_none()
+            && !is_repl_evaluated_block(inner)
+        {
             return false;
         }
         let writes = local_threading_construct(inner).is_some_and(|c| {
