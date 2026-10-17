@@ -1,0 +1,108 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3799 / BT-3860 (ADR 0131): a local assignment in value position (an
+// operand, a literal element, an assignment's value, a conditional's receiver)
+// at the method root and in loop and fold bodies. Its write must be visible to
+// everything after it. The receivers (class, value type, actor) must agree; the
+// pinned and expected answers are in stdlib/test/adr0131nested_assign_test.bt.
+
+Actor subclass: Adr0131NestedAssignActor
+  state: n = 0
+
+  rootPlain =>
+    t := 0
+    x := (t := t + 1) + 1
+    #[t, x]
+
+  rootLiteral =>
+    t := 0
+    #[t, (t := 7), t]
+
+  doPlain =>
+    t := 0
+    #(1, 2) do: [:x | (t := t + 1) > 0]
+    t
+
+  rootIf =>
+    t := 0
+    u := 0
+    (t := t + 1) > 0 ifTrue: [u := 9]
+    #[t, u]
+
+  doIf =>
+    t := 0
+    u := 0
+    #(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
+    #[t, u]
+
+  doIfElse =>
+    t := 0
+    u := 0
+    #(1, 2) do: [:x |
+      (t := t + 1) > 1 ifTrue: [u := u + 9] ifFalse: [u := u + 1]
+    ]
+    #[t, u]
+
+  doAnd =>
+    t := 0
+    u := 0
+    #(1, 2)
+      do: [:x |
+        (t := t + 1) > 1
+          and: [
+            u := 9
+            true
+          ]
+      ]
+    #[t, u]
+
+  doIfFalse =>
+    t := 0
+    u := 0
+    #(1, 2) do: [:x | (t := t + 1) > 5 ifFalse: [u := u + 1]]
+    #[t, u]
+
+  toDoIf =>
+    t := 0
+    u := 0
+    1 to: 2 do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
+    #[t, u]
+
+  timesIf =>
+    t := 0
+    u := 0
+    2 timesRepeat: [(t := t + 1) > 1 ifTrue: [u := 9]]
+    #[t, u]
+
+  whileIf =>
+    t := 0
+    u := 0
+    i := 0
+    [i < 2]
+      whileTrue: [
+        (t := t + 1) > 1 ifTrue: [u := 9]
+        i := i + 1
+      ]
+    #[t, u]
+
+  collectIf =>
+    t := 0
+    u := 0
+    r := #(1, 2)
+      collect: [:x |
+        (t := t + 1) > 1 ifTrue: [u := 9]
+        x
+      ]
+    #[t, u, r]
+
+  injectIf =>
+    t := 0
+    u := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:a :x |
+        (t := t + 1) > 1 ifTrue: [u := 9]
+        a + x
+      ]
+    #[t, u, r]
