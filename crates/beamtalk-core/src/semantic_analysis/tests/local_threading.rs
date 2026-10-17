@@ -1342,6 +1342,10 @@ fn deny_set_block_local_writes_are_judged_by_the_measurement() {
     for src in [in_class(collect), in_value(collect), in_actor(collect)] {
         assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
     }
+    // A local bound inside the search block itself is not a write of the
+    // construct: the rows below do not reach it.
+    let own = "i := 0\n[i < 2] whileTrue: [i := i + 1. #(1, 2) detect: [:e | v := e * 2. v > 5] ifNone: [nil]]\nt";
+    assert!(adr0131_diagnostics(&in_actor(own)).is_empty(), "{own}");
     let detect = "#(1, 2) detect: [:e | u := u + 1. e > 5] ifNone: [nil]";
     for (body, rejected_in_actor) in [
         (
