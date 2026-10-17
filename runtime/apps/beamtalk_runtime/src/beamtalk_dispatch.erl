@@ -706,6 +706,9 @@ No compiled module advertises an entry before ADR 0132 Phase 1, so for every
 compiled receiver this raises.
 """.
 -spec send_threaded(term(), selector(), args(), map()) -> {term(), map()}.
+send_threaded({beamtalk_future, _} = Future, Selector, Args, Acc) ->
+    %% Auto-await, as the plain send does (beamtalk_message_dispatch:send/3).
+    send_threaded(beamtalk_future:await(Future), Selector, Args, Acc);
 send_threaded(Receiver, Selector, Args, Acc) when
     is_atom(Selector), is_list(Args), is_map(Acc)
 ->
