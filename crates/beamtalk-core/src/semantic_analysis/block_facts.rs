@@ -2937,11 +2937,14 @@ pub fn is_control_flow_construct(
 ///
 /// A local assignment is in statement position when it is, bare, a statement
 /// of a body: a method body, a block body or a top-level expression list.
-/// Every body lowering binds the local there. Parentheses around the statement
-/// are unwrapped only at the root of a value-type or actor method
-/// (`(t := t + 1)` followed by `t`); the class-method root, the REPL root and
-/// every block body (a loop or fold body, an arm, a handler, a closure) compile
-/// a parenthesised statement as an expression. Anywhere else the assignment is
+/// Every body lowering binds the local there. Parentheses around a statement
+/// that is not the body's last are unwrapped only at the root of a value-type
+/// or actor method (BT-3830, BT-3838: `(t := t + 1)` followed by `t`) and in
+/// an inlined arm ([`conditional_arm_blocks`]: a conditional's arm, a lookup
+/// handler, a `[...] value` body); the class-method root, the REPL root, a
+/// last statement and every other block body (a loop or fold body, an
+/// exception body, a closure) compile a parenthesised statement as an
+/// expression. Anywhere else the assignment is
 /// in value position: an operand (`x := (t := t + 1) + 1`), a collection-literal
 /// element (`#[t, (t := 7), t]`), the value of another assignment (`x := t := 7`)
 /// or of `^`, a conditional's or a cascade's receiver

@@ -1089,7 +1089,12 @@ fn report_value_position_assignments(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for found in value_position_local_assignments(body, context.root_method_kind()) {
-        if diagnostics.iter().any(|d| d.span == found.span) {
+        let reported = diagnostics.iter().any(|d| {
+            d.span == found.span
+                && d.severity == crate::source_analysis::Severity::Error
+                && d.category == Some(DiagnosticCategory::UnmigratedLocalThreading)
+        });
+        if reported {
             continue;
         }
         let name = &found.name;
