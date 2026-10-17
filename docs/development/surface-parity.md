@@ -755,12 +755,25 @@ reports the same message at the same span. No operation is surface-specific.
   `value`-family send of another arity to a block literal in an arm (`[t := t
   + 1] value: 1` in a handler) is applied rather than inlined, so it raises
   the run-time arity error any block raises instead of ignoring the argument
-  (wrong to right); the input root still inlines it (BT-3881). The verdict is
+  (wrong to right); see the BT-3881 bullet below for the input root. The verdict is
   the analyser's, so CLI/LSP/MCP diagnostics for the same top-level
   expressions change together. Still errors: a construct in a REPL loop or fold
   body (BT-3876), and an outer-local write in a `match:` arm (the
   value-position error of BT-3864 in the REPL, the BT-3817 error in class,
   value-type and actor methods; BT-3875 makes `match:` arms producers).
+- **A block literal of another arity is never inlined (BT-3881).** A
+  `value`-family send to a block literal whose arity is not the block's own
+  (`[t := t + 1] value: 1`, `[:k | t := t + k] value`) is applied, never
+  inlined over the bindings map or a method's locals or state, at the REPL
+  input root as in a REPL arm, and in value-type and actor methods
+  (`block_literal_arity_matches`, the one rule core and codegen read). It
+  raises the run-time `arity_mismatch` error any block raises (`Wrong number
+  of arguments: block expects N but was called with M`) and its body never
+  runs. REPL-visible, wrong to right only: at the input root such a send used
+  to answer silently (the extra argument ignored, or the missing parameter
+  read from the workspace binding of the same name) and keep its write; it
+  now raises and leaves the bindings unchanged. It is a run-time error, not a
+  compile error: no new compile error, and the display format is unchanged.
 - The REPL sees only the current input: a stored block bound in one input and
   sent `value` in a later one is not seen by the §6 check and still raises
   `stateful_block_dispatch` at run time.

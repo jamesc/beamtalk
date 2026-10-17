@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3881: a block literal sent a `value`-family selector of another arity is
+// never inlined, so it raises the run-time arity error any block raises and
+// its body (and its writes) never run. The columns are
+// adr0131block_arity_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131block_arity_test.bt.
+
+Object subclass: Adr0131BlockArityClass
+  classState: n = 0
+
+  class fieldDrop =>
+    self.n := 0
+    [self.n := self.n + 1] value: 1
+    self.n
+
+  class fieldMissing =>
+    self.n := 0
+    [:k | self.n := self.n + k] value
+    self.n
+
+  class fieldN => self.n
