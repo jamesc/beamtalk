@@ -115,7 +115,9 @@ pub struct CoreErlangGenerator {
     /// Read only through [`Self::threaded_body_kind`], which derives the
     /// body's kind from `context`/`in_class_method`. Never set in
     /// production yet: the threaded body lowering (ADR 0132 Phases 1c/1d)
-    /// is the first setter, so every method compiles exactly as before.
+    /// is the first setter, so every method compiles exactly as before. That
+    /// setter must scope it to the one body it lowers (set on entry, restored
+    /// on exit, including on error), or the next method inherits `Acc`.
     pub(in crate::core_erlang) in_threaded_body: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
