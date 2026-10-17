@@ -715,6 +715,21 @@ t := 0
 #(1, 2) do: [:k | (k > 1) ifTrue: [#(1) do: [:j | t := t + j]]]
 // => ERROR: `do:` writes outer local `t`
 
+// BT-3877: a conditional statement of a REPL loop body that writes a binding
+// tripped the debug verifier (`BindFrameMismatch`). Since BT-3823 the
+// conditional is a producer of the fold body, bound in that body's frame.
+t := 5
+// => 5
+
+u := 0
+// => 0
+
+#(1, 2) do: [:k | t > 1 ifTrue: [u := 9]]
+// => _
+
+u
+// => 9
+
 // The same body with the write as the arm's own assignment of a fold's value
 // is accepted and keeps it.
 t := 0
@@ -732,16 +747,15 @@ t
 //
 // A `match:` arm is an expression, not a block: no construct threads a write
 // in it back. Class, value-type and actor methods reject one with a structured
-// error (BT-3817); the REPL is exempt from that error.
+// error (BT-3817); the REPL is exempt from that error, and dropped the write
+// silently until BT-3864 made an assignment used as a value (here the arm's
+// value) a compile error everywhere. BT-3875 makes `match:` arms producers.
 
 t := 0
 // => 0
 
-// PIN-BUG BT-3875: the arm's write is dropped silently. Correct answer: 9
-// (and `t` 9).
 r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
-// => 9
+// => ERROR: assignment to local `t` is used as a value in a top-level expression
 
-// PIN-BUG BT-3875: correct answer 9.
 t
 // => 0

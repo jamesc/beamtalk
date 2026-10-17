@@ -123,6 +123,8 @@ mod control_flow;
 mod dispatch_codegen;
 mod dispatch_spec;
 mod driver;
+#[cfg(any(test, feature = "test"))]
+pub mod dropped_assignment_probe;
 pub mod erlang_types;
 mod error;
 mod errors;
@@ -275,6 +277,13 @@ impl CoreErlangGenerator {
                 // just return the value - REPL handles binding updates externally.
                 // In compiled code, local variable assignments should be handled by
                 // the block/method scope, but for now we generate just the value.
+                //
+                // ADR 0131 stopgap (BT-3864): reaching here drops the write
+                // (BT-3860). The Phase 0 check rejects every such shape
+                // (`value_position_local_assignments`); the agreement tests
+                // record these hits to prove it.
+                #[cfg(any(test, feature = "test"))]
+                dropped_assignment_probe::record(expr.span());
                 self.generate_expression(value)
             }
             Expression::Return { value, span, .. } => {
