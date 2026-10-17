@@ -348,6 +348,38 @@ plain_refuses_tier2_test_() ->
             ),
             ?assertEqual(undefined, get(ran))
         end},
+        {"valueWithArguments: with a list gates arity like value:", fun() ->
+            Two = fun(_A, _B) ->
+                put(ran, true),
+                1
+            end,
+            Three = fun(_A, _B, _C) ->
+                put(ran, true),
+                1
+            end,
+            ?assertEqual(
+                {1, plain}, beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b], plain)
+            ),
+            ?assertEqual(
+                stateful_block_dispatch,
+                refused(fun() ->
+                    beamtalk_dispatch:call_threaded_with_arguments(Three, [a, b], plain)
+                end)
+            ),
+            ?assertEqual(undefined, get(ran)),
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() ->
+                    beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b, c, d], plain)
+                end)
+            ),
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() ->
+                    beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b, c, d], #{})
+                end)
+            )
+        end},
         {"a real Acc map still threads a Tier 2 block", fun() ->
             ?assertEqual(
                 {nil, #{}}, beamtalk_dispatch:call_threaded(ran_t2(0), [], #{})

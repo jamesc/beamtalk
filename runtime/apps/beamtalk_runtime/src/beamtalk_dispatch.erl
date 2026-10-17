@@ -857,11 +857,15 @@ call_threaded(Callable, Args, Acc) when is_list(Args), is_map(Acc) ->
 -doc """
 `call_threaded/3` for `Callable valueWithArguments: Xs` (ADR 0132 §2).
 
-A fun with a list `Xs` is gated exactly as `call_threaded(Callable, Xs, Acc)`.
-Everything else keeps the behaviour of the plain `valueWithArguments:`
-lowering: a fun with a non-list `Xs` is applied as it always was (raising the
-same error), and a non-fun callable is sent `valueWithArguments:` itself,
-never `value:`/`value:value:`, with `Acc` unchanged.
+A fun with a list `Xs` is gated exactly as `call_threaded(Callable, Xs, Acc)`,
+like every other invocation: a fun of the wrong arity raises the structured
+`arity_mismatch` (or, with the `plain` sentinel and one argument too many,
+`stateful_block_dispatch`) where the plain `valueWithArguments:` lowering
+raised a raw `badarity`, the same change `value:` gets. Everything else keeps
+the plain lowering's behaviour: a fun with a non-list `Xs` is applied as it
+always was (raising the same error), and a non-fun callable is sent
+`valueWithArguments:` itself, never `value:`/`value:value:`, with `Acc`
+unchanged.
 """.
 -spec call_threaded_with_arguments(term(), term(), map() | plain) -> {term(), map() | plain}.
 call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block), is_list(Xs) ->

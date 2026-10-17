@@ -81,7 +81,8 @@
 //! literal**.
 //!
 //! One more shape disqualifies **every** parameter of a method: a block literal
-//! anywhere in its body that does `^` (a non-local return; [`nlr_block_in`]).
+//! anywhere in its body that does `^`, or a `^` in a `match:` arm (a non-local
+//! return; `facts::body_has_block_nlr`, the recognizer codegen's NLR wrapper uses).
 //! A threaded body's `^` throws the `Acc` version current where its block is
 //! lowered, but a threaded callee can run the block after a later `Acc` step (as
 //! an argument of the use, `b value: [:x | ^x]`; stored by any path,
@@ -105,7 +106,6 @@ use crate::ast::{
 use crate::semantic_analysis::block_facts::{
     is_safe_value_family_selector, normalize_cascade, stored_block_var_uses,
 };
-use crate::source_analysis::Span;
 use crate::state_threading_selectors::{is_opaque_callable_hom_send, opaque_fold_callable_arg};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -504,7 +504,7 @@ impl ThreadingIndex {
             name: param.name.name.as_str(),
         };
         method.body.iter().all(|s| ctx.expr_ok(&s.expression))
-            && nlr_block_in(&method.body).is_none()
+            && !crate::semantic_analysis::facts::body_has_block_nlr(&method.body)
     }
 
     /// The threading parameter positions (0-based, ascending) of `class`'s
@@ -646,35 +646,6 @@ pub fn classify_threading_use(
         }
         _ => UseShape::NotAUse,
     }
-}
-
-/// ADR 0132 §2, the NLR row as Phase 1c ships it: the span of the first block
-/// literal in `body`, at any depth, that holds a `^`, or `None`. A method with
-/// one has no threading parameters (see the module docs: its `^` could answer a
-/// stale `Acc`). Deliberately over-approximate: a `^` in a conditional arm that
-/// runs where it is created disqualifies the method too.
-#[must_use]
-pub fn nlr_block_in(body: &[ExpressionStatement]) -> Option<Span> {
-    let mut found: Option<Span> = None;
-    for statement in body {
-        crate::ast_walker::walk_expression(&statement.expression, &mut |e| {
-            if found.is_none() && matches!(e, Expression::Block(_)) && holds_return(e) {
-                found = Some(e.span());
-            }
-        });
-        if found.is_some() {
-            break;
-        }
-    }
-    found
-}
-
-fn holds_return(expr: &Expression) -> bool {
-    let mut found = false;
-    crate::ast_walker::walk_expression(expr, &mut |e| {
-        found |= matches!(e, Expression::Return { .. });
-    });
-    found
 }
 
 /// Method-root use checker for [`ThreadingIndex`].
@@ -968,7 +939,8 @@ mod tests {
              chosen: b flag: c =>\n    f := c ifTrue: [[^1]] ifFalse: [[^2]]\n    b value\n  \
              inPlace: b flag: f =>\n    f ifTrue: [^0]\n    b value\n  \
              after: b over: xs =>\n    b value\n    xs do: [:x | ^x]\n    nil\n  \
-             rootReturn: b =>\n    ^b value\n",
+             rootReturn: b =>\n    ^b value\n  \
+             inMatchArm: b x: x =>\n    b value\n    x match: [1 -> ^0; _ -> 1]\n",
         );
         for sel in [
             "arg:",
@@ -979,6 +951,7 @@ mod tests {
             "chosen:flag:",
             "inPlace:flag:",
             "after:over:",
+            "inMatchArm:x:",
         ] {
             assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
         }

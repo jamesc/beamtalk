@@ -364,7 +364,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// after a later `Acc` step (an argument of the use, a stored block, a block
     /// a callee keeps), so its catch would answer a stale `Acc` and drop the
     /// caller's writes. The threading index gives any method whose body holds a
-    /// `^` block no threaded entry (`tier2_callee::nlr_block_in`); a threaded
+    /// `^` block no threaded entry (`facts::body_has_block_nlr`); a threaded
     /// body that holds one anyway is this error. Carrying the live `Acc` to the
     /// throw is ADR 0132 Phase 3.
     NlrInThreadedBody { at: Span },

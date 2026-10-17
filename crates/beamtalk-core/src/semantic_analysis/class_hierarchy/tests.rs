@@ -3715,7 +3715,7 @@ fn stdlib_threading_params_hand_checked_threading_homs() {
     );
     // `detect:ifNone:` invokes `noneBlock` at the root, but its body also holds
     // a block that does `^` (`self do: [:each | ... ifTrue: [^each]]`), so no
-    // parameter threads (`tier2_callee::nlr_block_in`, BT-3871 review).
+    // parameter threads (`facts::body_has_block_nlr`, BT-3871 review).
     assert_eq!(
         stdlib_threading_params("Collection", "detect:ifNone:", false),
         Vec::<usize>::new()

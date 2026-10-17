@@ -277,13 +277,46 @@ fn assert_entries_equal_the_index(src: &str, code: &str) {
         .collect();
     assert_eq!(entries.defined, expected_arity, "defined\n{code}");
     assert_eq!(entries.exported, expected_arity, "exported\n{code}");
+    assert_no_entry_needs_nlr(src, code);
+}
+
+/// The index and codegen's NLR decision cannot drift: no method the index
+/// marks threading is one codegen wraps in an NLR catch (`needs_nlr`, from
+/// `facts::body_has_block_nlr`), and no emitted threaded entry holds one.
+fn assert_no_entry_needs_nlr(src: &str, code: &str) {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let threading: BTreeSet<String> = index_class_side(src)
+        .into_iter()
+        .map(|(sel, _, _)| sel)
+        .collect();
+    for class in &module.classes {
+        for method in &class.class_methods {
+            let selector = method.selector.name().to_string();
+            if threading.contains(&selector) {
+                assert!(
+                    !beamtalk_core::semantic_analysis::facts::body_has_block_nlr(&method.body),
+                    "`{selector}` threads but needs the NLR catch"
+                );
+                let entry = crate::core_erlang::selector_mangler::threaded_class_fn_name(&selector);
+                let header = format!("'{entry}'/{}", method.parameters.len() + 2);
+                let text = function_text(code, &header);
+                // The method's own NLR boundary mints `_NlrToken` (an
+                // `on:do:` merely re-raises a `'$bt_nlr'` throw).
+                assert!(
+                    !text.contains("_NlrToken"),
+                    "`{selector}`'s threaded entry holds an NLR catch:\n{text}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
 fn tier2_class_methods_equals_the_threading_index_for_a_fixture_class() {
     let code = codegen(FIXTURE);
     assert_entries_equal_the_index(FIXTURE, &code);
-    // `callThen:firstPositiveIn:` holds a `^` block: no entry (`nlr_block_in`).
+    // `callThen:firstPositiveIn:` holds a `^` block: no entry (`facts::body_has_block_nlr`).
     assert_eq!(index_class_side(FIXTURE).len(), 3);
     assert_compiles_through_erlc("test", &code);
 }
@@ -412,7 +445,7 @@ fn every_stdlib_class_method_entry_is_defined_exported_advertised_and_in_the_ind
 // ─── The NLR row ───────────────────────────────────────────────────────────
 
 /// A class whose every method other than `apply:to:` has a block literal that
-/// does `^` (`tier2_callee::nlr_block_in`): an argument of the use itself
+/// does `^` (`facts::body_has_block_nlr`): an argument of the use itself
 /// (invocation, forward, fold handler), a stored block, a block kept in a
 /// collection, a block chosen by a conditional, and a `^` that runs in place.
 /// None gets a threaded entry (its `^` could answer a stale `Acc`); each
@@ -447,6 +480,9 @@ const NLR_BLOCKS: &str = "sealed Object subclass: Stale
     b value.
     items do: [:x | ^x].
     nil
+  class sealed inMatchArm: b x: x =>
+    b value.
+    x match: [1 -> ^0; _ -> 1]
 ";
 
 #[test]
@@ -461,6 +497,7 @@ fn a_method_with_a_block_that_does_a_return_has_no_entry_and_compiles() {
         "chosen:flag:",
         "inPlace:flag:",
         "late:items:",
+        "inMatchArm:x:",
     ] {
         assert!(
             !code.contains(&format!("'__t2_class_{selector}'")),
@@ -744,6 +781,7 @@ fn every_use_shape_beside_every_construct_threads_acc_linearly() {
             "{plain}"
         );
     }
+    assert_no_entry_needs_nlr(&src, &code);
     // The verifier ran over every body (a violation hard-fails a debug build),
     // and the whole module is valid Core Erlang.
     assert_compiles_through_erlc("test", &code);
