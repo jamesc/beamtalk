@@ -114,6 +114,9 @@ jobs:
       - name: Test Rust
         run: just test-rust
 
+      - name: Bench smoke (criterion benches in test mode, BT-3886)
+        run: just test-benches-smoke
+
       - name: Test stdlib
         run: just test-stdlib
 
@@ -200,6 +203,9 @@ jobs:
 
       - name: Test Rust
         run: just test-rust
+
+      - name: Bench smoke (criterion benches in test mode, BT-3886)
+        run: just test-benches-smoke
 
       - name: Test stdlib
         run: just test-stdlib

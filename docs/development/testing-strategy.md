@@ -32,7 +32,8 @@ Or individual steps:
 cargo build --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-just test-rust           # fast tier: cargo-nextest over every test binary (minus the corpus tier) + benches in test mode + doctests
+just test-rust           # fast tier: cargo-nextest over every test binary (minus the corpus tier) + doctests
+just test-benches-smoke  # criterion benches in test mode, one pass each (~5 min serial); nightly only, not in `ci` (BT-3886)
 just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~13 min); `ci-changed` and CI run it only when compiler crates change
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)

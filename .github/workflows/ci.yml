@@ -42,7 +42,11 @@ jobs:
         # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
         os: [ubuntu-latest, macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
+    # change) is ~28 min on Windows (11 min of dependency build alone), and a
+    # job the timeout cancels never reaches the post step that saves the
+    # cache, so it would stay cold on every rerun. Warm runs are 15-22 min.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

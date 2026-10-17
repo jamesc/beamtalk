@@ -1151,12 +1151,8 @@ test-corpus:
 test-rust-platform: (_test-rust "--workspace --exclude beamtalk-codegen --exclude beamtalk-repl")
 
 # ARGS is the cargo package selection, e.g. `--workspace --exclude <crate>`.
-# Benches stay on `cargo test`: nextest lists a `harness = false` binary by
-# running it with `--list`, and `benches/build_bench.rs` builds the stdlib
-# before it parses arguments, which fails under that invocation (macOS CI).
-# `cargo test --benches` runs them in criterion's test mode exactly as the old
-# `cargo test --all-targets` did (it is what caught BT-3868's Windows stack
-# overflow), and `--doc` runs the doctests nextest does not.
+# `cargo test --doc` runs the doctests nextest does not. The criterion bench
+# smoke is not here: see `test-benches-smoke` (nightly only, BT-3886).
 [unix]
 _test-rust ARGS:
     #!/usr/bin/env bash
@@ -1164,12 +1160,12 @@ _test-rust ARGS:
     echo "🧪 Running Rust tests (fast)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
         cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }} || exit $?
-        rest="--benches"
+        rest=()
     else
-        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier too)"
-        rest="--all-targets"
+        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier and the bench smoke too)"
+        rest=(--all-targets)
     fi
-    for targets in "$rest" "--doc"; do
+    for targets in "${rest[@]}" "--doc"; do
         output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
         echo "$output" | grep -E '^test result:|FAILED|^error' || true
         if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
@@ -1179,9 +1175,22 @@ _test-rust ARGS:
 [windows]
 _test-rust ARGS:
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $output = cargo test --benches --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
+
+# Bench smoke (BT-3886): every criterion bench binary once, in test mode
+# (`cargo test --benches` runs each benchmark function a single time, as the
+# old `cargo test --all-targets` did). It is what caught BT-3868's Windows
+# main-thread stack overflow, so nightly.yml runs it on its macOS/Windows
+# matrix; it is ~5 minutes of serial wall time (`benches/build_bench.rs`
+# cold-builds the stdlib), which is why it is not part of `test-rust`.
+# nextest cannot run these: it lists a `harness = false` binary with
+# `--list`, and build_bench builds the stdlib before it parses arguments.
+test-benches-smoke:
+    @echo "🧪 Running criterion benches in test mode (bench smoke, ~5 min)..."
+    cargo test --benches --quiet
+    @echo "✅ Bench smoke complete"
 
 # Run REPL protocol tests (slow - full pipeline, ~50s)
 test-repl-protocol: build-stdlib
