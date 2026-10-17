@@ -14,7 +14,7 @@
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
-use crate::semantic_analysis::tier2_callee::ThreadingIndex;
+use crate::semantic_analysis::tier2_callee::{ThreadingIndex, stdlib_spawns_block};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -574,6 +574,8 @@ impl ClassHierarchy {
     /// for cross-file hierarchy resolution in Pass 2.
     #[must_use]
     pub fn extract_class_infos(module: &Module) -> Vec<ClassInfo> {
+        // A project unit (build Pass 1, lint): `spawns_block` is only ever set
+        // for stdlib methods, so nothing spawns here.
         let threading = ThreadingIndex::build(&module.classes, &|_, _, _| false);
         module
             .classes
@@ -836,7 +838,14 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        let threading = ThreadingIndex::build(&module.classes, &|_, _, _| false);
+        // The same predicate `build_stdlib` uses for `generated_builtins.rs`, so
+        // compiling the stdlib sources and the generated index cannot disagree
+        // (`stdlib_threading_params_agree_with_the_stdlib_compile` enforces it).
+        let threading = if stdlib_mode {
+            ThreadingIndex::build(&module.classes, &stdlib_spawns_block)
+        } else {
+            ThreadingIndex::build(&module.classes, &|_, _, _| false)
+        };
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.

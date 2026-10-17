@@ -20,7 +20,10 @@ use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
-use beamtalk_core::semantic_analysis::tier2_callee::ThreadingIndex;
+use beamtalk_core::semantic_analysis::tier2_callee::{
+    COLLECTION_SPAWN_SELECTORS, PARALLEL_SPAWN_SELECTORS, TIMER_SPAWN_SELECTORS, ThreadingIndex,
+    stdlib_spawns_block,
+};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -908,28 +911,6 @@ fn mark_spawns_for_selectors(
 /// can skip false-positive warnings.
 fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
     mark_spawns_for_selectors(class_methods, TIMER_SPAWN_SELECTORS, "Timer")
-}
-
-/// `Timer` class methods that run their block in another process.
-const TIMER_SPAWN_SELECTORS: &[&str] = &["after:do:", "every:do:"];
-/// `Parallel` class methods that run their blocks in other processes.
-const PARALLEL_SPAWN_SELECTORS: &[&str] = &["all:", "all:timeout:", "any:"];
-/// `Collection` instance methods that delegate to `Parallel all:`.
-const COLLECTION_SPAWN_SELECTORS: &[&str] =
-    &["parallelCollect:", "parallelCollect:maxConcurrency:"];
-
-/// Whether the stdlib method `class`>>`selector` runs its block argument in
-/// another process (`MethodInfo::spawns_block`). The one table behind the
-/// `mark_*_spawns` markers and `ThreadingIndex::build`, which must exclude
-/// such a method (and so its same-unit forwarders) before its fixpoint.
-fn stdlib_spawns_block(class: &str, class_side: bool, selector: &str) -> bool {
-    let selectors = match (class, class_side) {
-        ("Timer", true) => TIMER_SPAWN_SELECTORS,
-        ("Parallel", true) => PARALLEL_SPAWN_SELECTORS,
-        ("Collection", false) => COLLECTION_SPAWN_SELECTORS,
-        _ => return false,
-    };
-    selectors.contains(&selector)
 }
 
 /// Mark `Parallel` class methods that spawn their block arguments in separate
@@ -3302,16 +3283,6 @@ mod tests {
             code.contains("param_types: vec![]"),
             "Should emit empty param_types. Got: {code}"
         );
-    }
-
-    #[test]
-    fn test_stdlib_spawns_block_matches_the_markers() {
-        assert!(stdlib_spawns_block("Timer", true, "after:do:"));
-        assert!(stdlib_spawns_block("Parallel", true, "all:"));
-        assert!(stdlib_spawns_block("Collection", false, "parallelCollect:"));
-        assert!(!stdlib_spawns_block("Collection", false, "do:"));
-        assert!(!stdlib_spawns_block("Timer", false, "after:do:"));
-        assert!(!stdlib_spawns_block("List", false, "all:"));
     }
 
     #[test]

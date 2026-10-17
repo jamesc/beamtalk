@@ -3581,6 +3581,69 @@ fn stdlib_threading_params(class: &str, selector: &str, class_side: bool) -> Vec
         .clone()
 }
 
+/// The two stdlib paths must agree: the index `build_stdlib` baked into
+/// `generated_builtins.rs` (via `stdlib_spawns_block`) and the one the regular
+/// stdlib compile builds in `add_module_classes` (`stdlib_mode`). Enforces the
+/// "one source" claim for the current stdlib, method by method.
+#[test]
+fn stdlib_threading_params_agree_with_the_stdlib_compile() {
+    let generated = ClassHierarchy::with_builtins();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
+    let mut compared = 0usize;
+    let mut threading = 0usize;
+    for entry in std::fs::read_dir(&dir).expect("stdlib/src readable") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().is_none_or(|e| e != "bt") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).expect("stdlib source readable");
+        let (module, _) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&src));
+        let (Ok(compiled), _) = ClassHierarchy::build_with_options(&module, true) else {
+            panic!("hierarchy build is infallible");
+        };
+        for class in &module.classes {
+            let name = class.name.name.as_str();
+            let (Some(from_source), Some(baked)) =
+                (compiled.get_class(name), generated.get_class(name))
+            else {
+                continue;
+            };
+            for (class_side, defs) in [(false, &class.methods), (true, &class.class_methods)] {
+                for def in defs {
+                    let selector = def.selector.name();
+                    let pick = |info: &ClassInfo| {
+                        let list = if class_side {
+                            &info.class_methods
+                        } else {
+                            &info.methods
+                        };
+                        list.iter()
+                            .find(|m| m.selector == selector)
+                            .map(|m| m.threading_params.clone())
+                    };
+                    let (Some(a), Some(b)) = (pick(from_source), pick(baked)) else {
+                        continue;
+                    };
+                    assert_eq!(
+                        a, b,
+                        "{name}>>{selector} (class side: {class_side}): stdlib compile vs generated_builtins"
+                    );
+                    compared += 1;
+                    threading += usize::from(!a.is_empty());
+                }
+            }
+        }
+    }
+    assert!(
+        compared > 500,
+        "expected to compare the stdlib, got {compared}"
+    );
+    assert!(
+        threading > 10,
+        "expected some threading methods, got {threading}"
+    );
+}
+
 /// Hand-checked against the stdlib sources: each of these forwards or invokes
 /// its block parameter only at the method root.
 #[test]

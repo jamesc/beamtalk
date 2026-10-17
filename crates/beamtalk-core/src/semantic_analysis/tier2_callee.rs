@@ -359,6 +359,31 @@ impl Ctx<'_> {
     }
 }
 
+/// `Timer` class methods that run their block in another process.
+pub const TIMER_SPAWN_SELECTORS: &[&str] = &["after:do:", "every:do:"];
+/// `Parallel` class methods that run their blocks in other processes.
+pub const PARALLEL_SPAWN_SELECTORS: &[&str] = &["all:", "all:timeout:", "any:"];
+/// `Collection` instance methods that delegate to `Parallel all:`.
+pub const COLLECTION_SPAWN_SELECTORS: &[&str] =
+    &["parallelCollect:", "parallelCollect:maxConcurrency:"];
+
+/// Whether the stdlib method `class`>>`selector` runs its block argument in
+/// another process (`MethodInfo::spawns_block`). The one table behind
+/// `build_stdlib`'s `mark_*_spawns` markers and every stdlib
+/// [`ThreadingIndex::build`] (the generated-builtins index and the regular
+/// stdlib compile in `ClassHierarchy::add_module_classes`), which must exclude
+/// such a method (and so its same-unit forwarders) before the fixpoint.
+#[must_use]
+pub fn stdlib_spawns_block(class: &str, class_side: bool, selector: &str) -> bool {
+    let selectors = match (class, class_side) {
+        ("Timer", true) => TIMER_SPAWN_SELECTORS,
+        ("Parallel", true) => PARALLEL_SPAWN_SELECTORS,
+        ("Collection", false) => COLLECTION_SPAWN_SELECTORS,
+        _ => return false,
+    };
+    selectors.contains(&selector)
+}
+
 /// Key of one candidate: `(class, class side, selector, parameter index)`.
 type ParamKey = (EcoString, bool, EcoString, usize);
 /// Key of one method: `(class, class side, selector)`.
@@ -399,6 +424,8 @@ impl ThreadingIndex {
                 }
             }
         }
+        let unit_classes: HashSet<EcoString> =
+            classes.iter().map(|c| c.name.name.clone()).collect();
         // Candidates: every parameter the body mentions at all (an unused
         // parameter has nothing to thread).
         let mut candidates: HashSet<ParamKey> = HashSet::new();
@@ -422,7 +449,7 @@ impl ThreadingIndex {
         loop {
             let failing: Vec<ParamKey> = candidates
                 .iter()
-                .filter(|key| !Self::holds(&methods, &candidates, key))
+                .filter(|key| !Self::holds(&methods, &unit_classes, &candidates, key))
                 .cloned()
                 .collect();
             if failing.is_empty() {
@@ -447,6 +474,7 @@ impl ThreadingIndex {
 
     fn holds(
         methods: &MethodTable<'_>,
+        unit_classes: &HashSet<EcoString>,
         assumed: &HashSet<ParamKey>,
         (class, class_side, selector, index): &ParamKey,
     ) -> bool {
@@ -459,6 +487,7 @@ impl ThreadingIndex {
             return false;
         };
         let ctx = RootCtx {
+            unit_classes,
             assumed,
             class: class_def,
             class_side: *class_side,
@@ -481,6 +510,7 @@ impl ThreadingIndex {
 
 /// Method-root use checker for [`ThreadingIndex`].
 struct RootCtx<'a> {
+    unit_classes: &'a HashSet<EcoString>,
     assumed: &'a HashSet<ParamKey>,
     class: &'a ClassDefinition,
     class_side: bool,
@@ -497,7 +527,8 @@ impl RootCtx<'_> {
     }
 
     /// The `(class, class side)` a send to `receiver` resolves to inside the
-    /// unit: `self`, or a literal class.
+    /// unit: `self`, or a literal class defined in the unit. A class outside
+    /// the unit does not resolve (its callee is unknown, Phase 2).
     fn forward_target(&self, receiver: &Expression) -> Option<(EcoString, bool)> {
         match receiver {
             Expression::Identifier(id) if id.name == "self" => {
@@ -507,7 +538,7 @@ impl RootCtx<'_> {
                 name,
                 package: None,
                 ..
-            } => Some((name.name.clone(), true)),
+            } if self.unit_classes.contains(&name.name) => Some((name.name.clone(), true)),
             _ => None,
         }
     }
@@ -536,9 +567,10 @@ impl RootCtx<'_> {
                     return true;
                 }
                 let sel = selector.name();
-                if let Some(ok) = callable_hom_use(expr, self.name) {
-                    return ok;
-                }
+                // A receiver that resolves inside the unit is judged by its real
+                // callee first (`C do: b` is C's own class-side `do:`, not a
+                // collection fold); only an unresolved receiver is taken as an
+                // opaque collection message.
                 if let Some((class, class_side)) = self.forward_target(receiver) {
                     let mut bare = arguments
                         .iter()
@@ -553,6 +585,9 @@ impl RootCtx<'_> {
                                 .all(|(i, a)| i == position || !self.mentions(a))
                             && self.assumed.contains(&(class, class_side, sel, position));
                     }
+                }
+                if let Some(ok) = callable_hom_use(expr, self.name) {
+                    return ok;
                 }
                 // Any other send: the parameter may only appear inside an
                 // operand that is itself an allowed use (`(b value) + 1`,
@@ -863,6 +898,40 @@ mod tests {
         );
         assert_eq!(idx.params("A", false, "go:"), vec![0]);
         assert_eq!(idx.params("B", true, "run:"), vec![0]);
+    }
+
+    #[test]
+    fn stdlib_spawns_block_matches_the_tables() {
+        assert!(stdlib_spawns_block("Timer", true, "after:do:"));
+        assert!(stdlib_spawns_block("Parallel", true, "all:"));
+        assert!(stdlib_spawns_block("Collection", false, "parallelCollect:"));
+        assert!(!stdlib_spawns_block("Collection", false, "do:"));
+        assert!(!stdlib_spawns_block("Timer", false, "after:do:"));
+        assert!(!stdlib_spawns_block("List", false, "all:"));
+    }
+
+    #[test]
+    fn same_unit_class_receiver_is_judged_by_its_real_callee_not_as_a_collection() {
+        // `C do: b` is a collection-HOM shape, but `C` is in the unit, so its
+        // class-side `do:` decides.
+        let storing = index(
+            "Object subclass: C\n  class do: b => (Erlang lists) foreach: b list: #()\n  \
+             each: b => C do: b\n  fold: b => C inject: 0 into: b\n  \
+             class inject: n into: b => (Erlang lists) foreach: b list: #()\n",
+        );
+        assert!(storing.params("C", true, "do:").is_empty());
+        assert!(inst(&storing, "C", "each:").is_empty());
+        assert!(inst(&storing, "C", "fold:").is_empty());
+        let threading = index(
+            "Object subclass: C\n  class do: b => b value\n  each: b => C do: b\n  \
+             class inject: n into: b => b value: n\n  fold: b => C inject: 0 into: b\n",
+        );
+        assert_eq!(threading.params("C", true, "do:"), vec![0]);
+        assert_eq!(inst(&threading, "C", "each:"), vec![0]);
+        assert_eq!(inst(&threading, "C", "fold:"), vec![0]);
+        // A class outside the unit is still an opaque collection fold.
+        let outside = index("Object subclass: C\n  each: b => Other do: b\n");
+        assert_eq!(inst(&outside, "C", "each:"), vec![0]);
     }
 
     #[test]
