@@ -119,23 +119,76 @@ fn section6_applies_in_value_type_methods_and_to_write_only_blocks() {
 }
 
 #[test]
-fn section6_stored_closure_invoked_directly_is_an_error_outside_actors() {
-    // s4: `b := [t := t + 1]. b value` — reported at the binding.
+fn section6_stored_closure_invoked_directly_is_an_inline_producer_outside_actors() {
+    // s4: `b := [t := t + 1]. b value` has no callee, so ADR 0132 Phase 0b
+    // (I5, BT-3867) evaluates the stored block in place: the same producer as
+    // `[t := t + 1] value`, in a class or value-type method.
     for src in [
         in_class("b := [t := t + 1]\nb value\nt"),
         in_value("b := [t := t + 1]\nb value\nt"),
+        in_class("b := [:n | t := t + n]\nb value: 2\nt"),
+        in_value("b := [:n :m | t := t + n + m]\nb value: 1 value: 2\nt"),
+        in_class("b := [:n | t := t + n]\nb value: 1; value: 2\nt"),
+        in_class("b := [t := t + 1. t]\nr := b value\n#[r, t]"),
+        in_value("b := [t := t + 1. t]\n^b value"),
     ] {
         let diags = adr0131_diagnostics(&src);
-        let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-        assert_eq!(s6.len(), 1, "{src}: {diags:?}");
-        assert_eq!(
-            s6[0].message.as_str(),
-            "block stored in `b` writes outer local `t`, but `value` cannot return the write"
-        );
-        assert_eq!(
-            s6[0].span.start() as usize,
-            src.find("b := [").unwrap(),
-            "the diagnostic points at the binding"
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+}
+
+/// The inlined copies of one stored block share the block's span (see
+/// `inline_send`), so a span-keyed table could answer for one site only. With
+/// sites in different positions the stored form must be judged no more loosely than
+/// the same program written with the block literal at each site, in either order.
+#[test]
+fn section6_inlined_copies_sharing_spans_are_judged_like_literals() {
+    let sites = [
+        "b value",
+        "CvA ap: b value",
+        "t := b value",
+        "(b value) + 1",
+    ];
+    let errors = |src: &str| {
+        adr0131_diagnostics(src)
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count()
+    };
+    for first in sites {
+        for second in sites {
+            let stored = format!("b := [t := t + 1. 1]\n{first}\n{second}\nt");
+            let literal =
+                format!("{first}\n{second}\nt").replace("b value", "[t := t + 1. 1] value");
+            for (mk, name) in [
+                (in_class as fn(&str) -> String, "class"),
+                (in_value as fn(&str) -> String, "value"),
+            ] {
+                let (s, l) = (errors(&mk(&stored)), errors(&mk(&literal)));
+                // The stored form may be stricter (a guard refuses it), never
+                // looser: accepted stored with a rejected literal is a miscompile.
+                assert!(
+                    s > 0 || l == 0,
+                    "{name}: {first} / {second}: stored {s} errors, literal {l}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn section6_stored_closure_in_a_position_the_producer_rejects_keeps_its_error() {
+    // A `value` inside another block is not promotable (it compiles through a
+    // path with no tuple unpacking), and a block that is never sent `value`
+    // escapes.
+    for src in [
+        in_class("b := [t := t + 1]\n#(1) do: [:e | b value]\nt"),
+        in_class("b := [t := t + 1]\nb"),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error),
+            "{src}: {diags:?}"
         );
     }
 }
@@ -850,7 +903,6 @@ fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
     // operands, and on a receiver other than the `Result` class.
     for body in [
         "CvA ap: [Result tryDo: [t := t + 1. 1]]\nt",
-        "blk := [Result tryDo: [t := t + 1. 1]]\nblk value\nt",
         "r := Set tryDo: [t := t + 1. 1]\nt",
     ] {
         for src in [in_class(body), in_value(body)] {
@@ -921,6 +973,12 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
 /// allow-set and with it the pending allow-set shapes.
 #[test]
 fn adr0131_probe_matrix_pins() {
+    // The contexts whose last pending shape was lowered, so they have no
+    // pending fixture left (the actor column's last shape, s1, moved to the
+    // compiled fixture with BT-3798). Pinned explicitly (BT-3855): a context
+    // not listed must have its pending fixture, so deleting one by accident
+    // fails here instead of skipping the context.
+    const NO_PENDING_FIXTURE: &[&str] = &["class", "value", "actor"];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
@@ -930,15 +988,14 @@ fn adr0131_probe_matrix_pins() {
         let compiled = format!("adr0131local_rebind_{context}.bt");
         let diags = adr0131_diagnostics(&read(&compiled));
         assert!(diags.is_empty(), "{compiled}: {diags:?}");
-        // (The actor column has no pending fixture left: its last shape, s1,
-        // moved to the compiled fixture with BT-3798.)
-        if context == "actor" {
-            continue;
-        }
 
         let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
-        // A context whose last pending shape was lowered has no file left.
-        if !root.join(&pending).exists() {
+        if NO_PENDING_FIXTURE.contains(&context) {
+            assert!(
+                !root.join(&pending).exists(),
+                "{pending} exists, but `{context}` is pinned as having no pending \
+                 fixture: drop it from NO_PENDING_FIXTURE"
+            );
             continue;
         }
         let src = read(&pending);
@@ -970,14 +1027,22 @@ fn adr0131_probe_matrix_pins() {
     );
 }
 
-/// ADR 0131 §6 is permanent for s4 in class and value-type methods (a
-/// stored closure invoked directly): the `BUnit` matrix no longer has a cell
-/// for it, so it is pinned here.
+/// ADR 0131 probe s4 in class and value-type methods (a stored closure
+/// invoked directly) was a permanent §6 error until ADR 0132 Phase 0b (I5,
+/// BT-3867): the stored block is evaluated in place, so it is accepted. A
+/// stored block passed as an argument stays an error (I4/I6).
 #[test]
-fn adr0131_probe_s4_is_a_permanent_section6_error() {
+fn adr0131_probe_s4_is_an_inline_producer() {
     for src in [
         "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
         "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
+    ] {
+        let diags = adr0131_diagnostics(src);
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+    }
+    for src in [
+        "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    P hom: b\n    t\n",
+        "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    #(1) do: b\n    t\n",
     ] {
         let diags = adr0131_diagnostics(src);
         assert_eq!(
@@ -2217,36 +2282,139 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
         "local in a branch",
         "b := [t := t + 1]\ntrue ifTrue: [b] ifFalse: [nil]",
     ),
+    // BT-3859: a local that aliases a block-valued local, directly or through
+    // a conditional arm, counts as that block.
+    ("returned alias", "b := [t := t + 1]\nc := b\n^c"),
+    ("alias in a literal", "b := [t := t + 1]\nc := b\n#[c]"),
+    (
+        "alias of a branch value",
+        "b := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nc := b\n^c",
+    ),
+    (
+        "alias through a branch",
+        "b := [t := t + 1]\nc := true ifTrue: [b] ifFalse: [nil]\n^c",
+    ),
+    (
+        "alias of an arm-local binding",
+        "c := true ifTrue: [b := [t := t + 1]. b] ifFalse: [nil]\n^c",
+    ),
+    ("alias as the last statement", "b := [t := t + 1]\nc := b"),
+    (
+        "branch value as the last statement",
+        "b := true ifTrue: [[t := t + 1]] ifFalse: [[0]]",
+    ),
+    (
+        "reassigned local as the last statement",
+        "b := nil\nb := [t := t + 1]",
+    ),
+];
+
+/// The [`ESCAPE_SHAPES`] whose block is the value of the method body's last
+/// statement, a local assignment: an actor method answers `nil` there, not
+/// the block (BT-3882), so in an actor the block is dropped unrun and the
+/// error says so rather than "returned" (BT-3859).
+/// Each is `(name, send_value)`: whether the hint may advise sending the
+/// local `value` before the method ends, which only runs the block (and
+/// threads its write) for a block literal bound directly, a Tier 2 local
+/// codegen promotes; an alias, a value bound through an arm and a local
+/// assigned more than once are not one.
+const ACTOR_DROPPED_SHAPES: &[(&str, bool)] = &[
+    ("returned via last-statement assignment", true),
+    ("alias as the last statement", false),
+    ("branch value as the last statement", false),
+    ("reassigned local as the last statement", false),
+];
+
+/// BT-3859: the [`ESCAPE_SHAPES`] whose block writes `u`, a local first bound
+/// in a conditional arm the value passes through, rather than the method
+/// local `t`. Probed before the fix: each compiled, and the first `value` of
+/// the answer raised `captures mutable state` in class, value-type and actor
+/// methods.
+const ARM_LOCAL_ESCAPE_SHAPES: &[(&str, &str)] = &[
+    (
+        "arm-local write in a returned binding",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\n^b",
+    ),
+    (
+        "arm-local write in a binding in a literal",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\n#[b]",
+    ),
+    (
+        "arm-local write through an alias",
+        "b := true ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]\nc := b\n^c",
+    ),
+    (
+        "arm-local write in a nested arm",
+        "b := true ifTrue: [u := 0. false ifTrue: [0] ifFalse: [[u := u + 1]]] ifFalse: [nil]\n^b",
+    ),
 ];
 
 #[test]
 fn section6_escaping_blocks_are_errors_in_every_context() {
-    for (name, body) in ESCAPE_SHAPES {
+    let rows = ESCAPE_SHAPES
+        .iter()
+        .map(|&(name, body)| (name, body, "t"))
+        .chain(
+            ARM_LOCAL_ESCAPE_SHAPES
+                .iter()
+                .map(|&(name, body)| (name, body, "u")),
+        );
+    for (name, body, local) in rows {
         for (context, src) in [
             ("class", in_class(body)),
             ("value", in_value(body)),
             ("actor", in_actor(body)),
         ] {
+            let dropped_row = ACTOR_DROPPED_SHAPES
+                .iter()
+                .find(|(shape, _)| *shape == name)
+                .filter(|_| context == "actor");
+            let dropped = dropped_row.is_some();
             let diags = adr0131_diagnostics(&src);
             let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
             assert_eq!(s6.len(), 1, "{name} in {context}: {src}\n{diags:?}");
             let d = s6[0];
             assert_eq!(d.severity, Severity::Error, "{name} in {context}");
             assert!(
-                d.message.contains("writes outer local `t`")
+                d.message.contains(&format!("writes outer local `{local}`"))
                     && d.message.contains("nothing can return the write"),
                 "{name} in {context}: {}",
                 d.message
             );
-            let hint = d.hint.as_deref().unwrap_or_default();
-            assert!(
-                hint.contains("`self.t := self.t + 1`") && hint.contains("assign it where"),
-                "{name} in {context}: {hint}"
+            assert_eq!(
+                d.message
+                    .contains("an actor method drops (it answers `nil`)"),
+                dropped,
+                "{name} in {context}: {}",
+                d.message
             );
+            assert!(
+                !dropped || !d.message.contains("returned from the method"),
+                "{name} in {context}: {}",
+                d.message
+            );
+            let hint = d.hint.as_deref().unwrap_or_default();
+            let field = format!("`self.{local} := self.{local} + 1`");
+            let send_value = "send it `value` before the method ends";
+            match dropped_row {
+                Some(&(_, advises_value)) => {
+                    assert!(
+                        hint.contains(&field)
+                            && hint.contains("dropped when the method ends")
+                            && hint.contains(send_value) == advises_value
+                            && !hint.contains("assign it where"),
+                        "{name} in {context}: {hint}"
+                    );
+                }
+                None => assert!(
+                    hint.contains(&field) && hint.contains("assign it where"),
+                    "{name} in {context}: {hint}"
+                ),
+            }
             assert!(
                 d.notes
                     .iter()
-                    .any(|n| n.message.contains("`t` is written here")),
+                    .any(|n| n.message.contains(&format!("`{local}` is written here"))),
                 "{name} in {context}"
             );
         }
@@ -2273,6 +2441,24 @@ fn section6_escape_points_at_the_block_or_its_binding() {
             .notes
             .iter()
             .any(|n| n.message.contains("`b` escapes here")),
+        "{diags:?}"
+    );
+
+    // BT-3859: an alias is reported at the block's own binding, naming the
+    // alias that escapes.
+    let src = in_class("b := [t := t + 1]\nc := b\n^c");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].span.start() as usize, src.find("b := [").unwrap());
+    assert!(
+        diags[0].message.contains("block stored in `c`"),
+        "{diags:?}"
+    );
+    assert!(
+        diags[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("`c` escapes here")),
         "{diags:?}"
     );
 
@@ -2368,6 +2554,10 @@ fn section6_values_that_are_not_returned_are_not_escapes() {
         "x := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nnil",
         "true ifTrue: [t := t + 1] ifFalse: [t := 0]",
         "b := [t := t + 1] value",
+        // BT-3859: an alias rebound before it escapes, and a block parameter
+        // that shadows the block-valued local.
+        "b := [t := t + 1]\nc := b\nc := nil\n^c",
+        "b := [t := t + 1]\nc := nil\n#(1) do: [:b | c := b]\n^c",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             assert_eq!(
@@ -3134,4 +3324,22 @@ fn adr0131_nested_assign_pins() {
             );
         }
     }
+}
+
+/// BT-3859 review: an actor's dropped alias (`c := b` as the last statement)
+/// is not a Tier 2 local codegen promotes, so its hint gives only the field
+/// advice, never "send it `value`".
+#[test]
+fn section6_actor_dropped_alias_hint_gives_only_the_field_advice() {
+    let src = in_actor("b := [t := t + 1]\nc := b");
+    let diags = adr0131_diagnostics(&src);
+    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+    assert_eq!(s6.len(), 1, "{diags:?}");
+    assert_eq!(
+        s6[0].hint.as_deref(),
+        Some(
+            "the block is dropped when the method ends, so `t` never changes: keep the state in \
+             a field (`self.t := self.t + 1`)"
+        )
+    );
 }

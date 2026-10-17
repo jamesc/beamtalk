@@ -5,7 +5,7 @@ Accepted (2026-10-08)
 
 ## Implementation Tracking
 
-**Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743)
+**Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (closed 2026-10-17 at a boundary); open follow-ups: [BT-3883](https://linear.app/beamtalk/issue/BT-3883)
 **Status:** All phases merged. The Phase 0 position diagnostic is retained (see Remaining work at close-out); the ADR's Status line is unchanged.
 
 | Phase | Issue | Description | Size | PR |
@@ -32,12 +32,16 @@ Related fixes that landed inside the epic: [#4232](https://github.com/jamesc/bea
 
 ### Remaining work at close-out
 
-Every phase above is merged and the user-facing behaviour is documented in `beamtalk-language-features.md` § Control Flow and Mutations. The epic's goal, *no silent wrong answer at any point*, holds. The goal *every position and every context lowers through a producer, so the Phase 0 position diagnostic is gone* does not yet hold. The ADR's Status stays **Accepted** until [BT-3841](https://linear.app/beamtalk/issue/BT-3841) closes. What remains, in priority order, verified against the code on `main` at the time of writing:
+Every phase above is merged and the user-facing behaviour is documented in `beamtalk-language-features.md` § Control Flow and Mutations. The epic's goal, *no silent wrong answer at any point*, holds. The goal *every position and every context lowers through a producer, so the Phase 0 position diagnostic is gone* does not yet hold. The ADR's Status stays **Accepted** until [BT-3841](https://linear.app/beamtalk/issue/BT-3841) closes.
+
+**Boundary (2026-10-17).** [BT-3743](https://linear.app/beamtalk/issue/BT-3743) is closed and its open children moved to [BT-3883](https://linear.app/beamtalk/issue/BT-3883). The epic was planned as ten issues and grew to 57, because every run of the measurement harness surfaced shapes that still drop writes and each one was filed as its own issue; per-issue cycle time was about 2.5x ADR 0130's. The rule from here: a newly measured shape is a row in the checked-in measured tables (`adr0131_statement_measured.tsv`, `adr0131_operand_measured.tsv`) and, where user-visible, a `PIN-BUG` case citing BT-3841, **not** a new issue, unless it is reachable from real stdlib or example code or answers wrong without a compile error. A shape that is a Tier 2 block reaching a higher-order method belongs to ADR 0132's §6 inventory, not here. Items 1 to 10 below keep their issue numbers; their live parent is BT-3883.
+
+What remains, in priority order, verified against the code on `main` at the time of writing:
 
 1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841): the Phase 0 position diagnostic is retained** (`DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`, message "`X` writes outer local `t`, but as <position> in <context> the write is not threaded back yet (BT-3743)"). Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
 2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833): three legacy write-back paths are still alive**: the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`. The "delete the remaining write-back paths" goal of Phases 3b and 3c is therefore only partly met.
 3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839)** (done): a `Dictionary` lookup whose handler writes an outer local is a producer in a loop or fold body in class, value-type and actor methods (`keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]`), under the same site rule as a conditional (an actor fold body's value-bearing sites stay errors, `is_actor_fold_value_site`). A lookup inside a closure that is not inlined keeps its §6 error ([BT-3862](https://linear.app/beamtalk/issue/BT-3862)), and a `detect:ifNone:` handler write in an actor loop or fold body keeps its `UnmigratedLocalThreading` error (measured `bad` in `adr0131_statement_probes.tsv`; [BT-3861](https://linear.app/beamtalk/issue/BT-3861)); class and value-type methods lower it since BT-3841. The verifier check that a fold body returns its accumulator is [BT-3863](https://linear.app/beamtalk/issue/BT-3863).
-4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823): REPL and `match:` leftovers.** An arm or loop nested inside a REPL `on:do:`/`Result tryDo:` is still a compile error (the o7/o8 REPL pins), because REPL arms are not frames. A `match:` arm that writes an outer local is a compile error rather than `match:` being a producer (the REPL is exempt from that error and unprobed).
+4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823)** (Done, [#4346](https://github.com/jamesc/beamtalk/pull/4346)): REPL conditional arms, `on:do:`/`ensure:` blocks, `Result tryDo:` blocks and evaluated block literals are producer frames (the o7/o8 REPL pins flipped). Still open from it: a construct inside a REPL loop or fold body ([BT-3876](https://linear.app/beamtalk/issue/BT-3876)), `match:` arms as producers ([BT-3875](https://linear.app/beamtalk/issue/BT-3875); a `match:` arm write is the value-position compile error of [BT-3864](https://linear.app/beamtalk/issue/BT-3864)), and a block literal sent a `value` selector of another arity at the REPL root ([BT-3881](https://linear.app/beamtalk/issue/BT-3881)).
 5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
 6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
 7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)** (done): `Dictionary` defines `at:ifPresent:`/`at:ifPresent:ifAbsent:`, and their handlers are producers like `at:ifAbsent:` (the present handler's parameter is bound to the found value). `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors permanently by decision, since an immutable `Dictionary` has no such behaviour. The three `Dictionary` lookups are producers only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
@@ -721,9 +725,22 @@ of these raised the same `Cannot call 'value' on Block ... captures mutable
 state` at the first `value` in class, value-type and actor methods (the
 actor's last-statement `b := [...]` answered `nil`). Still not seen: a local
 rebound to something else in only one branch before it escapes (any rebind
-forgets the block), a local that is the value of a conditional arm (an
-alias, `c ifTrue: [b] ...` stored in another local), and a block that is the
-value of a non-inlined send.
+forgets the block), and a block that is the value of a non-inlined send.
+
+BT-3859 closes two gaps in that binding map. A block bound through a
+conditional arm whose write targets a local first bound in that arm
+(`b := c ifTrue: [u := 0. [u := u + 1]] ifFalse: [nil]. ^b`) had its writes
+taken after the arm's scope was gone, so `u` looked like the block's own: the
+walker now records each value block's write while it is at the block, the
+same walk the literal path reports from. And a local that aliases a
+block-valued local (`c := b. ^c`, `c := x ifTrue: [b] ifFalse: [nil]`, an
+arm-local `b` included) now counts as that block, reported at the block's own
+binding. A current limitation, not specified semantics: an actor method
+answers `nil` for a last-statement local assignment where class and
+value-type methods answer the value (a bug tracked in BT-3882, pinned as
+`PIN-BUG BT-3882` in `adr0131section6escape_test.bt`), so in an actor a
+block that is that value is dropped unrun rather than returned; §6 still
+rejects it, saying the block never runs, until that bug is fixed.
 
 **A `whileTrue:`/`whileFalse:` condition block (BT-3782).** The loop's
 *body* is a §1 construct, but its keyword *condition* is a block receiver

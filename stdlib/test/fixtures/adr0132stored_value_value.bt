@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3867 (ADR 0132 Phase 0b, I5): a stored Tier 2 block sent `value` in a
+// value-type method is an inline producer over a fresh map: there is no callee, so
+// the write comes back through the enclosing frame's `LocalRebind`s. The
+// columns are adr0132stored_value_{class,value,actor}.bt; the expected answers
+// are in stdlib/test/adr0132stored_value_test.bt.
+
+Value subclass: Adr0132StoredValueValue
+
+  stValue =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    t
+
+  stTwice =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    b value
+    t
+
+  stArg =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 5
+    t
+
+  stArg2 =>
+    t := 0
+    b := [:a :c | t := t + a + c]
+    b value: 1 value: 2
+    t
+
+  stAssign =>
+    t := 0
+    b := [
+      t := t + 5
+      7
+    ]
+    r := b value
+    #[r, t]
+
+  stReturn =>
+    t := 0
+    b := [
+      t := t + 1
+      t
+    ]
+    ^b value
+
+  stLast =>
+    t := 0
+    b := [
+      t := t + 1
+      t
+    ]
+    b value
+
+  stCascade =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 1; value: 2
+    t
+
+  stCascadeAssign =>
+    t := 0
+    b := [:n |
+      t := t + n
+      t
+    ]
+    r := b value: 1; value: 2
+    #[r, t]
+
+  stTwoLocals =>
+    x := 0
+    y := 10
+    b := [
+      x := x + 1
+      y := y + 2
+    ]
+    b value
+    #[x, y]
+
+  stMixed =>
+    t := 0
+    b := [:n |
+      t := t + n size
+      t
+    ]
+    b value: "abcd"
+    r := (b value: #(1, 2)) + 10
+    #[t, r]
+
+  stNestedLocal =>
+    t := 0
+    b := [
+      #(1, 2)
+        do: [:e |
+          y := e
+          y
+        ]
+      t := t + 1
+    ]
+    b value
+    y := 5
+    #[t, y]

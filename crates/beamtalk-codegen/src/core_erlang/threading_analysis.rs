@@ -293,7 +293,10 @@ impl CoreErlangGenerator {
     /// (`ClassMethodDefect::StateAccLoopWithoutLocals`), so it lowers as a
     /// plain loop instead.
     ///
-    /// Every loop and fold gate reads this ([`Self::loop_body_needs_threading`],
+    /// BT-3834: the gate of every counted loop and fold lowering — whether
+    /// `body` is lowered with mutation threading (a `ThreadingPlan`) rather
+    /// than as a plain loop. Every loop and fold gate reads this directly
+    /// (the counted loops, the list ops, `eachWithIndex:`/`do:separatedBy:`,
     /// `while_loop_threads`) and so does the statement classifier
     /// (`control_flow_has_mutations`) for a loop or fold's block arguments,
     /// so the lowering and the caller that unpacks it cannot disagree.
@@ -312,14 +315,6 @@ impl CoreErlangGenerator {
                 .body_threaded_families(body, &self.eligible_families())
                 .as_slice()
                 .is_empty()
-    }
-
-    /// BT-3834: the gate of every counted loop and fold lowering — whether
-    /// `body` is lowered with mutation threading (a `ThreadingPlan`) rather
-    /// than as a plain loop. The same rule as the statement classifier's
-    /// ([`Self::loop_body_has_carried_mutations`]), by construction.
-    pub(in crate::core_erlang) fn loop_body_needs_threading(&self, body: &Block) -> bool {
-        self.loop_body_has_carried_mutations(body)
     }
 
     /// Recursively scans an expression for list op message sends with

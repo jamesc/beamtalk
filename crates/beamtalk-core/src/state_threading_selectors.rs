@@ -374,6 +374,17 @@ pub fn producer_handler_arg_index(sel: &str, arity: usize) -> Option<usize> {
     }
 }
 
+/// BT-3855: whether the handler of a send of `sel` with `arity` arguments
+/// ([`producer_handler_arg_index`]) runs *inside the producer's body frame*,
+/// as the arm of a conditional statement of the body, rather than once after
+/// the fold. `do:separatedBy:`'s separator is: codegen desugars the send to an
+/// `inject:into:` fold whose body starts with `first ifFalse: [separator]`.
+/// `detect:ifNone:`'s `ifNone:` handler is not.
+#[must_use]
+pub fn producer_handler_is_body_arm(sel: &str, arity: usize) -> bool {
+    matches!((sel, arity), ("do:separatedBy:", 2))
+}
+
 /// Whether `sel` is a counted loop in [`producer_body_arg_index`]'s table
 /// (`timesRepeat:`, `to:do:`, `to:by:do:`).
 #[must_use]
@@ -773,6 +784,16 @@ mod tests {
             assert!(is_state_threaded_block_arg(sel, 1));
             assert!(!is_state_threaded_block_arg(sel, 2));
         }
+    }
+
+    #[test]
+    fn only_the_separator_is_a_body_arm_handler() {
+        // BT-3855: `do:separatedBy:`'s separator runs inside the fold body;
+        // `detect:ifNone:`'s handler runs once after the fold.
+        assert!(producer_handler_is_body_arm("do:separatedBy:", 2));
+        assert!(!producer_handler_is_body_arm("detect:ifNone:", 2));
+        assert!(!producer_handler_is_body_arm("do:separatedBy:", 1));
+        assert!(!producer_handler_is_body_arm("do:", 1));
     }
 
     #[test]
