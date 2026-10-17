@@ -57,7 +57,7 @@ use crate::semantic_analysis::block_facts::{
     local_threading_construct, loop_body_producer_sites, operand_producer_writes,
     outer_local_writes, producer_body_block, receiver_statically_not_dictionary,
     repl_operand_sites, root_producer_writes, sequenced_operand_sites, stored_block_var_uses,
-    value_blocks,
+    value_blocks, value_position_local_assignments,
 };
 use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
@@ -82,6 +82,19 @@ pub(crate) enum MethodContext {
     Actor,
     /// A module-level expression (a REPL input or a script).
     Repl,
+}
+
+impl MethodContext {
+    /// The [`RootMethodKind`] of a method body of this context; `None` for a
+    /// module-level expression list.
+    fn root_method_kind(self) -> Option<RootMethodKind> {
+        match self {
+            Self::Class => Some(RootMethodKind::Class),
+            Self::ValueType => Some(RootMethodKind::ValueType),
+            Self::Actor => Some(RootMethodKind::Actor),
+            Self::Repl => None,
+        }
+    }
 }
 
 impl fmt::Display for MethodContext {
@@ -1062,6 +1075,39 @@ fn check_body(
     walker.receivers = Some(receivers.clone());
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
+    report_value_position_assignments(context, body, diagnostics);
+}
+
+/// ADR 0131 stopgap (BT-3864): a local assignment in value position
+/// ([`value_position_local_assignments`]) compiles to its value only and never
+/// rebinds the local (BT-3860), so it is an error in every context, the REPL
+/// included. An assignment a `match:`-arm error already reports
+/// ([`Walker::report_match_arm_writes`]) is not reported twice.
+fn report_value_position_assignments(
+    context: MethodContext,
+    body: &[ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for found in value_position_local_assignments(body, context.root_method_kind()) {
+        if diagnostics.iter().any(|d| d.span == found.span) {
+            continue;
+        }
+        let name = &found.name;
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "assignment to local `{name}` is used as a value in {context}, \
+                     but it would not rebind `{name}` (BT-3860)"
+                ),
+                found.span,
+            )
+            .with_hint(format!(
+                "move the assignment into its own statement before this one, \
+                 then use `{name}` here"
+            ))
+            .with_category(DiagnosticCategory::ValuePositionLocalAssignment),
+        );
+    }
 }
 
 /// The `(selector, parameter index)` pairs of `class`'s instance methods that
@@ -1708,12 +1754,7 @@ impl<'d> Walker<'d> {
 
     /// The [`RootMethodKind`] of the method being walked, `None` in the REPL.
     fn root_method_kind(&self) -> Option<RootMethodKind> {
-        match self.context {
-            Class => Some(RootMethodKind::Class),
-            ValueType => Some(RootMethodKind::ValueType),
-            Actor => Some(RootMethodKind::Actor),
-            Repl => None,
-        }
+        self.context.root_method_kind()
     }
 
     /// Whether `expr`, a conditional or `on:do:`/`ensure:` at a site of the

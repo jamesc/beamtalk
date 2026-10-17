@@ -663,6 +663,12 @@ pub enum DiagnosticCategory {
     /// write back yet (not a statement, and not in the allow-set of
     /// positions that work today). An error that BT-3743 removes.
     UnmigratedLocalThreading,
+    /// ADR 0131 stopgap (BT-3864): a local assignment in value position (an
+    /// operand, a literal element, another assignment's value, a
+    /// conditional's receiver, …), whose write codegen drops. An error until
+    /// BT-3860 makes the shape a producer; the fix is to hoist the
+    /// assignment into its own statement.
+    ValuePositionLocalAssignment,
     /// A codegen-internal invariant violation caught by the `ThreadedIr`
     /// verifier (ADR 0111 amendment, BT-3724). Always a *warning* whose
     /// message starts with `internal:`: it flags a compiler bug (the emitted

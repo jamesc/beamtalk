@@ -2865,7 +2865,7 @@ t                                             // => 0, the write inside the rais
 
 This is a deliberate departure from Pharo, where temporaries are shared cells and a write made before the raise survives. On BEAM the protected region's locals are a value that is returned only when the block completes. A block that does not raise keeps all its writes.
 
-**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. (The REPL is exempt from this error and is not covered by this rule.)
+**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. (The REPL is exempt from this error; there an arm's local assignment is rejected by the value-position rule below.)
 
 **Position errors.** Some combinations of a construct, the position it sits in and the method kind are not yet lowered as producers and are rejected with a second, temporary error rather than being allowed to drop the write:
 
@@ -2875,6 +2875,25 @@ error: `eachWithIndex:` writes outer local `t`, but as a statement inside a cond
 ```
 
 These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly statements nested inside a conditional arm, protected body, handler or loop body of another construct (`eachWithIndex:`, `do:separatedBy:`, `detect:ifNone:` in an actor method, and an `ifNil:`/`and:` family member or an actor loop in an arm; a `[...] value` with no arguments is a producer wherever it sits and is not in this list), and a REPL conditional arm or loop nested inside a REPL `on:do:`/`tryDo:`. The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: a construct inside a plain closure (`^xs do: [...]` inside a closure in a class or value-type method), a cascade, and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
+
+**Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, does not rebind the local yet ([BT-3860](https://linear.app/beamtalk/issue/BT-3860)), so it is a compile error (`ValuePositionLocalAssignment`) in class, value-type and actor methods and in the REPL. That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), and a `match:` arm, inside loop and fold bodies as well:
+
+```text
+error: assignment to local `t` is used as a value in a class method, but it would not rebind `t` (BT-3860)
+  hint: move the assignment into its own statement before this one, then use `t` here
+```
+
+The rewrite is to hoist the assignment into its own statement and use the local:
+
+```beamtalk
+// Rejected:  #(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
+#(1, 2) do: [:x |
+  t := t + 1
+  t > 1 ifTrue: [u := 9]
+]
+```
+
+A statement-position assignment (`t := t + 1`, also inside any block), a field assignment in any position (`r := (self.n := 5) + 1`) and an assignment inside a block literal that is itself a value (`x := [:k | t := k] value: 1`) are not affected. A parenthesised assignment statement (`(t := t + 1)`) counts as a statement only where it is followed by another statement in a value-type or actor method body, a conditional arm or a `[...] value` body; elsewhere drop the parentheses. Like the position errors above, this is a known limitation that BT-3860 removes, not a language rule.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
