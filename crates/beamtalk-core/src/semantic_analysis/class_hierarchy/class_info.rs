@@ -68,6 +68,16 @@ pub struct MethodInfo {
     /// because they execute in a different process and cannot re-enter the
     /// actor's own call-stack (`calling_self` dispatch does not apply).
     pub spawns_block: bool,
+    /// The argument positions (0-based) this method threads a Tier 2 block
+    /// through, i.e. the positions its threaded entry accepts a stateful block
+    /// at (ADR 0132 §1). Empty when the method has no threaded entry.
+    ///
+    /// The cross-file record of the same answer codegen emits into
+    /// `__beamtalk_meta/0` as `tier2_methods`/`tier2_class_methods`, so the
+    /// compiler can ask "does this known class's method thread" for a class in
+    /// another file (the precedent is `spawns_block`). Empty everywhere until
+    /// ADR 0132 Phase 1b populates it.
+    pub threading_params: Vec<usize>,
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).
     pub return_type: Option<DeclaredType>,
@@ -359,6 +369,7 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters
@@ -384,6 +395,7 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters

@@ -591,6 +591,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::parse("Boolean")),
                 param_types: vec![Some(DeclaredType::parse("ClassAlias"))],
                 doc: None,
@@ -691,6 +692,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
+            threading_params: Vec::new(),
             return_type: Some(DeclaredType::parse("Boolean")),
             param_types: vec![Some(DeclaredType::parse(
                 "#temporary | #transient | #permanent",

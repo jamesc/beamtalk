@@ -142,7 +142,11 @@ main([]) ->
         "shape_skew_cart",
         "shape_skew_match_cart",
         "shape_skew_local_only_cart",
-        "shape_skew_reload_cart"
+        "shape_skew_reload_cart",
+        %% BT-3868 (ADR 0132 Phase 0c) - the tier2_methods /
+        %% tier2_class_methods Rust/Erlang conformance row
+        %% (test/fixtures/tier2_meta_conformance.json).
+        "threaded_meta_fixture"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

@@ -413,7 +413,9 @@ module 'actor_conditional_field_mutations' ['start_link'/1, 'start_link'/2, 'ini
       'method_info' => ~{'incrementIf:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'decrementIfNot:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'setByFlag:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'setTagIfPresent:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'localConditional:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~,
+      'tier2_methods' => ~{}~,
+      'tier2_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -454,7 +456,9 @@ module 'actor_conditional_field_mutations' ['start_link'/1, 'start_link'/2, 'ini
       'method_info' => ~{'incrementIf:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'decrementIfNot:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'setByFlag:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'setTagIfPresent:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'localConditional:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~,
+      'tier2_methods' => ~{}~,
+      'tier2_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~
