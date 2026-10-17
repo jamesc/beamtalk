@@ -1379,7 +1379,13 @@ fn deny_set_block_local_writes_are_judged_by_the_measurement() {
             ),
             true,
         ),
-        // ... but an arm inside a `whileTrue:` body answers right (`armLoop`).
+        // ... but a `do:` body inside a counted-loop body answers right
+        // (`iterTimes`), and so does an arm inside a `whileTrue:` body
+        // (`armLoop`).
+        (
+            format!("2 timesRepeat: [#(1, 2) do: [:z | u := 0. {detect}. t := u]]\nt"),
+            false,
+        ),
         (
             format!(
                 "i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"

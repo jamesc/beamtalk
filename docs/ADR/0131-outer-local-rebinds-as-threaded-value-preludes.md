@@ -1078,9 +1078,13 @@ review added six containers with a loop as the innermost block (`loopArm`, `time
 `loopIter`, `timesIter`, `loopLoop`, `timesLoop`, 684 cells): every class, value-type
 and actor cell answers right except the 36 actor detect ones, which answer wrong. All 84
 are rejected by the `deny_block_local` rows of `DENY_SET` (`crosses: false`, keyed on
-the innermost role too) until BT-3878 lowers those folds as producers. The rows are
-coarser than the measurement where it is silent: a counted-loop body at any depth, and
-the innermost protected-body, handler and loop rows under the list-op and
+the innermost role too) until BT-3878 lowers those folds as producers. A second review
+round added the reverse nesting, a `do:` body, a `collect:` body or an evaluated block
+innermost in a `whileTrue:` or `timesRepeat:` body (`iterLoop`, `collLoop`, `valLoop`,
+`iterTimes`, `collTimes`, `valTimes`, 684 cells): every cell answers right in every
+context, so those stay accepted. The rows are coarser than the measurement where it is
+silent: an arm in a counted-loop body, and the innermost protected-body, handler and loop
+rows under the list-op and
 evaluated-block outer roles (and the protected-body and handler ones under a `do:` body
 or a loop), inferred from the measured shapes that share their lowering. The `iterIter` /
 `armIterIter` actor cells above answer right since. The re-measurement also found twelve

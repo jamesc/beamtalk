@@ -4,30 +4,30 @@
 # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
 # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
 # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
-statement	block-value	actor	100	0	0
-statement	block-value	class	110	0	0
-statement	block-value	value	88	0	0
-statement	detect-ifnone	actor	72	64	28
-statement	detect-ifnone	class	184	0	0
-statement	detect-ifnone	value	164	0	0
-statement	detect-plain	actor	36	32	14
-statement	detect-plain	class	92	0	0
-statement	detect-plain	value	82	0	0
-statement	enumeration	actor	182	0	0
-statement	enumeration	class	202	0	0
-statement	enumeration	value	170	0	0
+statement	block-value	actor	112	0	0
+statement	block-value	class	122	0	0
+statement	block-value	value	100	0	0
+statement	detect-ifnone	actor	96	64	28
+statement	detect-ifnone	class	208	0	0
+statement	detect-ifnone	value	188	0	0
+statement	detect-plain	actor	48	32	14
+statement	detect-plain	class	104	0	0
+statement	detect-plain	value	94	0	0
+statement	enumeration	actor	206	0	0
+statement	enumeration	class	226	0	0
+statement	enumeration	value	194	0	0
 statement	evaluated-block	actor	76	0	0
 statement	evaluated-block	class	76	0	0
 statement	evaluated-block	value	76	0	0
-statement	keyed-do	actor	82	0	0
-statement	keyed-do	class	92	0	0
-statement	keyed-do	value	82	0	0
-statement	other	actor	1010	0	0
-statement	other	class	1120	0	0
-statement	other	value	938	0	0
-statement	satisfy	actor	82	0	0
-statement	satisfy	class	92	0	0
-statement	satisfy	value	82	0	0
+statement	keyed-do	actor	94	0	0
+statement	keyed-do	class	104	0	0
+statement	keyed-do	value	94	0	0
+statement	other	actor	1142	0	0
+statement	other	class	1252	0	0
+statement	other	value	1070	0	0
+statement	satisfy	actor	94	0	0
+statement	satisfy	class	104	0	0
+statement	satisfy	value	94	0	0
 statement-group	arm-loop-mix	detect-ifnone	actor	8
 statement-group	arm-loop-mix	detect-plain	actor	4
 statement-group	handler	detect-ifnone	actor	12

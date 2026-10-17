@@ -101,7 +101,8 @@ pub fn container_group(container: &str) -> &'static str {
         "handler" | "ensBlk" => "handler",
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "iterIter" => "loop-body",
         "armIter" | "iterArm" | "armLoop" | "loopArm" | "timesArm" => "arm-loop-mix",
-        "loopIter" | "timesIter" | "loopLoop" | "timesLoop" => "nested-loop",
+        "loopIter" | "timesIter" | "loopLoop" | "timesLoop" | "iterLoop" | "collLoop"
+        | "valLoop" | "iterTimes" | "collTimes" | "valTimes" => "nested-loop",
         "val" => "evaluated-block",
         "armProtIter" | "protIterArm" | "armIterIter" | "armProtArm" => "three-deep",
         _ => "other",
@@ -115,8 +116,9 @@ pub fn container_group(container: &str) -> &'static str {
 pub fn container_runs(container: &str) -> i64 {
     match container {
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "armIter" | "iterArm" | "armLoop"
-        | "armProtIter" | "protIterArm" | "loopArm" | "timesArm" => 2,
-        "iterIter" | "armIterIter" | "loopIter" | "timesIter" | "loopLoop" | "timesLoop" => 4,
+        | "armProtIter" | "protIterArm" | "loopArm" | "timesArm" | "valLoop" | "valTimes" => 2,
+        "iterIter" | "armIterIter" | "loopIter" | "timesIter" | "loopLoop" | "timesLoop"
+        | "iterLoop" | "collLoop" | "iterTimes" | "collTimes" => 4,
         _ => 1,
     }
 }
@@ -458,25 +460,43 @@ pub const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
         "%c ifTrue: [[%c ifTrue: [S]] on: Error do: [:e | 0]]",
     ),
     // A loop as the innermost block (BT-3776 review): under an arm, a `do:`
-    // body or another loop.
+    // body or another loop. The counters are `m` and `j`, which no kind's
+    // block parameter shadows (`toDo` binds `i`, `kv` binds `k`).
     (
         "loopArm",
-        "%c ifTrue: [i := 0. [i < 2] whileTrue: [i := i + 1. S]]",
+        "%c ifTrue: [m := 0. [m < 2] whileTrue: [m := m + 1. S]]",
     ),
     ("timesArm", "%c ifTrue: [2 timesRepeat: [S]]"),
     (
         "loopIter",
-        "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. S]]",
+        "#(1, 2) do: [:z | m := 0. [m < 2] whileTrue: [m := m + 1. S]]",
     ),
     ("timesIter", "#(1, 2) do: [:z | 2 timesRepeat: [S]]"),
     (
         "loopLoop",
-        "i := 0. [i < 2] whileTrue: [i := i + 1. j := 0. [j < 2] whileTrue: [j := j + 1. S]]",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. j := 0. [j < 2] whileTrue: [j := j + 1. S]]",
     ),
     (
         "timesLoop",
-        "i := 0. [i < 2] whileTrue: [i := i + 1. 2 timesRepeat: [S]]",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. 2 timesRepeat: [S]]",
     ),
+    // ... and the reverse (BT-3776 review 2): a `do:` body, a `collect:` body
+    // or an evaluated block as the innermost block in a loop body.
+    (
+        "iterLoop",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | S]]",
+    ),
+    (
+        "collLoop",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) collect: [:z | S. z]]",
+    ),
+    (
+        "valLoop",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. [S] value]",
+    ),
+    ("iterTimes", "2 timesRepeat: [#(1, 2) do: [:z | S]]"),
+    ("collTimes", "2 timesRepeat: [#(1, 2) collect: [:z | S. z]]"),
+    ("valTimes", "2 timesRepeat: [[S] value]"),
     // REPL-only roles.
     ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
 ];

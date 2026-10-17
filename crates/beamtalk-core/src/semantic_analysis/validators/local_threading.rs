@@ -760,8 +760,17 @@ const DENY_SET: &[Denied] = &[
     // deletes these rows.
     deny_block_local(ProtectedBody, None, None, &[Actor], DETECT_KINDS),
     deny_block_local(Handler, None, None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, None, Some(false), &[Actor], DETECT_KINDS),
-    deny_block_local(CountedLoopBody, None, None, &[Actor], DETECT_KINDS),
+    // (Directly in a `whileTrue:` body is the `LoopBody`/`LoopBody` row below:
+    // at depth one the innermost block is the outermost, so that row covers it.)
+    // A counted-loop body as the outermost block: directly, and around every
+    // innermost role but a `do:`/`collect:` body or an evaluated block, which
+    // answer right (`iterTimes`, `collTimes`, `valTimes`); the arm one is
+    // unmeasured and stays rejected.
+    deny_block_local(CountedLoopBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(CountedLoopBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(CountedLoopBody, Some(Arm), None, &[Actor], DETECT_KINDS),
+    deny_block_local(CountedLoopBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
+    deny_block_local(CountedLoopBody, Some(Handler), None, &[Actor], DETECT_KINDS),
     deny_block_local(Arm, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
     deny_block_local(Arm, Some(Handler), None, &[Actor], DETECT_KINDS),
     deny_block_local(DoBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
