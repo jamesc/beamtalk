@@ -10,18 +10,20 @@
 //! (`conditional_arm_blocks` / `lookup_arm_blocks`) — so the conditional
 //! agreement check compares both directions for it: every lookup the Phase 0
 //! check accepts because it is a local-threading producer (a method-root site,
-//! a method-body statement, or a statement of an arm frame) is lowered by
-//! codegen's producer threading exactly the locals the core rule names, and
-//! codegen lowers no lookup as a producer anywhere else.
+//! a method-body statement, a statement of an arm frame, or, since BT-3839, a
+//! producer site of a loop or fold body) is lowered by codegen's producer
+//! threading exactly the locals the core rule names, and codegen lowers no
+//! lookup as a producer anywhere else.
 //!
 //! The rest of the table must stay rejected, and the lookups the producer
 //! cannot lower with it: the two selectors `Dictionary` does not implement,
-//! a lookup in the body of a loop or fold, a handler that is not a block
-//! literal taking the parameters the primitive passes, and the REPL.
+//! a lookup inside a closure that is not inlined, a handler that is not a
+//! block literal taking the parameters the primitive passes, and the REPL.
 
 use super::local_producer_agreement::{BODY_STATEMENTS, POSITIONS, body_sources, sources};
 use super::local_producer_agreement_conditional::{
-    ARM_CONSTRUCTS, ARM_FRAMES, CONDITIONAL_POSITIONS, check_conditional_agreement,
+    ARM_CONSTRUCTS, ARM_FRAMES, CONDITIONAL_POSITIONS, LOOP_BODY_FRAMES,
+    check_conditional_agreement,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
@@ -129,16 +131,15 @@ const LOOKUP_ARM_FRAMES: &[&str] = &[
     "#{#a => 1} at: #a ifPresent: [:v | t := t + v. 0] ifAbsent: [{s}. 0]",
 ];
 
-/// Frames that are a loop or fold body and not an arm: a lookup that writes
-/// `t` is not a producer there.
-const LOOP_ONLY_FRAMES: &[&str] = &[
-    "1 to: 2 do: [:k | {s}]",
-    "#(1, 2) do: [:k | {s}]",
-    "2 timesRepeat: [{s}]",
-    "[s < 3] whileTrue: [s := s + 1. {s}]",
-    "#(1, 2) collect: [:k | {s}. k]",
-    "#(1, 2) inject: 0 into: [:a :k | {s}. a + k]",
-    "#(1, 2) do: [:k | 1 to: 2 do: [:i | {s}]]",
+/// BT-3839: frames where a handler-writing lookup sits inside a closure that is
+/// not inlined (a block evaluated with an argument, a stored block), alone and
+/// in a loop body. The lookup producer has no frame there, so Phase 0 keeps
+/// its §6 error (ADR 0131 §6).
+const CLOSURE_FRAMES: &[&str] = &[
+    "[:z | {s}] value: 1",
+    "b := [{s}]\nb value",
+    "#(1, 2) do: [:k | [:z | {s}] value: k]",
+    "1 to: 2 do: [:k | b := [{s}]. b value]",
 ];
 
 /// Whether the Phase 0 / §6 checks reject `src`.
@@ -231,42 +232,105 @@ fn lookups_that_write_nothing_agree_in_every_context() {
     );
 }
 
+/// BT-3839: both ways, for a lookup anywhere a loop or fold body statement can
+/// hold one (the statement, an assignment's value, an operand), in every loop
+/// and fold frame (`LOOP_BODY_FRAMES`: counted, `whileTrue:`, each fold
+/// accumulator shape, a loop in a fold and a fold in a loop): the core rule's
+/// `is_loop_body_producer_site` + `conditional_producer_writes` name exactly
+/// the lookups codegen lowers as local-threading producers in the frame, and
+/// the enclosing loops and folds that thread their writes, in class,
+/// value-type and actor methods.
 #[test]
-fn a_lookup_in_a_loop_or_fold_body_is_never_a_producer() {
-    // The lookup producer lowers at the method root and in arm frames only.
-    // In a loop or fold body its handler's write would be dropped, so Phase 0
-    // must reject every such program (codegen never gets one to lower).
-    let mut rejected_count = 0;
-    for frame in LOOP_ONLY_FRAMES {
-        for construct in LOOKUPS.iter().filter(|c| !c.contains("[:x |")) {
-            for statement in [
-                "{c}",
-                "({c})",
-                "r := {c}",
-                "r := ({c}) size",
-                "r := t + ({c})",
-            ] {
-                for src in body_sources(frame, construct, statement) {
-                    // A lookup whose handler is the only writer in the body.
-                    if rejected(&src) {
-                        rejected_count += 1;
-                    } else {
-                        // Accepted: the only way is that the lookup writes no
-                        // outer local (a handler of `t` locals only).
-                        assert!(
-                            !construct.contains("t := ") && !construct.contains("u := "),
-                            "Phase 0 accepted a handler-writing lookup in a loop or fold body \
-                             (its write would be dropped):\n{src}"
-                        );
-                    }
+fn every_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer() {
+    let mut checked = [0usize; 3];
+    for frame in LOOP_BODY_FRAMES {
+        for construct in LOOKUP_SAMPLE {
+            for statement in BODY_STATEMENTS {
+                for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
+                    checked[i] += check_conditional_agreement(src).unwrap_or(0);
                 }
             }
         }
     }
     assert!(
-        rejected_count > 100,
-        "only {rejected_count} rejections checked"
+        checked.iter().all(|&n| n > 150),
+        "loop-body lookup producer sites compared (class, value, actor): {checked:?}"
     );
+}
+
+/// BT-3839: a lookup in a loop or fold body inside an arm of a conditional
+/// producer, which is where the actor fold-in-arm agreement gap showed: the
+/// enclosing loop must thread the handler's write, not only the lookup.
+#[test]
+fn loop_body_lookups_in_arm_frames_agree() {
+    let frames = [
+        "(s < 3) ifTrue: [#(1, 2) do: [:k | {s}]]",
+        "(s < 3) ifTrue: [1 to: 2 do: [:k | {s}]] ifFalse: [nil]",
+        "(s < 3) ifTrue: [#(1, 2) inject: 0 into: [:a :k | {s}. a + k]]",
+        "[#(1, 2) do: [:k | {s}]] on: Error do: [:e | 0]",
+        "#{#a => 1} at: #k ifAbsent: [#(1, 2) do: [:k | {s}]. 0]",
+        "#(1, 2) do: [:k | (s < 3) ifTrue: [#(1, 2) do: [:i | {s}]]]",
+    ];
+    let mut checked = [0usize; 3];
+    for frame in frames {
+        for construct in LOOKUP_SAMPLE {
+            for statement in BODY_STATEMENTS {
+                for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
+                    checked[i] += check_conditional_agreement(src).unwrap_or(0);
+                }
+            }
+        }
+    }
+    assert!(
+        checked.iter().all(|&n| n > 100),
+        "arm-frame loop-body lookup sites compared (class, value, actor): {checked:?}"
+    );
+}
+
+/// BT-3839: a handler-writing lookup in a loop or fold body that the producer
+/// cannot lower (a parenthesised handler, a block key, a handler with the
+/// wrong parameter count), and any handler-writing lookup inside a closure
+/// that is not inlined ([`CLOSURE_FRAMES`]), keeps its Phase 0 / §6 error in
+/// every method context: codegen never gets one to lower, so its write is
+/// never silently dropped.
+#[test]
+fn lookups_the_producer_cannot_lower_stay_rejected_in_loop_bodies_and_closures() {
+    let cannot_lower = [
+        "#{#a => 1} at: #k ifAbsent: ([t := t + 1. 0])",
+        "#{#a => 1} at: [t := t + 1. #k] ifAbsent: [0]",
+        "#{#a => 1} at: #k ifAbsent: [:x | t := t + 1. 0]",
+        "#{#a => 1} at: #k ifPresent: [t := t + 1. 0]",
+        "#{#a => 1} at: #k ifPresent: ([:v | t := t + v. 0])",
+    ];
+    let statements = [
+        "{c}",
+        "({c})",
+        "r := {c}",
+        "r := ({c}) size",
+        "r := t + ({c})",
+    ];
+    let mut checked = 0;
+    for frame in LOOP_BODY_FRAMES {
+        for construct in cannot_lower {
+            for statement in statements {
+                for src in body_sources(frame, construct, statement) {
+                    assert!(rejected(&src), "{src}");
+                    checked += 1;
+                }
+            }
+        }
+    }
+    for frame in CLOSURE_FRAMES {
+        for construct in LOOKUP_SAMPLE.iter().chain(&cannot_lower) {
+            for statement in statements {
+                for src in body_sources(frame, construct, statement) {
+                    assert!(rejected(&src), "{src}");
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 1000, "only {checked} programs checked");
 }
 
 #[test]

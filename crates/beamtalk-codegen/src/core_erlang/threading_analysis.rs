@@ -256,18 +256,25 @@ impl CoreErlangGenerator {
             || self.body_has_list_op_cross_scope_mutations(block)
     }
 
-    /// BT-3834: [`Self::block_arg_needs_threading`] for the body of a loop or
-    /// fold, true only when the loop has something to carry.
+    /// BT-3834: whether a loop or fold over `body` has something to carry, so
+    /// it is lowered with mutation threading (a `ThreadingPlan`) rather than as
+    /// a plain loop.
     ///
-    /// The mutation analysis is a heuristic over the body's writes; the
-    /// loop's threaded set is [`Self::loop_threaded_locals`] (ADR 0131's one
-    /// recognizer). When the heuristic says "threads" but the set is empty,
-    /// a `StateAcc` lowering carries a map only if the scope has one to seed
-    /// it with: the actor `State` of an actor instance method, the REPL
-    /// bindings, or a family the body threads (`SelfVt` in a value-type
-    /// method that writes a field). Anywhere else (a class method, a
-    /// value-type method writing no field) the loop threads nothing, and a
-    /// locals-less `StateAcc` loop would be seeded from an unbound `State`
+    /// The loop's threaded set is [`Self::loop_threaded_locals`] (ADR 0131's
+    /// one recognizer): when it is non-empty the loop threads, whatever the
+    /// mutation heuristic ([`Self::block_arg_needs_threading`]) says. That
+    /// heuristic misses a write-only local, and a write buried in a construct
+    /// the block-level analysis does not see through (BT-3839: a `Dictionary`
+    /// lookup's handler in a loop nested in the body, which left an actor
+    /// `do:` around it lowered by its statement as a plain loop while the
+    /// nested loop threaded the write, so the write was dropped). When the
+    /// heuristic says "threads" but the set is empty, a `StateAcc` lowering
+    /// carries a map only if the scope has one to seed it with: the actor
+    /// `State` of an actor instance method, the REPL bindings, or a family the
+    /// body threads (`SelfVt` in a value-type method that writes a field).
+    /// Anywhere else (a class method, a value-type method writing no field)
+    /// the loop threads nothing, and a locals-less `StateAcc` loop would be
+    /// seeded from an unbound `State`
     /// (`ClassMethodDefect::StateAccLoopWithoutLocals`), so it lowers as a
     /// plain loop instead.
     ///
@@ -276,9 +283,8 @@ impl CoreErlangGenerator {
     /// (`control_flow_has_mutations`) for a loop or fold's block arguments,
     /// so the lowering and the caller that unpacks it cannot disagree.
     pub(in crate::core_erlang) fn loop_body_has_carried_mutations(&self, body: &Block) -> bool {
-        self.block_arg_needs_threading(body)
-            && (self.loop_has_ambient_carrier(body)
-                || !self.loop_threaded_locals(body, None).is_empty())
+        !self.loop_threaded_locals(body, None).is_empty()
+            || (self.block_arg_needs_threading(body) && self.loop_has_ambient_carrier(body))
     }
 
     /// Whether a loop over `body` that threads no local still has a map to
@@ -295,15 +301,10 @@ impl CoreErlangGenerator {
 
     /// BT-3834: the gate of every counted loop and fold lowering — whether
     /// `body` is lowered with mutation threading (a `ThreadingPlan`) rather
-    /// than as a plain loop: [`Self::loop_body_has_carried_mutations`], or a
-    /// write to an outer local the mutation analysis misses (a write-only
-    /// local, or one buried in a nested loop), which
-    /// [`Self::loop_threaded_locals`] names.
+    /// than as a plain loop. The same rule as the statement classifier's
+    /// ([`Self::loop_body_has_carried_mutations`]), by construction.
     pub(in crate::core_erlang) fn loop_body_needs_threading(&self, body: &Block) -> bool {
-        // `loop_body_has_carried_mutations || locals`, with the threaded set
-        // computed once: when it is non-empty the answer is `true` either way.
-        !self.loop_threaded_locals(body, None).is_empty()
-            || (self.block_arg_needs_threading(body) && self.loop_has_ambient_carrier(body))
+        self.loop_body_has_carried_mutations(body)
     }
 
     /// Recursively scans an expression for list op message sends with

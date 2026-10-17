@@ -80,8 +80,9 @@ impl CoreErlangGenerator {
     /// The producer lowering of the lookup send `expr` (paren-unwrapped), or
     /// `Ok(None)` when it is not one core's `lookup_arm_blocks` names. The
     /// caller has already decided the send is a local-threading producer in
-    /// this frame ([`Self::conditional_producer_locals`]); a lookup is a producer
-    /// only at the method root or in an arm, never at a loop or fold body site.
+    /// this frame ([`Self::conditional_producer_locals`]): at the method root, in
+    /// an arm, or (BT-3839) at a loop or fold body's producer site, where the
+    /// arms' `LocalRebind`s lower by the frame's mode as a conditional's do.
     pub(in crate::core_erlang) fn generate_lookup_producer(
         &mut self,
         expr: &Expression,

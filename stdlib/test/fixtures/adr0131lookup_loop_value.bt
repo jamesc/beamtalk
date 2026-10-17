@@ -1,0 +1,230 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3839 (ADR 0131): a `Dictionary` lookup whose handler writes an outer
+// local is a local-threading producer in the body of a loop or fold, value-type-method
+// column. Each method walks the keys `#a`, `#b`, `#c` over `#{#a => 10}`: the
+// handler is skipped for the present key and runs for the two absent ones, so
+// a write it makes is kept exactly when it runs. The other columns are
+// adr0131lookup_loop_{value,actor}.bt; the expected answers are in
+// stdlib/test/adr0131lookup_loop_test.bt.
+
+Value subclass: Adr0131LookupLoopValue
+  field: m = 4
+
+  // A counted loop threading only locals (DirectParams).
+  toDoStatement =>
+    t := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + 1]]
+    t
+
+  // The lookup as an operand of an assignment in a counted loop body.
+  toDoOperand =>
+    t := 0
+    r := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    1
+      to: 3
+      do: [:i |
+        r := r + (d
+          at: (ks at: i)
+          ifAbsent: [
+            t := t + 1
+            1
+          ])
+      ]
+    #[r, t]
+
+  // `timesRepeat:` and `whileTrue:` bodies.
+  timesRepeatStatement =>
+    t := 0
+    i := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    3
+      timesRepeat: [
+        i := i + 1
+        d at: (ks at: i) ifAbsent: [t := t + i]
+      ]
+    t
+
+  whileStatement =>
+    t := 0
+    i := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    [i < 3]
+      whileTrue: [
+        i := i + 1
+        d at: (ks at: i) ifAbsent: [t := t + i]
+      ]
+    t
+
+  // A `do:` body (TupleAcc), the issue's motivating shape.
+  doStatement =>
+    misses := 0
+    d := #{#a => 10}
+    #(#a, #b, #c)
+      do: [:k |
+        d
+          at: k
+          ifAbsent: [
+            misses := misses + 1
+            0
+          ]
+      ]
+    misses
+
+  // Every key is present: the handler never runs and `t` is unchanged.
+  doAllPresent =>
+    t := 0
+    d := #{#a => 10, #b => 20, #c => 30}
+    #(#a, #b, #c) do: [:k | d at: k ifAbsent: [t := t + 1]]
+    t
+
+  // A fold whose accumulator is the collected list (TupleAcc with a gate).
+  collectLast =>
+    t := 0
+    d := #{#a => 10}
+    r := #(#a, #b, #c)
+      collect: [:k |
+        d
+          at: k
+          ifAbsent: [
+            t := t + 1
+            0
+          ]
+      ]
+    #[r first, r last, t]
+
+  injectStatement =>
+    t := 0
+    d := #{#a => 10}
+    r := #(#a, #b, #c)
+      inject: 0
+      into: [:a :k |
+        d at: k ifAbsent: [t := t + 1]
+        a + 1
+      ]
+    #[r, t]
+
+  // The lookup as an operand in a fold body.
+  injectOperand =>
+    t := 0
+    d := #{#a => 10}
+    r := #(#a, #b, #c)
+      inject: 0
+      into: [:a :k |
+        a + (d
+          at: k
+          ifAbsent: [
+            t := t + 1
+            1
+          ])
+      ]
+    #[r, t]
+
+  // A handler that reads a field.
+  fieldReadInToDo =>
+    t := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + self.m]]
+    t
+
+  // A loop in a fold.
+  toDoInDo =>
+    t := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    #(1, 2) do: [:j |
+      1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + j]]
+    ]
+    t
+
+  // In an arm of a conditional in a loop body.
+  armInToDo =>
+    t := 0
+    d := #{#a => 10}
+    ks := #(#a, #b, #c)
+    1 to: 3 do: [:i | i > 2 ifTrue: [d at: (ks at: i) ifAbsent: [t := t + 1]]]
+    t
+
+  // A fold in an arm of a conditional (the actor fold-in-arm shape).
+  doInArm =>
+    t := 0
+    d := #{#a => 10}
+    t =:= 0
+      ifTrue: [
+        #(#a, #b, #c)
+          do: [:k |
+            d
+              at: k
+              ifAbsent: [
+                t := t + 1
+                0
+              ]
+          ]
+      ]
+    t
+
+  // `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a `do:` body.
+  ifPresentInDo =>
+    t := 0
+    d := #{#a => 10, #c => 30}
+    #(#a, #b, #c) do: [:k | d at: k ifPresent: [:v | t := t + v]]
+    t
+
+  ifPresentIfAbsentInDo =>
+    t := 0
+    u := 0
+    d := #{#a => 10}
+    #(#a, #b, #c)
+      do: [:k |
+        d
+          at: k
+          ifPresent: [:v | t := t + v]
+          ifAbsent: [u := u + 1]
+      ]
+    #[t, u]
+
+  // Two locals, and a handler holding a loop.
+  twoLocalsInDo =>
+    t := 0
+    u := 0
+    d := #{#a => 10}
+    #(#a, #b, #c)
+      do: [:k |
+        d
+          at: k
+          ifAbsent: [
+            t := t + 1
+            u := u + 2
+            0
+          ]
+      ]
+    #[t, u]
+
+  handlerHoldsLoopInDo =>
+    t := 0
+    d := #{#a => 10}
+    #(#a, #b, #c) do: [:k | d at: k ifAbsent: [1 to: 2 do: [:i | t := t + i]]]
+    t
+
+  // The handler returns from the method on the first miss.
+  earlyReturnInDo =>
+    t := 0
+    d := #{#a => 10}
+    #(#a, #b, #c)
+      do: [:k |
+        d
+          at: k
+          ifAbsent: [
+            t := t + 1
+            ^t
+          ]
+      ]
+    0

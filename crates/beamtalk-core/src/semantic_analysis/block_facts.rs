@@ -2416,12 +2416,11 @@ pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> boo
 ///   an actor method, where the frames around them still drop or miscompile
 ///   the write (measured, BT-3793); there they keep their statement-position
 ///   rows.
-/// - A `Dictionary` lookup is a producer in an arm frame but not in a loop or
-///   fold body (ADR 0131 §6).
 /// - [`is_actor_fold_value_site`].
 ///
-/// A conditional or an `on:do:`/`ensure:` is a producer in a loop or fold body
-/// (ADR 0131 Phase 3b/3c, BT-3817/BT-3822) wherever the frame has a site for it.
+/// A conditional, an `on:do:`/`ensure:` or a `Dictionary` lookup is a producer
+/// in a loop or fold body (ADR 0131 Phase 3b/3c, BT-3817/BT-3822/BT-3839)
+/// wherever the frame has a site for it.
 #[must_use]
 pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
     // BT-3841: in an actor method a `detect:`/`detect:ifNone:` in a frame
@@ -2441,13 +2440,10 @@ pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> b
     // `on:do:`/`ensure:` (Phase 3b, BT-3817). Whether a given conditional is a
     // producer is `conditional_producer_writes`'s question, not the site's.
     //
-    // A `Dictionary` lookup (Phase 2d) is the exception: it is a conditional in
-    // the core rule's eyes, but it lowers at the method root and in `BranchArm`
-    // frames only (ADR 0131 §6), so in a loop or fold body it keeps its
-    // allow-set row.
-    if lookup_arm_blocks(site).is_some() && !ctx.arm {
-        return false;
-    }
+    // BT-3839: a `Dictionary` lookup (Phase 2d) is a conditional in the core
+    // rule's eyes, and lowers by the frame's mode like one. (Codegen's loop
+    // gate sees the handler's write through `threaded_locals_of`, so the
+    // enclosing loop or fold threads it in an actor too.)
     !is_actor_fold_value_site(site, ctx)
 }
 
