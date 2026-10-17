@@ -417,8 +417,10 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
         // too: the producer adopts element 2 (the Phase 0 check still rejects
         // the input, BT-3876).
         "#(1) do: [:x | Result tryDo: [t := t + 1. 1]]",
-        // An evaluated block is a REPL arm (BT-3823).
-        "#(1) collect: [:x | [Result tryDo: [t := t + 1. 1]] value: x]",
+        // An evaluated block is a REPL arm (BT-3823); its arity matches the
+        // send's, since a block of another arity is applied, not inlined
+        // (BT-3881).
+        "#(1) collect: [:x | [:y | Result tryDo: [t := t + y. 1]] value: x]",
     ] {
         for (entry, code) in both_outputs("try_do_root", src, true) {
             assert!(code.contains(tuple_call), "{entry}: {src}\n{code}");
@@ -430,6 +432,18 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     ] {
         for (entry, code) in both_outputs("try_do_nested", src, false) {
             assert!(!code.contains(tuple_call), "{entry}: {src}\n{code}");
+        }
+    }
+    // BT-3881: an evaluated block sent a `value` selector of another arity is
+    // not an arm: it is applied to a stand-in fun of the block's own arity
+    // (`generate_block_arity_mismatch`), so its `tryDo:` is never compiled.
+    for src in [
+        "#(1) collect: [:x | [Result tryDo: [t := t + 1. 1]] value: x]",
+        "[:y | Result tryDo: [t := t + y. 1]] value",
+    ] {
+        for (entry, code) in both_outputs("try_do_arity", src, true) {
+            assert!(!code.contains(tuple_call), "{entry}: {src}\n{code}");
+            assert!(code.contains("apply _Arity"), "{entry}: {src}\n{code}");
         }
     }
 }
