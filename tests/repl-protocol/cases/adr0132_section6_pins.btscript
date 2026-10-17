@@ -26,7 +26,7 @@ t
 // => 0
 
 // I2 (the REPL root as caller): the callee invokes the parameter in a `do:`.
-// PIN-BUG BT-3865: correct answer 1.
+// PIN-BUG BT-3865: correct answer nil (`do:` answers nil); `t` is then 1 more.
 Adr0132ReplCallee calleeDo: [t := t + 1]
 // => ERROR: block writes outer local `t`, but `calleeDo:` cannot return the write
 
@@ -38,11 +38,11 @@ blk := [:x | t := t + x]
 
 // PIN-BUG BT-3865: not a compile error in the REPL today but a run-time
 // failure (the accumulator the block expects is never supplied). Correct
-// answer: 3.
+// answer: nil, adding 3 to `t`.
 #(1, 2) do: blk
 // => ERROR: key not found: '__local__t'
 
-// PIN-BUG BT-3865: correct answer 3 after the loop above (1 from I1/I2 if
-// they have flipped too).
+// PIN-BUG BT-3865: correct answer 3 after the loop above (plus 1 for each of
+// I1 and I2 that has flipped too, so 5 once all three have).
 t
 // => 0

@@ -49513,8 +49513,8 @@
         "object",
         "subclassing"
       ],
-      "source": "// BT-3866 (ADR 0132 Phase 0a): callee classes for\n// cases/adr0132_section6_pins.btscript. A user higher-order class method and\n// a user higher-order instance method that invoke their block parameter.\n\nObject subclass: Adr0132ReplCallee\n\n  class sealed calleeDirect: b => b value\n\n  class sealed calleeDo: b => #(1) do: [:x | b value]",
-      "explanation": "BT-3866 (ADR 0132 Phase 0a): callee classes for cases/adr0132_section6_pins.btscript. A user higher-order class method and a user higher-order instance method that invoke their block parameter."
+      "source": "// BT-3866 (ADR 0132 Phase 0a): callee classes for\n// cases/adr0132_section6_pins.btscript. Two user higher-order class methods\n// that invoke their block parameter.\n\nObject subclass: Adr0132ReplCallee\n\n  class sealed calleeDirect: b => b value\n\n  class sealed calleeDo: b => #(1) do: [:x | b value]",
+      "explanation": "BT-3866 (ADR 0132 Phase 0a): callee classes for cases/adr0132_section6_pins.btscript. Two user higher-order class methods that invoke their block parameter."
     },
     {
       "id": "tests-repl-protocol-fixtures-announce-emitter",

@@ -396,7 +396,7 @@ fn section6_standalone_method_actor_self_send_is_an_error() {
 /// `adr0132section6_*.bt.pending` fixtures hold the §6 inventory shapes
 /// (I1-I4, I6-I8) as runtime programs over class, value-type and actor
 /// methods: every `probe*` method is rejected with `Tier2BlockNoReturnChannel`
-/// and every `callee*` method compiles clean. An ADR 0132 phase that makes a
+/// and no `callee*` method carries an ADR 0131 threading diagnostic. An ADR 0132 phase that makes a
 /// shape compile moves its probe out of the pending file, which keeps this
 /// green.
 #[test]

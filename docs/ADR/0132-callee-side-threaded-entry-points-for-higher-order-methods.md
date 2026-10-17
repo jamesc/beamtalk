@@ -68,7 +68,7 @@ as the callable of a collection message, or passes it on to another such
 method. A callee that invokes the block inside a `do:` body, a conditional
 arm, an operand, or a nested closure, an inherited callee, an overridable
 one, and every callee reached through any receiver but a bare `self` are
-the same error (`stdlib/test/fixtures/adr0131section6callee_actor_pending.bt.pending`
+the same error (`stdlib/test/fixtures/adr0132section6_actor.bt.pending`
 pins the four actor shapes; the class and value-type shapes are the ADR
 0131 §6 error at every send).
 
@@ -1031,7 +1031,7 @@ callees before callers.
   `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl`
   (`class_send/3`), `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl`,
   `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` (`'tryDo:'/2`),
-  `stdlib/test/fixtures/adr0131section6callee_actor_pending.bt.pending`,
+  `stdlib/test/fixtures/adr0132section6_actor.bt.pending`,
   `stdlib/test/fixtures/hom_composability_actor.bt`,
   `stdlib/test/fixtures/self_send_hom_pool.bt`
 - Documentation: `docs/beamtalk-language-features.md` § Control Flow and
