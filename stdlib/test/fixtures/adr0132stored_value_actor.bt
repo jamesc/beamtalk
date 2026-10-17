@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3867 (ADR 0132 Phase 0b, I5): the actor column of the stored-block
+// matrix. An actor instance method keeps the Tier 2 protocol for a stored
+// block (the fresh carrier is the actor `State`), so this column pins that the
+// class and value-type columns answer what the actor already does. The columns
+// are adr0132stored_value_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/adr0132stored_value_test.bt.
+
+Actor subclass: Adr0132StoredValueActor
+
+  stValue =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    t
+
+  stTwice =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    b value
+    t
+
+  stArg =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 5
+    t
+
+  stCascade =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 1; value: 2
+    t
