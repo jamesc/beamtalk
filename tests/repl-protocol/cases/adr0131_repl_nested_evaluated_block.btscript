@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3856 (ADR 0131): an evaluated literal block (`[...] value`) nested in an
+// `on:do:` protected body at the REPL root. The protected body is a REPL arm
+// (BT-3823), and an evaluated block inside it is a REPL producer site, so the
+// input answers the protected block's value and the write to `t` is visible
+// to the next input (it does not leak a `{Value, Bindings}` tuple).
+
+t := 11
+// => 11
+
+[[t := t + 100] value] on: Error do: [:e | 0]
+// => 111
+
+t
+// => 111
+
+// The same nesting under `ensure:`.
+[[t := t + 1] value] ensure: [0]
+// => 112
+
+t
+// => 112
+
+// BT-3877 follow-up: a loop body whose writes are hoisted, one of them under a
+// conditional arm. Both writes are visible afterwards.
+t := 0. u := 0. #(1, 2) do: [:k | t := t + 1. t > 1 ifTrue: [u := 9]]. #[t, u]
+// => #[2, 9]
