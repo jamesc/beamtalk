@@ -127,13 +127,19 @@ pub struct CoreErlangGenerator {
     /// `debug_assert!`: CLAUDE.md forbids one, and `verify()` cannot see a
     /// dropped slot):
     /// - read only `families.as_slice().first()`, dropping every later family
-    ///   (`Acc` is last, so it is the one lost):
-    ///   `control_flow/exception_handling.rs` lines 179, 283 and 1159, and
-    ///   `value_type_codegen.rs` line 1353 (`extract_vt_loop_family_slot`);
+    ///   (`Acc` is last, so it is the one lost): the readers in
+    ///   `control_flow/exception_handling.rs` (the `exception_family_slot`
+    ///   family and the `on:do:`/`ensure:` cleanup baseline) and
+    ///   `value_type_codegen.rs` (`extract_vt_loop_family_slot`);
     /// - gate on `families.as_slice().is_empty()`, which flips to "has a
-    ///   family" for a class body that now carries `Acc`:
-    ///   `control_flow/conditionals.rs` line 766 and `value_type_codegen.rs`
-    ///   lines 2281, 3486, 4120 and 4226.
+    ///   family" for a class body that now carries `Acc`: the gates in
+    ///   `control_flow/conditionals.rs` and in `value_type_codegen.rs`.
+    ///
+    /// Find them with `grep -n 'families.as_slice().first()'` and
+    /// `grep -n 'families.as_slice().is_empty()'` over
+    /// `crates/beamtalk-codegen/src/core_erlang`. One `is_empty()` gate is
+    /// excluded: `FoldFamilySlots::new` (`control_flow/family_slots.rs`) was
+    /// checked and handles multiple families.
     ///
     /// Tracked on BT-3871 (class methods) and BT-3872 (value-type methods).
     pub(in crate::core_erlang) in_threaded_body: bool,

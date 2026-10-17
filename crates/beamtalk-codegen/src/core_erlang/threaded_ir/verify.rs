@@ -1078,10 +1078,13 @@ impl VerifyWalk<'_> {
         }
         // An `Acc` version stored as a value: a `Put` writes the caller's map
         // into another map's key, where it would outlive the call and alias.
-        if let BindOp::Put {
-            value: ValueRef::Version(stored),
-            ..
-        } = op
+        // A `Put` into an `Acc` map is already reported above (`PutInto` /
+        // `OwnLocalKeyInAcc`), so it is not reported a second time here.
+        if keyed.is_none()
+            && let BindOp::Put {
+                value: ValueRef::Version(stored),
+                ..
+            } = op
             && is_acc(stored)
         {
             self.errors.push(VerifyError::AccAsScratchSeed {

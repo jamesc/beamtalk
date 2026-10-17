@@ -493,6 +493,31 @@ fn acc_as_scratch_seed_rejects_acc_stored_as_a_put_value() {
 }
 
 #[test]
+fn a_put_of_acc_into_an_acc_map_is_reported_once() {
+    // Both `PutInto` (the Acc target map) and `StoredAsValue` (the Acc value)
+    // apply; the keyed finding wins and the bind is reported a single time.
+    let frame = FrameId::ROOT;
+    let ir = vec![bind(
+        acc(1, frame),
+        acc(0, frame),
+        BindOp::Put {
+            field: "count".to_string(),
+            value: ValueRef::Version(acc(0, frame)),
+        },
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::AccAsScratchSeed {
+            defect: AccSeedDefect::PutInto {
+                acc: acc(1, frame),
+                key: "count".to_string(),
+            },
+            at: span(),
+        }]
+    );
+}
+
+#[test]
 fn acc_as_scratch_seed_rejects_a_direct_rebind_of_acc_into_another_family() {
     // `Direct(Version(Acc0))` into a `State` target is the other half of (b).
     let frame = FrameId::new(1);
