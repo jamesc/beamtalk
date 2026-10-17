@@ -2965,9 +2965,12 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
-            // BT-3823: a block of another arity in a REPL arm is applied
-            // (`repl_arm_applies_block`), answering a plain value.
-            if self.repl_arm_applies_block(receiver, arguments.len()) {
+            // BT-3881: a block literal of another arity is applied
+            // (`applies_block_of_other_arity`), answering a plain value.
+            if beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
+                selector,
+            ) && Self::applies_block_of_other_arity(receiver, arguments.len())
+            {
                 return false;
             }
             if selector.is_block_invocation() {

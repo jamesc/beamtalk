@@ -34,3 +34,11 @@ Actor subclass: Adr0131Section6EscapeActor
   runStored => self.h value
 
   count => self.n
+
+  // BT-3859: what a method whose last statement is a local assignment
+  // answers (pinned in adr0131section6escape_test.bt; BT-3882).
+  lastStatementAssignment => _r := 5
+
+  lastStatementBlockAssignment => _b := [:x | x + 1]
+
+  lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]

@@ -344,6 +344,21 @@ pub fn value_blocks(expr: &Expression) -> Vec<&Block> {
     found
 }
 
+/// The bare local-variable references `expr` may evaluate to, followed as
+/// [`value_blocks`] follows it (`c := b`, `c := x ifTrue: [b] ifFalse: [..]`):
+/// ADR 0131 §6 reads it for a local that aliases a block-valued local
+/// (BT-3859).
+#[must_use]
+pub fn value_locals(expr: &Expression) -> Vec<&crate::ast::Identifier> {
+    let mut found = Vec::new();
+    visit_returned(expr, ReturnedOperands::ThroughValue, &mut |operand, _| {
+        if let Expression::Identifier(id) = operand {
+            found.push(id);
+        }
+    });
+    found
+}
+
 /// Calls `visit` with every operand of a method body (nested blocks included)
 /// that is returned or stored, and how it escapes: the one classification
 /// behind [`escaping_blocks`] and [`escape_sites`], so they cannot disagree
@@ -1130,7 +1145,7 @@ pub fn outer_local_writes(
 /// A name assigned inside a `match:` arm body is not counted either: the
 /// walker gives each arm its own frame and pops it after the arm, matching
 /// the name resolver's per-arm scope.
-fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
+pub(crate) fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
     let mut walker = OuterWriteWalker {
         bound_outside: &|_| false,
         frames: vec![HashSet::new()],
@@ -1643,6 +1658,33 @@ pub fn producer_packed_blocks(expr: &Expression) -> Vec<&Block> {
     packed
 }
 
+/// BT-3855: the handler block of the producer `expr` when the producer runs it
+/// inside its own body frame as the arm of a conditional statement
+/// ([`crate::state_threading_selectors::producer_handler_is_body_arm`]:
+/// `do:separatedBy:`'s separator), or `None`.
+///
+/// That conditional is a statement of the fold body, lowered by the body's
+/// frame at the handler block's span: a lowering the producer performs for its
+/// own construct, like the statements of its body, not a site of the sites
+/// rule. Codegen's `do:separatedBy:` desugar gives the conditional this span,
+/// and the producer agreement test reads the same rule.
+#[must_use]
+pub fn producer_body_arm_handler(expr: &Expression) -> Option<&Block> {
+    let (sel, _) = producer_body_block(expr)?;
+    let Expression::MessageSend { arguments, .. } = expr.unwrap_parens() else {
+        return None;
+    };
+    if !crate::state_threading_selectors::producer_handler_is_body_arm(&sel, arguments.len()) {
+        return None;
+    }
+    let index =
+        crate::state_threading_selectors::producer_handler_arg_index(&sel, arguments.len())?;
+    match arguments.get(index) {
+        Some(Expression::Block(handler)) => Some(handler),
+        _ => None,
+    }
+}
+
 /// ADR 0131 Phase 2 (BT-3749): the threaded set of a loop or fold that
 /// codegen lowers as a local-threading producer in operand position, or
 /// `None` when `expr` is not one.
@@ -1724,7 +1766,7 @@ pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
     };
     (selector.well_known() == Some(crate::ast::WellKnownSelector::Value)
         && arguments.is_empty()
-        && block.parameters.is_empty())
+        && block_literal_arity_matches(block, 0))
     .then_some(block)
 }
 
@@ -2300,13 +2342,28 @@ pub fn repl_producer_writes(
     }
 }
 
+/// BT-3881: whether a `value`-family send with `arity` arguments to the block
+/// literal `block` may inline it: only when the arity is the block's own. A
+/// block literal sent a selector of another arity (`[t := t + 1] value: 1`,
+/// `[:k | t := t + k] value`) is never inlined, in the REPL (root or arm) or
+/// in a class, value-type or actor method: it is applied, so it raises the
+/// same structured `arity_mismatch` error as any other block called with the
+/// wrong number of arguments, and its body never runs (codegen's
+/// `applies_block_of_other_arity`). The one arity rule every inlining of a
+/// block literal `value` send reads.
+#[must_use]
+pub fn block_literal_arity_matches(block: &Block, arity: usize) -> bool {
+    block.parameters.len() == arity
+}
+
 /// BT-3823: the block of an *evaluated block* in the REPL sense: a
 /// `value`-family send to a bare block literal (`[...] value`,
-/// `[:k | ...] value: x`) whose arity matches the block's, or `None`. The REPL
-/// inlines such a block over its bindings map when it writes a binding (a REPL
-/// arm); a block sent a selector of another arity is applied instead, and
-/// raises `badarity` (codegen's `repl_arm_applies_block`; the REPL root still
-/// inlines it, BT-3881). The one rule the Phase 0 check and codegen read.
+/// `[:k | ...] value: x`) whose arity matches the block's
+/// ([`block_literal_arity_matches`]), or `None`. The REPL inlines such a block
+/// over its bindings map when it writes a binding (a REPL arm); a block sent a
+/// selector of another arity is applied instead, and raises `arity_mismatch`
+/// at the root and in an arm alike (BT-3881). The one rule the Phase 0 check
+/// and codegen read.
 #[must_use]
 pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
     let inner = expr.unwrap_parens();
@@ -2322,7 +2379,7 @@ pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
         return None;
     };
     (local_threading_construct(inner)?.family == LocalThreadingFamily::BlockValue
-        && block.parameters.len() == arguments.len())
+        && block_literal_arity_matches(block, arguments.len()))
     .then_some(block)
 }
 
@@ -4421,5 +4478,17 @@ mod tests {
             .collect();
         assert_eq!(found, vec!["[1]", "[2]"]);
         assert!(value_blocks(&parse_first_expr("[1] value")).is_empty());
+    }
+
+    #[test]
+    fn value_locals_are_the_locals_a_returned_expression_evaluates_to() {
+        let src = "c ifTrue: [b] ifFalse: [d := e]";
+        let expr = parse_first_expr(src);
+        let found: Vec<String> = value_locals(&expr)
+            .into_iter()
+            .map(|id| span_text(src, id.span))
+            .collect();
+        assert_eq!(found, vec!["b", "e"]);
+        assert!(value_locals(&parse_first_expr("b value")).is_empty());
     }
 }

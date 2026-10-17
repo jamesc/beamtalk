@@ -107,6 +107,12 @@ impl Shapes {
     /// (BT-3834: a class-method counted loop whose body holds a conditional
     /// whose arm's nested loop writes an arm-local).
     pub const BLOCK_LOCAL: Shapes = Shapes(1 << 18);
+    /// A stored block that writes the method-level local ([`TOUCH_LOCAL`]),
+    /// bound and sent `value` in the method body (`b := [t := t + 1. t]. v :=
+    /// b value`): in a class or value-type method there is no callee, so the
+    /// block is an inline producer over a fresh map (ADR 0132 Phase 0b, I5).
+    /// Needs [`Shapes::LOCAL_TOUCH`], which declares the local.
+    pub const STORED_VALUE: Shapes = Shapes(1 << 19);
 
     /// No shapes: straight-line writes and arithmetic only.
     pub const NONE: Shapes = Shapes(0);
@@ -144,7 +150,7 @@ impl Shapes {
     }
 
     /// Every named shape, for [`Shapes::names`] and [`Shapes::parse`].
-    const NAMED: [(&'static str, Shapes); 19] = [
+    const NAMED: [(&'static str, Shapes); 20] = [
         ("do", Shapes::LOOP_DO),
         ("fold", Shapes::LOOP_FOLD),
         ("to_do", Shapes::LOOP_TO_DO),
@@ -164,6 +170,7 @@ impl Shapes {
         ("local_touch", Shapes::LOCAL_TOUCH),
         ("nested_loops", Shapes::NESTED_LOOPS),
         ("block_local", Shapes::BLOCK_LOCAL),
+        ("stored_value", Shapes::STORED_VALUE),
     ];
 
     /// The names of the shapes in `self`.
@@ -363,6 +370,10 @@ pub enum Stmt {
     /// [`Expr::TouchSum`]. With [`Shapes::BLOCK_LOCAL`] it also bumps a local
     /// a block introduced, from inside a loop or fold nested in that block.
     Touch(String),
+    /// `closure := [t := t + 1. t]. result := closure value`: a stored block
+    /// that bumps [`TOUCH_LOCAL`], sent `value` by the next statement, binding
+    /// the new `t` to `result` ([`Shapes::STORED_VALUE`]).
+    StoredValue { closure: String, result: String },
 }
 
 /// The method-level local [`Stmt::Touch`] bumps.
@@ -605,6 +616,16 @@ impl<'p> Machine<'p> {
                     .find(|(n, _)| n == name)
                     .expect("touch local in scope");
                 slot.1 = Val::Int(c + 1);
+            }
+            Stmt::StoredValue { result, .. } => {
+                let c = Self::lookup_int(env, TOUCH_LOCAL) + 1;
+                let slot = env
+                    .iter_mut()
+                    .rev()
+                    .find(|(n, _)| n == TOUCH_LOCAL)
+                    .expect("touch local in scope");
+                slot.1 = Val::Int(c);
+                env.push((result.clone(), Val::Int(c)));
             }
         }
         Ok(())
@@ -1114,6 +1135,7 @@ impl Gen {
             EvalStored,
             Raise,
             Return,
+            StoredValue,
         }
         let s = self.shapes;
         let loop_ok = self.loop_ok(c);
@@ -1149,6 +1171,9 @@ impl Gen {
         }
         if !c.closures.is_empty() {
             ks.push((K::EvalStored, 2));
+        }
+        if s.has(Shapes::STORED_VALUE) && s.has(Shapes::LOCAL_TOUCH) && !c.in_block && !c.no_touch {
+            ks.push((K::StoredValue, 3));
         }
         if s.has(Shapes::RAISE) {
             ks.push((K::Raise, if c.protected { 3 } else { 1 }));
@@ -1259,6 +1284,12 @@ impl Gen {
             K::EvalStored => {
                 let i = self.rng.index(c.closures.len());
                 Stmt::Eval(Expr::CallStored(c.closures[i].clone()))
+            }
+            K::StoredValue => {
+                let closure = self.name("b");
+                let result = self.name("v");
+                c.scope.push(result.clone());
+                Stmt::StoredValue { closure, result }
             }
             K::Raise => {
                 if nested && s.has(Shapes::COND) && self.rng.chance(70) {
@@ -1513,6 +1544,7 @@ impl ShapeWalk {
             Stmt::Raise => self.mark(Shapes::RAISE),
             Stmt::Touch(name) if name == TOUCH_LOCAL => self.mark(Shapes::LOCAL_TOUCH),
             Stmt::Touch(_) => self.mark(Shapes::BLOCK_LOCAL),
+            Stmt::StoredValue { .. } => self.mark(Shapes::STORED_VALUE),
         }
     }
 
@@ -1693,6 +1725,9 @@ fn stmt_src(s: &Stmt) -> String {
         Stmt::Return(e) => format!("^{}", expr_src(e, false)),
         Stmt::Raise => "Error signal: \"boom\"".to_string(),
         Stmt::Touch(n) => format!("{n} := {n} + 1"),
+        Stmt::StoredValue { closure, result } => format!(
+            "{closure} := [{TOUCH_LOCAL} := {TOUCH_LOCAL} + 1. {TOUCH_LOCAL}]. {result} := {closure} value"
+        ),
     }
 }
 

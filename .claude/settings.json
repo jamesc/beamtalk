@@ -124,7 +124,11 @@
       "mcp__Linear__save_project_label",
       "mcp__Linear__save_release",
       "mcp__Linear__save_release_note",
-      "mcp__Linear__save_status_update"
+      "mcp__Linear__save_status_update",
+      "mcp__github__pull_request_read",
+      "mcp__Linear__get_issue",
+      "mcp__github__get_job_logs",
+      "mcp__github__get_check_run"
     ]
   }
 }

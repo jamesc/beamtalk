@@ -1445,29 +1445,28 @@ impl CoreErlangGenerator {
             );
         }
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
-        let saved_arm = std::mem::replace(&mut self.in_repl_arm, true);
         let out = f(self);
         self.local_producer_sites = saved;
-        self.in_repl_arm = saved_arm;
         out
     }
 
-    /// BT-3823: whether `receiver`, sent a `value`-family selector with
-    /// `arity` arguments, is a block literal of another arity inside a REPL arm
-    /// (`in_repl_arm`). Such a send is applied (`generate_block_value_call`),
-    /// never inlined, so it raises `badarity` at run time. The codegen side of
-    /// `beamtalk_core`'s `repl_evaluated_block` arity rule, which keeps the
-    /// same send out of the REPL producer rule (`repl_producer_writes`) and out
-    /// of the REPL arm constructs. The REPL root keeps its own inlining
-    /// (BT-3881).
-    pub(in crate::core_erlang) fn repl_arm_applies_block(
-        &self,
+    /// BT-3881: whether `receiver`, sent a `value`-family selector with
+    /// `arity` arguments, is a block literal of another arity
+    /// (`beamtalk_core`'s `block_literal_arity_matches`). Such a send is never
+    /// inlined, in the REPL (root or arm) or in a class, value-type or actor
+    /// method: it lowers through `generate_block_arity_mismatch`, a stand-in
+    /// fun of the block's own arity whose application raises `badarity` (the
+    /// structured `arity_mismatch` error) at run time, and the block body is
+    /// never compiled. The same rule keeps the send out of the REPL producer
+    /// rule (`repl_evaluated_block`), the method producer rule
+    /// (`literal_block_value_arm`) and every Tier 2 statement lowering
+    /// (`is_tier2_value_call`, `inline_block_captured_mutations`).
+    pub(in crate::core_erlang) fn applies_block_of_other_arity(
         receiver: &Expression,
         arity: usize,
     ) -> bool {
-        self.is_repl_mode()
-            && self.in_repl_arm
-            && matches!(receiver, Expression::Block(block) if block.parameters.len() != arity)
+        matches!(receiver, Expression::Block(block)
+            if !beamtalk_core::semantic_analysis::block_facts::block_literal_arity_matches(block, arity))
     }
 
     /// Whether `expr` is a local-threading producer
