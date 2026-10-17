@@ -1538,9 +1538,13 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
 #   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
 #     set; it is run by hand to print a generated program (BT-3733).
+#   - adr0131_measure_*: the ADR 0131 Phase 0 measurement harness needs a
+#     `--features beamtalk-core/measure-bypass` build; it is run by
+#     `just measure-adr0131-statements` (BT-3841).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip negative_test_invalid_spec_detected_by_dialyzer \
     --skip dump_program \
+    --skip adr0131_measure_ \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \
     --skip bad_cookie_readiness_resolves_within_the_default_budget \
