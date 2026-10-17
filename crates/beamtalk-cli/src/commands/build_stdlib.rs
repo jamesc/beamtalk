@@ -20,6 +20,7 @@ use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+use beamtalk_core::semantic_analysis::tier2_callee::ThreadingIndex;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -741,7 +742,13 @@ impl MethodKindMeta {
 }
 
 /// Convert an AST method definition to `MethodMeta`.
-fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
+fn method_def_to_meta(
+    m: &beamtalk_core::ast::MethodDefinition,
+    class_name: &str,
+    class_side: bool,
+    threading: &ThreadingIndex,
+) -> MethodMeta {
+    let selector = m.selector.name();
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
@@ -749,7 +756,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
-        threading_params: Vec::new(),
+        threading_params: threading.params(class_name, class_side, &selector),
         return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
@@ -878,6 +885,8 @@ fn mark_spawns_for_selectors(
     for m in methods.iter_mut() {
         if selectors.iter().any(|&s| s == m.selector) {
             m.spawns_block = true;
+            // The block runs in another process: it is never threaded.
+            m.threading_params.clear();
         }
     }
     let missing: Vec<&str> = selectors
@@ -1248,9 +1257,18 @@ fn extract_class_metadata(
         );
     }
 
-    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
-    let mut class_methods: Vec<MethodMeta> =
-        class.class_methods.iter().map(method_def_to_meta).collect();
+    let threading = ThreadingIndex::build(&module.classes);
+    let class_name_str = class.name.name.as_str();
+    let mut methods: Vec<MethodMeta> = class
+        .methods
+        .iter()
+        .map(|m| method_def_to_meta(m, class_name_str, false, &threading))
+        .collect();
+    let mut class_methods: Vec<MethodMeta> = class
+        .class_methods
+        .iter()
+        .map(|m| method_def_to_meta(m, class_name_str, true, &threading))
+        .collect();
 
     let state = class
         .state

@@ -3561,3 +3561,77 @@ fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
     );
     assert!(summary.assigned.is_empty());
 }
+
+// --- ADR 0132 Phase 1b: stdlib `threading_params` index (BT-3870) ---
+
+fn stdlib_threading_params(class: &str, selector: &str, class_side: bool) -> Vec<usize> {
+    let h = ClassHierarchy::with_builtins();
+    let info = h
+        .get_class(class)
+        .unwrap_or_else(|| panic!("{class} missing"));
+    let list = if class_side {
+        &info.class_methods
+    } else {
+        &info.methods
+    };
+    list.iter()
+        .find(|m| m.selector == selector)
+        .unwrap_or_else(|| panic!("{class}>>{selector} missing"))
+        .threading_params
+        .clone()
+}
+
+/// Hand-checked against the stdlib sources: each of these forwards or invokes
+/// its block parameter only at the method root.
+#[test]
+fn stdlib_threading_params_hand_checked_threading_homs() {
+    // `do: block => self activeEntries do: block`
+    assert_eq!(stdlib_threading_params("ChangeLog", "do:", false), vec![0]);
+    // `select: block => self.entries select: block`
+    assert_eq!(
+        stdlib_threading_params("ChangeLog", "select:", false),
+        vec![0]
+    );
+    assert_eq!(
+        stdlib_threading_params("SupervisionTree", "do:", false),
+        vec![0]
+    );
+    assert_eq!(
+        stdlib_threading_params("SupervisionTree", "select:", false),
+        vec![0]
+    );
+    // `ifTrue: trueBlock ifFalse: _falseBlock => trueBlock value`
+    assert_eq!(
+        stdlib_threading_params("True", "ifTrue:ifFalse:", false),
+        vec![0]
+    );
+    // `... noneBlock value` at the root; `block` is only used in a nested block.
+    assert_eq!(
+        stdlib_threading_params("Collection", "detect:ifNone:", false),
+        vec![1]
+    );
+}
+
+/// Hand-checked: these use the block in a nested block literal (Phase 3), as a
+/// primitive/intrinsic (no Beamtalk body), or in a spawned process.
+#[test]
+fn stdlib_threading_params_hand_checked_non_threading_homs() {
+    for (class, selector, class_side) in [
+        // Block used only inside `self inject:into: [...]` / `self do: [...]`.
+        ("Collection", "select:", false),
+        ("Collection", "detect:", false),
+        ("Collection", "do:separatedBy:", false),
+        // `@primitive` bodies.
+        ("List", "do:", false),
+        ("List", "select:", false),
+        // `@intrinsic`.
+        ("Block", "on:do:", false),
+        // Spawned in another process.
+        ("Timer", "after:do:", true),
+    ] {
+        assert!(
+            stdlib_threading_params(class, selector, class_side).is_empty(),
+            "{class}>>{selector} must not thread"
+        );
+    }
+}

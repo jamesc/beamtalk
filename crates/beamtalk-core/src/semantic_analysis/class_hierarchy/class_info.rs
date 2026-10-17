@@ -11,6 +11,7 @@ use ecow::EcoString;
 use std::collections::{BTreeSet, HashMap};
 
 use super::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::tier2_callee::ThreadingIndex;
 
 /// Information about a class variable (`classState:` declaration, ADR 0067).
 ///
@@ -357,7 +358,10 @@ impl ClassInfo {
     /// Shared by `extract_class_infos` and `add_module_classes` to avoid
     /// duplicating the field-mapping logic.
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to struct fields
-    pub(super) fn from_class_definition(class: &ClassDefinition) -> Self {
+    pub(super) fn from_class_definition(
+        class: &ClassDefinition,
+        threading: &ThreadingIndex,
+    ) -> Self {
         let mut instance_methods: Vec<MethodInfo> = class
             .methods
             .iter()
@@ -369,7 +373,7 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                threading_params: Vec::new(),
+                threading_params: threading.params(&class.name.name, false, &m.selector.name()),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters
@@ -395,7 +399,7 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                threading_params: Vec::new(),
+                threading_params: threading.params(&class.name.name, true, &m.selector.name()),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters

@@ -14,6 +14,7 @@
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
+use crate::semantic_analysis::tier2_callee::ThreadingIndex;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -573,10 +574,11 @@ impl ClassHierarchy {
     /// for cross-file hierarchy resolution in Pass 2.
     #[must_use]
     pub fn extract_class_infos(module: &Module) -> Vec<ClassInfo> {
+        let threading = ThreadingIndex::build(&module.classes);
         module
             .classes
             .iter()
-            .map(ClassInfo::from_class_definition)
+            .map(|c| ClassInfo::from_class_definition(c, &threading))
             .collect()
     }
     /// Set the `package` field on every entry in `class_infos` that doesn't
@@ -834,6 +836,7 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
+        let threading = ThreadingIndex::build(&module.classes);
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.
@@ -851,7 +854,7 @@ impl ClassHierarchy {
                 true,
                 &mut diagnostics,
             );
-            let class_info = ClassInfo::from_class_definition(class);
+            let class_info = ClassInfo::from_class_definition(class, &threading);
             self.classes.insert(class.name.name.clone(), class_info);
         }
         // Pass 1.5: Propagate ClassKind through the hierarchy.
