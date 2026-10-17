@@ -192,10 +192,18 @@ fn binding_is_promotable(
         .rev()
         .find(|&j| stored_block_var_uses(&stmts[j].expression, name).1)
         .unwrap_or(index);
+    let reads_fields = !analysis.field_reads.is_empty();
     let assigns_touched = |expr: &Expression| {
         let mut found = false;
         walk_expression(expr, &mut |e| match e {
             Expression::Assignment { target, .. } if matches!(target.as_ref(), Expression::Identifier(t) if touched.contains(t.name.as_str())) =>
+            {
+                found = true;
+            }
+            // A block that reads a field closed over the `self` of its binding:
+            // a field write before the send would be seen by the inlined one.
+            Expression::Assignment { target, .. }
+                if reads_fields && matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
             {
                 found = true;
             }
@@ -495,6 +503,31 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
             if *is_cast || arguments.len() != block.parameters.len() {
                 return false;
             }
+            // The arguments move into the inlined block's scope (`n := arg`).
+            // Anything scope-sensitive would change meaning there: a first
+            // assignment (or destructuring) would become block-local and be
+            // lost, and a `^` would return from the wrong frame. Such a send
+            // keeps the section 6 error. Nested blocks are walked too, so a
+            // block-local assignment in an argument is refused as well.
+            let mut scope_sensitive = false;
+            for arg in arguments.iter() {
+                walk_expression(arg, &mut |a| {
+                    if matches!(
+                        a,
+                        Expression::Assignment { .. }
+                            | Expression::DestructureAssignment { .. }
+                            | Expression::Return { .. }
+                    ) {
+                        scope_sensitive = true;
+                    }
+                });
+            }
+            if scope_sensitive {
+                return false;
+            }
+            // Copied ASTs (the block body at each send, split cascade
+            // arguments) share their original spans. Span-keyed side tables
+            // merge the copies; harmless while every copy lowers the same way.
             let mut body: Vec<ExpressionStatement> = block
                 .parameters
                 .iter()
@@ -565,6 +598,15 @@ mod tests {
     }
 
     #[test]
+    fn arguments_without_scope_sensitive_constructs_are_inlined() {
+        let out = inlined(
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (Array with: 2) size\n    t",
+        )
+        .unwrap();
+        assert!(out.contains("n := "), "{out}");
+    }
+
+    #[test]
     fn cascade_is_split_into_sends() {
         let out =
             inlined("    t := 0\n    b := [:n | t := t + n]\n    b value: 1; value: 2\n    t")
@@ -601,6 +643,23 @@ mod tests {
             "    t := 0\n    b := [t := t + 1]\n    r := [99] match: [t -> b value]\n    #[r, t]",
             // A destructuring assignment rebinding a local the block touches.
             "    t := 0\n    b := [t := t + 1]\n    {t, c} := Tuple withAll: #(1, 2)\n    b value\n    t",
+            // An argument that first-assigns a local: moved into the inlined
+            // block's scope it would become block-local and be lost.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (z := 5)\n    #[t, z]",
+            // ... nested in another send.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (Array with: (z := 1))\n    #[t, z]",
+            // ... a destructuring assignment in an argument.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: ({z, y} := Tuple withAll: #(1, 2))\n    z",
+            // ... an assignment inside a block nested in an argument.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: ([z := 1] value)\n    z",
+            // A `^` in an argument returns from the method, not the inlined block.
+            "    t := 0\n    b := [:n | t := t + n]\n    b value: (t > 5 ifTrue: [^0] ifFalse: [1])\n    t",
+            // A block-local temp that a later method-level assignment would turn
+            // into an outer write once the body is inlined.
+            "    t := 0\n    b := [tmp := 1. t := t + tmp]\n    tmp := 9\n    b value\n    #[t, tmp]",
+            // A field write between the binding and the send (the closure
+            // captured the old self).
+            "    t := 0\n    b := [t := t + self.count]\n    self.count := 5\n    b value\n    t",
             // A block parameter named like the stored local.
             "    t := 0\n    b := [t := t + 1]\n    #(1) do: [:b | b printString]\n    b value\n    t",
             // A block-local assignment of the stored local's name in a nested block.
