@@ -2238,6 +2238,10 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
         "branch value as the last statement",
         "b := true ifTrue: [[t := t + 1]] ifFalse: [[0]]",
     ),
+    (
+        "reassigned local as the last statement",
+        "b := nil\nb := [t := t + 1]",
+    ),
 ];
 
 /// The [`ESCAPE_SHAPES`] whose block is the value of the method body's last
@@ -2247,11 +2251,13 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
 /// Each is `(name, send_value)`: whether the hint may advise sending the
 /// local `value` before the method ends, which only runs the block (and
 /// threads its write) for a block literal bound directly, a Tier 2 local
-/// codegen promotes; an alias or a value bound through an arm is not one.
+/// codegen promotes; an alias, a value bound through an arm and a local
+/// assigned more than once are not one.
 const ACTOR_DROPPED_SHAPES: &[(&str, bool)] = &[
     ("returned via last-statement assignment", true),
     ("alias as the last statement", false),
     ("branch value as the last statement", false),
+    ("reassigned local as the last statement", false),
 ];
 
 /// BT-3859: the [`ESCAPE_SHAPES`] whose block writes `u`, a local first bound

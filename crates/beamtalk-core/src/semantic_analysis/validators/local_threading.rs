@@ -1342,11 +1342,14 @@ struct Walker<'d> {
     value_local_bindings: HashMap<Span, Tier2Local>,
     /// Actor methods only: the operands that are the value of the method
     /// body's last statement when that statement is a local assignment. An
-    /// actor method answers `nil` there, not the value (BT-3882), so a block
-    /// among them is dropped unrun rather than returned (BT-3859). Each maps
-    /// to whether it is the assignment's whole value, a block literal
-    /// (`b := [..]`): only then can a `b value` before the method ends run it.
-    actor_dropped: HashMap<Span, bool>,
+    /// actor method answers `nil` there, not the value (a bug tracked in
+    /// BT-3882), so a block among them is dropped unrun rather than returned
+    /// (BT-3859). Each maps
+    /// to the assigned local when it is the assignment's whole value, a block
+    /// literal (`b := [..]`): only then can a `b value` before the method
+    /// ends run it, and only if the binding is promotable
+    /// ([`Walker::promotable_binding`]).
+    actor_dropped: HashMap<Span, Option<EcoString>>,
     /// The bindings of Tier 2 locals already reported (one diagnostic per
     /// binding).
     reported_locals: HashSet<Span>,
@@ -1895,7 +1898,7 @@ impl<'d> Walker<'d> {
         };
         let promotable = top_statement
             && self.safe_stored_uses.get(name).copied() == Some(true)
-            && threads_all(block, &writes);
+            && self.promotable_binding(name, block, &writes);
         self.tier2_locals.insert(
             name.clone(),
             Tier2Local {
@@ -1905,6 +1908,16 @@ impl<'d> Walker<'d> {
                 promotable,
             },
         );
+    }
+
+    /// The part of codegen's `prescan_tier2_local_vars` promotion rule that
+    /// `name := block` itself decides, apart from where it sits and how `name`
+    /// is used later: `name` is assigned exactly once in the method and the
+    /// block threads every outer local it writes (`writes`,
+    /// [`threads_all`]). The one copy of that rule, for
+    /// [`Walker::note_tier2_binding`] and the §6 dropped-block hint.
+    fn promotable_binding(&self, name: &str, block: &Block, writes: &[OuterLocalWrite]) -> bool {
+        self.assign_counts.get(name).copied() == Some(1) && threads_all(block, writes)
     }
 
     /// Whether `expr` is a conditional or an `on:do:`/`ensure:` that is a
@@ -2603,7 +2616,11 @@ impl<'d> Walker<'d> {
         };
         let name = &write.name;
         let dropped = match self.actor_dropped.get(&block.span) {
-            Some(&direct) if shape == EscapeShape::Returned => Dropped::Yes { send_value: direct },
+            Some(direct) if shape == EscapeShape::Returned => Dropped::Yes {
+                send_value: direct.as_ref().is_some_and(|local| {
+                    self.promotable_binding(local, block, &self.writes_of(block))
+                }),
+            },
             _ => Dropped::No,
         };
         self.diagnostics.push(
@@ -2746,10 +2763,13 @@ fn escape_phrase(shape: EscapeShape) -> &'static str {
 /// The operands an actor method drops (BT-3859): the value of the method
 /// body's last statement when it is a local assignment (`b := [..]`,
 /// `b := c ifTrue: [[..]] ...`, `c := b`), which an actor method answers
-/// `nil` for (BT-3882) where a class or value-type method answers the value.
-/// Each maps to whether it is that assignment's whole value, a block literal.
-/// Empty in any other context.
-fn actor_dropped(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<Span, bool> {
+/// `nil` for today (a bug tracked in BT-3882) where a class or value-type
+/// method answers the value. Each maps to the assigned local when it is that
+/// assignment's whole value, a block literal. Empty in any other context.
+fn actor_dropped(
+    context: MethodContext,
+    body: &[ExpressionStatement],
+) -> HashMap<Span, Option<EcoString>> {
     if context != Actor {
         return HashMap::new();
     }
@@ -2757,17 +2777,17 @@ fn actor_dropped(context: MethodContext, body: &[ExpressionStatement]) -> HashMa
     else {
         return HashMap::new();
     };
-    if !matches!(target.as_ref(), Expression::Identifier(_)) {
+    let Expression::Identifier(local) = target.as_ref() else {
         return HashMap::new();
-    }
+    };
     let direct = match value.as_ref() {
         Expression::Block(block) => Some(block.span),
         _ => None,
     };
     value_blocks(value)
         .into_iter()
-        .map(|b| (b.span, Some(b.span) == direct))
-        .chain(value_locals(value).into_iter().map(|id| (id.span, false)))
+        .map(|b| (b.span, (Some(b.span) == direct).then(|| local.name.clone())))
+        .chain(value_locals(value).into_iter().map(|id| (id.span, None)))
         .collect()
 }
 
@@ -2779,8 +2799,8 @@ enum Dropped {
     No,
     /// The block is the value of an actor method's last-statement assignment
     /// and is dropped unrun. `send_value`: sending the bound local `value`
-    /// before the method ends would run it (`b := [..]` written directly, a
-    /// Tier 2 local codegen promotes).
+    /// before the method ends would run it (`b := [..]` written directly and
+    /// [`Walker::promotable_binding`]).
     Yes { send_value: bool },
 }
 
