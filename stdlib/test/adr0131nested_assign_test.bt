@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3799 / BT-3860 (ADR 0131): a local assignment in value position (a
+// receiver, an operand, a literal element, an assignment's value) such as
+// `(t := t + 1) > 1 ifTrue: [u := 9]` must rebind `t` before anything after it
+// reads it, at the method root and in every loop or fold body. Today it
+// evaluates its value but never rebinds the local, in a class, value-type and
+// actor method alike (the three columns, fixtures/adr0131nested_assign_*.bt).
+//
+// Every test below pins today's answer under `PIN-BUG BT-3860` and names the
+// correct one; the fix for BT-3860 flips them all. The REPL pins are in
+// tests/repl-protocol/cases/adr0131_nested_assign.btscript.
+
+TestCase subclass: Adr0131NestedAssignTest
+
+  // PIN-BUG BT-3860: correct answer #[1, 2] in every column.
+  testRootPlain =>
+    self assert: #[Adr0131NestedAssignClass rootPlain, (Adr0131NestedAssignValue new) rootPlain, (Adr0131NestedAssignActor spawn) rootPlain] equals: #[#[0, 2], #[0, 2], #[0, 2]]
+
+  // PIN-BUG BT-3860: correct answer #[0, 7, 7] in every column.
+  testRootLiteral =>
+    self assert: #[Adr0131NestedAssignClass rootLiteral, (Adr0131NestedAssignValue new) rootLiteral, (Adr0131NestedAssignActor spawn) rootLiteral] equals: #[#[0, 7, 0], #[0, 7, 0], #[0, 7, 0]]
+
+  // PIN-BUG BT-3860: every column raises (the loop body answers the
+  // comparison's boolean where the loop expects its state map); correct
+  // answer 2 in every column.
+  testDoPlain =>
+    self
+      assert: #[self kindOf: [
+        Adr0131NestedAssignClass doPlain
+      ], self kindOf: [
+        (Adr0131NestedAssignValue new) doPlain
+      ], self kindOf: [(Adr0131NestedAssignActor spawn) doPlain]]
+      equals: #[#type_error, #type_error, #argument_error]
+
+  // PIN-BUG BT-3860: correct answer #[1, 9] in every column.
+  testRootIf =>
+    self assert: #[Adr0131NestedAssignClass rootIf, (Adr0131NestedAssignValue new) rootIf, (Adr0131NestedAssignActor spawn) rootIf] equals: #[#[0, 9], #[0, 9], #[0, 9]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9] in every column (BT-3799's shape).
+  testDoIf =>
+    self assert: #[Adr0131NestedAssignClass doIf, (Adr0131NestedAssignValue new) doIf, (Adr0131NestedAssignActor spawn) doIf] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 10] in every column.
+  testDoIfElse =>
+    self assert: #[Adr0131NestedAssignClass doIfElse, (Adr0131NestedAssignValue new) doIfElse, (Adr0131NestedAssignActor spawn) doIfElse] equals: #[#[0, 2], #[0, 2], #[0, 2]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9] in every column.
+  testDoAnd =>
+    self assert: #[Adr0131NestedAssignClass doAnd, (Adr0131NestedAssignValue new) doAnd, (Adr0131NestedAssignActor spawn) doAnd] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 2] in every column.
+  testDoIfFalse =>
+    self assert: #[Adr0131NestedAssignClass doIfFalse, (Adr0131NestedAssignValue new) doIfFalse, (Adr0131NestedAssignActor spawn) doIfFalse] equals: #[#[0, 2], #[0, 2], #[0, 2]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9] in every column.
+  testToDoIf =>
+    self assert: #[Adr0131NestedAssignClass toDoIf, (Adr0131NestedAssignValue new) toDoIf, (Adr0131NestedAssignActor spawn) toDoIf] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9] in every column.
+  testTimesIf =>
+    self assert: #[Adr0131NestedAssignClass timesIf, (Adr0131NestedAssignValue new) timesIf, (Adr0131NestedAssignActor spawn) timesIf] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9] in every column.
+  testWhileIf =>
+    self assert: #[Adr0131NestedAssignClass whileIf, (Adr0131NestedAssignValue new) whileIf, (Adr0131NestedAssignActor spawn) whileIf] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9, #(1, 2)] in every column.
+  testCollectIf =>
+    self assert: #[Adr0131NestedAssignClass collectIf, (Adr0131NestedAssignValue new) collectIf, (Adr0131NestedAssignActor spawn) collectIf] equals: #[#[0, 0, #(1, 2)], #[0, 0, #(1, 2)], #[0, 0, #(1, 2)]]
+
+  // PIN-BUG BT-3860: correct answer #[2, 9, 3] in every column.
+  testInjectIf =>
+    self assert: #[Adr0131NestedAssignClass injectIf, (Adr0131NestedAssignValue new) injectIf, (Adr0131NestedAssignActor spawn) injectIf] equals: #[#[0, 0, 3], #[0, 0, 3], #[0, 0, 3]]
+
+  /// The error kind `block` raises, or `nil` if it answers.
+  kindOf: block =>
+    [
+      block value
+      nil
+    ] on: Exception do: [:e | e kind]
