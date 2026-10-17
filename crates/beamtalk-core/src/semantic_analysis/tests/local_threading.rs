@@ -2860,6 +2860,33 @@ fn statement_position_and_field_assignments_stay_accepted() {
     assert!(errors.is_empty(), "{src}: {errors:?}");
 }
 
+/// `^t := e` stays rejected (the stopgap is syntactic), but its hint is the
+/// rewrite that fits a return: `^e`, not a hoist. An assignment that is only
+/// part of the returned value keeps the hoist hint.
+#[test]
+fn a_returned_local_assignment_hints_at_returning_the_value() {
+    for body in [
+        "^t := t + 1",
+        "^(t := t + 1)",
+        "#(1, 2) do: [:k | k > 1 ifTrue: [^t := k]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = value_position_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            let hint = errors[0].hint.as_deref().unwrap_or_default();
+            assert!(
+                hint.contains("`^expr` instead of `^t := expr`"),
+                "{src}: {hint}"
+            );
+        }
+    }
+    let src = in_class("^(t := t + 1) + 1");
+    let errors = value_position_errors(&src, &[]);
+    assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+    let hint = errors[0].hint.as_deref().unwrap_or_default();
+    assert!(hint.contains("own statement"), "{hint}");
+}
+
 #[test]
 fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     let src = in_class("x := 3 match: [3 -> t := 7; _ -> 0]\nt");

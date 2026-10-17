@@ -78,6 +78,11 @@ const POSITIONS: &[&str] = &[
     // Inside a block that is itself in value position: its statements bind.
     "x := [:k | @A] value: 1",
     "x := [@A. t] value",
+    // The value of `^`, bare and as an operand, and of a non-local return
+    // from a block.
+    "^@A",
+    "^(@A) + 1",
+    "x := [:k | ^@A] value: 1",
 ];
 
 /// The bodies `@S` (one statement from [`POSITIONS`]) sits in, each with its

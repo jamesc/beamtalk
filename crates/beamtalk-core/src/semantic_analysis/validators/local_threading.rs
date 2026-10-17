@@ -1106,10 +1106,17 @@ fn report_value_position_assignments(
                 ),
                 found.span,
             )
-            .with_hint(format!(
-                "move the assignment into its own statement before this one, \
-                 then use `{name}` here"
-            ))
+            .with_hint(if found.returned {
+                format!(
+                    "nothing can read `{name}` after the return: \
+                     return the value itself (`^expr` instead of `^{name} := expr`)"
+                )
+            } else {
+                format!(
+                    "move the assignment into its own statement before this one, \
+                     then use `{name}` here"
+                )
+            })
             .with_category(DiagnosticCategory::ValuePositionLocalAssignment),
         );
     }

@@ -2979,6 +2979,9 @@ pub struct ValuePositionAssignment {
     pub name: ecow::EcoString,
     /// The whole assignment (`t := t + 1`, without enclosing parentheses).
     pub span: Span,
+    /// Whether the assignment is the whole value of a `^` (`^t := e`), whose
+    /// write nothing after it can read: the rewrite is `^e`.
+    pub returned: bool,
 }
 
 /// The walk behind [`value_position_local_assignments`].
@@ -3013,12 +3016,26 @@ impl ValuePositionAssignments {
 
 impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
     fn visit_expr(&mut self, expr: &'ast Expression) {
+        // `^t := e`: the same value position, told apart only for the hint.
+        if let Expression::Return { value, .. } = expr
+            && let assignment @ Expression::Assignment { target, value, .. } = value.unwrap_parens()
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            self.found.push(ValuePositionAssignment {
+                name: id.name.clone(),
+                span: assignment.span(),
+                returned: true,
+            });
+            self.visit_expr(value);
+            return;
+        }
         if let Expression::Assignment { target, .. } = expr
             && let Expression::Identifier(id) = target.as_ref()
         {
             self.found.push(ValuePositionAssignment {
                 name: id.name.clone(),
                 span: expr.span(),
+                returned: false,
             });
         }
         // An inlined arm (a conditional's, a lookup handler, `[...] value`)
