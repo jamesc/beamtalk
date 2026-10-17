@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3866 (ADR 0132 Phase 0a, epic BT-3865): value-type column of the ADR 0132
+// §"The inventory" shapes ADR 0131 §6 rejects today (see
+// adr0132section6_class.bt.pending for the layout and the shape key). The
+// `probe*` instance methods are `Tier2BlockNoReturnChannel` compile errors;
+// the `callee*` methods compile on their own. I1 and I4 are probed both
+// through the literal class (`class` callees) and as an instance self-send;
+// I7 is class-side only and is pinned in the class column. Inert: the runner
+// discovers only `.bt`.
+//
+// `adr0132_section6_inventory_pins` in beamtalk-core checks that every
+// `probe*` method is rejected and no `callee*` method is.
+
+Value subclass: Adr0132Section6Value
+
+  class calleeDirect: b => b value
+
+  class calleeOpen: b => b value
+
+  calleeDirect: b => b value
+
+  calleeDo: b => #(1) do: [:x | b value]
+
+  calleePass: b => self calleeDirect: b
+
+  probeI1 =>
+    t := 0
+    Adr0132Section6Value calleeDirect: [t := t + 1]
+    t
+
+  probeI1Self =>
+    t := 0
+    self calleeDirect: [t := t + 1]
+    t
+
+  probeI2 =>
+    t := 0
+    self calleeDo: [t := t + 1]
+    t
+
+  probeI4 =>
+    t := 0
+    self calleePass: [t := t + 1]
+    t
+
+  probeI6 =>
+    t := 0
+    blk := [:x | t := t + x]
+    #(1, 2) do: blk
+    t
+
+  probeI8 =>
+    t := 0
+    Adr0132Section6Value calleeOpen: [t := t + 1]
+    t
