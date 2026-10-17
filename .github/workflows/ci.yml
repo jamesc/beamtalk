@@ -48,6 +48,28 @@ jobs:
         with:
           persist-credentials: false
 
+      # The Rust corpus tier (`just test-corpus`, the state-threading agreement and
+      # corpus proofs, ~13 min) calls the compiler in-process and never touches the
+      # runtime, the CLI or the stdlib sources, so only a change to the compiler
+      # crates or the build/test configuration can change its verdict. On a PR it
+      # runs only when such paths changed (same gate as `just ci-changed`); on a
+      # push to main it always runs. Linux only (the tests are OS-independent).
+      - name: Decide whether the Rust corpus tier runs
+        id: corpus
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+               crates/beamtalk-core/ crates/beamtalk-codegen/ crates/beamtalk-repl/ \
+               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -154,6 +176,10 @@ jobs:
         # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
         # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
         run: just build clippy fmt-check ${{ runner.os == 'Linux' && 'test-rust' || 'test-rust-platform' }} lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar
+
+      - name: Rust corpus tier (state-threading agreement and corpus proofs)
+        if: runner.os == 'Linux' && steps.corpus.outputs.run == 'true'
+        run: just test-corpus
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches

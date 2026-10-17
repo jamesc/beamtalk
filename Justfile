@@ -44,11 +44,16 @@ doctor:
 # Matches: just build clippy fmt-check test (check job)
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
+# The slow tier of the Rust tests as a nextest filterset (see `test-rust` and
+# `test-corpus`): lib/unit tests whose module path says agreement or corpus,
+# and the integration binaries that are nothing but such proofs.
+corpus_tests := "test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/)"
+
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
+ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
 
 [windows]
-ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
+ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
 # suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
@@ -125,6 +130,21 @@ ci-changed:
       just test-parity
     else
       echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
+    fi
+
+    # The Rust corpus tier (`test-corpus`: the ADR 0111/0131 agreement and
+    # corpus proofs, ~13 min on 4 cores) calls the compiler in-process and
+    # never touches the runtime, the CLI or the stdlib sources, so only a
+    # change to the compiler crates (or to the build/test configuration) can
+    # change its verdict. CI's Linux `check` job applies the same gate.
+    CORPUS_PATTERNS=(
+      'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*'
+      'Cargo.toml' 'Cargo.lock' 'Justfile'
+    )
+    if matches_any "${CORPUS_PATTERNS[@]}"; then
+      just test-corpus
+    else
+      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job gates it the same way)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.
@@ -1055,7 +1075,36 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # filter (nextest then runs 0 tests and the later recipes never run). The
 # package selection is the one parameter of the hidden `_test-rust`.
 # Output: failures + the summary line only.
+#
+# Two tiers. `test-rust` is the fast tier: everything except `corpus_tests`.
+# `test-corpus` is the slow tier: the ADR 0111/0131 state-threading agreement
+# and corpus proofs (`local_producer_agreement*`, `*_corpus`,
+# `class_var_agreement`, `repl_local_producer`, ...), about 90 tests that
+# enumerate frames x constructs x statements and compile every cell: roughly
+# 13 of the suite's 21 minutes on a 4-core runner. They only prove things
+# about the compiler crates they call in-process, so `ci-changed` and CI's
+# Linux `check` job run them only when those crates change; `just ci` always
+# runs both tiers. The set is one nextest filterset, defined once here.
 test-rust: (_test-rust "")
+
+# The slow tier (see `test-rust`). Linux-only in CI; no platform subset.
+[unix]
+test-corpus:
+    #!/usr/bin/env bash
+    set -o pipefail
+    echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' || exit $?
+    else
+        echo "⏭️  cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)"
+    fi
+    echo "✅ Rust corpus tier complete"
+
+[windows]
+test-corpus:
+    @echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
+    @echo "✅ Rust corpus tier complete"
 
 # The platform-sensitive subset of the Rust tests: every crate except the pure
 # compiler crates whose tests are platform-independent and dominate the run
@@ -1079,10 +1128,10 @@ _test-rust ARGS:
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }} || exit $?
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }} || exit $?
         rest="--benches"
     else
-        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower)"
+        echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier too)"
         rest="--all-targets"
     fi
     for targets in "$rest" "--doc"; do
@@ -1095,7 +1144,7 @@ _test-rust ARGS:
 [windows]
 _test-rust ARGS:
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $output = cargo test --benches --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $output = cargo test --benches --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
 
