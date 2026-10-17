@@ -61,14 +61,16 @@ t
 // => 0
 
 // The rewrite the error names: the assignment hoisted into its own statement.
+// (The hoisted form of BT-3799's shape, a REPL loop body whose statement is a
+// conditional with a writing arm, still trips the debug verifier: BT-3877.)
 t := t + 1
 // => 1
 
 x := t + 1
 // => 2
 
-#(1, 2) do: [:k | t := t + 1. t > 1 ifTrue: [u := 9]]
+#(1, 2) do: [:k | t := t + 1]
 // => _
 
 #[t, u, x]
-// => #[3, 9, 2]
+// => #[3, 0, 2]

@@ -604,7 +604,9 @@ reports the same message at the same span. No operation is surface-specific.
     input that was accepted before, and answered a silently wrong value
     (`x := (t := t + 1) + 1` left `t` unchanged), is now a compile error, and
     BT-3799's `#(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]` no longer
-    reaches the debug compiler's verifier panic. The input is rejected before
+    reaches the debug compiler's verifier panic (its hoisted form, a REPL
+    loop body whose statement is a conditional with a writing arm, still
+    does: BT-3877). The input is rejected before
     it runs, so no binding changes. This is the only REPL change: every other
     REPL display, prompt and output is unchanged
     (`tests/repl-protocol/cases/adr0131_nested_assign.btscript`).
