@@ -266,12 +266,43 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
 struct ProcessManager {
     beam_process: Option<Child>,
     #[cfg_attr(not(unix), allow(dead_code))]
-    cover_enabled: bool,
+    cover: Option<CoverFiles>,
     /// The OS-assigned port on which the REPL TCP server is listening.
     port: u16,
     /// Dedicated, empty project dir for the workspace (so repo fixtures stay
     /// out-of-project / non-flushable). Removed on `stop`.
     project_dir: PathBuf,
+}
+
+/// Where a cover-instrumented node exports its coverdata and which file it
+/// polls for its shutdown signal.
+///
+/// Keyed by workspace name so every cover node alive at the same time has its
+/// own pair. `e2e_distribution_tests` runs a primary and a peer node together;
+/// when both shared one signal file and one `e2e.coverdata.tmp`, stopping the
+/// primary made both nodes export into the same temp file at once, and the
+/// interleaved writes left an `e2e.coverdata` that `cover:import/1` rejects.
+struct CoverFiles {
+    export: PathBuf,
+    signal: PathBuf,
+}
+
+impl CoverFiles {
+    fn for_workspace(runtime: &std::path::Path, workspace_name: &str) -> Self {
+        let dir = runtime.join("_build/test/cover");
+        // The primary node keeps the `e2e.coverdata` name `just coverage-e2e`
+        // checks for; other nodes get their own file, which `coverage-all`
+        // merges via its `*.coverdata` glob.
+        let stem = if workspace_name == E2E_SESSION_NAME {
+            "e2e".to_string()
+        } else {
+            format!("e2e_{workspace_name}")
+        };
+        Self {
+            export: dir.join(format!("{stem}.coverdata")),
+            signal: dir.join(format!(".{stem}_stop")),
+        }
+    }
 }
 
 /// Build the `-eval` command for the BEAM node.
@@ -434,8 +465,9 @@ impl ProcessManager {
         // When E2E_COVER=1, instrument all runtime modules with Erlang's cover
         // tool and export coverdata on shutdown via a signal file.
         let cover_enabled = env::var("E2E_COVER").is_ok();
-        let cover_export_path = runtime.join("_build/test/cover/e2e.coverdata");
-        let cover_signal_path = runtime.join("_build/test/cover/.e2e_stop");
+        let cover_files = CoverFiles::for_workspace(&runtime, workspace_name);
+        let cover_export_path = &cover_files.export;
+        let cover_signal_path = &cover_files.signal;
         if cover_enabled {
             // Ensure cover directory exists (may not after `just clean`)
             let _ = fs::create_dir_all(runtime.join("_build/test/cover"));
@@ -444,7 +476,7 @@ impl ProcessManager {
                 cover_export_path.display()
             );
         }
-        let _ = fs::remove_file(&cover_signal_path);
+        let _ = fs::remove_file(cover_signal_path);
         let eval_cmd = beam_eval_cmd(
             cover_enabled,
             paths
@@ -513,7 +545,7 @@ impl ProcessManager {
 
         Self {
             beam_process: Some(beam_child),
-            cover_enabled,
+            cover: cover_enabled.then_some(cover_files),
             port,
             project_dir: e2e_project_dir,
         }
@@ -581,7 +613,7 @@ impl ProcessManager {
         eprintln!("E2E: library-project REPL ready on port {port}");
         Self {
             beam_process: Some(beam_child),
-            cover_enabled: false,
+            cover: None,
             port,
             // Nonexistent sentinel: `stop`'s remove_dir_all is a no-op; the
             // caller's TempDir owns the real directory.
@@ -654,7 +686,7 @@ impl ProcessManager {
 
         Self {
             beam_process: Some(beam_child),
-            cover_enabled: false,
+            cover: None,
             port,
             project_dir: e2e_project_dir,
         }
@@ -814,7 +846,7 @@ impl ProcessManager {
 
         Self {
             beam_process: Some(beam_child),
-            cover_enabled: false,
+            cover: None,
             port,
             project_dir,
         }
@@ -830,13 +862,12 @@ impl ProcessManager {
     )]
     fn stop(&mut self) {
         if let Some(ref mut child) = self.beam_process {
-            if self.cover_enabled {
+            if let Some(cover) = &self.cover {
                 // Signal the BEAM to export cover data and shut down gracefully
                 // by creating the signal file it polls for.
-                let runtime = runtime_dir();
-                let signal = runtime.join("_build/test/cover/.e2e_stop");
+                let signal = &cover.signal;
                 eprintln!("E2E: Signaling cover export...");
-                let _ = fs::write(&signal, "stop");
+                let _ = fs::write(signal, "stop");
                 // Wait for BEAM to export and call init:stop(); the export is slow
                 // on a loaded runner, so use the cover-mode timeout (120s).
                 let deadline = std::time::Instant::now() + repl_timeout();
@@ -858,16 +889,16 @@ impl ProcessManager {
                         }
                     }
                 }
-                let _ = fs::remove_file(&signal);
+                let _ = fs::remove_file(signal);
                 if clean_exit {
                     eprintln!("E2E: Cover data exported.");
                 } else {
                     // A force-killed BEAM may have died mid-export. The export goes to a
                     // temp file and is renamed only when complete, so drop the temp file
                     // and any stale export; the merge step then never sees a partial file.
-                    let export = runtime.join("_build/test/cover/e2e.coverdata");
+                    let export = &cover.export;
                     let _ = fs::remove_file(export.with_extension("coverdata.tmp"));
-                    let _ = fs::remove_file(&export);
+                    let _ = fs::remove_file(export);
                     eprintln!(
                         "E2E: Warning - BEAM was force-killed before cover export finished; \
                          discarded the partial E2E coverdata."
