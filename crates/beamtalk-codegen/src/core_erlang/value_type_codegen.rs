@@ -993,7 +993,11 @@ impl CoreErlangGenerator {
         let Expression::Block(block) = receiver.as_ref() else {
             return None;
         };
-        (block.parameters.len() == arguments.len()).then_some((block, arguments.as_slice()))
+        beamtalk_core::semantic_analysis::block_facts::block_literal_arity_matches(
+            block,
+            arguments.len(),
+        )
+        .then_some((block, arguments.as_slice()))
     }
 
     /// BT-3816: whether `expr` is an inlined literal-block `value` send, in a

@@ -1724,7 +1724,7 @@ pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
     };
     (selector.well_known() == Some(crate::ast::WellKnownSelector::Value)
         && arguments.is_empty()
-        && block.parameters.is_empty())
+        && block_literal_arity_matches(block, 0))
     .then_some(block)
 }
 
@@ -2300,13 +2300,28 @@ pub fn repl_producer_writes(
     }
 }
 
+/// BT-3881: whether a `value`-family send with `arity` arguments to the block
+/// literal `block` may inline it: only when the arity is the block's own. A
+/// block literal sent a selector of another arity (`[t := t + 1] value: 1`,
+/// `[:k | t := t + k] value`) is never inlined, in the REPL (root or arm) or
+/// in a class, value-type or actor method: it is applied, so it raises the
+/// same structured `arity_mismatch` error as any other block called with the
+/// wrong number of arguments, and its body never runs (codegen's
+/// `applies_block_of_other_arity`). The one arity rule every inlining of a
+/// block literal `value` send reads.
+#[must_use]
+pub fn block_literal_arity_matches(block: &Block, arity: usize) -> bool {
+    block.parameters.len() == arity
+}
+
 /// BT-3823: the block of an *evaluated block* in the REPL sense: a
 /// `value`-family send to a bare block literal (`[...] value`,
-/// `[:k | ...] value: x`) whose arity matches the block's, or `None`. The REPL
-/// inlines such a block over its bindings map when it writes a binding (a REPL
-/// arm); a block sent a selector of another arity is applied instead, and
-/// raises `badarity` (codegen's `repl_arm_applies_block`; the REPL root still
-/// inlines it, BT-3881). The one rule the Phase 0 check and codegen read.
+/// `[:k | ...] value: x`) whose arity matches the block's
+/// ([`block_literal_arity_matches`]), or `None`. The REPL inlines such a block
+/// over its bindings map when it writes a binding (a REPL arm); a block sent a
+/// selector of another arity is applied instead, and raises `arity_mismatch`
+/// at the root and in an arm alike (BT-3881). The one rule the Phase 0 check
+/// and codegen read.
 #[must_use]
 pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
     let inner = expr.unwrap_parens();
@@ -2322,7 +2337,7 @@ pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
         return None;
     };
     (local_threading_construct(inner)?.family == LocalThreadingFamily::BlockValue
-        && block.parameters.len() == arguments.len())
+        && block_literal_arity_matches(block, arguments.len()))
     .then_some(block)
 }
 

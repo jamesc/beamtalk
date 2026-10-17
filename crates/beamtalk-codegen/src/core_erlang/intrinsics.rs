@@ -233,9 +233,10 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
-        // BT-3823: in a REPL arm a block of another arity raises `badarity`.
+        // BT-3881: a block literal of another arity is applied, never
+        // inlined, so it raises `badarity` (in the REPL and in a method).
         if let Expression::Block(block) = receiver
-            && self.repl_arm_applies_block(receiver, 0)
+            && Self::applies_block_of_other_arity(receiver, 0)
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
@@ -252,8 +253,7 @@ impl CoreErlangGenerator {
         // arm; `beamtalk_core`'s `repl_evaluated_block`).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis)
-                || (block.parameters.is_empty() && self.repl_blocks_write_bindings(&[block]))
+            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
                 return Ok(Some(doc));
@@ -457,9 +457,10 @@ impl CoreErlangGenerator {
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
-        // BT-3823: in a REPL arm a block of another arity raises `badarity`.
+        // BT-3881: a block literal of another arity is applied, never
+        // inlined, so it raises `badarity` (in the REPL and in a method).
         if let Expression::Block(block) = receiver
-            && self.repl_arm_applies_block(receiver, arguments.len())
+            && Self::applies_block_of_other_arity(receiver, arguments.len())
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
@@ -475,9 +476,7 @@ impl CoreErlangGenerator {
         // as above).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis)
-                || (block.parameters.len() == arguments.len()
-                    && self.repl_blocks_write_bindings(&[block]))
+            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
                 return Ok(Some(doc));
@@ -837,8 +836,9 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// BT-3823: a block literal sent a `value` selector of another arity in a
-    /// REPL arm ([`Self::repl_arm_applies_block`]): its arguments are evaluated
+    /// BT-3823, BT-3881: a block literal sent a `value` selector of another
+    /// arity, in the REPL or a method ([`Self::applies_block_of_other_arity`]):
+    /// its arguments are evaluated
     /// and applied to a stand-in `fun` of the block's own arity, so the send
     /// raises the same structured `badarity` error (`Wrong number of
     /// arguments: block expects N but was called with M`) as any other block
