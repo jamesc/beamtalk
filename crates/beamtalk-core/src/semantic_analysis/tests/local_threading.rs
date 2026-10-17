@@ -137,6 +137,45 @@ fn section6_stored_closure_invoked_directly_is_an_inline_producer_outside_actors
     }
 }
 
+/// The inlined copies of one stored block share the block's span (see
+/// `inline_send`), so a span-keyed table could answer for one site only. With
+/// sites in different positions the stored form must be judged no more loosely than
+/// the same program written with the block literal at each site, in either order.
+#[test]
+fn section6_inlined_copies_sharing_spans_are_judged_like_literals() {
+    let sites = [
+        "b value",
+        "CvA ap: b value",
+        "t := b value",
+        "(b value) + 1",
+    ];
+    let errors = |src: &str| {
+        adr0131_diagnostics(src)
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count()
+    };
+    for first in sites {
+        for second in sites {
+            let stored = format!("b := [t := t + 1. 1]\n{first}\n{second}\nt");
+            let literal =
+                format!("{first}\n{second}\nt").replace("b value", "[t := t + 1. 1] value");
+            for (mk, name) in [
+                (in_class as fn(&str) -> String, "class"),
+                (in_value as fn(&str) -> String, "value"),
+            ] {
+                let (s, l) = (errors(&mk(&stored)), errors(&mk(&literal)));
+                // The stored form may be stricter (a guard refuses it), never
+                // looser: accepted stored with a rejected literal is a miscompile.
+                assert!(
+                    s > 0 || l == 0,
+                    "{name}: {first} / {second}: stored {s} errors, literal {l}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn section6_stored_closure_in_a_position_the_producer_rejects_keeps_its_error() {
     // A `value` inside another block is not promotable (it compiles through a

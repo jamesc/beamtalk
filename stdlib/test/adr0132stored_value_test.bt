@@ -39,3 +39,10 @@ TestCase subclass: Adr0132StoredValueTest
 
   testTwoLocals =>
     self assert: #[Adr0132StoredValueClass stTwoLocals, (Adr0132StoredValueValue new) stTwoLocals] equals: #[#[1, 12], #[1, 12]]
+
+  // Two sends of one stored block differ in argument type and in statement
+  // versus value position. The inlined copies share the block's and the
+  // parameter's spans, so this pins that span-keyed tables merging them is
+  // harmless (see `inline_send`).
+  testMixedSites =>
+    self assert: #[Adr0132StoredValueClass stMixed, (Adr0132StoredValueValue new) stMixed] equals: #[#[6, 16], #[6, 16]]

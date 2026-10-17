@@ -504,11 +504,14 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
                 return false;
             }
             // The arguments move into the inlined block's scope (`n := arg`).
-            // Anything scope-sensitive would change meaning there: a first
-            // assignment (or destructuring) would become block-local and be
-            // lost, and a `^` would return from the wrong frame. Such a send
-            // keeps the section 6 error. Nested blocks are walked too, so a
-            // block-local assignment in an argument is refused as well.
+            // Anything scope-sensitive is refused, and the send keeps the
+            // section 6 error. EVERY assignment or destructuring in an
+            // argument is refused (also one rebinding an already-bound local,
+            // broader than the "a first assignment becomes block-local and is
+            // lost" case), so do not narrow this. A `^` is refused
+            // conservatively: non-local return inside the inlined producer is
+            // unverified. Nested blocks are walked too, so a block-local
+            // assignment in an argument is refused as well.
             let mut scope_sensitive = false;
             for arg in arguments.iter() {
                 walk_expression(arg, &mut |a| {
@@ -525,9 +528,13 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
             if scope_sensitive {
                 return false;
             }
-            // Copied ASTs (the block body at each send, split cascade
-            // arguments) share their original spans. Span-keyed side tables
-            // merge the copies; harmless while every copy lowers the same way.
+            // Copied ASTs (the block body and parameters at each send, split
+            // cascade arguments) share their original spans, so span-keyed
+            // side tables keep one site's answer for all copies. Sites can
+            // differ (argument type, statement versus value position); that is
+            // pinned end to end by `Adr0132StoredValueTest testMixedSites`
+            // (stdlib/test/adr0132stored_value_test.bt) and, for the checker,
+            // by `section6_inlined_copies_sharing_spans_are_judged_like_literals`.
             let mut body: Vec<ExpressionStatement> = block
                 .parameters
                 .iter()

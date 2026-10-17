@@ -83,3 +83,13 @@ Value subclass: Adr0132StoredValueValue
     ]
     b value
     #[x, y]
+
+  stMixed =>
+    t := 0
+    b := [:n |
+      t := t + n size
+      t
+    ]
+    b value: "abcd"
+    r := (b value: #(1, 2)) + 10
+    #[t, r]
