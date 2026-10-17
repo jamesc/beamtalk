@@ -2874,7 +2874,7 @@ error: `detect:ifNone:` writes outer local `t`, but as a statement inside a cond
        the write is not threaded back yet (BT-3743)
 ```
 
-These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly `detect:ifNone:` in an actor method at nested positions, an `ifNil:`/`and:` family member or an actor loop in an arm, and a REPL conditional arm or loop nested inside a REPL `on:do:`/`tryDo:`. The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: a cascade and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
+These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly `detect:ifNone:` in an actor method at nested positions, an `ifNil:`/`and:` family member or an actor loop in an arm, and a REPL conditional arm or loop nested inside a REPL `on:do:`/`tryDo:`. The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: a `^` whose value is a local-threading construct inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape), a cascade, and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
