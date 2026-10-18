@@ -11,15 +11,6 @@ use super::*;
 use crate::compilation::diagnostics_policy::apply_expect_directives;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
-fn parse_module(src: &str) -> Module {
-    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
-    assert!(
-        diags.iter().all(|d| d.severity != Severity::Error),
-        "fixture must parse: {diags:?}"
-    );
-    module
-}
-
 fn abroad(src: &str) -> Vec<Diagnostic> {
     analyse(&parse_module(src))
         .diagnostics
