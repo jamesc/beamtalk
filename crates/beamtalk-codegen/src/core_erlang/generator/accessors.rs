@@ -11,7 +11,7 @@
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, UntypedTrust, classify_fields,
+    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, UntypedTrust, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
@@ -487,30 +487,28 @@ impl CoreErlangGenerator {
     }
 
     /// Whether a `self.<name>` read is known to hold a value on which the
-    /// operator BIF for `primitive_set` is correct, so the fast path may stay
+    /// operator BIF for `op` is correct, so the fast path may stay
     /// bare. Inside a class method `self.<name>` is a class variable, so the
     /// class-side facts are consulted. A name with no fact is guarded — the
     /// runtime guard is always correct (BT-3892).
-    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, primitive_set: &[&str]) -> bool {
+    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, op: BareOperator) -> bool {
         let facts = if self.in_class_method() {
             &self.current_class_var_types
         } else {
             &self.current_class_field_types
         };
-        facts
-            .get(name)
-            .is_some_and(|fact| fact.is_bare(primitive_set))
+        facts.get(name).is_some_and(|fact| fact.is_bare(op))
     }
 
     /// `self.<field>` is comparison-bare when known primitive-ordered
-    /// (numeric, `Character`, or `String`).
+    /// (numeric, `Character`, or `String`) and not nilable (BT-3924).
     pub(in crate::core_erlang) fn field_is_comparable(&self, name: &str) -> bool {
-        self.field_is_bare(name, COMPARABLE_TYPES)
+        self.field_is_bare(name, BareOperator::Comparison)
     }
 
     /// `self.<field>` is arithmetic-bare when known numeric.
     pub(in crate::core_erlang) fn field_is_numeric(&self, name: &str) -> bool {
-        self.field_is_bare(name, NUMERIC_TYPES)
+        self.field_is_bare(name, BareOperator::Arithmetic)
     }
 
     /// Returns whether stdlib mode is active.

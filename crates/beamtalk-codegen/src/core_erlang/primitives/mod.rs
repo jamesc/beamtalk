@@ -447,6 +447,23 @@ mod tests {
     }
 
     #[test]
+    fn test_symbol_ordering() {
+        // BT-3924: Symbol defines `< > <= >=` (atom order = alphabetical).
+        for (sel, erl) in [("<", "<"), (">", ">"), ("<=", "=<"), (">=", ">=")] {
+            let result = doc_to_string(generate_primitive_bif(
+                "Symbol",
+                sel,
+                &["Other".to_string()],
+            ));
+            assert_eq!(
+                result,
+                Some(format!("call 'erlang':'{erl}'(Self, Other)")),
+                "Symbol {sel}"
+            );
+        }
+    }
+
+    #[test]
     fn test_symbol_hash() {
         let result = doc_to_string(generate_primitive_bif("Symbol", "hash", &[]));
         assert_eq!(result, Some("call 'erlang':'phash2'(Self)".to_string()));

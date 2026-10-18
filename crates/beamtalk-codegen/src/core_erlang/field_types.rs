@@ -12,11 +12,14 @@
 //! the field-type map is built, rather than special-cased at the operator:
 //!
 //! * A **declared** field records its full [`DeclaredType`]. A simple type is
-//!   bare when it is in the operator's primitive set; a union is bare only when
-//!   *every non-`Nil` member* is (so `:: Integer | Nil` stays bare while
-//!   `:: Point | Nil` is guarded). `nil` is not an object, so the runtime
-//!   guard would send it to the bare BIF anyway. Every other shape (generic,
-//!   singleton, false-or, …) is an object type and is guarded.
+//!   bare when it is in the operator's primitive set. For **arithmetic** a
+//!   union is bare when *every non-`Nil` member* is (so `:: Integer | Nil`
+//!   stays bare while `:: Point | Nil` is guarded): the arithmetic BIF already
+//!   raises `badarith` on `nil`. For **comparison** a `Nil` member makes the
+//!   union guarded: the comparison BIF would silently term-order `nil`
+//!   (`nil < 5` → `false`), while the runtime guard dispatches it to a
+//!   `does_not_understand` (BT-3924). See [`BareOperator`]. Every other shape
+//!   (generic, singleton, false-or, …) is an object type and is guarded.
 //! * An **untyped** field of an **Actor** (`state:`) or a `classState:`
 //!   variable of a **sealed** class is trusted as numeric only on positive
 //!   evidence gathered from the class's own source
@@ -82,26 +85,61 @@ pub(in crate::core_erlang) enum FieldTypeFact {
     Untyped,
 }
 
+/// The operator family a fast-path decision is for: it fixes which builtin
+/// types the bare BIF is correct on, and whether a `Nil` union member may
+/// share the bare path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum BareOperator {
+    /// `+ - * /` — bare on [`NUMERIC_TYPES`]; the BIF raises `badarith` on
+    /// `nil`, so a `Nil` union member does not force the guard.
+    Arithmetic,
+    /// `< > <= >=` — bare on [`COMPARABLE_TYPES`]; the BIF is a total term
+    /// order that would silently answer `nil < 5` → `false`, so a `Nil`
+    /// union member forces the runtime guard, which dispatches `nil` to a
+    /// `does_not_understand` (BT-3924).
+    Comparison,
+}
+
+impl BareOperator {
+    /// Builtin types on which this operator's BIF is correct.
+    pub(in crate::core_erlang) fn primitive_set(self) -> &'static [&'static str] {
+        match self {
+            Self::Arithmetic => NUMERIC_TYPES,
+            Self::Comparison => COMPARABLE_TYPES,
+        }
+    }
+
+    /// Whether a `nil` reaching this operator's bare BIF raises (so a `Nil`
+    /// union member may stay on the bare path).
+    fn bif_raises_on_nil(self) -> bool {
+        matches!(self, Self::Arithmetic)
+    }
+}
+
 impl FieldTypeFact {
     /// Whether a `self.<field>` read with this fact may skip the runtime
-    /// operator guard for an operator correct on exactly `primitive_set`.
-    pub(in crate::core_erlang) fn is_bare(&self, primitive_set: &[&str]) -> bool {
+    /// operator guard for `op`.
+    pub(in crate::core_erlang) fn is_bare(&self, op: BareOperator) -> bool {
         match self {
-            Self::Declared(ty) => declared_type_is_bare(ty, primitive_set),
-            Self::UntypedNumeric => NUMERIC_TYPES.iter().all(|t| primitive_set.contains(t)),
+            Self::Declared(ty) => declared_type_is_bare(ty, op),
+            Self::UntypedNumeric => NUMERIC_TYPES.iter().all(|t| op.primitive_set().contains(t)),
             Self::Untyped => false,
         }
     }
 }
 
-/// A declared type is bare when it is a simple type in `primitive_set`, or a
-/// union with at least one non-`Nil` member whose non-`Nil` members all are.
-fn declared_type_is_bare(ty: &DeclaredType, primitive_set: &[&str]) -> bool {
+/// A declared type is bare when it is a simple type in `op`'s primitive set,
+/// or — only for an operator whose BIF raises on `nil` — a union with at least
+/// one non-`Nil` member whose non-`Nil` members all are.
+fn declared_type_is_bare(ty: &DeclaredType, op: BareOperator) -> bool {
     match ty {
-        DeclaredType::Simple(name) => primitive_set.contains(&name.as_str()),
+        DeclaredType::Simple(name) => op.primitive_set().contains(&name.as_str()),
         DeclaredType::Union(members) => {
+            if !op.bif_raises_on_nil() && members.iter().any(is_nil_type) {
+                return false;
+            }
             let mut non_nil = members.iter().filter(|m| !is_nil_type(m)).peekable();
-            non_nil.peek().is_some() && non_nil.all(|m| declared_type_is_bare(m, primitive_set))
+            non_nil.peek().is_some() && non_nil.all(|m| declared_type_is_bare(m, op))
         }
         _ => false,
     }
@@ -334,11 +372,11 @@ mod tests {
     }
 
     fn numeric(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
-        facts[f].is_bare(NUMERIC_TYPES)
+        facts[f].is_bare(BareOperator::Arithmetic)
     }
 
     fn comparable(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
-        facts[f].is_bare(COMPARABLE_TYPES)
+        facts[f].is_bare(BareOperator::Comparison)
     }
 
     #[test]
@@ -446,9 +484,11 @@ mod tests {
             FieldTypeFact::Declared(DeclaredType::Union(_))
         ));
         assert!(!numeric(&facts, "tp") && !comparable(&facts, "tp"));
-        assert!(numeric(&facts, "n") && comparable(&facts, "n"));
+        // A `Nil` member keeps arithmetic bare (the BIF `badarith`s on nil) but
+        // guards comparison (the BIF would silently term-order nil, BT-3924).
+        assert!(numeric(&facts, "n") && !comparable(&facts, "n"));
         assert!(numeric(&facts, "nf") && comparable(&facts, "nf"));
-        assert!(!numeric(&facts, "s") && comparable(&facts, "s"));
+        assert!(!numeric(&facts, "s") && !comparable(&facts, "s"));
         assert!(!numeric(&facts, "mix") && !comparable(&facts, "mix"));
     }
 
@@ -466,7 +506,7 @@ mod tests {
     #[test]
     fn nil_only_union_is_not_bare() {
         let ty = DeclaredType::union(vec![DeclaredType::simple("Nil")]);
-        assert!(!FieldTypeFact::Declared(ty).is_bare(NUMERIC_TYPES));
+        assert!(!FieldTypeFact::Declared(ty).is_bare(BareOperator::Arithmetic));
     }
 
     #[test]

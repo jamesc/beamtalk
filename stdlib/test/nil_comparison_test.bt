@@ -1,0 +1,98 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3924: when a comparison receiver (`< > <= >=`) is not statically known to
+// be a number, character or string, codegen emits a runtime guard. Numbers,
+// characters and strings take the bare Erlang comparison BIF; every other
+// receiver is sent the operator as a message. `nil`, booleans, lists and
+// tuples define no `<`, so they raise `does_not_understand` instead of being
+// silently term-ordered (`nil < 5` used to answer `false`). Symbols define
+// `< > <= >=` (alphabetical by name), so `#a < #b` keeps working.
+//
+// The helpers take untyped parameters, so every comparison below goes through
+// the runtime guard rather than the statically-typed fast path.
+// The `NilableReading` value type lives in `fixtures/`.
+
+TestCase subclass: NilComparisonTest
+
+  /// `a < b` with `a` of unknown type (runtime-guarded).
+  lt: a with: b => a < b
+
+  /// `a > b` with `a` of unknown type (runtime-guarded).
+  gt: a with: b => a > b
+
+  /// `a <= b` with `a` of unknown type (runtime-guarded).
+  le: a with: b => a <= b
+
+  /// `a >= b` with `a` of unknown type (runtime-guarded).
+  ge: a with: b => a >= b
+
+  /// `nil < 5` through an untyped parameter raises, for every operator.
+  testNilReceiverRaisesViaUntypedParam =>
+    self should: [self lt: nil with: 5] raise: #does_not_understand
+    self should: [self gt: nil with: 5] raise: #does_not_understand
+    self should: [self le: nil with: 5] raise: #does_not_understand
+    self should: [self ge: nil with: 5] raise: #does_not_understand
+
+  /// `nil < 5` through a local raises at run time. The checker infers the
+  /// local as `nil` and flags the send too — `@expect dnu` acknowledges that
+  /// hint while the assertion verifies the runtime behaviour.
+  testNilReceiverRaisesViaLocal =>
+    readings := #(nil)
+    x := readings first
+    @expect dnu
+    self should: [x < 5] raise: #does_not_understand
+
+  /// Booleans, lists and tuples define no ordering either.
+  testOtherNonObjectPrimitivesRaise =>
+    self should: [self lt: true with: false] raise: #does_not_understand
+    self should: [self lt: #(1, 2) with: #(1, 3)] raise: #does_not_understand
+
+  /// An `:: Integer | Nil` field holding nil raises; holding an integer it
+  /// compares normally.
+  testNilableIntegerField =>
+    empty := NilableReading new
+    self should: [empty below: 5] raise: #does_not_understand
+    self should: [empty atLeast: 5] raise: #does_not_understand
+    three := (NilableReading new) withValue: 3
+    self assert: (three below: 5)
+    self deny: (three atLeast: 5)
+
+  /// An `:: String | Nil` field holding nil raises; holding a string it
+  /// compares normally.
+  testNilableStringField =>
+    empty := NilableReading new
+    self should: [empty labelBefore: "m"] raise: #does_not_understand
+    apple := (NilableReading new) withLabel: "apple"
+    self assert: (apple labelBefore: "m")
+
+  /// Numbers still compare through the guarded path (bare BIF arm).
+  testNumbersCompareThroughGuard =>
+    self assert: (self lt: 1 with: 2)
+    self deny: (self gt: 1 with: 2)
+    self assert: (self le: 2.5 with: 2.5)
+    self assert: (self ge: 3 with: 2.5)
+
+  /// Strings and characters still compare through the guarded path.
+  testStringsAndCharactersCompareThroughGuard =>
+    self assert: (self lt: "abc" with: "abd")
+    self deny: (self gt: "abc" with: "abd")
+    self assert: (self lt: $a with: $b)
+    self assert: (self ge: $b with: $b)
+
+  /// Symbols dispatch to `Symbol>><` etc. and order alphabetically by name.
+  testSymbolsCompareThroughGuard =>
+    self assert: (self lt: #apple with: #banana)
+    self deny: (self lt: #banana with: #apple)
+    self assert: (self gt: #banana with: #apple)
+    self assert: (self le: #apple with: #apple)
+    self deny: (self ge: #apple with: #banana)
+
+  /// Symbol literal receivers compare too.
+  testSymbolLiteralComparison =>
+    self assert: (#apple < #banana)
+    self assert: (#banana >= #apple)
+
+  /// Sorting a collection of symbols with a comparison block keeps working.
+  testSortSymbolsWithBlock =>
+    self assert: (#(#c, #a, #b) sort: [:a :b | a < b]) equals: #(#a, #b, #c)

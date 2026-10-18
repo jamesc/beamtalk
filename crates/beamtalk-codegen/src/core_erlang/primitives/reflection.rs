@@ -8,7 +8,7 @@
 //! Contains BIF generators for introspection and meta-level classes:
 //! `CompiledMethod`, `Symbol`.
 
-use super::binary_bif;
+use super::generate_comparison_bif;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -18,10 +18,10 @@ use beamtalk_cerl_doc::leaf;
 /// Symbols are Erlang atoms — interned, immutable identifiers.
 pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
-        // Comparison (ADR 0002: Erlang operators)
-        "=:=" => binary_bif("=:=", params),
-        "/=" => binary_bif("/=", params),
-        "=/=" => binary_bif("=/=", params),
+        // Comparison (ADR 0002: Erlang operators). Ordering is the atom
+        // term order — alphabetical by name (BT-3924: symbols reach these via
+        // dispatch, the comparison guard only keeps numbers/strings bare).
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
         "asString" => Some(Document::Str(
             "call 'erlang':'atom_to_binary'(Self, 'utf8')",

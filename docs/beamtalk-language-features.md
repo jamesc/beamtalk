@@ -674,6 +674,18 @@ This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `ge
 - `<=` - Less than or equal: `3 <= 3` → `true`
 - `>=` - Greater than or equal: `5 >= 3` → `true`
 
+Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples:
+
+```beamtalk
+#apple < #banana   // => true
+x := nil
+x < 5              // => ERROR: UndefinedObject does not understand '<'
+```
+
+This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
+
+The **argument** is not checked: a number, character or string receiver compares against an argument of any other kind by the BEAM's term order, so `5 < nil` answers `true` rather than raising. Comparison operators have no number-on-the-left coercion (see above).
+
 #### Equality (lowest precedence)
 - `=:=` - Strict equality (Erlang `=:=`): `5 =:= 5` → `true`
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`

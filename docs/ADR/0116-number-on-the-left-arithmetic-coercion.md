@@ -995,11 +995,16 @@ is, because that would guard the counter pattern in every open Actor. All of
 these cases are decided together in BT-3925. The implementation is
 `crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
 
-A union with a `Nil` member (`:: Integer | Nil`) stays bare for comparisons as
-well as arithmetic. Guarding it would change nothing: `nil` is not an object,
-so the runtime comparison guard sends it to the bare BIF too, and `nil < 5`
-answers `false` wherever it appears. Making comparisons on `nil` raise is a
-language-wide change to that guard, tracked in BT-3924.
+A union with a `Nil` member (`:: Integer | Nil`) stays bare for arithmetic,
+where the BIF already raises `badarith` on `nil`, but is guarded for
+comparisons. BT-3924 inverted the runtime comparison guard from "is this an
+object?" (`beamtalk_primitive:is_object/1`) to an inline primitive-comparable
+test (`is_number` or `is_binary`): numbers, characters and strings take the
+bare BIF and every other receiver is sent the operator as a message. So
+`nil < 5` raises `does_not_understand` wherever it appears — an untyped
+local or parameter, or a nilable field — instead of silently answering
+`false`. `Symbol` gained `< > <= >=` primitives so `#a < #b` keeps working
+through dispatch.
 
 ## Implementation Tracking
 

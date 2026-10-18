@@ -551,7 +551,9 @@ fn test_number_coercion_numeric_untyped_self_fields_both_sides_stay_bare() {
 #[test]
 fn test_union_typed_field_operators_follow_non_nil_members() {
     // BT-3892: `:: Point | Nil` is guarded for both arithmetic and comparison;
-    // `:: Integer | Nil` stays bare for both.
+    // `:: Integer | Nil` stays bare for arithmetic (the BIF `badarith`s on nil)
+    // but is guarded for comparison, so `nil < 1` raises a DNU instead of
+    // silently answering `false` (BT-3924).
     use crate::core_erlang::field_types::FieldTypeFact;
     use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
     let union = |m: &str| {
@@ -560,8 +562,9 @@ fn test_union_typed_field_operators_follow_non_nil_members() {
             DeclaredType::simple("Nil"),
         ]))
     };
-    for (member, guarded) in [("Point", true), ("Integer", false)] {
-        for (op, guard) in [("+", "is_number"), ("<", "is_object")] {
+    for member in ["Point", "Integer"] {
+        for (op, guard) in [("+", "is_number"), ("<", "is_binary")] {
+            let guarded = member == "Point" || op == "<";
             let mut generator = CoreErlangGenerator::new("test");
             generator
                 .current_class_field_types
@@ -615,13 +618,40 @@ fn test_bt3892_untyped_and_union_fields_with_object_values_are_guarded() {
     }
     for sel in ["ltUntyped:", "ltUnion:"] {
         assert!(
-            method_body_contains(&core, sel, "'is_object'("),
+            method_body_contains(&core, sel, "'is_binary'("),
             "{sel} must guard its self.<field> receiver:\n{core}"
         );
     }
     assert!(
         method_body_contains(&core, "next", "call 'erlang':'is_number'("),
         "a Value's untyped numeric-default field must be guarded:\n{core}"
+    );
+}
+
+#[test]
+fn test_bt3924_nilable_primitive_field_comparison_is_guarded() {
+    // BT-3924: `:: Integer | Nil` / `:: String | Nil` comparisons route through
+    // the runtime guard (so a nil value dispatches to a DNU), while the same
+    // field's arithmetic and a non-nilable `:: Integer` field stay bare.
+    let core = crate::core_erlang::tests::codegen(
+        "Value subclass: Holder\n  field: n :: Integer | Nil = nil\n  \
+         field: s :: String | Nil = nil\n  field: c :: Integer = 0\n  \
+         ltN: q => self.n < q\n  geS: q => self.s >= q\n  \
+         addN: q :: Integer => self.n + q\n  ltC: q => self.c < q\n",
+    );
+    for sel in ["ltN:", "geS:"] {
+        assert!(
+            method_body_contains(&core, sel, "call 'erlang':'is_binary'("),
+            "{sel} on a nilable primitive field must be guarded:\n{core}"
+        );
+    }
+    assert!(
+        !method_body_contains(&core, "addN:", "is_number"),
+        "arithmetic on an `Integer | Nil` field stays bare:\n{core}"
+    );
+    assert!(
+        !method_body_contains(&core, "ltC:", "is_binary"),
+        "comparison on an `Integer` field stays bare:\n{core}"
     );
 }
 
@@ -636,7 +666,7 @@ fn test_bt3892_actor_counter_stays_bare_and_poisoned_field_is_guarded() {
          below: n => self.count < n\n",
     );
     assert!(
-        !counter.contains("is_number") && !counter.contains("'is_object'("),
+        !counter.contains("is_number") && !counter.contains("'is_binary'("),
         "untyped counter with only numeric writes must stay bare:\n{counter}"
     );
     let poisoned = crate::core_erlang::tests::codegen(
@@ -733,8 +763,9 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
 // bare-BIF fast path holds for statically-comparable receivers (numeric / char
 // / string literals, `self` in Integer/Float/Character/String, and
 // Integer/Float/Number/Character/String params); everything else gets a runtime
-// `is_object` guard (NOT `is_number`) that dispatches on objects and keeps the
-// bare comparison BIF for primitives.
+// primitive-comparable guard (`is_number or is_binary`) that keeps the bare
+// comparison BIF for numbers/characters/strings and dispatches everything else
+// — objects, but also `nil`, symbols, lists and tuples (BT-3924).
 
 #[test]
 fn test_comparison_bare_bif_for_literal_receivers() {
@@ -760,7 +791,7 @@ fn test_comparison_bare_bif_for_literal_receivers() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains(&format!("call 'erlang':'{erl}'(")) && !output.contains("is_object"),
+            output.contains(&format!("call 'erlang':'{erl}'(")) && !output.contains("is_binary"),
             "literal receiver must skip the comparison guard; got: {output}"
         );
     }
@@ -795,7 +826,7 @@ fn test_comparison_bare_bif_for_self_in_comparable_class() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("call 'erlang':'>'(") && !output.contains("is_object"),
+            output.contains("call 'erlang':'>'(") && !output.contains("is_binary"),
             "`self > x` in {class} must be a bare BIF; got: {output}"
         );
     }
@@ -816,7 +847,7 @@ fn test_comparison_bare_bif_for_comparable_param() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("call 'erlang':'>='(") && !output.contains("is_object"),
+            output.contains("call 'erlang':'>='(") && !output.contains("is_binary"),
             "`other >= 1` with other :: {ty} must be a bare BIF; got: {output}"
         );
     }
@@ -835,22 +866,29 @@ fn test_comparison_guard_for_unknown_receiver() {
         .generate_binary_op("<", &left, &right)
         .unwrap()
         .to_pretty_string();
-    // Inverted guard: is_object → dispatch, else bare comparison BIF.
+    // BT-3924: primitive-comparable test → bare BIF, everything else → send.
+    // The test is inline `erlang` type-test BIFs, not a runtime-module call.
+    let flat: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        output.contains("call 'beamtalk_primitive':'is_object'("),
-        "unknown comparison receiver must emit an is_object guard; got: {output}"
+        flat.contains(
+            "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft1), \
+             call 'erlang':'is_binary'(_BinLeft1)) of"
+        ),
+        "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
     );
     assert!(
-        !output.contains("is_number"),
-        "comparison guard must NOT use is_number; got: {output}"
+        !output.contains("beamtalk_primitive"),
+        "comparison guard must not call into the runtime; got: {output}"
     );
+    let bif = flat
+        .find("<'true'> when 'true' -> call 'erlang':'<'(")
+        .unwrap_or_else(|| panic!("'true' arm must be the bare comparison BIF; got: {output}"));
+    let send = flat
+        .find("<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft1, '<', [")
+        .unwrap_or_else(|| panic!("'false' arm must dispatch '<' as a message; got: {output}"));
     assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'<'"),
-        "guard must dispatch '<' as a message on the object arm; got: {output}"
-    );
-    assert!(
-        output.contains("call 'erlang':'<'("),
-        "guard must keep a bare comparison BIF on the primitive arm; got: {output}"
+        bif < send,
+        "BIF arm must precede the send arm; got: {output}"
     );
     assert!(
         !output.contains("try "),
@@ -874,7 +912,7 @@ fn test_comparison_guard_for_self_in_non_comparable_class() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("call 'beamtalk_primitive':'is_object'("),
+        output.contains("call 'erlang':'is_binary'("),
         "`self < x` in a non-comparable class must be guarded; got: {output}"
     );
 }
@@ -901,7 +939,7 @@ fn self_field_access(field: &str) -> Expression {
 #[test]
 fn test_comparison_object_typed_field_is_guarded() {
     use beamtalk_core::ast::Identifier;
-    // `self.lo < y` where `lo :: Money` must dispatch (is_object guard), not
+    // `self.lo < y` where `lo :: Money` must dispatch (runtime guard), not
     // silently term-order the tagged map.
     let mut generator = CoreErlangGenerator::new("test");
     generator
@@ -917,7 +955,7 @@ fn test_comparison_object_typed_field_is_guarded() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("call 'beamtalk_primitive':'is_object'("),
+        output.contains("call 'erlang':'is_binary'("),
         "object-typed self.<field> comparison must be guarded; got: {output}"
     );
 }
@@ -950,7 +988,7 @@ fn test_comparison_primitive_and_numeric_untyped_field_stay_bare() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("call 'erlang':'<'(") && !output.contains("is_object"),
+            output.contains("call 'erlang':'<'(") && !output.contains("is_binary"),
             "field {field_name} ({fact:?}) comparison must stay bare; got: {output}"
         );
     }

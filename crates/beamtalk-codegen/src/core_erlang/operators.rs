@@ -13,44 +13,54 @@ use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
 /// Which runtime guard a dispatchable binary operator emits
-/// for an unknown/generic receiver. The two variants differ only in the guard
-/// predicate and which `case` branch dispatches vs. takes the bare BIF.
+/// for an unknown/generic receiver. Both guards share one shape — a
+/// primitive-type test whose `'true'` branch is the bare Erlang BIF and whose
+/// `'false'` branch is the message send — and differ only in the test.
 #[derive(Clone, Copy)]
 enum OperatorGuard {
-    /// `+ - * /`: `is_number` → bare BIF; non-number → message dispatch.
+    /// `+ - * /`: `is_number` → bare BIF; anything else → message dispatch.
     Arithmetic,
-    /// `< > <= >=`: `is_object` → message dispatch; primitive → bare BIF.
+    /// `< > <= >=`: primitive-comparable (`is_number` or `is_binary`) → bare
+    /// BIF; anything else → message dispatch (BT-3924).
     Comparison,
 }
 
-/// The runtime test a guarded operator emits: the discriminating predicate plus
-/// which `case` branch dispatches (vs. takes the bare BIF). Named fields rather
-/// than a positional tuple so the branch order isn't an ambiguous bare `bool`.
-struct GuardSpec {
-    /// Module of the predicate (`erlang` / `beamtalk_primitive`).
-    predicate_module: &'static str,
-    /// Predicate function name (`is_number` / `is_object`).
-    predicate_fn: &'static str,
-    /// When `true`, the `'true'` (predicate-holds) branch is the message
-    /// dispatch and the `'false'` branch is the bare BIF; when `false`, swapped.
-    dispatch_on_true: bool,
-}
-
 impl OperatorGuard {
-    /// The predicate + branch order for this guard. All strings are static, so
-    /// they are safe as `Document::Str` leaves.
-    fn spec(self) -> GuardSpec {
+    /// The guard's runtime test on the receiver variable `subject`: `'true'`
+    /// selects the bare BIF, `'false'` the message send. Built only from
+    /// `erlang` type-test BIFs, so it is inline (no cross-module call).
+    ///
+    /// * Arithmetic — `is_number(L)`: non-numbers would `badarith` in the BIF,
+    ///   so they dispatch (user overload or DNU).
+    /// * Comparison — `is_number(L) or is_binary(L)`: exactly the receivers
+    ///   whose builtin `<` *is* the Erlang term-order BIF — `Integer`/`Float`,
+    ///   `Character` (a codepoint integer at runtime, see
+    ///   `beamtalk_primitive:class_of/1`) and `String`/`Binary` (binaries).
+    ///   Erlang's `<` is a total order over every term and never raises, so
+    ///   any other receiver on the bare BIF would *silently* term-order it
+    ///   (`nil < 5` used to answer `false`). Everything else therefore
+    ///   dispatches: `nil`/booleans/lists/tuples raise `does_not_understand`,
+    ///   a `Symbol` reaches `Symbol>><`, and objects reach their overload
+    ///   (`Money>><`).
+    fn predicate_doc(self, subject: &str) -> Document<'static> {
+        let type_test = |bif: &'static str| {
+            docvec![
+                "call 'erlang':'",
+                Document::Str(bif),
+                "'(",
+                var(subject.to_string()),
+                ")",
+            ]
+        };
         match self {
-            Self::Arithmetic => GuardSpec {
-                predicate_module: "erlang",
-                predicate_fn: "is_number",
-                dispatch_on_true: false,
-            },
-            Self::Comparison => GuardSpec {
-                predicate_module: "beamtalk_primitive",
-                predicate_fn: "is_object",
-                dispatch_on_true: true,
-            },
+            Self::Arithmetic => type_test("is_number"),
+            Self::Comparison => docvec![
+                "call 'erlang':'or'(",
+                type_test("is_number"),
+                ", ",
+                type_test("is_binary"),
+                ")",
+            ],
         }
     }
 }
@@ -124,12 +134,15 @@ impl CoreErlangGenerator {
         // parameter) we keep the bare BIF fast path (zero cost — all stdlib hot
         // paths). Otherwise we emit a runtime guard.
         //
-        // The two guards differ in *predicate* and *branch order*:
-        //   * Arithmetic — `is_number`: non-numbers `badarith`, so number→BIF,
-        //     object→dispatch is the safe discriminator.
-        //   * Comparison — `is_object`: Erlang `<` is a total order over every
-        //     term and never raises, so a bare BIF on an object would *silently*
-        //     term-order it. The guard inverts to object→dispatch, builtin→BIF.
+        // Both guards test for the primitive types whose builtin operator *is*
+        // the bare BIF and dispatch everything else:
+        //   * Arithmetic — `is_number`: number→BIF, anything else→dispatch.
+        //   * Comparison — `is_number or is_binary` (numbers, characters,
+        //     strings): Erlang `<` is a total order over every term and never
+        //     raises, so a bare BIF on any other receiver would *silently*
+        //     term-order it (`nil < 5` → `false`). Every other receiver —
+        //     objects, but also `nil`, symbols, lists, tuples — dispatches, so
+        //     it reaches its own `<` or raises `does_not_understand` (BT-3924).
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
         let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
@@ -260,12 +273,14 @@ impl CoreErlangGenerator {
 
     /// Whether `expr` is statically known to evaluate to a value with a
     /// builtin total order, so the comparison fast path can skip the runtime
-    /// `is_object` guard and emit a bare comparison BIF.
+    /// primitive-comparable guard and emit a bare comparison BIF.
     ///
     /// A broader set than [`Self::receiver_is_statically_numeric`]: bare
-    /// `erlang:'<'` is correct for *every* primitive-ordered type, so this also
-    /// accepts `Character`/`String` (both define `< <=` as `@primitive`) and
-    /// their literals — only Beamtalk objects need dispatch. Recognises:
+    /// `erlang:'<'` is exactly the builtin `<` of every type the runtime guard
+    /// lets through (numbers, characters, strings — see
+    /// [`OperatorGuard::predicate_doc`]), so this also accepts
+    /// `Character`/`String` (both define `< <=` as `@primitive`) and their
+    /// literals. Recognises:
     /// * numeric / character / string literals,
     /// * `self` inside a builtin comparable class
     ///   (`Integer`/`Float`/`Character`/`String`),
@@ -279,11 +294,13 @@ impl CoreErlangGenerator {
     /// field would *silently* term-order the tagged map instead of dispatching —
     /// a wrong boolean, not a `badarith`. So a field with an explicit
     /// non-primitive declared type (e.g. `field: lo :: Money`) routes through the
-    /// `is_object` guard, making `self.lo < other lo` dispatch to `Money>><`.
+    /// runtime guard, making `self.lo < other lo` dispatch to `Money>><` — and
+    /// an `:: Integer | Nil` field holding `nil` raise `does_not_understand`.
     /// The same field facts as [`Self::receiver_is_statically_numeric`] apply
-    /// (BT-3892): numeric / `Character` / `String` declared fields (unions
-    /// whose non-`Nil` members all are), and untyped fields with numeric
-    /// evidence, stay on the bare comparison BIF; everything else is guarded.
+    /// (BT-3892): numeric / `Character` / `String` declared fields (unions of
+    /// those, but — unlike arithmetic — no union with a `Nil` member, BT-3924),
+    /// and untyped fields with numeric evidence, stay on the bare comparison
+    /// BIF; everything else is guarded.
     pub(in crate::core_erlang) fn receiver_is_statically_comparable(
         &self,
         expr: &Expression,
@@ -320,24 +337,25 @@ impl CoreErlangGenerator {
     /// Builds a runtime-guarded operator dispatch for an
     /// unknown/generic receiver, mirroring `generate_concat_op`'s `is_list` arm.
     /// One helper serves both arithmetic and comparison; the [`OperatorGuard`]
-    /// selects the predicate and which branch dispatches:
+    /// selects the primitive-type test ([`OperatorGuard::predicate_doc`]):
     ///
     /// ```erlang
     /// let <Lhs> = <left> in
     ///   let <Rhs> = <right> in
-    ///     case call '<Mod>':'<Pred>'(Lhs) of
-    ///       <'true'>  when 'true' -> <true branch>
-    ///       <'false'> when 'true' -> <false branch>
+    ///     case <primitive test on Lhs> of
+    ///       <'true'>  when 'true' -> <bare BIF>
+    ///       <'false'> when 'true' -> <message send>
     ///     end
     /// ```
     ///
-    /// * Arithmetic (`is_number`): true → bare BIF, false → dispatch. Numbers
-    ///   take the BIF; objects route through dispatch (overload or DNU).
-    /// * Comparison (`is_object`): true → dispatch, false → bare BIF. Objects
-    ///   dispatch (so `aMoney < bMoney` reaches `Money>><` and an unknown type
-    ///   raises a DNU); primitives keep Erlang's total term-order.
+    /// * Arithmetic (`is_number`): numbers take the BIF; everything else routes
+    ///   through dispatch (overload or DNU).
+    /// * Comparison (`is_number or is_binary`): numbers, characters and strings
+    ///   take the BIF; everything else dispatches (so `aMoney < bMoney` reaches
+    ///   `Money>><`, `#a < #b` reaches `Symbol>><`, and `nil < 5` raises a DNU
+    ///   instead of silently term-ordering — BT-3924).
     ///
-    /// `erlang_op` and the predicate module/function are static literals (safe as
+    /// `erlang_op` and the predicate BIF names are static literals (safe as
     /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
     /// Beamtalk operator.
     ///
@@ -357,17 +375,16 @@ impl CoreErlangGenerator {
     /// This `case` matches only `<'true'>`/`<'false'>`, no wildcard —
     /// the same non-exhaustive-to-the-compiler shape `case_clause_fallback`
     /// exists for (see its doc comment and ADR 0111 Addendum 5, "Production
-    /// bugs found", bug 3). Confirmed empirically reachable for the
-    /// **comparison** guard (`beamtalk_primitive:is_object/1`, a plain
-    /// function the Core Erlang compiler cannot prove exhaustive) as a try
-    /// body's last statement, e.g. `[... . a < b] ensure: [...]` with
+    /// bugs found", bug 3). It was confirmed empirically reachable for the
+    /// comparison guard when that guard called `beamtalk_primitive:is_object/1`
+    /// (a plain function the Core Erlang compiler cannot prove exhaustive) as a
+    /// try body's last statement, e.g. `[... . a < b] ensure: [...]` with
     /// `a`/`b` not statically comparable: erlc's `ambiguous_catch_try_state`
-    /// `beam_validator` bug. The **arithmetic** guard's `erlang:is_number/1`
-    /// predicate happens not to trigger it — the compiler's BIF return-type
-    /// inference already proves that case exhaustive without a wildcard — but
-    /// the explicit fallback is added to both branches uniformly (cheap,
-    /// behavior-preserving, and doesn't depend on that inference continuing
-    /// to hold in some future OTP release).
+    /// `beam_validator` bug. Both guards now test with `erlang` type-test BIFs,
+    /// whose boolean result the compiler's BIF return-type inference can
+    /// usually prove exhaustive without a wildcard — but the explicit fallback
+    /// is kept on both uniformly (cheap, behavior-preserving, and doesn't
+    /// depend on that inference holding in some future OTP release).
     fn guarded_op_doc(
         &mut self,
         guard: OperatorGuard,
@@ -377,11 +394,6 @@ impl CoreErlangGenerator {
         right_code: Document<'static>,
         right_is_statically_numeric: bool,
     ) -> Document<'static> {
-        let GuardSpec {
-            predicate_module: pred_module,
-            predicate_fn: pred_fn,
-            dispatch_on_true,
-        } = guard.spec();
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
 
@@ -419,11 +431,7 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
             "])",
         ];
-        let (true_branch, false_branch) = if dispatch_on_true {
-            (send_branch, bif_branch)
-        } else {
-            (bif_branch, send_branch)
-        };
+        let predicate = guard.predicate_doc(&left_var);
         // Explicit wildcard so this boolean `case` is statically
         // exhaustive — see this function's doc comment and
         // `case_clause_fallback`'s doc comment.
@@ -431,23 +439,19 @@ impl CoreErlangGenerator {
 
         docvec![
             "let ",
-            var(left_var.clone()),
+            var(left_var),
             " = ",
             left_code,
             " in let ",
             var(right_var.clone()),
             " = ",
             right_code,
-            " in case call '",
-            Document::Str(pred_module),
-            "':'",
-            Document::Str(pred_fn),
-            "'(",
-            var(left_var),
-            ") of <'true'> when 'true' -> ",
-            true_branch,
+            " in case ",
+            predicate,
+            " of <'true'> when 'true' -> ",
+            bif_branch,
             " <'false'> when 'true' -> ",
-            false_branch,
+            send_branch,
             no_match_fallback,
             " end",
         ]

@@ -73,6 +73,39 @@ sealed typed Object subclass: Symbol
   /// ```
   /= other :: Symbol -> Boolean => @primitive
 
+  /// Test if the receiver sorts before another symbol (alphabetically by
+  /// name, codepoint by codepoint).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #apple < #banana         // => true
+  /// ```
+  < other :: Symbol -> Boolean => @primitive
+
+  /// Test if the receiver sorts after another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #banana > #apple         // => true
+  /// ```
+  > other :: Symbol -> Boolean => @primitive
+
+  /// Test if the receiver sorts before or equal to another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #apple <= #apple         // => true
+  /// ```
+  <= other :: Symbol -> Boolean => @primitive
+
+  /// Test if the receiver sorts after or equal to another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #apple >= #banana        // => false
+  /// ```
+  >= other :: Symbol -> Boolean => @primitive
+
   // === Display & Hashing ===
 
   /// Return a user-facing string representation without the `#` prefix.
