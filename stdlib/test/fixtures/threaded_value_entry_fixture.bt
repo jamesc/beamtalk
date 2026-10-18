@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3872 (ADR 0132 Phase 1d): value-type instance methods with a threading
+// block parameter. Each compiles to one body over `Acc` (`'__t2_<sel>'`) with
+// the plain `'<sel>'` as a wrapper over it, which `'dispatch'/3` keeps calling;
+// nothing sends to a threaded entry from Beamtalk yet (ADR 0132 Phase 1e), so
+// threaded_value_entry_test.bt pins that the PLAIN function answers exactly what
+// it did before, with pure blocks, and refuses a writing block unrun. The entries
+// themselves are exercised from Erlang by
+// runtime/apps/beamtalk_runtime/test/beamtalk_threaded_value_entries_tests.erl.
+
+sealed Value subclass: ThreadedValueEntryFixture
+  field: items = #(1, 2, 3)
+
+  // A direct invocation, twice.
+  twice: b =>
+    b value
+    b value
+
+  // The callable argument of a collection message (ADR 0128's opaque fold).
+  each: b => self.items do: b
+
+  // A pass-on to this sealed class's own method: calls its threaded entry.
+  twiceVia: b => self twice: b
+
+  sumWith: b => self.items inject: 0 into: b
+
+  detectFirst: b => self.items detect: b ifNone: [nil]
+
+  // A block that does `^`: no threaded entry, compiled as before.
+  firstAfter: b =>
+    b value
+    self.items do: [:x | x > 1 ifTrue: [^x]]
+    nil
+
+  // No block parameter: compiled exactly as before.
+  plain: n => n + 1

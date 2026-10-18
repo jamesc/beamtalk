@@ -1982,18 +1982,8 @@ impl CoreErlangGenerator {
         // `MethodBody` over its families (`[SelfVt, Acc]` when it writes a
         // field, `[Acc]` otherwise).
         let body_result = if frame.in_threaded_body {
-            let eligible = frame.eligible_families();
-            let families: Vec<VersionPrefix> = frame
-                .stmts_threaded_families(&method.body, &eligible)
-                .as_slice()
-                .to_vec();
             body_result.and_then(|parts| {
-                frame.finish_threaded_value_body(
-                    parts,
-                    &families,
-                    nlr_token_var.as_deref(),
-                    method.span,
-                )
+                frame.finish_threaded_value_body(parts, method, nlr_token_var.as_deref())
             })
         } else {
             body_result
@@ -2050,25 +2040,41 @@ impl CoreErlangGenerator {
             }
             None => doc,
         };
-        if positions.is_empty() {
-            return Ok(docvec![
-                leaf::fname(mangled, arity),
-                " = ",
-                annotate(fun_doc),
-                "\n",
-            ]);
+        Ok(Self::value_type_method_defs(
+            mangled,
+            arity,
+            &params,
+            fun_doc,
+            !positions.is_empty(),
+            &annotate,
+        ))
+    }
+
+    /// The definitions of a value-type method: `'<sel>'/N = <fun>`, or, for a
+    /// method with a threaded entry (ADR 0132 §2), the entry
+    /// `'__t2_<sel>'/N+1 = <fun>` and, under today's name and arity, the plain
+    /// wrapper over it (the `plain` sentinel, the bare result), which
+    /// `'dispatch'/3` keeps calling. `annotate` adds the method's source line.
+    fn value_type_method_defs(
+        mangled: String,
+        arity: usize,
+        params: &[String],
+        fun_doc: Document<'static>,
+        threaded: bool,
+        annotate: &dyn Fn(Document<'static>) -> Document<'static>,
+    ) -> Document<'static> {
+        if !threaded {
+            return docvec![leaf::fname(mangled, arity), " = ", annotate(fun_doc), "\n",];
         }
-        // ADR 0132 §2: the body is the threaded entry; today's name and arity
-        // is the plain wrapper over it (the `plain` sentinel, the bare result).
         let entry_fn = super::selector_mangler::threaded_fn_name(&mangled);
         let wrapper_doc = docvec![
             "fun (",
             join(params.iter().cloned().map(leaf::var), &Document::Str(", ")),
             ") ->\n    ",
-            super::threaded_entry::plain_wrapper_call_doc(entry_fn.clone(), arity + 1, &params),
+            super::threaded_entry::plain_wrapper_call_doc(entry_fn.clone(), arity + 1, params),
             "\n",
         ];
-        Ok(docvec![
+        docvec![
             leaf::fname(entry_fn, arity + 1),
             " = ",
             annotate(fun_doc),
@@ -2077,7 +2083,7 @@ impl CoreErlangGenerator {
             " = ",
             annotate(wrapper_doc),
             "\n",
-        ])
+        ]
     }
 
     /// Generates an open Self-threading let chain for a non-last field assignment.

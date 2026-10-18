@@ -950,18 +950,21 @@ impl CoreErlangGenerator {
     /// the `Document`s of `parts` (`generate_vt_body_exprs`): the last part is
     /// the body's value, answered as `{Value, AccN}`. The body's producer
     /// preludes, logged in order ([`Self::log_threaded_value_prelude`]), are
-    /// verified once as the body's one `MethodBody` frame over `families`
-    /// (`[SelfVt]` when the body writes a field) with `Acc` last, closed by the
+    /// verified once as the body's one `MethodBody` frame over its families
+    /// (`[SelfVt]` when `method` writes a field) with `Acc` last, closed by the
     /// answer's `AccN`; a `^` block (`nlr_token`), which the threading index
     /// never admits (`facts::body_has_block_nlr`), is reported by the
     /// verifier's `NlrInThreadedBody` with the slot shape Phase 3 will need.
     pub(in crate::core_erlang) fn finish_threaded_value_body(
         &mut self,
         mut parts: Vec<Document<'static>>,
-        families: &[VersionPrefix],
+        method: &MethodDefinition,
         nlr_token: Option<&str>,
-        span: Span,
     ) -> Result<Vec<Document<'static>>> {
+        let span = method.span;
+        let eligible = self.eligible_families();
+        let families = self.stmts_threaded_families(&method.body, &eligible);
+        let families = families.as_slice();
         self.check_root_uses_lowered()?;
         let Some(last) = parts.pop() else {
             return Err(CodeGenError::Internal(

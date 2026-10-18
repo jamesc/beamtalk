@@ -54,7 +54,7 @@ fn test_list_inject_into_non_literal_value_type_generates_wrapper() {
     // inject:into: with a non-literal block (variable) outside Actor
     // context (no `State` map to thread) emits inline lists:foldl with an
     // arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
-    let src = "Value subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
+    let src = "Value subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    kept := block\n    items inject: 0 into: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foldl'"),
@@ -1542,7 +1542,7 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
     // ValueType + do: with non-literal callable → generate_simple_list_op (mod.rs lines 141–150).
     // In ValueType context there is no actor State var in scope, so the Tier-2 wrapper is
     // seeded with ~{}~ (empty map) rather than the current StateAcc.
-    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items do: block\n";
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    kept := block\n    items do: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foreach'"),
@@ -1567,7 +1567,7 @@ fn test_value_type_collect_non_literal_callable_generates_map_wrapper() {
     // Exercises the "map" arm of `generate_simple_list_op_footer`'s selector match
     // and the corresponding BIF dispatch, covering lines that the `do:` (foreach)
     // test does not reach.
-    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items collect: block\n";
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    kept := block\n    items collect: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'map'"),
@@ -1602,7 +1602,7 @@ fn test_value_type_select_non_literal_callable_generates_filter_wrapper() {
     // ADR 0128 state fold.
     // Exercises the "filter" arm of `generate_simple_list_op_footer`'s selector match,
     // covering the third distinct operation path through these two functions.
-    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items select: block\n";
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    kept := block\n    items select: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'filter'"),
@@ -1710,10 +1710,14 @@ fn test_opaque_fold_callable_arg_matches_codegen_call_sites() {
 #[test]
 fn test_opaque_fold_value_type_keeps_plain_value_paths() {
     // `ValueType` has no `State` map — none of the opaque-callable shapes
-    // fold there; each keeps its pre-ADR-0128 plain-value path.
+    // fold there; each keeps its pre-ADR-0128 plain-value path. (`kept :=
+    // block` stores the block, so it is not an ADR 0132 threading parameter:
+    // a threading parameter's callable folds over `Acc` instead,
+    // `tests/threaded_value_entry.rs`. The same holds for the value-type
+    // non-literal-callable tests in this file.)
     for (selector, body) in OPAQUE_FOLD_SHAPES {
         let src = format!(
-            "Value subclass: V\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
+            "Value subclass: V\n  state: x = 0\n\n  run: items with: block =>\n    kept := block\n    {body}\n"
         );
         let code = codegen(&src);
         assert!(

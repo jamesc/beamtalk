@@ -552,15 +552,21 @@ fn every_use_shape_beside_every_field_writing_construct_threads_self_and_acc() {
 /// Compiles `body` forced to have a threading parameter `b` (position 0) in a
 /// value type that writes a field, and returns the refusal.
 fn refusal_for(body: &str) -> String {
-    let src = format!(
+    refusal_in(&format!(
         "TestCase subclass: Forced\n  field: n = 0\n  run: b items: items flag: f =>\n    {body}\n"
-    );
+    ))
+}
+
+/// Compiles `src` with `run:items:flag:` forced to thread `b` (position 0) and
+/// returns the refusal, or the verifier's report (a hard failure in a debug
+/// build).
+fn refusal_in(src: &str) -> String {
     let result = forced_positions::with(&[("run:items:flag:", &[0])], || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| try_codegen(&src)))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| try_codegen(src)))
     });
     match result {
         Ok(Ok(code)) => panic!(
-            "`{body}` compiled without a refusal:\n{}",
+            "compiled without a refusal:\n{}",
             function_text(&code, "'__t2_run:items:flag:'/5")
         ),
         Ok(Err(error)) => format!("{error}"),
@@ -569,6 +575,26 @@ fn refusal_for(body: &str) -> String {
             .cloned()
             .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
             .unwrap_or_default(),
+    }
+}
+
+#[test]
+fn a_return_block_forced_into_a_threaded_body_is_reported_by_the_verifier() {
+    // The index never admits it (`facts::body_has_block_nlr`); forced past it,
+    // the body's one `MethodBody` verification is the backstop, whether the
+    // body threads `[Acc]` or `[SelfVt, Acc]`.
+    for (header, write) in [
+        ("Value subclass: Nlr\n  field: k = 0\n", ""),
+        (
+            "TestCase subclass: Nlr\n  field: n = 0\n",
+            "self.n := 1.\n    ",
+        ),
+    ] {
+        let message = refusal_in(&format!(
+            "{header}  run: b items: items flag: f =>\n    {write}b value.\n    \
+             items do: [:x | ^x].\n    nil\n"
+        ));
+        assert!(message.contains("NlrInThreadedBody"), "{message}");
     }
 }
 

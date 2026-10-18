@@ -1,0 +1,122 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3872 (ADR 0132 Phase 1d, epic BT-3865): a value-type method with a
+// threading block parameter compiles to one body over `Acc` with two entries,
+// and the PLAIN function (today's name and arity, which `'dispatch'/3` calls) is
+// a wrapper over it. Sent from Beamtalk with a pure block, every method must
+// answer what it answered before the change; a block that writes a captured
+// variable must be refused unrun, never run with its writes dropped. The
+// threaded entries themselves are exercised from Erlang
+// (beamtalk_threaded_value_entries_tests.erl).
+//
+// Fixtures: fixtures/threaded_value_entry_fixture.bt (a sealed `Value
+// subclass:`), fixtures/threaded_open_value_fixture.bt (an open `Value
+// subclass:`). This TestCase's own `bumpThen:` writes a field beside its
+// threading parameter (`[SelfVt, Acc]`).
+
+TestCase subclass: ThreadedValueEntryTest
+  field: n = 0
+
+  bumpThen: b =>
+    self.n := self.n + 1
+    b value: self.n
+
+  // --- a Value subclass ------------------------------------------------------
+  testTwiceAnswersTheBlocksLastValue =>
+    self assert: (ThreadedValueEntryFixture new twice: [7]) equals: 7
+
+  testEachVisitsEveryItemAndAnswersNil =>
+    self assert: (ThreadedValueEntryFixture new each: [:x | x * 10]) equals: nil
+
+  testTwiceViaPassesTheBlockOn =>
+    self assert: (ThreadedValueEntryFixture new twiceVia: [8]) equals: 8
+
+  testSumWithFoldsTheCallable =>
+    self assert: (ThreadedValueEntryFixture new sumWith: [:acc :x | acc + x]) equals: 6
+
+  testDetectFirstFindsTheFirstMatch =>
+    self assert: (ThreadedValueEntryFixture new detectFirst: [:x | x > 1]) equals: 2
+
+  testDetectFirstAnswersNilWithoutAMatch =>
+    self assert: (ThreadedValueEntryFixture new detectFirst: [:x | x > 5]) equals: nil
+
+  testAReturnFromABlockBesideAnInvocationIsUnchanged =>
+    self assert: (ThreadedValueEntryFixture new firstAfter: [1]) equals: 2
+
+  testAMethodWithoutABlockIsUnchanged =>
+    self assert: (ThreadedValueEntryFixture new plain: 1) equals: 2
+
+  // --- an open Object subclass ---------------------------------------------------
+  testALateBoundPassOnStillWorks =>
+    self assert: (ThreadedOpenValueFixture new viaOpen: [3]) equals: 3
+
+  testAStaticPassOnToASealedMethodStillWorks =>
+    self assert: (ThreadedOpenValueFixture new viaSealed: [4]) equals: 4
+
+  testAUseHoldingAnotherParametersUseCompilesAsBefore =>
+    self assert: (ThreadedOpenValueFixture new both: [:x | x + 1] with: [10]) equals: 11
+
+  // --- a field write beside the threading parameter ------------------------------
+  testAFieldWrittenBeforeTheInvocationIsSeenByIt =>
+    self assert: (self bumpThen: [:k | k * 10]) equals: 10
+
+  // --- the plain function refuses a Tier 2 block -------------------------------
+  //
+  // ADR 0131 section 6 rejects the direct shapes at compile time, so each block is
+  // laundered through an Erlang FFI tuple (exempt from section 6), as in
+  // blocks_test.bt; if that exemption narrows, these tests must change.
+  testAWritingBlockSentToAValueIsRefusedNotDropped =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    v := ThreadedValueEntryFixture new
+    self should: [v twice: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockSentByPerformIsRefusedNotDropped =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    v := ThreadedValueEntryFixture new
+    self should: [
+      v perform: #twice: withArguments: (Erlang lists duplicate: 1 of: laundered)
+    ] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockPassedOnThroughAForwardIsRefused =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    self should: [ThreadedValueEntryFixture new twiceVia: laundered] raise: #stateful_block_dispatch
+    self should: [ThreadedOpenValueFixture new viaSealed: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockGivenToACollectionCallableIsRefused =>
+    t := 0
+    @expect dead_assignment
+    writer := [:x | t := t + x]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    self should: [ThreadedValueEntryFixture new each: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  testAWritingBlockToAFieldWritingMethodIsRefused =>
+    t := 0
+    @expect dead_assignment
+    writer := [:k | t := t + k]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    self should: [self bumpThen: laundered] raise: #stateful_block_dispatch
+    self assert: t equals: 0
+
+  // The stdlib's own value-type entries (`Object>>ifNotNil:`, `True>>ifTrue:`,
+  // ...): a non-literal block is a real send to the plain function.
+  testStdlibConditionalsWithANonLiteralBlockAreUnchanged =>
+    inc := [:x | x + 1]
+    five := [5]
+    self assert: (3 ifNotNil: inc) equals: 4
+    self assert: (nil ifNil: five) equals: 5
+    self assert: ((#(1, 2) includes: 1) ifTrue: five) equals: 5
+    self assert: ((#(1, 2) includes: 3) ifTrue: five) equals: false
