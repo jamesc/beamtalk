@@ -171,28 +171,6 @@ pub(in crate::core_erlang) enum VersionPrefix {
     State,
     /// Value-type fields (`Self`, `Self1`, …).
     SelfVt,
-    /// ADR 0132 §2: the opaque map a threaded entry's caller hands over
-    /// (`Acc@0`, `Acc@1`, …), threaded through the body as a **trailing**
-    /// family slot exactly as `SelfVt` is, and read or written only by
-    /// `beamtalk_dispatch:call_threaded/3` and by forwards. It is never the
-    /// slot-2 scratch `StateAcc` map of a loop or fold
-    /// ([`VerifyError::AccAsScratchSeed`](super::verify::VerifyError::AccAsScratchSeed)),
-    /// never a `MapPut` rebind's map ([`RebindShape::for_frame`]) and never
-    /// holds a `'__local__'` key of the body's own
-    /// ([`VerifyError::OwnLocalKeyInAcc`](super::verify::VerifyError::OwnLocalKeyInAcc)).
-    /// Context-independent: it renders the same in and out of a loop body.
-    /// Version 0 is the entry's own parameter. The spelling is
-    /// [`ACC_VAR_PREFIX`] (`Acc@0`): a name no Beamtalk local can produce.
-    /// `to_core_var` only capitalises an identifier, so a local `acc0` renders
-    /// `Acc0` and a bare `Acc` is what a direct-params loop gives a local
-    /// `acc`; and `fresh_temp_var` spells `_Acc7`. `@` is legal in a Core
-    /// Erlang variable but never in a Beamtalk identifier, so `Acc@N` collides
-    /// with neither (`acc_version_spelling_never_collides_with_a_local` pins it).
-    ///
-    /// Eligible only inside a threaded body
-    /// (`CoreErlangGenerator::eligible_families`): the class-method threaded
-    /// body (ADR 0132 Phase 1c) is the first to mint an `Acc` version.
-    Acc,
     /// A directly-named loop-threaded local (`Sum`, `Count`, …) as produced
     /// by `ThreadingPlan::threaded_locals` in direct-params / hybrid mode.
     /// See module docs §Deviations for why this exists beyond the ADR's
@@ -266,7 +244,6 @@ impl VersionedVar {
         match &self.prefix {
             VersionPrefix::State => super::super::util::versioned_var("State", self.version),
             VersionPrefix::SelfVt => super::super::util::versioned_var("Self", self.version),
-            VersionPrefix::Acc => super::super::util::indexed_var(ACC_VAR_PREFIX, self.version),
             VersionPrefix::Local(name) => {
                 let core_name = super::super::CoreErlangGenerator::to_core_erlang_var(name);
                 super::super::util::versioned_var(&core_name, self.version)
@@ -276,24 +253,15 @@ impl VersionedVar {
     }
 }
 
-/// The Core Erlang spelling of an `Acc` version is `{ACC_VAR_PREFIX}{version}`
-/// (`Acc@0`). See [`VersionPrefix::Acc`] for why it contains an `@`.
-pub(in crate::core_erlang) const ACC_VAR_PREFIX: &str = "Acc@";
-
-// ─── Storage-family slot order (ADR 0122 Decision 2, ADR 0132 §2) ─────────
+// ─── Storage-family slot order (ADR 0122 Decision 2) ───────────────────────
 
 /// The canonical trailing-slot order of the storage families: the scratch
-/// map (`State`) first, then `SelfVt`, then `Acc` **last** (ADR 0132 §2: "the
-/// ADR 0131 ordering rule (`State` extracted first) extends to `Acc` last").
-/// The one definition: `control_flow::analysis::ThreadedFamilies` normalizes
-/// through [`canonical_families`], and so do the threaded `MethodBody`
-/// builder and the verifier's NLR slot-shape check, so a construct's tuple,
-/// a body's family list and its NLR slot can never disagree on order.
-pub(in crate::core_erlang) const FAMILY_SLOT_ORDER: [VersionPrefix; 3] = [
-    VersionPrefix::State,
-    VersionPrefix::SelfVt,
-    VersionPrefix::Acc,
-];
+/// map (`State`) first, then `SelfVt` (ADR 0131's ordering rule: `State` is
+/// extracted first). The one definition: `control_flow::analysis::ThreadedFamilies`
+/// normalizes through [`canonical_families`], so a construct's tuple and its
+/// family extraction can never disagree on order.
+pub(in crate::core_erlang) const FAMILY_SLOT_ORDER: [VersionPrefix; 2] =
+    [VersionPrefix::State, VersionPrefix::SelfVt];
 
 /// `families` re-sorted into [`FAMILY_SLOT_ORDER`], keeping only storage
 /// families (a `Local`/`Gensym` entry is not one and is dropped).
@@ -308,9 +276,7 @@ pub(in crate::core_erlang) fn canonical_families(families: &[VersionPrefix]) -> 
 /// The map-key prefix every threaded outer local is stored under in a
 /// `StateAcc` map (`'__local__t'`), so it cannot collide with an actor field
 /// name. The one definition: `CoreErlangGenerator::local_state_key` builds
-/// keys with it, and the verifier's
-/// [`VerifyError::OwnLocalKeyInAcc`](super::verify::VerifyError::OwnLocalKeyInAcc)
-/// recognizes them by it.
+/// keys with it.
 pub(in crate::core_erlang) const LOCAL_STATE_KEY_PREFIX: &str = "__local__";
 
 // ─── AccParam ─────────────────────────────────────────────────────
@@ -657,19 +623,10 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// not a versioned var), and the token-non-matching (foreign) arm carries
     /// nothing and re-raises. The IR does NOT pretend the relay "carries" a
     /// `VersionedVar`.
-    ///
-    /// ADR 0132 §2: `slot` names the families the token-matching arm unpacks
-    /// from the 4-tuple's state slot, in order. Empty for every catch today
-    /// (the boundary's own single-state shape); a catch inside a threaded
-    /// `MethodBody` must name the body's family tuple with `Acc` last
-    /// ([`VerifyError::NlrSlotShapeMismatch`](super::verify::VerifyError::NlrSlotShapeMismatch)).
-    /// Rendering: the `ClassMethod` boundary with slot `[Acc]` answers
-    /// `{Val, AccAtThrow}` (ADR 0132 Phase 1c); any other slot is bare.
     NlrCatch {
         boundary: NlrBoundary,
         token: TokenId,
         frame: FrameId,
-        slot: Vec<VersionPrefix>,
         span: Span,
     },
 
@@ -997,41 +954,24 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// where it is the bindings map's keys (the `MethodBody (REPL)` row of
     /// the §2 table). Renders `body` straight-line.
     ///
-    /// ADR 0132 §2: `kind` is [`MethodBodyKind::Threaded`] for a threaded
-    /// entry's body — `threads` empty, `families` the body's storage
-    /// families in `FAMILY_SLOT_ORDER` with `Acc` last (`[Acc]`, `[SelfVt,
-    /// Acc]`, `[State, Acc]`), the family tuple every NLR throw and catch
-    /// inside it carries
-    /// ([`VerifyError::NlrSlotShapeMismatch`](super::verify::VerifyError::NlrSlotShapeMismatch)).
-    /// Built by `build::build_threaded_method_body`. A
-    /// [`MethodBodyKind::Plain`] body has empty `families`. Rendering ignores
-    /// `kind` and `families`.
-    ///
     /// The non-REPL method root is the implicit frame of the top-level slice
-    /// (`RebindFrame::implicit_root`) for every method without a threading
-    /// parameter; the REPL root, which threads its bindings, and the threaded
-    /// entry body (ADR 0132 Phase 1c: a class method's) are the explicit ones.
+    /// (`RebindFrame::implicit_root`); the REPL root, which threads its
+    /// bindings, is the explicit one.
     MethodBody {
-        kind: MethodBodyKind,
         frame: FrameId,
         threads: Vec<String>,
-        families: Vec<VersionPrefix>,
         body: Vec<ThreadedStmt>,
         /// The method's span, where a verifier finding about the body as a
-        /// whole is reported (`ThreadedBodyThreadsLocals`). `Span::default()`
-        /// for a hand-built or REPL root.
+        /// whole is reported. `Span::default()` for a hand-built or REPL root.
         span: Span,
     },
 
-    /// ADR 0041 §State-Carrying NLR / ADR 0132 §2: a `^` throw, `let
+    /// ADR 0041 §State-Carrying NLR: a `^` throw, `let
     /// <result_var> = call 'erlang':'throw'({'$bt_nlr', Tok, Val, Slot}) in`.
     /// `slot` is the state slot of the 4-tuple: one version renders bare, two
-    /// or more render as a tuple in order. Inside a threaded `MethodBody` it
-    /// must be the body's family tuple with `Acc` last
-    /// ([`VerifyError::NlrSlotShapeMismatch`](super::verify::VerifyError::NlrSlotShapeMismatch)).
+    /// or more render as a tuple in order.
     ///
-    /// No production caller yet: `^` throws are still opaque `Statement`s;
-    /// the threaded body lowering (ADR 0132 Phases 1c/1d) is the first.
+    /// No production caller yet: `^` throws are still opaque `Statement`s.
     #[allow(dead_code)]
     NlrThrow {
         token: TokenId,
@@ -1053,17 +993,6 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         threads: Vec<String>,
         body: Vec<ThreadedStmt>,
     },
-}
-
-/// What a [`ThreadedStmt::MethodBody`] frame is the root of.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum MethodBodyKind {
-    /// An ordinary method root (ADR 0131 §2): the REPL root, which threads its
-    /// bindings, or a hand-built non-REPL root.
-    Plain,
-    /// ADR 0132 §2: a threaded entry's body, one frame over the trailing
-    /// `Acc` family.
-    Threaded,
 }
 
 // ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────
@@ -1146,15 +1075,6 @@ impl RebindShape {
     /// A non-member is never forced into the frame's parameter list or map:
     /// in an actor a stray `__local__` key would persist into the
     /// `gen_server` `State` (the BT-2717 class of bug).
-    ///
-    /// **`Acc` is never a rebind target** (ADR 0132 §2). A threaded
-    /// `MethodBody` threads no local (`threads` empty, by
-    /// `build_threaded_method_body`), so every rebind in it is the `Let`
-    /// cell; the `MapPut` cells name the frame's own `State`-prefix scratch
-    /// map, never the caller's `Acc`. The verifier enforces both halves:
-    /// `VerifyError::AccAsScratchSeed` rejects a `MapPut`/`MapHeld` rebind
-    /// whose map (or `state_first` read) is an `Acc` version, and a threaded
-    /// `MethodBody` that lists `threads`.
     pub(in crate::core_erlang) fn for_frame(kind: &RebindFrameKind, member: bool) -> Self {
         if !member {
             return Self::Let;
@@ -1332,7 +1252,6 @@ impl RebindLowering {
         else {
             return None;
         };
-        // `map.prefix == State`: never an `Acc` map (ADR 0132 §2).
         (current == Some(map) && map.prefix == VersionPrefix::State && map.frame == frame).then(
             || Self::MapHeld {
                 key: key.clone(),

@@ -320,25 +320,6 @@ impl CoreErlangGenerator {
                 })
             }
             _ => {
-                // ADR 0132 §2: a threading parameter has no lowering of its own.
-                // Every recognised use (an invocation, a collection HOM's
-                // callable, a forward) hands the block on without lowering the
-                // identifier, so reaching it here means a use sits somewhere the
-                // body does not carry `Acc` (a nested block, a loop or handler
-                // body, an unrecognised operand): refused, never silently
-                // lowered as the structural fallback that would drop the
-                // caller's writes.
-                if self.is_unreadable_threading_param(id.name.as_str()) {
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: format!(
-                            "the threading block parameter `{}` is used outside a method-root \
-                             invocation or forward (ADR 0132 Phase 3): the method has no \
-                             threaded entry for it",
-                            id.name
-                        ),
-                        span: Some(id.span),
-                    });
-                }
                 // Check if it's a bound variable in current or outer scopes
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     Ok(docvec![leaf::var(var_name)])

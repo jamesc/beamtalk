@@ -16,10 +16,8 @@ use beamtalk_core::source_analysis::Span;
 
 // ─── ADR 0122: unified storage-family detector ─────────────────────────────
 //
-// ADR 0122 Decision 2's canonical slot order (`State`, then `SelfVt`, then
-// ADR 0132's `Acc` last) is `threaded_ir::FAMILY_SLOT_ORDER`, applied by
-// `threaded_ir::canonical_families` — shared with the threaded `MethodBody`
-// builder and the verifier's NLR slot-shape check.
+// ADR 0122 Decision 2's canonical slot order (`State`, then `SelfVt`) is
+// `threaded_ir::FAMILY_SLOT_ORDER`, applied by `threaded_ir::canonical_families`.
 
 /// ADR 0122 Decision 2: the storage families a construct body mutates, in
 /// canonical slot order. Built by [`CoreErlangGenerator::body_threaded_families`]
@@ -32,7 +30,7 @@ pub(in crate::core_erlang) struct ThreadedFamilies(Vec<VersionPrefix>);
 impl ThreadedFamilies {
     /// Builds a `ThreadedFamilies` from an arbitrary-order set of matched
     /// families, re-sorting into `threaded_ir::FAMILY_SLOT_ORDER` (`State`,
-    /// `SelfVt`, `Acc`) — the shared normalization every constructor (this
+    /// `SelfVt`) — the shared normalization every constructor (this
     /// one included) routes through, so canonical order is a property of the
     /// TYPE, not of caller discipline.
     pub(in crate::core_erlang) fn from_matches(matches: &[VersionPrefix]) -> Self {
@@ -134,26 +132,15 @@ impl CoreErlangGenerator {
     /// class process (ADR 0130 §3).
     ///
     /// Mutually exclusive by construction: `context` alone decides `State`
-    /// vs. `SelfVt`, so at most one of them is ever eligible (none in `Repl`
+    /// vs. `SelfVt`, so at most one family is ever eligible (none in `Repl`
     /// context, which is never `ValueType`/`Actor`).
-    ///
-    /// * `Acc` (ADR 0132 §2) — inside a threaded entry's body
-    ///   ([`ScopeKind::Threaded`](super::super::threaded_ir::ScopeKind)), last:
-    ///   `[Acc]` for a class body, `[SelfVt, Acc]` for a value-type body
-    ///   (`SelfVt` threads when the body writes a field, decided per body by
-    ///   [`Self::body_threaded_families`]), `[State, Acc]` for an actor body.
-    ///   Outside a threaded body `Acc` is never eligible, so every method
-    ///   without a threading parameter is unchanged.
     pub(in crate::core_erlang) fn eligible_families(&self) -> Vec<VersionPrefix> {
-        let mut eligible = Vec::with_capacity(2);
+        let mut eligible = Vec::with_capacity(1);
         if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
             eligible.push(VersionPrefix::State);
         }
         if matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method() {
             eligible.push(VersionPrefix::SelfVt);
-        }
-        if self.threaded_body_kind().is_some() {
-            eligible.push(VersionPrefix::Acc);
         }
         eligible
     }
@@ -172,14 +159,6 @@ impl CoreErlangGenerator {
     ///   [`Self::eligible_families`] alone decides it and this always
     ///   answers `true` once asked (see
     ///   [`Self::body_threaded_families`]'s use of this).
-    /// * `Acc` — a *use of a threading parameter* (ADR 0132 §2's per-scope-kind
-    ///   table): the identifier of one of the threaded body's parameters. A
-    ///   construct carries `Acc` as a trailing slot only when it holds a use, so
-    ///   a loop, conditional or handler that never invokes a threading
-    ///   parameter is lowered exactly as in a body with none (it cannot change
-    ///   `Acc`), and `Acc` is threaded exactly where a `call_threaded/3` can
-    ///   write it. Unlike `State` this is a per-expression answer, not
-    ///   "always".
     /// * `Local`/`Gensym` — not a storage family this detector answers for;
     ///   always `false`.
     ///
@@ -194,7 +173,6 @@ impl CoreErlangGenerator {
     ) -> bool {
         match prefix {
             VersionPrefix::State => true,
-            VersionPrefix::Acc => self.is_threading_param_read(expr),
             VersionPrefix::SelfVt => {
                 !self.in_class_method()
                     && matches!(self.context, CodeGenContext::ValueType)
@@ -234,8 +212,7 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|prefix| {
                 // `State` needs no body walk at all — see
-                // `Self::is_family_mutation`'s doc comment (`Acc` does: it is
-                // threaded only through a construct that holds a use).
+                // `Self::is_family_mutation`'s doc comment.
                 matches!(prefix, VersionPrefix::State)
                     || body.body.iter().any(|stmt| {
                         let mut hit = false;

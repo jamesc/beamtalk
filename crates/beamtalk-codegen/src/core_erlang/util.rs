@@ -73,21 +73,13 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
     if version == 0 {
         prefix.to_string()
     } else {
-        indexed_var(prefix, version)
+        // Pre-allocate: prefix length + up to 4 digits (handles version ≤ 9999).
+        let mut s = String::with_capacity(prefix.len() + 4);
+        s.push_str(prefix);
+        // Write the counter directly instead of using format!.
+        let _ = write!(s, "{version}");
+        s
     }
-}
-
-/// [`versioned_var`] without the bare-prefix version 0: always
-/// `prefix{version}` (`Acc@0`, `Acc@1`, …). For a family whose entry parameter
-/// is named by its version too (ADR 0132's `Acc`). The one `prefix{version}`
-/// namer; [`versioned_var`] delegates to it for every non-zero version.
-pub(super) fn indexed_var(prefix: &str, version: usize) -> String {
-    // Pre-allocate: prefix length + up to 4 digits (handles version ≤ 9999).
-    let mut s = String::with_capacity(prefix.len() + 4);
-    s.push_str(prefix);
-    // Write the counter directly instead of using format!.
-    let _ = write!(s, "{version}");
-    s
 }
 
 /// Builds the metaclass tag string `"{class_name} class"`.
@@ -340,7 +332,6 @@ impl CoreErlangGenerator {
     /// [`CoreErlangGenerator::current_frame`] unless the call site already
     /// has its own branch frame in hand (a conditional/exception arm, which
     /// minted it via `current_branch_frame()` on entry).
-    #[allow(clippy::too_many_lines)] // the ordered list of producers, one branch each
     pub(super) fn threaded_expression(
         &mut self,
         expr: &Expression,
@@ -358,19 +349,6 @@ impl CoreErlangGenerator {
                 prelude: Vec::new(),
                 value: ValueRef::Doc(doc),
             });
-        }
-
-        // ADR 0132 §2: a use of a threading parameter in a threaded body
-        // (`b value: x`, `items do: b`, a forward) is a producer: its prelude
-        // steps `Acc`, whatever position it sits in.
-        if let Some(tv) = self.threaded_use_producer(inner, frame)? {
-            return Ok(tv);
-        }
-        // ... and a conditional whose receiver holds one: the receiver is
-        // sequenced ahead (its `Acc` step lands in the caller's frame), the
-        // conditional then reads its value.
-        if let Some(tv) = self.threaded_conditional_receiver_producer(inner, frame)? {
-            return Ok(tv);
         }
 
         // ADR 0131 §1 (Phase 2): a loop or fold at a sequenced operand site
@@ -706,7 +684,7 @@ impl CoreErlangGenerator {
     /// evaluated: `^ value`, `target := value`, `{a, b} := value`, and a
     /// `match:`'s scrutinee (its arms are phase 4 — untouched here).
     /// `None` for every other kind.
-    pub(super) fn single_sequenced_child(expr: &Expression) -> Option<&Expression> {
+    fn single_sequenced_child(expr: &Expression) -> Option<&Expression> {
         match expr {
             Expression::Return { value, .. }
             | Expression::Assignment { value, .. }
@@ -861,20 +839,8 @@ impl CoreErlangGenerator {
     ) -> Result<Option<ThreadedValue>> {
         if self.is_class_side_effect(expr) {
             let (mut prelude, scope) = match expr {
-                Expression::Assignment { value, .. }
-                    if self.statement_has_local_producer(expr)
-                        || self.expr_has_threaded_use(value) =>
-                {
+                Expression::Assignment { value, .. } if self.statement_has_local_producer(expr) => {
                     self.sequence_children(&[value.as_ref()], frame)?
-                }
-                // ADR 0132 §2: a class-side send whose receiver or arguments
-                // hold a use of a threading parameter sequences them ahead of
-                // it. Compiled as a closed document otherwise, the `Acc` step
-                // of the use would be scoped away with the send's own argument
-                // prelude.
-                Expression::MessageSend { .. } if self.expr_has_threaded_use(expr) => {
-                    let children = Self::sequenced_send_children(expr).unwrap_or_default();
-                    self.sequence_children(&children, frame)?
                 }
                 _ => (Vec::new(), PrecompiledScope::new()),
             };
@@ -1014,12 +980,6 @@ impl CoreErlangGenerator {
         // failing with "never substituted".
         if self.precompiled_subexprs_contains(inner) {
             return false;
-        }
-        // ADR 0132 §2: mirrors `threaded_expression`'s threaded-use producer.
-        // For both the sequencing and the threading probe: a use steps `Acc`,
-        // so a conditional whose receiver holds one needs its threaded form.
-        if probe != PreludeProbe::FieldWrites && self.threaded_use_at(inner).is_some() {
-            return true;
         }
         // BT-3816: the value-type body lowering asks only about field writes;
         // every other producer below has its own value-type path.

@@ -182,7 +182,9 @@ jobs:
         # `{'$bt_nlr', ...}` patterns in runtime sources (use the ?IS_NLR guard instead).
         # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
         # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
-        run: just build clippy fmt-check ${{ runner.os == 'Linux' && 'test-rust' || 'test-rust-platform' }} lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar
+        # test-lint-stamp (BT-3926) also no-ops on Windows; the pre-push hook's lint
+        # stamps must not depend on the cwd or the GIT_* variables a hook inherits.
+        run: just build clippy fmt-check ${{ runner.os == 'Linux' && 'test-rust' || 'test-rust-platform' }} lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
 
       - name: Rust corpus tier (state-threading agreement and corpus proofs)
         if: runner.os == 'Linux' && steps.corpus.outputs.run == 'true'
