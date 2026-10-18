@@ -6154,8 +6154,14 @@
         "assign",
         "assignment",
         "extends",
+        "for each",
+        "for-each",
+        "forEach",
         "inherit",
         "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
         "map",
         "mapping",
         "mutate",
@@ -6171,7 +6177,7 @@
         "testWildcard",
         "transform"
       ],
-      "source": "TestCase subclass: Ch14MapDestructuring\n\n  testSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testSubsetDestructuring =>\n    // Only some keys — extra keys in the dict are ignored:\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMissingKeyRaises =>\n    self should: [\n      #{#missing => _val} := #{#present => 42}\n    ] raise: RuntimeError\n\n  testInCollectBlock =>\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts collect: [:d |\n      #{#x => x, #y => y} := d\n      x + y\n    ]\n    self assert: sums equals: #[11, 22]",
+      "source": "TestCase subclass: Ch14MapDestructuring\n\n  testSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testSubsetDestructuring =>\n    // Only some keys — extra keys in the dict are ignored:\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMissingKeyRaises =>\n    kind := [\n      #{#missing => _val} := #{#present => 42}\n    ] on: Error do: [:e | e kind]\n    self assert: kind equals: #key_error\n\n  testInCollectBlock =>\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts collect: [:d |\n      #{#x => x, #y => y} := d\n      x + y\n    ]\n    self assert: sums equals: #[11, 22]",
       "explanation": "Code example from docs/learning/14-pattern-matching.md"
     },
     {
@@ -6444,7 +6450,7 @@
         "testListsFlattening",
         "testMapsToList"
       ],
-      "source": "TestCase subclass: Ch16PracticalPatterns\n\n  testCallingStringModule =>\n    // Erlang's string module for operations not yet in Beamtalk stdlib:\n    result := Erlang string uppercase: \"hello\"\n    self assert: result equals: \"HELLO\"\n\n  testCallingMathModule =>\n    // math:pow/2 — floating-point power:\n    result := Erlang math pow: 2.0 with: 10.0\n    self assert: result equals: 1024.0\n\n  testCallingCryptoHash =>\n    // crypto:hash/2 — SHA-256 (returns binary):\n    hash := Erlang crypto hash: #sha256 with: \"hello\"\n    self assert: hash class equals: String    // binary → String\n\n  testListsFlattening =>\n    nested := #[#[1, 2], #[3, 4], #[5]]\n    flat := Erlang lists flatten: nested\n    self assert: flat equals: #(1, 2, 3, 4, 5)\n\n  testMapsToList =>\n    // maps:to_list/1 — convert a map to a list of {K, V} tuples:\n    d := #{#a => 1, #b => 2}\n    pairs := Erlang maps to_list: d\n    self assert: pairs size equals: 2",
+      "source": "TestCase subclass: Ch16PracticalPatterns\n\n  testCallingStringModule =>\n    // Erlang's string module for operations not yet in Beamtalk stdlib:\n    result := Erlang string uppercase: \"hello\"\n    self assert: result equals: \"HELLO\"\n\n  testCallingMathModule =>\n    // math:pow/2 — floating-point power:\n    result := Erlang math pow: 2.0 with: 10.0\n    self assert: result equals: 1024.0\n\n  testCallingCryptoHash =>\n    // crypto:hash/2 — SHA-256 (returns binary):\n    hash := Erlang crypto hash: #sha256 with: \"hello\"\n    self assert: hash class equals: Binary    // raw bytes, not valid UTF-8 → Binary\n\n  testListsFlattening =>\n    nested := #[#[1, 2], #[3, 4], #[5]]\n    flat := Erlang lists flatten: nested\n    self assert: flat equals: #(1, 2, 3, 4, 5)\n\n  testMapsToList =>\n    // maps:to_list/1 — convert a map to a list of {K, V} tuples:\n    d := #{#a => 1, #b => 2}\n    pairs := Erlang maps to_list: d\n    self assert: pairs size equals: 2",
       "explanation": "Code example from docs/learning/16-beam-interop.md"
     },
     {
@@ -6944,7 +6950,7 @@
         "testReadAllLines",
         "where"
       ],
-      "source": "TestCase subclass: Ch18Streams\n  field: tmpDir = \"target/bt-doctest-tmp/ch18streams\"\n  field: nl = \"\"\n  setUp =>\n    updated := self withNl: (String fromCodePoint: 10)\n    File mkdirAll: updated tmpDir\n    File writeAll: updated tmpDir ++ \"/data.txt\"\n      contents: \"one\" ++ updated nl ++ \"two\" ++ updated nl ++ \"three\" ++ updated nl ++ \"four\" ++ updated nl ++ \"five\"\n    updated\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testReadAllLines =>\n    // Read all lines from a file\n    lines := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 5\n    self assert: (lines at: 1) equals: \"one\"\n    self assert: (lines at: 5) equals: \"five\"\n\n  testLazyTake =>\n    // take: only reads the first N lines — lazy evaluation\n    count := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2\n\n  testFilterLines =>\n    // select: filters lazily\n    result := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines select: [:l | l size <= 3]) asList\n    ]) unwrap\n    self assert: result size equals: 3",
+      "source": "TestCase subclass: Ch18Streams\n  field: tmpDir = \"target/bt-doctest-tmp/ch18streams\"\n  field: nl = \"\"\n  setUp =>\n    nl := String fromCodePoint: 10\n    File mkdirAll: self.tmpDir\n    File writeAll: self.tmpDir ++ \"/data.txt\"\n      contents: \"one\" ++ nl ++ \"two\" ++ nl ++ \"three\" ++ nl ++ \"four\" ++ nl ++ \"five\"\n    self withNl: nl\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testReadAllLines =>\n    // Read all lines from a file\n    lines := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 5\n    self assert: (lines at: 1) equals: \"one\"\n    self assert: (lines at: 5) equals: \"five\"\n\n  testLazyTake =>\n    // take: only reads the first N lines — lazy evaluation\n    count := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2\n\n  testFilterLines =>\n    // select: filters lazily\n    result := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines select: [:l | l size <= 3]) asList\n    ]) unwrap\n    self assert: result size equals: 3",
       "explanation": "Code example from docs/learning/18-file-io.md"
     },
     {
@@ -7509,7 +7515,7 @@
         "testMetaclassName",
         "testSelfGrounding"
       ],
-      "source": "TestCase subclass: Ch24Metaclass\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    name := Point class name\n    self assert: (name includesSubstring: \"class\")\n\n  testSelfGrounding =>\n    // The metaclass of a metaclass is itself — the hierarchy is self-grounding\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2",
+      "source": "TestCase subclass: Ch24Metaclass\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    // `name` answers a Symbol\n    self assert: Point class name equals: #'Point class'\n\n  testSelfGrounding =>\n    // The metaclass of a metaclass is itself — the hierarchy is self-grounding\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2",
       "explanation": "Code example from docs/learning/24-reflection.md"
     },
     {
@@ -8256,23 +8262,6 @@
       "explanation": "BUnit tests for docs/learning/12-error-handling.md (Result)"
     },
     {
-      "id": "docs-learning-fixtures-ch12validation-error",
-      "title": "ValidationError",
-      "category": "learning-fixtures",
-      "tags": [
-        "Error",
-        "ValidationError",
-        "ch12validation_error",
-        "extends",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing"
-      ],
-      "source": "// Custom error class fixture for docs/learning/12-error-handling.md\n\nError subclass: ValidationError",
-      "explanation": "Custom error class fixture for docs/learning/12-error-handling.md"
-    },
-    {
       "id": "docs-learning-fixtures-ch12validator",
       "title": "Ch12Validator",
       "category": "learning-fixtures",
@@ -8476,7 +8465,7 @@
         "testWildcard",
         "transform"
       ],
-      "source": "// BUnit tests for docs/learning/14-pattern-matching.md (maps)\n\nTestCase subclass: Ch14MapDestructuring\n\n  testSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testSubsetDestructuring =>\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMissingKeyRaises =>\n    result := [\n      #{#missing => _val} := #{#present => 42}\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e message includesSubstring: \"badkey\"]\n    self assert: result equals: true\n\n  testInCollectBlock =>\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts collect: [:d |\n      #{#x => x, #y => y} := d\n      x + y\n    ]\n    self assert: sums equals: #[11, 22]",
+      "source": "// BUnit tests for docs/learning/14-pattern-matching.md (maps)\n\nTestCase subclass: Ch14MapDestructuring\n\n  testSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testSubsetDestructuring =>\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMissingKeyRaises =>\n    kind := [\n      #{#missing => _val} := #{#present => 42}\n    ] on: Error do: [:e | e kind]\n    self assert: kind equals: #key_error\n\n  testInCollectBlock =>\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts collect: [:d |\n      #{#x => x, #y => y} := d\n      x + y\n    ]\n    self assert: sums equals: #[11, 22]",
       "explanation": "BUnit tests for docs/learning/14-pattern-matching.md (maps)"
     },
     {
@@ -8720,7 +8709,7 @@
         "testListsFlattening",
         "testMapsToList"
       ],
-      "source": "// BUnit tests for docs/learning/16-beam-interop.md (practical patterns)\n\nTestCase subclass: Ch16PracticalPatterns\n\n  testCallingStringModule =>\n    result := Erlang string uppercase: \"hello\"\n    self assert: result equals: \"HELLO\"\n\n  testCallingMathModule =>\n    result := Erlang math pow: 2.0 with: 10.0\n    self assert: (result > 1023.0)\n    self assert: (result < 1025.0)\n\n  testCallingCryptoHash =>\n    hash := Erlang crypto hash: #sha256 with: \"hello\"\n    self assert: hash class equals: String\n\n  testListsFlattening =>\n    nested := #(#(1, 2), #(3, 4), #(5))\n    flat := Erlang lists flatten: nested\n    self assert: flat equals: #(1, 2, 3, 4, 5)\n\n  testMapsToList =>\n    d := #{#a => 1, #b => 2}\n    pairs := Erlang maps to_list: d\n    self assert: pairs size equals: 2",
+      "source": "// BUnit tests for docs/learning/16-beam-interop.md (practical patterns)\n\nTestCase subclass: Ch16PracticalPatterns\n\n  testCallingStringModule =>\n    result := Erlang string uppercase: \"hello\"\n    self assert: result equals: \"HELLO\"\n\n  testCallingMathModule =>\n    result := Erlang math pow: 2.0 with: 10.0\n    self assert: (result > 1023.0)\n    self assert: (result < 1025.0)\n\n  testCallingCryptoHash =>\n    hash := Erlang crypto hash: #sha256 with: \"hello\"\n    self assert: hash class equals: Binary\n\n  testListsFlattening =>\n    nested := #(#(1, 2), #(3, 4), #(5))\n    flat := Erlang lists flatten: nested\n    self assert: flat equals: #(1, 2, 3, 4, 5)\n\n  testMapsToList =>\n    d := #{#a => 1, #b => 2}\n    pairs := Erlang maps to_list: d\n    self assert: pairs size equals: 2",
       "explanation": "BUnit tests for docs/learning/16-beam-interop.md (practical patterns)"
     },
     {
@@ -8750,63 +8739,6 @@
       ],
       "source": "// BUnit tests for docs/learning/16-beam-interop.md (type mapping)\n\nTestCase subclass: Ch16TypeMapping\n\n  testSymbolsAreAtoms =>\n    result := Erlang erlang is_atom: #hello\n    self assert: result\n\n  testStringsAreBinaries =>\n    result := Erlang erlang is_binary: \"hello\"\n    self assert: result\n\n  testIntegersAreIntegers =>\n    result := Erlang erlang is_integer: 42\n    self assert: result\n\n  testBooleansAreAtoms =>\n    result := Erlang erlang is_atom: true\n    self assert: result\n\n  testListsAreLists =>\n    result := Erlang erlang is_list: #(1, 2, 3)\n    self assert: result\n\n  testDictsAreMaps =>\n    result := Erlang erlang is_map: #{#a => 1}\n    self assert: result",
       "explanation": "BUnit tests for docs/learning/16-beam-interop.md (type mapping)"
-    },
-    {
-      "id": "docs-learning-fixtures-ch17counter",
-      "title": "Counter",
-      "category": "learning-fixtures",
-      "tags": [
-        "Actor",
-        "Counter",
-        "actor",
-        "assign",
-        "assignment",
-        "async",
-        "ch17counter",
-        "concurrent",
-        "extends",
-        "fault tolerance",
-        "field",
-        "gen_server",
-        "genserver",
-        "increment",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "process",
-        "property",
-        "restart",
-        "set",
-        "subclassing",
-        "supervision",
-        "value"
-      ],
-      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nActor subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1\n  value => self.value",
-      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
-    },
-    {
-      "id": "docs-learning-fixtures-ch17counter-app",
-      "title": "CounterApp",
-      "category": "learning-fixtures",
-      "tags": [
-        "CounterApp",
-        "Supervisor",
-        "ch17counter_app",
-        "children",
-        "extends",
-        "fault tolerance",
-        "inherit",
-        "inheritance",
-        "object",
-        "restart",
-        "subclassing",
-        "supervision"
-      ],
-      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nSupervisor subclass: CounterApp\n  class children => #[Counter supervisionSpec]",
-      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
       "id": "docs-learning-fixtures-ch17dynamic-supervisor",
@@ -8850,42 +8782,6 @@
       ],
       "source": "// BUnit tests for docs/learning/17-otp-supervisors.md (lifecycle)\n\nTestCase subclass: Ch17Lifecycle\n\n  testSupervisorClassMethods =>\n    self assert: CounterApp isSupervisor\n    self assert: CounterApp strategy equals: #oneForOne\n    self assert: (CounterApp children size) equals: 1",
       "explanation": "BUnit tests for docs/learning/17-otp-supervisors.md (lifecycle)"
-    },
-    {
-      "id": "docs-learning-fixtures-ch17persistent-worker",
-      "title": "PersistentWorker",
-      "category": "learning-fixtures",
-      "tags": [
-        "Actor",
-        "PersistentWorker",
-        "actor",
-        "assign",
-        "assignment",
-        "async",
-        "ch17persistent_worker",
-        "concurrent",
-        "extends",
-        "fault tolerance",
-        "field",
-        "gen_server",
-        "genserver",
-        "increment",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "process",
-        "property",
-        "restart",
-        "set",
-        "subclassing",
-        "supervision",
-        "supervisionPolicy"
-      ],
-      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nActor subclass: PersistentWorker\n  class supervisionPolicy => #permanent\n  state: value = 0\n  increment => self.value := self.value + 1",
-      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
       "id": "docs-learning-fixtures-ch17restart-policy",
@@ -8992,27 +8888,6 @@
       "explanation": "BUnit tests for docs/learning/17-otp-supervisors.md (supervision specs)"
     },
     {
-      "id": "docs-learning-fixtures-ch17worker-pool",
-      "title": "WorkerPool",
-      "category": "learning-fixtures",
-      "tags": [
-        "DynamicSupervisor",
-        "WorkerPool",
-        "ch17worker_pool",
-        "childClass",
-        "extends",
-        "fault tolerance",
-        "inherit",
-        "inheritance",
-        "object",
-        "restart",
-        "subclassing",
-        "supervision"
-      ],
-      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nDynamicSupervisor(Counter) subclass: WorkerPool\n  class childClass => Counter",
-      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
-    },
-    {
       "id": "docs-learning-fixtures-ch18file-io",
       "title": "Ch18FileIO",
       "category": "learning-fixtures",
@@ -9067,7 +8942,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BUnit tests for docs/learning/18-file-io.md\n\nTestCase subclass: Ch18FileIO\n  field: tmpDir = \"target/bt-doctest-tmp/ch18\"\n  field: nl = \"\"\n\n  setUp =>\n    updated := self withNl: (String fromCodePoint: 10)\n    File mkdirAll: updated tmpDir\n    updated\n\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  // — Reading and writing —\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/hello.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    result := File readAll: path\n    self assert: result isOk\n    self assert: result unwrap equals: \"Hello, Beamtalk!\"\n\n  testReadMissingFile =>\n    result := File readAll: self.tmpDir ++ \"/missing.txt\"\n    self assert: result isError\n\n  testOverwrite =>\n    path := self.tmpDir ++ \"/overwrite.txt\"\n    File writeAll: path contents: \"first\"\n    File writeAll: path contents: \"second\"\n    self assert: (File readAll: path) unwrap equals: \"second\"\n\n  testFileExists =>\n    path := self.tmpDir ++ \"/exists.txt\"\n    self deny: (File exists: path)\n    File writeAll: path contents: \"data\"\n    self assert: (File exists: path)\n\n  // — Directory operations —\n\n  testMkdir =>\n    dir := self.tmpDir ++ \"/subdir\"\n    result := File mkdir: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testMkdirAll =>\n    dir := self.tmpDir ++ \"/a/b/c\"\n    result := File mkdirAll: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testListDirectory =>\n    File writeAll: self.tmpDir ++ \"/a.txt\" contents: \"a\"\n    File writeAll: self.tmpDir ++ \"/b.txt\" contents: \"b\"\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"a.txt\")\n    self assert: (entries printString includesSubstring: \"b.txt\")\n\n  testIsFileAndIsDirectory =>\n    path := self.tmpDir ++ \"/check.txt\"\n    File writeAll: path contents: \"data\"\n    self assert: (File isFile: path)\n    self deny: (File isDirectory: path)\n    self assert: (File isDirectory: self.tmpDir)\n    self deny: (File isFile: self.tmpDir)\n\n  testDelete =>\n    path := self.tmpDir ++ \"/deleteme.txt\"\n    File writeAll: path contents: \"bye\"\n    self assert: (File exists: path)\n    File delete: path\n    self deny: (File exists: path)\n\n  testRename =>\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"moved\"\n    File rename: src to: dst\n    self deny: (File exists: src)\n    self assert: (File readAll: dst) unwrap equals: \"moved\"\n\n  testCwd =>\n    cwd := File cwd\n    self assert: (cwd isKindOf: String)\n    self assert: cwd size > 0\n\n  // — File streams —\n\n  testLinesStream =>\n    path := self.tmpDir ++ \"/lines.txt\"\n    content := \"one\" ++ self.nl ++ \"two\" ++ self.nl ++ \"three\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      h lines asList size\n    ]) unwrap\n    self assert: count equals: 3\n\n  testOpenDoReadLines =>\n    path := self.tmpDir ++ \"/stream.txt\"\n    content := \"alpha\" ++ self.nl ++ \"beta\" ++ self.nl ++ \"gamma\"\n    File writeAll: path contents: content\n    lines := (File open: path do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 3\n    self assert: (lines at: 1) equals: \"alpha\"\n    self assert: (lines at: 3) equals: \"gamma\"\n\n  testLazyTake =>\n    path := self.tmpDir ++ \"/many.txt\"\n    content := \"1\" ++ self.nl ++ \"2\" ++ self.nl ++ \"3\" ++ self.nl ++ \"4\" ++ self.nl ++ \"5\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2",
+      "source": "// BUnit tests for docs/learning/18-file-io.md\n\nTestCase subclass: Ch18FileIO\n  field: tmpDir = \"target/bt-doctest-tmp/ch18\"\n  field: nl = \"\"\n\n  setUp =>\n    File mkdirAll: self.tmpDir\n    self withNl: (String fromCodePoint: 10)\n\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  // — Reading and writing —\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/hello.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    result := File readAll: path\n    self assert: result isOk\n    self assert: result unwrap equals: \"Hello, Beamtalk!\"\n\n  testReadMissingFile =>\n    result := File readAll: self.tmpDir ++ \"/missing.txt\"\n    self assert: result isError\n\n  testOverwrite =>\n    path := self.tmpDir ++ \"/overwrite.txt\"\n    File writeAll: path contents: \"first\"\n    File writeAll: path contents: \"second\"\n    self assert: (File readAll: path) unwrap equals: \"second\"\n\n  testFileExists =>\n    path := self.tmpDir ++ \"/exists.txt\"\n    self deny: (File exists: path)\n    File writeAll: path contents: \"data\"\n    self assert: (File exists: path)\n\n  // — Directory operations —\n\n  testMkdir =>\n    dir := self.tmpDir ++ \"/subdir\"\n    result := File mkdir: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testMkdirAll =>\n    dir := self.tmpDir ++ \"/a/b/c\"\n    result := File mkdirAll: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testListDirectory =>\n    File writeAll: self.tmpDir ++ \"/a.txt\" contents: \"a\"\n    File writeAll: self.tmpDir ++ \"/b.txt\" contents: \"b\"\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"a.txt\")\n    self assert: (entries printString includesSubstring: \"b.txt\")\n\n  testIsFileAndIsDirectory =>\n    path := self.tmpDir ++ \"/check.txt\"\n    File writeAll: path contents: \"data\"\n    self assert: (File isFile: path)\n    self deny: (File isDirectory: path)\n    self assert: (File isDirectory: self.tmpDir)\n    self deny: (File isFile: self.tmpDir)\n\n  testDelete =>\n    path := self.tmpDir ++ \"/deleteme.txt\"\n    File writeAll: path contents: \"bye\"\n    self assert: (File exists: path)\n    File delete: path\n    self deny: (File exists: path)\n\n  testRename =>\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"moved\"\n    File rename: src to: dst\n    self deny: (File exists: src)\n    self assert: (File readAll: dst) unwrap equals: \"moved\"\n\n  testCwd =>\n    cwd := File cwd\n    self assert: (cwd isKindOf: String)\n    self assert: cwd size > 0\n\n  // — File streams —\n\n  testLinesStream =>\n    path := self.tmpDir ++ \"/lines.txt\"\n    content := \"one\" ++ self.nl ++ \"two\" ++ self.nl ++ \"three\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      h lines asList size\n    ]) unwrap\n    self assert: count equals: 3\n\n  testOpenDoReadLines =>\n    path := self.tmpDir ++ \"/stream.txt\"\n    content := \"alpha\" ++ self.nl ++ \"beta\" ++ self.nl ++ \"gamma\"\n    File writeAll: path contents: content\n    lines := (File open: path do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 3\n    self assert: (lines at: 1) equals: \"alpha\"\n    self assert: (lines at: 3) equals: \"gamma\"\n\n  testLazyTake =>\n    path := self.tmpDir ++ \"/many.txt\"\n    content := \"1\" ++ self.nl ++ \"2\" ++ self.nl ++ \"3\" ++ self.nl ++ \"4\" ++ self.nl ++ \"5\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2",
       "explanation": "BUnit tests for docs/learning/18-file-io.md"
     },
     {
@@ -9104,7 +8979,7 @@
         "testSuperclass",
         "testValueFieldNames"
       ],
-      "source": "// BUnit tests for docs/learning/24-reflection.md\n\nTestCase subclass: Ch24Reflection\n\n  // — fieldNames —\n\n  testValueFieldNames =>\n    p := Point x: 3 y: 4\n    names := p fieldNames\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  // — fieldAt: —\n\n  testReadField =>\n    p := Point x: 10 y: 20\n    self assert: (p fieldAt: #x) equals: 10\n    self assert: (p fieldAt: #y) equals: 20\n\n  testPrimitiveFieldAccess =>\n    self should: [42 fieldAt: #x] raise: #immutable_value\n    self should: [\"hello\" fieldAt: #x] raise: #immutable_value\n    @expect type\n    self should: [42 fieldAt: #x put: 10] raise: #immutable_value\n\n  // — Class introspection —\n\n  testMethods =>\n    methods := Point methods\n    self assert: (methods includes: #x)\n    self assert: (methods includes: #y)\n\n  testAllMethods =>\n    all := Point allMethods\n    self assert: (all includes: #x)\n    self assert: (all includes: #class)\n\n  testSuperclass =>\n    self assert: Point superclass equals: Value\n\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #name)\n    self assert: (Point respondsTo: #methods)\n\n  // — Metaclass —\n\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    name := Point class name\n    self assert: (name includesSubstring: \"class\")\n\n  testSelfGrounding =>\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2\n\n  // — Generic inspector —\n\n  testInspectValue =>\n    p := Point x: 5 y: 10\n\n    self assert: p class equals: Point\n    self assert: (p fieldNames includes: #x)\n    self assert: (p fieldAt: #x) equals: 5",
+      "source": "// BUnit tests for docs/learning/24-reflection.md\n\nTestCase subclass: Ch24Reflection\n\n  // — fieldNames —\n\n  testValueFieldNames =>\n    p := Point x: 3 y: 4\n    names := p fieldNames\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  // — fieldAt: —\n\n  testReadField =>\n    p := Point x: 10 y: 20\n    self assert: (p fieldAt: #x) equals: 10\n    self assert: (p fieldAt: #y) equals: 20\n\n  testPrimitiveFieldAccess =>\n    self should: [42 fieldAt: #x] raise: #immutable_value\n    self should: [\"hello\" fieldAt: #x] raise: #immutable_value\n    @expect type\n    self should: [42 fieldAt: #x put: 10] raise: #immutable_value\n\n  // — Class introspection —\n\n  testMethods =>\n    methods := Point methods\n    self assert: (methods includes: #x)\n    self assert: (methods includes: #y)\n\n  testAllMethods =>\n    all := Point allMethods\n    self assert: (all includes: #x)\n    self assert: (all includes: #class)\n\n  testSuperclass =>\n    self assert: Point superclass equals: Value\n\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #name)\n    self assert: (Point respondsTo: #methods)\n\n  // — Metaclass —\n\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    // `name` answers a Symbol\n    self assert: Point class name equals: #'Point class'\n\n  testSelfGrounding =>\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2\n\n  // — Generic inspector —\n\n  testInspectValue =>\n    p := Point x: 5 y: 10\n\n    self assert: p class equals: Point\n    self assert: (p fieldNames includes: #x)\n    self assert: (p fieldAt: #x) equals: 5",
       "explanation": "BUnit tests for docs/learning/24-reflection.md"
     },
     {
@@ -9141,6 +9016,27 @@
       ],
       "source": "// Fixture for docs/learning/11-actors.md\n// Reused by chapters 13 and 17\n\nActor subclass: Counter\n  state: value = 0\n\n  increment =>\n    self.value := self.value + 1\n\n  getValue =>\n    self.value\n\n  incrementBy: n =>\n    self.value := self.value + n\n\n  reset =>\n    self.value := 0",
       "explanation": "Fixture for docs/learning/11-actors.md Reused by chapters 13 and 17"
+    },
+    {
+      "id": "docs-learning-fixtures-counter-app",
+      "title": "CounterApp",
+      "category": "learning-fixtures",
+      "tags": [
+        "CounterApp",
+        "Supervisor",
+        "children",
+        "counter_app",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nSupervisor subclass: CounterApp\n  class children => #[Counter supervisionSpec]",
+      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
       "id": "docs-learning-fixtures-id-generator",
@@ -9239,6 +9135,42 @@
       ],
       "source": "// Fixture for docs/learning/12-error-handling.md\n\nObject subclass: Parser\n  safeParseInt: str =>\n    [Result ok: str asInteger]\n      on: Error\n      do: [:e | Result error: #parse_error]",
       "explanation": "Fixture for docs/learning/12-error-handling.md"
+    },
+    {
+      "id": "docs-learning-fixtures-persistent-worker",
+      "title": "PersistentWorker",
+      "category": "learning-fixtures",
+      "tags": [
+        "Actor",
+        "PersistentWorker",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "fault tolerance",
+        "field",
+        "gen_server",
+        "genserver",
+        "increment",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "persistent_worker",
+        "process",
+        "property",
+        "restart",
+        "set",
+        "subclassing",
+        "supervision",
+        "supervisionPolicy"
+      ],
+      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nActor subclass: PersistentWorker\n  class supervisionPolicy => #permanent\n  state: value = 0\n  increment => self.value := self.value + 1",
+      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
       "id": "docs-learning-fixtures-point",
@@ -9344,6 +9276,23 @@
       "explanation": "BUnit tests for docs/learning/13-testing.md (Stack)"
     },
     {
+      "id": "docs-learning-fixtures-validation-error",
+      "title": "ValidationError",
+      "category": "learning-fixtures",
+      "tags": [
+        "Error",
+        "ValidationError",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "validation_error"
+      ],
+      "source": "// Custom error class fixture for docs/learning/12-error-handling.md\n\nError subclass: ValidationError",
+      "explanation": "Custom error class fixture for docs/learning/12-error-handling.md"
+    },
+    {
       "id": "docs-learning-fixtures-validator",
       "title": "Validator",
       "category": "learning-fixtures",
@@ -9366,6 +9315,27 @@
       ],
       "source": "// Fixture for docs/learning/12-error-handling.md\n\nObject subclass: Validator\n  validate: x =>\n    x isNil ifTrue: [self error: \"value must not be nil\"]\n    x < 0   ifTrue: [self error: \"value must not be negative\"]\n    x",
       "explanation": "Fixture for docs/learning/12-error-handling.md"
+    },
+    {
+      "id": "docs-learning-fixtures-worker-pool",
+      "title": "WorkerPool",
+      "category": "learning-fixtures",
+      "tags": [
+        "DynamicSupervisor",
+        "WorkerPool",
+        "childClass",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision",
+        "worker_pool"
+      ],
+      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nDynamicSupervisor(Counter) subclass: WorkerPool\n  class childClass => Counter",
+      "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
       "id": "docs-learning-readme-block-1",

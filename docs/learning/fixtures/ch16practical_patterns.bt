@@ -16,7 +16,7 @@ TestCase subclass: Ch16PracticalPatterns
 
   testCallingCryptoHash =>
     hash := Erlang crypto hash: #sha256 with: "hello"
-    self assert: hash class equals: String
+    self assert: hash class equals: Binary
 
   testListsFlattening =>
     nested := #(#(1, 2), #(3, 4), #(5))
