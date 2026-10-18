@@ -674,6 +674,50 @@ This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `ge
 - `<=` - Less than or equal: `3 <= 3` → `true`
 - `>=` - Greater than or equal: `5 >= 3` → `true`
 
+Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples:
+
+```beamtalk
+#apple < #banana   // => true
+x := nil
+x < 5              // => ERROR: UndefinedObject does not understand '<'
+```
+
+This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
+
+The **argument** is not checked: a number, character or string receiver compares against an argument of any other kind by the BEAM's term order, so `5 < nil` answers `true` rather than raising. Comparison operators have no number-on-the-left coercion (see above).
+
+##### Arithmetic and comparison on fields: annotate numeric state
+
+Arithmetic and comparison operators are messages, so `self.count + 1` must
+dispatch to the object's `+` when `count` holds a `Point` or `Money`. The
+compiler emits the bare Erlang arithmetic/comparison instruction only when it
+*knows* the operand is a primitive; otherwise it adds a runtime type test that
+sends the message to objects. For a field, "knows" means the declared type: a
+field annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast
+path, and comparisons also accept `:: Character` / `:: String`. A union with
+`Nil` (`:: Integer | Nil`) stays bare for arithmetic only; its comparisons get
+the runtime test so a `nil` raises instead of term-ordering (see Comparison
+above). An **untyped** field always gets the runtime test,
+whatever its default, because writers outside the class can store any object in
+it (BT-3925):
+
+```beamtalk
+Actor subclass: Counter
+  state: count = 0                       // untyped: guarded
+  increment => self.count := self.count + 1
+
+c := Counter spawnWith: #{#count => aPoint}
+c increment                              // sends Point>>+, no badarith
+
+Actor subclass: FastCounter
+  state: count :: Integer = 0            // annotated: bare arithmetic
+  increment => self.count := self.count + 1
+```
+
+The test is cheap (the BT-3925 counter benchmark measured no slowdown, see
+`docs/development/benchmarks.md`), but annotating numeric state with
+`:: Integer` is the documented way to get the bare instruction.
+
 #### Equality (lowest precedence)
 - `=:=` - Strict equality (Erlang `=:=`): `5 =:= 5` → `true`
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
@@ -684,7 +728,7 @@ Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the p
 
 ##### Equality operators cannot be overridden
 
-Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997):
+Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997). A *dynamic* send — `x perform: #'==' withArguments: #(y)`, `x respondsTo: #'=='` — works on every receiver (integers, pids, references, value objects, actors): it reaches `ProtoObject`'s declarations, whose bodies are the same BIFs (BT-3919).
 
 ```beamtalk
 Value subclass: Money

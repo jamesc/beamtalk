@@ -66,7 +66,7 @@ fn test_bt2728_extension_object_typed_field_dispatches() {
     .expect("codegen should succeed");
 
     assert!(
-        code.contains("call 'beamtalk_primitive':'is_object'("),
+        code.contains("call 'erlang':'is_binary'("),
         "object-typed self.<field> comparison in an extension must be guarded (dispatch); got:\n{code}"
     );
 }
@@ -96,10 +96,11 @@ fn test_bt2728_extension_object_typed_field_arithmetic_dispatches() {
 }
 
 #[test]
-fn test_bt2728_extension_untyped_field_stays_bare() {
-    // An untyped `self.<field>` in an extension keeps the bare BIF (no
-    // regression) — the guard/dispatch path is only taken for object-typed
-    // fields.
+fn test_bt2728_extension_untyped_field_is_guarded() {
+    // BT-3892: an untyped `self.<field>` in an extension has no visible
+    // writers (the target's AST is foreign), so codegen cannot know it holds
+    // a primitive — it routes through the runtime comparison guard, which
+    // keeps the bare BIF for a number or string and dispatches anything else.
     let src = "PriceBand >> below: other => self.lo < other";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -112,8 +113,30 @@ fn test_bt2728_extension_untyped_field_stays_bare() {
     .expect("codegen should succeed");
 
     assert!(
-        code.contains("call 'erlang':'<'(") && !code.contains("is_object"),
-        "untyped self.<field> comparison in an extension must stay bare; got:\n{code}"
+        code.contains("call 'erlang':'is_binary'("),
+        "untyped self.<field> comparison in an extension must be guarded; got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt3892_extension_union_typed_field_is_guarded() {
+    // BT-3892: a union-typed target field is recorded with its declared type;
+    // `Money | Nil` has a non-primitive member, so arithmetic is guarded.
+    let src = "PriceBand >> plus: other => self.lo + other";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@geo@price_band_ext").with_class_hierarchy(vec![
+            price_band_class_info_with_lo_type(Some("Money | Nil")),
+        ]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'erlang':'is_number'("),
+        "union-typed (Money | Nil) self.<field> arithmetic must be guarded; got:\n{code}"
     );
 }
 
@@ -133,7 +156,7 @@ fn test_bt2728_extension_primitive_field_stays_bare() {
     .expect("codegen should succeed");
 
     assert!(
-        code.contains("call 'erlang':'<'(") && !code.contains("is_object"),
+        code.contains("call 'erlang':'<'(") && !code.contains("is_binary"),
         "primitive-typed self.<field> comparison in an extension must stay bare; got:\n{code}"
     );
 }

@@ -46,6 +46,9 @@ xref/registry state.
 temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 start_fixture(Prefix, Files) ->
+    %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
+    %% `no_workspace` unless this node records a workspace capability.
+    ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
@@ -91,6 +94,7 @@ stop_classes(ClassNames) ->
     ).
 
 stop_meta() ->
+    ok = beamtalk_capability:clear(),
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)

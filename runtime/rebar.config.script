@@ -55,4 +55,70 @@ Config2 = case BtModules of
         SetKey(dialyzer, NewDialyzer, Config1)
 end,
 
-Config2.
+%% BT-3896: generate the EUnit test set (`eunit_tests`) for a bare
+%% `rebar3 eunit` — what `just test-runtime`, `just coverage-runtime` and CI
+%% run. rebar3 only consults `eunit_tests` when no test arguments are given
+%% on the command line, so `rebar3 eunit --module=...` / `--dir=...` keep
+%% working as before.
+%%
+%% Why not `--app=...`: EUnit's `{application, App}` spec runs each source
+%% module listed in the `.app` plus its `Module_tests` companion, so a test
+%% module in `test/` without a `src/` counterpart in that app compiled fine
+%% but was silently never run. This list is `{application, App}` for every
+%% EUnit app plus `{module, M}` for every test-dir module the app specs do not
+%% reach, so a new standalone suite runs without anyone registering it.
+%%
+%% The ONE place a test-dir module may be left out is `EunitExcluded`, each
+%% with its reason. A stale entry (the module is gone, or is now reached as a
+%% companion) fails the config load rather than lingering.
+EunitApps = [beamtalk_runtime, beamtalk_workspace, beamtalk_compiler],
+EunitExcluded = [
+    %% {Module, "why it cannot run in the default EUnit pass"}
+],
+RuntimeRoot = filename:dirname(filename:absname(SCRIPT)),
+ErlFilesIn = fun(SubDir) ->
+    [F
+     || App <- EunitApps,
+        F <- filelib:wildcard(
+            filename:join([RuntimeRoot, "apps", atom_to_list(App), SubDir, "**", "*.erl"])
+        )]
+end,
+ModOf = fun(F) -> filename:basename(F, ".erl") end,
+SrcMods = lists:usort([ModOf(F) || F <- ErlFilesIn("src")]),
+%% A test-dir module is a suite when it defines a zero-arity `*_test` or
+%% `*_test_` function — EUnit's own discovery rule — whatever the module is
+%% called. Fixtures and helpers define none and are left out.
+DefinesTests = fun(F) ->
+    {ok, Src} = file:read_file(F),
+    match =:=
+        re:run(Src, "^[a-z][A-Za-z0-9_@]*_test_?\\(\\)\\s*->", [multiline, {capture, none}])
+end,
+TestDirSuites = lists:usort([ModOf(F) || F <- ErlFilesIn("test"), DefinesTests(F)]),
+%% `{application, A}` / `{module, M}` both also run `M_tests` when it exists.
+IsCompanionOf = fun(T, Mods) -> lists:any(fun(M) -> T =:= M ++ "_tests" end, Mods) end,
+NotViaApps = [T || T <- TestDirSuites, not IsCompanionOf(T, SrcMods)],
+Standalone = [T || T <- NotViaApps, not IsCompanionOf(T, NotViaApps)],
+ExcludedNames = [atom_to_list(M) || {M, Reason} <- EunitExcluded, is_list(Reason), Reason =/= ""],
+%% This script is evaluated by every rebar3 command (compile, dialyzer, ...),
+%% so these errors say exactly which list to fix.
+length(ExcludedNames) =:= length(EunitExcluded) orelse
+    erlang:error(
+        {"runtime/rebar.config.script: every EunitExcluded entry needs a non-empty reason",
+            EunitExcluded}
+    ),
+case ExcludedNames -- Standalone of
+    [] ->
+        ok;
+    Stale ->
+        erlang:error(
+            {"runtime/rebar.config.script: EunitExcluded names modules that are no longer "
+             "standalone test suites (deleted, or now run as a src module's companion); "
+             "remove them from EunitExcluded", Stale}
+        )
+end,
+EunitTests =
+    [{application, App} || App <- EunitApps] ++
+        [{module, list_to_atom(M)} || M <- Standalone, not lists:member(M, ExcludedNames)],
+Config3 = SetKey(eunit_tests, EunitTests, Config2),
+
+Config3.

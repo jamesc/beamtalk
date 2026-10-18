@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3892 fixture: a Value whose untyped field has a numeric default (`= 0`)
+// but is set to a `FieldOperandPoint` by the keyword constructor, from outside
+// the class, so `self.origin op q` must still dispatch to the point.
+
+Value subclass: FieldOperandDefaultHolder
+  field: origin = 0
+
+  /// `+ - * /` on the numeric-default untyped field.
+  arith: q :: FieldOperandPoint -> Array =>
+    #[self.origin + q, self.origin - q, self.origin * 2, self.origin / 2]
+
+  /// `< > <= >=` on the numeric-default untyped field.
+  compare: q :: FieldOperandPoint -> Array =>
+    #[self.origin < q, self.origin > q, self.origin <= q, self.origin >= q]

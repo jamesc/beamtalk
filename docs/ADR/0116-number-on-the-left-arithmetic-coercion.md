@@ -956,6 +956,55 @@ If untyped-field arithmetic's silent-badarith risk ever becomes a real
 problem in practice, revisit both operands together as one design pass —
 not the right operand alone.
 
+## Addendum (2026-10-18): BT-3892 — untyped/union `self.<field>` trust revisited, both operands
+
+The risk above became real: `field: p = nil` set to a `Point` in `setUp`, then
+`self.p + q`, skipped the left guard, hit `badarith`, and was routed to
+`plusFromNumber:` on `q` — a DNU that never sent `+` to the `Point`. Union-typed
+fields (`:: Point | Nil`) had the same failure because only simple annotations
+were recorded. Per the addendum above, both operands were revisited together,
+by changing what `receiver_is_statically_numeric` (and its comparison twin)
+know about a field, not by splitting the predicate:
+
+- A declared field records its full type; a union is bare only when every
+  non-`Nil` member is in the operator's primitive set (and, for comparisons,
+  only when it has no `Nil` member; see the last paragraph).
+- An untyped field (`state:`, `field:` or `classState:`, of any class kind)
+  is always guarded, whatever its default. This replaced, in BT-3925, a first
+  rule that trusted an untyped Actor `state:` field (or a sealed class's
+  `classState:`) as numeric on evidence from the class's own source — a
+  numeric-literal default and only numeric in-class writes. That evidence
+  could not see the open-world writers: `spawnWith:` (`Ctr spawnWith:
+  #{#count => aPoint}`), `fieldAt:put:`, a subclass assigning an inherited
+  field, an inherited class method over a redeclared `classState:`, a
+  class-side extension, or a Value's keyword constructor. Any of them made
+  `self.count + 1` a raw `badarith` instead of a send to the object's `+`.
+- `:: Integer` / `:: Float` / `:: Number` is the fast path: an annotated
+  field keeps the bare BIF. BT-3925 measured the cost of guarding the untyped
+  Actor counter (`runtime/perf/self_send_bench`, `SsbMain counters`): the
+  guarded loop was no slower than the bare one (see
+  `docs/development/benchmarks.md`), and the guard wraps only the operator,
+  so an `ifTrue:` on a guarded `self.count < n` still compiles to the same
+  inline state-threading `case`.
+- A field with no fact (inherited untyped, an extension target's untyped
+  field) is guarded. Class methods consult `classState:` facts built the same
+  way.
+
+Both operands still share one rule, so the right-operand gap closes with the
+left. The implementation is
+`crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
+
+A union with a `Nil` member (`:: Integer | Nil`) stays bare for arithmetic,
+where the BIF already raises `badarith` on `nil`, but is guarded for
+comparisons. BT-3924 inverted the runtime comparison guard from "is this an
+object?" (`beamtalk_primitive:is_object/1`) to an inline primitive-comparable
+test (`is_number` or `is_binary`): numbers, characters and strings take the
+bare BIF and every other receiver is sent the operator as a message. So
+`nil < 5` raises `does_not_understand` wherever it appears — an untyped
+local or parameter, or a nilable field — instead of silently answering
+`false`. `Symbol` gained `< > <= >=` primitives so `#a < #b` keeps working
+through dispatch.
+
 ## Implementation Tracking
 
 **Parent:** BT-2712 (Phase 4 of BT-2708, already tracked this ADR's spec —

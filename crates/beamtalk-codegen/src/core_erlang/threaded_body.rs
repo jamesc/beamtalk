@@ -1,121 +1,37 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0132 Phase 1c (BT-3871): the threaded entry of a class method.
+//! The dead remainder of ADR 0132's threaded body (the `Acc` producer).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! A class method with a *threading parameter* (`MethodInfo::threading_params`,
-//! computed once by `beamtalk-core`'s `ThreadingIndex` and read here from the
-//! class hierarchy, never re-derived) is compiled as **one body with two entry
-//! points**:
-//!
-//! ```erlang
-//! '__t2_class_twice:'/3 = fun (ClassSelf, ABlock, Acc@0) -> {Result, Acc@N}
-//! 'class_twice:'/2 = fun (ClassSelf, ABlock) ->
-//!     call 'erlang':'element'(1, apply '__t2_class_twice:'/3
-//!         (ClassSelf, ABlock, {'plain', 'Twice class', 'twice:'}))
-//! ```
-//!
-//! The wrapper has no caller map to thread, so it hands the body the
-//! plain-entry sentinel `{'plain', ClassTag, Selector}` as `Acc@0`
-//! (`threading_abi::plain_entry_acc_doc`; never used as a map: only
-//! `call_threaded/3`, forwards and the NLR slot touch `Acc`). With it
-//! `call_threaded/3` runs a Tier 1 block as before and raises
-//! `stateful_block_dispatch` naming this method *without running* a Tier 2 one
-//! (recognised by its mark, BT-3885), so a late-bound caller never has a
-//! block's writes dropped silently.
-//!
-//! The body is a `ThreadedStmt::MethodBody` frame over the trailing `Acc`
-//! family; every use of a threading parameter is a *producer* in the sense of
-//! ADR 0118/0131 (a prelude of `ThreadedStmt`s and a value), reached through the
-//! same `threaded_expression` that sequences every other producer, so its
-//! position in a statement, an assignment right-hand side, a `^` value or an
-//! operand needs no machinery of its own:
-//!
-//! - a direct invocation (`b value: x`) is
-//!   `call 'beamtalk_dispatch':'call_threaded'(B, [X], Acc@k)`, destructured into
-//!   the value and `Acc@k+1`;
-//! - the callable argument of a collection HOM (`items do: b`) is the ADR 0128
-//!   opaque-callable fold with `Acc` as its trailing accumulator and
-//!   `call_threaded/3` as its per-element gate (`FoldCarrier::Acc`);
-//! - a bare-argument forward to a callee of this class that threads that
-//!   position and is bound statically (the rule `generate_class_method_self_send`
-//!   applies to every class-side self-send) calls the callee's threaded entry
-//!   directly with the current `Acc`. Any other forward — a late-bound `self`
-//!   send in an open class, a send to another class of the unit — is the plain
-//!   send of today with `Acc` unchanged (Phase 2 resolves those at run time).
-//!
-//! `Acc` is a family of a *construct* only when that construct holds a use (see
-//! [`CoreErlangGenerator::is_family_mutation`]), so a loop, conditional or
-//! `on:do:` that does not invoke a threading parameter is lowered exactly as in
-//! any class method and never carries `Acc`. ADR 0132 §1's predicate admits a
-//! use only at the method root (Phase 1), so no construct ever holds one; a use
-//! that nevertheless reaches a construct is refused loudly
-//! ([`CoreErlangGenerator::reject_unthreadable_acc_family`], and the
-//! `generate_identifier` guard) rather than dropped.
+//! ADR 0132 Phase 1c compiled a class method with a threading block parameter
+//! to a second, threaded entry `'__t2_class_<sel>'` whose body threaded the
+//! caller's `Acc` through every use of the parameter. ADR 0133 Phase 2
+//! (BT-3904) removed those entries, their metadata, specs and exports, and the
+//! threading ABI: nothing in Beamtalk called them. Nothing sets
+//! `in_threaded_body` any more, so every function here answers "not a use"
+//! and the producers are unreachable. They stay only because the `Acc` family
+//! they lower (`VersionPrefix::Acc`, `ScopeKind::Threaded`, the opaque fold's
+//! `FoldCarrier::Acc`) is still in the IR; BT-3905 deletes this module with it.
 
-use super::class_meta::Tier2Entry;
 use super::generator::CoreErlangGenerator;
-use super::selector_mangler::threaded_class_fn_name;
-use super::spec_codegen;
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VerifyError, VersionCounter,
     VersionPrefix, VersionedVar,
 };
 use super::{CodeGenError, Result};
-use beamtalk_cerl_doc::{Document, docvec, join, leaf};
-use beamtalk_core::ast::{
-    ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind,
-};
-use beamtalk_core::semantic_analysis::block_facts::{normalize_cascade, sequenced_operand_sites};
+use beamtalk_cerl_doc::{Document, docvec, leaf};
+use beamtalk_core::ast::{Expression, MessageSelector};
+use beamtalk_core::semantic_analysis::block_facts::normalize_cascade;
 use beamtalk_core::semantic_analysis::tier2_callee::{
     ThreadingUse, UseShape, classify_threading_use, forward_target_of,
 };
 use beamtalk_core::source_analysis::Span;
-use ecow::EcoString;
-use std::cell::RefCell;
 use std::collections::HashSet;
 
-/// Test-only override of `MethodInfo::threading_params` by selector.
-#[cfg(test)]
-pub(in crate::core_erlang) mod forced_positions {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-
-    thread_local! {
-        static FORCED: RefCell<HashMap<String, Vec<usize>>> = RefCell::new(HashMap::new());
-    }
-
-    pub(in crate::core_erlang) fn get(selector: &str) -> Option<Vec<usize>> {
-        FORCED.with(|f| f.borrow().get(selector).cloned())
-    }
-
-    /// Runs `body` with `forced` (selector, positions) in effect on this thread.
-    pub(in crate::core_erlang) fn with<T>(
-        forced: &[(&str, &[usize])],
-        body: impl FnOnce() -> T,
-    ) -> T {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                FORCED.with(|f| f.borrow_mut().clear());
-            }
-        }
-        FORCED.with(|f| {
-            *f.borrow_mut() = forced
-                .iter()
-                .map(|(s, p)| ((*s).to_string(), p.to_vec()))
-                .collect();
-        });
-        let _reset = Reset;
-        body()
-    }
-}
-
-/// The per-body state of the threaded entry being lowered. Empty outside one;
-/// scoped by [`CoreErlangGenerator::begin_threaded_class_body`] /
-/// [`CoreErlangGenerator::end_threaded_class_body`].
+/// The per-body state of a threaded body. Always empty since BT-3904 (see the
+/// module docs).
 #[derive(Debug, Default)]
 pub(in crate::core_erlang) struct ThreadedBodyState {
     /// The Beamtalk names of the body's threading parameters.
@@ -132,203 +48,12 @@ pub(in crate::core_erlang) struct ThreadedBodyState {
     /// would mint cannot be seen by the code after the construct.
     root_uses: HashSet<Span>,
     /// The spans of the root uses the producer has lowered so far; equal to
-    /// `root_uses` when the body is complete (checked by
-    /// [`CoreErlangGenerator::finish_threaded_body_stmts`]), so a root use that
-    /// no producer lowered is an error, never a dropped `Acc` step.
+    /// `root_uses` when the body is complete, so a root use that no producer
+    /// lowered is an error, never a dropped `Acc` step.
     lowered_uses: HashSet<Span>,
 }
 
 impl CoreErlangGenerator {
-    /// The threading positions (0-based) of `class_name`'s class-side
-    /// `selector`: `MethodInfo::threading_params`, the one answer the entry
-    /// function, the plain wrapper, the metadata and the spec are all emitted
-    /// from. Empty when the class is unknown or the method has none.
-    pub(in crate::core_erlang) fn class_method_threading_positions(
-        &self,
-        class_name: &str,
-        selector: &str,
-    ) -> Vec<usize> {
-        // Test hook: force a method's positions, bypassing the predicate, to
-        // drive the body lowering over shapes the predicate never admits (the
-        // negative corpus of `tests/threaded_class_entry.rs`).
-        #[cfg(test)]
-        if let Some(forced) = forced_positions::get(selector) {
-            return forced;
-        }
-        self.class_hierarchy
-            .as_ref()
-            .and_then(|hierarchy| hierarchy.get_class(class_name))
-            .and_then(|class| class.class_methods.iter().find(|m| m.selector == selector))
-            .map(|method| method.threading_params.clone())
-            .unwrap_or_default()
-    }
-
-    /// The threading positions of `method` of `class`, or empty when it is not
-    /// a `Primary` method that gets an entry. The one place the "this class
-    /// method has a threaded entry" decision is taken.
-    pub(in crate::core_erlang) fn threaded_entry_positions(
-        &self,
-        class: &ClassDefinition,
-        method: &MethodDefinition,
-    ) -> Vec<usize> {
-        if method.kind != MethodKind::Primary {
-            return Vec::new();
-        }
-        self.class_method_threading_positions(&class.name.name, &method.selector.name())
-            .into_iter()
-            .filter(|position| *position < method.parameters.len())
-            .collect()
-    }
-
-    /// `class`'s class-side threaded entries as they are advertised in
-    /// `'tier2_class_methods'`, from the same [`Self::threaded_entry_positions`]
-    /// answer the entries are emitted from.
-    pub(in crate::core_erlang) fn collect_own_tier2_class_methods(
-        &self,
-        class: &ClassDefinition,
-    ) -> Vec<Tier2Entry> {
-        class
-            .class_methods
-            .iter()
-            .filter_map(|method| {
-                let positions = self.threaded_entry_positions(class, method);
-                if positions.is_empty() {
-                    return None;
-                }
-                let selector = method.selector.name().to_string();
-                Some(Tier2Entry {
-                    entry_fn: threaded_class_fn_name(&selector),
-                    selector,
-                    positions,
-                })
-            })
-            .collect()
-    }
-
-    /// All `-spec` attributes of `class`: the plain methods' specs
-    /// ([`spec_codegen::generate_class_specs`]) and, beside them, the spec of
-    /// each class-side threaded entry. The one call every module kind builds its
-    /// specs through, so an exported entry always has its spec.
-    pub(in crate::core_erlang) fn class_spec_attrs(
-        &self,
-        class: &ClassDefinition,
-        is_value_type: bool,
-        referenced: &RefCell<HashSet<EcoString>>,
-    ) -> Vec<Document<'static>> {
-        let mut specs = spec_codegen::generate_class_specs(
-            class,
-            is_value_type,
-            Some(&self.alias_registry),
-            Some(referenced),
-        );
-        specs.extend(spec_codegen::generate_threaded_class_specs(
-            class,
-            &|method| !self.threaded_entry_positions(class, method).is_empty(),
-            Some(&self.alias_registry),
-            Some(referenced),
-        ));
-        specs
-    }
-
-    /// Records the module's class names and its own class-side entries (called
-    /// once per module by the driver, with the hierarchy installed).
-    pub(in crate::core_erlang) fn set_threaded_entries(
-        &mut self,
-        module: &beamtalk_core::ast::Module,
-    ) {
-        self.unit_class_names = module
-            .classes
-            .iter()
-            .map(|c| c.name.name.to_string())
-            .collect();
-        self.own_tier2_class_methods = module
-            .classes
-            .first()
-            .map(|class| self.collect_own_tier2_class_methods(class))
-            .unwrap_or_default();
-    }
-
-    /// Enters the threaded body of `method`: its threading `positions` become
-    /// the body's threading parameters and `Acc@0` the current `Acc` version.
-    /// Pair with [`Self::end_threaded_class_body`] (the [`MethodFrame`] guard
-    /// does it on every exit path).
-    ///
-    /// [`MethodFrame`]: super::method_frame::MethodFrame
-    pub(in crate::core_erlang) fn begin_threaded_class_body(
-        &mut self,
-        method: &MethodDefinition,
-        positions: &[usize],
-    ) {
-        self.in_threaded_body = true;
-        self.threaded_body = ThreadedBodyState {
-            params: positions
-                .iter()
-                .filter_map(|i| method.parameters.get(*i))
-                .map(|p| p.name.name.to_string())
-                .collect(),
-            acc: VersionCounter::new(),
-            plain_reads: 0,
-            root_uses: HashSet::new(),
-            lowered_uses: HashSet::new(),
-        };
-        let mut root_uses = HashSet::new();
-        for statement in &method.body {
-            self.collect_root_uses(&statement.expression, &mut root_uses);
-            // A root `^` ends the body: nothing after it is lowered.
-            if matches!(statement.expression, Expression::Return { .. }) {
-                break;
-            }
-        }
-        self.threaded_body.root_uses = root_uses;
-    }
-
-    /// The spans of the uses of a threading parameter at the method root of
-    /// `expr`: `expr` itself, the value of a `:=` or `^`, and the operands the
-    /// sequencing rule walks (`threaded_expression`), recursively. A use's own
-    /// operands are walked too: they never mention *its* parameter
-    /// (`classify_threading_use`), but may use another threading parameter of
-    /// the body (`a value: (b value)`, `self apply: a to: (b value)`), which
-    /// the index admits for both and the producer sequences ahead of the use
-    /// ([`Self::use_children`]).
-    fn collect_root_uses(&self, expr: &Expression, out: &mut HashSet<Span>) {
-        let inner = expr.unwrap_parens();
-        if self.threaded_use_at(inner).is_some() {
-            out.insert(inner.span());
-            for child in Self::use_children(inner) {
-                self.collect_root_uses(child, out);
-            }
-        } else if let Some(children) = Self::sequenced_send_children(inner) {
-            for child in children {
-                self.collect_root_uses(child, out);
-            }
-        } else if let Some(child) = Self::single_sequenced_child(inner) {
-            self.collect_root_uses(child, out);
-        } else if let Some(receiver) = Self::conditional_send_receiver(inner) {
-            // `(b value) ifTrue: [...]`: the conditional's own lowering threads
-            // its receiver ahead of its arms (`inline_control_flow_producer`).
-            self.collect_root_uses(receiver, out);
-        }
-    }
-
-    /// The uses at the method root the producer has not lowered yet — empty
-    /// once the body is complete.
-    pub(in crate::core_erlang) fn unlowered_root_uses(&self) -> Vec<Span> {
-        let mut missing: Vec<Span> = self
-            .threaded_body
-            .root_uses
-            .difference(&self.threaded_body.lowered_uses)
-            .copied()
-            .collect();
-        missing.sort_by_key(|s| s.start());
-        missing
-    }
-
-    /// Leaves the threaded body: the next method compiles with no `Acc`.
-    pub(in crate::core_erlang) fn end_threaded_class_body(&mut self) {
-        self.in_threaded_body = false;
-        self.threaded_body = ThreadedBodyState::default();
-    }
-
     /// The Core Erlang variable of the current `Acc` version (`Acc@0` is the
     /// entry's own parameter).
     pub(in crate::core_erlang) fn current_acc_var_name(&self) -> String {
@@ -435,18 +160,6 @@ impl CoreErlangGenerator {
             })
     }
 
-    /// Whether the method-body statement `stmt` is a use of a threading
-    /// parameter or holds one at a sequenced operand site, so it must be
-    /// compiled through `threaded_expression` with its prelude spliced into the
-    /// body ([`Self::lower_root_statement_with_producer`]).
-    pub(in crate::core_erlang) fn statement_has_threaded_use(&self, stmt: &Expression) -> bool {
-        self.in_threaded_body
-            && (self.expr_has_threaded_use(stmt)
-                || sequenced_operand_sites(stmt)
-                    .into_iter()
-                    .any(|site| self.expr_has_threaded_use(site)))
-    }
-
     /// Whether `expr` is a use or holds one at a node `threaded_expression`
     /// sequences (the spine of sends, `^`, `:=`, parentheses and literal
     /// containers).
@@ -507,9 +220,7 @@ impl CoreErlangGenerator {
         let value = match kind {
             ThreadingUse::Invocation => self.lower_threaded_invocation(expr, span)?,
             ThreadingUse::CallableHom => self.lower_threaded_callable_hom(expr, span)?,
-            ThreadingUse::Forward { position } => {
-                self.lower_threaded_forward(expr, position, span)?
-            }
+            ThreadingUse::Forward { .. } => self.lower_threaded_forward(expr)?,
         };
         self.finish_precompiled_scope(scope)?;
         prelude.extend(value.prelude);
@@ -725,90 +436,15 @@ impl CoreErlangGenerator {
         Ok(ThreadedValue { prelude, value })
     }
 
-    /// `receiver selector: ... b ...` with `b` the bare argument at `position`.
-    ///
-    /// A callee of this class that threads that position and is bound
-    /// statically (the rule every class-side self-send applies) is called
-    /// through its threaded entry with the current `Acc`. Every other forward is
-    /// today's plain send of the block, `Acc` unchanged.
-    fn lower_threaded_forward(
-        &mut self,
-        expr: &Expression,
-        position: usize,
-        span: Span,
-    ) -> Result<ThreadedValue> {
-        let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = expr.unwrap_parens()
-        else {
-            return Err(CodeGenError::Internal(
-                "threaded forward: not a send".to_string(),
-            ));
-        };
-        let selector_name = selector.name().to_string();
-        if self.forward_is_statically_threaded(receiver, &selector_name, position) {
-            let mut prelude: Vec<ThreadedStmt> = Vec::new();
-            let (arg_prelude, arg_refs) =
-                self.with_plain_param_reads(|this| this.thread_args_bound(arguments, "Arg"))?;
-            prelude.extend(arg_prelude);
-            let mut call_args: Vec<Document<'static>> = vec![leaf::var("ClassSelf")];
-            call_args.extend(arg_refs);
-            call_args.push(leaf::var(self.current_acc_var_name()));
-            let call = docvec![
-                "call ",
-                leaf::atom(self.module_name.to_string()),
-                ":",
-                leaf::atom(threaded_class_fn_name(&selector_name)),
-                "(",
-                join(call_args, &Document::Str(", ")),
-                ")"
-            ];
-            let value = self.bind_result_and_step_acc(call, &mut prelude, span);
-            return Ok(ThreadedValue { prelude, value });
-        }
-        // Late-bound (an open class's `self` send, another class of the unit):
-        // the plain send, exactly as without a threaded entry. `Acc` passes
-        // through unchanged; ADR 0132 Phase 2 resolves these at run time.
+    /// `receiver selector: ... b ...` with `b` a bare argument: the plain send
+    /// of the block, `Acc` unchanged (no callee has a threaded entry since
+    /// BT-3904).
+    fn lower_threaded_forward(&mut self, expr: &Expression) -> Result<ThreadedValue> {
         let doc = self.with_plain_param_reads(|this| this.generate_expression(expr))?;
         Ok(ThreadedValue {
             prelude: Vec::new(),
             value: ValueRef::Doc(doc),
         })
-    }
-
-    /// Whether the forward `receiver selector: ... b ...` (`b` at `position`)
-    /// is a statically bound send to a class method of this class whose
-    /// threaded entry threads `position`.
-    fn forward_is_statically_threaded(
-        &self,
-        receiver: &Expression,
-        selector: &str,
-        position: usize,
-    ) -> bool {
-        let own = self.class_name();
-        let receiver_is_self = matches!(receiver, Expression::Identifier(id) if id.name == "self");
-        let names_own_class = matches!(
-            receiver,
-            Expression::ClassReference { name, package: None, .. } if name.name == own
-        );
-        if !(receiver_is_self || names_own_class) {
-            return false;
-        }
-        // The binding rule of `generate_class_method_self_send`: a selector this
-        // class defines is a direct call when the class is sealed, the
-        // selector is `class sealed`, or the receiver names the class.
-        let defines = self.class_method_selectors().contains(selector);
-        let bound = self.is_class_sealed()
-            || !receiver_is_self
-            || self.sealed_class_method_selectors().contains(selector);
-        defines
-            && bound
-            && self
-                .class_method_threading_positions(&own, selector)
-                .contains(&position)
     }
 
     /// ADR 0132 Phase 3 guard: a construct of a threaded body whose body holds a
@@ -840,25 +476,5 @@ impl CoreErlangGenerator {
             return Err(Self::use_in_construct_error(span));
         }
         Ok(())
-    }
-
-    /// `{Value, Acc}` as the threaded body's answer, replacing the value
-    /// document `last` the body's last statement produced.
-    pub(in crate::core_erlang) fn threaded_body_answer_doc(
-        &mut self,
-        last: Document<'static>,
-    ) -> Document<'static> {
-        let result = self.fresh_temp_var("ThAnswer");
-        docvec![
-            "let ",
-            leaf::var(result.clone()),
-            " = ",
-            last,
-            " in {",
-            leaf::var(result),
-            ", ",
-            leaf::var(self.current_acc_var_name()),
-            "}"
-        ]
     }
 }

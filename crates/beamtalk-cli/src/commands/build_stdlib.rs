@@ -195,7 +195,6 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
     generate_erlang_builtins_hrl(&class_metadata)?;
     generate_class_vars_keys_hrl()?;
-    generate_threading_abi_hrl()?;
 
     println!("Built {} stdlib modules", source_files.len());
 
@@ -1556,10 +1555,6 @@ const GENERATED_BUILTINS_HRL_PATH: &str =
 const GENERATED_CLASS_VARS_KEYS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl";
 
-/// Default path for the generated ADR 0132 threading-ABI header (BT-3885).
-const GENERATED_THREADING_ABI_HRL_PATH: &str =
-    "runtime/apps/beamtalk_runtime/include/beamtalk_threading_abi.hrl";
-
 /// Write generated `content` to `dest`, but only if it differs from what's
 /// already there — skips touching the file (and downstream recompilation)
 /// when a stdlib build produces byte-identical output.
@@ -1783,19 +1778,6 @@ fn generate_class_vars_keys_hrl() -> Result<()> {
     write_generated_file_if_changed(
         &dest,
         &beamtalk_codegen::core_erlang::class_var_keys::erlang_header(),
-    )
-}
-
-/// Generate `beamtalk_threading_abi.hrl` from codegen's `threading_abi` leaf
-/// (ADR 0132, BT-3885): the Tier 2 block mark codegen mints every Tier 2 fun
-/// under and the plain-entry `Acc` sentinel, both of which
-/// `beamtalk_dispatch:call_threaded/3` must agree on, rendered from one Rust
-/// source instead of copied (CLAUDE.md shared-fixture rule).
-fn generate_threading_abi_hrl() -> Result<()> {
-    let dest = Utf8PathBuf::from(GENERATED_THREADING_ABI_HRL_PATH);
-    write_generated_file_if_changed(
-        &dest,
-        &beamtalk_codegen::core_erlang::threading_abi::erlang_header(),
     )
 }
 

@@ -3178,8 +3178,10 @@ mod tests {
             code.contains("maps':'put'('n'"),
             "True branch should update 'n' via maps:put. Got:\n{code}"
         );
+        // The untyped `self.n + 1` keeps its operator guard (whose fallback
+        // sends `+`, BT-3925); the conditional itself is never sent.
         assert!(
-            !code.contains("'beamtalk_message_dispatch':'send'"),
+            !code.contains(", 'ifTrue:', ["),
             "ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
         );
         // Non-taken branch returns {'nil', unchanged_state} with StateAcc naming

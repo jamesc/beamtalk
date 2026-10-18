@@ -42,6 +42,20 @@ opt-level = 1
 [profile.dev.package.beamtalk-codegen]
 opt-level = 1
 
+# beamtalk-build is both a workspace member and a build-dependency of
+# beamtalk-core/-cli/-compiler-port. `cargo build --all-targets` builds it as a
+# root lib with the dev profile's debuginfo and lets the build scripts share
+# that unit; `cargo test`/`cargo nextest`/`cargo run` build only the
+# build-dependency copy, with Cargo's build-dependency default of no debuginfo.
+# Two different units, so every build script above it reran and beamtalk-core
+# and the whole workspace above it recompiled: the 2.8-4.6 min "Compiling" phase
+# at the start of CI's test step right after `just build` (BT-3879), and the
+# same rebuild locally on `just build` then `just test`. With no debuginfo for
+# this package in every profile (a package override outranks build-override),
+# every command builds the one unit.
+[profile.dev.package.beamtalk-build]
+debug = false
+
 [profile.release]
 strip = "debuginfo"
 

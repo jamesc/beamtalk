@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3920: Actor fixture whose raising extension methods are declared in
+// stdlib/test/actor_extension_error_test.bt (`Bt3920ExtensionCrashActor >> sel`).
+
+Actor subclass: Bt3920ExtensionCrashActor
+  state: count = 0
+
+  increment => self.count := self.count + 1
+
+  count => self.count

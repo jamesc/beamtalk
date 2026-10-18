@@ -81,7 +81,7 @@ as_string_same_as_print_string_test() ->
 print_string_keyword_selector_test() ->
     Method = test_method_with_args(),
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], Method),
-    ?assertEqual(<<"CompiledMethod('add:')">>, Result).
+    ?assertEqual(<<"CompiledMethod(add:)">>, Result).
 
 %%====================================================================
 %% respondsTo: tests

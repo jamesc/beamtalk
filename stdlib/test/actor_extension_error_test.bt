@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3920: an extension method on an Actor that raises must answer the caller
+// a structured error and leave the actor alive. `invoke_extension/6` wraps the
+// crash as `{error, #beamtalk_error{}}`; generated dispatch/4 used to hand that
+// lookup-shaped 2-tuple straight to handle_call/3, which matches only
+// `{reply, _, _}` / `{error, _, _}`, so the actor died with `if_clause`.
+//
+// The extensions are declared HERE in source so the test exercises the
+// codegen path end-to-end. Calls use `perform:` because the type checker
+// cannot see extensions.
+//
+// Fixtures: stdlib/test/fixtures/bt3920extension_crash_actor.bt
+
+TestCase subclass: ActorExtensionErrorTest
+  field: a = nil
+
+  setUp => self withA: Bt3920ExtensionCrashActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  testRaisingExtensionAnswersStructuredError =>
+    self should: [self.a perform: #bt3920Boom] raise: #user_error
+    self assert: ([
+      self.a perform: #bt3920Boom
+    ] on: Exception do: [:e | e message]) equals: "bt3920 boom"
+
+  testActorSurvivesRaisingExtension =>
+    self.a increment
+    [self.a perform: #bt3920Boom] on: Exception do: [:e | nil]
+    self assert: self.a isAlive
+    self assert: self.a count equals: 1
+    self.a increment
+    self assert: self.a count equals: 2
+
+  testRawErlangCrashInExtensionAnswersStructuredError =>
+    caught := [self.a perform: #bt3920DivideByZero] on: Exception do: [:e | e]
+    self assert: (caught isKindOf: Exception)
+    self assert: self.a isAlive
+    self assert: self.a count equals: 0
+Bt3920ExtensionCrashActor >> bt3920Boom => self error: "bt3920 boom"
+Bt3920ExtensionCrashActor >> bt3920DivideByZero => 1 / 0

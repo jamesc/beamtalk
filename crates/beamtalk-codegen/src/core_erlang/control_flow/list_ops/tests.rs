@@ -1441,11 +1441,10 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     // the pre-existing plain-value wrapper, exactly like the ValueType
     // sibling case just below.
     //
-    // ADR 0132 Phase 1c: a class method whose block parameter is only invoked or
-    // forwarded at the method root is a *threading* method, whose `items do:
-    // block` folds over its `Acc` (see `threaded_class_entry`). The method
-    // answers the block itself here, so `block` is not a threading parameter and
-    // the callable keeps the plain wrapper.
+    // The method answers the block itself here, so `block` would not have
+    // been an ADR 0132 threading parameter either (its threaded entries were
+    // removed by ADR 0133 Phase 2, BT-3904); the callable keeps the plain
+    // wrapper.
     let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block.\n    block\n";
     let code = codegen(src);
     assert!(

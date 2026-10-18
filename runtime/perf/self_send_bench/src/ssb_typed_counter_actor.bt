@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3925: the `:: Integer` baseline for SsbUntypedCounterActor (same
+// methods, annotated field), which always takes the bare-BIF fast path.
+
+Actor subclass: SsbTypedCounterActor
+  state: count :: Integer = 0
+
+  increment => self.count := self.count + 1
+
+  loop: n :: Integer -> Integer =>
+    self.count := 0
+    [self.count < n] whileTrue: [self.count := self.count + 1]
+    n

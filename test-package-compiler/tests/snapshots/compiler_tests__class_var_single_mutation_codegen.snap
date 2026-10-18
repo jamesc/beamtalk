@@ -293,7 +293,17 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
                     %% crashing extension body is caught and converted to a
                     %% structured error naming what was sent, instead of
                     %% re-raising a bare Erlang exception.
-                    call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'SingleClassVarCtr', Args, Self, State)
+                    %% BT-3920: that structured error comes back as the
+                    %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
+                    %% own {error, E, State} contract (state rolled back, as for a
+                    %% crashing method body) so handle_call replies with it
+                    %% instead of crashing the actor on an unmatched result.
+                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'SingleClassVarCtr', Args, Self, State) of
+                        <{'reply', ExtResult, ExtState}> when 'true' ->
+                            {'reply', ExtResult, ExtState}
+                        <{'error', ExtError}> when 'true' ->
+                            {'error', ExtError, State}
+                    end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
                     case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'SingleClassVarCtr') of
@@ -353,7 +363,7 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
 
 
 'class_bump'/1 = fun (ClassSelf) ->
-    let _CVKey7 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in let _seq4 = let _CVVal8 = call 'erlang':'+'(case call 'erlang':'get'(_CVKey7) of <_CVMap5> when call 'erlang':'is_map'(_CVMap5) -> case call 'maps':'find'('total', _CVMap5) of <{'ok', _CVVal6}> when 'true' -> _CVVal6 <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end, 1) in case call 'erlang':'get'(_CVKey7) of <_CVMap9> when call 'erlang':'is_map'(_CVMap9) -> let _CVOld10 = call 'erlang':'put'(_CVKey7, call 'maps':'put'('total', _CVVal8, _CVMap9)) in _CVVal8 <_> when 'true' -> call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal8) end in case call 'erlang':'get'(_CVKey7) of <_CVMap11> when call 'erlang':'is_map'(_CVMap11) -> case call 'maps':'find'('total', _CVMap11) of <{'ok', _CVVal12}> when 'true' -> _CVVal12 <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end
+    let _CVKey7 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in let _seq4 = let _CVVal11 = let _BinLeft8 = case call 'erlang':'get'(_CVKey7) of <_CVMap5> when call 'erlang':'is_map'(_CVMap5) -> case call 'maps':'find'('total', _CVMap5) of <{'ok', _CVVal6}> when 'true' -> _CVVal6 <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end in let _BinRight9 = 1 in case call 'erlang':'is_number'(_BinLeft8) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft8, _BinRight9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft8, '+', [_BinRight9]) <_BinOpNoMatch10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch10}) end in case call 'erlang':'get'(_CVKey7) of <_CVMap12> when call 'erlang':'is_map'(_CVMap12) -> let _CVOld13 = call 'erlang':'put'(_CVKey7, call 'maps':'put'('total', _CVVal11, _CVMap12)) in _CVVal11 <_> when 'true' -> call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal11) end in case call 'erlang':'get'(_CVKey7) of <_CVMap14> when call 'erlang':'is_map'(_CVMap14) -> case call 'maps':'find'('total', _CVMap14) of <{'ok', _CVVal15}> when 'true' -> _CVVal15 <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end <_> when 'true' -> call 'beamtalk_class_vars':'get'(ClassSelf, 'total') end
 
 'class_supervisionSpec'/1 = fun (ClassSelf) ->
     let Policy = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf) in
@@ -384,9 +394,7 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'method_info' => ~{}~,
       'class_method_info' => ~{'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -427,9 +435,7 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'method_info' => ~{}~,
       'class_method_info' => ~{'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~

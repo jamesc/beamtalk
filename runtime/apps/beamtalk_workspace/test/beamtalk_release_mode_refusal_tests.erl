@@ -157,9 +157,12 @@ workspace_ops_refused_in_both_release_variants_test_() ->
 %%====================================================================
 
 actors_still_available_test_() ->
+    %% Answers the actor list rather than a release refusal. Not `[]`: actors
+    %% another suite in the same EUnit VM left running are listed too.
     [
-        ?_assertEqual(
-            {actors, []}, with_capabilities(Caps, fun() -> dispatch(<<"actors">>, #{}) end)
+        ?_assertMatch(
+            {actors, Actors} when is_list(Actors),
+            with_capabilities(Caps, fun() -> dispatch(<<"actors">>, #{}) end)
         )
      || Caps <- [?RELEASE, ?RELEASE_WITH_COMPILER]
     ].

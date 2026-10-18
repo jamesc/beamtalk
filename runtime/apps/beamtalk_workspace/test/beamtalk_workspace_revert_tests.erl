@@ -157,9 +157,13 @@ suite_setup() ->
     end,
     %% Let the runtime register bootstrap classes before compiling user code.
     timer:sleep(300),
+    %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
+    %% `no_workspace` unless this node records a workspace capability.
+    ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     ok.
 
 suite_teardown(_) ->
+    ok = beamtalk_capability:clear(),
     _ = application:stop(beamtalk_compiler),
     ok.
 

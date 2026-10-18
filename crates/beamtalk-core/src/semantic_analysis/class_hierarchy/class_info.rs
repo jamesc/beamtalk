@@ -73,11 +73,10 @@ pub struct MethodInfo {
     /// through, i.e. the positions its threaded entry accepts a stateful block
     /// at (ADR 0132 §1). Empty when the method has no threaded entry.
     ///
-    /// The cross-file record of the same answer codegen emits into
-    /// `__beamtalk_meta/0` as `tier2_methods`/`tier2_class_methods`, so the
-    /// compiler can ask "does this known class's method thread" for a class in
-    /// another file (the precedent is `spawns_block`). Empty everywhere until
-    /// ADR 0132 Phase 1b populates it.
+    /// The cross-file record of whether a known class's method threads (the
+    /// precedent is `spawns_block`). Codegen no longer reads it: ADR 0133
+    /// Phase 2 removed the threaded entries and their `tier2_*` metadata
+    /// (BT-3904), and BT-3906 removes this field.
     pub threading_params: Vec<usize>,
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).

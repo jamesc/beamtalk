@@ -10,6 +10,9 @@
 
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
+use crate::core_erlang::field_types::{
+    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
+};
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::threaded_ir::ThreadedBodyKind;
@@ -29,11 +32,6 @@ impl CoreErlangGenerator {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
             direct_class_methods: &self.own_direct_class_methods,
-            // ADR 0132 Phase 1d (instance-side entries) is not generated yet.
-            tier2_methods: &[],
-            // ADR 0132 Phase 1c: the class-side entries, from the same
-            // `threading_params` answer the entry functions are emitted from.
-            tier2_class_methods: &self.own_tier2_class_methods,
         }
     }
 
@@ -364,20 +362,20 @@ impl CoreErlangGenerator {
         self.current_method_param_types.clear();
     }
 
-    /// Records a method parameter's declared type for the arithmetic
-    /// fast-path classifier (keyed by **source** name → simple type name).
-    /// Only `Simple` annotations are recorded; anything else is left absent so
-    /// the classifier falls back to the runtime `is_number` guard, which is
-    /// always correct.
+    /// Records a method parameter's declared simple type for the operator
+    /// fast-path classifiers (keyed by **source** name → simple type name).
+    /// Callers record only the parameters
+    /// [`trusted_param_types`](crate::core_erlang::field_types::trusted_param_types)
+    /// answers — a `Simple` annotation on a name the body never rebinds — so
+    /// anything else is left absent and the classifier falls back to the
+    /// runtime guard, which is always correct.
     pub(in crate::core_erlang) fn record_method_param_type(
         &mut self,
         source_name: &str,
-        annotation: Option<&beamtalk_core::ast::TypeAnnotation>,
+        type_name: &str,
     ) {
-        if let Some(beamtalk_core::ast::TypeAnnotation::Simple(id)) = annotation {
-            self.current_method_param_types
-                .insert(source_name.to_string(), id.name.to_string());
-        }
+        self.current_method_param_types
+            .insert(source_name.to_string(), type_name.to_string());
     }
 
     /// Whether `name` refers to a `:: Integer/Float/Number`-annotated
@@ -385,121 +383,100 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn param_is_numeric(&self, name: &str) -> bool {
         self.current_method_param_types
             .get(name)
-            .is_some_and(|ty| matches!(ty.as_str(), "Integer" | "Float" | "Number"))
+            .is_some_and(|ty| NUMERIC_TYPES.contains(&ty.as_str()))
     }
 
     /// Whether `name` refers to a parameter declared with a builtin
     /// comparable type. A superset of [`Self::param_is_numeric`]: bare
     /// comparison BIFs are correct for `Character`/`String` too (both define
     /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
-    /// the bare-BIF fast path and skips the `is_object` guard.
+    /// the bare-BIF fast path and skips the runtime comparison guard.
     pub(in crate::core_erlang) fn param_is_comparable(&self, name: &str) -> bool {
-        self.current_method_param_types.get(name).is_some_and(|ty| {
-            matches!(
-                ty.as_str(),
-                "Integer" | "Float" | "Number" | "Character" | "String"
-            )
-        })
+        self.current_method_param_types
+            .get(name)
+            .is_some_and(|ty| COMPARABLE_TYPES.contains(&ty.as_str()))
     }
 
-    /// Records each instance field's declared `Simple` type
-    /// from a class's state declarations, for the operator fast-path
-    /// classifiers. Replaces any previously-recorded set (call once per class at
-    /// codegen entry). Only `Simple` annotations are recorded; untyped fields
-    /// are deliberately absent so they keep the bare-BIF status quo.
+    /// Records a [`FieldTypeFact`] for every instance field and class variable
+    /// of `class`, for the operator fast-path classifiers. Replaces any
+    /// previously-recorded facts (call once per class at codegen entry).
+    ///
+    /// Own fields and `classState:` variables are classified by their
+    /// declaration alone ([`classify_fields`]): a declared type is recorded in
+    /// full (unions included), an untyped field is always guarded, whatever
+    /// its default or the class's own writes (BT-3925 — `spawnWith:`, keyword
+    /// constructors, subclasses and extensions write fields too). Inherited
+    /// fields get their declared type from the class hierarchy; an inherited
+    /// untyped field gets no fact and is guarded (BT-3892).
     pub(in crate::core_erlang) fn set_class_field_types(
         &mut self,
-        state: &[beamtalk_core::ast::StateDeclaration],
+        class: &beamtalk_core::ast::ClassDefinition,
     ) {
-        self.current_class_field_types.clear();
-        for decl in state {
-            if let Some(beamtalk_core::ast::TypeAnnotation::Simple(id)) =
-                decl.type_annotation.as_ref()
-            {
-                self.current_class_field_types
-                    .insert(decl.name.name.to_string(), id.name.to_string());
+        let mut fields = classify_fields(&class.state);
+        if let (Some(hierarchy), Some(superclass)) =
+            (self.class_hierarchy.as_ref(), class.superclass.as_ref())
+        {
+            for name in hierarchy.all_state(&superclass.name) {
+                if fields.contains_key(name.as_str()) {
+                    continue;
+                }
+                if let Some(ty) = hierarchy.state_field_type(&superclass.name, &name) {
+                    fields.insert(name.to_string(), FieldTypeFact::Declared(ty));
+                }
             }
         }
+        self.current_class_field_types = fields;
+        self.current_class_var_types = classify_fields(&class.class_variables);
     }
 
-    /// Populates instance-field type tracking for an **extension**
-    /// method from the *target* class's declared state types, resolved via the
-    /// class hierarchy. The target class is foreign (declared in another
-    /// module), so its AST `state` is unavailable at extension-codegen time, but
-    /// its [`ClassInfo`] carries the field-type strings. This lets an extension
-    /// method's `self.<field>` operator dispatch be type-aware, matching in-class
-    /// methods (which use [`Self::set_class_field_types`]).
-    ///
-    /// Mirrors `set_class_field_types`'s filtering: only *simple* named types are
-    /// recorded, so generic/union/singleton-typed fields keep the bare-BIF
-    /// status quo (parity with the in-class path, which records only
-    /// `TypeAnnotation::Simple`). When the target class is not in the hierarchy,
-    /// the map is cleared — the bare-BIF fallback, unchanged status quo.
-    ///
-    /// [`ClassInfo`]: beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo
+    /// Populates instance-field facts for an **extension** method from the
+    /// *target* class's declared state types, resolved via the class hierarchy
+    /// (the target's AST is unavailable at extension-codegen time). Declared
+    /// fields — own or inherited, unions included — record their type, exactly
+    /// like the in-class path; untyped fields get no fact (their writers are
+    /// not visible here) and are guarded. Class-variable facts are cleared, so
+    /// class-side `self.<name>` reads in an extension are guarded too.
     pub(in crate::core_erlang) fn set_extension_target_field_types(&mut self, target_class: &str) {
-        let field_types: Vec<(String, String)> = self
+        let field_types: Vec<(String, FieldTypeFact)> = self
             .class_hierarchy
             .as_ref()
-            .and_then(|h| h.get_class(target_class))
-            .map(|info| {
-                info.state_types
+            .map(|h| {
+                h.all_state(target_class)
                     .iter()
-                    .filter(|(_, ty)| Self::is_simple_type_name(ty))
-                    .map(|(name, ty)| (name.to_string(), ty.to_string()))
+                    .filter_map(|name| {
+                        h.state_field_type(target_class, name)
+                            .map(|ty| (name.to_string(), FieldTypeFact::Declared(ty)))
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        self.current_class_field_types.clear();
-        for (name, ty) in field_types {
-            self.current_class_field_types.insert(name, ty);
-        }
+        self.current_class_field_types = field_types.into_iter().collect();
+        self.current_class_var_types.clear();
     }
 
-    /// Whether `ty` is a *simple* named type (a bare identifier such as `Money`
-    /// or `Integer`), as opposed to a generic (`List(Integer)`), union
-    /// (`Integer | String`), singleton (`#north`), or metatype (`Foo class`).
-    ///
-    /// So extension-method field typing matches the in-class path (which
-    /// records only `TypeAnnotation::Simple` fields, see
-    /// [`Self::set_class_field_types`]). `Self` needs no explicit exclusion
-    /// here: unlike a string-rendered check, `Self` is
-    /// [`DeclaredType::SelfType`], never `Simple("Self")`, so it already
-    /// falls through to `false`.
-    ///
-    /// [`ClassInfo::state_types`]: beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo::state_types
-    pub(in crate::core_erlang) fn is_simple_type_name(
-        ty: &beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType,
-    ) -> bool {
-        matches!(
-            ty,
-            beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::Simple(_)
-        )
+    /// Whether a `self.<name>` read is known to hold a value on which the
+    /// operator BIF for `op` is correct, so the fast path may stay
+    /// bare. Inside a class method `self.<name>` is a class variable, so the
+    /// class-side facts are consulted. A name with no fact is guarded — the
+    /// runtime guard is always correct (BT-3892).
+    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, op: BareOperator) -> bool {
+        let facts = if self.in_class_method() {
+            &self.current_class_var_types
+        } else {
+            &self.current_class_field_types
+        };
+        facts.get(name).is_some_and(|fact| fact.is_bare(op))
     }
 
-    /// Whether `self.<name>` is known to hold a value with a
-    /// builtin total order / numeric type, so the comparison/arithmetic fast
-    /// path may stay bare. True when the field is **untyped** (no info — keep
-    /// the status quo) or its declared type is in `primitive_set`; false only
-    /// when the field has an explicit non-primitive (object) type, which then
-    /// routes through the runtime guard and dispatches.
-    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, primitive_set: &[&str]) -> bool {
-        match self.current_class_field_types.get(name) {
-            Some(ty) => primitive_set.contains(&ty.as_str()),
-            None => true,
-        }
-    }
-
-    /// `self.<field>` is comparison-bare when untyped or a
-    /// primitive-ordered type (numeric, `Character`, or `String`).
+    /// `self.<field>` is comparison-bare when known primitive-ordered
+    /// (numeric, `Character`, or `String`) and not nilable (BT-3924).
     pub(in crate::core_erlang) fn field_is_comparable(&self, name: &str) -> bool {
-        self.field_is_bare(name, &["Integer", "Float", "Number", "Character", "String"])
+        self.field_is_bare(name, BareOperator::Comparison)
     }
 
-    /// `self.<field>` is arithmetic-bare when
-    /// untyped or a numeric type.
+    /// `self.<field>` is arithmetic-bare when known numeric.
     pub(in crate::core_erlang) fn field_is_numeric(&self, name: &str) -> bool {
-        self.field_is_bare(name, &["Integer", "Float", "Number"])
+        self.field_is_bare(name, BareOperator::Arithmetic)
     }
 
     /// Returns whether stdlib mode is active.

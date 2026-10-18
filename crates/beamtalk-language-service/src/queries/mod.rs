@@ -15,6 +15,7 @@
 //! - [`hover_provider`] - Show information on hover
 //! - [`implementors_provider`] - Find every class that defines a given selector
 //! - [`references_provider`] - Find all references to a symbol across files
+//! - [`return_value_fix_provider`] - The ADR 0133 "return the value instead" quick-fix
 //! - [`signature_help_provider`] - Show parameter info for keyword messages
 //!
 //! **DDD Context:** Language Service
@@ -43,6 +44,7 @@ pub mod hover_provider;
 pub mod implementors_provider;
 pub mod references_provider;
 pub mod references_to_query;
+pub mod return_value_fix_provider;
 pub mod selector_rename_query;
 pub mod senders_query;
 pub mod signature_help_provider;

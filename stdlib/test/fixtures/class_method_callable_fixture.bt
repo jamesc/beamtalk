@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class methods that hand a block parameter on to a collection message, or
+// that register a ClassBuilder class beside an invocation of one. Moved from
+// the ADR 0132 threaded-entry fixture when ADR 0133 Phase 2 (BT-3904)
+// removed the threaded entries: the behaviour they pin (a non-list receiver
+// takes the plain send, a ClassBuilder fun answers its bare value) is the
+// ordinary class-method lowering's. Used by class_method_callable_test.bt.
+
+sealed Object subclass: ClassMethodCallableFixture
+
+  class sealed twice: b =>
+    b value
+    b value
+
+  // A same-class pass-on of the block.
+  class sealed twiceVia: b => self twice: b
+
+  class sealed spread: b with: xs => b valueWithArguments: xs
+
+  class sealed each: items do: b => items do: b
+
+  class sealed collectIn: items with: b => items collect: b
+
+  class sealed detectIn: items with: b none: c => items detect: b ifNone: c
+
+  class sealed buildAfter: b =>
+    b value
+    Object classBuilder name: #ClassMethodCallableBuiltAfter;
+      superclass: Object;
+      classMethods: #{#hi => [:_self | 42]};
+      register
+
+  class sealed buildBefore: b =>
+    cls := Object classBuilder name: #ClassMethodCallableBuiltBefore;
+      superclass: Object;
+      classMethods: #{#hi => [:_self | 42]};
+      register
+    b value
+    cls
