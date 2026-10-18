@@ -20,7 +20,7 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
 'findFirstOver:in:'/3 = fun (Self, _threshold1, _coll2) ->
     let _NlrToken3 = call 'erlang':'make_ref'() in
     try
-    let _seq4 = let _temp5 = _coll2 in let _temp6 = fun (_each7) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft8 = _each7 in let _BinRight9 = _threshold1 in case call 'beamtalk_primitive':'is_object'(_BinLeft8) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft8, '>', [_BinRight9]) <'false'> when 'true' -> call 'erlang':'>'(_BinLeft8, _BinRight9) <_BinOpNoMatch10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch10}) end, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken3, _each7, Self})]) in case call 'erlang':'is_list'(_temp5) of <'true'> when 'true' -> call 'lists':'foreach'(_temp6, _temp5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp5, 'do:', [_temp6]) end in
+    let _seq4 = let _temp5 = _coll2 in let _temp6 = fun (_each7) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft8 = _each7 in let _BinRight9 = _threshold1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft8), call 'erlang':'is_binary'(_BinLeft8)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft8, _BinRight9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft8, '>', [_BinRight9]) <_BinOpNoMatch10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch10}) end, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken3, _each7, Self})]) in case call 'erlang':'is_list'(_temp5) of <'true'> when 'true' -> call 'lists':'foreach'(_temp6, _temp5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp5, 'do:', [_temp6]) end in
     let _BodyResult11 = 0 in
     {_BodyResult11, Self}
 
@@ -142,9 +142,7 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -181,9 +179,7 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 end

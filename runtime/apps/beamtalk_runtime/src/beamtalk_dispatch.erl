@@ -73,7 +73,16 @@ super(Selector, Args, Self, State, CurrentClass)
 ]).
 
 -include("beamtalk.hrl").
--include("beamtalk_threading_abi.hrl").
+
+%% The ADR 0132 Tier 2 mark and plain-entry sentinel `call_threaded/3` reads.
+%% Codegen no longer mints either: ADR 0133 Phase 2 (BT-3904) removed the
+%% class-method threaded entries (whose plain wrapper passed the sentinel), the
+%% `letrec` mark on Tier 2 block funs and the generated
+%% `beamtalk_threading_abi.hrl`. Only Erlang test code
+%% (`beamtalk_tier2_test_block`, `beamtalk_threaded_dispatch_tests`) produces
+%% them now; BT-3907 removes this gate with the rest of the runtime floor.
+-define(BT_TIER2_BLOCK_NAME, 'BtTier2Block').
+-define(BT_PLAIN_ENTRY_ACC(ClassTag, Selector), {plain, ClassTag, Selector}).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -87,8 +96,9 @@ super(Selector, Args, Self, State, CurrentClass)
 -type bt_self() :: term().
 -type state() :: map().
 -type class_name() :: atom().
-%% The `Acc` the plain entry of a threaded class method hands its body
-%% (`?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)`, ADR 0132 §2).
+%% The plain-entry sentinel `Acc` (`?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)`,
+%% ADR 0132 §2). The plain wrapper of a class-method threaded entry passed it;
+%% no compiled code does since BT-3904, only the EUnit suites.
 -type plain_entry_acc() :: {plain, atom(), selector()}.
 -type dispatch_result() :: {reply, term(), state()} | {error, #beamtalk_error{}}.
 
@@ -799,17 +809,18 @@ Invoke a callable that may be a Tier 2 block, threading `Acc` (ADR 0132 §2).
 The per-invocation tier gate every threaded entry uses for a threading
 parameter, answering `{Result, Acc1}`. **The tier is decided before anything
 is applied** (BT-3885): a fun of arity `length(Args) + 1` is a Tier 2 block only
-when it carries the Tier 2 mark (`is_tier2_block/1`, the `letrec` name codegen
-mints every Tier 2 fun under, `beamtalk_threading_abi.hrl`); otherwise it is a
-plain block of the wrong arity, and it is never run.
+when it carries the Tier 2 mark (`is_tier2_block/1`, the fun name
+`?BT_TIER2_BLOCK_NAME`); otherwise it is a plain block of the wrong arity, and
+it is never run. Since ADR 0133 Phase 2 (BT-3904) codegen mints no marked fun
+and passes no sentinel; only Erlang code reaches this gate.
 
 - a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
   `{Result, Acc}` with `Acc` unchanged;
 - with a map `Acc`, a marked fun of arity `length(Args) + 1` (Tier 2) is applied
   to `Args ++ [Acc]` and answers its own `{Result, Acc1}`;
 - with the plain-entry sentinel `?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)` as
-  `Acc` (what the plain entry of a threaded class method passes: it has no
-  caller map), a marked fun of arity `length(Args) + 1` raises the structured
+  `Acc` (what the plain wrapper of a class-method threaded entry passed before
+  BT-3904 removed the entries: it had no caller map), a marked fun of arity `length(Args) + 1` raises the structured
   `stateful_block_dispatch` naming `ClassTag>>Selector`, *without running*,
   because its writes would be dropped. The sentinel is never used as a map;
 - any other fun (an unmarked fun of arity `length(Args) + 1` included) raises a
@@ -842,17 +853,19 @@ call_tier2(Block, Args, Acc) when is_map(Acc) ->
         Other -> erlang:error({malformed_tier2_reply, Other})
     end;
 call_tier2(_Block, Args, ?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)) ->
-    %% The plain entry of a threaded class method (BT-3871 review): there is
-    %% no caller map to thread, so a Tier 2 block cannot be run - its writes
-    %% would be dropped silently.
+    %% The plain-entry sentinel (BT-3871 review; no compiled code passes it
+    %% since BT-3904): there is no caller map to thread, so a Tier 2 block
+    %% cannot be run - its writes would be dropped silently.
     raise_plain_entry_refusal(ClassTag, Selector, length(Args)).
 
 -doc """
 True when `Fun` is a Tier 2 block: a fun minted under the Tier 2 mark
 (`?BT_TIER2_BLOCK_NAME`, ADR 0132 / BT-3885).
 
-Codegen binds every Tier 2 block fun with `letrec 'BtTier2Block'/A = fun ...`,
-and the Erlang compiler names the lifted function of a `letrec` fun
+Codegen bound every Tier 2 block fun with `letrec 'BtTier2Block'/A = fun ...`
+until ADR 0133 Phase 2 (BT-3904); now only Erlang code mints the mark, as a
+named fun called `BtTier2Block` (`beamtalk_tier2_test_block:mark/1`). The Erlang
+compiler names the lifted function of such a fun
 `-<Function>/<Arity>-BtTier2Block/<A>-<N>-` (an anonymous fun is
 `-<Function>/<Arity>-anonymous-<N>-`, an Erlang `fun` `-<Function>/<Arity>-fun-<N>-`),
 so `erlang:fun_info(Fun, name)` carries the mark on the fun value: the gate
@@ -938,8 +951,9 @@ block_arity(Block) ->
     Arity.
 
 -doc """
-Raise the refusal of a Tier 2 block that reached the plain entry of class method
-`ClassTag>>Selector` (BT-3871 review, BT-3885): a late-bound send (`perform:`,
+Raise the refusal of a Tier 2 block that reached `call_threaded/3` with the
+plain-entry sentinel of class method `ClassTag>>Selector` (BT-3871 review,
+BT-3885; no compiled code passes the sentinel since BT-3904): a late-bound send (`perform:`,
 a variable receiver) has no caller map to thread its writes into, so the block
 is refused before it runs. The error names the class method the caller sent,
 never the `value` the body would have sent it.

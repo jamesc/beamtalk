@@ -78,11 +78,53 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
 /// method raises a `does_not_understand` error so that messages sent to objects
 /// that have no implementation propagate as errors rather than silently returning
 /// a falsy value.
+///
+/// The equality operators and the timeout / local `perform` variants also get
+/// real bodies here (BT-3919). A call-site `==` never reaches them
+/// (`operators.rs` lowers it straight to the Erlang BIF, ADR 0002), but a
+/// dynamic send does — `perform:`, `beamtalk_primitive:send/3`, or an actor's
+/// hierarchy walk — since every value type's dispatch chain ends in
+/// `bt@stdlib@proto_object:dispatch/3`. Without a body they would compile to
+/// the runtime-dispatch placeholder, which re-enters this module's own
+/// `dispatch/3` with the same selector and never returns.
 pub(crate) fn generate_proto_object_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
+        "==" => super::binary_bif("==", params),
+        "/=" => super::binary_bif("/=", params),
+        "=:=" => super::binary_bif("=:=", params),
+        "=/=" => super::binary_bif("=/=", params),
+        // The same entry point as the call-site interception: honours the
+        // timeout for actors, ignores it for value types.
+        "perform:withArguments:timeout:" => {
+            let sel = param(params, 0, "_Selector");
+            let args = param(params, 1, "_Args");
+            let timeout = param(params, 2, "_Timeout");
+            Some(docvec![
+                "call 'beamtalk_message_dispatch':'send'(Self, ",
+                leaf::var(sel.to_string()),
+                ", ",
+                leaf::var(args.to_string()),
+                ", ",
+                leaf::var(timeout.to_string()),
+                ")",
+            ])
+        }
+        // Class objects only: any other receiver gets a structured
+        // `type_error` from `local_call/3`.
+        "performLocally:withArguments:" => {
+            let sel = param(params, 0, "_Selector");
+            let args = param(params, 1, "_Args");
+            Some(docvec![
+                "call 'beamtalk_object_class':'local_call'(Self, ",
+                leaf::var(sel.to_string()),
+                ", ",
+                leaf::var(args.to_string()),
+                ")",
+            ])
+        }
         "doesNotUnderstand:args:" => {
             let selector_var = super::param(params, 0, "_Selector");
             let hint = super::core_erlang_binary_string(

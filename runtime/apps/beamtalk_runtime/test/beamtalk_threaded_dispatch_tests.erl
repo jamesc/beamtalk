@@ -16,9 +16,6 @@ EUnit tests for the ADR 0132 Phase 0 runtime floor (BT-3868).
   reached through `beamtalk_dispatch:send_threaded/4` with a hand-packed `Acc`,
   proving the lookup, the `function_exported/3` guard, the entry call and the
   map round trip before any codegen emits an entry.
-- The Erlang half of the Rust/Erlang conformance fixture
-  `test/fixtures/tier2_meta_conformance.json` (the Rust half is
-  `class_meta::tests::tier2_meta_matches_shared_conformance_fixture`).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -370,89 +367,3 @@ wire_check_test_() ->
             end)
         end}
     ]}.
-
-%%====================================================================
-%% Rust/Erlang conformance (tier2_meta_conformance.json)
-%%====================================================================
-
-conformance_test_() ->
-    {setup, fun setup/0, fun(_) -> ok end, [
-        {"compiled fixture meta and the registry agree with the shared fixture",
-            fun conformance_matches_shared_fixture/0}
-    ]}.
-
-conformance_matches_shared_fixture() ->
-    Cases = beamtalk_test_corpus:load_json_fixture([
-        "runtime", "apps", "beamtalk_runtime", "test", "fixtures", "tier2_meta_conformance.json"
-    ]),
-    ?assert(length(Cases) > 0),
-    lists:foreach(fun assert_conformance_case/1, Cases).
-
-assert_conformance_case(Case) ->
-    ClassName = binary_to_atom(maps:get(<<"class_name">>, Case), utf8),
-    Basename = binary_to_atom(maps:get(<<"fixture">>, Case), utf8),
-    ok = beamtalk_dist_wire_tests:ensure_fixture_loaded(Basename, ClassName),
-    Module = list_to_atom("bt@" ++ atom_to_list(Basename)),
-    ExpectedInstance = expected_entries(maps:get(<<"tier2_methods">>, Case)),
-    ExpectedClass = expected_entries(maps:get(<<"tier2_class_methods">>, Case)),
-    %% What the Rust side emitted into the compiled module.
-    Meta = Module:'__beamtalk_meta'(),
-    ?assertEqual(ExpectedInstance, maps:get(tier2_methods, Meta)),
-    ?assertEqual(ExpectedClass, maps:get(tier2_class_methods, Meta)),
-    %% What the registry cached from it.
-    ?assertEqual(
-        {ExpectedInstance, ExpectedClass},
-        beamtalk_class_metadata:lookup_tier2_methods(ClassName)
-    ),
-    Pid = beamtalk_class_registry:whereis_class(ClassName),
-    ?assert(is_pid(Pid)),
-    lists:foreach(
-        fun(SelBin) ->
-            Sel = binary_to_atom(SelBin, utf8),
-            ?assertEqual(
-                error, beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Sel, [b])
-            )
-        end,
-        maps:get(<<"unthreaded_selectors">>, Case)
-    ),
-    lists:foreach(
-        fun(SelBin) ->
-            Sel = binary_to_atom(SelBin, utf8),
-            ?assertEqual(
-                error, beamtalk_class_dispatch:lookup_threaded_class_entry(Pid, Sel, [b])
-            )
-        end,
-        maps:get(<<"unthreaded_class_selectors">>, Case)
-    ),
-    maps:foreach(
-        fun(Sel, {EntryFn, _Positions}) ->
-            ?assertEqual(
-                {ok, Module, EntryFn},
-                beamtalk_class_dispatch:lookup_threaded_entry(ClassName, Sel, args_for(Sel))
-            )
-        end,
-        ExpectedInstance
-    ),
-    maps:foreach(
-        fun(Sel, {EntryFn, _Positions}) ->
-            ?assertEqual(
-                {ok, Module, EntryFn},
-                beamtalk_class_dispatch:lookup_threaded_class_entry(Pid, Sel, args_for(Sel))
-            )
-        end,
-        ExpectedClass
-    ).
-
-%% Placeholder arguments of the selector's arity (the entry's arity is checked).
-args_for(Selector) ->
-    lists:duplicate(length([C || C <- atom_to_list(Selector), C =:= $:]), b).
-
-%% `{"sel": {"entry_fn": "...", "positions": [..]}}` -> `#{sel => {entry_fn, [..]}}`.
-expected_entries(Json) ->
-    maps:fold(
-        fun(SelBin, #{<<"entry_fn">> := Fn, <<"positions">> := Positions}, Acc) ->
-            Acc#{binary_to_atom(SelBin, utf8) => {binary_to_atom(Fn, utf8), Positions}}
-        end,
-        #{},
-        Json
-    ).

@@ -9,7 +9,6 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use crate::core_erlang::field_types::UntypedTrust;
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -279,9 +278,7 @@ impl CoreErlangGenerator {
         )));
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
-        // A value's fields are set by its keyword constructor from outside the
-        // class, so untyped fields are never trusted as numeric (BT-3892).
-        self.set_class_field_types(class, module, UntypedTrust::Never);
+        self.set_class_field_types(class);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., object.bt defines `new => @primitive basicNew`)
@@ -306,7 +303,7 @@ impl CoreErlangGenerator {
         let auto_methods = compute_auto_slot_methods(class);
 
         // Collect all function exports for the module header.
-        let exports = self.build_value_type_exports(
+        let exports = Self::build_value_type_exports(
             class,
             auto_methods.as_ref(),
             has_explicit_new,
@@ -421,7 +418,6 @@ impl CoreErlangGenerator {
     /// Includes constructors (`new/0`, `new/1`), instance methods, auto-generated
     /// slot methods (`dispatch/3`, `has_method/1`, `superclass/0`, `register_class/0`), and class methods.
     fn build_value_type_exports(
-        &self,
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
         has_explicit_new: bool,
@@ -487,14 +483,6 @@ impl CoreErlangGenerator {
                 let mut class_fn_name = String::from("class_");
                 class_fn_name.push_str(&method.selector.name());
                 parts.push(leaf::fname(class_fn_name, arity));
-                // ADR 0132 §2: the threaded entry takes ClassSelf, the user
-                // params and `Acc`.
-                if !self.threaded_entry_positions(class, method).is_empty() {
-                    parts.push(leaf::fname(
-                        super::selector_mangler::threaded_class_fn_name(&method.selector.name()),
-                        arity + 1,
-                    ));
-                }
             }
         }
 
@@ -524,7 +512,12 @@ impl CoreErlangGenerator {
         // `-type` declarations for those (plus transitive deps) instead of
         // every pre-loaded alias in the compilation unit.
         let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
-        let spec_attrs = self.class_spec_attrs(class, true, &referenced_aliases);
+        let spec_attrs = spec_codegen::generate_class_specs(
+            class,
+            true,
+            Some(&self.alias_registry),
+            Some(&referenced_aliases),
+        );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
@@ -1900,12 +1893,7 @@ impl CoreErlangGenerator {
 
         // Bind parameters via fresh_var (not to_core_var) so names go through
         // the counter and can't collide with sequencing temp vars.
-        let (mut frame, user_params) = MethodFrame::enter(
-            self,
-            method.selector.name().as_str(),
-            &method.parameters,
-            MethodBoundary::ValueType,
-        );
+        let (mut frame, user_params) = MethodFrame::enter(self, method, MethodBoundary::ValueType);
         let mut params = vec!["Self".to_string()];
         params.extend(user_params);
 
@@ -4443,14 +4431,19 @@ impl CoreErlangGenerator {
 
     /// Computes the module name for a superclass in the dispatch chain.
     ///
-    /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
-    /// all stdlib types → `bt@stdlib@{snake_case}`.
+    /// Returns `None` only for `ProtoObject`'s own superclass (`nil`, spelled
+    /// `"none"` by `ClassDefinition::superclass_name`) — `ProtoObject` is the root
+    /// of the hierarchy, so its `dispatch/3` raises `does_not_understand` and
+    /// there is no module to delegate to. `Object` (and any other `ProtoObject
+    /// subclass:`) delegates to `bt@stdlib@proto_object`, so the methods
+    /// `ProtoObject` defines (`==`, `/=`, `=:=`, `=/=`, …) are reachable by a
+    /// dynamic send to any value (BT-3919). For stdlib classes, applies the
+    /// ADR 0016 naming convention: all stdlib types → `bt@stdlib@{snake_case}`.
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix.
     fn superclass_module_name(&self, superclass: &str) -> Option<String> {
-        if superclass == "ProtoObject" {
+        if superclass == "none" {
             return None;
         }
         Some(self.compiled_module_name(superclass))

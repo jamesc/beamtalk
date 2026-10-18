@@ -1201,8 +1201,7 @@ actor_spawn_chain_test() ->
 %%% Exercises real compiled dispatch ('bt@counter' / 'bt@arithmetic_actor').
 %%% An error raised inside a compiled method is caught by
 %%% `beamtalk_actor:safe_dispatch/3`'s catch clause and surfaces as
-%%% `{error, {error, Reason, Stacktrace}}` (matches
-%%% extension_error_propagation_test's pattern); an arity mismatch is a
+%%% `{error, {error, Reason, Stacktrace}}`; an arity mismatch is a
 %%% normal (successful) call reply carrying the generated dispatch/4
 %%% arity-mismatch clause's value, `{'reply', {'error', 'bad_arity'},
 %%% State}` (see crates/beamtalk-core/src/codegen/core_erlang/gen_server/
@@ -1702,7 +1701,13 @@ extension_method_state_threading_test() ->
         ets:delete(beamtalk_extensions, {'Counter', 'addHundred'})
     end.
 
-%% Test: Extension that throws propagates error through safe_dispatch
+%% Test: Extension that raises answers a structured error and leaves the actor alive
+%%
+%% `beamtalk_dispatch:invoke_extension/6` catches the crash and wraps it as a
+%% `#beamtalk_error{}` (BT-3199), answering the lookup-shaped `{error, E}`;
+%% generated `dispatch/4` lifts that to its own `{error, E, State}` contract
+%% (BT-3920), so `handle_call/3` replies with it instead of crashing the actor
+%% on an unmatched dispatch result.
 extension_error_propagation_test() ->
     beamtalk_extensions:init(),
     CrashFun = fun([], _Self, _State) -> error(extension_crash) end,
@@ -1711,8 +1716,17 @@ extension_error_propagation_test() ->
     Pid = element(4, Object),
     try
         Result = gen_server:call(Pid, {crashMethod, []}),
-        %% safe_dispatch includes stacktrace in error tuple
-        ?assertMatch({error, {error, extension_crash, _Stacktrace}}, Result),
+        ?assertMatch(
+            {error, #beamtalk_error{
+                kind = runtime_error,
+                class = 'Counter',
+                selector = crashMethod,
+                details = #{reason := extension_crash}
+            }},
+            Result
+        ),
+        %% The actor survived and its state is untouched.
+        ?assert(is_process_alive(Pid)),
         {ok, 0} = gen_server:call(Pid, {getValue, []})
     after
         gen_server:stop(Pid),

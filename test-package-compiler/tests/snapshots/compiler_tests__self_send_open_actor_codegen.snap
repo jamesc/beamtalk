@@ -298,7 +298,17 @@ module 'self_send_open_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                     %% crashing extension body is caught and converted to a
                     %% structured error naming what was sent, instead of
                     %% re-raising a bare Erlang exception.
-                    call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'OpenSelfSendActor', Args, Self, State)
+                    %% BT-3920: that structured error comes back as the
+                    %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
+                    %% own {error, E, State} contract (state rolled back, as for a
+                    %% crashing method body) so handle_call replies with it
+                    %% instead of crashing the actor on an unmatched result.
+                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'OpenSelfSendActor', Args, Self, State) of
+                        <{'reply', ExtResult, ExtState}> when 'true' ->
+                            {'reply', ExtResult, ExtState}
+                        <{'error', ExtError}> when 'true' ->
+                            {'error', ExtError, State}
+                    end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
                     case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'OpenSelfSendActor') of
@@ -386,9 +396,7 @@ module 'self_send_open_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
       'method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -429,9 +437,7 @@ module 'self_send_open_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
       'method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~

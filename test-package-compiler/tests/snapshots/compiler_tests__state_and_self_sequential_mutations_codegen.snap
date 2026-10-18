@@ -278,9 +278,9 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'incrementTwice'> when 'true' ->
-            let _Val4 = call 'erlang':'+'(call 'maps':'get'('n', State), 1) in let State1 = call 'maps':'put'('n', _Val4, State) in let _Val5 = call 'erlang':'+'(call 'maps':'get'('n', State1), 1) in let State2 = call 'maps':'put'('n', _Val5, State1) in let _Result = call 'maps':'get'('n', State2) in {'reply', _Result, State2}
+            let _Val4 = let _BinLeft5 = call 'maps':'get'('n', State) in let _BinRight6 = 1 in case call 'erlang':'is_number'(_BinLeft5) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft5, _BinRight6) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft5, '+', [_BinRight6]) <_BinOpNoMatch7> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch7}) end in let State1 = call 'maps':'put'('n', _Val4, State) in let _Val8 = let _BinLeft9 = call 'maps':'get'('n', State1) in let _BinRight10 = 1 in case call 'erlang':'is_number'(_BinLeft9) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft9, _BinRight10) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft9, '+', [_BinRight10]) <_BinOpNoMatch11> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch11}) end in let State2 = call 'maps':'put'('n', _Val8, State1) in let _Result = call 'maps':'get'('n', State2) in {'reply', _Result, State2}
         <'resetAndBump'> when 'true' ->
-            let _Val6 = 0 in let State1 = call 'maps':'put'('n', _Val6, State) in let _Val7 = #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}# in let State2 = call 'maps':'put'('label', _Val7, State1) in let _Val8 = call 'erlang':'+'(call 'maps':'get'('n', State2), 1) in let State3 = call 'maps':'put'('n', _Val8, State2) in let _Result = call 'maps':'get'('n', State3) in {'reply', _Result, State3}
+            let _Val12 = 0 in let State1 = call 'maps':'put'('n', _Val12, State) in let _Val13 = #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}# in let State2 = call 'maps':'put'('label', _Val13, State1) in let _Val14 = let _BinLeft15 = call 'maps':'get'('n', State2) in let _BinRight16 = 1 in case call 'erlang':'is_number'(_BinLeft15) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft15, _BinRight16) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft15, '+', [_BinRight16]) <_BinOpNoMatch17> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch17}) end in let State3 = call 'maps':'put'('n', _Val14, State2) in let _Result = call 'maps':'get'('n', State3) in {'reply', _Result, State3}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('SeqStateCtr', OtherSelector)
@@ -299,7 +299,17 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
                     %% crashing extension body is caught and converted to a
                     %% structured error naming what was sent, instead of
                     %% re-raising a bare Erlang exception.
-                    call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'SeqStateCtr', Args, Self, State)
+                    %% BT-3920: that structured error comes back as the
+                    %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
+                    %% own {error, E, State} contract (state rolled back, as for a
+                    %% crashing method body) so handle_call replies with it
+                    %% instead of crashing the actor on an unmatched result.
+                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'SeqStateCtr', Args, Self, State) of
+                        <{'reply', ExtResult, ExtState}> when 'true' ->
+                            {'reply', ExtResult, ExtState}
+                        <{'error', ExtError}> when 'true' ->
+                            {'error', ExtError, State}
+                    end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
                     case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'SeqStateCtr') of
@@ -387,9 +397,7 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
       'method_info' => ~{'incrementTwice' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'resetAndBump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -430,9 +438,7 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
       'method_info' => ~{'incrementTwice' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'resetAndBump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~

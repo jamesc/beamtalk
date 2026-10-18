@@ -21,7 +21,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 
 'countUpTo:'/2 = fun (Self, _limit1) ->
     let X = 0 in
-    let _WhileResult12 = letrec 'while'/1 = fun (X) -> let _CondFun2 = fun (X) -> let _BinLeft3 = X in let _BinRight4 = _limit1 in case call 'beamtalk_primitive':'is_object'(_BinLeft3) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '<', [_BinRight4]) <'false'> when 'true' -> call 'erlang':'<'(_BinLeft3, _BinRight4) <_BinOpNoMatch5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch5}) end in case apply _CondFun2 (X) of <'true'> when 'true' -> let _X9 = let _BinLeft6 = X in let _BinRight7 = 1 in case call 'erlang':'is_number'(_BinLeft6) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft6, _BinRight7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft6, '+', [_BinRight7]) <_BinOpNoMatch8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch8}) end in  apply 'while'/1 (_X9) <'false'> when 'true' -> let _ExitSA10 = call 'maps':'new'() in let _ExitSA11 = call 'maps':'put'('__local__x', X, _ExitSA10) in {'nil', _ExitSA11} end in apply 'while'/1 (X) in
+    let _WhileResult12 = letrec 'while'/1 = fun (X) -> let _CondFun2 = fun (X) -> let _BinLeft3 = X in let _BinRight4 = _limit1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft3), call 'erlang':'is_binary'(_BinLeft3)) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft3, _BinRight4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '<', [_BinRight4]) <_BinOpNoMatch5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch5}) end in case apply _CondFun2 (X) of <'true'> when 'true' -> let _X9 = let _BinLeft6 = X in let _BinRight7 = 1 in case call 'erlang':'is_number'(_BinLeft6) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft6, _BinRight7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft6, '+', [_BinRight7]) <_BinOpNoMatch8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch8}) end in  apply 'while'/1 (_X9) <'false'> when 'true' -> let _ExitSA10 = call 'maps':'new'() in let _ExitSA11 = call 'maps':'put'('__local__x', X, _ExitSA10) in {'nil', _ExitSA11} end in apply 'while'/1 (X) in
     let _WhileState13 = call 'erlang':'element'(2, _WhileResult12) in
     let _x14 = call 'maps':'get'('__local__x', _WhileState13) in
     _x14
@@ -145,9 +145,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -195,9 +193,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'method_info' => ~{}~,
       'class_method_info' => ~{'countDownFrom:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
                 }~
                 in let _Reg1 = case call 'beamtalk_class_builder':'register'(_BuilderState1) of
@@ -235,9 +231,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 end

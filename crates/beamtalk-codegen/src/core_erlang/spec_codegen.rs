@@ -63,7 +63,7 @@ use std::collections::HashSet;
 
 use ecow::EcoString;
 
-use super::selector_mangler::{safe_class_method_fn_name, threaded_class_fn_name};
+use super::selector_mangler::safe_class_method_fn_name;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit};
 use beamtalk_cerl_doc::{Document, join};
@@ -441,90 +441,6 @@ fn generate_class_method_spec(
         return_spec,
         "]}]"
     ])
-}
-
-/// Generates the spec attribute for a class method's threaded entry
-/// (ADR 0132 §2): `'__t2_class_<sel>'(ClassSelf, Params..., Acc)` answering
-/// `{Result, Acc1}`. Emitted for a method with a threading parameter, beside
-/// the plain wrapper's [`generate_class_method_spec`], under the same rule (a
-/// method with no annotation gets no spec).
-fn generate_threaded_class_method_spec(
-    method: &MethodDefinition,
-    aliases: Option<&AliasRegistry>,
-    referenced: Option<&RefCell<HashSet<EcoString>>>,
-) -> Option<Document<'static>> {
-    let has_any_annotation = method.return_type.is_some()
-        || method
-            .parameters
-            .iter()
-            .any(|p| p.type_annotation.is_some());
-    if !has_any_annotation {
-        return None;
-    }
-
-    let any = || Document::Str("{'type', 0, 'any', []}");
-    // `map() | {'plain', atom(), atom()}`: the caller's map, or the sentinel
-    // the plain wrapper passes when it has none (`threading_abi`).
-    let acc_map = || {
-        docvec![
-            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, ",
-            "{'type', 0, 'tuple', [{'atom', 0, ",
-            atom(super::threading_abi::PLAIN_ENTRY_TAG),
-            "}, {'type', 0, 'atom', []}, {'type', 0, 'atom', []}]}]}"
-        ]
-    };
-    let mut param_types: Vec<Document<'static>> = vec![any()]; // ClassSelf
-    for param in &method.parameters {
-        param_types.push(
-            param
-                .type_annotation
-                .as_ref()
-                .map_or_else(any, |ann| type_annotation_to_spec(ann, aliases, referenced)),
-        );
-    }
-    param_types.push(acc_map()); // Acc
-
-    let result = method
-        .return_type
-        .as_ref()
-        .map_or_else(any, |ann| type_annotation_to_spec(ann, aliases, referenced));
-    // The entry answers `{Result, Acc1}`.
-    let return_spec = docvec!["{'type', 0, 'tuple', [", result, ", ", acc_map(), "]}"];
-
-    // Method arities are bounded by the parameter count and always fit in i64.
-    let arity = i64::try_from(method.parameters.len() + 2).unwrap_or(i64::MAX);
-    Some(docvec![
-        "{",
-        atom(threaded_class_fn_name(method.selector.name().as_ref())),
-        ", ",
-        int_lit(arity),
-        "}",
-        ", [{'type', 0, 'fun', [{'type', 0, 'product', [",
-        join(param_types, &Document::Str(", ")),
-        "]}, ",
-        return_spec,
-        "]}]"
-    ])
-}
-
-/// The spec attributes of `class`'s threaded class-method entries
-/// (ADR 0132 §2): one per method for which `has_entry` holds, in declaration
-/// order.
-pub fn generate_threaded_class_specs(
-    class: &ClassDefinition,
-    has_entry: &dyn Fn(&MethodDefinition) -> bool,
-    aliases: Option<&AliasRegistry>,
-    referenced: Option<&RefCell<HashSet<EcoString>>>,
-) -> Vec<Document<'static>> {
-    class
-        .class_methods
-        .iter()
-        .filter(|m| m.kind == MethodKind::Primary && has_entry(m))
-        .filter_map(|m| {
-            generate_threaded_class_method_spec(m, aliases, referenced)
-                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
-        })
-        .collect()
 }
 
 /// Generates all spec attributes for methods in a class definition.

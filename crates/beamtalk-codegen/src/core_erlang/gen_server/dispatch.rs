@@ -172,10 +172,8 @@ impl CoreErlangGenerator {
         // Delegate dynamically (by class name, through
         // beamtalk_dispatch:responds_to/2's live registry walk), not via a
         // module name resolved at this class's own compile time — see
-        // SuperclassDelegation's doc comment. ProtoObject is the hierarchy
-        // root with no further module to delegate to (mirrors
-        // superclass_module_name's own ProtoObject special case), so no
-        // superclass delegation is emitted for it.
+        // SuperclassDelegation's doc comment. No superclass delegation is
+        // emitted for a direct ProtoObject subclass.
         let superclass_name = class.superclass_name();
         let superclass = (superclass_name != "ProtoObject")
             .then_some(SuperclassDelegation::Dynamic(superclass_name));
@@ -646,9 +644,32 @@ impl CoreErlangGenerator {
                             line(),
                             "%% re-raising a bare Erlang exception.",
                             line(),
-                            "call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, ",
+                            "%% BT-3920: that structured error comes back as the",
+                            line(),
+                            "%% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4",
+                            line(),
+                            "%% own {error, E, State} contract (state rolled back, as for a",
+                            line(),
+                            "%% crashing method body) so handle_call replies with it",
+                            line(),
+                            "%% instead of crashing the actor on an unmatched result.",
+                            line(),
+                            "case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, ",
                             leaf::atom(class_name.to_string()),
-                            ", Args, Self, State)",
+                            ", Args, Self, State) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'reply', ExtResult, ExtState}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'reply', ExtResult, ExtState}"]),
+                                    line(),
+                                    "<{'error', ExtError}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'error', ExtError, State}"]),
+                                ]
+                            ),
+                            line(),
+                            "end",
                         ]
                     ),
                     line(),

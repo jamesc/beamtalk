@@ -9,7 +9,9 @@
 // (`FieldOperandValueHolder`), an Actor (`FieldOperandActorHolder`) and this
 // TestCase's own fields, alongside the untyped numeric-counter shape, which
 // must keep working. A Value field with a numeric default but set to an object
-// by the keyword constructor is covered too (`FieldOperandDefaultHolder`).
+// by the keyword constructor is covered too (`FieldOperandDefaultHolder`), and
+// so is its Actor counterpart (BT-3925): an Actor counter whose own methods
+// only write numbers, given a point by `spawnWith:` (`FieldOperandSpawnCounter`).
 //
 // The point and holder classes live in `fixtures/` (one class per file).
 
@@ -96,6 +98,23 @@ TestCase subclass: FieldOperandDispatchTest
     self assert: a increment equals: 3
     self assert: (a countBelow: 4)
     self deny: (a countBelow: 3)
+    a stop
+
+  /// BT-3925: `spawnWith:` initialises the untyped numeric-default counter to
+  /// a point, a write the class's own (numeric) methods never show.
+  testActorSpawnWithObjectInNumericDefaultFieldDispatches =>
+    a := FieldOperandSpawnCounter spawnWith: #{
+      #count => (FieldOperandPoint x: 3 y: 4)
+    }
+    self assert: (a arith: self q) equals: #[FieldOperandPoint x: 4 y: 6, FieldOperandPoint x: 6 y: 8]
+    self deny: (a countBelow: self cq)
+    a stop
+
+  testActorSpawnWithNumericCounter =>
+    a := FieldOperandSpawnCounter spawnWith: #{#count => 41}
+    self assert: a increment equals: 42
+    self assert: (a arith: 1) equals: #[43, 84]
+    self assert: (a countBelow: 43)
     a stop
 
   // ── TestCase (this class's own fields, set in setUp) ───────────────────

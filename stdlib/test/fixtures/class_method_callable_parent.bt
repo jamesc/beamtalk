@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// An open class whose class method takes a block, inherited without an
+// override by ClassMethodCallableChild. Used by class_method_callable_test.bt.
+
+Object subclass: ClassMethodCallableParent
+
+  class twice: b =>
+    b value
+    b value

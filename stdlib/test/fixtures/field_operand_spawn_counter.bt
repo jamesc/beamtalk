@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3925 fixture: an Actor whose untyped `count` has a numeric default and is
+// only ever written numerically by its own methods, yet `spawnWith:` (a writer
+// the class source cannot show) may initialise it to any object.
+
+Actor subclass: FieldOperandSpawnCounter
+  state: count = 0
+
+  /// The numeric-counter shape: `self.count := self.count + 1`.
+  increment -> Integer =>
+    self.count := self.count + 1
+    self.count
+
+  /// `self.count + q`, `self.count * 2` on the counter slot.
+  arith: q -> Array => #[self.count + q, self.count * 2]
+
+  /// `self.count < q` on the counter slot.
+  countBelow: q -> Boolean => self.count < q
