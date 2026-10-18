@@ -56,8 +56,11 @@ async fn code_actions_at(source: &str, name: &str, at: Position) -> Vec<CodeActi
 fn return_value_edits(actions: &[CodeActionOrCommand]) -> Option<Vec<TextEdit>> {
     actions.iter().find_map(|action| match action {
         CodeActionOrCommand::CodeAction(action)
-            if action.title.starts_with("Return the new value") =>
+            if action.title.starts_with("Assign the result of") =>
         {
+            // The rewrite is only right when the callee answers the block's
+            // value, which the server cannot check: never auto-applied.
+            assert_eq!(action.is_preferred, Some(false), "{action:?}");
             let changes = action.edit.as_ref()?.changes.as_ref()?;
             changes.values().next().cloned()
         }

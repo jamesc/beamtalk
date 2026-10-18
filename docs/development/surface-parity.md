@@ -601,7 +601,11 @@ reports the same message at the same span. No operation is surface-specific.
     assignment, rewrites `Twice twice: [t := t + 1]` to `t := Twice twice:
     [t + 1]` (two AST-span edits). Not offered for a block that assigns more
     than one local or writes a field or class variable, or whose send is not
-    a statement (stored, returned, assigned, cascaded).
+    a statement (stored, returned, assigned, cascaded). The rewrite assigns
+    the send's result, so it is right only when the callee answers the
+    block's value; the server cannot check that, so the action is never
+    `isPreferred` and its title says so ("Assign the result of `twice:` to
+    `t` (check `twice:` answers the block's value)").
   - **REPL behaviour change (BT-3858, mandated by ADR 0133 Phase 1).** The
     REPL root used to skip the escape check: `[t := t + 1]` as an input's
     value, `b := [t := t + 1]` and `d := #([t := t + 1])` compiled and the

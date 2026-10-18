@@ -25,7 +25,24 @@
 //! - that is the block's only assignment (none to another local, a field or a
 //!   class variable, at any depth).
 //!
-//! Otherwise no action is offered and the diagnostic keeps its message. The
+//! Otherwise no action is offered and the diagnostic keeps its message.
+//!
+//! **Precondition the action cannot check: the callee answers the block's
+//! value.** The rewrite assigns the *send's* result to `t`, which equals the
+//! value the block computed only if the method answers what its block
+//! answers (`twice: b => b value. b value` does; a method that answers
+//! `self`, or folds the block's values, does not). The action only ever
+//! appears on a user-defined or otherwise unthreaded callee: the threading
+//! constructs (`do:`, `inject:into:`, `ifTrue:`, ...) carry the assignment
+//! back themselves, so the diagnostic never fires on them. This is ADR
+//! 0133's own fix ("return the new value from the block and assign it where
+//! it is called", § REPL session, § User Impact), which leaves the callee's
+//! answer to the user. So the action is never marked preferred (the LSP
+//! sends `isPreferred: false`; no auto-apply), and its title names the
+//! selector and the check: "Assign the result of `twice:` to `t` (check
+//! `twice:` answers the block's value)".
+//!
+//! The
 //! escape analysis is not re-derived here: the diagnostic names the
 //! assignment (its span) and the block (the note spanning it), and this
 //! provider only checks the AST shape around them. Every edit is delimited by
@@ -34,6 +51,7 @@
 use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Module};
 use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use ecow::EcoString;
 
 use crate::value_objects::{CodeAction, SourceEdit};
 
@@ -106,7 +124,7 @@ fn return_value_action(
         .iter()
         .filter_map(|note| note.span)
         .find(|span| span.contains(write))?;
-    let (statement, block) = statement_sending_block(module, block_span)?;
+    let (statement, selector, block) = statement_sending_block(module, block_span)?;
     let block = &block;
 
     if assignment_count(block) != 1 {
@@ -130,7 +148,10 @@ fn return_value_action(
     let value_text = source.get(value.span().as_range())?;
     let name = &local.name;
     Some(CodeAction::with_edits(
-        format!("Return the new value of `{name}` from the block and assign it here"),
+        format!(
+            "Assign the result of `{selector}` to `{name}` (check `{selector}` answers the \
+             block's value)"
+        ),
         vec![
             SourceEdit::insert(statement.start(), format!("{name} := ")),
             SourceEdit::replace(write, value_text),
@@ -157,9 +178,9 @@ fn assignment_count(block: &Block) -> usize {
 
 /// The span of the statement whose expression is a synchronous message send
 /// with the block literal at `block_span` as its receiver or one of its
-/// arguments, with (a copy of) that block. Searches every statement sequence
+/// arguments, with the send's selector and (a copy of) that block. Searches every statement sequence
 /// of the module: the top-level expressions, method bodies and block bodies.
-fn statement_sending_block(module: &Module, block_span: Span) -> Option<(Span, Block)> {
+fn statement_sending_block(module: &Module, block_span: Span) -> Option<(Span, EcoString, Block)> {
     let mut found = None;
     for_each_expr_seq(module, |seq| {
         if found.is_none() {
@@ -169,14 +190,14 @@ fn statement_sending_block(module: &Module, block_span: Span) -> Option<(Span, B
     found
 }
 
-fn in_sequence(seq: &[ExpressionStatement], block_span: Span) -> Option<(Span, Block)> {
+fn in_sequence(seq: &[ExpressionStatement], block_span: Span) -> Option<(Span, EcoString, Block)> {
     for statement in seq {
         let expression = &statement.expression;
         if !expression.span().contains(block_span) {
             continue;
         }
-        if let Some(block) = sent_block(expression, block_span) {
-            return Some((expression.span(), block.clone()));
+        if let Some((selector, block)) = sent_block(expression, block_span) {
+            return Some((expression.span(), selector, block.clone()));
         }
         // The block is deeper: look in the bodies of the block literals of
         // this statement.
@@ -197,11 +218,12 @@ fn in_sequence(seq: &[ExpressionStatement], block_span: Span) -> Option<(Span, B
     None
 }
 
-/// The block literal at `block_span` when it is the receiver or an argument
-/// of `expression`, a synchronous message send.
-fn sent_block(expression: &Expression, block_span: Span) -> Option<&Block> {
+/// The selector of `expression`, a synchronous message send, and the block
+/// literal at `block_span` when it is the send's receiver or an argument.
+fn sent_block(expression: &Expression, block_span: Span) -> Option<(EcoString, &Block)> {
     let Expression::MessageSend {
         receiver,
+        selector,
         arguments,
         is_cast: false,
         ..
@@ -212,7 +234,7 @@ fn sent_block(expression: &Expression, block_span: Span) -> Option<&Block> {
     std::iter::once(receiver.as_ref())
         .chain(arguments)
         .find_map(|operand| match operand {
-            Expression::Block(block) if block.span == block_span => Some(block),
+            Expression::Block(block) if block.span == block_span => Some((selector.name(), block)),
             _ => None,
         })
 }

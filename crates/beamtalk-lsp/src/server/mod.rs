@@ -630,6 +630,9 @@ impl LanguageServer for Backend {
                         changes: Some(changes),
                         ..Default::default()
                     }),
+                    // Never preferred: the ADR 0133 "assign the result"
+                    // fix is right only when the callee answers its block's
+                    // value, which the user must check (no auto-apply).
                     is_preferred: Some(false),
                     ..Default::default()
                 };

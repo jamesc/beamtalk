@@ -396,8 +396,12 @@ fn code_actions_return_value_instead_on_escaping_block() {
     let actions = service.code_actions(&file, at, at);
     let fix = actions
         .iter()
-        .find(|a| a.title.contains("Return the new value of `t`"))
+        .find(|a| a.title.starts_with("Assign the result of"))
         .unwrap_or_else(|| panic!("no return-value action: {actions:?}"));
+    assert_eq!(
+        fix.title,
+        "Assign the result of `twice:` to `t` (check `twice:` answers the block's value)"
+    );
 
     let mut fixed = source.to_string();
     for edit in fix.edits.iter().rev() {
@@ -431,4 +435,38 @@ fn code_actions_return_value_not_offered_for_two_locals() {
             .any(|a| a.title.contains("Return the new value")),
         "{actions:?}"
     );
+}
+
+/// The bot-review examples (`do:`, `ifTrue:`) never reach the action: they
+/// are threading constructs, which carry the block's assignment back
+/// themselves, so the escaping-block diagnostic does not fire on them and no
+/// "assign the result" rewrite (which would assign the receiver or the
+/// branch's value) is offered.
+#[test]
+fn code_actions_return_value_not_offered_on_threading_constructs() {
+    use beamtalk_core::source_analysis::DiagnosticCategory;
+
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("src/Sums.bt");
+    let source = "Object subclass: Sums\n  class run: c =>\n    t := 0\n    \
+                  #(1, 2, 3) do: [:x | t := t + x]\n    \
+                  c ifTrue: [t := t + 1]\n    t\n";
+    service.update_file(file.clone(), source.to_string());
+    let diagnostics = service.diagnostics(&file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel)),
+        "{diagnostics:?}"
+    );
+    for write in ["t := t + x", "t := t + 1"] {
+        let at = len32(&source[..source.find(write).unwrap()]);
+        let actions = service.code_actions(&file, at, at);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| a.title.starts_with("Assign the result of")),
+            "{write}: {actions:?}"
+        );
+    }
 }
