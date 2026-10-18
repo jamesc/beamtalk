@@ -2310,19 +2310,14 @@ const ESCAPE_SHAPES: &[(&str, &str)] = &[
 ];
 
 /// The [`ESCAPE_SHAPES`] whose block is the value of the method body's last
-/// statement, a local assignment: an actor method answers `nil` there, not
-/// the block (BT-3882), so in an actor the block is dropped unrun and the
-/// error says so rather than "returned" (BT-3859).
-/// Each is `(name, send_value)`: whether the hint may advise sending the
-/// local `value` before the method ends, which only runs the block (and
-/// threads its write) for a block literal bound directly, a Tier 2 local
-/// codegen promotes; an alias, a value bound through an arm and a local
-/// assigned more than once are not one.
-const ACTOR_DROPPED_SHAPES: &[(&str, bool)] = &[
-    ("returned via last-statement assignment", true),
-    ("alias as the last statement", false),
-    ("branch value as the last statement", false),
-    ("reassigned local as the last statement", false),
+/// statement, a local assignment: the method answers the assigned value in
+/// every context, actor methods included (BT-3882), so the block is returned
+/// from the method.
+const LAST_STATEMENT_ASSIGNMENT_SHAPES: &[&str] = &[
+    "returned via last-statement assignment",
+    "alias as the last statement",
+    "branch value as the last statement",
+    "reassigned local as the last statement",
 ];
 
 /// BT-3859: the [`ESCAPE_SHAPES`] whose block writes `u`, a local first bound
@@ -2365,11 +2360,6 @@ fn section6_escaping_blocks_are_errors_in_every_context() {
             ("value", in_value(body)),
             ("actor", in_actor(body)),
         ] {
-            let dropped_row = ACTOR_DROPPED_SHAPES
-                .iter()
-                .find(|(shape, _)| *shape == name)
-                .filter(|_| context == "actor");
-            let dropped = dropped_row.is_some();
             let diags = adr0131_diagnostics(&src);
             let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
             assert_eq!(s6.len(), 1, "{name} in {context}: {src}\n{diags:?}");
@@ -2381,36 +2371,12 @@ fn section6_escaping_blocks_are_errors_in_every_context() {
                 "{name} in {context}: {}",
                 d.message
             );
-            assert_eq!(
-                d.message
-                    .contains("an actor method drops (it answers `nil`)"),
-                dropped,
-                "{name} in {context}: {}",
-                d.message
-            );
-            assert!(
-                !dropped || !d.message.contains("returned from the method"),
-                "{name} in {context}: {}",
-                d.message
-            );
             let hint = d.hint.as_deref().unwrap_or_default();
             let field = format!("`self.{local} := self.{local} + 1`");
-            let send_value = "send it `value` before the method ends";
-            match dropped_row {
-                Some(&(_, advises_value)) => {
-                    assert!(
-                        hint.contains(&field)
-                            && hint.contains("dropped when the method ends")
-                            && hint.contains(send_value) == advises_value
-                            && !hint.contains("assign it where"),
-                        "{name} in {context}: {hint}"
-                    );
-                }
-                None => assert!(
-                    hint.contains(&field) && hint.contains("assign it where"),
-                    "{name} in {context}: {hint}"
-                ),
-            }
+            assert!(
+                hint.contains(&field) && hint.contains("assign it where"),
+                "{name} in {context}: {hint}"
+            );
             assert!(
                 d.notes
                     .iter()
@@ -3326,20 +3292,33 @@ fn adr0131_nested_assign_pins() {
     }
 }
 
-/// BT-3859 review: an actor's dropped alias (`c := b` as the last statement)
-/// is not a Tier 2 local codegen promotes, so its hint gives only the field
-/// advice, never "send it `value`".
+/// BT-3882: a block that is the value of the method body's last-statement
+/// assignment is returned from the method in every context, so the actor
+/// diagnostic is the class and value-type one.
 #[test]
-fn section6_actor_dropped_alias_hint_gives_only_the_field_advice() {
-    let src = in_actor("b := [t := t + 1]\nc := b");
-    let diags = adr0131_diagnostics(&src);
-    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-    assert_eq!(s6.len(), 1, "{diags:?}");
-    assert_eq!(
-        s6[0].hint.as_deref(),
-        Some(
-            "the block is dropped when the method ends, so `t` never changes: keep the state in \
-             a field (`self.t := self.t + 1`)"
-        )
-    );
+fn section6_last_statement_assignment_escape_is_returned_in_every_context() {
+    for &name in LAST_STATEMENT_ASSIGNMENT_SHAPES {
+        let body = ESCAPE_SHAPES
+            .iter()
+            .find(|(shape, _)| *shape == name)
+            .map(|&(_, body)| body)
+            .expect("a LAST_STATEMENT_ASSIGNMENT_SHAPES row names an ESCAPE_SHAPES row");
+        let reports: Vec<(EcoString, Option<EcoString>)> =
+            [in_class(body), in_value(body), in_actor(body)]
+                .iter()
+                .map(|src| {
+                    let diags = adr0131_diagnostics(src);
+                    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+                    assert_eq!(s6.len(), 1, "{name}: {src}\n{diags:?}");
+                    (s6[0].message.clone(), s6[0].hint.clone())
+                })
+                .collect();
+        assert!(
+            reports[0].0.contains("returned from the method"),
+            "{name}: {}",
+            reports[0].0
+        );
+        assert_eq!(reports[0], reports[1], "{name}: class vs value");
+        assert_eq!(reports[0], reports[2], "{name}: class vs actor");
+    }
 }

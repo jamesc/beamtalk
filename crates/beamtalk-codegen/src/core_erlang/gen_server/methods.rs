@@ -1412,7 +1412,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.pure_reply_doc();
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1465,7 +1465,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.pure_reply_doc();
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1502,7 +1502,7 @@ impl CoreErlangGenerator {
                                     span,
                                 ));
                                 if is_last {
-                                    let reply = self.pure_reply_doc();
+                                    let reply = self.local_assign_reply_doc(expr)?;
                                     stmts.push(ThreadedStmt::Statement(reply, span));
                                 }
                                 continue;
@@ -1522,7 +1522,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.pure_reply_doc();
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1552,7 +1552,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.pure_reply_doc();
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1581,9 +1581,9 @@ impl CoreErlangGenerator {
                             // BT-3493, one level up at this flat top-level
                             // body instead of a branch/loop frame). Falls
                             // through to this arm's own reply behavior below
-                            // (`pure_reply_doc`, not the assigned value) when
-                            // this is the body's last statement — only the
-                            // RHS lowering differs.
+                            // (`local_assign_reply_doc`, the assigned value)
+                            // when this is the body's last statement — only
+                            // the RHS lowering differs.
                             if let Some(field_write) = self.local_assign_field_write(value) {
                                 let field_val_var = self.lower_field_assignment_bind(
                                     field_write,
@@ -1616,7 +1616,7 @@ impl CoreErlangGenerator {
                         }
                     }
                     if is_last {
-                        let reply = self.pure_reply_doc();
+                        let reply = self.local_assign_reply_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
@@ -1955,12 +1955,34 @@ impl CoreErlangGenerator {
         Ok(stmts)
     }
 
-    /// Emit a generic `{'reply', _Result, State}` close for the last expression
-    /// when the expression itself has already been emitted as an open let chain.
-    /// Used by local assignments and other open-chain handlers in last position.
-    fn pure_reply_doc(&mut self) -> Document<'static> {
+    /// Emit the `{'reply', Var, State}` close for a local assignment
+    /// `x := expr` in last position, once its open let chain has bound `x`:
+    /// an assignment evaluates to the assigned value, so the method answers
+    /// it, as class and value-type methods do (BT-3882). Every caller has
+    /// bound an identifier target, so an unbound one is an internal error
+    /// rather than a silent `nil`.
+    fn local_assign_reply_doc(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        let value = match expr {
+            Expression::Assignment { target, .. } => match target.as_ref() {
+                Expression::Identifier(id) => self.lookup_var(&id.name).cloned(),
+                _ => None,
+            },
+            _ => None,
+        };
+        let var = value.ok_or_else(|| {
+            CodeGenError::Internal(
+                "local_assign_reply_doc: last-statement assignment target is not a bound local"
+                    .to_string(),
+            )
+        })?;
         let post_state = self.current_state_var();
-        docvec!["{'reply', 'nil', ", leaf::var(post_state), "}"]
+        Ok(docvec![
+            "{'reply', ",
+            leaf::var(var),
+            ", ",
+            leaf::var(post_state),
+            "}"
+        ])
     }
 
     /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
