@@ -803,9 +803,9 @@ fn a_fold_over_acc_takes_the_plain_send_for_a_non_list_receiver() {
         // The receiver is guarded once, the fold in the list arm and the plain
         // send (with the fold's seed `Acc`) in the other.
         assert_eq!(text.matches("'is_list'(").count(), 1, "{selector}\n{text}");
-        let fallback = format!("'beamtalk_message_dispatch':'send'(_temp");
+        let fallback = "'beamtalk_message_dispatch':'send'(_temp";
         let at = text
-            .find(&fallback)
+            .find(fallback)
             .unwrap_or_else(|| panic!("{selector}: no plain send\n{text}"));
         assert!(
             text[at..].contains(sent),
