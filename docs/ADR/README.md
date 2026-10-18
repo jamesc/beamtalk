@@ -159,6 +159,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented | 2026-10-06 |
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Accepted | 2026-10-08 |
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Accepted | 2026-10-17 |
+| [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Proposed | 2026-10-18 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
