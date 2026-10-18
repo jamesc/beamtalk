@@ -142,7 +142,36 @@ pub struct CoreErlangGenerator {
     /// checked and handles multiple families.
     ///
     /// Tracked on BT-3871 (class methods) and BT-3872 (value-type methods).
+    ///
+    /// **BT-3871 (class methods) is the first setter and decided the
+    /// generalisation this way:** `Acc` is a family of a *construct* only when
+    /// that construct holds a use of a threading parameter
+    /// (`CoreErlangGenerator::is_family_mutation` answers per expression, not
+    /// "always"), so a loop, fold, conditional or `on:do:`/`ensure:` that does
+    /// not invoke a threading parameter is lowered exactly as in a method with
+    /// none, and the sites above never see an `Acc` family. A use inside such a
+    /// construct is ADR 0132 Phase 3 (the predicate in `tier2_callee` makes the
+    /// method non-threading), and is refused loudly: the single-family sites
+    /// above report `VerifyError::ConstructFamilyDropped` for an `Acc` they
+    /// cannot carry (`CoreErlangGenerator::reject_unthreadable_acc_family`), and
+    /// the threading parameter's own identifier cannot be lowered outside a
+    /// recognised use (`generate_identifier`). BT-3872 reuses the same rules
+    /// for `[SelfVt, Acc]`.
     pub(in crate::core_erlang) in_threaded_body: bool,
+    /// ADR 0132 §2: the per-body state of the threaded entry being lowered
+    /// (its threading parameters, the `Acc` version counter); empty outside
+    /// one. Scoped by `begin_threaded_class_body` / `end_threaded_class_body`.
+    pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState,
+    /// The names of every class defined in the module being compiled (ADR 0132
+    /// §1: "the unit"), so a forward `Other sel: b` resolves exactly as the
+    /// threading index resolved it (`tier2_callee::forward_target_of`).
+    pub(in crate::core_erlang) unit_class_names: std::collections::HashSet<String>,
+    /// ADR 0132 §1: the class being compiled's own class-side threaded entries,
+    /// emitted as `'tier2_class_methods'` in `__beamtalk_meta/0`. Collected from
+    /// the same `MethodInfo::threading_params` answer the entries are emitted
+    /// from (`CoreErlangGenerator::class_method_threading_positions`).
+    pub(in crate::core_erlang) own_tier2_class_methods:
+        Vec<crate::core_erlang::class_meta::Tier2Entry>,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -449,6 +478,9 @@ impl CoreErlangGenerator {
             state_threading: VersionCounter::new(),
             in_loop_body: false,
             in_threaded_body: false,
+            threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState::default(),
+            unit_class_names: std::collections::HashSet::new(),
+            own_tier2_class_methods: Vec::new(),
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),

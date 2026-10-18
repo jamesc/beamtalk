@@ -3585,12 +3585,19 @@ fn stdlib_threading_params(class: &str, selector: &str, class_side: bool) -> Vec
 /// `generated_builtins.rs` (via `stdlib_spawns_block`) and the one the regular
 /// stdlib compile builds in `add_module_classes` (`stdlib_mode`). Enforces the
 /// "one source" claim for the current stdlib, method by method.
+///
+/// Both real pipelines trait-expand a file before the index is built
+/// (`build_stdlib::extract_class_metadata`, and the stdlib compile's
+/// `analyse_full`), with the protocols of the whole stdlib as
+/// `external_protocols` (`build_stdlib::compile_all_stdlib_files` collects
+/// `pre_loaded_protocol_defs`). This test does the same, so the methods a
+/// `uses:` line provides (`Ets>>do:`, `ChangeLog>>select:`, ...) are compared
+/// too: they are the ones whose `threading_params` the index changes.
 #[test]
 fn stdlib_threading_params_agree_with_the_stdlib_compile() {
     let generated = ClassHierarchy::with_builtins();
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
-    let mut compared = 0usize;
-    let mut threading = 0usize;
+    let mut modules: Vec<Module> = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("stdlib/src readable") {
         let path = entry.expect("dir entry").path();
         if path.extension().is_none_or(|e| e != "bt") {
@@ -3598,17 +3605,46 @@ fn stdlib_threading_params_agree_with_the_stdlib_compile() {
         }
         let src = std::fs::read_to_string(&path).expect("stdlib source readable");
         let (module, _) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&src));
+        modules.push(module);
+    }
+    // The same `external_protocols` build_stdlib collects: every protocol the
+    // stdlib defines, by name.
+    let external_protocols: std::collections::HashMap<
+        ecow::EcoString,
+        crate::ast::ProtocolDefinition,
+    > = modules
+        .iter()
+        .flat_map(|m| m.protocols.iter())
+        .map(|p| (p.name.name.clone(), p.clone()))
+        .collect();
+    assert!(
+        external_protocols.contains_key("Enumerable"),
+        "the stdlib's protocols must be collected"
+    );
+
+    let mut compared = 0usize;
+    let mut threading = 0usize;
+    let mut provided_compared: Vec<String> = Vec::new();
+    for unexpanded in &modules {
+        let mut module = unexpanded.clone();
+        let _ = crate::semantic_analysis::trait_expansion::expand_module(
+            &mut module,
+            &external_protocols,
+        );
         let (Ok(compiled), _) = ClassHierarchy::build_with_options(&module, true) else {
             panic!("hierarchy build is infallible");
         };
-        for class in &module.classes {
+        for (class, original) in module.classes.iter().zip(&unexpanded.classes) {
             let name = class.name.name.as_str();
             let (Some(from_source), Some(baked)) =
                 (compiled.get_class(name), generated.get_class(name))
             else {
                 continue;
             };
-            for (class_side, defs) in [(false, &class.methods), (true, &class.class_methods)] {
+            for (class_side, defs, own) in [
+                (false, &class.methods, &original.methods),
+                (true, &class.class_methods, &original.class_methods),
+            ] {
                 for def in defs {
                     let selector = def.selector.name();
                     let pick = |info: &ClassInfo| {
@@ -3630,6 +3666,9 @@ fn stdlib_threading_params_agree_with_the_stdlib_compile() {
                     );
                     compared += 1;
                     threading += usize::from(!a.is_empty());
+                    if !own.iter().any(|m| m.selector.name() == selector) {
+                        provided_compared.push(format!("{name}>>{selector}"));
+                    }
                 }
             }
         }
@@ -3641,6 +3680,12 @@ fn stdlib_threading_params_agree_with_the_stdlib_compile() {
     assert!(
         threading > 10,
         "expected some threading methods, got {threading}"
+    );
+    // A method a `uses:` line provides was compared (the expansion ran), and
+    // the provided `Enumerable` iteration methods are among them.
+    assert!(
+        provided_compared.iter().any(|m| m == "Ets>>do:"),
+        "expected the trait-provided Ets>>do: to be compared, got {provided_compared:?}"
     );
 }
 
@@ -3668,10 +3713,12 @@ fn stdlib_threading_params_hand_checked_threading_homs() {
         stdlib_threading_params("True", "ifTrue:ifFalse:", false),
         vec![0]
     );
-    // `... noneBlock value` at the root; `block` is only used in a nested block.
+    // `detect:ifNone:` invokes `noneBlock` at the root, but its body also holds
+    // a block that does `^` (`self do: [:each | ... ifTrue: [^each]]`), so no
+    // parameter threads (`facts::body_has_block_nlr`, BT-3871 review).
     assert_eq!(
         stdlib_threading_params("Collection", "detect:ifNone:", false),
-        vec![1]
+        Vec::<usize>::new()
     );
 }
 

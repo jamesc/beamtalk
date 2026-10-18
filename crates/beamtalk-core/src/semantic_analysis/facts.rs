@@ -257,11 +257,20 @@ impl SemanticFacts {
         if self.is_populated {
             self.methods_with_block_nlr.contains(span)
         } else {
-            body_stmts
-                .iter()
-                .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
+            body_has_block_nlr(body_stmts)
         }
     }
+}
+
+/// Whether a method body holds a non-local return: a `^` inside a block, or
+/// inside a `match:` arm (arms compile to case arms that need the NLR catch).
+/// The one recognizer: codegen's NLR wrapper (`methods_with_block_nlr`) and
+/// ADR 0132's threading index (a method with one has no threading parameters,
+/// `tier2_callee`) both ask it, so they cannot disagree.
+#[must_use]
+pub fn body_has_block_nlr(body: &[ExpressionStatement]) -> bool {
+    body.iter()
+        .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
 }
 
 /// Returns `true` if `expr` (or any sub-expression) contains a `^` (Return) inside a block.
@@ -390,11 +399,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         // block is a normal early return, not an NLR — only ^ inside a *nested* block is NLR.
         if let Expression::Assignment { value, .. } = &stmt.expression {
             if let Expression::Block(block) = value.as_ref() {
-                if block
-                    .body
-                    .iter()
-                    .any(|s| expr_has_block_nlr(&s.expression, false))
-                {
+                if body_has_block_nlr(&block.body) {
                     facts.methods_with_block_nlr.insert(block.span);
                 }
             }
@@ -441,11 +446,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
             .chain(class.class_methods.iter().map(|m| (m, true)));
         for (method, in_class_method) in tagged_methods {
             // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
-            if method
-                .body
-                .iter()
-                .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
-            {
+            if body_has_block_nlr(&method.body) {
                 facts.methods_with_block_nlr.insert(method.span);
             }
 
@@ -461,11 +462,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         let method = &standalone.method;
 
         // Detect block NLR for standalone methods.
-        if method
-            .body
-            .iter()
-            .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
-        {
+        if body_has_block_nlr(&method.body) {
             facts.methods_with_block_nlr.insert(method.span);
         }
 

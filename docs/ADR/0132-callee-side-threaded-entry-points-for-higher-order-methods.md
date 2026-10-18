@@ -15,7 +15,7 @@ Accepted (2026-10-17); Proposed 2026-10-16
 | 0c | [BT-3868](https://linear.app/beamtalk/issue/BT-3868) | Runtime floor (`send_threaded/4`, `call_threaded/3`), metadata keys, `MethodInfo::threading_params`, wire check, baselines | M | |
 | 1a | [BT-3869](https://linear.app/beamtalk/issue/BT-3869) | `VersionPrefix::Acc`, `ScopeKind::Threaded`, the `MethodBody` builder, four verifier checks | M | |
 | 1b | [BT-3870](https://linear.app/beamtalk/issue/BT-3870) | Generalize `callee_threads_block_param` (greatest fixpoint); populate `threading_params` | M | |
-| 1c | [BT-3871](https://linear.app/beamtalk/issue/BT-3871) | Threaded entry for class methods | M | |
+| 1c | [BT-3871](https://linear.app/beamtalk/issue/BT-3871) | Threaded entry for class methods | M | [#4361](https://github.com/jamesc/beamtalk/pull/4361) |
 | 1d | [BT-3872](https://linear.app/beamtalk/issue/BT-3872) | Threaded entry for value-type methods | M | |
 | 1e | [BT-3873](https://linear.app/beamtalk/issue/BT-3873) | Caller-side `callee_threaded_send` producer; §6 narrowed for exact receivers; actor locals-only rule | M | |
 | 1f | [BT-3874](https://linear.app/beamtalk/issue/BT-3874) | Corpus with oracle, pin flips, repl-protocol case, measurement, docs | M | |
@@ -23,6 +23,10 @@ Accepted (2026-10-17); Proposed 2026-10-16
 Dependency order: {3866, 3867, 3868, 3869} → 3870 (after 3868) → {3871, 3872} → 3873 → 3874.
 
 Two file references in the text below are corrected by this tracking entry: `call_threaded/3` lives in `beamtalk_dispatch.erl` (there is no `beamtalk_block.erl`), and the generated builtins file is `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`.
+
+**Deviation from §2 (BT-3871 review, #4361):** the plain `class_<sel>` wrapper does not hand the body an empty map. With `~{}~` a Tier 2 block reaching the plain entry from a late-bound send ran through `call_threaded/3` and its writes were dropped silently, which §4 forbids. The wrapper passes the atom `plain` as `Acc@0`; `call_threaded/3` with `plain` applies an arity-N fun as before, raises `stateful_block_dispatch` for an arity-N+1 fun without running it, and sends `value` to a non-fun callable. `plain` is threaded through `Acc` unchanged and never used as a map.
+
+**Deviation from §2's NLR row (BT-3871 review, #4361):** Phase 1c ships no NLR-carrying threaded body. A `^` throws the `Acc` version current where its block is lowered, and a threaded callee can run the block after a later `Acc` step (`b value: [:x | ^x]`, a stored block, a block a callee keeps), so the `{Val, AccAtThrow}` catch would drop the caller's writes. The threading index therefore gives a method whose body holds any block that does `^` no threading parameters (`facts::body_has_block_nlr`, over-approximate); it keeps its plain entry and compiles as before. The verifier's `NlrInThreadedBody` refuses an NLR node in a threaded body; `NlrSlotShapeMismatch` keeps the slot shape Phase 3 will need. Carrying the live `Acc` to the throw is Phase 3. Stdlib effect: `Collection>>detect:ifNone:` loses its (instance-side) threading parameter.
 
 ## Context
 
@@ -209,7 +213,9 @@ body with two entry points. The body is lowered as a `ThreadedIr`
 caller hands over; every invocation of the parameter is gated per
 invocation on the block's tier and threads `Acc` through every construct
 the body contains. The plain entry (today's function name and arity) calls
-the body with an empty map and answers the bare result; the threaded entry
+the body with no map (the `plain` sentinel, see the deviation note in the
+tracking section: an empty map would silently drop a Tier 2 block's
+writes) and answers the bare result; the threaded entry
 (`'__t2_<sel>'`, one arity higher) takes `Acc` and answers `{Result,
 Acc1}`. Threaded entries are advertised in `'__beamtalk_meta'/0` and
 resolved through the same late-bound dispatch walk a plain send uses. A
@@ -862,7 +868,7 @@ and the per-invocation gate makes one entry accept any mix.
 
 ### Negative
 - **The plain path of a threading HOM pays one tuple per block invocation**
-  and threads an empty `Acc` through its body's constructs (a trailing
+  and threads the `plain` sentinel as `Acc` through its body's constructs (a trailing
   slot in each loop or fold tuple). Phase 1 measures it against today's
   structural fallback on the same body.
 - **Code size** grows by the `Acc` threading in each threading HOM's body

@@ -310,6 +310,11 @@ pub fn generate_module_with_warnings(
     // typed-no-default field validation).
     generator.class_hierarchy = Some(hierarchy.clone());
 
+    // ADR 0132 §1/§2: the module's class names (the unit a forward resolves
+    // in) and the class-side threaded entries it emits and advertises, both
+    // from the hierarchy's `threading_params`.
+    generator.set_threaded_entries(module);
+
     // Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?

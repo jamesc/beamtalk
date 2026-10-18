@@ -169,6 +169,7 @@ impl Drop for LoopContextGuard<'_, '_> {
 /// `try_render_while_direct_via_threaded_ir` pilot (gated behind
 /// `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`), later deleted — see the module
 /// docs §Status / ADR 0111 Addendum 13.
+#[allow(clippy::too_many_lines)] // one arm per `ThreadedStmt` variant
 pub(in crate::core_erlang) fn render(
     ir: &[ThreadedStmt],
     ctx: &mut RenderCtx,
@@ -191,10 +192,19 @@ pub(in crate::core_erlang) fn render(
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
             ThreadedStmt::NlrCatch {
-                boundary, token, ..
+                boundary,
+                token,
+                slot,
+                ..
             } => {
                 let body_doc = render(&ir[i + 1..], ctx);
-                docs.push(render_nlr_catch(*boundary, token.name(), body_doc, ctx));
+                docs.push(render_nlr_catch(
+                    *boundary,
+                    token.name(),
+                    slot,
+                    body_doc,
+                    ctx,
+                ));
                 return Document::Vec(docs);
             }
             ThreadedStmt::Return(value, state, _) => docs.push(render_return(value, state, ctx)),
@@ -1069,11 +1079,12 @@ fn render_bind(
 fn render_nlr_catch(
     boundary: NlrBoundary,
     token_var: &str,
+    slot: &[VersionPrefix],
     body_doc: Document<'static>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
     ctx.generator
-        .wrap_body_with_nlr_catch(body_doc, token_var, boundary)
+        .wrap_body_with_nlr_catch(body_doc, token_var, boundary, slot)
 }
 
 fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Document<'static> {

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3871 review: an OPEN class whose class method has a threading block
+// parameter, so a subclass inherits a method with a threaded entry (the plain
+// entry must still refuse a Tier 2 block when reached through the subclass).
+// Used by threaded_class_entry_test.bt.
+
+Object subclass: ThreadedEntryParent
+
+  class twice: b =>
+    b value
+    b value

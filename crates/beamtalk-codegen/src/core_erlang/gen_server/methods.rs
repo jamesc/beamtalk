@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
-use super::super::selector_mangler::safe_class_method_fn_name;
+use super::super::selector_mangler::{safe_class_method_fn_name, threaded_class_fn_name};
 use super::super::sequencing::PrecompiledScope;
 use super::super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
@@ -2157,6 +2157,17 @@ impl CoreErlangGenerator {
                 MethodBoundary::ClassMethod,
             );
 
+            // ADR 0132 §2: a class method with a threading parameter is one
+            // body over `Acc` with two entries. The positions are
+            // `MethodInfo::threading_params`, the same answer the metadata and
+            // the spec are emitted from; a `self delegate` body has no
+            // parameter use, so never a candidate.
+            let positions = frame.threaded_entry_positions(class, method);
+            if !positions.is_empty() {
+                frame.begin_threaded_class_body(method, &positions);
+            }
+            let acc_entry_var = frame.current_acc_var_name();
+
             // Detect if method body has ^ inside blocks (needs NLR).
             let needs_nlr = frame
                 .semantic_facts
@@ -2201,15 +2212,56 @@ impl CoreErlangGenerator {
 
             // Build function header with params (Document pieces, not format! —
             // Core Erlang fragments must use the Document API, ADR 0089).
-            let doc = docvec![
-                "\n",
-                fname(safe_class_method_fn_name(&selector_name), arity),
-                " = fun (ClassSelf",
-                Self::class_method_params_suffix_doc(&param_vars),
-                ") ->",
-                nest(INDENT, docvec![line(), body_doc,]),
-                "\n",
-            ];
+            let doc = if positions.is_empty() {
+                docvec![
+                    "\n",
+                    fname(safe_class_method_fn_name(&selector_name), arity),
+                    " = fun (ClassSelf",
+                    Self::class_method_params_suffix_doc(&param_vars),
+                    ") ->",
+                    nest(INDENT, docvec![line(), body_doc,]),
+                    "\n",
+                ]
+            } else {
+                frame.end_threaded_class_body();
+                let entry_name = threaded_class_fn_name(&selector_name);
+                // The body, lowered once over `Acc`, then today's name and
+                // arity as a wrapper that hands it the `plain` sentinel (it has
+                // no caller map: `call_threaded/3` runs a Tier 1 block and
+                // raises `stateful_block_dispatch` for a Tier 2 one rather than
+                // dropping its writes) and answers the bare result (ADR 0132
+                // §2, as amended by the BT-3871 review).
+                docvec![
+                    "\n",
+                    fname(entry_name.clone(), arity + 1),
+                    " = fun (ClassSelf",
+                    Self::class_method_params_suffix_doc(&param_vars),
+                    ", ",
+                    leaf::var(acc_entry_var),
+                    ") ->",
+                    nest(INDENT, docvec![line(), body_doc,]),
+                    "\n",
+                    "\n",
+                    fname(safe_class_method_fn_name(&selector_name), arity),
+                    " = fun (ClassSelf",
+                    Self::class_method_params_suffix_doc(&param_vars),
+                    ") ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "call 'erlang':'element'(1, apply ",
+                            fname(entry_name, arity + 1),
+                            " (ClassSelf",
+                            Self::class_method_params_suffix_doc(&param_vars),
+                            ", ",
+                            leaf::atom("plain"),
+                            "))",
+                        ]
+                    ),
+                    "\n",
+                ]
+            };
             docs.push(doc);
 
             // `frame` drops here, popping the scope, clearing
@@ -2522,10 +2574,26 @@ impl CoreErlangGenerator {
                         boundary: super::super::NlrBoundary::ClassMethod,
                         token: threaded_ir::TokenId::new(token_var.to_string()),
                         frame: threaded_ir::FrameId::ROOT,
-                        slot: Vec::new(),
+                        // ADR 0132 §2: a threaded body's catch unpacks `Acc`
+                        // from the throw's state slot and answers
+                        // `{Val, AccAtThrow}`.
+                        slot: if this.in_threaded_body {
+                            vec![threaded_ir::VersionPrefix::Acc]
+                        } else {
+                            Vec::new()
+                        },
                         span: method.span,
                     },
                 );
+            }
+            if this.in_threaded_body {
+                // One `MethodBody` frame over the trailing `Acc` family.
+                body_stmts = vec![threaded_ir::build_threaded_method_body(
+                    threaded_ir::FrameId::ROOT,
+                    &[],
+                    body_stmts,
+                    method.span,
+                )];
             }
             Ok(this.verify_and_render_body_stmts(&body_stmts, method.span))
         })
@@ -2571,9 +2639,18 @@ impl CoreErlangGenerator {
                 let span = expr.span();
 
                 if let Expression::Return { value, .. } = expr {
-                    let doc = this.generate_class_method_return(value)?;
+                    let doc = if this.expr_has_threaded_use(value) {
+                        // ADR 0132 §2: the `^` value's uses of a threading
+                        // parameter are sequenced ahead of it, their `Acc`
+                        // steps spliced into the body.
+                        let tv = this.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                        stmts.extend(tv.prelude);
+                        this.threaded_value_doc(&tv.value)
+                    } else {
+                        this.generate_class_method_return(value)?
+                    };
                     stmts.push(ThreadedStmt::Statement(doc, span));
-                    return Ok(stmts);
+                    return this.finish_threaded_body_stmts(stmts);
                 }
 
                 // ADR 0131 Phase 2: a local-threading producer in this
@@ -2595,8 +2672,35 @@ impl CoreErlangGenerator {
                     stmts.push(ThreadedStmt::Statement(doc, span));
                 }
             }
-            Ok(stmts)
+            this.finish_threaded_body_stmts(stmts)
         })
+    }
+
+    /// ADR 0132 §2: a threaded body answers `{Result, AccN}`, so its last
+    /// statement (the value of the body, or of its `^`) is wrapped with the
+    /// current `Acc` version. Every other body is returned unchanged.
+    fn finish_threaded_body_stmts(
+        &mut self,
+        mut stmts: Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        if !self.in_threaded_body {
+            return Ok(stmts);
+        }
+        if let Some(span) = self.unlowered_root_uses().first() {
+            return Err(CodeGenError::Internal(format!(
+                "a threading-parameter use at {span:?} was not lowered by the threaded producer"
+            )));
+        }
+        match stmts.pop() {
+            Some(threaded_ir::ThreadedStmt::Statement(last, span)) => {
+                let answer = self.threaded_body_answer_doc(last);
+                stmts.push(threaded_ir::ThreadedStmt::Statement(answer, span));
+                Ok(stmts)
+            }
+            _ => Err(CodeGenError::Internal(
+                "a threaded class-method body must end in its value statement".to_string(),
+            )),
+        }
     }
 
     /// ADR 0131 Phase 2: lowers a method-body statement of a class or
@@ -2638,6 +2742,8 @@ impl CoreErlangGenerator {
             && !conditional_statement
             && !self.statement_has_local_producer(expr)
             && !self.statement_has_value_type_producer(expr)
+            // ADR 0132 §2: a use of a threading parameter steps `Acc`.
+            && !self.statement_has_threaded_use(expr)
         {
             return Ok(None);
         }

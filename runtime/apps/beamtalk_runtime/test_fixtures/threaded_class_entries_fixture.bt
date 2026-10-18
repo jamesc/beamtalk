@@ -1,0 +1,90 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3871 (ADR 0132 Phase 1c) fixture: class methods with a threading block
+// parameter, compiled to a threaded entry `'__t2_class_<sel>'/n+2` (the body
+// over `Acc`) beside the plain `'class_<sel>'/n+1` wrapper.
+//
+// Two tests read it:
+//   - the Rust/Erlang metadata conformance row
+//     (test/fixtures/tier2_meta_conformance.json): the Rust emission test
+//     asserts this class compiles to the expected `tier2_class_methods` map;
+//   - `beamtalk_threaded_class_entries_tests` calls each entry directly with a
+//     hand-packed `Acc` and each plain entry with a pure block, and asserts the
+//     two agree on the result and on the sequence of block invocations.
+// The shapes cover ADR 0132 section 1's Phase 1 uses: a direct invocation, the
+// callable argument of a collection message, a same-class pass-on, invocations
+// as an operand, as an assigned value and as a conditional's receiver, a
+// cascade. `plain:` (no block)
+// and `storeAway:` (the block is stored, so it is not a threading parameter)
+// have no entry.
+
+sealed Object subclass: ThreadedClassEntriesFixture
+  class sealed twice: b => b value. b value
+
+  class sealed each: items do: b => items do: b
+
+  class sealed twiceVia: b => self twice: b
+
+  class sealed viaOwn: b => ThreadedClassEntriesFixture twice: b
+
+  class sealed apply: b to: x => b value: x
+
+  class sealed cascade: b => b value: 1; value: 2
+
+  class sealed sumOver: items with: b => items inject: 0 into: b
+
+  class sealed collectIn: items with: b => items collect: b
+
+  class sealed selectIn: items with: b => items select: b
+
+  class sealed detectIn: items with: b => items detect: b ifNone: [0]
+
+  class sealed countIn: items with: b => items count: b
+
+  class sealed bothOf: b => (b value: 1) + (b value: 2)
+
+  class sealed doubled: b =>
+    r := b value: 3.
+    r * 2
+
+  class sealed branch: b => (b value: 1) > 0 ifTrue: [10] ifFalse: [20]
+
+  class sealed callThen: b firstPositiveIn: items =>
+    b value.
+    items do: [:x | x > 0 ifTrue: [^x]].
+    nil
+
+  class sealed guarded: b flag: f =>
+    f ifTrue: [^0].
+    b value
+
+  class sealed withLocals: b =>
+    total := 0.
+    #(1, 2, 3) do: [:i | total := total + i].
+    b value: total
+
+  class sealed afterEnsure: b =>
+    [1] ensure: [2].
+    b value: 5
+
+  // A block that does `^` and flows into a use (an invocation's argument, a
+  // forward's argument, a fold's ifNone: handler): a threaded callee could run
+  // it after writing to `Acc`, and its `^` would answer the `Acc` version it was
+  // created at. ADR 0132 Phase 3 can carry it; until then a method whose body
+  // holds any `^` block has no entry (`callThen:` and `guarded:` above too).
+  class sealed find: b =>
+    b value: [:found | ^found].
+    nil
+
+  class sealed nlrForward: b =>
+    self apply: b to: [:x | ^x].
+    nil
+
+  class sealed nlrFold: items with: b =>
+    items detect: b ifNone: [^0].
+    nil
+
+  class sealed plain: n => n + 1
+
+  class sealed storeAway: b => #(1, 2) collect: [:x | b]

@@ -349,6 +349,26 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
+    /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
+    /// unpacks. A throw always carries the state its boundary hands back (the
+    /// family tuple inside a threaded body, [`Self::NlrSlotShapeMismatch`]; the
+    /// scope's own single state elsewhere). Reported separately from the shape
+    /// check because the shape is only constrained inside a threaded `MethodBody`.
+    NlrThrowWithoutSlot { at: Span },
+
+    /// ADR 0132 §2, the NLR row, as Phase 1c ships it (BT-3871 review): an
+    /// [`ThreadedStmt::NlrThrow`] or [`ThreadedStmt::NlrCatch`] inside a
+    /// threaded `MethodBody` at all. A `^` throws the `Acc` version current
+    /// where its block is *lowered*, but a threaded callee can run the block
+    /// after a later `Acc` step (an argument of the use, a stored block, a block
+    /// a callee keeps), so its catch would answer a stale `Acc` and drop the
+    /// caller's writes. The threading index gives any method whose body holds a
+    /// `^` block no threaded entry (`facts::body_has_block_nlr`); a threaded
+    /// body that holds one anyway is this error. Carrying the live `Acc` to the
+    /// throw is ADR 0132 Phase 3.
+    NlrInThreadedBody { at: Span },
+
     /// ADR 0132 §3, "Actor instance method": a block compiled for a threaded
     /// entry ([`ScopeKind::ThreadedBlock`] with an actor caller) reads or
     /// writes the actor `State` family. Such a block is compiled locals-only:
@@ -1151,6 +1171,9 @@ impl VerifyWalk<'_> {
     /// an NLR throw's or catch's state slot (`found`) must be that body's
     /// family tuple with `Acc` last. Outside one there is no constraint here.
     fn check_nlr_slot(&mut self, found: Vec<VersionPrefix>, at: Span) {
+        if !self.threaded_slots.is_empty() {
+            self.errors.push(VerifyError::NlrInThreadedBody { at });
+        }
         if let Some(expected) = self.threaded_slots.last()
             && *expected != found
         {
@@ -1315,6 +1338,10 @@ impl VerifyWalk<'_> {
             ThreadedStmt::NlrThrow {
                 value, slot, span, ..
             } => {
+                if slot.is_empty() {
+                    self.errors
+                        .push(VerifyError::NlrThrowWithoutSlot { at: *span });
+                }
                 for v in slot {
                     self.check_use(v, *span);
                 }
@@ -1357,6 +1384,7 @@ impl VerifyWalk<'_> {
                 threads,
                 families,
                 body,
+                span,
             } => {
                 let threaded = *kind == MethodBodyKind::Threaded;
                 if threaded {
@@ -1365,7 +1393,7 @@ impl VerifyWalk<'_> {
                             defect: AccSeedDefect::ThreadedBodyThreadsLocals {
                                 threads: threads.clone(),
                             },
-                            at: Span::default(),
+                            at: *span,
                         });
                     }
                     self.threaded_slots.push(threaded_nlr_slot(families));

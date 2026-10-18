@@ -67,7 +67,8 @@ super(Selector, Args, Self, State, CurrentClass)
     invoke_extension/6,
     check_extension/2,
     send_threaded/4,
-    call_threaded/3
+    call_threaded/3,
+    call_threaded_with_arguments/3
 ]).
 
 -include("beamtalk.hrl").
@@ -793,28 +794,109 @@ Invoke a callable that may be a Tier 2 block, threading `Acc` (ADR 0132 §2).
 The per-invocation tier gate every threaded entry uses for a threading
 parameter, answering `{Result, Acc1}`:
 
-- a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
+- with the atom `plain` as `Acc` (the sentinel the plain entry of a threaded
+  class method passes: it has no caller map), a fun of arity `length(Args)` is
+  applied and answers `{Result, plain}`; a fun of arity `length(Args) + 1` (a
+  Tier 2 block, or a plain block of the wrong arity) raises the structured
+  `stateful_block_dispatch` *without running*, because its writes would be
+  dropped; a non-fun callable gets the ordinary `value`-family send. `plain`
+  is never used as a map;
+- otherwise, with a map `Acc`, a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
   `{Result, Acc}` unchanged;
 - a fun of arity `length(Args) + 1` (Tier 2) is applied to `Args ++ [Acc]` and
-  answers its own `{Result, Acc1}`;
+  answers its own `{Result, Acc1}`; a reply of any other shape means the fun was
+  a plain block of the wrong arity, and raises the structured `arity_mismatch`;
 - any other fun raises a structured `arity_mismatch`, never a raw `badarity`;
 - a non-fun callable (a `Symbol`, an object answering `value:`, ADR 0128's
   opaque callables) gets the ordinary `value`-family send and answers
   `{Result, Acc}`.
 """.
--spec call_threaded(term(), args(), map()) -> {term(), map()}.
+-spec call_threaded(term(), args(), map() | plain) -> {term(), map() | plain}.
+call_threaded(Block, Args, plain) when is_function(Block), is_list(Args) ->
+    %% The plain entry of a threaded class method (BT-3871 review): there is no
+    %% caller map to thread, so a Tier 2 block cannot be run - its writes would
+    %% be dropped silently. Decide on arity *before* applying anything, so the
+    %% block never runs and the error is the one the plain path always raised.
+    N = length(Args),
+    case erlang:is_function(Block, N) of
+        true ->
+            {erlang:apply(Block, Args), plain};
+        false ->
+            case erlang:is_function(Block, N + 1) of
+                true -> raise_stateful_block_dispatch(N);
+                false -> raise_block_arity_mismatch(block_arity(Block), N)
+            end
+    end;
+call_threaded(Callable, Args, plain) when is_list(Args) ->
+    {
+        beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)),
+        plain
+    };
 call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args), is_map(Acc) ->
     N = length(Args),
-    case erlang:fun_info(Block, arity) of
-        {arity, N} ->
+    N1 = N + 1,
+    case erlang:is_function(Block, N) of
+        true ->
             {erlang:apply(Block, Args), Acc};
-        {arity, N1} when N1 =:= N + 1 ->
-            erlang:apply(Block, Args ++ [Acc]);
-        {arity, Arity} ->
-            raise_block_arity_mismatch(Arity, N)
+        false when is_function(Block, N1) ->
+            %% A Tier 2 fun answers `{Result, Acc1}`. A plain block that merely
+            %% takes one argument more than it is called with answers anything
+            %% else: that is the arity mistake the plain path has always
+            %% reported, not a Tier 2 block, so it raises the same structured
+            %% error instead of a raw `badarg` at the caller's `element/2`.
+            case erlang:apply(Block, Args ++ [Acc]) of
+                {_Result, Acc1} = Reply when is_map(Acc1) -> Reply;
+                _NotATier2Reply -> raise_block_arity_mismatch(N1, N)
+            end;
+        false ->
+            raise_block_arity_mismatch(block_arity(Block), N)
     end;
 call_threaded(Callable, Args, Acc) when is_list(Args), is_map(Acc) ->
     {beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)), Acc}.
+
+-doc """
+`call_threaded/3` for `Callable valueWithArguments: Xs` (ADR 0132 §2).
+
+A fun with a list `Xs` is gated exactly as `call_threaded(Callable, Xs, Acc)`,
+like every other invocation: a fun of the wrong arity raises the structured
+`arity_mismatch` (or, with the `plain` sentinel and one argument too many,
+`stateful_block_dispatch`) where the plain `valueWithArguments:` lowering
+raised a raw `badarity`, the same change `value:` gets. Everything else keeps
+the plain lowering's behaviour: a fun with a non-list `Xs` is applied as it
+always was (raising the same error), and a non-fun callable is sent
+`valueWithArguments:` itself, never `value:`/`value:value:`, with `Acc`
+unchanged.
+""".
+-spec call_threaded_with_arguments(term(), term(), map() | plain) -> {term(), map() | plain}.
+call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block), is_list(Xs) ->
+    call_threaded(Block, Xs, Acc);
+call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block) ->
+    {erlang:apply(Block, Xs), Acc};
+call_threaded_with_arguments(Callable, Xs, Acc) ->
+    {beamtalk_message_dispatch:send(Callable, 'valueWithArguments:', [Xs]), Acc}.
+
+-spec block_arity(function()) -> non_neg_integer().
+block_arity(Block) ->
+    {arity, Arity} = erlang:fun_info(Block, arity),
+    Arity.
+
+-spec raise_stateful_block_dispatch(non_neg_integer()) -> no_return().
+raise_stateful_block_dispatch(N) ->
+    Selector = value_selector(N),
+    Error0 = beamtalk_error:new(stateful_block_dispatch, 'Block', Selector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        beamtalk_error:generate_message(stateful_block_dispatch, 'Block', Selector)
+    ),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Wrong argument count, or the block assigns captured variables and "
+            "the method does not thread its block: return the new value from the "
+            "block and assign it where it is called"
+        >>
+    ),
+    beamtalk_error:raise(Error2).
 
 -spec value_selector(non_neg_integer()) -> selector().
 value_selector(0) -> value;
