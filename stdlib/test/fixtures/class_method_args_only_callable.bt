@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// A callable that answers only `valueWithArguments:` (no `value`, `value:`,
+// ...), so `b valueWithArguments: xs` in a class method must send it
+// `valueWithArguments:` itself. Used by class_method_callable_test.bt.
+
+Value subclass: ClassMethodArgsOnlyCallable
+
+  valueWithArguments: xs => xs size

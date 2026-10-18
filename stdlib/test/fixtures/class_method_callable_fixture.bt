@@ -10,6 +10,15 @@
 
 sealed Object subclass: ClassMethodCallableFixture
 
+  class sealed twice: b =>
+    b value
+    b value
+
+  // A same-class pass-on of the block.
+  class sealed twiceVia: b => self twice: b
+
+  class sealed spread: b with: xs => b valueWithArguments: xs
+
   class sealed each: items do: b => items do: b
 
   class sealed collectIn: items with: b => items collect: b

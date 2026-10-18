@@ -19173,9 +19173,12 @@
       "tags": [
         "ClassMethodCallableTest",
         "TestCase",
+        "anonymous function",
         "assign",
         "assignment",
+        "callback",
         "class_method_callable_test",
+        "closure",
         "constructor",
         "create",
         "extends",
@@ -19192,6 +19195,7 @@
         "instantiate",
         "iterate",
         "iteration",
+        "lambda",
         "loop",
         "map",
         "mapping",
@@ -19210,12 +19214,19 @@
         "testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid",
         "testACollectionMessageOnAStreamStaysLazy",
         "testACollectionMessageOnAStringAnswersWhatItAlwaysDid",
+        "testASameClassPassOnHandsTheBlockOn",
+        "testAWrongArityBlockRaisesStatefulBlockDispatch",
+        "testAnInheritedClassMethodTakesTheBlock",
         "testDetectOnAnInfiniteStreamTerminates",
+        "testTwiceAnswersTheBlocksLastValue",
+        "testValueWithArgumentsOfANonListRaisesWhatTheExpressionRaises",
+        "testValueWithArgumentsOnABlock",
+        "testValueWithArgumentsOnACallableThatAnswersOnlyValueWithArguments",
         "transform",
         "unless"
       ],
-      "source": "// A class method that hands its block parameter on to a collection message\n// sends it to the receiver as written: a Dictionary, a String and a Stream\n// answer what they always did (a Stream stays lazy, so a detect: over an\n// infinite one terminates), and a ClassBuilder class-method fun registered\n// beside an invocation of the parameter answers its bare value. Kept from\n// the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed\n// the entries.\n//\n// Fixture: fixtures/class_method_callable_fixture.bt.\n\nTestCase subclass: ClassMethodCallableTest\n  field: cls = nil\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid =>\n    d := Dictionary new\n    d at: #a put: 1\n    d at: #b put: 2\n    self assert: (ClassMethodCallableFixture collectIn: d with: [:x |\n      x\n    ]) equals: (d collect: [:x | x])\n    self assert: (ClassMethodCallableFixture each: d do: [:x |\n      x\n    ]) equals: (d do: [:x | x])\n\n  testACollectionMessageOnAStreamStaysLazy =>\n    s := ClassMethodCallableFixture collectIn: (Stream on: #(1, 2, 3)) with: [:x |\n      x * 2\n    ]\n    self assert: (s isKindOf: Stream)\n    self assert: s asList equals: #(2, 4, 6)\n\n  testDetectOnAnInfiniteStreamTerminates =>\n    self\n      assert: (ClassMethodCallableFixture\n        detectIn: (Stream from: 1)\n        with: [:x | x > 3]\n        none: [0])\n      equals: 4\n\n  testACollectionMessageOnAStringAnswersWhatItAlwaysDid =>\n    self assert: (ClassMethodCallableFixture collectIn: \"abc\" with: [:c |\n      c\n    ]) equals: (\"abc\" collect: [:c | c])\n\n  testAClassBuilderFunAfterAnInvocationAnswersItsBareValue =>\n    ClassMethodCallableFixture buildAfter: [1]\n    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltAfter\n    self assert: self.cls hi equals: 42\n\n  testAClassBuilderFunBeforeAnInvocationAnswersItsBareValue =>\n    ClassMethodCallableFixture buildBefore: [1]\n    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltBefore\n    self assert: self.cls hi equals: 42",
-      "explanation": "A class method that hands its block parameter on to a collection message sends it to the receiver as written: a Dictionary, a String and a Stream answer what they always did (a Stream stays lazy, so a detect: over an infinite one terminates), and a ClassBuilder class-method fun registered beside an invocation of the parameter answers its bare value. Kept from the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed the entries.  Fixture: fixtures/class_method_callable_fixture.bt."
+      "source": "// A class method that hands its block parameter on to a collection message\n// sends it to the receiver as written: a Dictionary, a String and a Stream\n// answer what they always did (a Stream stays lazy, so a detect: over an\n// infinite one terminates), and a ClassBuilder class-method fun registered\n// beside an invocation of the parameter answers its bare value. Kept from\n// the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed\n// the entries.\n//\n// Also pinned: invoking, passing on and spreading a block parameter, an\n// inherited class method taking a block, and the error a wrong-arity block\n// raises. (A `^` from a block inside a class method is covered by\n// class_method_non_local_return_test.bt.)\n//\n// Fixtures: fixtures/class_method_callable_fixture.bt,\n// fixtures/class_method_callable_parent.bt, fixtures/class_method_callable_child.bt,\n// fixtures/class_method_args_only_callable.bt.\n\nTestCase subclass: ClassMethodCallableTest\n  field: cls = nil\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid =>\n    d := Dictionary new\n    d at: #a put: 1\n    d at: #b put: 2\n    self assert: (ClassMethodCallableFixture collectIn: d with: [:x |\n      x\n    ]) equals: (d collect: [:x | x])\n    self assert: (ClassMethodCallableFixture each: d do: [:x |\n      x\n    ]) equals: (d do: [:x | x])\n\n  testACollectionMessageOnAStreamStaysLazy =>\n    s := ClassMethodCallableFixture collectIn: (Stream on: #(1, 2, 3)) with: [:x |\n      x * 2\n    ]\n    self assert: (s isKindOf: Stream)\n    self assert: s asList equals: #(2, 4, 6)\n\n  testDetectOnAnInfiniteStreamTerminates =>\n    self\n      assert: (ClassMethodCallableFixture\n        detectIn: (Stream from: 1)\n        with: [:x | x > 3]\n        none: [0])\n      equals: 4\n\n  testACollectionMessageOnAStringAnswersWhatItAlwaysDid =>\n    self assert: (ClassMethodCallableFixture collectIn: \"abc\" with: [:c |\n      c\n    ]) equals: (\"abc\" collect: [:c | c])\n\n  testTwiceAnswersTheBlocksLastValue =>\n    self assert: (ClassMethodCallableFixture twice: [7]) equals: 7\n\n  testASameClassPassOnHandsTheBlockOn =>\n    self assert: (ClassMethodCallableFixture twiceVia: [8]) equals: 8\n\n  testAnInheritedClassMethodTakesTheBlock =>\n    self assert: (ClassMethodCallableChild twice: [9]) equals: 9\n\n  // A block of one argument where the method sends `value` raises the same\n  // structured error an instance method's `b value` does (before ADR 0133\n  // Phase 2, BT-3904, the threaded entry's gate raised `arity_mismatch`).\n  testAWrongArityBlockRaisesStatefulBlockDispatch =>\n    self should: [\n      ClassMethodCallableFixture twice: [:x | x]\n    ] raise: #stateful_block_dispatch\n\n  testValueWithArgumentsOnABlock =>\n    self assert: (ClassMethodCallableFixture spread: [:x :y |\n      x + y\n    ] with: #(3, 4)) equals: 7\n\n  // A non-block callable is sent `valueWithArguments:` itself, never\n  // `value:value:`.\n  testValueWithArgumentsOnACallableThatAnswersOnlyValueWithArguments =>\n    self assert: (ClassMethodCallableFixture spread: ClassMethodArgsOnlyCallable new with: #(1, 2)) equals: 2\n\n  // A non-list argument raises what the expression raises outside a class\n  // method.\n  testValueWithArgumentsOfANonListRaisesWhatTheExpressionRaises =>\n    @expect type\n    direct := [[:x | x] valueWithArguments: 5] on: Exception do: [:e | e kind]\n    viaClassMethod := [\n      ClassMethodCallableFixture spread: [:x | x] with: 5\n    ] on: Exception do: [:e | e kind]\n    self assert: viaClassMethod equals: direct\n\n  testAClassBuilderFunAfterAnInvocationAnswersItsBareValue =>\n    ClassMethodCallableFixture buildAfter: [1]\n    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltAfter\n    self assert: self.cls hi equals: 42\n\n  testAClassBuilderFunBeforeAnInvocationAnswersItsBareValue =>\n    ClassMethodCallableFixture buildBefore: [1]\n    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltBefore\n    self assert: self.cls hi equals: 42",
+      "explanation": "A class method that hands its block parameter on to a collection message sends it to the receiver as written: a Dictionary, a String and a Stream answer what they always did (a Stream stays lazy, so a detect: over an infinite one terminates), and a ClassBuilder class-method fun registered beside an invocation of the parameter answers its bare value. Kept from the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed the entries.  Also pinned: invoking, passing on and spreading a block parameter, an inherited class method taking a block, and the error a wrong-arity block raises. (A `^` from a block inside a class method is covered by class_method_non_local_return_test.bt.)  Fixtures: fixtures/class_method_callable_fixture.bt, fixtures/class_method_callable_parent.bt, fixtures/class_method_callable_child.bt, fixtures/class_method_args_only_callable.bt."
     },
     {
       "id": "stdlib-test-class-method-conditional-local-and-class-var-test",
@@ -31000,6 +31011,24 @@
       "explanation": "BT-1862: Test fixture — actor with a keyword class method that transforms constructor args before building state.  The class method `create: name value: val` combines the two params into a single `label` string, demonstrating arg→state transformation that would be lost if supervision bypassed the class method."
     },
     {
+      "id": "stdlib-test-fixtures-class-method-args-only-callable",
+      "title": "ClassMethodArgsOnlyCallable",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ClassMethodArgsOnlyCallable",
+        "Value",
+        "class_method_args_only_callable",
+        "extends",
+        "inherit",
+        "inheritance",
+        "subclassing",
+        "value",
+        "valueWithArguments:"
+      ],
+      "source": "// A callable that answers only `valueWithArguments:` (no `value`, `value:`,\n// ...), so `b valueWithArguments: xs` in a class method must send it\n// `valueWithArguments:` itself. Used by class_method_callable_test.bt.\n\nValue subclass: ClassMethodArgsOnlyCallable\n\n  valueWithArguments: xs => xs size",
+      "explanation": "A callable that answers only `valueWithArguments:` (no `value`, `value:`, ...), so `b valueWithArguments: xs` in a class method must send it `valueWithArguments:` itself. Used by class_method_callable_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-class-method-block",
       "title": "ClassMethodBlock",
       "category": "stdlib-fixtures",
@@ -31079,6 +31108,24 @@
       "explanation": "BT-1397: Test fixture for class method calls inside blocks in class methods. Class methods that contain blocks calling other class methods via `self`."
     },
     {
+      "id": "stdlib-test-fixtures-class-method-callable-child",
+      "title": "ClassMethodCallableChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ClassMethodCallableChild",
+        "ClassMethodCallableParent",
+        "class_method_callable_child",
+        "extends",
+        "inherit",
+        "inheritance",
+        "marker",
+        "object",
+        "subclassing"
+      ],
+      "source": "// Inherits `class twice:` from ClassMethodCallableParent without overriding\n// it. Used by class_method_callable_test.bt.\n\nClassMethodCallableParent subclass: ClassMethodCallableChild\n\n  class marker => 1",
+      "explanation": "Inherits `class twice:` from ClassMethodCallableParent without overriding it. Used by class_method_callable_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-class-method-callable-fixture",
       "title": "ClassMethodCallableFixture",
       "category": "stdlib-fixtures",
@@ -31111,11 +31158,32 @@
         "object",
         "search",
         "set",
+        "spread:with:",
         "subclassing",
-        "transform"
+        "transform",
+        "twice:",
+        "twiceVia:"
       ],
-      "source": "// Class methods that hand a block parameter on to a collection message, or\n// that register a ClassBuilder class beside an invocation of one. Moved from\n// the ADR 0132 threaded-entry fixture when ADR 0133 Phase 2 (BT-3904)\n// removed the threaded entries: the behaviour they pin (a non-list receiver\n// takes the plain send, a ClassBuilder fun answers its bare value) is the\n// ordinary class-method lowering's. Used by class_method_callable_test.bt.\n\nsealed Object subclass: ClassMethodCallableFixture\n\n  class sealed each: items do: b => items do: b\n\n  class sealed collectIn: items with: b => items collect: b\n\n  class sealed detectIn: items with: b none: c => items detect: b ifNone: c\n\n  class sealed buildAfter: b =>\n    b value\n    Object classBuilder name: #ClassMethodCallableBuiltAfter;\n      superclass: Object;\n      classMethods: #{#hi => [:_self | 42]};\n      register\n\n  class sealed buildBefore: b =>\n    cls := Object classBuilder name: #ClassMethodCallableBuiltBefore;\n      superclass: Object;\n      classMethods: #{#hi => [:_self | 42]};\n      register\n    b value\n    cls",
+      "source": "// Class methods that hand a block parameter on to a collection message, or\n// that register a ClassBuilder class beside an invocation of one. Moved from\n// the ADR 0132 threaded-entry fixture when ADR 0133 Phase 2 (BT-3904)\n// removed the threaded entries: the behaviour they pin (a non-list receiver\n// takes the plain send, a ClassBuilder fun answers its bare value) is the\n// ordinary class-method lowering's. Used by class_method_callable_test.bt.\n\nsealed Object subclass: ClassMethodCallableFixture\n\n  class sealed twice: b =>\n    b value\n    b value\n\n  // A same-class pass-on of the block.\n  class sealed twiceVia: b => self twice: b\n\n  class sealed spread: b with: xs => b valueWithArguments: xs\n\n  class sealed each: items do: b => items do: b\n\n  class sealed collectIn: items with: b => items collect: b\n\n  class sealed detectIn: items with: b none: c => items detect: b ifNone: c\n\n  class sealed buildAfter: b =>\n    b value\n    Object classBuilder name: #ClassMethodCallableBuiltAfter;\n      superclass: Object;\n      classMethods: #{#hi => [:_self | 42]};\n      register\n\n  class sealed buildBefore: b =>\n    cls := Object classBuilder name: #ClassMethodCallableBuiltBefore;\n      superclass: Object;\n      classMethods: #{#hi => [:_self | 42]};\n      register\n    b value\n    cls",
       "explanation": "Class methods that hand a block parameter on to a collection message, or that register a ClassBuilder class beside an invocation of one. Moved from the ADR 0132 threaded-entry fixture when ADR 0133 Phase 2 (BT-3904) removed the threaded entries: the behaviour they pin (a non-list receiver takes the plain send, a ClassBuilder fun answers its bare value) is the ordinary class-method lowering's. Used by class_method_callable_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-class-method-callable-parent",
+      "title": "ClassMethodCallableParent",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ClassMethodCallableParent",
+        "Object",
+        "class_method_callable_parent",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "twice:"
+      ],
+      "source": "// An open class whose class method takes a block, inherited without an\n// override by ClassMethodCallableChild. Used by class_method_callable_test.bt.\n\nObject subclass: ClassMethodCallableParent\n\n  class twice: b =>\n    b value\n    b value",
+      "explanation": "An open class whose class method takes a block, inherited without an override by ClassMethodCallableChild. Used by class_method_callable_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-class-method-conditional-local-and-class-var",

@@ -191,6 +191,9 @@ pub(in crate::core_erlang) fn render(
                 threads: _,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
+            // `NlrCatch::slot` is deliberately ignored: only the removed
+            // class-method threaded entry (BT-3904) built a non-empty one; the
+            // field goes with the `Acc` family (BT-3905).
             ThreadedStmt::NlrCatch {
                 boundary, token, ..
             } => {

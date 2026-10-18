@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Inherits `class twice:` from ClassMethodCallableParent without overriding
+// it. Used by class_method_callable_test.bt.
+
+ClassMethodCallableParent subclass: ClassMethodCallableChild
+
+  class marker => 1

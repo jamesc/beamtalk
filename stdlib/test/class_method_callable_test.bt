@@ -9,7 +9,14 @@
 // the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed
 // the entries.
 //
-// Fixture: fixtures/class_method_callable_fixture.bt.
+// Also pinned: invoking, passing on and spreading a block parameter, an
+// inherited class method taking a block, and the error a wrong-arity block
+// raises. (A `^` from a block inside a class method is covered by
+// class_method_non_local_return_test.bt.)
+//
+// Fixtures: fixtures/class_method_callable_fixture.bt,
+// fixtures/class_method_callable_parent.bt, fixtures/class_method_callable_child.bt,
+// fixtures/class_method_args_only_callable.bt.
 
 TestCase subclass: ClassMethodCallableTest
   field: cls = nil
@@ -46,6 +53,43 @@ TestCase subclass: ClassMethodCallableTest
     self assert: (ClassMethodCallableFixture collectIn: "abc" with: [:c |
       c
     ]) equals: ("abc" collect: [:c | c])
+
+  testTwiceAnswersTheBlocksLastValue =>
+    self assert: (ClassMethodCallableFixture twice: [7]) equals: 7
+
+  testASameClassPassOnHandsTheBlockOn =>
+    self assert: (ClassMethodCallableFixture twiceVia: [8]) equals: 8
+
+  testAnInheritedClassMethodTakesTheBlock =>
+    self assert: (ClassMethodCallableChild twice: [9]) equals: 9
+
+  // A block of one argument where the method sends `value` raises the same
+  // structured error an instance method's `b value` does (before ADR 0133
+  // Phase 2, BT-3904, the threaded entry's gate raised `arity_mismatch`).
+  testAWrongArityBlockRaisesStatefulBlockDispatch =>
+    self should: [
+      ClassMethodCallableFixture twice: [:x | x]
+    ] raise: #stateful_block_dispatch
+
+  testValueWithArgumentsOnABlock =>
+    self assert: (ClassMethodCallableFixture spread: [:x :y |
+      x + y
+    ] with: #(3, 4)) equals: 7
+
+  // A non-block callable is sent `valueWithArguments:` itself, never
+  // `value:value:`.
+  testValueWithArgumentsOnACallableThatAnswersOnlyValueWithArguments =>
+    self assert: (ClassMethodCallableFixture spread: ClassMethodArgsOnlyCallable new with: #(1, 2)) equals: 2
+
+  // A non-list argument raises what the expression raises outside a class
+  // method.
+  testValueWithArgumentsOfANonListRaisesWhatTheExpressionRaises =>
+    @expect type
+    direct := [[:x | x] valueWithArguments: 5] on: Exception do: [:e | e kind]
+    viaClassMethod := [
+      ClassMethodCallableFixture spread: [:x | x] with: 5
+    ] on: Exception do: [:e | e kind]
+    self assert: viaClassMethod equals: direct
 
   testAClassBuilderFunAfterAnInvocationAnswersItsBareValue =>
     ClassMethodCallableFixture buildAfter: [1]
