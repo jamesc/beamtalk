@@ -292,38 +292,70 @@ pub struct ParameterInfo {
     pub documentation: Option<EcoString>,
 }
 
+/// One text edit of a [`CodeAction`]: the source in `span` is replaced by
+/// `new_text`. An empty span is an insertion at `span.start()`.
+///
+/// **DDD Context:** Language Service — Value Object
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceEdit {
+    /// The byte range (in the source file) that `new_text` replaces.
+    pub span: Span,
+    /// The replacement text.
+    pub new_text: EcoString,
+}
+
+impl SourceEdit {
+    /// An insertion of `new_text` at byte offset `at`.
+    #[must_use]
+    pub fn insert(at: u32, new_text: impl Into<EcoString>) -> Self {
+        Self::replace(Span::new(at, at), new_text)
+    }
+
+    /// A replacement of the source in `span` by `new_text`.
+    #[must_use]
+    pub fn replace(span: Span, new_text: impl Into<EcoString>) -> Self {
+        Self {
+            span,
+            new_text: new_text.into(),
+        }
+    }
+}
+
 /// A suggested code action (e.g. "Add annotation: -> Integer").
 ///
 /// **DDD Context:** Language Service — Value Object
 ///
-/// Used to surface inferred return-type annotations as VS Code quick-fixes
-/// (ADR 0045 Phase 1b). Each action describes a single text
-/// insertion: `new_text` inserted at byte offset `insert_at` in the file.
+/// Surfaced as VS Code quick-fixes: inferred return-type annotations (ADR
+/// 0045 Phase 1b) and the ADR 0133 "return the value instead" fix for the
+/// escaping-block diagnostic. Each action is a set of non-overlapping
+/// [`SourceEdit`]s applied together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeAction {
     /// Human-readable title shown in the VS Code lightbulb menu.
     /// Example: `"Add annotation: -> Integer"`
     pub title: EcoString,
-    /// The text to insert at `insert_at`.
-    /// Example: `"-> Integer "`
-    pub new_text: EcoString,
-    /// The byte offset (in the source file) at which `new_text` is inserted.
-    /// This is a zero-length insertion point — existing text is not replaced.
-    pub insert_at: u32,
+    /// The edits the action applies, in source order, non-overlapping.
+    pub edits: Vec<SourceEdit>,
 }
 
 impl CodeAction {
-    /// Creates a new code action.
+    /// Creates a code action that inserts `new_text` at byte offset
+    /// `insert_at`.
     #[must_use]
     pub fn new(
         title: impl Into<EcoString>,
         new_text: impl Into<EcoString>,
         insert_at: u32,
     ) -> Self {
+        Self::with_edits(title, vec![SourceEdit::insert(insert_at, new_text)])
+    }
+
+    /// Creates a code action that applies `edits`.
+    #[must_use]
+    pub fn with_edits(title: impl Into<EcoString>, edits: Vec<SourceEdit>) -> Self {
         Self {
             title: title.into(),
-            new_text: new_text.into(),
-            insert_at,
+            edits,
         }
     }
 }

@@ -22,6 +22,7 @@
 //! - [`flush_and_rename_edits`] — workspace-edit builders, flush-action
 //!   classification, and rename-class/-method support
 //! - [`call_hierarchy`] — callHierarchy helpers
+//! - [`code_actions`] — `textDocument/codeAction` quick-fixes
 //! - [`references`] — `textDocument/references` declaration-merge,
 //!   driven through the [`open_test_file`] / [`real_did_open`] harness below
 //! - [`type_hierarchy`] — goto-implementation and
@@ -144,6 +145,7 @@ pub(crate) fn references_params(
 }
 
 mod call_hierarchy;
+mod code_actions;
 mod command_builders;
 mod content_fetch;
 mod diagnostics_table;
