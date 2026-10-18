@@ -38,10 +38,11 @@
 use std::collections::{HashMap, HashSet};
 
 use beamtalk_core::ast::{
-    Expression, Literal, MessageSelector, MethodDefinition, StateDeclaration,
+    Expression, Literal, MessageSelector, MethodDefinition, Pattern, StateDeclaration,
 };
 use beamtalk_core::ast_walker;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 use beamtalk_core::synthetic_selectors::with_star_selector;
 
 /// Builtin types on which the arithmetic BIFs (`+ - * /`) are correct.
@@ -124,6 +125,11 @@ pub(in crate::core_erlang) fn classify_fields(
     loop {
         let mut rejected: Vec<String> = Vec::new();
         for method in writers {
+            // A typed parameter is evidence only while its name means the
+            // parameter: a block parameter, local or pattern variable of the
+            // same name (shadowing is a warning, not an error) may hold
+            // anything, and the walk below does not track scopes.
+            let rebound = names_rebound_in(method);
             let numeric_params: HashSet<&str> = method
                 .parameters
                 .iter()
@@ -135,6 +141,7 @@ pub(in crate::core_erlang) fn classify_fields(
                     )
                 })
                 .map(|p| p.name.name.as_str())
+                .filter(|name| !rebound.contains(*name))
                 .collect();
             for stmt in &method.body {
                 ast_walker::walk_expression(&stmt.expression, &mut |e| {
@@ -166,6 +173,36 @@ pub(in crate::core_erlang) fn classify_fields(
             (d.name.name.to_string(), fact)
         })
         .collect()
+}
+
+/// Every name `method`'s body binds: block parameters, plain assignment
+/// targets, and destructuring / `match:` pattern variables.
+fn names_rebound_in(method: &MethodDefinition) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let add_pattern = |names: &mut HashSet<String>, pattern: &Pattern| {
+        let (bindings, _) = extract_pattern_bindings(pattern);
+        names.extend(bindings.into_iter().map(|id| id.name.to_string()));
+    };
+    for stmt in &method.body {
+        ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Block(block) => {
+                names.extend(block.parameters.iter().map(|p| p.name.to_string()));
+            }
+            Expression::Assignment { target, .. } => {
+                if let Expression::Identifier(id) = target.unwrap_parens() {
+                    names.insert(id.name.to_string());
+                }
+            }
+            Expression::DestructureAssignment { pattern, .. } => add_pattern(&mut names, pattern),
+            Expression::Match { arms, .. } => {
+                for arm in arms {
+                    add_pattern(&mut names, &arm.pattern);
+                }
+            }
+            _ => {}
+        });
+    }
+    names
 }
 
 fn is_numeric_literal(expr: &Expression) -> bool {
@@ -329,6 +366,22 @@ mod tests {
             "Actor subclass: H\n  state: total = 0\n  add: n => self.total := self.total + n\n",
         );
         assert_eq!(facts["total"], FieldTypeFact::Untyped);
+    }
+
+    #[test]
+    fn typed_param_name_rebound_in_the_body_is_not_evidence() {
+        // The block's `n` is a collection element, not the `:: Integer`
+        // parameter it shadows.
+        let shadowed = instance_facts(
+            "Actor subclass: H\n  state: total = 0\n  \
+             add: n :: Integer in: xs => xs do: [:n | self.total := self.total + n]\n",
+        );
+        assert_eq!(shadowed["total"], FieldTypeFact::Untyped);
+        let pattern = instance_facts(
+            "Actor subclass: H\n  state: total = 0\n  \
+             add: n :: Integer from: t => {n, _} := t. self.total := self.total + n\n",
+        );
+        assert_eq!(pattern["total"], FieldTypeFact::Untyped);
     }
 
     #[test]

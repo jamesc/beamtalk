@@ -75,11 +75,11 @@ EunitApps = [beamtalk_runtime, beamtalk_workspace, beamtalk_compiler],
 EunitExcluded = [
     %% {Module, "why it cannot run in the default EUnit pass"}
     {beamtalk_opaque_type_tests,
-        "red (BT-3896 follow-up): a dynamic `==` send to a Pid/Port/Reference raises "
+        "red, BT-3919: a dynamic `==` send to a Pid/Port/Reference raises "
         "does_not_understand and respondsTo: #== answers false (also for Integer), so "
         "pid_equality_inherited and {pid,port,reference}_responds_to fail"},
     {beamtalk_codegen_simulation_tests,
-        "red (BT-3896 follow-up): extension_error_propagation_test - an extension method "
+        "red, BT-3920: extension_error_propagation_test - an extension method "
         "that raises crashes the bt@counter actor with if_clause in handle_call/3 instead "
         "of answering {error, {error, extension_crash, _}}"}
 ],
@@ -107,11 +107,22 @@ IsCompanionOf = fun(T, Mods) -> lists:any(fun(M) -> T =:= M ++ "_tests" end, Mod
 NotViaApps = [T || T <- TestDirSuites, not IsCompanionOf(T, SrcMods)],
 Standalone = [T || T <- NotViaApps, not IsCompanionOf(T, NotViaApps)],
 ExcludedNames = [atom_to_list(M) || {M, Reason} <- EunitExcluded, is_list(Reason), Reason =/= ""],
+%% This script is evaluated by every rebar3 command (compile, dialyzer, ...),
+%% so these errors say exactly which list to fix.
 length(ExcludedNames) =:= length(EunitExcluded) orelse
-    erlang:error({eunit_excluded_entries_need_a_reason, EunitExcluded}),
+    erlang:error(
+        {"runtime/rebar.config.script: every EunitExcluded entry needs a non-empty reason",
+            EunitExcluded}
+    ),
 case ExcludedNames -- Standalone of
-    [] -> ok;
-    Stale -> erlang:error({stale_eunit_exclusions, Stale})
+    [] ->
+        ok;
+    Stale ->
+        erlang:error(
+            {"runtime/rebar.config.script: EunitExcluded names modules that are no longer "
+             "standalone test suites (deleted, or now run as a src module's companion); "
+             "remove them from EunitExcluded", Stale}
+        )
 end,
 EunitTests =
     [{application, App} || App <- EunitApps] ++
