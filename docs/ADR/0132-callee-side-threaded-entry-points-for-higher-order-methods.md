@@ -24,7 +24,9 @@ Dependency order: {3866, 3867, 3868, 3869} → 3870 (after 3868) → {3871, 3872
 
 Two file references in the text below are corrected by this tracking entry: `call_threaded/3` lives in `beamtalk_dispatch.erl` (there is no `beamtalk_block.erl`), and the generated builtins file is `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`.
 
-**Deviation from §2 (BT-3871 review, #4361):** the plain `class_<sel>` wrapper does not hand the body an empty map. With `~{}~` a Tier 2 block reaching the plain entry from a late-bound send ran through `call_threaded/3` and its writes were dropped silently, which §4 forbids. The wrapper passes the atom `plain` as `Acc@0`; `call_threaded/3` with `plain` applies an arity-N fun as before, raises `stateful_block_dispatch` for an arity-N+1 fun without running it, and sends `value` to a non-fun callable. `plain` is threaded through `Acc` unchanged and never used as a map.
+**Deviation from §2 (BT-3871 review, #4361):** the plain `class_<sel>` wrapper does not hand the body an empty map. With `~{}~` a Tier 2 block reaching the plain entry from a late-bound send ran through `call_threaded/3` and its writes were dropped silently, which §4 forbids. The wrapper passes a sentinel as `Acc@0` (the atom `plain` in #4361; `{plain, ClassTag, Selector}` since BT-3885, below); `call_threaded/3` with the sentinel applies an arity-N fun as before, raises `stateful_block_dispatch` for a Tier 2 fun without running it, and sends `value` to a non-fun callable. The sentinel is threaded through `Acc` unchanged and never used as a map.
+
+**Deviation from §2's tier gate (BT-3885):** the gate below said `is_function(B, n+1)` applies a Tier 2 fun with `Acc`. Arity alone cannot tell a Tier 2 fun from a plain block that takes one argument more than it is called with, so with a real `Acc` map that gate had to *run* such a block (its side effects happened, with the caller's `Acc` bound to its last parameter) before its reply showed the mistake, and a reply that happened to be `{_, Map}` (an Erlang `{ok, #{...}}`) was taken for a Tier 2 reply, the foreign map becoming the caller's `Acc`. Tier 2 funs are now **marked at creation**: codegen mints every Tier 2 block as `letrec 'BtTier2Block'/N+1 = fun (..., StateAcc) -> ... in 'BtTier2Block'/N+1` (`generate_block_stateful_fun`, the one place Tier 2 funs are created), the Erlang compiler names the lifted function `-F/A-BtTier2Block/N+1-K-`, and `beamtalk_dispatch:is_tier2_block/1` reads that from `erlang:fun_info(F, name)`. The gate decides the tier **before applying anything**: an arity-N+1 fun runs with `Acc` only if it is marked; unmarked, it raises `arity_mismatch` unrun, whatever `Acc` is. The mark and the plain-entry sentinel have one source, `crates/beamtalk-codegen/src/core_erlang/threading_abi.rs`, rendered into the generated `runtime/apps/beamtalk_runtime/include/beamtalk_threading_abi.hrl` (`just check-generated-builtins`, `checked_in_header_matches_the_generator`), and an EUnit test checks a block codegen compiled against the runtime's check end to end. The sentinel carries the class method's name so the refusal says which method refused the block (`'twice:' on Twice class cannot thread a block that assigns captured variables through this send; the block was not run`) instead of the structural fallback's wording about `perform:` and `value`.
 
 **Deviation from §2's NLR row (BT-3871 review, #4361):** Phase 1c ships no NLR-carrying threaded body. A `^` throws the `Acc` version current where its block is lowered, and a threaded callee can run the block after a later `Acc` step (`b value: [:x | ^x]`, a stored block, a block a callee keeps), so the `{Val, AccAtThrow}` catch would drop the caller's writes. The threading index therefore gives a method whose body holds any block that does `^` no threading parameters (`facts::body_has_block_nlr`, over-approximate); it keeps its plain entry and compiles as before. The verifier's `NlrInThreadedBody` refuses an NLR node in a threaded body; `NlrSlotShapeMismatch` keeps the slot shape Phase 3 will need. Carrying the live `Acc` to the throw is Phase 3. Stdlib effect: `Collection>>detect:ifNone:` loses its (instance-side) threading parameter.
 
@@ -317,7 +319,10 @@ For a class method:
 gate: `is_function(B, n)` applies a Tier 1 fun and answers `{Result, Acc}`
 unchanged; `is_function(B, n+1)` applies a Tier 2 fun with `Acc`; anything
 else is the dynamic `value`-family send (`beamtalk_dispatch`), answering
-`{Result, Acc}`. It replaces the structural fallback's `is_function(B, n)`
+`{Result, Acc}`. (Amended by BT-3885, see Implementation Tracking: an arity
+n+1 fun is Tier 2 only when it carries the Tier 2 mark codegen gives every
+Tier 2 block, read before it is applied; any other fun of the wrong arity
+raises `arity_mismatch` without running.) It replaces the structural fallback's `is_function(B, n)`
 check for threading parameters, so the plain path pays what it pays today
 plus one tuple. This is ADR 0128's per-element `is_function/2` gate, moved
 from the fold into the one helper every invocation uses.
@@ -865,8 +870,37 @@ and the per-invocation gate makes one entry accept any mix.
 - The `tryDo:/2` precedent becomes the rule for natives, so a hand-written
   HOM that should thread has a documented, fixture-checked shape.
 - I5 ships on its own in Phase 0, a plain ADR 0131 producer.
+- **The tier is decided before a block runs** (BT-3885). A Tier 2 fun carries
+  a mark from creation, so the gate never applies a wrong-arity block to find
+  out what it is, and no reply shape is ever trusted: a plain block that
+  answers `{ok, #{...}}` cannot become the caller's `Acc`. The same mark lets
+  the plain-entry refusal be precise (`stateful_block_dispatch` only for a
+  real Tier 2 block, naming the class method; `arity_mismatch` for a block of
+  the wrong arity).
 
 ### Negative
+- **Every Tier 2 invocation through the gate pays the mark check** (BT-3885):
+  one `erlang:fun_info(F, name)`, one `atom_to_binary/2` and a scan of the
+  name's last few bytes, about 100 to 140 ns on the BT-3885 microbenchmark
+  (`call_threaded/3` with a marked Tier 2 fun and a map `Acc`: about 140 ns,
+  against about 13 ns for the old arity-only gate). Tier 1 invocations and the
+  plain entry's Tier 1 path pay nothing (11 to 12 ns before and after); the
+  check runs only for a fun of arity n+1. Phase 1f's measurement includes it;
+  if it shows up, the decision can be memoised per lifted name.
+- **The mark relies on the Erlang compiler's lifted-function naming**
+  (`-F/A-Name/Arity-K-` for a `letrec` fun), an implementation detail that has
+  been stable across OTP releases but is not a documented contract. A change
+  fails loudly, not silently: every Tier 2 block would be refused as
+  `arity_mismatch`, and the end-to-end EUnit test over a compiled Tier 2 block
+  (`beamtalk_threaded_class_entries_tests:compiled_mark_test_`, run through
+  `beamtalk_dispatch_tests`) goes red.
+- **An unmarked Tier 2 fun is refused.** A Tier 2 block compiled before
+  BT-3885, or a hand-written Erlang `fun(Args..., Acc)`, raises
+  `arity_mismatch` at a threaded entry. Erlang code that means to hand the gate
+  a Tier 2 block mints it as a named fun called `?BT_TIER2_BLOCK_NAME`
+  (`beamtalk_threading_abi.hrl`) that uses its own name, as the EUnit helper
+  `beamtalk_tier2_test_block:mark/1` does (a test pins that spelling to the
+  generated name).
 - **The plain path of a threading HOM pays one tuple per block invocation**
   and threads the `plain` sentinel as `Acc` through its body's constructs (a trailing
   slot in each loop or fold tuple). Phase 1 measures it against today's

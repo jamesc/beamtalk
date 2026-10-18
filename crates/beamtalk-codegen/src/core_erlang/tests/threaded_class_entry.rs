@@ -87,12 +87,14 @@ fn a_direct_invocation_is_a_body_over_acc_with_a_plain_wrapper() {
          let _seq5 = _ThV7 in \
          let _ThAnswer8 = _seq5 in {_ThAnswer8, Acc@2}"
     );
-    // The plain entry: today's name and arity, over the body with the `plain`
-    // sentinel (no caller map; a Tier 2 block is refused, not run).
+    // The plain entry: today's name and arity, over the body with the plain-entry
+    // sentinel naming the method (no caller map; a Tier 2 block is refused, not
+    // run).
     assert_eq!(
         function_text(&code, "'class_twice:'/2"),
         "'class_twice:'/2 = fun (ClassSelf, _b1) ->\n    \
-         call 'erlang':'element'(1, apply '__t2_class_twice:'/3 (ClassSelf, _b1, 'plain'))"
+         call 'erlang':'element'(1, apply '__t2_class_twice:'/3 \
+         (ClassSelf, _b1, {'plain', 'ThreadedFixture class', 'twice:'}))"
     );
 }
 
@@ -386,10 +388,11 @@ fn an_annotated_entry_has_a_spec_over_the_acc_map() {
         ),
         "{code}"
     );
-    // `Acc` is the caller's map or the `'plain'` sentinel of the plain wrapper.
+    // `Acc` is the caller's map or the plain-entry sentinel of the plain wrapper.
     assert!(
         code.contains(
-            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, {'atom', 0, 'plain'}]}]}, \
+            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, {'type', 0, 'tuple', \
+             [{'atom', 0, 'plain'}, {'type', 0, 'atom', []}, {'type', 0, 'atom', []}]}]}]}, \
              {'type', 0, 'tuple', [{'type', 0, 'integer', []}, {'type', 0, 'union', "
         ),
         "{code}"

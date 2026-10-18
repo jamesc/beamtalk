@@ -147,6 +147,7 @@ mod supervisor_codegen;
 mod threaded_entry;
 mod threaded_expr;
 mod threaded_ir;
+pub mod threading_abi;
 mod threading_analysis;
 mod util;
 mod value_accessors;

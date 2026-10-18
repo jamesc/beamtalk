@@ -2226,11 +2226,13 @@ impl CoreErlangGenerator {
                 frame.end_threaded_class_body();
                 let entry_name = threaded_class_fn_name(&selector_name);
                 // The body, lowered once over `Acc`, then today's name and
-                // arity as a wrapper that hands it the `plain` sentinel (it has
-                // no caller map: `call_threaded/3` runs a Tier 1 block and
-                // raises `stateful_block_dispatch` for a Tier 2 one rather than
-                // dropping its writes) and answers the bare result (ADR 0132
-                // §2, as amended by the BT-3871 review).
+                // arity as a wrapper that hands it the plain-entry sentinel
+                // `{'plain', '<Class> class', '<sel>'}` (it has no caller map:
+                // `call_threaded/3` runs a Tier 1 block and raises
+                // `stateful_block_dispatch` naming this method for a Tier 2
+                // one rather than dropping its writes) and answers the bare
+                // result (ADR 0132 §2, as amended by the BT-3871 and BT-3885
+                // reviews).
                 docvec![
                     "\n",
                     fname(entry_name.clone(), arity + 1),
@@ -2255,7 +2257,10 @@ impl CoreErlangGenerator {
                             " (ClassSelf",
                             Self::class_method_params_suffix_doc(&param_vars),
                             ", ",
-                            leaf::atom("plain"),
+                            crate::core_erlang::threading_abi::plain_entry_acc_doc(
+                                &class.name.name,
+                                selector_name.as_str(),
+                            ),
                             "))",
                         ]
                     ),
