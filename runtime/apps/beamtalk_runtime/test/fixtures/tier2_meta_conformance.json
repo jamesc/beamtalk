@@ -3,13 +3,66 @@
     "class_name": "ThreadedMetaFixture",
     "fixture": "threaded_meta_fixture",
     "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_meta_fixture.bt",
-    "tier2_methods": {},
+    "tier2_methods": {
+      "twice:": {"entry_fn": "__t2_twice:", "positions": [0]}
+    },
     "tier2_class_methods": {
       "twice:": {"entry_fn": "__t2_class_twice:", "positions": [0]}
     },
-    "unthreaded_selectors": ["twice:"],
+    "unthreaded_selectors": [],
     "unthreaded_class_selectors": [],
-    "why": "ADR 0132 Phase 1c (BT-3871): the class-side `twice:` invokes its block parameter at the method root, so its module advertises the threaded entry `'__t2_class_twice:'` in `tier2_class_methods`. The instance-side `twice:` threads too (its `MethodInfo::threading_params` is [0]) but gets its entry with ADR 0132 Phase 1d, so `tier2_methods` is still empty. Each expected map is `selector => {\"entry_fn\": name, \"positions\": [0-based arg positions]}`; `unthreaded_selectors` are instance methods and `unthreaded_class_selectors` class methods that must resolve to no threaded entry on either side."
+    "why": "ADR 0132 Phase 1c (BT-3871) and 1d (BT-3872): `twice:` invokes its block parameter at the method root on both sides, so this value type advertises the class-side entry `'__t2_class_twice:'` in `tier2_class_methods` and the instance-side entry `'__t2_twice:'` in `tier2_methods`. Each expected map is `selector => {\"entry_fn\": name, \"positions\": [0-based arg positions]}`; `unthreaded_selectors` are instance methods and `unthreaded_class_selectors` class methods that must resolve to no threaded entry on either side."
+  },
+  {
+    "class_name": "ThreadedValueEntriesFixture",
+    "fixture": "threaded_value_entries_fixture",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_value_entries_fixture.bt",
+    "tier2_methods": {
+      "apply:to:": {"entry_fn": "__t2_apply:to:", "positions": [0]},
+      "bothOf:": {"entry_fn": "__t2_bothOf:", "positions": [0]},
+      "branch:": {"entry_fn": "__t2_branch:", "positions": [0]},
+      "cascade:": {"entry_fn": "__t2_cascade:", "positions": [0]},
+      "collectIn:with:": {"entry_fn": "__t2_collectIn:with:", "positions": [1]},
+      "detectIn:with:": {"entry_fn": "__t2_detectIn:with:", "positions": [1]},
+      "doubled:": {"entry_fn": "__t2_doubled:", "positions": [0]},
+      "each:do:": {"entry_fn": "__t2_each:do:", "positions": [1]},
+      "sumOver:with:": {"entry_fn": "__t2_sumOver:with:", "positions": [1]},
+      "twice:": {"entry_fn": "__t2_twice:", "positions": [0]},
+      "twiceVia:": {"entry_fn": "__t2_twiceVia:", "positions": [0]},
+      "withLocals:": {"entry_fn": "__t2_withLocals:", "positions": [0]}
+    },
+    "tier2_class_methods": {},
+    "unthreaded_selectors": ["plain:", "storeAway:"],
+    "unthreaded_class_selectors": [],
+    "why": "ADR 0132 Phase 1d (BT-3872): a value-type instance method with a threading parameter (an invocation, the callable of a collection HOM, a pass-on to the sealed class's own method, as an operand, an assigned value or a conditional's receiver, in a cascade) advertises its entry and positions in `tier2_methods`. `plain:` (no block), `storeAway:` (stores the block), `detectFirst:in:` and `firstAfter:in:` (a block that does `^`) and `both:with:` (a use of `a` holding a use of `b`) advertise none."
+  },
+  {
+    "class_name": "ThreadedValueRecordFixture",
+    "fixture": "threaded_value_record_fixture",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_value_record_fixture.bt",
+    "tier2_methods": {
+      "detectFirst:": {"entry_fn": "__t2_detectFirst:", "positions": [0]},
+      "each:": {"entry_fn": "__t2_each:", "positions": [0]},
+      "twice:": {"entry_fn": "__t2_twice:", "positions": [0]},
+      "twiceVia:": {"entry_fn": "__t2_twiceVia:", "positions": [0]}
+    },
+    "tier2_class_methods": {},
+    "unthreaded_selectors": ["items"],
+    "unthreaded_class_selectors": [],
+    "why": "ADR 0132 Phase 1d (BT-3872): a `Value subclass:` advertises its instance-side entries like any value type; its auto-generated slot getter `items` has none."
+  },
+  {
+    "class_name": "ThreadedValueTestCaseFixture",
+    "fixture": "threaded_value_test_case_fixture",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/threaded_value_test_case_fixture.bt",
+    "tier2_methods": {
+      "bump:": {"entry_fn": "__t2_bump:", "positions": [0]},
+      "bumpTwice:": {"entry_fn": "__t2_bumpTwice:", "positions": [0]}
+    },
+    "tier2_class_methods": {},
+    "unthreaded_selectors": [],
+    "unthreaded_class_selectors": [],
+    "why": "ADR 0132 Phase 1d (BT-3872): a `TestCase` method that writes a field and invokes its block parameter threads `Self` beside `Acc` (`[SelfVt, Acc]`) and advertises its entry."
   },
   {
     "class_name": "ThreadedClassEntriesFixture",

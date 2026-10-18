@@ -230,6 +230,17 @@ impl CoreErlangGenerator {
         body: &beamtalk_core::ast::Block,
         eligible: &[VersionPrefix],
     ) -> ThreadedFamilies {
+        self.stmts_threaded_families(&body.body, eligible)
+    }
+
+    /// [`Self::body_threaded_families`] over a statement list: a block's body,
+    /// or a whole method body (ADR 0132 §2: the families of a threaded entry's
+    /// `MethodBody`).
+    pub(in crate::core_erlang) fn stmts_threaded_families(
+        &self,
+        stmts: &[beamtalk_core::ast::ExpressionStatement],
+        eligible: &[VersionPrefix],
+    ) -> ThreadedFamilies {
         let matches: Vec<VersionPrefix> = eligible
             .iter()
             .filter(|prefix| {
@@ -237,7 +248,7 @@ impl CoreErlangGenerator {
                 // `Self::is_family_mutation`'s doc comment (`Acc` does: it is
                 // threaded only through a construct that holds a use).
                 matches!(prefix, VersionPrefix::State)
-                    || body.body.iter().any(|stmt| {
+                    || stmts.iter().any(|stmt| {
                         let mut hit = false;
                         beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| {
                             if self.is_family_mutation(prefix, e) {

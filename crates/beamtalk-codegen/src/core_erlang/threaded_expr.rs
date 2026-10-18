@@ -1720,6 +1720,12 @@ impl CoreErlangGenerator {
         prelude: &[ThreadedStmt],
         span: Span,
     ) -> Document<'static> {
+        // ADR 0132 §2: in a value-type threaded entry the preludes thread `Acc`
+        // from one statement to the next, so they are verified together, as
+        // the body's one `MethodBody` (`finish_threaded_value_body`).
+        if self.log_threaded_value_prelude(prelude) {
+            return self.threaded_prelude_doc(prelude);
+        }
         let errors =
             threaded_ir::verify_body_with_opaque_version_gaps(prelude, self.threaded_scope());
         self.report_threaded_ir_verify_errors(

@@ -2164,7 +2164,7 @@ impl CoreErlangGenerator {
             // parameter use, so never a candidate.
             let positions = frame.threaded_entry_positions(class, method);
             if !positions.is_empty() {
-                frame.begin_threaded_class_body(method, &positions);
+                frame.begin_threaded_body(method, &positions);
             }
             let acc_entry_var = frame.current_acc_var_name();
 
@@ -2223,7 +2223,7 @@ impl CoreErlangGenerator {
                     "\n",
                 ]
             } else {
-                frame.end_threaded_class_body();
+                frame.end_threaded_body();
                 let entry_name = threaded_class_fn_name(&selector_name);
                 // The body, lowered once over `Acc`, then today's name and
                 // arity as a wrapper that hands it the `plain` sentinel (it has
@@ -2250,13 +2250,13 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "call 'erlang':'element'(1, apply ",
-                            fname(entry_name, arity + 1),
-                            " (ClassSelf",
-                            Self::class_method_params_suffix_doc(&param_vars),
-                            ", ",
-                            leaf::atom("plain"),
-                            "))",
+                            super::super::threaded_entry::plain_wrapper_call_doc(
+                                entry_name,
+                                arity + 1,
+                                &std::iter::once("ClassSelf".to_string())
+                                    .chain(param_vars.iter().cloned())
+                                    .collect::<Vec<_>>(),
+                            ),
                         ]
                     ),
                     "\n",
@@ -2686,11 +2686,7 @@ impl CoreErlangGenerator {
         if !self.in_threaded_body {
             return Ok(stmts);
         }
-        if let Some(span) = self.unlowered_root_uses().first() {
-            return Err(CodeGenError::Internal(format!(
-                "a threading-parameter use at {span:?} was not lowered by the threaded producer"
-            )));
-        }
+        self.check_root_uses_lowered()?;
         match stmts.pop() {
             Some(threaded_ir::ThreadedStmt::Statement(last, span)) => {
                 let answer = self.threaded_body_answer_doc(last);

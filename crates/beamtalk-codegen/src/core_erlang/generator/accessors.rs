@@ -28,8 +28,9 @@ impl CoreErlangGenerator {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
             direct_class_methods: &self.own_direct_class_methods,
-            // ADR 0132 Phase 1d (instance-side entries) is not generated yet.
-            tier2_methods: &[],
+            // ADR 0132 Phase 1d: a value type's instance-side entries (empty
+            // for every other module kind).
+            tier2_methods: &self.own_tier2_methods,
             // ADR 0132 Phase 1c: the class-side entries, from the same
             // `threading_params` answer the entry functions are emitted from.
             tier2_class_methods: &self.own_tier2_class_methods,

@@ -155,12 +155,21 @@ pub struct CoreErlangGenerator {
     /// above report `VerifyError::ConstructFamilyDropped` for an `Acc` they
     /// cannot carry (`CoreErlangGenerator::reject_unthreadable_acc_family`), and
     /// the threading parameter's own identifier cannot be lowered outside a
-    /// recognised use (`generate_identifier`). BT-3872 reuses the same rules
-    /// for `[SelfVt, Acc]`.
+    /// recognised use (`generate_identifier`).
+    ///
+    /// **BT-3872 (value-type methods) reuses the same rules for `[SelfVt,
+    /// Acc]`:** the value-type constructs (`extract_vt_loop_family_slot`, the
+    /// value-type conditional and the `on:do:`/`ensure:` consumers) compute
+    /// their families from their own bodies, so a construct holding no use
+    /// carries `SelfVt` alone and is lowered as in any value-type method; one
+    /// holding a use is refused as above (and the loop and conditional
+    /// detectors never answer `Acc`, so their consumers cannot see it). The
+    /// method root threads `SelfVt` beside `Acc`, which only the root's own
+    /// producers step.
     pub(in crate::core_erlang) in_threaded_body: bool,
     /// ADR 0132 §2: the per-body state of the threaded entry being lowered
     /// (its threading parameters, the `Acc` version counter); empty outside
-    /// one. Scoped by `begin_threaded_class_body` / `end_threaded_class_body`.
+    /// one. Scoped by `begin_threaded_body` / `end_threaded_body`.
     pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState,
     /// The names of every class defined in the module being compiled (ADR 0132
     /// §1: "the unit"), so a forward `Other sel: b` resolves exactly as the
@@ -169,9 +178,12 @@ pub struct CoreErlangGenerator {
     /// ADR 0132 §1: the class being compiled's own class-side threaded entries,
     /// emitted as `'tier2_class_methods'` in `__beamtalk_meta/0`. Collected from
     /// the same `MethodInfo::threading_params` answer the entries are emitted
-    /// from (`CoreErlangGenerator::class_method_threading_positions`).
+    /// from (`CoreErlangGenerator::method_threading_positions`).
     pub(in crate::core_erlang) own_tier2_class_methods:
         Vec<crate::core_erlang::class_meta::Tier2Entry>,
+    /// ADR 0132 Phase 1d: a value type's own instance-side threaded entries,
+    /// emitted as `'tier2_methods'`; empty for every other module kind.
+    pub(in crate::core_erlang) own_tier2_methods: Vec<crate::core_erlang::class_meta::Tier2Entry>,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -481,6 +493,7 @@ impl CoreErlangGenerator {
             threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState::default(),
             unit_class_names: std::collections::HashSet::new(),
             own_tier2_class_methods: Vec::new(),
+            own_tier2_methods: Vec::new(),
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),

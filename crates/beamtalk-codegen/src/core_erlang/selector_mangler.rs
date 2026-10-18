@@ -48,6 +48,10 @@ const SEALED_PREFIX: &str = "__sealed_";
 /// `class twice:` compiling).
 const THREADED_CLASS_PREFIX: &str = "__t2_class_";
 
+/// ADR 0132 §1: the prefix of an instance method's threaded entry,
+/// `'__t2_<sel>'` (the value-type twin of [`THREADED_CLASS_PREFIX`]).
+const THREADED_PREFIX: &str = "__t2_";
+
 /// The prefix used for `self delegate` dispatch function names in native
 /// facade modules.
 ///
@@ -119,11 +123,18 @@ pub fn safe_class_method_fn_name(selector: &str) -> String {
 /// (≤ 246 chars) the result is exactly `"__sealed_" + selector`.
 #[must_use]
 pub fn sealed_fn_name(selector: &str) -> String {
-    if SEALED_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
-        format!("{SEALED_PREFIX}{selector}")
+    prefixed_fn_name(SEALED_PREFIX, selector)
+}
+
+/// `prefix` + `selector`, or `prefix` + `"kw_<16-hex>"` (the selector's FNV-1a
+/// hash) when that would exceed the atom limit. The one rule behind
+/// [`sealed_fn_name`], [`threaded_class_fn_name`] and [`threaded_fn_name`].
+fn prefixed_fn_name(prefix: &str, selector: &str) -> String {
+    if prefix.len() + selector.len() <= MAX_ATOM_LEN {
+        format!("{prefix}{selector}")
     } else {
         let hash = fnv1a_64(selector.as_bytes());
-        format!("{SEALED_PREFIX}kw_{hash:016x}")
+        format!("{prefix}kw_{hash:016x}")
     }
 }
 
@@ -135,12 +146,16 @@ pub fn sealed_fn_name(selector: &str) -> String {
 /// `tier2_class_methods`, which codegen emits from this function).
 #[must_use]
 pub fn threaded_class_fn_name(selector: &str) -> String {
-    if THREADED_CLASS_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
-        format!("{THREADED_CLASS_PREFIX}{selector}")
-    } else {
-        let hash = fnv1a_64(selector.as_bytes());
-        format!("{THREADED_CLASS_PREFIX}kw_{hash:016x}")
-    }
+    prefixed_fn_name(THREADED_CLASS_PREFIX, selector)
+}
+
+/// Returns a safe function name atom for an instance method's threaded entry
+/// (ADR 0132 §2, the value-type entry): `'__t2_{selector}'`, the body over
+/// `Acc` that the plain `'{selector}'` wraps. Mangled as [`sealed_fn_name`]
+/// is; the runtime reads the name from `tier2_methods`, never derives it.
+#[must_use]
+pub fn threaded_fn_name(selector: &str) -> String {
+    prefixed_fn_name(THREADED_PREFIX, selector)
 }
 
 /// Returns a safe function name atom for a `self delegate` dispatch function
@@ -267,6 +282,22 @@ mod tests {
         assert!(hashed.starts_with("__t2_class_kw_"), "{hashed}");
         assert_eq!(hashed.len(), 11 + 3 + 16);
         assert_eq!(hashed, threaded_class_fn_name(&long));
+    }
+
+    #[test]
+    fn threaded_fn_name_short_and_long() {
+        assert_eq!(threaded_fn_name("twice:"), "__t2_twice:");
+        assert_eq!(threaded_fn_name("run"), "__t2_run");
+        // "__t2_" is 5 chars: 250 + 5 = 255 fits, 251 is hashed.
+        let fits = "a".repeat(250);
+        assert_eq!(threaded_fn_name(&fits), format!("__t2_{fits}"));
+        let long = "a".repeat(251);
+        let hashed = threaded_fn_name(&long);
+        assert_eq!(
+            hashed,
+            format!("__t2_kw_{:016x}", fnv1a_64(long.as_bytes()))
+        );
+        assert_eq!(hashed.len(), 5 + 3 + 16);
     }
 
     #[test]

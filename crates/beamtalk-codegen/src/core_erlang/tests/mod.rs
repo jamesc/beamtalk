@@ -200,6 +200,7 @@ mod supervisor;
 mod threaded_class_entry;
 mod threaded_locals;
 mod threaded_locals_agreement;
+mod threaded_value_entry;
 mod trait_flattening;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;

@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 /// `generate_module` over `src` as a single module named `test`.
-fn try_codegen(src: &str) -> Result<String, CodeGenError> {
+pub(super) fn try_codegen(src: &str) -> Result<String, CodeGenError> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     generate_module(&module, CodegenOptions::new("test"))
@@ -39,7 +39,7 @@ fn try_codegen(src: &str) -> Result<String, CodeGenError> {
 
 /// The text of the module-level function that starts with `header` (e.g.
 /// `'__t2_class_twice:'/3`), up to the next top-level function.
-fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
+pub(super) fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
     let start = code
         .find(&format!("\n{header} = fun"))
         .unwrap_or_else(|| panic!("no function `{header}` in:\n{code}"))
@@ -176,21 +176,32 @@ fn a_block_parameter_that_is_stored_has_no_entry() {
 
 /// The `(selector, entry function, arity)` triples the module defines, exports
 /// and advertises, so each can be compared with the others and the index.
-struct Entries {
-    defined: BTreeSet<(String, usize)>,
-    exported: BTreeSet<(String, usize)>,
-    advertised: BTreeSet<(String, String, Vec<usize>)>,
+pub(super) struct Entries {
+    pub(super) defined: BTreeSet<(String, usize)>,
+    pub(super) exported: BTreeSet<(String, usize)>,
+    pub(super) advertised: BTreeSet<(String, String, Vec<usize>)>,
 }
 
 fn entries_of(code: &str) -> Entries {
+    entries_with(code, "__t2_class_", "tier2_class_methods")
+}
+
+/// The entries named `<prefix><sel>` the module defines and exports, and those
+/// its `__beamtalk_meta/0` lists under `meta_key`. A class-side entry's prefix
+/// (`__t2_class_`) is itself prefixed by the instance side's (`__t2_`), so an
+/// instance-side scan excludes the class side's names.
+pub(super) fn entries_with(code: &str, prefix: &str, meta_key: &str) -> Entries {
+    let other_side = |name: &str| prefix == "__t2_" && name.starts_with("class_");
     let mut defined = BTreeSet::new();
     for line in code.lines() {
-        if let Some(rest) = line.strip_prefix("'__t2_class_")
+        // A value-type function is annotated: `'f'/N = ( fun ...`.
+        if let Some(rest) = line.strip_prefix(&format!("'{prefix}"))
             && let Some((name, tail)) = rest.split_once("'/")
             && let Some((arity, after)) = tail.split_once(' ')
-            && after.starts_with("= fun")
+            && (after.starts_with("= fun") || after.starts_with("= ( fun"))
+            && !other_side(name)
         {
-            defined.insert((format!("__t2_class_{name}"), arity.parse().unwrap()));
+            defined.insert((format!("{prefix}{name}"), arity.parse().unwrap()));
         }
     }
     let header_end = code.find("attributes").expect("module header");
@@ -198,16 +209,18 @@ fn entries_of(code: &str) -> Entries {
     let mut exported = BTreeSet::new();
     for part in header.split(", ") {
         let part = part.trim_start_matches(['[', ' ']);
-        if let Some(rest) = part.strip_prefix("'__t2_class_")
+        if let Some(rest) = part.strip_prefix(&format!("'{prefix}"))
             && let Some((name, arity)) = rest.split_once("'/")
+            && !other_side(name)
         {
             let arity: String = arity.chars().take_while(char::is_ascii_digit).collect();
-            exported.insert((format!("__t2_class_{name}"), arity.parse().unwrap()));
+            exported.insert((format!("{prefix}{name}"), arity.parse().unwrap()));
         }
     }
     let mut advertised = BTreeSet::new();
-    if let Some(start) = code.find("'tier2_class_methods' => ~{") {
-        let body = &code[start + "'tier2_class_methods' => ~{".len()..];
+    let open = format!("'{meta_key}' => ~{{");
+    if let Some(start) = code.find(&open) {
+        let body = &code[start + open.len()..];
         let body = &body[..body.find("}~").unwrap_or(0)];
         // 'sel' => {'entry', [0, 1]}, ...
         for entry in body.split("}, ") {
@@ -360,7 +373,7 @@ fn every_module_kind_emits_exports_and_entries_alike() {
     }
 }
 
-fn repo_path(rel: &str) -> std::path::PathBuf {
+pub(super) fn repo_path(rel: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
@@ -576,7 +589,7 @@ fn acc_is_a_family_of_a_body_only_where_it_holds_a_use() {
 
     let mut generator = CoreErlangGenerator::new("probe");
     generator.set_in_class_method(true);
-    generator.begin_threaded_class_body(method, &[0]);
+    generator.begin_threaded_body(method, &[0]);
     let eligible = generator.eligible_families();
     assert_eq!(eligible, vec![VersionPrefix::Acc]);
     assert_eq!(
@@ -593,7 +606,7 @@ fn acc_is_a_family_of_a_body_only_where_it_holds_a_use() {
             .is_empty(),
         "a construct holding no use is lowered as in a method with no threading parameter"
     );
-    generator.end_threaded_class_body();
+    generator.end_threaded_body();
     assert!(
         !generator.eligible_families().contains(&VersionPrefix::Acc),
         "the next method inherits no Acc"
@@ -700,7 +713,7 @@ fn corpus_class() -> (String, Vec<(String, usize)>) {
 
 /// Every `Acc@N` bound in `text` is bound once, in order from 1, before any use
 /// of it, and the answer tuple carries the last one bound.
-fn assert_acc_linear(text: &str, what: &str) {
+pub(super) fn assert_acc_linear(text: &str, what: &str) {
     let mut bound: Vec<usize> = Vec::new();
     let mut rest = text;
     let mut offset = 0usize;

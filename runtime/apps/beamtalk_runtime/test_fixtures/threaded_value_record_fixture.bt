@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3872 (ADR 0132 Phase 1d) fixture: a `Value subclass:` whose instance
+// methods have a threaded entry (see threaded_value_entries_fixture.bt), read
+// by `beamtalk_threaded_value_entries_tests` and the metadata conformance row.
+
+sealed Value subclass: ThreadedValueRecordFixture
+  field: items = #(1, 2, 3)
+
+  twice: b => b value. b value
+
+  each: b => self.items do: b
+
+  twiceVia: b => self twice: b
+
+  detectFirst: b => self.items detect: b ifNone: [nil]

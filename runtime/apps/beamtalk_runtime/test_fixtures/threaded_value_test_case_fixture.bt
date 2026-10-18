@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3872 (ADR 0132 Phase 1d) fixture: a `TestCase subclass:` whose threading
+// methods also write a field, so their threaded entry threads `Self` beside
+// `Acc` (`[SelfVt, Acc]`, ADR 0120/0122). Read by
+// `beamtalk_threaded_value_entries_tests`.
+
+TestCase subclass: ThreadedValueTestCaseFixture
+  field: n = 0
+
+  bump: b =>
+    self.n := self.n + 1.
+    b value: self.n
+
+  bumpTwice: b =>
+    self.n := self.n + 1.
+    r := b value: self.n.
+    self.n := self.n + r.
+    self.n

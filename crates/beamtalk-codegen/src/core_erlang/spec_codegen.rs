@@ -63,7 +63,9 @@ use std::collections::HashSet;
 
 use ecow::EcoString;
 
-use super::selector_mangler::{safe_class_method_fn_name, threaded_class_fn_name};
+use super::selector_mangler::{
+    safe_class_method_fn_name, threaded_class_fn_name, threaded_fn_name,
+};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit};
 use beamtalk_cerl_doc::{Document, join};
@@ -443,13 +445,17 @@ fn generate_class_method_spec(
     ])
 }
 
-/// Generates the spec attribute for a class method's threaded entry
-/// (ADR 0132 §2): `'__t2_class_<sel>'(ClassSelf, Params..., Acc)` answering
-/// `{Result, Acc1}`. Emitted for a method with a threading parameter, beside
-/// the plain wrapper's [`generate_class_method_spec`], under the same rule (a
-/// method with no annotation gets no spec).
-fn generate_threaded_class_method_spec(
+/// Generates the spec attribute for a method's threaded entry (ADR 0132 §2):
+/// `'__t2_class_<sel>'(ClassSelf, Params..., Acc)` for a class method,
+/// `'__t2_<sel>'(Self, Params..., Acc)` for a value-type instance method, each
+/// answering `{Result, Acc1}`. Emitted for a method with a threading
+/// parameter, beside the plain function's spec ([`generate_class_method_spec`],
+/// [`generate_method_spec`]), under the same rule (a method with no annotation
+/// gets no spec) and with the same receiver type (`any()` for `ClassSelf`, a
+/// map for a value's `Self`).
+fn generate_threaded_entry_spec(
     method: &MethodDefinition,
+    class_side: bool,
     aliases: Option<&AliasRegistry>,
     referenced: Option<&RefCell<HashSet<EcoString>>>,
 ) -> Option<Document<'static>> {
@@ -472,7 +478,16 @@ fn generate_threaded_class_method_spec(
             "}]}"
         ]
     };
-    let mut param_types: Vec<Document<'static>> = vec![any()]; // ClassSelf
+    let selector = method.selector.name();
+    let (receiver, entry_fn) = if class_side {
+        (any(), threaded_class_fn_name(selector.as_ref()))
+    } else {
+        (
+            Document::Str("{'type', 0, 'map', 'any'}"),
+            threaded_fn_name(selector.as_ref()),
+        )
+    };
+    let mut param_types: Vec<Document<'static>> = vec![receiver];
     for param in &method.parameters {
         param_types.push(
             param
@@ -494,7 +509,7 @@ fn generate_threaded_class_method_spec(
     let arity = i64::try_from(method.parameters.len() + 2).unwrap_or(i64::MAX);
     Some(docvec![
         "{",
-        atom(threaded_class_fn_name(method.selector.name().as_ref())),
+        atom(entry_fn),
         ", ",
         int_lit(arity),
         "}",
@@ -506,22 +521,26 @@ fn generate_threaded_class_method_spec(
     ])
 }
 
-/// The spec attributes of `class`'s threaded class-method entries
-/// (ADR 0132 §2): one per method for which `has_entry` holds, in declaration
-/// order.
-pub fn generate_threaded_class_specs(
+/// The spec attributes of `class`'s threaded entries (ADR 0132 §2): one per
+/// method for which `has_entry` holds, instance side then class side, each in
+/// declaration order. `has_entry` decides which methods have an entry (an
+/// actor's instance methods never do).
+pub fn generate_threaded_entry_specs(
     class: &ClassDefinition,
     has_entry: &dyn Fn(&MethodDefinition) -> bool,
     aliases: Option<&AliasRegistry>,
     referenced: Option<&RefCell<HashSet<EcoString>>>,
 ) -> Vec<Document<'static>> {
-    class
-        .class_methods
-        .iter()
-        .filter(|m| m.kind == MethodKind::Primary && has_entry(m))
-        .filter_map(|m| {
-            generate_threaded_class_method_spec(m, aliases, referenced)
-                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+    [(false, &class.methods), (true, &class.class_methods)]
+        .into_iter()
+        .flat_map(|(class_side, methods)| {
+            methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary && has_entry(m))
+                .filter_map(move |m| {
+                    generate_threaded_entry_spec(m, class_side, aliases, referenced)
+                        .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+                })
         })
         .collect()
 }

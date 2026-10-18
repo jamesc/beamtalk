@@ -42,27 +42,9 @@ setup() ->
 %% Blocks
 %%====================================================================
 
-%% A Tier 2 block of user arity N: `fun(Args..., Acc) -> {F(Args...), Acc1}`
-%% that records its arguments in `Acc` under `log`.
-t2(0, F) -> fun(Acc) -> step(F, [], Acc) end;
-t2(1, F) -> fun(A, Acc) -> step(F, [A], Acc) end;
-t2(2, F) -> fun(A, B, Acc) -> step(F, [A, B], Acc) end.
-
-step(F, Args, Acc) ->
-    {erlang:apply(F, Args), Acc#{log => maps:get(log, Acc, []) ++ [Args]}}.
-
-%% The matching Tier 1 block, which records its arguments in the process
-%% dictionary instead.
-t1(0, F) -> fun() -> note(F, []) end;
-t1(1, F) -> fun(A) -> note(F, [A]) end;
-t1(2, F) -> fun(A, B) -> note(F, [A, B]) end.
-
-note(F, Args) ->
-    put(log, get(log) ++ [Args]),
-    erlang:apply(F, Args).
-
-insert_at(0, X, Rest) -> [X | Rest];
-insert_at(N, X, [H | T]) -> [H | insert_at(N - 1, X, T)].
+%% The Tier 2 / Tier 1 blocks and the plain-against-entry differential are
+%% shared with the value-type suite (`beamtalk_threaded_entry_test_helper`).
+t2(Arity, F) -> beamtalk_threaded_entry_test_helper:t2(Arity, F).
 
 plain_fn(Selector) -> list_to_atom("class_" ++ atom_to_list(Selector)).
 entry_fn(Selector) -> list_to_atom("__t2_class_" ++ atom_to_list(Selector)).
@@ -72,18 +54,9 @@ entry_fn(Selector) -> list_to_atom("__t2_class_" ++ atom_to_list(Selector)).
 %% `{Result, BlockLog, Acc1}`. `Others` are the non-block arguments in order,
 %% `BlockPos` the block's argument position.
 differential(Selector, Others, BlockPos, BlockArity, F) ->
-    put(log, []),
-    PlainArgs = insert_at(BlockPos, t1(BlockArity, F), Others),
-    Plain = erlang:apply(?MOD, plain_fn(Selector), [nil | PlainArgs]),
-    PlainLog = erase(log),
-    EntryArgs = insert_at(BlockPos, t2(BlockArity, F), Others),
-    {Result, Acc1} = erlang:apply(
-        ?MOD, entry_fn(Selector), [nil | EntryArgs] ++ [#{log => [], untouched => kept}]
-    ),
-    ?assertEqual(Plain, Result),
-    ?assertEqual(PlainLog, maps:get(log, Acc1)),
-    ?assertEqual(kept, maps:get(untouched, Acc1)),
-    {Result, PlainLog, Acc1}.
+    beamtalk_threaded_entry_test_helper:differential(
+        {?MOD, plain_fn(Selector), entry_fn(Selector)}, nil, Others, BlockPos, BlockArity, F
+    ).
 
 %%====================================================================
 %% Each Phase 1 use, plain entry against threaded entry
@@ -265,29 +238,9 @@ tier_gate_test_() ->
 
 %% A Tier 2 block records that it ran; the plain entry has no caller map to
 %% thread, so it must be refused *before* it runs, as it was before ADR 0132.
-ran_t2(Arity) ->
-    Ran = fun() -> put(ran, true) end,
-    case Arity of
-        0 ->
-            fun(Acc) ->
-                Ran(),
-                {nil, Acc}
-            end;
-        1 ->
-            fun(_A, Acc) ->
-                Ran(),
-                {nil, Acc}
-            end
-    end.
+ran_t2(Arity) -> beamtalk_threaded_entry_test_helper:ran_t2(Arity).
 
-refused(Fun) ->
-    erase(ran),
-    try
-        Fun(),
-        ok
-    catch
-        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
-    end.
+refused(Fun) -> beamtalk_threaded_entry_test_helper:refused(Fun).
 
 plain_refuses_tier2_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [

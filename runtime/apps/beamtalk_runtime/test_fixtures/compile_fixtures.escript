@@ -150,7 +150,12 @@ main([]) ->
         %% BT-3871 (ADR 0132 Phase 1c) - class methods with a threaded entry:
         %% the metadata conformance row and the direct-entry EUnit tests
         %% (beamtalk_threaded_class_entries_tests).
-        "threaded_class_entries_fixture"
+        "threaded_class_entries_fixture",
+        %% BT-3872 (ADR 0132 Phase 1d) - value-type methods with a threaded
+        %% entry (beamtalk_threaded_value_entries_tests, the conformance rows).
+        "threaded_value_entries_fixture",
+        "threaded_value_record_fixture",
+        "threaded_value_test_case_fixture"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

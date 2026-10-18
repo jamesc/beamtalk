@@ -279,6 +279,9 @@ impl CoreErlangGenerator {
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
         self.set_class_field_types(&class.state);
+        // ADR 0132 Phase 1d: the instance-side threaded entries this module
+        // emits and advertises in `'tier2_methods'`.
+        self.set_threaded_instance_entries(class);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., object.bt defines `new => @primitive basicNew`)
@@ -440,7 +443,14 @@ impl CoreErlangGenerator {
         for method in &class.methods {
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.name().to_string();
+            // ADR 0132 §2: the threaded entry takes Self, the user params and
+            // `Acc`.
+            let entry = (!self.threaded_entry_positions(class, method).is_empty())
+                .then(|| super::selector_mangler::threaded_fn_name(&mangled));
             parts.push(leaf::fname(mangled, arity));
+            if let Some(entry) = entry {
+                parts.push(leaf::fname(entry, arity + 1));
+            }
         }
 
         // Auto-generated getter and with*: setter exports for Value subclass:
@@ -1545,6 +1555,9 @@ impl CoreErlangGenerator {
                             )?)
                         } else if self.statement_has_local_producer(expr)
                             || self.statement_has_value_type_producer(expr)
+                            // ADR 0132 §2: a use of a threading parameter in
+                            // the `^` value steps `Acc`.
+                            || self.statement_has_threaded_use(expr)
                         {
                             let tv =
                                 self.threaded_expression(value, super::threaded_ir::FrameId::ROOT)?;
@@ -1920,6 +1933,17 @@ impl CoreErlangGenerator {
             }
         }
 
+        // ADR 0132 §2 (Phase 1d): a value-type method with a threading
+        // parameter is one body over `Acc` with two entries, from the same
+        // `MethodInfo::threading_params` answer the export, the spec and
+        // `'tier2_methods'` are emitted from. `'dispatch'/3` keeps calling the
+        // plain function.
+        let positions = frame.threaded_entry_positions(class_def, method);
+        if !positions.is_empty() {
+            frame.begin_threaded_body(method, &positions);
+        }
+        let acc_entry_var = frame.current_acc_var_name();
+
         // Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing method.
@@ -1954,6 +1978,26 @@ impl CoreErlangGenerator {
         } else {
             frame.generate_vt_body_exprs(&body, has_nlr)
         };
+        // The threaded body answers `{Result, AccN}` and is verified as one
+        // `MethodBody` over its families (`[SelfVt, Acc]` when it writes a
+        // field, `[Acc]` otherwise).
+        let body_result = if frame.in_threaded_body {
+            let eligible = frame.eligible_families();
+            let families: Vec<VersionPrefix> = frame
+                .stmts_threaded_families(&method.body, &eligible)
+                .as_slice()
+                .to_vec();
+            body_result.and_then(|parts| {
+                frame.finish_threaded_value_body(
+                    parts,
+                    &families,
+                    nlr_token_var.as_deref(),
+                    method.span,
+                )
+            })
+        } else {
+            body_result
+        };
 
         frame.set_current_nlr_token(None);
         // Resolve the method-level line + file while `frame` still has a
@@ -1977,7 +2021,16 @@ impl CoreErlangGenerator {
         // Wrap the method body in try/catch to catch non-local
         // returns thrown by ^ inside block closures.
         let body_doc = Document::Vec(body_parts);
-        let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
+        // A threaded entry takes `Acc` after the user parameters.
+        let entry_params: Vec<String> = if positions.is_empty() {
+            params.clone()
+        } else {
+            params.iter().cloned().chain([acc_entry_var]).collect()
+        };
+        let params_doc = join(
+            entry_params.into_iter().map(leaf::var),
+            &Document::Str(", "),
+        );
         let fun_doc = if let Some(token_var) = nlr_token_var {
             let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
             docvec![
@@ -1991,12 +2044,40 @@ impl CoreErlangGenerator {
         } else {
             docvec!["fun (", params_doc, ") ->\n", body_doc,]
         };
-        let fun_doc = if let Some(line_num) = line_annotation {
-            Self::annotate_with_line_in(annotation_path.as_deref(), fun_doc, line_num)
-        } else {
-            fun_doc
+        let annotate = |doc: Document<'static>| match line_annotation {
+            Some(line_num) => {
+                Self::annotate_with_line_in(annotation_path.as_deref(), doc, line_num)
+            }
+            None => doc,
         };
-        Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n",])
+        if positions.is_empty() {
+            return Ok(docvec![
+                leaf::fname(mangled, arity),
+                " = ",
+                annotate(fun_doc),
+                "\n",
+            ]);
+        }
+        // ADR 0132 §2: the body is the threaded entry; today's name and arity
+        // is the plain wrapper over it (the `plain` sentinel, the bare result).
+        let entry_fn = super::selector_mangler::threaded_fn_name(&mangled);
+        let wrapper_doc = docvec![
+            "fun (",
+            join(params.iter().cloned().map(leaf::var), &Document::Str(", ")),
+            ") ->\n    ",
+            super::threaded_entry::plain_wrapper_call_doc(entry_fn.clone(), arity + 1, &params),
+            "\n",
+        ];
+        Ok(docvec![
+            leaf::fname(entry_fn, arity + 1),
+            " = ",
+            annotate(fun_doc),
+            "\n\n",
+            leaf::fname(mangled, arity),
+            " = ",
+            annotate(wrapper_doc),
+            "\n",
+        ])
     }
 
     /// Generates an open Self-threading let chain for a non-last field assignment.
@@ -2989,10 +3070,14 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
-        !self
-            .exception_construct_families(&blocks)
+        // ADR 0132 (BT-3872): the question is "does an arm write a field",
+        // i.e. does the arm thread `SelfVt`. In a threaded entry's body an arm
+        // holding a use also answers `Acc`, which is not a field write (and is
+        // refused where the arm's use is lowered), so it must not route the
+        // conditional to the field-writing producer.
+        self.exception_construct_families(&blocks)
             .as_slice()
-            .is_empty()
+            .contains(&VersionPrefix::SelfVt)
     }
 
     /// `true` if any TOP-LEVEL statement of `block` is a value-type

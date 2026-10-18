@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3872 (ADR 0132 Phase 1d) fixture: value-type instance methods with a
+// threading block parameter, compiled to a threaded entry `'__t2_<sel>'/n+2`
+// (the body over `Acc`) beside the plain `'<sel>'/n+1` wrapper, which
+// `'dispatch'/3` keeps calling.
+//
+// Read by:
+//   - the Rust/Erlang metadata conformance row
+//     (test/fixtures/tier2_meta_conformance.json) and the codegen drift guard
+//     (`tests/threaded_value_entry.rs`);
+//   - `beamtalk_threaded_value_entries_tests`, which calls each entry directly
+//     with a hand-packed `Acc` and each plain function with a pure block, and
+//     asserts the two agree on the result and the block invocations.
+// `detectFirst:in:` and `firstAfter:in:` hold a block that does `^`, and
+// `both:with:` a use of `a` that holds a use of `b`: the index gives them no
+// threading parameter, so they compile as plain methods. `plain:` has no
+// block; `storeAway:` stores it.
+
+sealed Object subclass: ThreadedValueEntriesFixture
+  twice: b => b value. b value
+
+  each: items do: b => items do: b
+
+  twiceVia: b => self twice: b
+
+  apply: b to: x => b value: x
+
+  cascade: b => b value: 1; value: 2
+
+  sumOver: items with: b => items inject: 0 into: b
+
+  collectIn: items with: b => items collect: b
+
+  detectIn: items with: b => items detect: b ifNone: [0]
+
+  bothOf: b => (b value: 1) + (b value: 2)
+
+  doubled: b =>
+    r := b value: 3.
+    r * 2
+
+  branch: b => (b value: 1) > 0 ifTrue: [10] ifFalse: [20]
+
+  withLocals: b =>
+    total := 0.
+    #(1, 2, 3) do: [:i | total := total + i].
+    b value: total
+
+  detectFirst: b in: items =>
+    items do: [:x | (b value: x) ifTrue: [^x]].
+    nil
+
+  firstAfter: b in: items =>
+    b value.
+    items do: [:x | x > 0 ifTrue: [^x]].
+    nil
+
+  both: a with: b => self apply: a to: (b value)
+
+  plain: n => n + 1
+
+  storeAway: b => #(1, 2) collect: [:x | b]
