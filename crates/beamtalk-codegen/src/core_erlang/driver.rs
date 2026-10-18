@@ -95,7 +95,7 @@ pub fn generate_module_with_warnings(
     };
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
-    generator.set_protocol_sources(options.protocol_sources, &module.protocols);
+    generator.set_protocol_sources(options.protocol_sources, module, options.analysis.as_ref());
     generator.set_class_module_index(options.class_module_index);
     generator.source_path = options.source_path;
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.

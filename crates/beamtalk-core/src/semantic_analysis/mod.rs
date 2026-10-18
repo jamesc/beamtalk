@@ -17,7 +17,7 @@
 use crate::ast::{Module, ProtocolDefinition};
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod alias_registry;
 mod block_analyzer;
@@ -225,6 +225,13 @@ pub struct AnalysisResult {
     /// passes an empty map here instead would silently fail to flatten any
     /// cross-file/cross-package `uses:` line the original analysis resolved.
     pub external_protocols: HashMap<EcoString, ProtocolDefinition>,
+
+    /// `(class, protocol)` for every `uses:` line of the module that resolved
+    /// to the stdlib's own protocol (BT-3915) —
+    /// [`trait_expansion::stdlib_resolved_uses`]. Codegen maps those
+    /// classes' provisions through the stdlib file; analysis stamps their
+    /// provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
+    pub stdlib_protocol_uses: HashSet<(EcoString, EcoString)>,
 }
 
 impl AnalysisResult {
@@ -242,6 +249,7 @@ impl AnalysisResult {
             referenced_aliases: Vec::new(),
             type_map: TypeMap::new(),
             external_protocols: HashMap::new(),
+            stdlib_protocol_uses: HashSet::new(),
         }
     }
 }
@@ -688,6 +696,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
     // language service's placeholder package is not one.
     let trait_package = trait_expansion::known_package(current_package);
+    result.stdlib_protocol_uses =
+        trait_expansion::stdlib_resolved_uses(module, &external_protocols, trait_package);
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
@@ -1268,6 +1278,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &mut result.diagnostics,
         );
     }
+
+    stdlib_protocols::stamp_stdlib_provisions(
+        &mut result.diagnostics,
+        &result.stdlib_protocol_uses,
+    );
 
     result
 }

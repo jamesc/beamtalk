@@ -26,7 +26,7 @@
 //! its own protocols live from `stdlib/src/` rather than from the snapshot
 //! baked into the compiler that is building it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use ecow::EcoString;
@@ -34,6 +34,7 @@ use ecow::EcoString;
 use crate::ast::ProtocolDefinition;
 use crate::semantic_analysis::protocol_source::{ProtocolSource, ProtocolSourceMap};
 use crate::semantic_analysis::trait_expansion::first_wins_protocol_map;
+use crate::source_analysis::Diagnostic;
 
 /// The package every stdlib protocol is declared in — the same identity
 /// `build_stdlib.rs` stamps on stdlib classes, aliases and protocol sources.
@@ -101,48 +102,55 @@ pub(crate) fn stdlib_protocol_map() -> &'static HashMap<EcoString, ProtocolDefin
     &stdlib_protocols().map
 }
 
-/// Every stdlib provision-bearing protocol, sorted by name.
-#[must_use]
-pub fn stdlib_protocol_defs() -> Vec<&'static ProtocolDefinition> {
-    let mut defs: Vec<_> = stdlib_protocols()
-        .map
-        .iter()
-        .filter(|(key, def)| **key == def.name.name)
-        .map(|(_, def)| def)
-        .collect();
-    defs.sort_by(|a, b| a.name.name.cmp(&b.name.name));
-    defs
-}
-
 /// The source file of stdlib protocol `name`, if it is one.
 #[must_use]
 pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {
     stdlib_protocols().sources.get(name)
 }
 
-/// Adds the source of every stdlib protocol to `sources` that neither
-/// `sources` nor `module_protocols` (the module being compiled) already
-/// declares — the protocols a `uses:` there resolves to the stdlib's.
-///
-/// Codegen maps a flattened provision's spans through this map (ADR 0127 §3,
-/// "Source locations"); a protocol of the module's own file has no entry, as
-/// its spans are already the module's, so a same-named local protocol must not
-/// pick up the stdlib file.
-pub fn seed_stdlib_protocol_sources(
-    sources: &mut ProtocolSourceMap,
-    module_protocols: &[ProtocolDefinition],
+/// Stamps [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package) as the stdlib on every provision
+/// diagnostic raised in a class whose `uses:` of that protocol resolved to the
+/// stdlib's own (`uses`, from
+/// [`trait_expansion::stdlib_resolved_uses`](crate::semantic_analysis::trait_expansion::stdlib_resolved_uses)),
+/// so a reporter renders it against the stdlib file and never against a
+/// same-named protocol of the user's.
+#[allow(clippy::implicit_hasher)] // concrete HashSet, as `AnalysisResult::stdlib_protocol_uses` holds it
+pub fn stamp_stdlib_provisions(
+    diagnostics: &mut [Diagnostic],
+    uses: &HashSet<(EcoString, EcoString)>,
 ) {
-    for (name, source) in &stdlib_protocols().sources {
-        if sources.contains_key(name) || module_protocols.iter().any(|p| &p.name.name == name) {
+    if uses.is_empty() {
+        return;
+    }
+    for diagnostic in diagnostics {
+        let Some(origin) = diagnostic.provision.as_mut() else {
             continue;
+        };
+        if origin
+            .users
+            .iter()
+            .any(|user| uses.contains(&(user.clone(), origin.protocol.clone())))
+        {
+            origin.package = Some(STDLIB_PACKAGE.into());
         }
-        sources.insert(name.clone(), source.clone());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every stdlib provision-bearing protocol, sorted by name.
+    fn stdlib_protocol_defs() -> Vec<&'static ProtocolDefinition> {
+        let mut defs: Vec<_> = stdlib_protocols()
+            .map
+            .iter()
+            .filter(|(key, def)| **key == def.name.name)
+            .map(|(_, def)| def)
+            .collect();
+        defs.sort_by(|a, b| a.name.name.cmp(&b.name.name));
+        defs
+    }
 
     #[test]
     fn carries_comparable_and_enumerable_from_the_stdlib_sources() {
@@ -203,28 +211,30 @@ mod tests {
     }
 
     #[test]
-    fn seeding_skips_carried_and_module_local_protocols() {
-        let mut sources = ProtocolSourceMap::new();
-        sources.insert(
-            "Enumerable".into(),
-            ProtocolSource {
-                path: Some("dep/enumerable.bt".into()),
-                text: "".into(),
-                package: Some("dep".into()),
-            },
-        );
-        let (module, _) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(
-            "Protocol define: Comparable\n  < other -> Boolean\n",
-        ));
-        seed_stdlib_protocol_sources(&mut sources, &module.protocols);
+    fn stamps_only_provisions_of_stdlib_resolved_uses() {
+        let span = crate::source_analysis::Span::default();
+        let mut diagnostics = vec![
+            Diagnostic::warning("in stdlib provision", span)
+                .with_provision_origin("Comparable", "Rank"),
+            Diagnostic::warning("in user provision", span)
+                .with_provision_origin("Comparable", "Other"),
+        ];
+        let uses: HashSet<(EcoString, EcoString)> =
+            [("Rank".into(), "Comparable".into())].into_iter().collect();
+        stamp_stdlib_provisions(&mut diagnostics, &uses);
         assert_eq!(
-            sources["Enumerable"].path.as_deref(),
-            Some("dep/enumerable.bt"),
-            "a carried protocol keeps its own source"
+            diagnostics[0]
+                .provision
+                .as_ref()
+                .and_then(|o| o.package.as_deref()),
+            Some(STDLIB_PACKAGE)
         );
-        assert!(
-            !sources.contains_key("Comparable"),
-            "a module-local protocol maps through the module's own text"
+        assert_eq!(
+            diagnostics[1]
+                .provision
+                .as_ref()
+                .and_then(|o| o.package.as_deref()),
+            None
         );
     }
 }

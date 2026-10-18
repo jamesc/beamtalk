@@ -182,11 +182,16 @@ pub(crate) fn provision_report_target<'a>(
     protocol_sources: &'a beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) -> Option<(String, &'a str)> {
     let origin = diagnostic.provision.as_ref()?;
-    // A provision flattened from a stdlib protocol (BT-3915) is reported
-    // against the stdlib file when no carried protocol has its name.
-    let found = protocol_sources.get(&origin.protocol).or_else(|| {
+    // A provision flattened from the stdlib's own protocol (BT-3915, stamped
+    // by analysis) is reported against the stdlib file, never against a
+    // same-named carried protocol; any other against its carried source.
+    let found = if beamtalk_core::semantic_analysis::stdlib_protocols::is_stdlib_package(
+        origin.package.as_deref(),
+    ) {
         beamtalk_core::semantic_analysis::stdlib_protocols::stdlib_protocol_source(&origin.protocol)
-    });
+    } else {
+        protocol_sources.get(&origin.protocol)
+    };
     Some(match found {
         Some(src) => (
             src.path
@@ -421,6 +426,42 @@ mod tests {
             "{}",
             rendered[0].message
         );
+    }
+
+    /// BT-3915: a provision diagnostic renders against the stdlib file only
+    /// when analysis stamped it as resolved to the stdlib's protocol — a
+    /// user's own `Comparable` with no carried source never borrows the
+    /// stdlib's file, and a stdlib one never borrows a carried same-named one.
+    #[test]
+    fn provision_diagnostic_uses_the_stdlib_file_only_when_stamped_stdlib() {
+        use beamtalk_core::semantic_analysis::{ProtocolSource, ProtocolSourceMap};
+
+        let diag = || {
+            CoreDiagnostic::error("in a provision", Span::new(0, 1))
+                .with_provision_origin("Comparable", "Rank")
+        };
+        let mut stamped = diag();
+        if let Some(origin) = stamped.provision.as_mut() {
+            origin.package = Some("stdlib".into());
+        }
+        let carried: ProtocolSourceMap = [(
+            "Comparable".into(),
+            ProtocolSource {
+                path: Some("src/comparable.bt".into()),
+                text: "Protocol define: Comparable\n".into(),
+                package: None,
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let (path, _) = provision_report_target(&diag(), &ProtocolSourceMap::new()).unwrap();
+        assert_eq!(path, "<protocol Comparable>");
+        let (path, _) = provision_report_target(&diag(), &carried).unwrap();
+        assert_eq!(path, "src/comparable.bt");
+        let (path, text) = provision_report_target(&stamped, &carried).unwrap();
+        assert_eq!(path, "stdlib/src/comparable.bt");
+        assert!(text.contains("Protocol define: Comparable"));
     }
 
     #[test]

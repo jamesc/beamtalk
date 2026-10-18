@@ -510,6 +510,39 @@ impl<'a> ProtocolLookup<'a> {
     }
 }
 
+/// `(class, protocol name)` for every `uses:` line of `module` that resolves to
+/// one of the stdlib's own protocols (BT-3915) rather than to a protocol of
+/// the module or one carried in `external_protocols`, under the same rule
+/// [`expand_module_in_package`] flattens with.
+///
+/// `MethodInfo::origin` names a provision's protocol by bare name only, so a
+/// stdlib `Comparable` and a user's carried `Comparable` look alike there;
+/// this set is what tells codegen's source mapping and provision-diagnostic
+/// rendering that a given class's provisions come from the stdlib file.
+#[must_use]
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn stdlib_resolved_uses(
+    module: &Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> HashSet<(EcoString, EcoString)> {
+    let mut uses = HashSet::new();
+    if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+        return uses;
+    }
+    let protocols = ProtocolLookup::new(&module.protocols, external_protocols, current_package);
+    for class in &module.classes {
+        for use_ in &class.uses {
+            if let Some(protocol) = protocols.resolve(use_) {
+                if stdlib_protocols::is_stdlib_package(protocol.package.as_deref()) {
+                    uses.insert((class.name.name.clone(), protocol.name.name.clone()));
+                }
+            }
+        }
+    }
+    uses
+}
+
 /// The last tier of `uses:` resolution (BT-3915): a key that resolves in
 /// neither the current module nor the carried protocols resolves among the
 /// stdlib's provision-bearing protocols

@@ -70,8 +70,10 @@ use beamtalk_core::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER;
 /// build pipeline's convention (`build_stdlib.rs`'s `generate_app_file`,
 /// `class_hierarchy/builtins.rs`'s `ClassInfo.package` stamping) — stdlib is
 /// always its own package, distinct from both a project's own aliases and
-/// any fetched dependency's.
-pub const STDLIB_PACKAGE_MARKER: &str = "stdlib";
+/// any fetched dependency's. One definition, in `beamtalk-core`
+/// (`stdlib_protocols::STDLIB_PACKAGE`), shared with the compiler's stdlib
+/// protocol fallback (BT-3915).
+pub use beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE as STDLIB_PACKAGE_MARKER;
 
 /// Derives the dependency package name for `file` from its path.
 ///

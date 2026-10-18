@@ -258,6 +258,69 @@ fn flattened_provision_without_protocol_source_still_compiles() {
     assert!(code.contains("describe"));
 }
 
+/// BT-3915: a user's *own* `Comparable` carried in (a REPL `protocol_sources`
+/// compile, say) with no codegen source must not borrow the stdlib's
+/// `comparable.bt` for its provisions' paths and lines just because the
+/// names match — only a `uses:` that resolved to the stdlib's protocol does.
+#[test]
+fn carried_non_stdlib_protocol_never_maps_through_the_stdlib_file() {
+    const USER_COMPARABLE: &str = concat!(
+        "Protocol define: Comparable\n",
+        "  < other -> Boolean\n",
+        "  describe -> String => \"user comparable\"\n",
+    );
+    const RANK: &str = concat!(
+        "Value subclass: Rank\n",
+        "  uses: Comparable\n",
+        "  < other => true\n",
+    );
+    let code = generate_cross_file(RANK, USER_COMPARABLE, "unused.bt", false);
+    assert!(code.contains("describe"), "{code}");
+    assert!(
+        !code.contains("stdlib/src/comparable.bt"),
+        "a carried non-stdlib Comparable must not map through the stdlib file, got:\n{code}"
+    );
+}
+
+/// Counterpart: a `uses: Comparable` that resolved to the stdlib's own
+/// protocol (nothing carried) maps its provisions through the stdlib file.
+#[test]
+fn stdlib_resolved_provision_maps_through_the_stdlib_file() {
+    const RANK: &str = concat!(
+        "Value subclass: Rank\n",
+        "  uses: Comparable\n",
+        "  field: level :: Integer = 0\n",
+        "  < other :: Rank -> Boolean => self.level < other level\n",
+    );
+    let mut module = parse_fixture(RANK);
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    assert!(
+        analysis
+            .stdlib_protocol_uses
+            .contains(&("Rank".into(), "Comparable".into())),
+        "{:?}",
+        analysis.stdlib_protocol_uses
+    );
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+    );
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("rank")
+            .with_source(RANK)
+            .with_source_path_opt(Some("rank.bt"))
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'file', \"stdlib/src/comparable.bt\"}"),
+        "expected stdlib provisions annotated with the stdlib file, got:\n{code}"
+    );
+}
+
 /// BT-3663: a *dependency-package* protocol carries its own source identity
 /// (checkout file, declaring package). Its flattened method's BEAM line
 /// annotation names the dependency's file, and the provision's free class

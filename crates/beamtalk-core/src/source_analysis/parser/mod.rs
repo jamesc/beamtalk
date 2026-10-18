@@ -735,6 +735,15 @@ pub struct ProvisionOrigin {
     /// The classes the provision was flattened into when the diagnostic
     /// arose (sorted, unique).
     pub users: Vec<EcoString>,
+    /// The package `protocol` resolved in, when analysis knows it — today
+    /// only `Some("stdlib")` for a `uses:` that resolved to the stdlib's own
+    /// protocol (BT-3915), so a reporter renders it against the stdlib file
+    /// rather than against a same-named protocol of the user's.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub package: Option<EcoString>,
 }
 
 /// Prefix of the note [`Diagnostic::with_provision_origin`] attaches.
@@ -759,7 +768,7 @@ pub fn merge_provision_diagnostics(
         let existing = merged.iter_mut().find(|d| {
             d.provision
                 .as_ref()
-                .is_some_and(|o| o.protocol == origin.protocol)
+                .is_some_and(|o| o.protocol == origin.protocol && o.package == origin.package)
                 && d.span == diagnostic.span
                 && d.severity == diagnostic.severity
                 && d.message == diagnostic.message
@@ -879,6 +888,7 @@ impl Diagnostic {
         self.provision = Some(ProvisionOrigin {
             protocol: protocol.into(),
             users,
+            package: None,
         });
     }
 

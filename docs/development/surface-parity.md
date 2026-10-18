@@ -881,10 +881,13 @@ flattening implementation):
   Their one source is `stdlib/src/*.bt` itself: `build-stdlib` generates
   `generated_stdlib_protocol_files()` (in `generated_builtins.rs`), an
   `include_str!` table of the files declaring provision-bearing protocols,
-  parsed once by `semantic_analysis::stdlib_protocols`. Codegen
-  (`seed_stdlib_protocol_sources`) and provision-diagnostic rendering
-  (`provision_report_target`) map a stdlib provision's spans through that
-  file. The fallback is off while compiling the stdlib itself
+  parsed once by `semantic_analysis::stdlib_protocols`. Which `(class,
+  protocol)` uses resolved to the stdlib is recorded per class
+  (`trait_expansion::stdlib_resolved_uses`, `AnalysisResult::stdlib_protocol_uses`,
+  `ProvisionOrigin::package`), so codegen (`flattened_method_source`) and
+  provision-diagnostic rendering (`provision_report_target`) map only those
+  provisions through the stdlib file — never a user's same-named carried
+  protocol. The fallback is off while compiling the stdlib itself
   (`current_package == "stdlib"` / `stdlib_mode`), which carries its own
   protocols live.
 - `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or
