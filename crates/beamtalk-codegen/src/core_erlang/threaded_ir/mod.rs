@@ -83,11 +83,6 @@ pub(super) use build::{
 };
 #[cfg(test)]
 pub(super) use build::{build_local_rebind, build_method_body};
-// ADR 0132 §2's threaded `MethodBody` builder. Test-only since ADR 0133 Phase 2
-// removed its one production caller, the class-method threaded entry
-// (BT-3904); BT-3905 deletes it with the `Acc` family.
-#[cfg(test)]
-pub(super) use build::build_threaded_method_body;
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;
@@ -97,11 +92,11 @@ pub(super) use ir::{
     TryRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
-// ADR 0132 §2: the one family slot order and the `'__local__'` key prefix.
+// The one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
 pub(super) use verify::{
-    SequencedSibling, ThreadedBodyKind, VerifyError, verify_bind_frames,
-    verify_fold_family_carried, verify_fold_locals_carried, verify_sibling_reads,
+    SequencedSibling, VerifyError, verify_bind_frames, verify_fold_family_carried,
+    verify_fold_locals_carried, verify_sibling_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name
@@ -114,10 +109,10 @@ pub(super) use verify::{
 // 0111 Addendum 15's Letrec migration gives it a real production
 // constructor (counted loops' `ConditionalLoop::counter`).
 #[cfg(test)]
-pub(super) use ir::{AccParam, CloseContext, FAMILY_SLOT_ORDER, MethodBodyKind};
+pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
-    AccSeedDefect, CatchRestoreDefect, ClassMethodDefect, ScopeKind, verify, verify_in_scope,
+    CatchRestoreDefect, ClassMethodDefect, ScopeKind, verify, verify_in_scope,
 };
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level

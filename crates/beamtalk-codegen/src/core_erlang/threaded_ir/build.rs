@@ -12,9 +12,8 @@
 use super::super::CoreErlangGenerator;
 use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, MethodBodyKind, RebindFrame,
-    RebindLowering, RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
-    VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, RebindFrame, RebindLowering, RebindShape,
+    ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
@@ -655,46 +654,10 @@ pub(in crate::core_erlang) fn build_method_body(
     body: Vec<ThreadedStmt>,
 ) -> ThreadedStmt {
     ThreadedStmt::MethodBody {
-        kind: MethodBodyKind::Plain,
         frame,
         threads,
-        families: Vec::new(),
         body,
         span: Span::default(),
-    }
-}
-
-/// ADR 0132 §2: builds a threaded entry's body, `MethodBody { kind: Threaded,
-/// threads: [], families, body }` — the production builder ADR 0131 §2 left
-/// `MethodBody` without. `families` is the body's
-/// `CoreErlangGenerator::eligible_families` answer in any order; it is
-/// normalized to `FAMILY_SLOT_ORDER` and `Acc` is always present, last (a
-/// threaded body threads the caller's map whatever else it threads), so the
-/// node's family tuple — the one every NLR throw and catch inside it carries —
-/// is right by construction. `threads` is empty: the body's own locals go
-/// through ADR 0131's frames under their own `'__local__'` keys, never into
-/// `Acc` ([`RebindShape::for_frame`]).
-///
-/// The non-REPL root of a method with no threading parameter stays the
-/// implicit root (`RebindFrame::implicit_root`); this builder was for the
-/// threaded entry only, removed by ADR 0133 Phase 2 (BT-3904), so it is
-/// test-only until BT-3905 deletes the `Acc` family.
-#[cfg(test)]
-pub(in crate::core_erlang) fn build_threaded_method_body(
-    frame: FrameId,
-    families: &[VersionPrefix],
-    body: Vec<ThreadedStmt>,
-    span: Span,
-) -> ThreadedStmt {
-    let mut with_acc = families.to_vec();
-    with_acc.push(VersionPrefix::Acc);
-    ThreadedStmt::MethodBody {
-        kind: MethodBodyKind::Threaded,
-        frame,
-        threads: Vec::new(),
-        families: super::ir::canonical_families(&with_acc),
-        body,
-        span,
     }
 }
 

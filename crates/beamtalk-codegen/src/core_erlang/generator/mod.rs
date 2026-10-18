@@ -110,64 +110,6 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
     pub(in crate::core_erlang) in_loop_body: bool,
-    /// ADR 0132 §2: whether the method body being lowered is a threaded
-    /// entry's body (one `MethodBody` frame over the trailing `Acc` family).
-    /// Read only through [`Self::threaded_body_kind`], which derives the
-    /// body's kind from `context`/`in_class_method`. Never set in
-    /// production: its only setter, the class-method threaded entry (ADR 0132
-    /// Phase 1c), was removed by ADR 0133 Phase 2 (BT-3904), and BT-3905
-    /// deletes this flag with the `Acc` family. A setter would have to scope
-    /// it to the one body it lowers (set on entry, restored on exit,
-    /// including on error), or the next method inherits `Acc`.
-    ///
-    /// **The first setter must generalise these single-family sites first.**
-    /// While set, `eligible_families` adds `Acc` (so a class body's set is
-    /// `[Acc]` and a value-type or actor body's has two entries), but these
-    /// consumers assume at most one family or read a non-empty set as "this is
-    /// a value-type/actor construct", and would silently miscompile (no
-    /// `debug_assert!`: CLAUDE.md forbids one, and `verify()` cannot see a
-    /// dropped slot):
-    /// - read only `families.as_slice().first()`, dropping every later family
-    ///   (`Acc` is last, so it is the one lost): the readers in
-    ///   `control_flow/exception_handling.rs` (the `exception_family_slot`
-    ///   family and the `on:do:`/`ensure:` cleanup baseline) and
-    ///   `value_type_codegen.rs` (`extract_vt_loop_family_slot`);
-    /// - gate on `families.as_slice().is_empty()`, which flips to "has a
-    ///   family" for a class body that now carries `Acc`: the gates in
-    ///   `control_flow/conditionals.rs` and in `value_type_codegen.rs`.
-    ///
-    /// Find them with `grep -n 'families.as_slice().first()'` and
-    /// `grep -n 'families.as_slice().is_empty()'` over
-    /// `crates/beamtalk-codegen/src/core_erlang`. One `is_empty()` gate is
-    /// excluded: `FoldFamilySlots::new` (`control_flow/family_slots.rs`) was
-    /// checked and handles multiple families.
-    ///
-    /// Tracked on BT-3871 (class methods) and BT-3872 (value-type methods).
-    ///
-    /// **BT-3871 (class methods) is the first setter and decided the
-    /// generalisation this way:** `Acc` is a family of a *construct* only when
-    /// that construct holds a use of a threading parameter
-    /// (`CoreErlangGenerator::is_family_mutation` answers per expression, not
-    /// "always"), so a loop, fold, conditional or `on:do:`/`ensure:` that does
-    /// not invoke a threading parameter is lowered exactly as in a method with
-    /// none, and the sites above never see an `Acc` family. A use inside such a
-    /// construct is ADR 0132 Phase 3 (the predicate in `tier2_callee` makes the
-    /// method non-threading), and is refused loudly: the single-family sites
-    /// above report `VerifyError::ConstructFamilyDropped` for an `Acc` they
-    /// cannot carry (`CoreErlangGenerator::reject_unthreadable_acc_family`), and
-    /// the threading parameter's own identifier cannot be lowered outside a
-    /// recognised use (`generate_identifier`). BT-3872 reuses the same rules
-    /// for `[SelfVt, Acc]`.
-    pub(in crate::core_erlang) in_threaded_body: bool,
-    /// ADR 0132 §2: the per-body state of a threaded body (its threading
-    /// parameters, the `Acc` version counter). Always empty since ADR 0133
-    /// Phase 2 (BT-3904) removed the class-method threaded entries, the only
-    /// threaded bodies; deleted with the `Acc` family by BT-3905.
-    pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState,
-    /// The names of every class defined in the module being compiled (ADR 0132
-    /// §1: "the unit"), read by the threaded-body producer's forward
-    /// classification. Never set since BT-3904; deleted by BT-3905.
-    pub(in crate::core_erlang) unit_class_names: std::collections::HashSet<String>,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -482,9 +424,6 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
-            in_threaded_body: false,
-            threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState::default(),
-            unit_class_names: std::collections::HashSet::new(),
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),
