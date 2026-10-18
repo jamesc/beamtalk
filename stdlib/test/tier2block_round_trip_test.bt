@@ -9,6 +9,7 @@
 
 TestCase subclass: Tier2BlockRoundTripTest
   field: actor = nil
+
   class serial -> Boolean => true
 
   setUp => self.actor := Tier2BlockTestActor spawn
@@ -16,8 +17,7 @@ TestCase subclass: Tier2BlockRoundTripTest
   tearDown => self.actor isNil ifFalse: [self.actor stop]
 
   // BT-851: Basic round-trip: block mutates count, HOM is last expression
-  testStatefulBlockViaHOM =>
-    self assert: self.actor testRoundTrip equals: 5
+  testStatefulBlockViaHOM => self assert: self.actor testRoundTrip equals: 5
 
   // BT-853: Non-last Tier 2 value: call in HOM body
   // The block mutates count (via StateAcc), the HOM continues and returns 99,
