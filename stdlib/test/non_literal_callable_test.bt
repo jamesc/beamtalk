@@ -19,7 +19,3 @@ TestCase subclass: NonLiteralCallableTest
   // Tier-1 block stored in a variable, passed to select:
   testSelectWithBlockVar =>
     self assert: self.actor selectWithTier1Block equals: #(3, 4, 5)
-
-  // Tier-2 block stored in a variable, passed to do: — must not crash
-  testDoWithTier2BlockVar =>
-    self assert: self.actor doWithTier2Block equals: "done"

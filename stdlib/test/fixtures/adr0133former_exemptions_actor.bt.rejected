@@ -1,0 +1,122 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0133 Phase 1 (BT-3902): the actor-instance-method shapes ADR 0131 §6
+// exempted (BT-3745, BT-3755) because codegen threaded the write back: a block
+// that writes an outer local passed to a `sealed` method of the same class
+// (BT-912's actor self-send), and a stored block sent `value` as a
+// method-body statement. ADR 0133 makes every one an escaping-block compile
+// error: a block passed to a user-defined method, or stored in a local, may
+// read captured variables but not assign them. Inert: the runner discovers
+// only `.bt`. `adr0133_rejected_fixtures_report_the_escaping_assignment`
+// (beamtalk-core) asserts each `probe*` method is reported at its assignment
+// and no `callee*` method is.
+
+Actor subclass: Adr0133FormerExemptionsActor
+
+  sealed calleeDirect: b => b value
+
+  sealed calleeArg: b => b value: 5
+
+  sealed calleeAssign: b =>
+    r := b value
+    r
+
+  sealed calleeReturn: b => ^b value
+
+  sealed calleeTwice: b =>
+    b value
+    b value
+
+  sealed calleeCascade: b => b value: 1; value: 2
+
+  sealed calleeLoop: b =>
+    last := nil
+    #(1, 2, 3) do: [:e | last := b value: e]
+    last
+
+  sealed calleeOpaque: b => #(1, 2, 3) do: b
+
+  sealed calleeOpaqueOperand: b => (#(1, 2, 3) collect: b) size
+
+  sealed calleePassOn: b => self calleeArg: b
+
+  // A bare block literal to a self-send, as a method-body statement, an
+  // assignment's value and a `^` value.
+  probeSelfSendStatement =>
+    t := 0
+    self calleeDirect: [t := t + 1]
+    t
+
+  probeSelfSendAssign =>
+    t := 0
+    r := self
+      calleeDirect: [
+        t := t + 1
+        7
+      ]
+    #[r, t]
+
+  probeSelfSendReturn =>
+    t := 0
+    ^self calleeDirect: [t := t + 1]
+
+  // A stored block sent `value` as method-body statements.
+  probeStoredValue =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    b value
+    t
+
+  probeStoredValueCascade =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 1; value: 2
+    t
+
+  // Each callee shape.
+  probeArg =>
+    t := 0
+    self calleeArg: [:x | t := t + x]
+    t
+
+  probeAssign =>
+    t := 0
+    self calleeAssign: [t := t + 1]
+    t
+
+  probeReturn =>
+    t := 0
+    self calleeReturn: [t := t + 1]
+    t
+
+  probeTwice =>
+    t := 0
+    self calleeTwice: [t := t + 1]
+    t
+
+  probeCascade =>
+    t := 0
+    self calleeCascade: [:x | t := t + x]
+    t
+
+  probeLoop =>
+    t := 0
+    self calleeLoop: [:x | t := t + x]
+    t
+
+  probeOpaque =>
+    t := 0
+    self calleeOpaque: [:x | t := t + x]
+    t
+
+  probeOpaqueOperand =>
+    t := 0
+    self calleeOpaqueOperand: [:x | t := t + x]
+    t
+
+  probePassOn =>
+    t := 0
+    self calleePassOn: [:x | t := t + x]
+    t

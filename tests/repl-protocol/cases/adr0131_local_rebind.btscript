@@ -227,7 +227,7 @@ t := 0
 // methods; the REPL keeps the error (its bindings-map lowering has no lookup
 // row). Correct answer: 0.
 r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
-// => ERROR: block writes outer local `t`, but `at:ifAbsent:` cannot return the write
+// => ERROR: `t` is assigned in a block passed to `at:ifAbsent:`
 
 // PIN-BUG BT-3841: correct answer 1.
 t

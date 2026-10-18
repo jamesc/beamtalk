@@ -1311,29 +1311,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testOpaqueAllSatisfyNonLastReadWriteActorClassMethod =>
     self assert: MutationCorpusActorClassMethod opaqueAllSatisfyNonLastReadWrite equals: 1
 
-  testOpaqueDoSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueDoSelfSendReadWrite equals: 6
-
-  testOpaqueCollectSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueCollectSelfSendReadWrite equals: 6
-
-  testOpaqueSelectSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueSelectSelfSendReadWrite equals: 3
-
-  testOpaqueInjectSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueInjectSelfSendReadWrite equals: 3
-
-  testOpaqueDetectSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueDetectSelfSendReadWrite equals: 2
-
-  testOpaqueDetectIfNoneSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueDetectIfNoneSelfSendReadWrite equals: 3
-
-  testOpaqueCountSelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueCountSelfSendReadWrite equals: 3
-
-  testOpaqueAnySatisfySelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueAnySatisfySelfSendReadWrite equals: 2
-
-  testOpaqueAllSatisfySelfSendReadWriteActor =>
-    self assert: self actorCorpus opaqueAllSatisfySelfSendReadWrite equals: 2
+  // BT-3615's `opaque*SelfSendReadWrite` rows (a block that assigns a captured
+  // local passed through an actor self-send HOM) are ADR 0133 escaping-block
+  // compile errors since BT-3902.

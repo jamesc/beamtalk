@@ -79,24 +79,148 @@ fn section6_literal_block_to_user_hom_in_class_method_is_an_error() {
     assert_eq!(s6.len(), 1, "{diags:?}");
     let d = s6[0];
     assert_eq!(d.severity, Severity::Error);
+    // ADR 0133: `CvA ap:` is not `class sealed`, so it runs in the class's
+    // process.
     assert_eq!(
         d.message.as_str(),
-        "block writes outer local `t`, but `ap:` cannot return the write"
+        "`t` is assigned in a block passed to a class method (`ap:`); it would run in another \
+         process"
     );
     let hint = d.hint.as_deref().unwrap_or_default();
     assert!(
-        hint.contains("return the new value from the block"),
+        hint.contains("return the new value from the block and assign it where it is called"),
         "{hint}"
     );
-    assert!(hint.contains("`do:`, `inject:into:`, `on:do:`"), "{hint}");
-    // Points at the block, with a note at the write.
+    // Points at the assignment, with a note at the block and the construct
+    // list.
+    assert_eq!(d.span.start() as usize, src.find("t := t + 1. 1]").unwrap());
     let block_start = src.find("[t := t + 1. 1]").unwrap();
-    assert_eq!(d.span.start() as usize, block_start);
     assert!(
         d.notes
             .iter()
-            .any(|n| n.message.contains("`t` is written here"))
+            .any(|n| n.span.is_some_and(|s| s.start() as usize == block_start))
     );
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.message.contains("(ADR 0133)") && n.message.contains("inject:into:")),
+        "{:?}",
+        d.notes
+    );
+}
+
+/// ADR 0133 § Error examples: the same diagnostic for every escaping shape,
+/// naming the shape, reported at the assignment.
+#[test]
+fn escaping_block_messages_name_the_shape() {
+    let sealed =
+        "sealed Object subclass: Twice\n  class sealed twice: b =>\n    b value\n    b value\n\n";
+    for (src, message) in [
+        (
+            in_class("f := [t := t + 1]\nf value\nt"),
+            "`t` is assigned in a block stored in `f`",
+        ),
+        (
+            in_class("^[t := t + 1]"),
+            "`t` is assigned in a block returned from `probe`",
+        ),
+        (
+            in_value("self forEach: [:o | t := t + o]\nt"),
+            "`t` is assigned in a block passed to `forEach:`, which is not a construct the \
+             compiler threads it through",
+        ),
+        (
+            in_value("CvA onEvent: [:e | t := t + 1]\nt"),
+            "`t` is assigned in a block passed to a class method (`onEvent:`); it would run in \
+             another process",
+        ),
+        (
+            format!("{sealed}{}", in_class("Twice twice: [t := t + 1]\nt")),
+            "`t` is assigned in a block passed to `twice:`, which is not a construct the \
+             compiler threads it through",
+        ),
+        (
+            in_class("#[[t := t + 1]]"),
+            "`t` is assigned in a block placed in a collection literal",
+        ),
+        (
+            in_class("r := #(1) collect: [:x | [t := t + x]]\nr"),
+            "`t` is assigned in a block answered by a collection operation's block, into the \
+             operation's result",
+        ),
+        (
+            in_class("x := [t := t + 1] foo\nx"),
+            "`t` is assigned in a block sent `foo`, which is not a construct the compiler \
+             threads it through",
+        ),
+        (
+            in_class("CvA ap: 1; ap: [t := t + 1]\nt"),
+            "`t` is assigned in a block sent in a cascade (`ap:`), which the compiler does not \
+             thread it through",
+        ),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+        assert_eq!(s6[0].message.as_str(), message, "{src}");
+        // At the assignment.
+        let at = &src[s6[0].span.start() as usize..s6[0].span.end() as usize];
+        assert!(at.starts_with("t := t + "), "{src}: {at}");
+    }
+}
+
+/// The note's construct list is generated from `state_threading_selectors`,
+/// the one list codegen reads: every selector it names threads a block literal
+/// written directly as its argument (no diagnostic), and the one shape it
+/// leaves out (a user method) does not.
+#[test]
+fn escaping_block_note_lists_exactly_the_threading_constructs() {
+    let constructs = crate::state_threading_selectors::assignment_threading_constructs();
+    let note = of_category(
+        &adr0131_diagnostics(&in_class("CvA ap: [t := t + 1]\nt")),
+        DiagnosticCategory::Tier2BlockNoReturnChannel,
+    )[0]
+    .notes
+    .iter()
+    .map(|n| n.message.to_string())
+    .find(|m| m.contains("ADR 0133"))
+    .expect("construct note");
+    for selector in constructs.control.iter().chain(&constructs.collection) {
+        assert!(note.contains(selector), "{selector} missing from {note}");
+        let bare = selector.trim_start_matches("Result ");
+        assert!(
+            crate::state_threading_selectors::is_state_threading_keyword_selector(bare)
+                || crate::state_threading_selectors::is_state_threaded_block_receiver(bare)
+                || crate::state_threading_selectors::is_state_threading_unary_selector(bare)
+                || crate::state_threading_selectors::is_dictionary_inline_lookup(bare)
+                || crate::state_threading_selectors::is_try_do_selector(bare),
+            "{selector} is not a threading construct"
+        );
+    }
+}
+
+/// ADR 0133: reading a captured variable, and `^`, inside an escaping block
+/// are unaffected; so is a write to the block's own locals or parameters.
+#[test]
+fn escaping_blocks_may_read_captured_variables_and_return() {
+    for body in [
+        "f := [t + 1]\nf value",
+        "^[t + 1]",
+        "CvA ap: [t + 1]\nt",
+        "CvA ap: [^t]\nt",
+        "CvA ap: [:x | x > 0 ifTrue: [^x]. t]\nt",
+        "f := [:x | s := x. s := s + t. s]\nf value: 1",
+        "#[[t]]",
+        "r := #(1) collect: [:x | [x + t]]\nr",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+                "{src}: {diags:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -109,119 +233,65 @@ fn section6_applies_in_value_type_methods_and_to_write_only_blocks() {
     );
 }
 
+/// ADR 0133 (BT-3867's I5 shape included): a block stored in a local escapes
+/// however the local is used later, `value` sends included, in every context;
+/// one diagnostic per block, at its first write.
 #[test]
-fn section6_stored_closure_invoked_directly_is_an_inline_producer_outside_actors() {
-    // s4: `b := [t := t + 1]. b value` has no callee, so ADR 0132 Phase 0b
-    // (I5, BT-3867) evaluates the stored block in place: the same producer as
-    // `[t := t + 1] value`, in a class or value-type method.
-    for src in [
-        in_class("b := [t := t + 1]\nb value\nt"),
-        in_value("b := [t := t + 1]\nb value\nt"),
-        in_class("b := [:n | t := t + n]\nb value: 2\nt"),
-        in_value("b := [:n :m | t := t + n + m]\nb value: 1 value: 2\nt"),
-        in_class("b := [:n | t := t + n]\nb value: 1; value: 2\nt"),
-        in_class("b := [t := t + 1. t]\nr := b value\n#[r, t]"),
-        in_value("b := [t := t + 1. t]\n^b value"),
+fn stored_block_is_an_error_however_it_is_used() {
+    for body in [
+        "b := [t := t + 1]\nb value\nt",
+        "b := [:n | t := t + n]\nb value: 2\nt",
+        "b := [:n :m | t := t + n + m]\nb value: 1 value: 2\nt",
+        "b := [:n | t := t + n]\nb value: 1; value: 2\nt",
+        "b := [t := t + 1. t]\nr := b value\n#[r, t]",
+        "b := [t := t + 1. t]\n^b value",
+        "b := [t := t + 1]\n#(1) do: [:e | b value]\nt",
+        "b := [t := t + 1]\nb",
+        "b := [t := t + 1]\nCvA ap: b\nt",
+        "b := [:x | t := t + x]\n#(1, 2) do: b\nt",
+        // Replaced or shadowed later: storing it was the escape.
+        "b := [t := t + 1]\nb := [0]\nb value\nt",
+        "b := [t := t + 1]\n#(1, 2) do: [:b | b printString]\nt",
+        // Bound inside a block.
+        "#(1) do: [:e | b := [t := t + 1]. b value]\nt",
+        // The value of a conditional.
+        "b := 4 > 3 ifTrue: [[t := t + 1]] ifFalse: [[0]]\nb value\nt",
     ] {
-        let diags = adr0131_diagnostics(&src);
-        assert!(diags.is_empty(), "{src}: {diags:?}");
-    }
-}
-
-/// The inlined copies of one stored block share the block's span (see
-/// `inline_send`), so a span-keyed table could answer for one site only. With
-/// sites in different positions the stored form must be judged no more loosely than
-/// the same program written with the block literal at each site, in either order.
-#[test]
-fn section6_inlined_copies_sharing_spans_are_judged_like_literals() {
-    let sites = [
-        "b value",
-        "CvA ap: b value",
-        "t := b value",
-        "(b value) + 1",
-    ];
-    let errors = |src: &str| {
-        adr0131_diagnostics(src)
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .count()
-    };
-    for first in sites {
-        for second in sites {
-            let stored = format!("b := [t := t + 1. 1]\n{first}\n{second}\nt");
-            let literal =
-                format!("{first}\n{second}\nt").replace("b value", "[t := t + 1. 1] value");
-            for (mk, name) in [
-                (in_class as fn(&str) -> String, "class"),
-                (in_value as fn(&str) -> String, "value"),
-            ] {
-                let (s, l) = (errors(&mk(&stored)), errors(&mk(&literal)));
-                // The stored form may be stricter (a guard refuses it), never
-                // looser: accepted stored with a rejected literal is a miscompile.
-                assert!(
-                    s > 0 || l == 0,
-                    "{name}: {first} / {second}: stored {s} errors, literal {l}"
-                );
-            }
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+            assert!(
+                s6[0]
+                    .message
+                    .starts_with("`t` is assigned in a block stored in `b`")
+                    || s6[0].message.contains("returned from `probe`"),
+                "{src}: {}",
+                s6[0].message
+            );
         }
     }
 }
 
+/// ADR 0133 retires the actor self-send exemption (BT-912/BT-3755): a block
+/// passed to any method of the actor's own class escapes, whatever the callee
+/// does with it, and so does every near miss the exemption used to reject.
 #[test]
-fn section6_stored_closure_in_a_position_the_producer_rejects_keeps_its_error() {
-    // A `value` inside another block is not promotable (it compiles through a
-    // path with no tuple unpacking), and a block that is never sent `value`
-    // escapes.
-    for src in [
-        in_class("b := [t := t + 1]\n#(1) do: [:e | b value]\nt"),
-        in_class("b := [t := t + 1]\nb"),
+fn former_actor_exemptions_and_their_near_misses_are_errors() {
+    // The former exemptions.
+    for callee in [
+        "  sealed ap: b => b value",
+        "  sealed ap: b => b value: 5",
+        "  sealed ap: b =>\n    b value\n    b value",
+        "  sealed ap: b => #(1, 2) do: b",
+        "  sealed ap: b => self target: b\n\n  sealed target: c => c value",
     ] {
-        let diags = adr0131_diagnostics(&src);
-        assert!(
-            diags.iter().any(|d| d.severity == Severity::Error),
-            "{src}: {diags:?}"
-        );
+        assert_eq!(section6_errors(&actor_calling("", callee)), 1, "{callee}");
     }
-}
-
-#[test]
-fn section6_stored_closure_passed_on_through_a_user_hom_is_an_error() {
-    let src = in_class("b := [t := t + 1]\nCvA ap: b\nt");
-    let diags = adr0131_diagnostics(&src);
-    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-    assert_eq!(s6.len(), 1, "{diags:?}");
-    assert!(s6[0].message.contains("`ap:` cannot return the write"));
-}
-
-#[test]
-fn section6_reassigned_local_is_not_a_tier2_block_value() {
-    let src = in_class("b := [t := t + 1]\nb := [0]\nb value\nt");
-    assert!(adr0131_diagnostics(&src).is_empty());
-}
-
-#[test]
-fn section6_shadowing_block_parameter_is_not_the_tier2_local() {
-    let src = in_class("b := [t := t + 1]\n#(1, 2) do: [:b | b printString]\nt");
-    let diags = adr0131_diagnostics(&src);
-    assert!(diags.is_empty(), "{diags:?}");
-}
-
-/// Each actor §6 exemption is exactly the syntactic shape codegen threads,
-/// and each near miss is rejected. The exempt shapes are the methods of the
-/// compiled fixture `stdlib/test/fixtures/adr0131section6exemptions_actor.bt`,
-/// whose `BUnit` test (`adr0131section6exemptions_test.bt`) asserts they really
-/// thread the write; this test checks the fixture compiles clean, so a change
-/// to either the exemptions or codegen's recognizers (`detect_tier2_self_send`,
-/// `prescan_tier2_local_vars`/`is_tier2_value_call`,
-/// `inline_block_captured_mutations`) shows up as a failure.
-#[test]
-fn section6_exemptions_match_codegen_shapes() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
-    let fixture = std::fs::read_to_string(root.join("adr0131section6exemptions_actor.bt"))
-        .expect("exemption fixture");
-    let diags = adr0131_diagnostics(&fixture);
-    assert!(diags.is_empty(), "every exempt shape compiles: {diags:?}");
-
+    assert_eq!(
+        section6_errors(&actor_calling("sealed ", "  ap: b => b value")),
+        1
+    );
     // The near misses, each probed in an actor instance method on the debug
     // build (BT-3745): each answers 0 (write dropped) or raises.
     for body in [
@@ -267,7 +337,8 @@ fn section6_exemptions_match_codegen_shapes() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3755: the actor self-send exemption needs a callee that threads the block
+// BT-3755 (retired by ADR 0133): an actor self-send is an escape, whatever the
+// callee does
 // ---------------------------------------------------------------------------
 
 /// An actor whose `probe` self-sends `ap:` a block writing `t`, with `callee`
@@ -287,13 +358,12 @@ fn section6_errors(src: &str) -> usize {
     .len()
 }
 
-/// The callee shapes the exemption keeps: a `sealed` same-class method (or a
-/// method of a `sealed` class) whose every use of the parameter is a direct
-/// `value` send as a body statement, assignment right-hand side or `^` value.
-/// These are the methods of `adr0131section6exemptions_actor.bt`, whose
-/// `BUnit` test asserts they thread the write at runtime.
+/// The callee shapes BT-3755's exemption kept (a `sealed` same-class method,
+/// or a method of a `sealed` class, whose every use of the parameter is a
+/// direct `value` send as a body statement, assignment right-hand side or `^`
+/// value): ADR 0133 makes each an escape.
 #[test]
-fn section6_actor_self_send_to_a_threading_callee_is_exempt() {
+fn section6_actor_self_send_to_a_former_threading_callee_is_an_error() {
     for callee in [
         "  sealed ap: b => b value",
         "  sealed ap: b => b value: 5",
@@ -317,16 +387,10 @@ fn section6_actor_self_send_to_a_threading_callee_is_exempt() {
         "  sealed ap: b => self target: b\n\n  sealed target: c => c value",
         "  sealed ap: b =>\n    r := self target: b\n    r\n\n  sealed target: c => ^c value",
     ] {
-        assert_eq!(section6_errors(&actor_calling("", callee)), 0, "{callee}");
+        assert_eq!(section6_errors(&actor_calling("", callee)), 1, "{callee}");
     }
-    // A `sealed` class seals every method.
-    assert_eq!(
-        section6_errors(&actor_calling("sealed ", "  ap: b => b value")),
-        0
-    );
-    // The block's position selects the parameter that must thread.
     let two = "Actor subclass: Ac\n  sealed ap: a with: b => b value\n\n  probe =>\n    t := 0\n    self ap: 1 with: [t := t + 1]\n    t\n";
-    assert_eq!(section6_errors(two), 0);
+    assert_eq!(section6_errors(two), 1);
 }
 
 /// Each of these answered a wrong value or raised before BT-3755 (probed on
@@ -436,47 +500,62 @@ fn section6_standalone_method_actor_self_send_is_an_error() {
     assert_eq!(section6_errors(src), 1);
 }
 
-/// PIN-BUG BT-3865 (ADR 0132 Phase 0a, BT-3866): the inert
-/// `adr0132section6_*.bt.pending` fixtures hold the §6 inventory shapes
-/// (I1-I4, I6-I8) as runtime programs over class, value-type and actor
-/// methods: every `probe*` method is rejected with `Tier2BlockNoReturnChannel`
-/// and no `callee*` method carries an ADR 0131 threading diagnostic. An ADR 0132 phase that makes a
-/// shape compile moves its probe out of the pending file, which keeps this
-/// green.
+/// ADR 0133 Phase 1 (BT-3902): the inert `*.bt.rejected` fixtures under
+/// `stdlib/test/fixtures/` hold the escaping-block shapes as whole programs
+/// over class, value-type and actor methods: the ADR 0132 §6 inventory
+/// (I1-I4, I6-I8, formerly the `PIN-BUG BT-3865` pending fixtures), BT-3867's
+/// stored-block `value` shape (I5) and BT-3755's former actor self-send
+/// exemptions. ADR 0133 makes each a permanent compile error, so the files
+/// never compile (the stdlib runner discovers only `.bt`); this test is their
+/// assertion. Every method not named `callee*` is rejected with exactly one
+/// escaping-block diagnostic, at an assignment inside it (`… is assigned in a
+/// block …`); no `callee*` method carries any ADR 0131 threading diagnostic.
 #[test]
-fn adr0132_section6_inventory_pins() {
+fn adr0133_rejected_fixtures_report_the_escaping_assignment() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
-    for context in ["class", "value", "actor"] {
-        let name = format!("adr0132section6_{context}.bt.pending");
+    let mut names: Vec<String> = std::fs::read_dir(&root)
+        .expect("fixtures directory")
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().into_string().ok()?;
+            name.ends_with(".bt.rejected").then_some(name)
+        })
+        .collect();
+    names.sort();
+    assert!(names.len() >= 7, "{names:?}");
+    for name in names {
         let src =
             std::fs::read_to_string(root.join(&name)).unwrap_or_else(|e| panic!("{name}: {e}"));
         let module = parse_module(&src);
         let diags = adr0131_diagnostics(&src);
         let class = &module.classes[0];
-        let (mut probes, mut callees) = (0, 0);
+        let mut probes = 0;
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             let selector = method.selector.name();
-            let within = |d: &Diagnostic| {
+            let within = |d: &&Diagnostic| {
                 method.span.start() <= d.span.start() && d.span.end() <= method.span.end()
             };
-            if selector.starts_with("probe") {
-                probes += 1;
-                let rejected = diags.iter().any(|d| {
-                    d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel) && within(d)
-                });
-                assert!(rejected, "{name}: `{selector}` is no longer rejected");
-            } else {
-                callees += 1;
-                assert!(
-                    !diags.iter().any(within),
-                    "{name}: helper `{selector}` is rejected"
-                );
+            let found: Vec<&Diagnostic> = diags.iter().filter(within).collect();
+            if selector.starts_with("callee") {
+                assert!(found.is_empty(), "{name}: helper `{selector}`: {found:?}");
+                continue;
             }
+            probes += 1;
+            assert_eq!(found.len(), 1, "{name}: `{selector}`: {found:?}");
+            let d = found[0];
+            assert_eq!(
+                d.category,
+                Some(DiagnosticCategory::Tier2BlockNoReturnChannel),
+                "{name}: `{selector}`"
+            );
+            assert!(
+                d.message.contains("is assigned in a block"),
+                "{name}: `{selector}`: {}",
+                d.message
+            );
+            let at = &src[d.span.start() as usize..d.span.end() as usize];
+            assert!(at.contains(":="), "{name}: `{selector}` reported at `{at}`");
         }
-        assert!(
-            probes >= 2 && callees >= 2,
-            "{name}: {probes} probes, {callees} callees"
-        );
+        assert!(probes >= 2, "{name}: {probes} probes");
     }
 }
 
@@ -909,17 +988,20 @@ fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
 #[test]
 fn a_try_do_sent_to_another_receiver_takes_the_ordinary_section6_path() {
     // Only `Result tryDo:` is a §1 construct. An actor's own `tryDo:` taking
-    // the block is a plain `self` send: the BT-3755 exemption and callee check
-    // apply to it like any other.
+    // the block is a plain `self` send, so the block escapes (ADR 0133),
+    // whatever the callee does with it.
     let actor = |callee: &str| {
         format!(
             "Actor subclass: Ac\n  state: n = 0\n\n{callee}\n\n  probe =>\n    t := 0\n    self tryDo: [t := t + 1]\n    t\n"
         )
     };
-    let threading = actor("  sealed tryDo: b => b value");
-    assert!(adr0131_diagnostics(&threading).is_empty(), "{threading}");
-    let non_threading = actor("  sealed tryDo: b => #(1) do: [:x | b value]");
-    assert_eq!(section6_errors(&non_threading), 1, "{non_threading}");
+    for callee in [
+        "  sealed tryDo: b => b value",
+        "  sealed tryDo: b => #(1) do: [:x | b value]",
+    ] {
+        let src = actor(callee);
+        assert_eq!(section6_errors(&src), 1, "{src}");
+    }
 }
 
 #[test]
@@ -1018,20 +1100,15 @@ fn adr0131_probe_matrix_pins() {
     );
 }
 
-/// ADR 0131 probe s4 in class and value-type methods (a stored closure
-/// invoked directly) was a permanent §6 error until ADR 0132 Phase 0b (I5,
-/// BT-3867): the stored block is evaluated in place, so it is accepted. A
-/// stored block passed as an argument stays an error (I4/I6).
+/// ADR 0131 probe s4 (a stored closure invoked directly) was a permanent §6
+/// error until ADR 0132 Phase 0b (I5, BT-3867) evaluated the stored block in
+/// place in class and value-type methods; ADR 0133 makes it the escaping-block
+/// error again, like a stored block passed as an argument (I4/I6).
 #[test]
-fn adr0131_probe_s4_is_an_inline_producer() {
+fn adr0131_probe_s4_is_an_escaping_block() {
     for src in [
         "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
         "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    b value\n    t\n",
-    ] {
-        let diags = adr0131_diagnostics(src);
-        assert!(diags.is_empty(), "{src}: {diags:?}");
-    }
-    for src in [
         "Object subclass: P\n  class s4 =>\n    t := 0\n    b := [t := t + 1]\n    P hom: b\n    t\n",
         "Value subclass: P\n  s4 =>\n    t := 0\n    b := [t := t + 1]\n    #(1) do: b\n    t\n",
     ] {
@@ -1099,19 +1176,17 @@ fn section6_parenthesized_block_receiver_is_a_block_value() {
 }
 
 #[test]
-fn section6_sibling_scope_parameter_is_not_an_earlier_tier2_local() {
-    let src = in_value(
-        "#(1) do: [:e | blk := [t := t + 1]. blk]\n#(1, 2) do: [:blk | blk printString]\nt",
-    );
-    let diags = adr0131_diagnostics(&src);
-    assert!(diags.is_empty(), "{diags:?}");
-}
-
-#[test]
-fn section6_destructuring_rebind_is_a_reassignment() {
-    let src = in_class("b := [t := t + 1]\n#[b, _x] := #[[0], 1]\nb value\nt");
-    let diags = adr0131_diagnostics(&src);
-    assert!(diags.is_empty(), "{diags:?}");
+fn section6_stored_block_is_reported_once_whatever_reuses_its_name() {
+    // A sibling scope's parameter or a destructuring rebind of the same name
+    // does not add a second diagnostic, nor remove the binding's (ADR 0133).
+    for src in [
+        in_value(
+            "#(1) do: [:e | blk := [t := t + 1]. blk]\n#(1, 2) do: [:blk | blk printString]\nt",
+        ),
+        in_class("b := [t := t + 1]\n#[b, _x] := #[[0], 1]\nb value\nt"),
+    ] {
+        assert_eq!(section6_errors(&src), 1, "{src}");
+    }
 }
 
 #[test]
@@ -2357,21 +2432,23 @@ fn section6_escaping_blocks_are_errors_in_every_context() {
             let d = s6[0];
             assert_eq!(d.severity, Severity::Error, "{name} in {context}");
             assert!(
-                d.message.contains(&format!("writes outer local `{local}`"))
-                    && d.message.contains("nothing can return the write"),
+                d.message
+                    .starts_with(&format!("`{local}` is assigned in a block ")),
                 "{name} in {context}: {}",
                 d.message
             );
             let hint = d.hint.as_deref().unwrap_or_default();
-            let field = format!("`self.{local} := self.{local} + 1`");
             assert!(
-                hint.contains(&field) && hint.contains("assign it where"),
+                hint.contains("assign it where"),
                 "{name} in {context}: {hint}"
             );
+            let at = &src[d.span.start() as usize..d.span.end() as usize];
             assert!(
-                d.notes
-                    .iter()
-                    .any(|n| n.message.contains(&format!("`{local}` is written here"))),
+                at.starts_with(&format!("{local} := ")),
+                "{name} in {context}: at `{at}`"
+            );
+            assert!(
+                d.notes.iter().any(|n| n.message.contains("(ADR 0133)")),
                 "{name} in {context}"
             );
         }
@@ -2379,52 +2456,39 @@ fn section6_escaping_blocks_are_errors_in_every_context() {
 }
 
 #[test]
-fn section6_escape_points_at_the_block_or_its_binding() {
+fn section6_escape_points_at_the_assignment_with_a_note_at_the_block() {
     let src = in_class("^[t := t + 1]");
     let diags = adr0131_diagnostics(&src);
     assert_eq!(diags.len(), 1, "{diags:?}");
     assert_eq!(
         diags[0].span.start() as usize,
-        src.find("[t := t + 1]").unwrap()
+        src.find("t := t + 1]").unwrap()
     );
-    assert!(diags[0].message.contains("returned from the method"));
-
-    let src = in_class("b := [t := t + 1]\n^b");
-    let diags = adr0131_diagnostics(&src);
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_eq!(diags[0].span.start() as usize, src.find("b := [").unwrap());
+    assert!(diags[0].message.contains("returned from `probe`"));
+    let block = src.find("[t := t + 1]").unwrap();
     assert!(
         diags[0]
             .notes
             .iter()
-            .any(|n| n.message.contains("`b` escapes here")),
+            .any(|n| n.span.is_some_and(|s| s.start() as usize == block)),
         "{diags:?}"
     );
 
-    // BT-3859: an alias is reported at the block's own binding, naming the
-    // alias that escapes.
-    let src = in_class("b := [t := t + 1]\nc := b\n^c");
-    let diags = adr0131_diagnostics(&src);
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_eq!(diags[0].span.start() as usize, src.find("b := [").unwrap());
-    assert!(
-        diags[0].message.contains("block stored in `c`"),
-        "{diags:?}"
-    );
-    assert!(
-        diags[0]
-            .notes
-            .iter()
-            .any(|n| n.message.contains("`c` escapes here")),
-        "{diags:?}"
-    );
-
-    let src = in_actor("b := [t := t + 1]\nself.n := b\nnil");
-    assert!(
-        adr0131_diagnostics(&src)[0]
-            .message
-            .contains("stored in a field or class variable")
-    );
+    // A local bound to the block is reported where it is bound, whatever the
+    // local does later (an alias, a return, a field store).
+    for body in [
+        "b := [t := t + 1]\n^b",
+        "b := [t := t + 1]\nc := b\n^c",
+        "b := [t := t + 1]\nself.n := b\nnil",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        assert_eq!(diags.len(), 1, "{body}: {diags:?}");
+        assert!(
+            diags[0].message.contains("stored in `b`"),
+            "{body}: {diags:?}"
+        );
+    }
     let src = in_class("#([t := t + 1])");
     assert!(
         adr0131_diagnostics(&src)[0]
@@ -2496,25 +2560,16 @@ fn section6_non_escaping_uses_are_not_escapes() {
 
 /// BT-3806: the value a returned operand is followed through is only what the
 /// method answers. A block that is not the value of the last statement of an
-/// arm, the cleanup of an `ensure:`, a block rebound to something else before
-/// it escapes, and a block that is the value of a block that is only stored,
-/// never returned, stay accepted (a stored, never-sent block is the
-/// dead-block-assignment lint's).
+/// arm and the cleanup of an `ensure:` are discarded, so they do not escape;
+/// nor does a block that is evaluated in place.
 #[test]
 fn section6_values_that_are_not_returned_are_not_escapes() {
     for body in [
         "true ifTrue: [[t := t + 1]. 0] ifFalse: [0]",
         "[0] ensure: [[t := t + 1]]",
-        "b := [t := t + 1]\nb := nil\n^b",
-        "b := [t := t + 1]\nc := b\nnil",
-        "x := [[t := t + 1]]\nnil",
-        "x := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nnil",
         "true ifTrue: [t := t + 1] ifFalse: [t := 0]",
         "b := [t := t + 1] value",
-        // BT-3859: an alias rebound before it escapes, and a block parameter
-        // that shadows the block-valued local.
-        "b := [t := t + 1]\nc := b\nc := nil\n^c",
-        "b := [t := t + 1]\nc := nil\n#(1) do: [:b | c := b]\n^c",
+        "#(1) do: [:x | [t := t + x]]",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             assert_eq!(
@@ -2525,49 +2580,83 @@ fn section6_values_that_are_not_returned_are_not_escapes() {
             );
         }
     }
+    // ADR 0133: storing the block in a local is the escape, so rebinding the
+    // local before it is returned no longer clears it (BT-3806, BT-3859
+    // accepted these).
+    for body in [
+        "b := [t := t + 1]\nb := nil\n^b",
+        "b := [t := t + 1]\nc := b\nnil",
+        "x := [[t := t + 1]]\nnil",
+        "x := true ifTrue: [[t := t + 1]] ifFalse: [nil]\nnil",
+        "b := [t := t + 1]\nc := b\nc := nil\n^c",
+        "b := [t := t + 1]\nc := nil\n#(1) do: [:b | c := b]\n^c",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                1,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
+    }
 }
 
-/// BT-3806: a local assigned more than once is reported for the binding that
-/// escapes, once per binding.
+/// A local assigned more than once is reported once per block it is bound to.
 #[test]
-fn section6_escape_reports_the_escaping_binding_of_a_reassigned_local() {
+fn section6_escape_reports_every_stored_block_of_a_reassigned_local() {
     let src = in_class("b := [t := t + 1]\nb := [t := t + 2]\n^b");
     let s6: Vec<_> = adr0131_diagnostics(&src)
         .into_iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
         .collect();
-    let escaping = s6
-        .iter()
-        .filter(|d| d.message.contains("returned from the method"))
-        .collect::<Vec<_>>();
-    assert_eq!(escaping.len(), 1, "{s6:?}");
+    assert_eq!(s6.len(), 2, "{s6:?}");
     assert_eq!(
-        escaping[0].span.start() as usize,
-        src.find("b := [t := t + 2]").unwrap()
+        s6[1].span.start() as usize,
+        src.find("t := t + 2]").unwrap()
     );
 }
 
+/// BT-3858 (ADR 0133): the REPL root reports the same diagnostic as a method
+/// (surface parity): a block that is the input's value, stored in a session
+/// binding, or placed in a literal escapes.
 #[test]
-fn section6_escape_in_a_repl_expression_list_is_not_checked() {
-    // The REPL's last value goes to the display and its locals are session
-    // bindings; only sends are checked there.
-    let diags = adr0131_diagnostics_with("t := 0\n[t := t + 1]", &[]);
-    assert!(
-        of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
-        "{diags:?}"
-    );
-}
-
-/// BT-3755 review: the help for a non-threading actor self-send callee names
-/// exactly the two accepted non-direct forms, not "a collection message".
-#[test]
-fn section6_self_send_help_names_only_the_accepted_forms() {
-    let src = actor_calling("sealed ", "  ap: b => b foo: 1");
-    let diags = adr0131_diagnostics(&src);
-    let hint = diags[0].hint.as_deref().unwrap_or_default();
-    assert!(hint.contains("`#(1) do: b`"), "{hint}");
-    assert!(hint.contains("`last := b value: e`"), "{hint}");
-    assert!(!hint.contains("`inject:into:`"), "{hint}");
+fn section6_escape_in_a_repl_expression_list_is_checked() {
+    for (src, message) in [
+        (
+            "[t := t + 1]",
+            "`t` is assigned in a block that is the value of the expression",
+        ),
+        (
+            "b := [t := t + 1]",
+            "`t` is assigned in a block stored in `b`",
+        ),
+        (
+            "d := #([t := t + 100])",
+            "`t` is assigned in a block placed in a collection literal",
+        ),
+        (
+            "c := true ifTrue: [[t := t + 10]] ifFalse: [[0]]",
+            "`t` is assigned in a block stored in `c`",
+        ),
+    ] {
+        let diags = adr0131_diagnostics_with(src, &["t"]);
+        let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+        assert_eq!(s6[0].message.as_str(), message, "{src}");
+    }
+    // The inline shapes still compile at the REPL.
+    for src in [
+        "#(1, 2, 3) do: [:x | t := t + x]",
+        "[t < 10] whileTrue: [t := t + 1]",
+        "[t := t + 1] value",
+    ] {
+        let diags = adr0131_diagnostics_with(src, &["t"]);
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+            "{src}: {diags:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3284,10 +3373,10 @@ fn adr0131_nested_assign_pins() {
 }
 
 /// BT-3882: a block that is the value of the method body's last-statement
-/// assignment is returned from the method in every context, so the actor
-/// diagnostic is the class and value-type one.
+/// assignment escapes in every context, so the actor diagnostic is the class
+/// and value-type one (ADR 0133 names the local it is stored in).
 #[test]
-fn section6_last_statement_assignment_escape_is_returned_in_every_context() {
+fn section6_last_statement_assignment_escape_is_the_same_in_every_context() {
     for &name in LAST_STATEMENT_ASSIGNMENT_SHAPES {
         let body = ESCAPE_SHAPES
             .iter()
@@ -3305,7 +3394,7 @@ fn section6_last_statement_assignment_escape_is_returned_in_every_context() {
                 })
                 .collect();
         assert!(
-            reports[0].0.contains("returned from the method"),
+            reports[0].0.contains("stored in `b`"),
             "{name}: {}",
             reports[0].0
         );

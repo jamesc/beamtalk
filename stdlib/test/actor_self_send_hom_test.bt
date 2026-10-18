@@ -102,44 +102,10 @@ TestCase subclass: ActorSelfSendHomTest
 
   // ── BT-3615: ADR 0128 extended to the remaining collection HOMs ──────────
   // `fixtures/self_send_hom_fold_pool.bt` forwards an opaque block across a
-  // self-send to each operator. Before the fix every Tier 2 shape below
-  // crashed (badarity / function_clause / type error); the `r := self hom:
-  // [...]` assignment form also silently dropped the captured-local write
-  // (caller side), for `do:`/`collect:` too.
-  testInjectIntoThreadsCapturedLocalThroughSelfSendHom =>
-    self assert: SelfSendHomFoldPool spawn injectTouches equals: #(4, 10)
-    self assert: SelfSendHomFoldPool spawn injectTouchesStatement equals: 4
-
-  testDetectThreadsCapturedLocalAndShortCircuits =>
-    self assert: SelfSendHomFoldPool spawn detectTouches equals: #(3, 3)
-
-  testDetectIfNoneThreadsCapturedLocal =>
-    self assert: SelfSendHomFoldPool spawn detectIfNoneTouches equals: #(4, 0)
-
-  testCountThreadsCapturedLocal =>
-    self assert: SelfSendHomFoldPool spawn countTouches equals: #(4, 2)
-
-  testAnySatisfyThreadsCapturedLocalAndShortCircuits =>
-    self assert: SelfSendHomFoldPool spawn anySatisfyTouches equals: #(2, true)
-
-  testAllSatisfyThreadsCapturedLocalAndShortCircuits =>
-    self assert: SelfSendHomFoldPool spawn allSatisfyTouches equals: #(2, false)
-
-  testOpaqueFoldThreadsFieldAndCapturedLocalTogether =>
-    self assert: SelfSendHomFoldPool spawn injectFieldAndLocal equals: #(10, 4, 110)
-
-  testArrayOpaqueFoldsThreadCapturedLocal =>
-    pool := SelfSendHomFoldPool spawn
-    self assert: pool arrDoTouches equals: 10
-    self assert: pool arrCollectTouches equals: #(10, #[2, 4, 6, 8])
-    self assert: pool arrInjectTouches equals: #(4, 10)
-
-  testSetOpaqueFoldsThreadCapturedLocalAndKeepSpecies =>
-    pool := SelfSendHomFoldPool spawn
-    self assert: pool setDoTouches equals: 10
-    self assert: pool setCollectTouches equals: #(10, Set, 4)
-    self assert: pool setInjectTouches equals: #(4, 10)
-
+  // self-send to each operator. Its Tier 2 callers (a block that assigns a
+  // captured local through the self-send) are ADR 0133 escaping-block compile
+  // errors since BT-3902; the pure callables below remain.
+  //
   // Pure (Tier 1) opaque callables from another process — the common case
   // that worked before and must keep working, with the right result type.
   testPureOpaqueCallableRemainingOperators =>
@@ -164,8 +130,8 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool nestedInjectPlusOne: [:a :b | a + b]) equals: 11
     self assert: (pool nestedAnyAnswer: [:x | x > 3]) equals: "yes"
 
-  testOpaqueFoldInConditionalArmAndLoopBodyThreadsState =>
+  testOpaqueFoldInConditionalArmAndLoopBody =>
     pool := SelfSendHomFoldPool spawn
-    self assert: pool doWhenTouches equals: 10
-    self assert: pool injectTwiceTouches equals: #(8, 20)
-    self assert: pool whileConditionTouches equals: #(12, 2)
+    self assert: (pool doWhen: true with: [:x | x]) equals: nil
+    self assert: (pool injectTwice: [:a :b | a + b]) equals: 20
+    self assert: (pool countUpWhile: [:x | x > 2]) equals: 2

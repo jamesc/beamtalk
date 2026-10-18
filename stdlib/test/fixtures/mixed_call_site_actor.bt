@@ -18,8 +18,5 @@ Actor subclass: MixedCallSiteActor
   // was compiled as arity 1 but the Tier 2 method body calls it with arity 2
   testTier1CallSite => self applyBlock: [:x | x + 1] to: 10
 
-  // Tier 2 call site: block captures and mutates `total`
-  testTier2CallSite =>
-    total := 0
-    self applyBlock: [:x | total := total + x] to: 7
-    total
+// The Tier 2 call site (`self applyBlock: [:x | total := total + x] to: 7`) is
+// an ADR 0133 escaping-block compile error since BT-3902.

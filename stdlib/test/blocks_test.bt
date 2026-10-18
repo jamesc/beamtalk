@@ -91,22 +91,15 @@ TestCase subclass: BlocksTest
       x + y + z
     ] perform: #value:value:value: withArguments: #(1, 2, 3)) equals: 6
 
-  testPerformOnStatefulBlockRaisesClearError =>
-    // BT-2812: a stored (Tier 2) block mutates captured state via a threaded
-    // StateAcc that only a call-site-aware caller can supply — perform:
-    // has no such state, so this now raises a clear, purpose-built error
-    // instead of the wrong-selector does_not_understand it used to.
-    count := 0
-    @expect dead_assignment
-    statefulBlock := [:x | count := count + x]
-    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
-    // the runtime guard; if that exemption narrows, this test must change.
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBlock))
-    self should: [
-      laundered perform: #value: withArguments: #(3)
-    ] raise: #stateful_block_dispatch
-
+  // The guards below raise `stateful_block_dispatch` for a fun of one more
+  // parameter than the send passes: the shape of a Tier 2 (stateful) block,
+  // whose extra parameter is the StateAcc only a call-site-aware caller can
+  // supply (BT-2812). ADR 0133 (BT-3902) makes a block that assigns a
+  // captured variable and escapes a compile error, so a Tier 2 block can no
+  // longer reach these guards from source; they are exercised with a pure
+  // block of that arity, which the guard cannot tell apart (see the first
+  // test). BT-2892's Tier 2 misapplication shapes (a 0-arg Tier 2 block sent
+  // `value:`, or used as an `on:do:` handler) went with them.
   testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind =>
     // BT-2812 code review: erlang:is_function/2 arity comparison can't tell a
     // genuine Tier 2 (stateful) block from a Tier 1 (pure) block simply called
@@ -124,42 +117,14 @@ TestCase subclass: BlocksTest
     // BT-2914: the unary `value` fallback guard (statically-unknown
     // receiver) must arity-discriminate like the keyword value:* guards —
     // a Tier 2 (stateful) 0-arg block is an arity-1 fun whose StateAcc a
-    // generic call site can't supply. Laundering the block through an Erlang tuple
-    // hides it from the call-site Tier 2 tracking (it's neither a block
-    // literal nor a local assigned one), so the runtime guard is what fires.
-    count := 0
-    @expect dead_assignment
-    statefulBlock := [count := count + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulBlock))
+    // generic call site can't supply. Laundering the block through an Erlang
+    // tuple hides it from the call site, so the runtime guard is what fires.
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc | 42]))
     self should: [laundered value] raise: #stateful_block_dispatch
 
     // A pure 0-arg block through the same laundering keeps working.
     pureLaundered := #([42]) first
     self assert: pureLaundered value equals: 42
-
-  testPerformWithWrongArityOnStatefulBlockRaisesAStructuredErrorNotACrash =>
-    // BT-2812 code review (BT-2892 tracks improving this): the arity
-    // ambiguity also cuts the other way — a genuinely Tier 2 (stateful)
-    // 0-arg block has raw arity 1 (StateAcc only), which satisfies
-    // value:'s Tier 1 check, so the fallback misapplies the caller's
-    // argument into the StateAcc slot. This does NOT crash raw: an outer
-    // safety net already converts the resulting internal map-shape failure
-    // into a clean, catchable structured error (currently #type_error, not
-    // the more informative #stateful_block_dispatch — see BT-2892). This
-    // test pins "still a structured error, not a raw crash" rather than the
-    // exact kind, since the precise kind is an accident of unrelated
-    // machinery, not a designed contract.
-    count := 0
-    @expect dead_assignment
-    statefulZeroArgBlock := [count := count + 1]
-    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
-    // the runtime guard; if that exemption narrows, this test must change.
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulZeroArgBlock))
-    caught := [
-      laundered perform: #value: withArguments: #(42)
-    ] on: Exception do: [:e | e]
-    self assert: (caught isKindOf: Exception)
 
   testPerformOnPureWhileTrueAndWhileFalseSelectors =>
     // BT-2908: whileTrue:/whileFalse: reached via perform:withArguments:
@@ -238,19 +203,14 @@ TestCase subclass: BlocksTest
     // purpose-built error instead of a wrong-selector does_not_understand.
     // Exact repro from docs/beamtalk-language-features.md's former "known
     // limitation" note.
+    // (A pure block of the Tier 2 arity stands in for one: see the note
+    // above testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind.)
     i := 0
-    @expect dead_assignment
-    statefulIncrement := [i := i + 1]
-    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
-    // the runtime guard; if that exemption narrows, this test must change.
-    launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulIncrement))
+    launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc | i + 1]))
     self should: [
       [i < 3] perform: #whileTrue: withArguments: #(launderedIncrement)
     ] raise: #stateful_block_dispatch
-    count := 0
-    @expect dead_assignment
-    statefulBody := [count := count + 1]
+    statefulBody := [:acc | nil]
     self
       should: [
         [
@@ -265,19 +225,15 @@ TestCase subclass: BlocksTest
 
   testPerformOnStatefulExceptionBlockRaisesClearError =>
     // BT-2908: same Tier 2 gap as the loop family above, for on:do:/ensure:'s
-    // receiver, handler, and cleanup blocks.
-    count := 0
-    @expect dead_assignment
-    statefulReceiver := [count := count + 1]
-    // ADR 0131 §6 (BT-3745) rejects the direct shape at compile time, so the
-    // block is laundered through an Erlang FFI tuple (exempt from §6) to reach
-    // the runtime guard; if that exemption narrows, this test must change.
+    // receiver, handler, and cleanup blocks. (A pure block of the Tier 2
+    // arity stands in for one: see the note above
+    // testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind.)
+    statefulReceiver := [:acc | nil]
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulReceiver))
     self should: [
       laundered perform: #on:do: withArguments: #(Error, [:e | "unused"])
     ] raise: #stateful_block_dispatch
-    @expect dead_assignment
-    statefulHandler := [:e | count := count + 1]
+    statefulHandler := [:e :acc | nil]
     launderedHandler := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: statefulHandler))
     self should: [
       [1 / 0] perform: #on:do: withArguments: #(Error, launderedHandler)
@@ -336,31 +292,3 @@ TestCase subclass: BlocksTest
       self assert: counter value equals: 1
     ] ensure: [counter delete]
 
-  testPerformOnDoWithZeroArgStatefulHandlerSilentlyMisfiresInsteadOfErroring =>
-    // BT-2908 review: on:do:'s handler dispatch shares the arity-1 ambiguity
-    // BT-2812 documented for blockValue* (deferred to BT-2892) — a genuinely
-    // Tier 2 0-arg handler has raw arity 1 (StateAcc only), indistinguishable
-    // from a pure 1-arg handler, so it gets misapplied as
-    // `apply Handler (ExObj)` instead of raising stateful_block_dispatch.
-    // Empirically checked (not assumed): unlike BT-2812's blockValue* variant,
-    // where the misapplied block's internal maps:get/maps:put hits a badarg
-    // an outer safety net converts to a clean #beamtalk_error{}, this
-    // variant doesn't crash or error at all — a 0-arg block using direct-
-    // params state threading (BT-1275) just tolerates ExObj as a stand-in
-    // StateAcc and returns a garbage {Result, NewState} tuple silently, with
-    // the original exception dropped rather than propagated or reported.
-    // Pinned as the observed behavior for this specific variant of the
-    // deferred BT-2892 ambiguity — not a regression from this PR (the same
-    // arity check already exists for value:/etc. via BT-2812), but the
-    // silent-data-loss shape is worth flagging for whoever picks up BT-2892.
-    count := 0
-    @expect dead_assignment
-    statefulZeroArgHandler := [count := count + 1]
-    result := [1 / 0]
-      perform: #on:do:
-      withArguments: (Erlang erlang
-        tuple_to_list: (Erlang erlang
-          setelement: 1
-          of: (Erlang erlang make_tuple: 2 init: statefulZeroArgHandler)
-          value: Error))
-    self assert: (result isKindOf: Tuple)
