@@ -18,15 +18,13 @@ TestCase subclass: DynamicEqualitySendTest
     self assert: (1 perform: #'==' withArguments: #(1.0))
     self deny: (1 perform: #'=:=' withArguments: #(1.0))
 
-  testIntegerRespondsToEquals =>
-    self assert: (1 respondsTo: #'==')
+  testIntegerRespondsToEquals => self assert: (1 respondsTo: #'==')
 
   testPidPerformEquals =>
     p := Erlang erlang self
     self assert: (p perform: #'==' withArguments: #(p))
 
-  testPidRespondsToEquals =>
-    self assert: (Erlang erlang self respondsTo: #'==')
+  testPidRespondsToEquals => self assert: (Erlang erlang self respondsTo: #'==')
 
   testReferencePerformEquals =>
     r := Erlang erlang make_ref
