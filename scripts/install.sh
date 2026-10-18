@@ -14,6 +14,8 @@
 #   BEAMTALK_VERSION   - version to install (default: latest)
 #   BEAMTALK_NIGHTLY   - set to 1 for nightly build
 #   BEAMTALK_PREFIX    - install prefix (default: ~/.beamtalk)
+#   GITHUB_TOKEN       - optional; authenticates the "latest release" lookup
+#                        (GH_TOKEN also works). Nightly needs no API call.
 
 set -eu
 
@@ -50,6 +52,7 @@ while [ $# -gt 0 ]; do
             echo "  BEAMTALK_VERSION    Same as --version"
             echo "  BEAMTALK_NIGHTLY    Set to 1 for nightly build"
             echo "  BEAMTALK_PREFIX     Same as --prefix"
+            echo "  GITHUB_TOKEN        Optional; authenticates the latest-release lookup"
             exit 0
             ;;
         *)  echo "Unknown option: $1"; exit 1 ;;
@@ -101,40 +104,52 @@ resolve_version() {
     fi
 
     if [ "${NIGHTLY}" = "1" ]; then
-        echo "Fetching latest nightly build..."
+        # The rolling nightly release always has tag `nightly` and versionless
+        # asset names (beamtalk-nightly-<platform>.<ext>), so it is downloaded
+        # directly. No GitHub API call: release downloads are not subject to
+        # the API's unauthenticated rate limit (60 requests/hour per IP, shared
+        # by CI runners), which used to fail installs with a misleading
+        # "no nightly release" error.
         TAG="nightly"
-        RELEASE_URL="${GITHUB_API}/repos/${REPO}/releases/tags/nightly"
-    else
-        echo "Fetching latest release..."
-        RELEASE_URL="${GITHUB_API}/repos/${REPO}/releases/latest"
+        VERSION="nightly"
+        return
     fi
 
+    echo "Fetching latest release..."
+    RELEASE_URL="${GITHUB_API}/repos/${REPO}/releases/latest"
+    # Authenticate when a token is available (GitHub Actions sets
+    # GITHUB_TOKEN; `gh` users have GH_TOKEN): 1,000+ requests/hour instead of
+    # 60 per IP.
+    TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if command -v curl >/dev/null 2>&1; then
-        RELEASE_JSON=$(curl -sS "${RELEASE_URL}")
+        if [ -n "${TOKEN}" ]; then
+            RELEASE_JSON=$(curl -sS --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+        else
+            RELEASE_JSON=$(curl -sS --retry 3 "${RELEASE_URL}")
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        RELEASE_JSON=$(wget -qO- "${RELEASE_URL}")
+        if [ -n "${TOKEN}" ]; then
+            RELEASE_JSON=$(wget -qO- --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+        else
+            RELEASE_JSON=$(wget -qO- "${RELEASE_URL}")
+        fi
     else
         echo "Error: curl or wget required"
         exit 1
-    fi
-
-    if [ "${NIGHTLY}" = "1" ]; then
-        # For nightly, extract the version from the release name (e.g., "Nightly Build (nightly-20260321-abc1234)")
-        VERSION=$(echo "${RELEASE_JSON}" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -1)
-        if [ -z "${VERSION}" ]; then
-            echo "Error: No nightly release found. Nightly builds may not be available yet."
-            exit 1
-        fi
-        # For nightly, the tag IS the version identifier
-        TAG="${VERSION}"
-        return
     fi
 
     # Parse tag_name from JSON (handles variable whitespace)
     TAG=$(echo "${RELEASE_JSON}" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -1)
 
     if [ -z "${TAG}" ]; then
-        echo "Error: Could not determine latest version"
+        # Surface GitHub's own error (e.g. "API rate limit exceeded ...")
+        # rather than guessing at the cause.
+        API_MESSAGE=$(echo "${RELEASE_JSON}" | sed -n 's/.*"message" *: *"\([^"]*\)".*/\1/p' | head -1)
+        echo "Error: Could not determine the latest version from ${RELEASE_URL}"
+        if [ -n "${API_MESSAGE}" ]; then
+            echo "  GitHub API: ${API_MESSAGE}"
+        fi
+        echo "  Set GITHUB_TOKEN to authenticate, or pass --version VERSION."
         exit 1
     fi
 
