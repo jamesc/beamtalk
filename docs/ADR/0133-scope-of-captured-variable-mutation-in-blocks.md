@@ -70,7 +70,16 @@ Size alone would be acceptable if the machinery were converging. It is not:
   `jamesc/beamtalk-symphony` (2026-10-18) found about 20 writes to captured
   locals, every one inside a `do:`, `ifTrue:`, `ifFalse:` or `ifNotNil:`
   literal block, and **zero** writing blocks that are stored, returned,
-  passed to a user-defined method or sent to another process.
+  passed to a user-defined method or sent to another process. The same
+  codebase does write higher-order methods, five of its own (`logged:`, a
+  middleware wrapper; `HTTPRouter build:`, a DSL block; `onEvent:`,
+  `onExit:`, `onReload:`, callbacks stored on an actor and run later by
+  another process) plus stdlib callbacks such as `Timer after:do:`. Every one
+  takes its block as a value to run later, where assigning a local of the
+  registering method would be meaningless in any Smalltalk; state goes into
+  the actor through `self … !`. The HOM shape that *would* want a captured
+  write, a user-defined collection class with its own `do:`, does not occur:
+  data is maps, lists, value objects and `Result`s.
 
 ### Current state
 
@@ -400,6 +409,20 @@ code.
   `state_threading_selectors.rs`), and user-defined collections never join it.
 - `Collection>>detect:ifNone:`'s lost threading parameter and the other 33
   stdlib `threading_params` entries become moot rather than fixed.
+- **User-defined collection classes.** The Smalltalk idiom "subclass
+  `Collection`, define `do:`, inherit the rest" meets the rule at its one
+  sharp edge: `myOrders do: [:o | total := total + o price]` is refused when
+  `do:` resolves to user code, because a hand-written `do:` cannot thread the
+  block's writes. Today that shape is already a run-time
+  `stateful_block_dispatch`; the rule makes it a documented limit instead of a
+  gap to close. The idioms that remain: iterate the inner stdlib collection
+  (`myOrders items inject: 0 into: [:acc :o | acc + o price]`), expose a
+  folding method (`myOrders sumOf: [:o | o price]`) whose body uses the
+  stdlib fold, or declare `uses: Enumerable` and implement only `do:`, in
+  which case the protocol-provided `inject:into:`, `collect:` and `select:`
+  are stdlib code expanded into the class (see Phase 1 for what they may
+  carry). Neither Symphony nor the stdlib has such a class today; the
+  `Enumerable` users in the stdlib (`Ets`, `ChangeLog`) are stdlib code.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.
@@ -427,6 +450,13 @@ shape-specific fragment and the fix. The ADR 0132 §6 inventory's `PIN-BUG`
 cases flip to positive diagnostic tests. The LSP reports it as a diagnostic
 with a code action. `beamtalk explain stateful-blocks` lists the known
 constructs from `state_threading_selectors.rs` so the list has one source.
+Decide here, with a test, what a `uses: Enumerable` class's expanded
+`inject:into:` / `collect:` / `select:` do with a Tier 2 block: they are
+stdlib code, so they may honour the Tier 2 protocol as the stdlib collections
+do (the block then threads through the user's `do:` only if that `do:` is
+also protocol-provided or forwards to a stdlib collection), or they refuse it
+with `stateful_block_dispatch` like any user method. Either answer is
+acceptable under this ADR; the one that is not is dropping the write.
 
 **Phase 2: removal (L).** In dependency order: the caller-side hook that was
 never emitted; `send_threaded/4`, `call_threaded/3`,
