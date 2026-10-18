@@ -1529,6 +1529,11 @@ trusted); "guarded" is the same compiler with Actor trust switched to never (`is
 median [min-max]. Shared 4-core VM under heavy load (load average ~22), so only medians of interleaved
 rounds mean anything.
 
+These numbers predate BT-3924, which landed in the same PR and replaced the comparison guard's external
+`beamtalk_primitive:is_object` call with an inline `is_number(L) or is_binary(L)` test. Current codegen
+therefore does not match the measured "guarded" build exactly. The guard is now cheaper (no cross-module
+call), so the conclusion that guarding costs nothing measurable still holds.
+
 | case | bare (before) | guarded (BT-3925) |
 |---|---|---|
 | untyped `loop:` | 140 [92-191] | 42 [32-80] |
