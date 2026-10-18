@@ -674,7 +674,8 @@ impl CoreErlangGenerator {
     /// The protocol source a `uses:`-flattened method must be mapped through
     /// (ADR 0127 §3, "Source locations"), or `None` when `selector` on the
     /// current class is not a flattened provision (or its protocol's source
-    /// was not supplied via `CodegenOptions::with_protocol_sources`).
+    /// is neither the stdlib's — for a `uses:` in `stdlib_protocol_uses`,
+    /// BT-3915 — nor supplied via `CodegenOptions::with_protocol_sources`).
     ///
     /// Provenance comes from `MethodInfo::origin`, stamped by
     /// `trait_expansion::apply_origins`. Provisions are instance-side only

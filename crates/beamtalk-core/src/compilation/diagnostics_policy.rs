@@ -17,6 +17,7 @@
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::ast_walker::expression_contains_block;
+use crate::semantic_analysis::stdlib_protocols::is_stdlib_package;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 use std::collections::BTreeMap;
@@ -683,6 +684,12 @@ pub fn apply_protocol_expect_directives(
     // `ProtocolRegistry::add_pre_loaded` and the protocol source map.
     let mut by_protocol: BTreeMap<&str, Vec<ExpectDirectiveEntry>> = BTreeMap::new();
     for protocol in protocols {
+        // A provision is identified by (package, name), not by bare name
+        // (BT-3915): the stdlib's own protocols are matched only by a
+        // stdlib-stamped origin, which this function never matches (below).
+        if is_stdlib_package(protocol.package.as_deref()) {
+            continue;
+        }
         by_protocol
             .entry(protocol.name.name.as_str())
             .or_insert_with(|| {
@@ -697,6 +704,14 @@ pub fn apply_protocol_expect_directives(
         let Some(origin) = &diag.provision else {
             return true;
         };
+        // A provision from the stdlib's own protocol (BT-3915) is never
+        // suppressed by a same-named user protocol's `@expect`. Stdlib
+        // protocol files carry no `@expect` today, so there is nothing of
+        // theirs to route here; if one ever does, load it from
+        // `stdlib_protocols` keyed the same way.
+        if is_stdlib_package(origin.package.as_deref()) {
+            return true;
+        }
         let Some(directives) = by_protocol.get(origin.protocol.as_str()) else {
             return true;
         };
@@ -1648,6 +1663,43 @@ dnu = "error"
             !(d.provision.as_ref().is_some_and(|o| o.protocol == "Broken")
                 && d.category == Some(DiagnosticCategory::Dnu))
         }));
+    }
+
+    /// BT-3915: a package-local `Comparable` with an `@expect`, and a class
+    /// that `uses: stdlib@Comparable` — the stdlib provision's diagnostic
+    /// (stamped `package: stdlib` by analysis) is not suppressed by the local
+    /// protocol's directive, even at a coinciding span; the local protocol's
+    /// own provision diagnostic still is.
+    #[test]
+    fn local_protocol_expect_never_suppresses_a_stdlib_provision_bt_3915() {
+        let source = "Protocol define: Comparable\n  < other -> Boolean\n\n  @expect type\n  probe -> Integer => 3 bogus\n";
+        let (module, parse_diags) = parse(lex_with_eof(source));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let start = u32::try_from(source.find("bogus").unwrap()).unwrap();
+        let span = Span::new(start, start + 5);
+        let provision = |user: &str, stdlib: bool| {
+            let mut d = Diagnostic::warning("dnu", span).with_provision_origin("Comparable", user);
+            d.category = Some(DiagnosticCategory::Dnu);
+            if stdlib {
+                if let Some(origin) = d.provision.as_mut() {
+                    origin.package = Some("stdlib".into());
+                }
+            }
+            d
+        };
+        let mut diags = vec![provision("Rank", true), provision("Local", false)];
+
+        apply_protocol_expect_directives(&module.protocols, &mut diags);
+
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            diags[0]
+                .provision
+                .as_ref()
+                .and_then(|o| o.package.as_deref()),
+            Some("stdlib"),
+            "the stdlib provision diagnostic must survive: {diags:?}"
+        );
     }
 
     /// A provision diagnostic must not be matched by an unrelated `@expect`

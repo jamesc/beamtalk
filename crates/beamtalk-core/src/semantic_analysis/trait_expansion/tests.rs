@@ -335,6 +335,42 @@ Value subclass: Rank
     );
 }
 
+/// `uses: stdlib@Comparable` beside a package-local `Comparable` is recorded
+/// as stdlib-resolved (so its provisions and their diagnostics are keyed to the
+/// stdlib file, BT-3915); a bare `uses: Comparable` there is the local one.
+#[test]
+fn qualified_stdlib_use_beside_a_local_namesake_is_recorded_as_stdlib() {
+    let module = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  max: other => #local
+
+Value subclass: Rank
+  uses: stdlib@Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    let uses = stdlib_resolved_uses(&module, &HashMap::new(), Some("my_app"));
+    assert!(
+        uses.contains(&("Rank".into(), "Comparable".into())),
+        "{uses:?}"
+    );
+
+    let local = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  max: other => #local
+
+Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    assert!(stdlib_resolved_uses(&local, &HashMap::new(), Some("my_app")).is_empty());
+}
+
 #[test]
 fn the_stdlib_itself_never_falls_back_to_the_baked_protocols() {
     let mut module = parse_source(
