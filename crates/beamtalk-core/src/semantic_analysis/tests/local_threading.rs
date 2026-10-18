@@ -3603,6 +3603,10 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
         "r := nil\n#(1) eachWithIndex: [:z :j | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
         // [...] value
         "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]] value\nr",
+        // Listed blocks nested in each other: single level only, nesting is
+        // unmeasured.
+        "r := nil\ntrue ifTrue: [#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
+        "r := nil\n[#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]. 0] on: Error do: [:e | 0]\nr",
         // Measured right, but keyed on every enclosing role: an arm in a
         // loop body stays rejected (loud, not silent).
         "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",

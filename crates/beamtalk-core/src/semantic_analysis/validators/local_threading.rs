@@ -1103,7 +1103,9 @@ fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static R
 /// statement (the last one included: the reply) or a statement inside a block
 /// whose value is discarded (not the block's last); a method-body field
 /// assignment or `^`; and the value of an assignment to a local when every
-/// enclosing block is one of [`GROUP_BY_ASSIGN_BLOCKS`] (`in_listed_blocks`).
+/// assignment sits at the method body or directly in exactly one
+/// [`GROUP_BY_ASSIGN_BLOCKS`] block with no other block around it
+/// (`in_listed_blocks`).
 /// At the REPL only a top-level statement or assignment: inside any block the
 /// fold's bindings-map carrier leaks or raises. `last` is whether the
 /// statement is the last of its innermost block.
@@ -1138,7 +1140,10 @@ fn group_by_value_unpacked(
 /// on the exact construct block, not on its family: an assignment directly in
 /// a `whileTrue:`, `to:do:` or `timesRepeat:` body answers the carrier, and
 /// every block not listed (another selector of the same family, another arm,
-/// a closure) is unmeasured, so it stays a compile error.
+/// a closure) is unmeasured, so it stays a compile error. Single level only;
+/// nesting is unmeasured: the assignment must sit directly in exactly one
+/// listed block with no other block around it (a `do:` in an `ifTrue:` arm,
+/// two listed blocks deep, is rejected).
 const GROUP_BY_ASSIGN_BLOCKS: &[(&str, Option<usize>)] = &[
     ("ifTrue:", Some(0)),        // assignedInArm:
     ("on:do:", None),            // assignedInOnDo
@@ -2583,7 +2588,13 @@ impl<'d> Walker<'d> {
             return;
         }
         let last = self.last_statements.last().copied().unwrap_or(false);
-        let in_listed_blocks = self.group_by_assign_blocks.iter().all(|listed| *listed);
+        // Single level only: at the method body, or directly in exactly one
+        // listed block with no other block around it (nesting is unmeasured).
+        let in_listed_blocks = match self.group_by_assign_blocks.as_slice() {
+            [] => true,
+            [listed] => *listed,
+            _ => false,
+        };
         if group_by_value_unpacked(self.context, position, self.depth, last, in_listed_blocks) {
             return;
         }
