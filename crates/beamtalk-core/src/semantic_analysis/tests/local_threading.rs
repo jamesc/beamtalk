@@ -3566,6 +3566,14 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
         "#(1) do: [:z | ^#(1, 3) groupBy: [:x | k := x > 2. k]]\nnil",
         "b := [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. r]\nb value: 1",
         "#(1) do: [:z | self.n := (#(1, 3) groupBy: [:x | k := x > 2. k]) size]\nnil",
+        // An assignment directly in a loop or counted-loop body answered the
+        // carrier (measured, PR #4383 review).
+        "r := nil\n[r isNil] whileTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n1 to: 1 do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n1 timesRepeat: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // Measured right, but keyed on every enclosing role: an arm in a
+        // loop body stays rejected (loud, not silent).
+        "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
     ] {
         let src = in_actor(body);
         let messages = residual_messages(&src, None);
@@ -3585,6 +3593,14 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
         "r := nil\n#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
         "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
         "#(1) do: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
+        // Assignments in the other blocks measured to unpack the fold
+        // (`adr0133residuals_test.bt`), and a discarded statement in a loop.
+        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0] on: Error do: [:e | 0]\nr",
+        "r := nil\n[nil] ensure: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]\nr",
+        "r := nil\n#(1) inject: 0 into: [:a :z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. a]\nr",
+        "r := nil\n#(1) detect: [:z | false] ifNone: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        "1 timesRepeat: [#(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
         "(#(1, 3) groupBy: [:x | x > 2]) at: true",
     ] {
         let src = in_actor(body);

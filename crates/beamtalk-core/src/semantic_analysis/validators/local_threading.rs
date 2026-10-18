@@ -47,11 +47,12 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, analyze_block, conditional_arm_blocks, conditional_producer_writes,
+    RootMethodKind, conditional_arm_blocks, conditional_producer_writes,
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
-    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
+    group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
+    is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
+    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
+    operand_producer_writes, outer_local_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
     value_blocks, value_position_local_assignments,
@@ -1099,19 +1100,25 @@ fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static R
 /// Whether the value of a `groupBy:` threaded fold at `position` in `context`
 /// is unpacked from its `{Map, StateAcc}` carrier ([`Residual::GroupByValue`],
 /// measured on a BEAM for BT-3909). In an actor method: a method-body
-/// statement or a statement inside a block whose value is discarded (not the
-/// block's last), the value of an assignment to a local outside any closure,
-/// and a method-body field assignment or `^`. At the REPL only a top-level
-/// statement or assignment: inside any block the fold's bindings-map carrier
-/// leaks or raises. `last` is whether the statement is the last of its
-/// innermost block; `in_closure` whether a closure (a block its construct does
-/// not inline) encloses it.
+/// statement (the last one included: the reply) or a statement inside a block
+/// whose value is discarded (not the block's last), a method-body field
+/// assignment or `^`, and the value of an assignment to a local when every
+/// enclosing block is an arm, a protected body, a handler or `ensure:` block,
+/// a `do:`-style or collection-operation body, or an evaluated block
+/// ([`unpacks_assigned_group_by`]). An assignment directly in a `whileTrue:`,
+/// `to:do:` or `timesRepeat:` body answers the carrier (the same assignment
+/// in an arm or a `do:` body inside the loop answers right, but the check is
+/// keyed on every enclosing role, so it stays rejected), and so does one in a
+/// closure. At the REPL only a top-level statement or assignment: inside any
+/// block the fold's bindings-map carrier leaks or raises. `last` is whether
+/// the statement is the last of its innermost block; `containers` the roles
+/// of the enclosing blocks, outermost first.
 fn group_by_value_unpacked(
     context: MethodContext,
     position: Position,
     depth: usize,
     last: bool,
-    in_closure: bool,
+    containers: &[Container],
 ) -> bool {
     if context == Repl {
         return depth == 0
@@ -1122,12 +1129,25 @@ fn group_by_value_unpacked(
     }
     match position {
         Position::Statement => depth == 0 || !last,
-        Position::AssignValue { .. } => !in_closure,
+        Position::AssignValue { .. } => containers.iter().copied().all(unpacks_assigned_group_by),
         Position::FieldAssignValue { nested: false } | Position::ReturnValue { nested: false } => {
             true
         }
         _ => false,
     }
+}
+
+/// Whether an actor `r := <groupBy: fold>` inside a block of role `container`
+/// unpacks the fold (measured right for BT-3909: conditional arms, `on:do:`
+/// and `ensure:` bodies, handlers and cleanups, `do:`, `keysAndValuesDo:`,
+/// `eachWithIndex:`, `collect:`, `select:`, `inject:into:` and
+/// `detect:ifNone:` blocks, and `[...] value`). A loop or counted-loop body
+/// answers the carrier, and a closure is unmeasured.
+fn unpacks_assigned_group_by(container: Container) -> bool {
+    matches!(
+        container,
+        Arm | ProtectedBody | Handler | DoBody | ListOpBody | EvaluatedBlock
+    )
 }
 
 /// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
@@ -2524,17 +2544,14 @@ impl<'d> Walker<'d> {
         let Some(row) = residual_denied(Residual::GroupByValue, self.context) else {
             return;
         };
-        // The rule codegen's `needs_mutation_threading` reads: `State` is
-        // always an eligible family in an actor instance method.
-        if !analyze_block(block).needs_mutation_threading(self.context.root_method_kind(), true) {
+        if !group_by_fold_threads(block, self.context.root_method_kind()) {
             return;
         }
         if !self.writes_of(block).is_empty() {
             return;
         }
         let last = self.last_statements.last().copied().unwrap_or(false);
-        let in_closure = self.containers.contains(&Container::Other);
-        if group_by_value_unpacked(self.context, position, self.depth, last, in_closure) {
+        if group_by_value_unpacked(self.context, position, self.depth, last, &self.containers) {
             return;
         }
         self.diagnostics.push(

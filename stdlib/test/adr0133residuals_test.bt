@@ -27,5 +27,20 @@ TestCase subclass: Adr0133ResidualsTest
   testAssignedInArm =>
     self assert: (Adr0133ResidualsActor spawn assignedInArm: true) equals: #(3)
 
+  testAssignedInOnDo =>
+    self assert: Adr0133ResidualsActor spawn assignedInOnDo equals: #(3)
+
+  testAssignedInEnsure =>
+    self assert: Adr0133ResidualsActor spawn assignedInEnsure equals: #(3)
+
+  testAssignedInCollect =>
+    self assert: Adr0133ResidualsActor spawn assignedInCollect equals: #(3)
+
+  testAssignedInInject =>
+    self assert: Adr0133ResidualsActor spawn assignedInInject equals: #(3)
+
+  testAssignedInIfNone =>
+    self assert: Adr0133ResidualsActor spawn assignedInIfNone equals: #(3)
+
   testFieldWriting =>
     self assert: Adr0133ResidualsActor spawn fieldWriting equals: #(#(3), 3)

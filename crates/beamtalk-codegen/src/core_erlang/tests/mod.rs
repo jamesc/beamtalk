@@ -205,6 +205,7 @@ mod expressions;
 mod field_assignment_value_position;
 mod fold_locals_carried_corpus;
 mod gen_server;
+mod group_by_fold_gate_agreement;
 mod hybrid_field_rebind_corpus;
 mod late_reconcile_conformance;
 mod local_producer_agreement;

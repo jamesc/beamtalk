@@ -72,7 +72,8 @@ pub fn probe_rows() -> Vec<ProbeRow> {
 /// - `satisfy`: `anySatisfy:`;
 /// - `group-by`: `groupBy:` (BT-3897);
 /// - `match-arm`: a `match:` arm (BT-3875);
-/// - `other`: anything else (empty today).
+/// - `other`: anything else (the loop, fold, conditional and exception
+///   kinds, e.g. the BT-3891 `cond` cells).
 #[must_use]
 pub fn statement_family(container: &str, kind: &str) -> &'static str {
     if container == "val" {

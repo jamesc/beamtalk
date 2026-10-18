@@ -6311,3 +6311,24 @@ repl	cond	fresh	ifNil	ok
 repl	cond	fresh	ifTrue	ok
 repl	top	fresh	groupBy	bad
 repl	top	outer	match	bad
+# BT-3909 review: the `cond` role with a local bound outside the loop
+# (`outer`, `direct`) fails `erlc` in every method context too; the Phase 0
+# and section 6 checks reject it.
+actor	cond	direct	and	bad
+actor	cond	direct	ifNil	bad
+actor	cond	direct	ifTrue	bad
+actor	cond	outer	and	bad
+actor	cond	outer	ifNil	bad
+actor	cond	outer	ifTrue	bad
+class	cond	direct	and	bad
+class	cond	direct	ifNil	bad
+class	cond	direct	ifTrue	bad
+class	cond	outer	and	bad
+class	cond	outer	ifNil	bad
+class	cond	outer	ifTrue	bad
+value	cond	direct	and	bad
+value	cond	direct	ifNil	bad
+value	cond	direct	ifTrue	bad
+value	cond	outer	and	bad
+value	cond	outer	ifNil	bad
+value	cond	outer	ifTrue	bad
