@@ -17,6 +17,10 @@ Value subclass: Bt3889DestructureValueValue
     c ifTrue: [^0]
     #(_a, _b) := #(1, 2)
 
+  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)
+
+  lastMap => #{#k => _v} := #{#k => 1}
+
   block => [#(_a, _b) := #(1, 2)] value
 
   arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]

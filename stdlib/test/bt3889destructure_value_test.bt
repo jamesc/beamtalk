@@ -10,6 +10,8 @@ TestCase subclass: Bt3889DestructureValueTest
     self assert: o last equals: #(1, 2)
     self assert: (o lastNlr: false) equals: #(1, 2)
     self assert: (o lastNlr: true) equals: 0
+    self assert: o lastTuple equals: (Erlang erlang list_to_tuple: #(1, 2))
+    self assert: o lastMap equals: #{#k => 1}
     self assert: o block equals: #(1, 2)
     self assert: (o arm: true) equals: #(1, 2)
     self assert: (o arm: false) equals: 0
@@ -35,3 +37,6 @@ TestCase subclass: Bt3889DestructureValueTest
     self assert: (a lastCf: true) equals: #(1, 2)
     self assert: a n equals: 1
     self assert: (a lastCf: false) equals: #(3, 4)
+
+  testActorStatefulBlock =>
+    self assert: Bt3889DestructureValueActor spawn tier2Block equals: #(#(#(1, 1), #(2, 3)), 3)

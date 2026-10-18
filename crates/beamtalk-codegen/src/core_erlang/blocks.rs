@@ -32,8 +32,8 @@ use beamtalk_core::ast::{Block, Expression};
 /// their own doc comments.
 pub(super) enum BlockExprKind {
     /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
-    /// Carries `is_last` so the handler can append `'nil'` when the destructure
-    /// is the final expression in the block.
+    /// Carries `is_last` so the handler can answer the right-hand side (the
+    /// destructure's value, BT-3889) when it is the final expression in the block.
     Destructure { is_last: bool },
     /// Last expression (general case) — its value is the block's result.
     LastExpr,

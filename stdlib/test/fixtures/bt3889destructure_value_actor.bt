@@ -18,6 +18,10 @@ Actor subclass: Bt3889DestructureValueActor
     c ifTrue: [^0]
     #(_a, _b) := #(1, 2)
 
+  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)
+
+  lastMap => #{#k => _v} := #{#k => 1}
+
   block => [#(_a, _b) := #(1, 2)] value
 
   arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]
@@ -62,3 +66,16 @@ Actor subclass: Bt3889DestructureValueActor
       ifFalse: [#(3, 4)]
 
   n => self.n
+
+  // A stateful (Tier 2) block: it writes a captured local and crosses a
+  // self-send to a collection primitive.
+  sealed opaqueCollect: block => #(1, 2) collect: block
+
+  tier2Block =>
+    t := 0
+    r := self
+      opaqueCollect: [:x |
+        t := t + x
+        #(_a, _b) := #(x, t)
+      ]
+    #(r, t)
