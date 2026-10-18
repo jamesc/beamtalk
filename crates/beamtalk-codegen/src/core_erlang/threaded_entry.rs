@@ -13,14 +13,18 @@
 //! ```erlang
 //! '__t2_class_twice:'/3 = fun (ClassSelf, ABlock, Acc@0) -> {Result, Acc@N}
 //! 'class_twice:'/2 = fun (ClassSelf, ABlock) ->
-//!     call 'erlang':'element'(1, apply '__t2_class_twice:'/3 (ClassSelf, ABlock, 'plain'))
+//!     call 'erlang':'element'(1, apply '__t2_class_twice:'/3
+//!         (ClassSelf, ABlock, {'plain', 'Twice class', 'twice:'}))
 //! ```
 //!
-//! The wrapper has no caller map to thread, so it hands the body the atom
-//! `'plain'` as `Acc@0` (never used as a map: only `call_threaded/3`, forwards
-//! and the NLR slot touch `Acc`). With it `call_threaded/3` runs a Tier 1 block
-//! as before and raises `stateful_block_dispatch` *without running* a Tier 2
-//! one, so a late-bound caller never has a block's writes dropped silently.
+//! The wrapper has no caller map to thread, so it hands the body the
+//! plain-entry sentinel `{'plain', ClassTag, Selector}` as `Acc@0`
+//! (`threading_abi::plain_entry_acc_doc`; never used as a map: only
+//! `call_threaded/3`, forwards and the NLR slot touch `Acc`). With it
+//! `call_threaded/3` runs a Tier 1 block as before and raises
+//! `stateful_block_dispatch` naming this method *without running* a Tier 2 one
+//! (recognised by its mark, BT-3885), so a late-bound caller never has a
+//! block's writes dropped silently.
 //!
 //! The body is a `ThreadedStmt::MethodBody` frame over the trailing `Acc`
 //! family; every use of a threading parameter is a *producer* in the sense of

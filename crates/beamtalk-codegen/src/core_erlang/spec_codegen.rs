@@ -463,13 +463,14 @@ fn generate_threaded_class_method_spec(
     }
 
     let any = || Document::Str("{'type', 0, 'any', []}");
-    // `map() | 'plain'`: the caller's map, or the sentinel the plain wrapper
-    // passes when it has none.
+    // `map() | {'plain', atom(), atom()}`: the caller's map, or the sentinel
+    // the plain wrapper passes when it has none (`threading_abi`).
     let acc_map = || {
         docvec![
-            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, {'atom', 0, ",
-            atom("plain"),
-            "}]}"
+            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, ",
+            "{'type', 0, 'tuple', [{'atom', 0, ",
+            atom(super::threading_abi::PLAIN_ENTRY_TAG),
+            "}, {'type', 0, 'atom', []}, {'type', 0, 'atom', []}]}]}"
         ]
     };
     let mut param_types: Vec<Document<'static>> = vec![any()]; // ClassSelf
