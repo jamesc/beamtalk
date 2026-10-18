@@ -597,8 +597,9 @@ fn method_body_contains(core: &str, selector: &str, needle: &str) -> bool {
 #[test]
 fn test_bt3892_untyped_and_union_fields_with_object_values_are_guarded() {
     // The issue's repro: `self.p + q` (untyped, default nil) and `self.tp + q`
-    // (`:: Point | Nil`) must dispatch, like `self.ok + q` (`:: Point`); the
-    // untyped numeric counter stays bare.
+    // (`:: Point | Nil`) must dispatch, like `self.ok + q` (`:: Point`). A
+    // Value's untyped `count = 0` is guarded too: its keyword constructor may
+    // have set it to anything.
     let core = crate::core_erlang::tests::codegen(
         "Value subclass: Holder\n  field: p = nil\n  field: tp :: Point | Nil = nil\n  \
          field: ok :: Point = nil\n  field: count = 0\n  \
@@ -619,9 +620,8 @@ fn test_bt3892_untyped_and_union_fields_with_object_values_are_guarded() {
         );
     }
     assert!(
-        !method_body_contains(&core, "next", "is_number")
-            && method_body_contains(&core, "next", "call 'erlang':'+'("),
-        "the numeric untyped counter must stay bare:\n{core}"
+        method_body_contains(&core, "next", "call 'erlang':'is_number'("),
+        "a Value's untyped numeric-default field must be guarded:\n{core}"
     );
 }
 

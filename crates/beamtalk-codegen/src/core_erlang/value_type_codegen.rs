@@ -9,6 +9,7 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
+use crate::core_erlang::field_types::UntypedTrust;
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -278,7 +279,9 @@ impl CoreErlangGenerator {
         )));
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
-        self.set_class_field_types(class, module);
+        // A value's fields are set by its keyword constructor from outside the
+        // class, so untyped fields are never trusted as numeric (BT-3892).
+        self.set_class_field_types(class, module, UntypedTrust::Never);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., object.bt defines `new => @primitive basicNew`)

@@ -11,7 +11,7 @@
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
+    COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, UntypedTrust, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
@@ -408,7 +408,11 @@ impl CoreErlangGenerator {
     /// Own fields are classified from the class source by
     /// [`classify_fields`] — declared types in full (unions included), untyped
     /// fields by their default and every in-class `self.f :=` write (including
-    /// standalone `Class >> sel` methods for this class in `module`). Inherited
+    /// standalone `Class >> sel` methods for this class in `module`) when
+    /// `trust` allows it: an Actor's own writes are its fields' normal
+    /// writers, a Value's are not (its keyword constructor runs outside the
+    /// class). `classState:` variables are always classified from the class
+    /// methods, their only writers. Inherited
     /// fields get their declared type from the class hierarchy; an inherited
     /// *untyped* field has no visible writers, so it gets no fact and is
     /// guarded (BT-3892).
@@ -416,6 +420,7 @@ impl CoreErlangGenerator {
         &mut self,
         class: &beamtalk_core::ast::ClassDefinition,
         module: &beamtalk_core::ast::Module,
+        trust: UntypedTrust,
     ) {
         let standalone = |class_side: bool| {
             module
@@ -431,7 +436,7 @@ impl CoreErlangGenerator {
         let class_writers: Vec<&beamtalk_core::ast::MethodDefinition> =
             class.class_methods.iter().chain(standalone(true)).collect();
 
-        let mut fields = classify_fields(&class.state, &instance_writers);
+        let mut fields = classify_fields(&class.state, &instance_writers, trust);
         if let (Some(hierarchy), Some(superclass)) =
             (self.class_hierarchy.as_ref(), class.superclass.as_ref())
         {
@@ -445,7 +450,11 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        self.current_class_var_types = classify_fields(&class.class_variables, &class_writers);
+        self.current_class_var_types = classify_fields(
+            &class.class_variables,
+            &class_writers,
+            UntypedTrust::FromClassSource,
+        );
     }
 
     /// Populates instance-field facts for an **extension** method from the

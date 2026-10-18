@@ -14,26 +14,30 @@
 //! * A **declared** field records its full [`DeclaredType`]. A simple type is
 //!   bare when it is in the operator's primitive set; a union is bare only when
 //!   *every non-`Nil` member* is (so `:: Integer | Nil` stays bare while
-//!   `:: Point | Nil` is guarded). Every other shape (generic, singleton,
-//!   false-or, …) is an object type and is guarded.
-//! * An **untyped** field is trusted as numeric only on positive evidence
-//!   gathered from the class's own source ([`FieldTypeFact::UntypedNumeric`]):
-//!   its default is a numeric literal *and* every in-class write —
-//!   `self.f := e`, or a Value's copy-setter `self withF: e` — writes a
+//!   `:: Point | Nil` is guarded). `nil` is not an object, so the runtime
+//!   guard would send it to the bare BIF anyway. Every other shape (generic,
+//!   singleton, false-or, …) is an object type and is guarded.
+//! * An **untyped** field of an **Actor** (`state:`) or a `classState:`
+//!   variable is trusted as numeric only on positive evidence gathered from
+//!   the class's own source ([`FieldTypeFact::UntypedNumeric`]): its default is
+//!   a numeric literal *and* every in-class `self.f := e` writes a
 //!   numeric-evidenced `e` (a numeric literal, a numeric-typed parameter,
 //!   another numeric-evidenced field, or `+ - * / %` over two
 //!   numeric-evidenced operands). This keeps the `self.count := self.count + 1`
-//!   counter pattern bare while `field: p = nil` (later set to a `Point`)
-//!   routes through the runtime guard and dispatches.
+//!   counter pattern bare while `state: p = nil` (later set to a `Point`)
+//!   routes through the runtime guard and dispatches. Untyped fields of every
+//!   other class kind (Value, Object, `TestCase`, …) are never trusted: their
+//!   usual writer is a keyword constructor (`H origin: aPoint`) sent from
+//!   outside the class, which the class source cannot show, so a numeric
+//!   default says nothing about the value a read sees.
 //! * A field with **no fact** (an inherited untyped field, an extension
 //!   target's untyped field, a name codegen knows nothing about) is guarded —
 //!   the guard is always correct, merely not free.
 //!
-//! Open-world writers the class cannot see — keyword constructors and
-//! `with*:` sent to a Value from outside, `spawnWith:` on an Actor,
+//! Open-world writers an Actor's source cannot show — `spawnWith:`,
 //! `fieldAt:put:`, or a subclass assigning an inherited untyped field — are
-//! not tracked: the literal default is taken as the untyped field's declared
-//! shape.
+//! not tracked: for an Actor's own untyped field the literal default is taken
+//! as its declared shape.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,7 +47,6 @@ use beamtalk_core::ast::{
 use beamtalk_core::ast_walker;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::extract_pattern_bindings;
-use beamtalk_core::synthetic_selectors::with_star_selector;
 
 /// Builtin types on which the arithmetic BIFs (`+ - * /`) are correct.
 pub(in crate::core_erlang) const NUMERIC_TYPES: &[&str] = &["Integer", "Float", "Number"];
@@ -98,12 +101,24 @@ fn is_nil_type(ty: &DeclaredType) -> bool {
     matches!(ty, DeclaredType::Simple(name) if name == "Nil" || name == "UndefinedObject")
 }
 
+/// Whether untyped fields may be trusted as numeric from in-class evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum UntypedTrust {
+    /// The class's own writes are the fields' normal writers (an Actor's
+    /// `state:`, any class's `classState:`).
+    FromClassSource,
+    /// The fields' usual writer is outside the class (a Value's keyword
+    /// constructor), so untyped fields are never trusted.
+    Never,
+}
+
 /// Classifies every field in `decls` given the method bodies that may assign
 /// it via `self.<field> :=` (the instance methods for `state:`/`field:`, the
 /// class methods for `classState:`).
 pub(in crate::core_erlang) fn classify_fields(
     decls: &[StateDeclaration],
     writers: &[&MethodDefinition],
+    trust: UntypedTrust,
 ) -> HashMap<String, FieldTypeFact> {
     // Optimistic start: every untyped field with a numeric-literal default is
     // a candidate; a pass drops each candidate assigned a non-evidenced value
@@ -111,17 +126,11 @@ pub(in crate::core_erlang) fn classify_fields(
     // `self.total := self.total + self.step`).
     let mut candidates: HashSet<&str> = decls
         .iter()
+        .filter(|_| trust == UntypedTrust::FromClassSource)
         .filter(|d| d.type_annotation.is_none())
         .filter(|d| d.default_value.as_ref().is_some_and(is_numeric_literal))
         .map(|d| d.name.name.as_str())
         .collect();
-    // `self withF: e` is an in-class write of `f` on a Value (ADR 0042
-    // copy-setter), keyed by its synthesized selector.
-    let with_setters: HashMap<String, &str> = decls
-        .iter()
-        .map(|d| (with_star_selector(&d.name.name), d.name.name.as_str()))
-        .collect();
-
     loop {
         let mut rejected: Vec<String> = Vec::new();
         for method in writers {
@@ -145,7 +154,7 @@ pub(in crate::core_erlang) fn classify_fields(
                 .collect();
             for stmt in &method.body {
                 ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                    if let Some((field, value)) = field_write(e, &with_setters)
+                    if let Some((field, value)) = field_write(e)
                         && candidates.contains(field)
                         && !is_numeric_evidenced(value, &candidates, &numeric_params)
                     {
@@ -212,24 +221,12 @@ fn is_numeric_literal(expr: &Expression) -> bool {
     )
 }
 
-/// The field and written value when `expr` writes one of the class's own
-/// fields: `self.f := e`, or a Value's copy-setter `self withF: e`.
-fn field_write<'e>(
-    expr: &'e Expression,
-    with_setters: &HashMap<String, &'e str>,
-) -> Option<(&'e str, &'e Expression)> {
+/// The field and written value when `expr` is a `self.f := e` write.
+fn field_write(expr: &Expression) -> Option<(&str, &Expression)> {
     match expr {
         Expression::Assignment { target, value, .. } => {
             self_field_name(target).map(|field| (field, value.as_ref()))
         }
-        Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            ..
-        } if parts.len() == 1 && arguments.len() == 1 && is_self(receiver) => with_setters
-            .get(parts[0].keyword.as_str())
-            .map(|field| (*field, &arguments[0])),
         _ => None,
     }
 }
@@ -283,14 +280,20 @@ fn is_numeric_evidenced(
 mod tests {
     use super::*;
 
-    /// Parses `src` (one class) and classifies its instance fields.
+    /// Parses `src` (one class) and classifies its instance fields, trusting
+    /// in-class evidence only for an `Actor` subclass (as the generator does).
     fn instance_facts(src: &str) -> HashMap<String, FieldTypeFact> {
         let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
         let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
         assert!(diags.is_empty(), "parse errors: {diags:?}");
         let class = module.classes.first().expect("one class");
         let writers: Vec<&MethodDefinition> = class.methods.iter().collect();
-        classify_fields(&class.state, &writers)
+        let trust = if class.superclass.as_ref().is_some_and(|s| s.name == "Actor") {
+            UntypedTrust::FromClassSource
+        } else {
+            UntypedTrust::Never
+        };
+        classify_fields(&class.state, &writers, trust)
     }
 
     fn class_side_facts(src: &str) -> HashMap<String, FieldTypeFact> {
@@ -299,7 +302,11 @@ mod tests {
         assert!(diags.is_empty(), "parse errors: {diags:?}");
         let class = module.classes.first().expect("one class");
         let writers: Vec<&MethodDefinition> = class.class_methods.iter().collect();
-        classify_fields(&class.class_variables, &writers)
+        classify_fields(
+            &class.class_variables,
+            &writers,
+            UntypedTrust::FromClassSource,
+        )
     }
 
     fn numeric(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
@@ -335,19 +342,24 @@ mod tests {
     #[test]
     fn untyped_numeric_default_with_object_write_is_guarded() {
         let facts =
-            instance_facts("Object subclass: H\n  field: p = 0\n  setUp => self.p := Point new\n");
+            instance_facts("Actor subclass: H\n  state: p = 0\n  reset => self.p := Point new\n");
         assert_eq!(facts["p"], FieldTypeFact::Untyped);
         assert!(!numeric(&facts, "p") && !comparable(&facts, "p"));
     }
 
     #[test]
-    fn value_copy_setter_on_self_is_an_in_class_write() {
-        let facts = instance_facts(
-            "TestCase subclass: T\n  field: origin = 0\n  field: n = 0\n  \
-             setUp => (self withOrigin: Point new) withN: 3\n",
-        );
-        assert_eq!(facts["origin"], FieldTypeFact::Untyped);
-        assert_eq!(facts["n"], FieldTypeFact::UntypedNumeric);
+    fn non_actor_untyped_numeric_default_is_never_trusted() {
+        // A Value's usual writer is its keyword constructor, sent from outside
+        // the class (`H origin: aPoint`), so the `0` default proves nothing.
+        for src in [
+            "Value subclass: H\n  field: origin = 0\n  shift: q => self.origin + q\n",
+            "Object subclass: H\n  field: origin = 0\n  bump => self.origin := self.origin + 1\n",
+            "TestCase subclass: H\n  field: origin = 0\n",
+        ] {
+            let facts = instance_facts(src);
+            assert_eq!(facts["origin"], FieldTypeFact::Untyped, "{src}");
+            assert!(!numeric(&facts, "origin") && !comparable(&facts, "origin"));
+        }
     }
 
     #[test]
