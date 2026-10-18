@@ -13,12 +13,10 @@
 %% The `letrec` name every Tier 2 block fun is minted under; the compiler
 %% names its lifted function `-F/A-BtTier2Block/Arity-N-`, which
 %% `erlang:fun_info(Fun, name)` answers (BT-3885).
+%% Erlang code mints one as a named fun of that name that uses its name
+%% (`fun BtTier2Block(Args..., Acc) -> _ = BtTier2Block, Body end`;
+%% an unused name is dropped by the compiler).
 -define(BT_TIER2_BLOCK_NAME, 'BtTier2Block').
-
-%% The same name as an Erlang variable, for Erlang code that mints a Tier 2
-%% block: `fun ?BT_TIER2_BLOCK_VAR(Args..., Acc) -> _ = ?BT_TIER2_BLOCK_VAR,
-%% Body end` (the name must be used in the body or the compiler drops it).
--define(BT_TIER2_BLOCK_VAR, BtTier2Block).
 
 %% The `Acc` the plain entry of class method `Selector` of `ClassTag`
 %% (`'Name class'`) hands its threaded body; never used as a map.

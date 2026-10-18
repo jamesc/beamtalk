@@ -892,13 +892,15 @@ and the per-invocation gate makes one entry accept any mix.
   been stable across OTP releases but is not a documented contract. A change
   fails loudly, not silently: every Tier 2 block would be refused as
   `arity_mismatch`, and the end-to-end EUnit test over a compiled Tier 2 block
-  (`beamtalk_threaded_class_entries_tests:compiled_mark_test_`) goes red.
+  (`beamtalk_threaded_class_entries_tests:compiled_mark_test_`, run through
+  `beamtalk_dispatch_tests`) goes red.
 - **An unmarked Tier 2 fun is refused.** A Tier 2 block compiled before
   BT-3885, or a hand-written Erlang `fun(Args..., Acc)`, raises
   `arity_mismatch` at a threaded entry. Erlang code that means to hand the gate
-  a Tier 2 block mints it with `?BT_TIER2_BLOCK_VAR` from
-  `beamtalk_threading_abi.hrl` (the EUnit tests do, through
-  `beamtalk_tier2_test_block:mark/1`).
+  a Tier 2 block mints it as a named fun called `?BT_TIER2_BLOCK_NAME`
+  (`beamtalk_threading_abi.hrl`) that uses its own name, as the EUnit helper
+  `beamtalk_tier2_test_block:mark/1` does (a test pins that spelling to the
+  generated name).
 - **The plain path of a threading HOM pays one tuple per block invocation**
   and threads the `plain` sentinel as `Acc` through its body's constructs (a trailing
   slot in each loop or fold tuple). Phase 1 measures it against today's

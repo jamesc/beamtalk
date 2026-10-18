@@ -21,6 +21,7 @@ and beamtalk_object_class registry for realistic testing.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
+-include("beamtalk_threading_abi.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Teardown
@@ -1597,6 +1598,41 @@ bt3482_drain_trace_calls(Acc) ->
 %%% ============================================================================
 %%% call_threaded/3 — ADR 0132 tier gate (GH-4367)
 %%% ============================================================================
+
+%% `rebar3 eunit --app` (`just test-runtime`, CI) runs only a source module's
+%% `_tests` companion, so the standalone ADR 0132 suites never ran there. They
+%% ride on this companion (BT-3885).
+adr0132_suites_test_() ->
+    [
+        {module, beamtalk_threaded_dispatch_tests},
+        {module, beamtalk_threaded_class_entries_tests}
+    ].
+
+%% The Tier 2 mark the EUnit helper spells is the generated one, at every
+%% arity, and the gate's check accepts it (BT-3885).
+tier2_mark_test_() ->
+    Marked = [
+        beamtalk_tier2_test_block:mark(fun(Acc) -> {1, Acc} end),
+        beamtalk_tier2_test_block:mark(fun(_A, Acc) -> {1, Acc} end),
+        beamtalk_tier2_test_block:mark(fun(_A, _B, Acc) -> {1, Acc} end),
+        beamtalk_tier2_test_block:mark(fun(_A, _B, _C, Acc) -> {1, Acc} end)
+    ],
+    [
+        ?_test(begin
+            {name, Name} = erlang:fun_info(M, name),
+            {arity, Arity} = erlang:fun_info(M, arity),
+            Mark =
+                "-" ++ atom_to_list(?BT_TIER2_BLOCK_NAME) ++ "/" ++ integer_to_list(Arity) ++ "-",
+            ?assertNotEqual(nomatch, string:find(atom_to_list(Name), Mark)),
+            ?assert(beamtalk_dispatch:is_tier2_block(M))
+        end)
+     || M <- Marked
+    ] ++
+        [
+            ?_assertNot(beamtalk_dispatch:is_tier2_block(fun(_Acc) -> {1, #{}} end)),
+            ?_assertNot(beamtalk_dispatch:is_tier2_block(fun maps:put/3)),
+            ?_assertNot(beamtalk_dispatch:is_tier2_block(not_a_fun))
+        ].
 
 %% Hand-written Tier 2 block `[t := t + 1]` over a hand-packed Acc:
 %% the shape ADR 0131 codegen emits.

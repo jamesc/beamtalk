@@ -44,8 +44,9 @@ use beamtalk_cerl_doc::{Document, docvec, leaf};
 use super::util::metaclass_tag;
 
 /// The `letrec` name every Tier 2 block fun is minted under. A valid Erlang
-/// variable name, so Erlang code can mint one too (`?BT_TIER2_BLOCK_VAR`), and
-/// never a name codegen derives from a user identifier.
+/// variable name, so Erlang code can mint one too (a named fun of this name,
+/// as `beamtalk_tier2_test_block:mark/1` does), and never a name codegen
+/// derives from a user identifier.
 pub const TIER2_BLOCK_FUN_NAME: &str = "BtTier2Block";
 
 /// First element of the `Acc` a plain class-method entry passes its threaded
@@ -108,12 +109,10 @@ pub fn erlang_header() -> String {
          %% The `letrec` name every Tier 2 block fun is minted under; the compiler\n\
          %% names its lifted function `-F/A-{TIER2_BLOCK_FUN_NAME}/Arity-N-`, which\n\
          %% `erlang:fun_info(Fun, name)` answers (BT-3885).\n\
+         %% Erlang code mints one as a named fun of that name that uses its name\n\
+         %% (`fun {TIER2_BLOCK_FUN_NAME}(Args..., Acc) -> _ = {TIER2_BLOCK_FUN_NAME}, Body end`;\n\
+         %% an unused name is dropped by the compiler).\n\
          -define(BT_TIER2_BLOCK_NAME, '{TIER2_BLOCK_FUN_NAME}').\n\
-         \n\
-         %% The same name as an Erlang variable, for Erlang code that mints a Tier 2\n\
-         %% block: `fun ?BT_TIER2_BLOCK_VAR(Args..., Acc) -> _ = ?BT_TIER2_BLOCK_VAR,\n\
-         %% Body end` (the name must be used in the body or the compiler drops it).\n\
-         -define(BT_TIER2_BLOCK_VAR, {TIER2_BLOCK_FUN_NAME}).\n\
          \n\
          %% The `Acc` the plain entry of class method `Selector` of `ClassTag`\n\
          %% (`'Name class'`) hands its threaded body; never used as a map.\n\
@@ -159,7 +158,6 @@ mod tests {
     fn header_defines_the_shared_shape() {
         let hrl = erlang_header();
         assert!(hrl.contains("-define(BT_TIER2_BLOCK_NAME, 'BtTier2Block')."));
-        assert!(hrl.contains("-define(BT_TIER2_BLOCK_VAR, BtTier2Block)."));
         assert!(hrl.contains(
             "-define(BT_PLAIN_ENTRY_ACC(ClassTag, Selector), {'plain', ClassTag, Selector})."
         ));
