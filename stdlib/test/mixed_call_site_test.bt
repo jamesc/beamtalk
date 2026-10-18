@@ -16,5 +16,5 @@ TestCase subclass: MixedCallSiteTest
     actor := MixedCallSiteActor spawn
     self assert: actor testTier1CallSite equals: 11
 
-  // The Tier 2 call site (a captured-mutation block passed to the HOM) is an
-  // ADR 0133 escaping-block compile error since BT-3902.
+// The Tier 2 call site (a captured-mutation block passed to the HOM) is an
+// ADR 0133 escaping-block compile error since BT-3902.

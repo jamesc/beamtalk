@@ -151,7 +151,7 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // N>2 case (multiple intermediate {Result, State} tuples threaded in sequence).
   tickThrice: x => self.onTick value: x; value: x; value: x
 
-  // P2-11 (BT-2815): a same-method LOCAL var block with a captured-local-only
-  // mutation, invoked via a cascade, threaded its write back until ADR 0133
-  // made a block that assigns a captured local and is stored in a local an
-  // escaping-block compile error (BT-3902), so it is not a fixture method.
+// P2-11 (BT-2815): a same-method LOCAL var block with a captured-local-only
+// mutation, invoked via a cascade, threaded its write back until ADR 0133
+// made a block that assigns a captured local and is stored in a local an
+// escaping-block compile error (BT-3902), so it is not a fixture method.

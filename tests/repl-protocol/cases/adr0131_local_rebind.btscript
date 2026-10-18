@@ -257,17 +257,12 @@ t
 t := 0
 // => 0
 
+// ADR 0133 (BT-3902): storing a block that assigns a captured binding is the
+// escaping-block compile error, so the input is refused and `t` is unchanged
+// (it used to be stored, and its later `value` raised at run time).
 b := [t := t + 1]
-// => _
+// => ERROR: `t` is assigned in a block stored in `b`
 
-// PIN-BUG BT-3841: the stored Tier 2 block is sent `value` via perform:.
-// ADR 0131 §6 makes this a compile error when the binding and the send are
-// compiled together (BT-3745); across two REPL inputs the second sees `b`
-// only as a binding, so the runtime error remains. Correct answer: 1.
-b value
-// => ERROR: Cannot call 'value' on Block via perform:
-
-// PIN-BUG BT-3841: correct answer 1 (or a compile error under ADR 0131 §6).
 t
 // => 0
 

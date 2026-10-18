@@ -119,7 +119,9 @@ TestCase subclass: BlocksTest
     // a Tier 2 (stateful) 0-arg block is an arity-1 fun whose StateAcc a
     // generic call site can't supply. Laundering the block through an Erlang
     // tuple hides it from the call site, so the runtime guard is what fires.
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc | 42]))
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc |
+      42
+    ]))
     self should: [laundered value] raise: #stateful_block_dispatch
 
     // A pure 0-arg block through the same laundering keeps working.
@@ -206,7 +208,9 @@ TestCase subclass: BlocksTest
     // (A pure block of the Tier 2 arity stands in for one: see the note
     // above testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind.)
     i := 0
-    launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc | i + 1]))
+    launderedIncrement := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:acc |
+      i + 1
+    ]))
     self should: [
       [i < 3] perform: #whileTrue: withArguments: #(launderedIncrement)
     ] raise: #stateful_block_dispatch
@@ -291,4 +295,3 @@ TestCase subclass: BlocksTest
       self assert: (self performEnsureNlrHelper: counter) equals: 42
       self assert: counter value equals: 1
     ] ensure: [counter delete]
-

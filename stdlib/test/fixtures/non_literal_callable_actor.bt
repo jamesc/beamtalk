@@ -17,6 +17,6 @@ Actor subclass: NonLiteralCallableActor
     blk := [:x | x > 2]
     #(1, 2, 3, 4, 5) select: blk
 
-  // A Tier-2 (stateful) block stored in a variable (`blk := [:x | total :=
-  // total + x]`) is an ADR 0133 escaping-block compile error since BT-3902,
-  // so it is not a fixture method here.
+// A Tier-2 (stateful) block stored in a variable (`blk := [:x | total :=
+// total + x]`) is an ADR 0133 escaping-block compile error since BT-3902,
+// so it is not a fixture method here.

@@ -23,5 +23,5 @@ TestCase subclass: HomFieldWriteTest
     actor := HomFieldWriteActor spawn
     self assert: actor testTwoFieldWritesViaHOM equals: 5
 
-  // BT-1140's third case, a block that also assigned a captured local, is an
-  // ADR 0133 escaping-block compile error since BT-3902.
+// BT-1140's third case, a block that also assigned a captured local, is an
+// ADR 0133 escaping-block compile error since BT-3902.
