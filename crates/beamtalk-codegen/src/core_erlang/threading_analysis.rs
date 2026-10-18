@@ -14,9 +14,9 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
-    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, expression_threaded_writes,
-    local_threading_construct, lookup_arm_blocks, producer_body_block, producer_packed_blocks,
-    threaded_block_writes, threaded_today_block_writes,
+    LocalThreadingConstruct, LocalThreadingFamily, OuterLocalWrite, RootMethodKind,
+    expression_threaded_writes, local_threading_construct, lookup_arm_blocks, producer_body_block,
+    producer_packed_blocks, threaded_block_writes, threaded_today_block_writes,
 };
 use beamtalk_core::state_threading_selectors::state_threaded_block_arg_indices;
 
@@ -73,50 +73,26 @@ impl CoreErlangGenerator {
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
     ) -> bool {
-        if self.is_repl_mode() {
-            // REPL: both local vars and fields need threading
-            analysis.has_mutations()
+        // The per-context rule lives in `beamtalk-core`
+        // (`BlockMutationAnalysis::needs_mutation_threading`), shared with the
+        // ADR 0133 `groupBy:` residual check (BT-3909).
+        let root = if self.is_repl_mode() {
+            None
         } else if self.in_class_method() {
-            // Class methods have no actor State variable — field writes and
-            // self-sends must NOT trigger state threading.
-            // However, captured local variable mutations (outer vars both read
-            // and written in the block) DO need threading via a fresh local map, same as
-            // value types. Without this, `do:` blocks silently lose local mutations.
-            analysis
-                .captured_reads
-                .iter()
-                .any(|v| analysis.local_writes.contains(v))
+            Some(RootMethodKind::Class)
         } else if self.context == CodeGenContext::Actor {
-            // Actor methods: field writes, self-sends,
-            // OR local variable mutations all need threading.
-            //
-            // ADR 0122/BT-3514: the "family half" of this OR (field
-            // writes/self-sends) is gated behind `ThreadedFamilies`
-            // non-emptiness — `eligible_families()` reports exactly
-            // `[State]` for a non-class-method Actor instance method,
-            // never empty, matching ADR 0122 §"State already fits": "the
-            // predicate is always true" once `State` is eligible. ANDed
-            // with the real, data-dependent `has_state_effects()` check
-            // (a block with no field write/self-send still doesn't need
-            // threading on this account), this is behavior-preserving —
-            // the "outer-local half" (`!analysis.local_writes.is_empty()`)
-            // is untouched.
-            let family_half = !ThreadedFamilies::from_matches(&self.eligible_families())
-                .as_slice()
-                .is_empty()
-                && analysis.has_state_effects();
-            family_half || !analysis.local_writes.is_empty()
+            Some(RootMethodKind::Actor)
         } else {
-            // Value types have no State variable, so self-sends should
-            // NOT trigger state threading. Only field writes need threading.
-            // Captured local variable mutations (outer vars both read and
-            // written in the block) also need threading via a fresh local map.
-            !analysis.field_writes.is_empty()
-                || analysis
-                    .captured_reads
-                    .iter()
-                    .any(|v| analysis.local_writes.contains(v))
-        }
+            Some(RootMethodKind::ValueType)
+        };
+        // ADR 0122/BT-3514: the actor "family half" (field writes/self-sends)
+        // is gated behind `ThreadedFamilies` non-emptiness —
+        // `eligible_families()` reports exactly `[State]` for a non-class-method
+        // Actor instance method, never empty (ADR 0122 §"State already fits").
+        let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
+            .as_slice()
+            .is_empty();
+        analysis.needs_mutation_threading(root, actor_state_eligible)
     }
 
     /// Returns `true` if the block body contains list op message sends

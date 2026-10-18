@@ -19,6 +19,14 @@ Actor subclass: Adr0133ResidualsActor
       ]
     r at: true
 
+  // The method's last statement: its implicit reply.
+  lastStatement =>
+    #(1, 3)
+      groupBy: [:x |
+        k := x > 2
+        k
+      ]
+
   // `^` at the method body.
   returned =>
     ^#(1, 3)

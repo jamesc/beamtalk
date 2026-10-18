@@ -3423,6 +3423,9 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
     // The positions that unpack it (measured right) and a pure block.
     for body in [
         "#(1, 3) groupBy: [:x | k := x > 2. k]\nnil",
+        // The method's last statement, its reply (`lastStatement` in
+        // adr0133residuals_test.bt answers the map).
+        "#(1, 3) groupBy: [:x | k := x > 2. k]",
         "r := #(1, 3) groupBy: [:x | k := x > 2. k]\nr at: true",
         "^#(1, 3) groupBy: [:x | k := x > 2. k]",
         "r := nil\n#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
@@ -3459,6 +3462,12 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
     ] {
         assert!(residual_messages(input, Some(&[])).is_empty(), "{input}");
     }
+    // At the REPL only a local or field write threads the fold (the shared
+    // `needs_mutation_threading` rule): a block that forwards an opaque
+    // callable to a HOM is the plain `groupBy:` and answers the map
+    // anywhere (PR #4383 review).
+    let input = "(#(1, 3) groupBy: [:x | #(3) anySatisfy: f]) at: true\n";
+    assert!(residual_messages(input, Some(&["f"])).is_empty(), "{input}");
 }
 
 /// PIN-BUG BT-3911 (closes BT-3875): a REPL `match:` arm that writes an

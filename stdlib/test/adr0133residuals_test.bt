@@ -16,6 +16,9 @@ TestCase subclass: Adr0133ResidualsTest
   testReturned =>
     self assert: (Adr0133ResidualsActor spawn returned at: false) equals: #(1)
 
+  testLastStatement =>
+    self assert: (Adr0133ResidualsActor spawn lastStatement at: true) equals: #(3)
+
   testStored => self assert: Adr0133ResidualsActor spawn stored equals: #(3)
 
   testAssignedInDo =>

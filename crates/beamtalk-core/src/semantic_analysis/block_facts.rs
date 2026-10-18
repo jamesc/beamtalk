@@ -81,6 +81,45 @@ impl BlockMutationAnalysis {
             || self.has_opaque_callable_hom_send
     }
 
+    /// Whether a loop or fold over this block is lowered with mutation
+    /// threading, in a method of kind `root` (`None`: a top-level expression,
+    /// the REPL or a script). The one per-context rule: codegen's
+    /// `needs_mutation_threading` and the ADR 0133 `groupBy:` residual check
+    /// (BT-3909, `validators/local_threading.rs`) both call it.
+    ///
+    /// - REPL: any local or field write (the bindings map carries both).
+    /// - Class method: no `State`, so field writes and self-sends never
+    ///   thread; a captured local both read and written does, through a
+    ///   fresh local map.
+    /// - Actor instance method: field writes, self-sends and other state
+    ///   effects ([`Self::has_state_effects`]) when `State` is an eligible
+    ///   family (`actor_state_eligible`, always true in an actor instance
+    ///   method, ADR 0122), or any local write.
+    /// - Value-type method: a field write, or a captured local both read and
+    ///   written.
+    #[must_use]
+    pub fn needs_mutation_threading(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+    ) -> bool {
+        let captured_local_mutation = || {
+            self.captured_reads
+                .iter()
+                .any(|v| self.local_writes.contains(v))
+        };
+        match root {
+            None => self.has_mutations(),
+            Some(RootMethodKind::Class) => captured_local_mutation(),
+            Some(RootMethodKind::Actor) => {
+                (actor_state_eligible && self.has_state_effects()) || !self.local_writes.is_empty()
+            }
+            Some(RootMethodKind::ValueType) => {
+                !self.field_writes.is_empty() || captured_local_mutation()
+            }
+        }
+    }
+
     /// Returns all variables that need threading (read AND written).
     #[cfg(test)]
     pub fn threaded_vars(&self) -> HashSet<String> {

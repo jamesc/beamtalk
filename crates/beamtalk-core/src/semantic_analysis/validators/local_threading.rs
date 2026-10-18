@@ -2619,18 +2619,20 @@ impl<'d> Walker<'d> {
     }
 
     /// [`Residual::GroupByValue`] (BT-3897): an actor or REPL `groupBy:` whose
-    /// block codegen lowers as the threaded fold (it binds a local, writes a
-    /// field or sends to `self`: [`analyze_block`]'s facts, which codegen's
-    /// `needs_mutation_threading` reads; a superset at the REPL, where only a
-    /// local write threads) and that writes no
+    /// block codegen lowers as the threaded fold
+    /// ([`BlockMutationAnalysis::needs_mutation_threading`](crate::semantic_analysis::block_facts::BlockMutationAnalysis::needs_mutation_threading),
+    /// the rule codegen calls: in an actor it binds a local, writes a field or
+    /// sends to `self`; at the REPL it writes a local or a field) and that
+    /// writes no
     /// outer local (that is the Phase 0 check's), at a position whose value is
     /// the raw `{Map, StateAcc}` tuple.
     fn check_group_by_value(&mut self, expr: &Expression, block: &Block, position: Position) {
         let Some(row) = residual_denied(Residual::GroupByValue, self.context) else {
             return;
         };
-        let analysis = analyze_block(block);
-        if analysis.local_writes.is_empty() && !analysis.has_state_effects() {
+        // The rule codegen's `needs_mutation_threading` reads: `State` is
+        // always an eligible family in an actor instance method.
+        if !analyze_block(block).needs_mutation_threading(self.context.root_method_kind(), true) {
             return;
         }
         if !self.writes_of(block).is_empty() {
