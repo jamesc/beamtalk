@@ -9,15 +9,6 @@ use super::*;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::fmt::Write as _;
 
-fn parse_module(src: &str) -> Module {
-    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
-    assert!(
-        diags.iter().all(|d| d.severity != Severity::Error),
-        "fixture must parse: {diags:?}"
-    );
-    module
-}
-
 fn adr0131_diagnostics_with(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default().with_known_vars(known_vars);
     analyse_full(&parse_module(src), ctx)
