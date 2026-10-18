@@ -3083,7 +3083,8 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
 //    - passed as a bare argument of a method-body self-send to another
 //      callee of the same class that itself threads that parameter.
 //
-// A cycle of such forwards (self-recursion, mutual recursion) does not thread.
+// A cycle of such forwards (self-recursion, mutual recursion) does not thread
+// (BT-3922 makes these field-writing self-send shapes a compile error).
 
 /// The instance method of `class` that a self-send of `selector` resolves to,
 /// when `class` itself defines it.
