@@ -867,9 +867,10 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// typed data the verifier reads instead of the opaque text. Built by
     /// every `BodyKind` epilogue in `control_flow/body.rs`.
     ///
-    /// A fold frame that threads locals must end in one whose `carry` is its
-    /// mode's: the locals it threads, in order, for a tuple accumulator; the
-    /// `StateAcc` map for a map accumulator
+    /// A fold frame that threads locals must end in one whose `carry` has its
+    /// mode's shape: the locals it threads, in order, for a tuple
+    /// accumulator; the `StateAcc` map for a map accumulator; never a raw
+    /// value
     /// ([`VerifyError::FoldLocalsNotCarried`](super::verify::VerifyError::FoldLocalsNotCarried)).
     FoldAccumulator {
         carry: FoldCarry,

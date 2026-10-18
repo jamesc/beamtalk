@@ -31,7 +31,10 @@ fn repro_sources() -> [String; 3] {
     ]
 }
 
-/// `do:`-kind fold frames whose body's last statement is `{s}`, or a loop or fold around it.
+/// `do:`-kind fold frames whose body's last statement is `{s}`, or a loop or fold around it. Only
+/// the `do:` tail can end in a raw value: under the same split, a `collect:` / `inject:into:` /
+/// predicate body still ends in its correctly shaped epilogue, and the write the missed producer
+/// drops (inside an opaque statement) is outside what `FoldLocalsNotCarried` checks.
 const FOLD_TAIL_FRAMES: &[&str] = &[
     "#(1, 2) do: [:k | {s}]",
     "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | {s}]",

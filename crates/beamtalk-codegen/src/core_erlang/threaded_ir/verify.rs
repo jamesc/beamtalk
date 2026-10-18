@@ -308,6 +308,15 @@ pub(in crate::core_erlang) enum VerifyError {
     /// (`erlc`-clean). `found` is the carry the body ended in, or `None`
     /// when its last statement is not a fold accumulator at all. Checked
     /// by [`verify_fold_locals_carried`].
+    ///
+    /// Scope: the check is on the accumulator's *shape*, not on which
+    /// version of each local (or which `StateAcc`) it reads. In production
+    /// every `Locals` carry is the plan's own `threaded_locals`, so what it
+    /// rules out is a fold that threads locals ending in a raw value (only
+    /// the `do:` tail can) or in the other mode's accumulator. A write lost
+    /// inside an opaque statement before a correctly shaped tail (a nested
+    /// loop the statement classifier missed, ending a `collect:` body) is
+    /// the producer-agreement corpora's to catch, not this check's.
     FoldLocalsNotCarried {
         threads: Vec<String>,
         found: Option<FoldCarry>,
@@ -682,8 +691,9 @@ pub(in crate::core_erlang) fn verify_fold_family_carried(
 /// BT-3863, [`VerifyError::FoldLocalsNotCarried`] over one fold lambda body
 /// (the statement list of a `Foldl*` `Threaded` node with `mode`, threading
 /// `threads`): when it threads any local, its last statement must be the
-/// [`ThreadedStmt::FoldAccumulator`] that carries them the way `mode` does.
-/// Needs no version history (like [`verify_fold_family_carried`]), so it runs
+/// [`ThreadedStmt::FoldAccumulator`] whose carry has `mode`'s shape (see the
+/// variant's scope note: the shape, not the versions read). Needs no version
+/// history (like [`verify_fold_family_carried`]), so it runs
 /// on the body fragment alone, before `carry_fold_families` wraps the
 /// accumulator in the `Self` family's `Return`.
 pub(in crate::core_erlang) fn verify_fold_locals_carried(
