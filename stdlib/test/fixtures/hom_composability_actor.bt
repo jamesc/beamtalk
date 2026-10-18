@@ -34,25 +34,19 @@ Actor subclass: HomComposabilityActor
 
   // --- Test methods (called from BUnit via actor await) ---
 
-  // Test: user-defined HOM with mutating block — mutations accumulate
-  // Block captures local `count`; HOM calls it for 1..5; count should be 15
-  testMutatingBlockInCustomLoop =>
-    count := 0
-    self eachItem: [:x | count := count + x]
-    count
+  // Test: user-defined HOM whose block answers a value. A block that assigned
+  // a captured `count` here (BT-912's Tier 2 round trip) is an ADR 0133
+  // escaping-block compile error since BT-3902; the block answers the value
+  // instead, and the HOM answers the last one: 5 * 3.
+  testValueBlockInCustomLoop => self eachItem: [:x | x * 3]
 
-  // Test: nested HOMs — outer calls inner, both thread state correctly
-  // Same block, same items, same expected result as above
-  testNestedHOMsAccumulate =>
-    count := 0
-    self outerEachItem: [:x | count := count + x]
-    count
+  // Test: nested HOMs — outer delegates to inner; same block, same answer
+  testNestedHOMsAnswer => self outerEachItem: [:x | x * 3]
 
   // Test: pure block passed to HOM — correct result, no crash
   // sumOf:over: loops with a pure block [:x | x * 2]; result = 2+4+6+8+10 = 30
   testPureBlockViaHOM => self sumOf: [:x | x * 2] over: #(1, 2, 3, 4, 5)
 
-// A block stored in a local variable and then passed to a user-defined HOM
-// (`addBlock := [:x | count := count + x]. self eachItem: addBlock`) drops
-// the write (BT-909) and is an ADR 0131 §6 compile error since BT-3745, so
-// it is not a fixture method here.
+// A block that assigns a captured local and is passed to a user-defined HOM,
+// directly or through a local, is an ADR 0133 escaping-block compile error
+// (BT-3902), so it is not a fixture method here.

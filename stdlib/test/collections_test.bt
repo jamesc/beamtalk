@@ -176,60 +176,39 @@ TestCase subclass: CollectionsTest
     // the wrong arity and crash with a confusing raw error (`function_clause`,
     // `type_error`, ...) instead of the clear stateful_block_dispatch error
     // BT-2812 established for the same situation on Block's value*.
-    // ADR 0131 §6 exempts Erlang FFI arguments, so the block reaches the
-    // runtime guard through a tuple (a list literal holding it is a §6 error,
-    // BT-3756); if that exemption narrows, this test must change.
-    count := 0
-    @expect dead_assignment
-    statefulBlock := [:x |
-      count := count + 1
-      x * 2
-    ]
+    // The block reaches the runtime guard through an Erlang FFI tuple. ADR
+    // 0133 (BT-3902) makes a stored block that assigns a captured variable a
+    // compile error, so a pure block of the Tier 2 arity (one more parameter,
+    // the StateAcc) stands in for one: the guard is keyed on arity.
+    statefulBlock := [:x :acc | x * 2]
     self
       should: [
         #(1, 2, 3) perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
       ]
       raise: #stateful_block_dispatch
 
-    count := 0
-    @expect dead_assignment
-    statefulDoBlock := [:x | count := count + x]
+    statefulDoBlock := [:x :acc | nil]
     self
       should: [
         #(1, 2, 3) perform: #do: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulDoBlock))
       ]
       raise: #stateful_block_dispatch
 
-    count := 0
-    @expect dead_assignment
-    statefulSelectBlock := [:x |
-      count := count + 1
-      x > 1
-    ]
+    statefulSelectBlock := [:x :acc | x > 1]
     self
       should: [
         #(1, 2, 3) perform: #select: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulSelectBlock))
       ]
       raise: #stateful_block_dispatch
 
-    count := 0
-    @expect dead_assignment
-    statefulRejectBlock := [:x |
-      count := count + 1
-      x > 1
-    ]
+    statefulRejectBlock := [:x :acc | x > 1]
     self
       should: [
         #(1, 2, 3) perform: #reject: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulRejectBlock))
       ]
       raise: #stateful_block_dispatch
 
-    count := 0
-    @expect dead_assignment
-    statefulInjectBlock := [:acc :x |
-      count := count + 1
-      acc + x
-    ]
+    statefulInjectBlock := [:acc :x :stateAcc | acc + x]
     self
       should: [
         #(1, 2, 3)
@@ -250,9 +229,8 @@ TestCase subclass: CollectionsTest
     // perform: used to crash with a raw badarity instead of the clear
     // stateful_block_dispatch error. The guard now lives in the generic
     // value-send fallback, so any self-hosted iteration method gets it.
-    count := 0
-    @expect dead_assignment
-    statefulBlock := [:x :i | count := count + x]
+    // (A pure block of the Tier 2 arity stands in for one, ADR 0133.)
+    statefulBlock := [:x :i :acc | nil]
     self
       should: [
         #(1, 2, 3) perform: #eachWithIndex: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))

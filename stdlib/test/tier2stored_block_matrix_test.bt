@@ -93,14 +93,11 @@ TestCase subclass: Tier2StoredBlockMatrixTest
   // P2-10 (BT-2814): a same-method, captured-LOCAL Tier 2 block invoked in
   // argument position computed its value but dropped its write, so since
   // BT-3745 it is an ADR 0131 §6 compile error (pinned in beamtalk-core's
-  // `section6_exemptions_match_codegen_shapes`) and has no runtime test here.
+  // `former_actor_exemptions_and_their_near_misses_are_errors`) and has no
+  // runtime test here.
 
-  // P2-11 (BT-2815): same-method, LOCAL var block with a captured-local-ONLY
-  // mutation, invoked via a cascade — the mutation used to never thread back
-  // to the caller's own variable.
-  testMixedLocalVarCascade =>
-    result := self.a mixedLocalVarCascade: 4
-    self assert: result equals: 8
+  // P2-11 (BT-2815): a same-method LOCAL var block with a captured-local-only
+  // mutation is an ADR 0133 escaping-block compile error since BT-3902.
 
   // P2-12: field reassigned to a different block between two invocations —
   // confirms runtime discrimination re-reads the field each call.

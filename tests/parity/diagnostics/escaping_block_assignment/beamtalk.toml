@@ -1,0 +1,13 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture: a block that assigns a captured local and
+# escapes (ADR 0133, BT-3902) must produce the same error on every
+# diagnostic surface.
+
+[package]
+name = "parity_escaping_block_assignment"
+version = "0.1.0"
+description = "Escaping-block assignment diagnostic parity fixture"
+
+[dependencies]

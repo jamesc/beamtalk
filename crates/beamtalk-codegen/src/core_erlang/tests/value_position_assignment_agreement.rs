@@ -124,8 +124,11 @@ fn the_rejection_names_exactly_the_local_assignments_codegen_drops() {
             assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
             let expected = predicate(&module);
             let analysis = analyse_full(&module, AnalysisContext::default());
-            // The Phase 0 check reports every assignment the predicate names
-            // (a `match:` arm's write to an outer local keeps its own error).
+            // Every assignment the predicate names is a compile error at its
+            // span, whichever check owns it: a `match:` arm's write to an outer
+            // local keeps its own error, and an assignment inside an escaping
+            // block is the ADR 0133 escaping-block error (one diagnostic per
+            // assignment, BT-3902).
             for span in &expected {
                 let reported = analysis.diagnostics.iter().any(|d| {
                     d.span == *span
@@ -134,6 +137,7 @@ fn the_rejection_names_exactly_the_local_assignments_codegen_drops() {
                             Some(
                                 DiagnosticCategory::ValuePositionLocalAssignment
                                     | DiagnosticCategory::UnmigratedLocalThreading
+                                    | DiagnosticCategory::Tier2BlockNoReturnChannel
                             )
                         )
                 });

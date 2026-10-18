@@ -527,33 +527,21 @@ map_acc_refuses_wrong_arity_test_() ->
 
 compiled_mark_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"a compiled Tier 2 block carries the mark; a pure block does not", fun() ->
-            Writer = ?MOD:class_writerBlock(nil),
-            ?assert(is_function(Writer, 1)),
-            ?assert(beamtalk_dispatch:is_tier2_block(Writer)),
+        %% A compiled Tier 2 block (one that writes a captured local and leaves
+        %% its method) is an ADR 0133 escaping-block compile error since
+        %% BT-3902, so the fixture can no longer mint one; the mark itself is
+        %% pinned by codegen's tier2_block_values tests until ADR 0133 Phase 2
+        %% (BT-3907) removes it.
+        {"a compiled pure block is not marked", fun() ->
             Pure = ?MOD:'class_pureBlock:'(nil, 1),
             ?assert(is_function(Pure, 1)),
             ?assertNot(beamtalk_dispatch:is_tier2_block(Pure))
-        end},
-        {"a compiled Tier 2 block threads through the entry with a real Acc", fun() ->
-            Writer = ?MOD:class_writerBlock(nil),
-            ?assertEqual(
-                {2, #{'__local__t' => 2, kept => yes}},
-                ?MOD:'__t2_class_twice:'(nil, Writer, #{'__local__t' => 0, kept => yes})
-            )
         end},
         {"a compiled pure block of one argument too many is refused unrun", fun() ->
             Pure = ?MOD:'class_pureBlock:'(nil, 1),
             ?assertEqual(
                 arity_mismatch, refused(fun() -> ?MOD:'__t2_class_twice:'(nil, Pure, #{}) end)
             )
-        end},
-        {"a plain fun created inside a Tier 2 block is not marked", fun() ->
-            Outer = ?MOD:class_nestingWriterBlock(nil),
-            {Inner, _} = Outer(#{}),
-            ?assert(is_function(Inner, 1)),
-            ?assert(beamtalk_dispatch:is_tier2_block(Outer)),
-            ?assertNot(beamtalk_dispatch:is_tier2_block(Inner))
         end},
         {"non-funs and external funs are not marked", fun() ->
             ?assertNot(beamtalk_dispatch:is_tier2_block(42)),

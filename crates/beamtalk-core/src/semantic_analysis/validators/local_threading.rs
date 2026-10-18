@@ -15,24 +15,21 @@
 //! Two checks share
 //! one walk and one fact, [`outer_local_writes`]:
 //!
-//! - **§6, a Tier 2 block value with no return channel**
-//!   ([`DiagnosticCategory::Tier2BlockNoReturnChannel`], permanent). A block
-//!   literal that writes an outer local, or a local bound to one and never
-//!   reassigned, that flows to a send that cannot return the write: anything
-//!   but a §1 construct (a [`crate::state_threading_selectors`] selector, the
-//!   conditional family, `on:do:`/`ensure:`, `tryDo:`, a block `value` send on
-//!   a literal block), an actor instance self-send (BT-912) in the exact
-//!   shape codegen's `detect_tier2_self_send` threads (a bare `self`
-//!   receiver, not a cascade message, at the method body's top level, with a
-//!   bare block argument whose writes are all captured mutations) to a callee
-//!   that threads the block (BT-3755, [`callee_threads_block_param`]), or an
-//!   Erlang FFI argument (ADR 0041 §Erlang Interop Boundary: lossy by design,
-//!   codegen's `generate_erlang_interop_wrapper` warns). In an actor instance
-//!   method a stored block may also be sent a `value`-family message, but
-//!   only as a bare identifier receiver in a method-body statement, for a
-//!   binding codegen's `prescan_tier2_local_vars` promotes; passing a stored
-//!   block on (to a self-send or a collection HOM) drops its write.
-//!   Everywhere else no callee can hand a `StateAcc` back.
+//! - **ADR 0133: a block that assigns a captured variable and escapes**
+//!   ([`DiagnosticCategory::Tier2BlockNoReturnChannel`], permanent; it began
+//!   as ADR 0131 §6). A block may assign a local it captured only where the
+//!   compiler lowers the block in place: as the direct argument (or receiver,
+//!   for `value` and the loops) of a control construct or a compiler-known
+//!   collection message ([`crate::state_threading_selectors`], the one list,
+//!   which [`threading_constructs_note`] also reads), or as an Erlang FFI
+//!   argument (ADR 0041 §Erlang Interop Boundary: lossy by design, codegen's
+//!   `generate_erlang_interop_wrapper` warns). A block literal that does so
+//!   and **escapes** (is stored in a local, returned, stored in a field or
+//!   class variable, placed in a collection literal, passed to any other
+//!   method, a cascade message included, or sent a message other than
+//!   `value`) is reported at the assignment, naming the shape ([`Escape`]),
+//!   in every context, the REPL root included (BT-3858). Reads of captured
+//!   variables and `^` inside an escaping block are unaffected.
 //! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
 //!   still needed: BT-3751 measured 552 of 733 rejected statement shapes still
 //!   dropping their writes silently and 43 failing erlc with it bypassed, so
@@ -50,18 +47,15 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, analyze_block, captured_local_mutations, conditional_arm_blocks,
-    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_safe_value_family_selector, is_threaded_frame_body,
-    literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
+    RootMethodKind, analyze_block, conditional_arm_blocks, conditional_producer_writes,
+    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
+    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
     loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    stored_block_var_uses, value_blocks, value_locals, value_position_local_assignments,
+    value_blocks, value_position_local_assignments,
 };
-use crate::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
-use crate::semantic_analysis::tier2_callee::callee_threads_block_param;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -1177,6 +1171,7 @@ pub(crate) fn check_local_threading(
                     .superclass_chain(class_name)
                     .iter()
                     .any(|c| c == "Dictionary")),
+        class_name: EcoString::from(class_name),
     };
     let instance_context = |class_name: &str| {
         if hierarchy.is_actor_subclass(class_name) {
@@ -1188,28 +1183,11 @@ pub(crate) fn check_local_threading(
     for class in &module.classes {
         let class_name = class.name.name.as_str();
         let context = instance_context(class_name);
-        let callees = if context == Actor {
-            threading_callees(class)
-        } else {
-            HashSet::new()
-        };
         for method in &class.methods {
-            check_method(
-                context,
-                method,
-                &callees,
-                &facts(class_name, false),
-                diagnostics,
-            );
+            check_method(context, method, &facts(class_name, false), diagnostics);
         }
         for method in &class.class_methods {
-            check_method(
-                Class,
-                method,
-                &HashSet::new(),
-                &facts(class_name, true),
-                diagnostics,
-            );
+            check_method(Class, method, &facts(class_name, true), diagnostics);
         }
     }
     for standalone in &module.method_definitions {
@@ -1218,11 +1196,9 @@ pub(crate) fn check_local_threading(
         } else {
             instance_context(standalone.class_name.name.as_str())
         };
-        let method = &standalone.method;
         check_method(
             context,
-            method,
-            &HashSet::new(),
+            &standalone.method,
             &facts(
                 standalone.class_name.name.as_str(),
                 standalone.is_class_method,
@@ -1234,9 +1210,9 @@ pub(crate) fn check_local_threading(
         let known: Vec<EcoString> = known_vars.iter().map(|v| EcoString::from(*v)).collect();
         check_body(
             Repl,
+            None,
             known,
             &module.expressions,
-            &HashSet::new(),
             &facts("", true),
             diagnostics,
         );
@@ -1244,7 +1220,8 @@ pub(crate) fn check_local_threading(
 }
 
 /// What the lookup-receiver rule
-/// ([`receiver_statically_not_dictionary`]) reads for one method body.
+/// ([`receiver_statically_not_dictionary`]) and the escaping-block message
+/// ([`Walker::passed_escape`]) read for one method body.
 #[derive(Clone)]
 struct ReceiverFacts<'a> {
     hierarchy: &'a ClassHierarchy,
@@ -1254,50 +1231,44 @@ struct ReceiverFacts<'a> {
     /// Whether `self` may be a `Dictionary`: an instance method of `Dictionary`
     /// or a subclass.
     self_is_dictionary: bool,
+    /// The class the method belongs to (empty at the REPL root): where a
+    /// class-side `self` send goes.
+    class_name: EcoString,
 }
 
-/// [`check_body`] for one method. ADR 0132 Phase 0b (BT-3867): in a class or
-/// value-type method a stored Tier 2 block sent `value` is an inline producer,
-/// so the body is checked with each promotable one inlined at its sends
-/// ([`inline_stored_tier2_values`], the rule `lower_module_for_codegen`
-/// applies before codegen).
+/// [`check_body`] for one method.
 fn check_method(
     context: MethodContext,
     method: &crate::ast::MethodDefinition,
-    callees: &HashSet<(EcoString, usize)>,
     receivers: &ReceiverFacts<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let params = param_names(method);
-    let inlined = if context == Actor {
-        None
-    } else {
-        inline_stored_tier2_values(&method.body, &params)
-    };
     check_body(
         context,
-        params,
-        inlined.as_deref().unwrap_or(&method.body),
-        callees,
+        Some(method.selector.name()),
+        param_names(method),
+        &method.body,
         receivers,
         diagnostics,
     );
 }
 
-/// Walks one method body (or module-level expression list) whose
-/// outermost frame binds `params`.
+/// Walks one method body (`selector` its method's), or the module-level
+/// expression list (`selector` `None`), whose outermost frame binds `params`.
 fn check_body(
     context: MethodContext,
+    selector: Option<EcoString>,
     params: Vec<EcoString>,
     body: &[ExpressionStatement],
-    callees: &HashSet<(EcoString, usize)>,
     receivers: &ReceiverFacts<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut walker = Walker::new(context, body, callees, diagnostics);
+    let mut walker = Walker::new(context, body, diagnostics);
     walker.receivers = Some(receivers.clone());
+    walker.method_selector = selector;
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
+    walker.finish();
     report_value_position_assignments(context, body, diagnostics);
 }
 
@@ -1312,10 +1283,19 @@ fn report_value_position_assignments(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for found in value_position_local_assignments(body, context.root_method_kind()) {
+        // One diagnostic per assignment: an assignment a `match:`-arm error or
+        // the ADR 0133 escaping-block error (reported at the assignment)
+        // already reports is not reported again.
         let reported = diagnostics.iter().any(|d| {
             d.span == found.span
                 && d.severity == crate::source_analysis::Severity::Error
-                && d.category == Some(DiagnosticCategory::UnmigratedLocalThreading)
+                && matches!(
+                    d.category,
+                    Some(
+                        DiagnosticCategory::UnmigratedLocalThreading
+                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+                    )
+                )
         });
         if reported {
             continue;
@@ -1354,22 +1334,6 @@ fn is_repl_evaluated_block(expr: &Expression) -> bool {
     repl_evaluated_block(expr).is_some()
 }
 
-/// The `(selector, parameter index)` pairs of `class`'s instance methods that
-/// thread a Tier 2 block passed to them ([`callee_threads_block_param`], the
-/// predicate codegen's class pre-scan reads as well).
-fn threading_callees(class: &crate::ast::ClassDefinition) -> HashSet<(EcoString, usize)> {
-    let mut callees = HashSet::new();
-    for method in class.methods.iter().filter(|m| !m.is_class_method) {
-        let selector = method.selector.name();
-        for index in 0..method.parameters.len() {
-            if callee_threads_block_param(class, &selector, index) {
-                callees.insert((selector.clone(), index));
-            }
-        }
-    }
-    callees
-}
-
 fn param_names(method: &crate::ast::MethodDefinition) -> Vec<EcoString> {
     method
         .parameters
@@ -1379,36 +1343,135 @@ fn param_names(method: &crate::ast::MethodDefinition) -> Vec<EcoString> {
 }
 
 /// A local bound (once) to a block literal that writes an outer local.
-#[derive(Clone)]
-struct Tier2Local {
-    /// The `b := [...]` assignment.
-    binding: Span,
-    /// The block's first outer-local write.
-    write: OuterLocalWrite,
-    /// The index in `Walker::scope` of the frame that binds the local.
-    frame: usize,
-    /// Whether codegen promotes the binding to a Tier 2 local
-    /// (`prescan_tier2_local_vars`): see [`Walker::note_tier2_binding`].
-    promotable: bool,
+/// ADR 0133: how a block literal that assigns a captured local escapes, the
+/// shape-specific part of the diagnostic (the ADR's error table).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Escape {
+    /// Assigned to the local (`f := [...]`).
+    Stored(EcoString),
+    /// Returned from the method (the operand of `^` or the method's value);
+    /// at the REPL root, the value of the input.
+    Returned,
+    /// Assigned to a field or class variable.
+    StoredState,
+    /// An element of a collection literal.
+    InLiteral,
+    /// The value of the block of a value-returning collection operation
+    /// (`collect:`, `inject:into:`, `select:`, `detect:ifNone:`, ...): it
+    /// leaves the block into the operation's machinery (its result, for
+    /// `collect:` and the folds; a predicate's answer otherwise).
+    CollectionResult,
+    /// An argument of an ordinary send of this selector: a user-defined method,
+    /// or a stdlib method outside the known list.
+    Passed(EcoString),
+    /// A handler of this `Dictionary` lookup where the compiler does not lower
+    /// it in place (BT-3798: its receiver is statically not a `Dictionary`,
+    /// or the lookup is not in a producer position).
+    Lookup(EcoString),
+    /// An argument of this class-side selector, which runs in the class's
+    /// process (not a direct-called `class sealed` method, ADR 0129 Phase 0b).
+    ClassMethod(EcoString),
+    /// An argument or the receiver of a cascade message: a cascade sends every
+    /// message through ordinary dispatch.
+    Cascade(EcoString),
+    /// The receiver of this selector, which does not run its receiver block in
+    /// place.
+    Receiver(EcoString),
+    /// The condition of a `whileTrue:`/`whileFalse:` whose loop does not
+    /// thread a condition write here (BT-3782).
+    Condition(EcoString),
 }
 
-/// Where a send sits relative to the method body, for the actor exemptions:
-/// codegen threads an actor Tier 2 call only at the top level of the method
-/// body (probed, BT-3745), never inside a block or an operand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TopLevel {
-    /// A method-body statement.
-    Statement,
-    /// The value of a method-body `x := ...` or `^...`.
-    Value,
-    /// Anywhere else.
-    None,
+impl Escape {
+    /// What follows "`x` is assigned in a block " in the message. `method` is
+    /// the enclosing method's selector, `None` at the REPL root.
+    fn fragment(&self, method: Option<&str>) -> String {
+        match self {
+            Self::Stored(local) => format!("stored in `{local}`"),
+            Self::Returned => match method {
+                Some(method) => format!("returned from `{method}`"),
+                None => "that is the value of the expression".to_string(),
+            },
+            Self::StoredState => "stored in a field or class variable".to_string(),
+            Self::InLiteral => "placed in a collection literal".to_string(),
+            Self::CollectionResult => "answered by the block of a collection operation".to_string(),
+            Self::Passed(selector) => format!(
+                "passed to `{selector}`, which is not a construct the compiler threads it through"
+            ),
+            Self::Lookup(selector) => format!(
+                "passed to `{selector}` where the compiler does not thread it (the receiver is \
+                 not known to be a `Dictionary`, or the lookup is not where it is lowered in place)"
+            ),
+            Self::ClassMethod(selector) => {
+                format!("passed to a class method (`{selector}`); it would run in another process")
+            }
+            Self::Cascade(selector) => format!(
+                "sent in a cascade (`{selector}`), which the compiler does not thread it through"
+            ),
+            Self::Receiver(selector) => format!(
+                "sent `{selector}`, which is not a construct the compiler threads it through"
+            ),
+            Self::Condition(selector) => format!(
+                "used as the condition of `{selector}`, which does not thread an assignment in \
+                 its condition here"
+            ),
+        }
+    }
+
+    /// The fix: the ADR's idiom for the shape.
+    fn help(&self, name: &str) -> String {
+        match self {
+            Self::Stored(local) => format!(
+                "have the block answer the new value and assign it where the block is \
+                 called: `{local} := [{name} + 1]`, then `{name} := {local} value`"
+            ),
+            Self::Returned | Self::StoredState | Self::InLiteral | Self::CollectionResult => {
+                format!(
+                    "once the block has left this scope, no later call of it can hand `{name}` \
+                 back: keep the state in a field (`self.{name} := self.{name} + 1`) or return \
+                 the new value from the block and assign it where the block is called"
+                )
+            }
+            Self::Passed(selector)
+            | Self::Lookup(selector)
+            | Self::ClassMethod(selector)
+            | Self::Cascade(selector) => {
+                format!(
+                    "return the new value from the block and assign it where it is called: \
+                     `{name} := ... {selector} [... {name} + 1]`"
+                )
+            }
+            Self::Receiver(selector) => format!(
+                "return the new value from the block and assign it where it is called: \
+                 `{name} := [... {name} + 1] {selector}`"
+            ),
+            Self::Condition(selector) => format!(
+                "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
+                 {name} + 1]`"
+            ),
+        }
+    }
+}
+
+/// The ADR 0133 note on every escaping-block diagnostic: the rule, and the
+/// messages that do thread assignments, generated from
+/// [`crate::state_threading_selectors::assignment_threading_constructs`] (the
+/// one list codegen reads), so the note cannot drift from what compiles.
+fn threading_constructs_note() -> String {
+    let constructs = crate::state_threading_selectors::assignment_threading_constructs();
+    format!(
+        "a block that is stored, returned, or passed to a method the compiler does not lower in \
+         place may read captured variables but not assign them (ADR 0133). The messages that \
+         thread assignments, with the block written directly as the argument, are the control \
+         constructs ({}) and the collection messages ({})",
+        constructs.control.join(", "),
+        constructs.collection.join(", ")
+    )
 }
 
 /// The walk behind [`check_local_threading`] for one method body: tracks
-/// scope (so a write can be told apart from a block-local definition), the
-/// block nesting depth (a construct inside a block is in a nested frame) and
-/// the Tier 2 block-valued locals bound so far.
+/// scope (so a write can be told apart from a block-local definition) and the
+/// block nesting depth (a construct inside a block is in a nested frame).
 /// The current statement of a threaded frame body (ADR 0131 Phase 2b).
 #[derive(Default)]
 struct FrameSites {
@@ -1454,22 +1517,10 @@ struct Walker<'d> {
     /// For each enclosing block, innermost last: whether it rebinds a local
     /// bound outside it (see [`Position::NestedStatement`]).
     direct_blocks: Vec<bool>,
-    /// How many times each name is assigned anywhere in the method.
-    assign_counts: HashMap<EcoString, usize>,
-    tier2_locals: HashMap<EcoString, Tier2Local>,
-    /// For the escape check alone (BT-3806): the latest binding of each local,
-    /// in walk order, whose value may be a block literal writing an outer
-    /// local ([`value_blocks`]: `b := [..]`, `b := c ifTrue: [[..]] ifFalse:
-    /// [..]`), or aliasing such a local (`c := b`, BT-3859, recorded with
-    /// `b`'s binding), however often the local is assigned (`b := nil.
-    /// b := [t := 1]. ^b` returns the block). Any other assignment to the
-    /// local forgets it, so a block replaced before the local escapes is not reported; one
-    /// replaced only in a branch is not either (the check stays syntactic).
-    /// Its entries' `promotable` is unused.
-    escape_bindings: HashMap<EcoString, Tier2Local>,
-    /// The spans of the block literals and bare locals that make up the value
-    /// of some `x := ...` in the method ([`value_blocks`], [`value_locals`]):
-    /// the operands [`Walker::note_tier2_binding`] reads (BT-3859).
+    /// The spans of the block literals that make up the value of some
+    /// `x := ...` in the method ([`value_blocks`]: `b := [..]`, `b := c
+    /// ifTrue: [[..]] ifFalse: [..]`): the blocks
+    /// [`Walker::note_block_binding`] reports as stored (BT-3859).
     value_operands: HashSet<Span>,
     /// For each block in [`Walker::value_operands`], its first outer-local
     /// write, taken while the walk is at the block, with the scope it is
@@ -1478,18 +1529,15 @@ struct Walker<'d> {
     /// popped, so a local first bound in an arm (`b := c ifTrue: [u := 0.
     /// [u := u + 1]] ...`) would look like the block's own.
     value_block_writes: HashMap<Span, OuterLocalWrite>,
-    /// For each local in [`Walker::value_operands`], the escape binding it
-    /// held where it is read (BT-3859): `c := b` makes `c` the block of `b`
-    /// even when `b` was bound in an arm that has since been popped.
-    value_local_bindings: HashMap<Span, Tier2Local>,
-    /// The bindings of Tier 2 locals already reported (one diagnostic per
-    /// binding).
-    reported_locals: HashSet<Span>,
-    /// For each method-body statement `b := [...]`, whether every later use
-    /// of `b` in the method body is a safe `value` send
-    /// ([`stored_block_var_uses`], shared with codegen's
-    /// `prescan_tier2_local_vars`).
-    safe_stored_uses: HashMap<EcoString, bool>,
+    /// The block literals already reported as escaping (one diagnostic per
+    /// block, whichever way it is first seen to escape).
+    reported_blocks: HashSet<Span>,
+    /// The escaping-block diagnostics, keyed by the assignment they report
+    /// and the block that escapes, in walk order ([`Walker::report_escape`]).
+    escaping_writes: Vec<(Span, Span, Diagnostic)>,
+    /// The enclosing method's selector, for [`Escape::Returned`]; `None` at
+    /// the REPL root.
+    method_selector: Option<EcoString>,
     /// The spans of the current method-body statement's
     /// [`sequenced_operand_sites`]: where a loop or fold is lowered as an
     /// ADR 0131 local-threading producer (BT-3749).
@@ -1511,12 +1559,9 @@ struct Walker<'d> {
     /// What the lookup-receiver rule reads; `None` only before [`check_body`]
     /// has set it.
     receivers: Option<ReceiverFacts<'d>>,
-    /// The actor self-send callees of the enclosing class that thread a Tier 2
-    /// block argument ([`threading_callees`]).
-    callees: &'d HashSet<(EcoString, usize)>,
-    /// ADR 0131 §6 (BT-3756): the block literals and bare locals of the method
-    /// body that escape the method without a send — returned, stored in a
-    /// field or class variable, or an element of a collection literal
+    /// ADR 0131 §6 (BT-3756): the block literals of the method body that
+    /// escape the method without a send — returned, stored in a field or
+    /// class variable, or an element of a collection literal
     /// ([`escape_sites`], the classification behind `escaping_blocks`). Keyed
     /// by the operand's span.
     escapes: HashMap<Span, EscapeShape>,
@@ -1527,49 +1572,14 @@ impl<'d> Walker<'d> {
     fn new(
         context: MethodContext,
         body: &[ExpressionStatement],
-        callees: &'d HashSet<(EcoString, usize)>,
         diagnostics: &'d mut Vec<Diagnostic>,
     ) -> Self {
-        let mut assign_counts = HashMap::new();
-        for stmt in body {
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                Expression::Assignment { target, .. } => {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        *assign_counts.entry(id.name.clone()).or_insert(0) += 1;
-                    }
-                }
-                Expression::DestructureAssignment { pattern, .. } => {
-                    let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
-                    for id in ids {
-                        *assign_counts.entry(id.name).or_insert(0) += 1;
-                    }
-                }
-                _ => {}
-            });
-        }
-        let mut safe_stored_uses = HashMap::new();
-        for (i, stmt) in body.iter().enumerate() {
-            let Expression::Assignment { target, value, .. } = &stmt.expression else {
-                continue;
-            };
-            let (Expression::Identifier(id), Expression::Block(_)) =
-                (target.as_ref(), value.as_ref())
-            else {
-                continue;
-            };
-            let (has_unsafe, has_safe) = body[i + 1..]
-                .iter()
-                .map(|later| stored_block_var_uses(&later.expression, &id.name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-            safe_stored_uses.insert(id.name.clone(), has_safe && !has_unsafe);
-        }
         let mut value_operands = HashSet::new();
         for stmt in body {
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
                 if let Expression::Assignment { target, value, .. } = e {
                     if matches!(target.as_ref(), Expression::Identifier(_)) {
                         value_operands.extend(value_blocks(value).into_iter().map(|b| b.span));
-                        value_operands.extend(value_locals(value).into_iter().map(|id| id.span));
                     }
                 }
             });
@@ -1583,21 +1593,17 @@ impl<'d> Walker<'d> {
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
-            assign_counts,
-            tier2_locals: HashMap::new(),
-            escape_bindings: HashMap::new(),
             value_operands,
             value_block_writes: HashMap::new(),
-            value_local_bindings: HashMap::new(),
-            reported_locals: HashSet::new(),
-            safe_stored_uses,
+            reported_blocks: HashSet::new(),
+            escaping_writes: Vec::new(),
+            method_selector: None,
             operand_sites: HashSet::new(),
             frame_sites: Vec::new(),
             pending_frame_body: None,
             lookup_producers: HashSet::new(),
             receivers: None,
-            callees,
-            escapes: escape_map(context, body),
+            escapes: escape_map(body),
             diagnostics,
         }
     }
@@ -1622,11 +1628,6 @@ impl<'d> Walker<'d> {
         }
     }
 
-    /// The index of the innermost scope frame binding `name`.
-    fn binding_frame(&self, name: &str) -> Option<usize> {
-        self.scope.iter().rposition(|f| f.contains(name))
-    }
-
     /// Whether `name` is bound in the innermost enclosing block (or, at
     /// method level, anywhere in the method).
     fn is_frame_local(&self, name: &str) -> bool {
@@ -1644,20 +1645,6 @@ impl<'d> Walker<'d> {
 
     fn writes_of(&self, block: &Block) -> Vec<OuterLocalWrite> {
         outer_local_writes(block, &|name| self.is_bound(name))
-    }
-
-    /// Where an expression at `position` sits relative to the method body.
-    fn top_level(&self, position: Position) -> TopLevel {
-        if self.depth > 0 {
-            return TopLevel::None;
-        }
-        match position {
-            Position::Statement => TopLevel::Statement,
-            Position::AssignValue { nested: false } | Position::ReturnValue { nested: false } => {
-                TopLevel::Value
-            }
-            _ => TopLevel::None,
-        }
     }
 
     fn body(&mut self, body: &[ExpressionStatement]) {
@@ -1691,6 +1678,14 @@ impl<'d> Walker<'d> {
                     .into_iter()
                     .map(Expression::span)
                     .collect();
+            }
+            // ADR 0133: a block literal that is the value of a collection
+            // operation's block (`collect: [:x | [t := t + x]]`) escapes into
+            // the operation's result.
+            if i + 1 == body.len() && self.containers.last() == Some(&Container::ListOpBody) {
+                if let Expression::Block(block) = stmt.expression.unwrap_parens() {
+                    self.report_literal(block, &Escape::CollectionResult);
+                }
             }
             self.expr(&stmt.expression, Position::Statement);
         }
@@ -1736,14 +1731,9 @@ impl<'d> Walker<'d> {
         self.block_frames.pop();
     }
 
-    /// Leaves the innermost scope frame, forgetting the Tier 2 block-valued
-    /// locals it bound (a later same-named binding in a sibling scope is a
-    /// different variable).
+    /// Leaves the innermost scope frame.
     fn pop_frame(&mut self) {
         self.scope.pop();
-        let depth = self.scope.len();
-        self.tier2_locals.retain(|_, local| local.frame < depth);
-        self.escape_bindings.retain(|_, local| local.frame < depth);
     }
 
     /// Walks `expr` as an operand: a block literal is walked as a block (of
@@ -1770,8 +1760,7 @@ impl<'d> Walker<'d> {
                 Expression::Identifier(id) => {
                     self.operand(value, Position::AssignValue { nested });
                     self.define(&id.name);
-                    let top_statement = self.top_level(position) == TopLevel::Statement;
-                    self.note_tier2_binding(&id.name, value, expr.span(), top_statement);
+                    self.note_block_binding(&id.name, value);
                 }
                 Expression::FieldAccess { receiver, .. } => {
                     self.expr(receiver, Position::Receiver);
@@ -1787,7 +1776,6 @@ impl<'d> Walker<'d> {
                 let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
                 for id in ids {
                     self.define(&id.name);
-                    self.escape_bindings.remove(&id.name);
                 }
             }
             Expression::Return { value, .. } => {
@@ -1801,9 +1789,8 @@ impl<'d> Walker<'d> {
             } => {
                 self.check_residuals(expr, position);
                 self.check_construct(expr, position);
-                let top = self.top_level(position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
-                self.check_send(receiver, selector, arguments, true, top, lookup_producer);
+                self.check_send(receiver, selector, arguments, true, lookup_producer);
                 // The role of each block literal the construct inlines (the
                 // same recognizer as `check_construct`); any other block is a
                 // block value.
@@ -1882,12 +1869,11 @@ impl<'d> Walker<'d> {
                     // selector.
                     // The shared receiver is evaluated once: check it once.
                     if let Expression::Block(block) = shared.unwrap_parens() {
-                        self.report_literal(block, &selector.name());
+                        self.report_literal(block, &Escape::Cascade(selector.name()));
                     }
-                    let top = self.top_level(position);
-                    self.check_send(shared, selector, arguments, false, top, false);
+                    self.check_send(shared, selector, arguments, false, false);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments, false, top, false);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false, false);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -1946,17 +1932,10 @@ impl<'d> Walker<'d> {
                     }
                 }
             }
-            Expression::Identifier(id) => {
-                if let Some(shape) = self.escapes.get(&expr.span()).copied() {
-                    self.report_escaping_local(&id.name, shape, expr.span());
-                }
-                if self.value_operands.contains(&id.span) {
-                    if let Some(local) = self.live_binding(&self.escape_bindings, &id.name) {
-                        self.value_local_bindings.insert(id.span, local.clone());
-                    }
-                }
-            }
-            Expression::Literal(..)
+            // A local bound to a writing block was reported where it was bound
+            // (`note_block_binding`), so a later escape of the local is not.
+            Expression::Identifier(_)
+            | Expression::Literal(..)
             | Expression::ClassReference { .. }
             | Expression::Super(_)
             | Expression::Primitive { .. }
@@ -1966,90 +1945,24 @@ impl<'d> Walker<'d> {
         }
     }
 
-    /// `name := value`: remembers `name` as a Tier 2 block-valued local when
-    /// `value` is a block literal that writes an outer local and `name` is
-    /// assigned nowhere else in the method; and, whatever the assign count, as
-    /// the binding the escape check reads ([`Walker::escape_bindings`]).
-    ///
-    /// The binding is *promotable* (an actor may then send it `value`) only
-    /// in the shape codegen's `prescan_tier2_local_vars` promotes: a
-    /// method-body statement, whose block threads every outer local it writes
-    /// ([`captured_local_mutations`]), with every later use a safe `value`
-    /// send ([`stored_block_var_uses`]).
-    fn note_tier2_binding(
-        &mut self,
-        name: &EcoString,
-        value: &Expression,
-        binding: Span,
-        top_statement: bool,
-    ) {
-        self.escape_bindings.remove(name);
-        let Some(frame) = self.binding_frame(name) else {
-            return;
-        };
-        // A block value: its write as seen where the block was walked
-        // (`value_block_writes`), else as seen here (`b := [b := b + 1]`
-        // writes the `b` this assignment binds). An alias (`c := b`): the
-        // binding `b` held where it was read, reported at that binding.
-        let escaping = value_blocks(value)
-            .into_iter()
-            .find_map(|block| {
-                self.value_block_writes
-                    .get(&block.span)
-                    .cloned()
-                    .or_else(|| self.writes_of(block).into_iter().next())
-                    .map(|write| (binding, write))
-            })
-            .or_else(|| {
-                value_locals(value).into_iter().find_map(|id| {
-                    self.value_local_bindings
-                        .get(&id.span)
-                        .map(|local| (local.binding, local.write.clone()))
-                })
-            });
-        if let Some((binding, write)) = escaping {
-            self.escape_bindings.insert(
-                name.clone(),
-                Tier2Local {
-                    binding,
-                    write,
-                    frame,
-                    promotable: false,
-                },
-            );
+    /// `name := value` (ADR 0133): each block literal that makes up `value`
+    /// ([`value_blocks`]: `b := [..]`, `b := c ifTrue: [[..]] ifFalse: [..]`)
+    /// and assigns a captured local escapes by being stored in `name`, however
+    /// `name` is used later. Its write is the one seen where the block was
+    /// walked (`value_block_writes`), else as seen here (`b := [b := b + 1]`
+    /// writes the `b` this assignment binds). A later use of `name` (`^b`,
+    /// `self foo: b`) is not reported again.
+    fn note_block_binding(&mut self, name: &EcoString, value: &Expression) {
+        for block in value_blocks(value) {
+            let write = self
+                .value_block_writes
+                .get(&block.span)
+                .cloned()
+                .or_else(|| self.writes_of(block).into_iter().next());
+            if let Some(write) = write {
+                self.report_escape(block, &write, &Escape::Stored(name.clone()), None);
+            }
         }
-        let Expression::Block(block) = value else {
-            return;
-        };
-        if self.assign_counts.get(name).copied() != Some(1) {
-            return;
-        }
-        let writes = self.writes_of(block);
-        let Some(write) = writes.first().cloned() else {
-            return;
-        };
-        let promotable = top_statement
-            && self.safe_stored_uses.get(name).copied() == Some(true)
-            && self.promotable_binding(name, block, &writes);
-        self.tier2_locals.insert(
-            name.clone(),
-            Tier2Local {
-                binding,
-                write,
-                frame,
-                promotable,
-            },
-        );
-    }
-
-    /// The part of codegen's `prescan_tier2_local_vars` promotion rule that
-    /// `name := block` itself decides, apart from where it sits and how `name`
-    /// is used later: `name` is assigned exactly once in the method and the
-    /// block threads every outer local it writes (`writes`,
-    /// [`threads_all`]). The one copy of that rule, for
-    /// [`Walker::note_tier2_binding`].
-    fn promotable_binding(&self, name: &str, block: &Block, writes: &[OuterLocalWrite]) -> bool {
-        self.assign_counts.get(name).copied() == Some(1) && threads_all(block, writes)
     }
 
     /// Whether `expr` is a conditional or an `on:do:`/`ensure:` that is a
@@ -2183,8 +2096,9 @@ impl<'d> Walker<'d> {
                      Compute the new value without writing it from the block, or iterate a \
                      `Dictionary` (`asDictionary`)"
                 );
-                if !writes.is_empty() {
-                    self.report_literal_with_hint(body, &selector, hint);
+                if let Some(write) = writes.first() {
+                    let escape = Escape::Passed(EcoString::from(selector.as_str()));
+                    self.report_escape(body, write, &escape, Some(hint));
                 } else if self.context == Actor && touches_state(body, false) {
                     self.report_state_literal(body, &selector, hint);
                 }
@@ -2451,43 +2365,28 @@ impl<'d> Walker<'d> {
         }
     }
 
-    /// The §6 check for one send: its literal block arguments and receiver,
-    /// and any Tier 2 block-valued local it is sent to or passed. `inlined`
-    /// is false for a cascade message, which codegen never inlines.
+    /// The ADR 0133 check for one send: its literal block arguments and
+    /// receiver. `inlined` is false for a cascade message, which codegen never
+    /// inlines. A block passed to any other method escapes, an actor self-send
+    /// to a `sealed` method of the same class included (ADR 0133 retires the
+    /// BT-912/BT-3755 exemption).
     fn check_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
         inlined: bool,
-        top: TopLevel,
         lookup_producer: bool,
     ) {
-        let sel = selector.name().to_string();
+        let sel = selector.name();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
             // ADR 0041 §Erlang Interop Boundary: lossy by design (warned by codegen).
             return;
         }
-        // EXEMPTION (actor self-send), the shape codegen's
-        // `detect_tier2_self_send` (dispatch_codegen.rs) promotes: receiver a
-        // bare `self` (not `super`, not parenthesized), an ordinary send (not
-        // a cascade message), at the top level of the method body, with a
-        // bare `[...]` argument whose block threads every outer local it
-        // writes (`captured_mutations_for_block`). Anything else drops the
-        // write or raises (probed, BT-3745). The callee must also thread the
-        // block (BT-3755): see `semantic_analysis::tier2_callee`'s module docs
-        // for the exact callee shapes ([`callee_threads_block_param`], the
-        // predicate codegen's class pre-scan reads too). Pinned by
-        // `section6_exemptions_match_codegen_shapes` and the compiled
-        // fixture `adr0131section6exemptions_actor.bt`.
-        let is_self_send = matches!(receiver, Expression::Identifier(id) if id.name == "self");
-        let actor_self_send =
-            inlined && self.context == Actor && is_self_send && top != TopLevel::None;
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined
         // send of a §1 selector (`local_threading_construct`).
         // (`tryDo:` is a §1 construct only sent to the `Result` class: any other
-        // receiver takes the ordinary §6 path, actor self-send exemption and
-        // callee check included.)
+        // receiver takes the ordinary path.)
         let construct_send = inlined
             && (is_section1_selector(&sel)
                 || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
@@ -2514,74 +2413,69 @@ impl<'d> Walker<'d> {
                     if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
                         && !self.while_condition_threads(block, arguments) =>
                 {
-                    self.report_literal(block, &sel);
+                    self.report_literal(block, &Escape::Condition(sel.clone()));
                 }
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
-                    self.report_literal(block, &sel);
+                    self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }
-                Expression::Parenthesized { .. } => {
-                    if let Expression::Block(block) = receiver.unwrap_parens() {
-                        self.report_literal(block, &sel);
+                Expression::Block(_) => {}
+                // Any other receiver that evaluates to a block literal, a
+                // parenthesized one or one answered by a conditional arm, an
+                // evaluated block or a protected body ([`value_blocks`]), is a
+                // block value sent `sel`.
+                _ => {
+                    for block in value_blocks(receiver) {
+                        self.report_literal(block, &Escape::Receiver(sel.clone()));
                     }
                 }
-                _ => {}
             }
         }
-        // Block literal arguments. A parenthesized block argument is a block
-        // value in every send.
+        // Block arguments. Only a bare `[...]` argument of a construct send (or a
+        // lookup producer's handler) is lowered in place; any other argument that
+        // evaluates to a block literal ([`value_blocks`]: the literal itself,
+        // parenthesized, or answered by a conditional arm, an evaluated block or
+        // a protected body) is a block value passed to `sel`, in every send.
+        let escape = if inlined {
+            self.passed_escape(receiver, &sel)
+        } else {
+            Escape::Cascade(sel.clone())
+        };
         for (index, arg) in arguments.iter().enumerate() {
-            match arg {
-                Expression::Block(_) if construct_send || handler_indices.contains(&index) => {}
-                Expression::Block(block) if actor_self_send => {
-                    let writes = self.writes_of(block);
-                    // BT-3755: the callee must hand the block's `StateAcc`
-                    // back; only then does the write survive.
-                    let callee_threads = self
-                        .callees
-                        .contains(&(EcoString::from(sel.as_str()), index));
-                    if !threads_all(block, &writes) {
-                        self.report_literal(block, &sel);
-                    } else if !callee_threads {
-                        self.report_literal_with_hint(block, &sel, self_send_help(&sel));
-                    }
-                }
-                Expression::Block(block) => self.report_literal(block, &sel),
-                Expression::Parenthesized { .. } => {
-                    if let Expression::Block(block) = arg.unwrap_parens() {
-                        self.report_literal(block, &sel);
-                    }
-                }
-                _ => {}
+            if matches!(arg, Expression::Block(_))
+                && (construct_send || handler_indices.contains(&index))
+            {
+                continue;
+            }
+            for block in value_blocks(arg) {
+                self.report_literal(block, &escape);
             }
         }
+    }
 
-        // Tier 2 block-valued locals. EXEMPTION (actor stored block): a bare
-        // identifier receiver of a `value`-family send, as a method-body
-        // statement (cascade or not), for a binding codegen's
-        // `prescan_tier2_local_vars` promotes (see `note_tier2_binding`);
-        // `is_tier2_value_call` and the cascade path match only a bare
-        // identifier. Every other use, including any argument use (a
-        // self-send or a collection fold of a stored block drops the write,
-        // probed), has no return channel.
-        if let Expression::Identifier(id) = receiver.unwrap_parens() {
-            let bare = matches!(receiver, Expression::Identifier(_));
-            let promotable = self
-                .tier2_locals
-                .get(&id.name)
-                .is_some_and(|l| l.promotable);
-            let ok = bare
-                && self.context == Actor
-                && promotable
-                && top == TopLevel::Statement
-                && is_safe_value_family_selector(selector);
-            if !ok {
-                self.report_local(&id.name, &sel, receiver.span());
+    /// How a block argument of an ordinary send of `selector` to `receiver`
+    /// escapes: to a class method that runs in the class's process (a class
+    /// reference receiver, or `self` in a class method, unless the method is
+    /// direct-called in the caller, ADR 0129 Phase 0b), or to any other method.
+    fn passed_escape(&self, receiver: &Expression, selector: &EcoString) -> Escape {
+        let receivers = self.receivers.as_ref();
+        let class = match receiver.unwrap_parens() {
+            Expression::ClassReference { name, .. } => Some(name.name.clone()),
+            Expression::Identifier(id) if id.name == "self" && self.context == Class => {
+                receivers.map(|r| r.class_name.clone())
             }
-        }
-        for arg in arguments {
-            if let Expression::Identifier(id) = arg.unwrap_parens() {
-                self.report_local(&id.name, &sel, arg.span());
+            _ => None,
+        };
+        match class {
+            Some(class)
+                if !receivers
+                    .is_some_and(|r| r.hierarchy.is_direct_call_eligible(&class, selector)) =>
+            {
+                Escape::ClassMethod(selector.clone())
             }
+            _ if crate::state_threading_selectors::is_dictionary_inline_lookup(selector) => {
+                Escape::Lookup(selector.clone())
+            }
+            _ => Escape::Passed(selector.clone()),
         }
     }
 
@@ -2819,23 +2713,70 @@ impl<'d> Walker<'d> {
         }
     }
 
-    fn report_literal(&mut self, block: &Block, selector: &str) {
+    /// Reports `block` as escaping (`escape`) if it assigns a captured local.
+    fn report_literal(&mut self, block: &Block, escape: &Escape) {
         let Some(write) = self.writes_of(block).into_iter().next() else {
             return;
         };
-        let hint = section6_help(&write.name, selector);
-        self.push_literal(block, selector, &write, hint);
+        self.report_escape(block, &write, escape, None);
     }
 
-    fn report_literal_with_hint(&mut self, block: &Block, selector: &str, hint: String) {
-        let Some(write) = self.writes_of(block).into_iter().next() else {
+    /// The ADR 0133 diagnostic: `write` (the block's first assignment to a
+    /// captured local) is reported at the assignment, with the shape, the fix
+    /// (`hint`, else the shape's own) and the note listing the constructs that
+    /// do thread assignments. One diagnostic per block literal.
+    fn report_escape(
+        &mut self,
+        block: &Block,
+        write: &OuterLocalWrite,
+        escape: &Escape,
+        hint: Option<String>,
+    ) {
+        if !self.reported_blocks.insert(block.span) {
             return;
-        };
-        self.push_literal(block, selector, &write, hint);
+        }
+        let name = &write.name;
+        let diagnostic = Diagnostic::error(
+            format!(
+                "`{name}` is assigned in a block {}",
+                escape.fragment(self.method_selector.as_deref())
+            ),
+            write.span,
+        )
+        .with_hint(hint.unwrap_or_else(|| escape.help(name)))
+        .with_note("the block", Some(block.span))
+        .with_note(threading_constructs_note(), None)
+        .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
+        // One diagnostic per assignment: a write inside nested escaping blocks
+        // (`f := [:d | d at: k ifAbsent: [t := t + 1]]`) is reported for the
+        // outermost one, which is the escape to fix.
+        let within =
+            |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
+        match self
+            .escaping_writes
+            .iter_mut()
+            .find(|(at, ..)| *at == write.span)
+        {
+            Some(entry) if within(block.span, entry.1) => {
+                *entry = (write.span, block.span, diagnostic);
+            }
+            Some(_) => {}
+            None => self
+                .escaping_writes
+                .push((write.span, block.span, diagnostic)),
+        }
     }
 
-    /// [`Self::push_literal`] for a block that writes object state (a field or
-    /// a class variable) rather than an outer local.
+    /// Hands the escaping-block diagnostics found by the walk
+    /// ([`Walker::report_escape`]) to the caller.
+    fn finish(self) {
+        self.diagnostics
+            .extend(self.escaping_writes.into_iter().map(|(.., d)| d));
+    }
+
+    /// A keyed iteration's block that writes object state (a field or a class
+    /// variable) rather than a captured local, on a receiver that would run it
+    /// as a closure (BT-3841).
     fn report_state_literal(&mut self, block: &Block, selector: &str, hint: String) {
         self.diagnostics.push(
             Diagnostic::error(
@@ -2847,29 +2788,10 @@ impl<'d> Walker<'d> {
         );
     }
 
-    fn push_literal(
-        &mut self,
-        block: &Block,
-        selector: &str,
-        write: &OuterLocalWrite,
-        hint: String,
-    ) {
-        let name = &write.name;
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "block writes outer local `{name}`, but `{selector}` cannot return the write"
-                ),
-                block.span,
-            )
-            .with_hint(hint)
-            .with_note(format!("`{name}` is written here"), Some(write.span))
-            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
-        );
-    }
-
-    /// ADR 0131 §6 (BT-3756): a block literal that writes an outer local of
-    /// the method and escapes it without a send.
+    /// ADR 0131 §6 (BT-3756): a block literal that assigns a captured local
+    /// and escapes the method without a send (returned, stored in a field or
+    /// class variable, or placed in a literal). A block stored in a local is
+    /// reported by [`Walker::note_block_binding`].
     fn report_escaping_literal(&mut self, block: &Block, shape: EscapeShape) {
         // A block literal assigned straight to a field of an instance is
         // already a compile error from the block analyzer (BT-2809, "cannot
@@ -2877,124 +2799,30 @@ impl<'d> Walker<'d> {
         // which reports it once; `section6_field_stored_literal_is_an_error_in_every_context`
         // pins that some error survives. A class variable store has no such
         // error, so the class-method context reports it here.
-        if shape == EscapeShape::StoredLocal
-            || (shape == EscapeShape::StoredClassVar && self.context != Class)
-        {
+        // A block that is (part of) the value of a local assignment is
+        // reported as stored in that local, whatever else it does.
+        if self.value_operands.contains(&block.span) {
             return;
         }
-        let Some(write) = self.writes_of(block).into_iter().next() else {
-            return;
+        let escape = match shape {
+            EscapeShape::StoredLocal => return,
+            EscapeShape::StoredClassVar if self.context != Class => return,
+            EscapeShape::StoredClassVar => Escape::StoredState,
+            EscapeShape::Returned => Escape::Returned,
+            EscapeShape::StoredInLiteral => Escape::InLiteral,
         };
-        let name = &write.name;
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "block writes outer local `{name}`, but {}",
-                    escape_clause("it", shape)
-                ),
-                block.span,
-            )
-            .with_hint(escape_help(name))
-            .with_note(format!("`{name}` is written here"), Some(write.span))
-            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
-        );
-    }
-
-    /// As [`Walker::report_escaping_literal`] for a local bound to such a
-    /// block (`b := [...]`, then `^b`).
-    fn report_escaping_local(&mut self, local: &EcoString, shape: EscapeShape, use_span: Span) {
-        if shape == EscapeShape::StoredLocal {
-            return;
-        }
-        let Some((binding, write)) = self.binding_to_report(local, true) else {
-            return;
-        };
-        let name = &write.name;
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "block stored in `{local}` writes outer local `{name}`, but {}",
-                    escape_clause(&format!("`{local}`"), shape)
-                ),
-                binding,
-            )
-            .with_hint(escape_help(name))
-            .with_note(format!("`{name}` is written here"), Some(write.span))
-            .with_note(format!("`{local}` escapes here"), Some(use_span))
-            .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel),
-        );
-    }
-
-    /// The binding and first write of the Tier 2 block-valued local `local`
-    /// (for an `escape`, its latest block binding, [`Walker::escape_bindings`])
-    /// if it has not been reported yet (one diagnostic per binding); `None`
-    /// for a name that is not one, or that a block parameter or match binding
-    /// of the same name shadows.
-    fn binding_to_report(
-        &mut self,
-        local: &EcoString,
-        escape: bool,
-    ) -> Option<(Span, OuterLocalWrite)> {
-        let bindings = if escape {
-            &self.escape_bindings
-        } else {
-            &self.tier2_locals
-        };
-        let info = self.live_binding(bindings, local)?;
-        let found = (info.binding, info.write.clone());
-        self.reported_locals.insert(found.0).then_some(found)
-    }
-
-    /// `bindings`' entry for `local` when the name in scope here is the local
-    /// it was recorded for (not a block parameter or match binding of the
-    /// same name).
-    fn live_binding<'a>(
-        &self,
-        bindings: &'a HashMap<EcoString, Tier2Local>,
-        local: &str,
-    ) -> Option<&'a Tier2Local> {
-        let info = bindings.get(local)?;
-        (self.binding_frame(local) == Some(info.frame)).then_some(info)
-    }
-
-    fn report_local(&mut self, local: &EcoString, selector: &str, use_span: Span) {
-        let Some((binding, write)) = self.binding_to_report(local, false) else {
-            return;
-        };
-        let name = &write.name;
-        let diagnostic = Diagnostic::error(
-            format!(
-                "block stored in `{local}` writes outer local `{name}`, but `{selector}` cannot \
-                 return the write"
-            ),
-            binding,
-        )
-        .with_hint(section6_help(name, selector))
-        .with_note(format!("`{name}` is written here"), Some(write.span))
-        .with_note(
-            format!("`{local}` flows to `{selector}` here"),
-            Some(use_span),
-        )
-        .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
-        self.diagnostics.push(diagnostic);
+        self.report_literal(block, &escape);
     }
 }
 
-/// The [`escape_sites`] of a method body that §6 inspects (BT-3756). A REPL
-/// expression list is skipped: its locals are session bindings, and the value
-/// of its last expression goes to the display, not to a caller (whether the
-/// REPL should reject these is open for the maintainer, BT-3858; the
-/// repl-protocol case `adr0131_section6_escape_pins` records what it does
-/// today).
+/// The [`escape_sites`] of a method body (or REPL expression list, BT-3858:
+/// the value of its last expression is the input's value) that ADR 0133
+/// inspects (BT-3756).
 ///
 /// An operand listed with several shapes (`^(b := [..])` is returned and
-/// stored in a local, BT-3806) keeps the one that leaves the method: a store
-/// into a local is not an escape by itself.
-fn escape_map(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<Span, EscapeShape> {
+/// stored in a local, BT-3806) keeps the one that leaves the method.
+fn escape_map(body: &[ExpressionStatement]) -> HashMap<Span, EscapeShape> {
     let mut escapes = HashMap::new();
-    if context == Repl {
-        return escapes;
-    }
     for (span, shape) in escape_sites(body) {
         let entry = escapes.entry(span).or_insert(shape);
         if *entry == EscapeShape::StoredLocal {
@@ -3002,34 +2830,6 @@ fn escape_map(context: MethodContext, body: &[ExpressionStatement]) -> HashMap<S
         }
     }
     escapes
-}
-
-/// How a block escapes, for the §6 message.
-fn escape_phrase(shape: EscapeShape) -> &'static str {
-    match shape {
-        EscapeShape::Returned => "returned from the method",
-        EscapeShape::StoredClassVar => "stored in a field or class variable",
-        EscapeShape::StoredInLiteral => "placed in a collection literal",
-        EscapeShape::StoredLocal => "stored in a local",
-    }
-}
-
-/// What follows "but" in a §6 escape message for `subject` (`it`, or a
-/// local): how it escapes.
-fn escape_clause(subject: &str, shape: EscapeShape) -> String {
-    format!(
-        "{subject} is {} and nothing can return the write",
-        escape_phrase(shape)
-    )
-}
-
-/// The ADR 0131 §6 help text for a block that escapes the method.
-fn escape_help(name: &str) -> String {
-    format!(
-        "once the method returns, no later call of the block can hand `{name}` back: keep the \
-         state in a field (`self.{name} := self.{name} + 1`) or return the new value from the \
-         block and assign it where the block is called"
-    )
 }
 
 /// Whether a statement of `block` (not of a nested block) is an assignment
@@ -3069,36 +2869,6 @@ fn touches_state(block: &Block, in_class_method: bool) -> bool {
         )
         .any()
     })
-}
-
-/// Whether codegen's Tier 2 block protocol threads back every outer local in
-/// `writes` (each is in [`captured_local_mutations`]).
-fn threads_all(block: &Block, writes: &[OuterLocalWrite]) -> bool {
-    let captured = captured_local_mutations(block);
-    writes
-        .iter()
-        .all(|w| captured.iter().any(|c| c == w.name.as_str()))
-}
-
-/// The help text for an actor self-send whose callee does not hand the
-/// block's write back (BT-3755).
-fn self_send_help(selector: &str) -> String {
-    format!(
-        "`{selector}` must be a `sealed` method of this class that only invokes the block \
-         directly (`b value`) as a statement, an assignment or a `^` in its body, or hands it \
-         on to another such method. Only two other forms are accepted: the bare callable form \
-         (`#(1) do: b`, never `do: [:e | b value: e]`) and the loop shape \
-         `last := b value: e` inside `items do: [:e | ...]`, with `last` bound before the loop. \
-         Otherwise return the new value from the block and assign it"
-    )
-}
-
-/// The ADR 0131 §6 help text.
-fn section6_help(name: &str, selector: &str) -> String {
-    format!(
-        "return the new value from the block and assign it: `{name} := ... {selector} [... {name} + 1]`, \
-         or use a control-flow message (`do:`, `inject:into:`, `on:do:`) that threads locals"
-    )
 }
 
 /// ADR 0131 §6: a §1 construct selector, whose literal block arguments are

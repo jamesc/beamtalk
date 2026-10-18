@@ -37,70 +37,133 @@
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 
+/// The conditional selectors the type-checker intrinsifies: the one list
+/// [`is_state_threading_keyword_selector`], [`is_conditional_selector`] and
+/// [`assignment_threading_constructs`] read.
+const CONDITIONAL_WELL_KNOWN: &[WellKnownSelector] = &[
+    WellKnownSelector::IfTrue,
+    WellKnownSelector::IfFalse,
+    WellKnownSelector::IfTrueIfFalse,
+    // ADR 0118 phase 4: `ifNil:`/`ifNil:ifNotNil:`/`ifNotNil:ifNil:` get the
+    // same `_with_mutations` inline-case treatment as `ifNotNil:`: their block
+    // argument(s) are analysed for field mutations the same way.
+    WellKnownSelector::IfNil,
+    WellKnownSelector::IfNotNil,
+    WellKnownSelector::IfNilIfNotNil,
+    WellKnownSelector::IfNotNilIfNil,
+];
+
+/// The state-threading keyword selectors that are control constructs but not
+/// [`WellKnownSelector`]s: loops, `ensure:`, and `and:`/`or:` (see the module
+/// doc comment). With [`CONDITIONAL_WELL_KNOWN`], `on:do:` and
+/// [`COLLECTION_KEYWORD_SELECTORS`], the one list behind
+/// [`is_state_threading_keyword_selector`].
+const CONTROL_KEYWORD_SELECTORS: &[&str] = &[
+    "and:",
+    "or:",
+    "whileTrue:",
+    "whileFalse:",
+    "timesRepeat:",
+    "to:do:",
+    "to:by:do:",
+    "ensure:",
+];
+
+/// The state-threading keyword selectors that are collection messages.
+const COLLECTION_KEYWORD_SELECTORS: &[&str] = &[
+    "do:",
+    "collect:",
+    "select:",
+    "reject:",
+    "detect:",
+    "detect:ifNone:",
+    "inject:into:",
+    "count:",
+    "anySatisfy:",
+    "allSatisfy:",
+    "flatMap:",
+    "takeWhile:",
+    "dropWhile:",
+    "groupBy:",
+    "partition:",
+    "sort:",
+    "eachWithIndex:",
+    "do:separatedBy:",
+    "doWithKey:",
+    "keysAndValuesDo:",
+];
+
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
 /// These selectors receive block arguments that are analysed for field mutations
 /// as part of state-threading control flow.
 #[must_use]
 pub fn is_state_threading_keyword_selector(sel: &str) -> bool {
-    if matches!(
-        WellKnownSelector::from_name(sel),
-        Some(
-            WellKnownSelector::OnDo
-                | WellKnownSelector::IfTrue
-                | WellKnownSelector::IfFalse
-                | WellKnownSelector::IfTrueIfFalse
-                | WellKnownSelector::IfNotNil
-                // ADR 0118 phase 4: `ifNil:`/`ifNil:ifNotNil:`/
-                // `ifNotNil:ifNil:` get the same `_with_mutations` inline-case
-                // treatment as `ifNotNil:` — their block argument(s) are
-                // analysed for field mutations the same way.
-                | WellKnownSelector::IfNil
-                | WellKnownSelector::IfNilIfNotNil
-                | WellKnownSelector::IfNotNilIfNil,
-        )
-    ) {
-        return true;
+    WellKnownSelector::from_name(sel)
+        .is_some_and(|w| w == WellKnownSelector::OnDo || CONDITIONAL_WELL_KNOWN.contains(&w))
+        || CONTROL_KEYWORD_SELECTORS.contains(&sel)
+        || COLLECTION_KEYWORD_SELECTORS.contains(&sel)
+}
+
+/// ADR 0133: the messages whose block literal argument (or, for `value` and
+/// the loops, receiver) may assign a captured variable, grouped for the
+/// escaping-block diagnostic's note. Read off the same lists as
+/// [`is_state_threading_keyword_selector`],
+/// [`is_state_threaded_block_receiver`] and [`LOOKUP_SHAPES`] (plus
+/// `Result tryDo:`, [`is_try_do_selector`]), so the note cannot name a message the compiler does not
+/// thread, nor leave out one it does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignmentThreadingConstructs {
+    /// Conditionals, loops, exception handling, `Result tryDo:` and a block
+    /// literal sent `value`.
+    pub control: Vec<&'static str>,
+    /// The collection messages, the inlined `Dictionary` lookups included.
+    pub collection: Vec<&'static str>,
+}
+
+/// See [`AssignmentThreadingConstructs`].
+#[must_use]
+pub fn assignment_threading_constructs() -> AssignmentThreadingConstructs {
+    let mut control: Vec<&'static str> =
+        CONDITIONAL_WELL_KNOWN.iter().map(|w| w.as_str()).collect();
+    control.extend(CONTROL_KEYWORD_SELECTORS);
+    control.extend(UNARY_LOOP_SELECTORS);
+    control.push(WellKnownSelector::OnDo.as_str());
+    // `tryDo:` threads only when sent to the `Result` class (ADR 0131 §5).
+    control.push("Result tryDo:");
+    control.extend(
+        [
+            WellKnownSelector::Value,
+            WellKnownSelector::ValueColon,
+            WellKnownSelector::ValueValue,
+            WellKnownSelector::ValueValueValue,
+        ]
+        .into_iter()
+        .map(WellKnownSelector::as_str)
+        .filter(|sel| is_state_threaded_block_receiver(sel)),
+    );
+    let mut collection: Vec<&'static str> = COLLECTION_KEYWORD_SELECTORS.to_vec();
+    collection.extend(
+        LOOKUP_SHAPES
+            .iter()
+            .filter(|row| row.dictionary_inline)
+            .map(|row| row.selector),
+    );
+    AssignmentThreadingConstructs {
+        control,
+        collection,
     }
-    matches!(
-        sel,
-        "whileTrue:"
-            | "whileFalse:"
-            | "timesRepeat:"
-            | "to:do:"
-            | "to:by:do:"
-            | "do:"
-            | "collect:"
-            | "select:"
-            | "reject:"
-            | "anySatisfy:"
-            | "allSatisfy:"
-            | "detect:"
-            | "detect:ifNone:"
-            | "count:"
-            | "flatMap:"
-            | "takeWhile:"
-            | "dropWhile:"
-            | "groupBy:"
-            | "partition:"
-            | "sort:"
-            | "inject:into:"
-            | "eachWithIndex:"
-            | "do:separatedBy:"
-            | "doWithKey:"
-            | "keysAndValuesDo:"
-            | "ensure:"
-            // See module doc comment.
-            | "and:"
-            | "or:"
-    )
 }
 
 /// Returns `true` if `sel` is a state-threading unary selector.
 #[must_use]
 pub fn is_state_threading_unary_selector(sel: &str) -> bool {
-    matches!(sel, "whileTrue" | "whileFalse" | "timesRepeat")
+    UNARY_LOOP_SELECTORS.contains(&sel)
 }
+
+/// The state-threading unary selectors: the loops whose receiver block is the
+/// body.
+const UNARY_LOOP_SELECTORS: &[&str] = &["whileTrue", "whileFalse", "timesRepeat"];
 
 /// Returns `true` if `sel` is an exception-handling selector (`on:do:` or `ensure:`).
 ///
@@ -132,18 +195,8 @@ pub fn is_exception_selector(sel: &str) -> bool {
 /// same way `ifTrue:`/`ifFalse:` does.
 #[must_use]
 pub fn is_conditional_selector(sel: &str) -> bool {
-    matches!(
-        WellKnownSelector::from_name(sel),
-        Some(
-            WellKnownSelector::IfTrue
-                | WellKnownSelector::IfFalse
-                | WellKnownSelector::IfTrueIfFalse
-                | WellKnownSelector::IfNotNil
-                | WellKnownSelector::IfNil
-                | WellKnownSelector::IfNilIfNotNil
-                | WellKnownSelector::IfNotNilIfNil,
-        )
-    ) || matches!(sel, "and:" | "or:")
+    WellKnownSelector::from_name(sel).is_some_and(|w| CONDITIONAL_WELL_KNOWN.contains(&w))
+        || matches!(sel, "and:" | "or:")
 }
 
 /// ADR 0118 §Decision 7: the single "which selectors thread which

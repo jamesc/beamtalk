@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3866 (ADR 0132 Phase 0a, epic BT-3865): class-method column of the
+// ADR 0132 §"The inventory" shapes. Each `probe*` class method hands a block
+// that writes the outer local `t` to a callee (or stores it); the `callee*`
+// class methods are the callees and compile on their own. ADR 0132 would have
+// made these compile; ADR 0133 (which supersedes it) makes each a permanent
+// escaping-block compile error instead (BT-3902). Inert: the runner discovers
+// only `.bt`.
+//
+// `adr0133_rejected_fixtures_report_the_escaping_assignment` in beamtalk-core
+// checks that every `probe*` method is reported at its assignment and no
+// `callee*` method is.
+//
+// I1 direct invoke                  I2 invoke in a nested construct
+// I4 pass-through to a HOM          I6 stored block to `do:`
+// I7 class-side `self hom:`         I8 class method not `class sealed`
+// (I5, a stored block sent `value`, is adr0132stored_value_class.bt.rejected.)
+
+Object subclass: Adr0132Section6Class
+
+  class sealed calleeDirect: b => b value
+
+  class sealed calleeDo: b => #(1) do: [:x | b value]
+
+  class sealed calleePass: b => self calleeDirect: b
+
+  class calleeOpen: b => b value
+
+  class probeI1 =>
+    t := 0
+    Adr0132Section6Class calleeDirect: [t := t + 1]
+    t
+
+  class probeI2 =>
+    t := 0
+    Adr0132Section6Class calleeDo: [t := t + 1]
+    t
+
+  class probeI4 =>
+    t := 0
+    Adr0132Section6Class calleePass: [t := t + 1]
+    t
+
+  class probeI6 =>
+    t := 0
+    blk := [:x | t := t + x]
+    #(1, 2) do: blk
+    t
+
+  class probeI7 =>
+    t := 0
+    self calleeDirect: [t := t + 1]
+    t
+
+  class probeI8 =>
+    t := 0
+    Adr0132Section6Class calleeOpen: [t := t + 1]
+    t
+
+  // BT-3862: a lookup handler that writes an outer local, inside a closure
+  // that is not inlined (stored, or a `value:` block passed to a callee).
+  class probeLookupInStoredClosure =>
+    t := 0
+    f := [:d | d at: #k ifAbsent: [t := t + 1]]
+    f value: #{}
+    t
+
+  class probeLookupInPassedClosure =>
+    t := 0
+    Adr0132Section6Class calleeDirect: [#{} at: #k ifAbsent: [t := t + 1]]
+    t

@@ -75,15 +75,9 @@ Actor subclass: Bt3889DestructureValueActor
 
   n => self.n
 
-  // A stateful (Tier 2) block: it writes a captured local and crosses a
-  // self-send to a collection primitive.
+  // A block that crosses a self-send to a collection primitive. (It also
+  // wrote a captured local, as a Tier 2 block, until ADR 0133 made that an
+  // escaping-block compile error, BT-3902.)
   sealed opaqueCollect: block => #(1, 2) collect: block
 
-  tier2Block =>
-    t := 0
-    r := self
-      opaqueCollect: [:x |
-        t := t + x
-        #(_a, _b) := #(x, t)
-      ]
-    #(r, t)
+  tier2Block => self opaqueCollect: [:x | #(_a, _b) := #(x, x * 10)]
