@@ -80,6 +80,10 @@ expect_same "editors/vscode, hook GIT_DIR + GIT_WORK_TREE=." "$SUBDIR" \
   "GIT_DIR=$GIT_DIR_ABS" "GIT_WORK_TREE=."
 expect_same "editors/vscode, GIT_PREFIX" "$SUBDIR" \
   "GIT_DIR=$GIT_DIR_ABS" "GIT_PREFIX=editors/vscode/"
+# A relative GIT_DIR, as exported for a hook run from the main checkout's root,
+# names nothing once a recipe has changed directory.
+expect_same "editors/vscode, relative GIT_DIR=.git" "$SUBDIR" \
+  "GIT_DIR=.git"
 expect_same "repo root, hook GIT_DIR" "$REPO_ROOT" \
   "GIT_DIR=$GIT_DIR_ABS"
 
