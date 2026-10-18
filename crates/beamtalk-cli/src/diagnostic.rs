@@ -182,7 +182,12 @@ pub(crate) fn provision_report_target<'a>(
     protocol_sources: &'a beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) -> Option<(String, &'a str)> {
     let origin = diagnostic.provision.as_ref()?;
-    Some(match protocol_sources.get(&origin.protocol) {
+    // A provision flattened from a stdlib protocol (BT-3915) is reported
+    // against the stdlib file when no carried protocol has its name.
+    let found = protocol_sources.get(&origin.protocol).or_else(|| {
+        beamtalk_core::semantic_analysis::stdlib_protocols::stdlib_protocol_source(&origin.protocol)
+    });
+    Some(match found {
         Some(src) => (
             src.path
                 .as_deref()

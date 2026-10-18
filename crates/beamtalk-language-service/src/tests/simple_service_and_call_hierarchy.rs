@@ -333,6 +333,35 @@ fn hover_on_cross_file_trait_provided_method_shows_provenance() {
     );
 }
 
+/// BT-3915: a `uses:` of the stdlib's own `Enumerable` — declared in no file
+/// the service knows — resolves in the LSP as in `beamtalk build`: no
+/// "unknown protocol", and hover shows the stdlib provision's provenance.
+#[test]
+fn stdlib_trait_uses_resolves_without_any_protocol_file() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("bag2.bt");
+    let source = "Value subclass: Bag2\n  uses: Enumerable(Integer)\n  field: items :: List(Integer) = #()\n\n  elements -> List(Integer) => self.items\n\nBag2 new size\n";
+    service.update_file(file.clone(), source.to_string());
+
+    let diagnostics = service.diagnostics(&file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown protocol")),
+        "stdlib Enumerable must resolve: {diagnostics:?}"
+    );
+    let hover = service
+        .hover(&file, Position::new(6, 10))
+        .expect("expected hover on the stdlib-provided selector");
+    assert!(
+        hover
+            .documentation
+            .unwrap_or_default()
+            .contains("*provided by* `Enumerable`"),
+        "stdlib provided method should show provenance"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Package-qualified `uses:` (ADR 0127 §3, BT-3684)
 // ---------------------------------------------------------------------------

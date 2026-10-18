@@ -24,6 +24,13 @@ pub(crate) mod class_info;
 pub(crate) mod declared_type;
 mod hierarchy_queries;
 mod method_resolution;
+
+/// `(path, source text)` of every stdlib file declaring a provision-bearing
+/// protocol, from `generated_builtins.rs` — read by
+/// [`crate::semantic_analysis::stdlib_protocols`] (BT-3915).
+pub(crate) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static str)> {
+    builtins::stdlib_protocol_files()
+}
 #[cfg(test)]
 mod tests;
 pub use class_info::{

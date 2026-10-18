@@ -14,8 +14,10 @@
 // laundered through Erlang FFI is outside this decision, BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
-// user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class (a user
-// package cannot `uses:` a stdlib protocol yet, BT-3915).
+// stdlib,user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class;
+// `Adr0133EnumerableStdlib` is a user class that `uses:` the same stdlib
+// `Enumerable` (BT-3915), whose provisions forward to `elements` rather than
+// walking with `self do:`.
 
 TestCase subclass: Adr0133EnumerableUserTest
 
@@ -24,6 +26,8 @@ TestCase subclass: Adr0133EnumerableUserTest
   handWalk => Adr0133EnumerableHandWalk new: #{#items => #(1, 2, 3)}
 
   ownAny => Adr0133EnumerableOwnAny new: #{#items => #(1, 2, 3)}
+
+  stdlibBag => Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}
 
   // An `Ets` ordered by key, so its values snapshot is #(1, 2, 3).
   withEts: aBlock =>
@@ -90,6 +94,24 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser detectPure: self handWalk) equals: 2
     self assert: (Adr0133EnumerableUser detectNonePure: self handWalk) equals: #none
     self assert: (Adr0133EnumerableUser anySatisfyPure: self handWalk)
+
+  // --- A user class `uses: Enumerable(Integer)` from the stdlib ---
+  testStdlibEnumerableWrite =>
+    self assert: (Adr0133EnumerableUser doWrite: self stdlibBag) equals: 6
+    self assert: (Adr0133EnumerableUser injectWrite: self stdlibBag) equals: #[6, 3]
+    self assert: (Adr0133EnumerableUser collectWrite: self stdlibBag) equals: #[#(10, 20, 30), 3]
+    self assert: (Adr0133EnumerableUser selectWrite: self stdlibBag) equals: #[#(2, 3), 3]
+    self assert: (Adr0133EnumerableUser detectWrite: self stdlibBag) equals: #[2, 2]
+    self assert: (Adr0133EnumerableUser detectNoneWrite: self stdlibBag) equals: #[#none, 3]
+    self assert: (Adr0133EnumerableUser anySatisfyWrite: self stdlibBag) equals: #[true, 3]
+
+  testStdlibEnumerablePure =>
+    self assert: (Adr0133EnumerableUser injectPure: self stdlibBag) equals: 6
+    self assert: (Adr0133EnumerableUser collectPure: self stdlibBag) equals: #(10, 20, 30)
+    self assert: (Adr0133EnumerableUser selectPure: self stdlibBag) equals: #(2, 3)
+    self assert: (Adr0133EnumerableUser detectPure: self stdlibBag) equals: 2
+    self assert: (Adr0133EnumerableUser detectNonePure: self stdlibBag) equals: #none
+    self assert: (Adr0133EnumerableUser anySatisfyPure: self stdlibBag)
 
   // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---
   testEtsWrite =>

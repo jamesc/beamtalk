@@ -58,7 +58,11 @@
 //! that section for the full per-entry-point breakdown) and hands it in
 //! here — `trait_expansion` itself does no file I/O and knows nothing about
 //! packages or dependency checkouts. A `uses:` whose protocol resolves in
-//! neither map reports [`Diagnostic::error`]: "unknown protocol" for a bare
+//! neither map falls back, last, to the stdlib's own provision-bearing
+//! protocols (`Comparable`, `Enumerable`; BT-3915) — baked into the compiler
+//! like the stdlib's classes, so no compile path has to carry them; see
+//! [`crate::semantic_analysis::stdlib_protocols`]. One resolving nowhere
+//! reports [`Diagnostic::error`]: "unknown protocol" for a bare
 //! name (a same-file/same-project typo, exactly as before), or a distinct
 //! "no source available" error for a package-qualified name — since the
 //! *only* way a cross-package protocol's `ProtocolDefinition` reaches
@@ -95,6 +99,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::protocol_source::ProtocolSourceMap;
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::stdlib_protocols;
 use crate::semantic_analysis::type_checker::{TypeChecker, is_generic_type_param};
 use crate::source_analysis::Diagnostic;
 
@@ -493,16 +498,37 @@ impl<'a> ProtocolLookup<'a> {
         }
     }
 
-    /// Resolves the protocol a `uses:` line names.
+    /// Resolves the protocol a `uses:` line names: the current module's and
+    /// the carried protocols first, then the stdlib's ([`resolve_stdlib_protocol`]).
     fn resolve(&self, use_: &ProtocolUse) -> Option<&'a ProtocolDefinition> {
-        resolve_protocol_entry(
-            &self.protocols,
-            &protocol_use_key(use_),
-            self.current_package,
-            |p| p.package.is_none(),
-        )
+        let key = protocol_use_key(use_);
+        resolve_protocol_entry(&self.protocols, &key, self.current_package, |p| {
+            p.package.is_none()
+        })
         .copied()
+        .or_else(|| resolve_stdlib_protocol(&key, self.current_package))
     }
+}
+
+/// The last tier of `uses:` resolution (BT-3915): a key that resolves in
+/// neither the current module nor the carried protocols resolves among the
+/// stdlib's provision-bearing protocols
+/// ([`stdlib_protocols`](crate::semantic_analysis::stdlib_protocols)) — a bare
+/// `Enumerable` or a qualified `stdlib@Enumerable`. Off while compiling the
+/// stdlib itself, which carries its own protocols live.
+fn resolve_stdlib_protocol(
+    key: &str,
+    current_package: Option<&str>,
+) -> Option<&'static ProtocolDefinition> {
+    if stdlib_protocols::is_stdlib_package(current_package) {
+        return None;
+    }
+    resolve_protocol_entry(
+        stdlib_protocols::stdlib_protocol_map(),
+        key,
+        current_package,
+        |p| p.package.is_none(),
+    )
 }
 
 /// The one rule by which a [`protocol_use_key`] finds its protocol in a map
@@ -538,7 +564,8 @@ fn resolve_protocol_entry<'a, T>(
 
 /// Resolves a [`protocol_use_key`] in a [`first_wins_protocol_map`] for a
 /// package compiled as `current_package`; see [`resolve_protocol_entry`] for
-/// the rule.
+/// the rule. Falls back to the stdlib's protocols exactly as the flattener
+/// does, so the incremental-build hash covers a `uses: Enumerable` too.
 #[must_use]
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn resolve_protocol_key<'a>(
@@ -549,6 +576,7 @@ pub fn resolve_protocol_key<'a>(
     resolve_protocol_entry(external_protocols, key, current_package, |p| {
         p.package.is_none()
     })
+    .or_else(|| resolve_stdlib_protocol(key, current_package))
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s

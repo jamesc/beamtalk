@@ -870,6 +870,23 @@ flattening implementation):
   a `didOpen` racing the root-package load) counts as an unknown package
   (`trait_expansion::known_package`), so `uses: my_app@Parser` of the project's
   own protocol is accepted there exactly as `beamtalk build` accepts it.
+- **Stdlib protocols (BT-3915):** a user `uses: Enumerable(E)` /
+  `uses: Comparable` (or `stdlib@Enumerable`) flattens the stdlib's provisions
+  on every surface — CLI `build`/`test`/`lint`, REPL/workspace (compiler
+  port), LSP and MCP `lint`: **parity**. The stdlib is not a resolved
+  dependency, so no surface carries its protocol ASTs; instead the stdlib's
+  provision-bearing protocols are the *last* tier of the one resolver every
+  surface goes through (`trait_expansion`'s `ProtocolLookup::resolve` and
+  `resolve_protocol_key`), after the module's own and every carried protocol.
+  Their one source is `stdlib/src/*.bt` itself: `build-stdlib` generates
+  `generated_stdlib_protocol_files()` (in `generated_builtins.rs`), an
+  `include_str!` table of the files declaring provision-bearing protocols,
+  parsed once by `semantic_analysis::stdlib_protocols`. Codegen
+  (`seed_stdlib_protocol_sources`) and provision-diagnostic rendering
+  (`provision_report_target`) map a stdlib provision's spans through that
+  file. The fallback is off while compiling the stdlib itself
+  (`current_package == "stdlib"` / `stdlib_mode`), which carries its own
+  protocols live.
 - `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or
   re-scanned — into the package indexes in source order with the same
   `Pass1Index::add_file` a clean scan uses, and its cache entry keeps *every*

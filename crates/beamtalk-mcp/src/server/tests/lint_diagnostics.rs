@@ -273,7 +273,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
 /// return, which would otherwise silently drop them either way.
 #[test]
 fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
-    let protocol_source = "Protocol define: Comparable\n  \
+    let protocol_source = "Protocol define: Ranked\n  \
         < other :: Self -> Boolean\n\n  \
         max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n";
     let (protocol_module, protocol_parse_diags) = parse(lex_with_eof(protocol_source));
@@ -282,7 +282,7 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
     assert_eq!(protocol_defs.len(), 1);
 
     let source = "Value subclass: Version\n  \
-        uses: Comparable\n  \
+        uses: Ranked\n  \
         field: major :: Integer = 0\n\n  \
         < other :: Version -> Boolean => self.major < other major\n";
     let tokens = lex_with_eof(source);
@@ -305,7 +305,7 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
     assert!(
         has_unknown_protocol(Vec::new()),
         "expected the negative control (no pre_loaded_protocol_defs) to report \
-         `uses: Comparable` as unresolvable"
+         `uses: Ranked` as unresolvable"
     );
 }
 

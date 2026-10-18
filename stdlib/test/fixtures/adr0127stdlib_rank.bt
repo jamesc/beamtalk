@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3915: a user value that `uses:` the stdlib's `Comparable`. It writes
+// only the required `<`; `>`, `<=`, `>=`, `between:and:`, `min:` and `max:`
+// are the stdlib's provisions. Driven by
+// stdlib/test/adr0127stdlib_trait_test.bt.
+
+Value subclass: Adr0127StdlibRank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other :: Adr0127StdlibRank -> Boolean => self.level < other level

@@ -13896,6 +13896,52 @@
       "explanation": "BT-3268 (ADR 0114 Phase 1 spike): confirms the referencesTo: live-patch gap Constraint 4 describes reproduces end-to-end via ClassBuilder's `methodSource:` install path — the one real, currently-reachable surface this spike found that actually hits it (see tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript and runtime/apps/beamtalk_workspace/test/beamtalk_adr0114_site_discovery_spike_tests.erl for the two surfaces that do NOT: `>>`/`compile:source:` recompile the whole class with a complete xref, and `register/5` sourced extensions are unconditionally rescanned by system_navigation.bt's `referencesTo:` itself (BT-2196), bypassing the xref table's gap entirely).  A ClassBuilder class built with a real block-literal method body (BT-2246 auto-populates its source from the literal) is fully INDEXED (`beamtalk_class_builder.erl`'s `source_map_to_xref/3` calls `beamtalk_xref:build_method_entry/5` with `SourceStatus = indexed`) — so, unlike a loaded-but-unindexed class, it is never re-scanned by `referencesTo:`'s fallback path either. Its xref row's `references` field is hard-coded `[]` by `build_method_entry/5` (Constraint 4), and nothing compensates for it the way the extension-specific rescan does — so the real reference below is silently missed end-to-end."
     },
     {
+      "id": "stdlib-test-adr0127stdlib-trait-test",
+      "title": "Adr0127StdlibTraitTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Adr0127StdlibTraitTest",
+        "TestCase",
+        "adr0127stdlib_trait_test",
+        "assign",
+        "assignment",
+        "async",
+        "bag",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "filter",
+        "filtering",
+        "find",
+        "first match",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "rank:",
+        "search",
+        "set",
+        "subclassing",
+        "testComparableBetweenMinMax",
+        "testComparableDerivedOrdering",
+        "testEnumerableIteration",
+        "testEnumerableQueries",
+        "testWorkerPoolEnumerable",
+        "transform",
+        "where"
+      ],
+      "source": "// BT-3915 (ADR 0127 §9, §10a): a user package `uses:` the stdlib's own\n// provision-bearing protocols. The stdlib is not a resolved dependency of a\n// user package, so its `Comparable` and `Enumerable` are baked into the\n// compiler (`semantic_analysis::stdlib_protocols`) as the last tier of `uses:`\n// resolution. Each class below writes only the protocol's required method;\n// everything else it answers is the stdlib's provision.\n//\n// Fixtures: fixtures/adr0127stdlib_{rank,worker,worker_pool}.bt,\n// fixtures/adr0133enumerable_stdlib.bt.\n\nTestCase subclass: Adr0127StdlibTraitTest\n\n  rank: n => Adr0127StdlibRank new: #{#level => n}\n\n  bag => Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}\n\n  // --- `uses: Comparable` ---\n  testComparableDerivedOrdering =>\n    self assert: (self rank: 2) > (self rank: 1)\n    self deny: (self rank: 1) > (self rank: 2)\n    self assert: (self rank: 1) <= (self rank: 1)\n    self assert: (self rank: 2) >= (self rank: 1)\n\n  testComparableBetweenMinMax =>\n    self assert: ((self rank: 2) between: (self rank: 1) and: (self rank: 3))\n    self deny: ((self rank: 4) between: (self rank: 1) and: (self rank: 3))\n    self assert: ((self rank: 1) min: (self rank: 3)) level equals: 1\n    self assert: ((self rank: 1) max: (self rank: 3)) level equals: 3\n\n  // --- `uses: Enumerable(Integer)` on a Value ---\n  testEnumerableQueries =>\n    self assert: self bag size equals: 3\n    self deny: self bag isEmpty\n    self assert: self bag isNotEmpty\n    self assert: (Adr0133EnumerableStdlib new: #{#items => #()}) isEmpty\n\n  testEnumerableIteration =>\n    self assert: (self bag inject: 0 into: [:acc :x | acc + x]) equals: 6\n    self assert: (self bag collect: [:x | x * 10]) equals: #(10, 20, 30)\n    self assert: (self bag select: [:x | x > 1]) equals: #(2, 3)\n    self assert: (self bag detect: [:x | x > 1] ifNone: [nil]) equals: 2\n    self assert: (self bag anySatisfy: [:x | x > 2])\n    self assert: (self bag count: [:x | x isOdd]) equals: 2\n\n  // --- The docs' `WorkerPool`: a typed Actor `uses: Enumerable(Worker)` ---\n  testWorkerPoolEnumerable =>\n    idle := Adr0127StdlibWorker new\n    busy := Adr0127StdlibWorker new: #{#idle => false}\n    pool := Adr0127StdlibWorkerPool spawnWith: #{\n      #workers => #(idle, busy, idle)\n    }\n    [\n      self assert: pool size equals: 3\n      self assert: (pool count: [:w | w isIdle]) equals: 2\n      self assert: (pool select: [:w | w isIdle]) size equals: 2\n      self assert: (pool anySatisfy: [:w | w isIdle not])\n    ] ensure: [pool stop]",
+      "explanation": "BT-3915 (ADR 0127 §9, §10a): a user package `uses:` the stdlib's own provision-bearing protocols. The stdlib is not a resolved dependency of a user package, so its `Comparable` and `Enumerable` are baked into the compiler (`semantic_analysis::stdlib_protocols`) as the last tier of `uses:` resolution. Each class below writes only the protocol's required method; everything else it answers is the stdlib's provision.  Fixtures: fixtures/adr0127stdlib_{rank,worker,worker_pool}.bt, fixtures/adr0133enumerable_stdlib.bt."
+    },
+    {
       "id": "stdlib-test-adr0131block-arity-test",
       "title": "Adr0131BlockArityTest",
       "category": "stdlib-tests",
@@ -16553,6 +16599,7 @@
         "process",
         "reduce",
         "set",
+        "stdlibBag",
         "subclassing",
         "testActorSelfDoWritePinBug",
         "testActorWrite",
@@ -16574,10 +16621,12 @@
         "testHandWalkSelectWrite",
         "testOwnAnySatisfyPure",
         "testOwnAnySatisfyWritePin",
+        "testStdlibEnumerablePure",
+        "testStdlibEnumerableWrite",
         "withEts:"
       ],
-      "source": "// BT-3903 (ADR 0133 Phase 1): what a user collection does with a block that\n// assigns a captured local, when the iteration messages come from a trait\n// (`uses:`) on top of the class's own `do:`. The decision is \"honour\": a\n// block literal that writes, sent with one of the compiler-known collection\n// messages (`state_threading_selectors.rs`), is lowered in place at the call\n// site as a fold over the receiver's `do:` (`beamtalk_collection:to_list/1`),\n// so the write threads whatever the receiver's class, whether its `do:`\n// forwards to a stdlib collection or walks by hand. The trait's provisions\n// themselves need no gate of their own: inside a provision, `self do:` with\n// a writing block is the same in-place fold. Never a dropped write. (A block\n// laundered through Erlang FFI is outside this decision, BT-3917.)\n//\n// Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,\n// user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class (a user\n// package cannot `uses:` a stdlib protocol yet, BT-3915).\n\nTestCase subclass: Adr0133EnumerableUserTest\n\n  forwarding => Adr0133EnumerableForwarding new: #{#items => #(1, 2, 3)}\n\n  handWalk => Adr0133EnumerableHandWalk new: #{#items => #(1, 2, 3)}\n\n  ownAny => Adr0133EnumerableOwnAny new: #{#items => #(1, 2, 3)}\n\n  // An `Ets` ordered by key, so its values snapshot is #(1, 2, 3).\n  withEts: aBlock =>\n    table := Ets new: #adr0133EnumerableUser type: #orderedSet\n    [\n      table at: 1 put: 1\n      table at: 2 put: 2\n      table at: 3 put: 3\n      aBlock value: table\n    ] ensure: [table delete]\n\n  // --- `do:` forwarding to the inner List ---\n  testForwardingDoWrite =>\n    self assert: (Adr0133EnumerableUser doWrite: self forwarding) equals: 6\n\n  testForwardingInjectWrite =>\n    self assert: (Adr0133EnumerableUser injectWrite: self forwarding) equals: #[6, 3]\n\n  testForwardingCollectWrite =>\n    self assert: (Adr0133EnumerableUser collectWrite: self forwarding) equals: #[#(10, 20, 30), 3]\n\n  testForwardingSelectWrite =>\n    self assert: (Adr0133EnumerableUser selectWrite: self forwarding) equals: #[#(2, 3), 3]\n\n  testForwardingDetectWrite =>\n    self assert: (Adr0133EnumerableUser detectWrite: self forwarding) equals: #[2, 2]\n    self assert: (Adr0133EnumerableUser detectNoneWrite: self forwarding) equals: #[#none, 3]\n\n  testForwardingAnySatisfyWrite =>\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self forwarding) equals: #[true, 3]\n\n  testForwardingPure =>\n    self assert: (Adr0133EnumerableUser injectPure: self forwarding) equals: 6\n    self assert: (Adr0133EnumerableUser collectPure: self forwarding) equals: #(10, 20, 30)\n    self assert: (Adr0133EnumerableUser selectPure: self forwarding) equals: #(2, 3)\n    self assert: (Adr0133EnumerableUser detectPure: self forwarding) equals: 2\n    self assert: (Adr0133EnumerableUser detectNonePure: self forwarding) equals: #none\n    self assert: (Adr0133EnumerableUser anySatisfyPure: self forwarding)\n\n  // --- `do:` by hand (a `whileTrue:` over an index) ---\n  testHandWalkDoWrite =>\n    self assert: (Adr0133EnumerableUser doWrite: self handWalk) equals: 6\n\n  testHandWalkInjectWrite =>\n    self assert: (Adr0133EnumerableUser injectWrite: self handWalk) equals: #[6, 3]\n\n  testHandWalkCollectWrite =>\n    self assert: (Adr0133EnumerableUser collectWrite: self handWalk) equals: #[#(10, 20, 30), 3]\n\n  testHandWalkSelectWrite =>\n    self assert: (Adr0133EnumerableUser selectWrite: self handWalk) equals: #[#(2, 3), 3]\n\n  testHandWalkDetectWrite =>\n    self assert: (Adr0133EnumerableUser detectWrite: self handWalk) equals: #[2, 2]\n    self assert: (Adr0133EnumerableUser detectNoneWrite: self handWalk) equals: #[#none, 3]\n\n  testHandWalkAnySatisfyWrite =>\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self handWalk) equals: #[true, 3]\n\n  testHandWalkPure =>\n    self assert: (Adr0133EnumerableUser injectPure: self handWalk) equals: 6\n    self assert: (Adr0133EnumerableUser collectPure: self handWalk) equals: #(10, 20, 30)\n    self assert: (Adr0133EnumerableUser selectPure: self handWalk) equals: #(2, 3)\n    self assert: (Adr0133EnumerableUser detectPure: self handWalk) equals: 2\n    self assert: (Adr0133EnumerableUser detectNonePure: self handWalk) equals: #none\n    self assert: (Adr0133EnumerableUser anySatisfyPure: self handWalk)\n\n  // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---\n  testEtsWrite =>\n    self\n      withEts: [:t |\n        self assert: (Adr0133EnumerableUser doWrite: t) equals: 6\n        self assert: (Adr0133EnumerableUser injectWrite: t) equals: #[6, 3]\n        self assert: (Adr0133EnumerableUser collectWrite: t) equals: #[#(10, 20, 30), 3]\n        self assert: (Adr0133EnumerableUser selectWrite: t) equals: #[#(2, 3), 3]\n        self assert: (Adr0133EnumerableUser detectWrite: t) equals: #[2, 2]\n        self assert: (Adr0133EnumerableUser detectNoneWrite: t) equals: #[#none, 3]\n        self assert: (Adr0133EnumerableUser anySatisfyWrite: t) equals: #[true, 3]\n      ]\n\n  testEtsPure =>\n    self\n      withEts: [:t |\n        self assert: (Adr0133EnumerableUser injectPure: t) equals: 6\n        self assert: (Adr0133EnumerableUser collectPure: t) equals: #(10, 20, 30)\n        self assert: (Adr0133EnumerableUser selectPure: t) equals: #(2, 3)\n        self assert: (Adr0133EnumerableUser detectPure: t) equals: 2\n        self assert: (Adr0133EnumerableUser detectNonePure: t) equals: #none\n        self assert: (Adr0133EnumerableUser anySatisfyPure: t)\n      ]\n\n  // --- An actor with only `do:`, from another process ---\n  // The writing form folds over the actor's `do:`; the pure form would be\n  // `does_not_understand` (it has no `inject:into:`), so only writes here.\n  testActorWrite =>\n    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}\n    [\n      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6\n      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]\n      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]\n      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]\n      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]\n      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]\n    ] ensure: [a stop]\n\n  testActorSelfDoWritePinBug =>\n    // PIN-BUG (BT-3918): inside the actor's own method, `self do:` with a\n    // writing block silently drops the write and answers 0, not 6. A fix\n    // flips this to `equals: 6` (or the shape becomes a compile error and\n    // this test and `selfDoSum` go).\n    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}\n    [self assert: a selfDoSum equals: 0] ensure: [a stop]\n\n  // --- BT-3843: the class's own `anySatisfy:` ---\n  testOwnAnySatisfyPure =>\n    // The class's own method runs: it looks only at the first element.\n    self deny: (Adr0133EnumerableUser anySatisfyPure: self ownAny)\n\n  testOwnAnySatisfyWritePin =>\n    // PIN (BT-3916): with a writing block the message is the fold over the\n    // receiver's `do:` (ADR 0133 § Consequences, BT-3903 note), so the\n    // class's own `anySatisfy:` does not run and the answer is the fold's.\n    // The write is never dropped. If BT-3916 adopts a receiver guard, this\n    // flips to `raise: #stateful_block_dispatch`.\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self ownAny) equals: #[true, 3]",
-      "explanation": "BT-3903 (ADR 0133 Phase 1): what a user collection does with a block that assigns a captured local, when the iteration messages come from a trait (`uses:`) on top of the class's own `do:`. The decision is \"honour\": a block literal that writes, sent with one of the compiler-known collection messages (`state_threading_selectors.rs`), is lowered in place at the call site as a fold over the receiver's `do:` (`beamtalk_collection:to_list/1`), so the write threads whatever the receiver's class, whether its `do:` forwards to a stdlib collection or walks by hand. The trait's provisions themselves need no gate of their own: inside a provision, `self do:` with a writing block is the same in-place fold. Never a dropped write. (A block laundered through Erlang FFI is outside this decision, BT-3917.)  Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any, user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class (a user package cannot `uses:` a stdlib protocol yet, BT-3915)."
+      "source": "// BT-3903 (ADR 0133 Phase 1): what a user collection does with a block that\n// assigns a captured local, when the iteration messages come from a trait\n// (`uses:`) on top of the class's own `do:`. The decision is \"honour\": a\n// block literal that writes, sent with one of the compiler-known collection\n// messages (`state_threading_selectors.rs`), is lowered in place at the call\n// site as a fold over the receiver's `do:` (`beamtalk_collection:to_list/1`),\n// so the write threads whatever the receiver's class, whether its `do:`\n// forwards to a stdlib collection or walks by hand. The trait's provisions\n// themselves need no gate of their own: inside a provision, `self do:` with\n// a writing block is the same in-place fold. Never a dropped write. (A block\n// laundered through Erlang FFI is outside this decision, BT-3917.)\n//\n// Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,\n// stdlib,user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class;\n// `Adr0133EnumerableStdlib` is a user class that `uses:` the same stdlib\n// `Enumerable` (BT-3915), whose provisions forward to `elements` rather than\n// walking with `self do:`.\n\nTestCase subclass: Adr0133EnumerableUserTest\n\n  forwarding => Adr0133EnumerableForwarding new: #{#items => #(1, 2, 3)}\n\n  handWalk => Adr0133EnumerableHandWalk new: #{#items => #(1, 2, 3)}\n\n  ownAny => Adr0133EnumerableOwnAny new: #{#items => #(1, 2, 3)}\n\n  stdlibBag => Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}\n\n  // An `Ets` ordered by key, so its values snapshot is #(1, 2, 3).\n  withEts: aBlock =>\n    table := Ets new: #adr0133EnumerableUser type: #orderedSet\n    [\n      table at: 1 put: 1\n      table at: 2 put: 2\n      table at: 3 put: 3\n      aBlock value: table\n    ] ensure: [table delete]\n\n  // --- `do:` forwarding to the inner List ---\n  testForwardingDoWrite =>\n    self assert: (Adr0133EnumerableUser doWrite: self forwarding) equals: 6\n\n  testForwardingInjectWrite =>\n    self assert: (Adr0133EnumerableUser injectWrite: self forwarding) equals: #[6, 3]\n\n  testForwardingCollectWrite =>\n    self assert: (Adr0133EnumerableUser collectWrite: self forwarding) equals: #[#(10, 20, 30), 3]\n\n  testForwardingSelectWrite =>\n    self assert: (Adr0133EnumerableUser selectWrite: self forwarding) equals: #[#(2, 3), 3]\n\n  testForwardingDetectWrite =>\n    self assert: (Adr0133EnumerableUser detectWrite: self forwarding) equals: #[2, 2]\n    self assert: (Adr0133EnumerableUser detectNoneWrite: self forwarding) equals: #[#none, 3]\n\n  testForwardingAnySatisfyWrite =>\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self forwarding) equals: #[true, 3]\n\n  testForwardingPure =>\n    self assert: (Adr0133EnumerableUser injectPure: self forwarding) equals: 6\n    self assert: (Adr0133EnumerableUser collectPure: self forwarding) equals: #(10, 20, 30)\n    self assert: (Adr0133EnumerableUser selectPure: self forwarding) equals: #(2, 3)\n    self assert: (Adr0133EnumerableUser detectPure: self forwarding) equals: 2\n    self assert: (Adr0133EnumerableUser detectNonePure: self forwarding) equals: #none\n    self assert: (Adr0133EnumerableUser anySatisfyPure: self forwarding)\n\n  // --- `do:` by hand (a `whileTrue:` over an index) ---\n  testHandWalkDoWrite =>\n    self assert: (Adr0133EnumerableUser doWrite: self handWalk) equals: 6\n\n  testHandWalkInjectWrite =>\n    self assert: (Adr0133EnumerableUser injectWrite: self handWalk) equals: #[6, 3]\n\n  testHandWalkCollectWrite =>\n    self assert: (Adr0133EnumerableUser collectWrite: self handWalk) equals: #[#(10, 20, 30), 3]\n\n  testHandWalkSelectWrite =>\n    self assert: (Adr0133EnumerableUser selectWrite: self handWalk) equals: #[#(2, 3), 3]\n\n  testHandWalkDetectWrite =>\n    self assert: (Adr0133EnumerableUser detectWrite: self handWalk) equals: #[2, 2]\n    self assert: (Adr0133EnumerableUser detectNoneWrite: self handWalk) equals: #[#none, 3]\n\n  testHandWalkAnySatisfyWrite =>\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self handWalk) equals: #[true, 3]\n\n  testHandWalkPure =>\n    self assert: (Adr0133EnumerableUser injectPure: self handWalk) equals: 6\n    self assert: (Adr0133EnumerableUser collectPure: self handWalk) equals: #(10, 20, 30)\n    self assert: (Adr0133EnumerableUser selectPure: self handWalk) equals: #(2, 3)\n    self assert: (Adr0133EnumerableUser detectPure: self handWalk) equals: 2\n    self assert: (Adr0133EnumerableUser detectNonePure: self handWalk) equals: #none\n    self assert: (Adr0133EnumerableUser anySatisfyPure: self handWalk)\n\n  // --- A user class `uses: Enumerable(Integer)` from the stdlib ---\n  testStdlibEnumerableWrite =>\n    self assert: (Adr0133EnumerableUser doWrite: self stdlibBag) equals: 6\n    self assert: (Adr0133EnumerableUser injectWrite: self stdlibBag) equals: #[6, 3]\n    self assert: (Adr0133EnumerableUser collectWrite: self stdlibBag) equals: #[#(10, 20, 30), 3]\n    self assert: (Adr0133EnumerableUser selectWrite: self stdlibBag) equals: #[#(2, 3), 3]\n    self assert: (Adr0133EnumerableUser detectWrite: self stdlibBag) equals: #[2, 2]\n    self assert: (Adr0133EnumerableUser detectNoneWrite: self stdlibBag) equals: #[#none, 3]\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self stdlibBag) equals: #[true, 3]\n\n  testStdlibEnumerablePure =>\n    self assert: (Adr0133EnumerableUser injectPure: self stdlibBag) equals: 6\n    self assert: (Adr0133EnumerableUser collectPure: self stdlibBag) equals: #(10, 20, 30)\n    self assert: (Adr0133EnumerableUser selectPure: self stdlibBag) equals: #(2, 3)\n    self assert: (Adr0133EnumerableUser detectPure: self stdlibBag) equals: 2\n    self assert: (Adr0133EnumerableUser detectNonePure: self stdlibBag) equals: #none\n    self assert: (Adr0133EnumerableUser anySatisfyPure: self stdlibBag)\n\n  // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---\n  testEtsWrite =>\n    self\n      withEts: [:t |\n        self assert: (Adr0133EnumerableUser doWrite: t) equals: 6\n        self assert: (Adr0133EnumerableUser injectWrite: t) equals: #[6, 3]\n        self assert: (Adr0133EnumerableUser collectWrite: t) equals: #[#(10, 20, 30), 3]\n        self assert: (Adr0133EnumerableUser selectWrite: t) equals: #[#(2, 3), 3]\n        self assert: (Adr0133EnumerableUser detectWrite: t) equals: #[2, 2]\n        self assert: (Adr0133EnumerableUser detectNoneWrite: t) equals: #[#none, 3]\n        self assert: (Adr0133EnumerableUser anySatisfyWrite: t) equals: #[true, 3]\n      ]\n\n  testEtsPure =>\n    self\n      withEts: [:t |\n        self assert: (Adr0133EnumerableUser injectPure: t) equals: 6\n        self assert: (Adr0133EnumerableUser collectPure: t) equals: #(10, 20, 30)\n        self assert: (Adr0133EnumerableUser selectPure: t) equals: #(2, 3)\n        self assert: (Adr0133EnumerableUser detectPure: t) equals: 2\n        self assert: (Adr0133EnumerableUser detectNonePure: t) equals: #none\n        self assert: (Adr0133EnumerableUser anySatisfyPure: t)\n      ]\n\n  // --- An actor with only `do:`, from another process ---\n  // The writing form folds over the actor's `do:`; the pure form would be\n  // `does_not_understand` (it has no `inject:into:`), so only writes here.\n  testActorWrite =>\n    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}\n    [\n      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6\n      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]\n      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]\n      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]\n      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]\n      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]\n    ] ensure: [a stop]\n\n  testActorSelfDoWritePinBug =>\n    // PIN-BUG (BT-3918): inside the actor's own method, `self do:` with a\n    // writing block silently drops the write and answers 0, not 6. A fix\n    // flips this to `equals: 6` (or the shape becomes a compile error and\n    // this test and `selfDoSum` go).\n    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}\n    [self assert: a selfDoSum equals: 0] ensure: [a stop]\n\n  // --- BT-3843: the class's own `anySatisfy:` ---\n  testOwnAnySatisfyPure =>\n    // The class's own method runs: it looks only at the first element.\n    self deny: (Adr0133EnumerableUser anySatisfyPure: self ownAny)\n\n  testOwnAnySatisfyWritePin =>\n    // PIN (BT-3916): with a writing block the message is the fold over the\n    // receiver's `do:` (ADR 0133 § Consequences, BT-3903 note), so the\n    // class's own `anySatisfy:` does not run and the answer is the fold's.\n    // The write is never dropped. If BT-3916 adopts a receiver guard, this\n    // flips to `raise: #stateful_block_dispatch`.\n    self assert: (Adr0133EnumerableUser anySatisfyWrite: self ownAny) equals: #[true, 3]",
+      "explanation": "BT-3903 (ADR 0133 Phase 1): what a user collection does with a block that assigns a captured local, when the iteration messages come from a trait (`uses:`) on top of the class's own `do:`. The decision is \"honour\": a block literal that writes, sent with one of the compiler-known collection messages (`state_threading_selectors.rs`), is lowered in place at the call site as a fold over the receiver's `do:` (`beamtalk_collection:to_list/1`), so the write threads whatever the receiver's class, whether its `do:` forwards to a stdlib collection or walks by hand. The trait's provisions themselves need no gate of their own: inside a provision, `self do:` with a writing block is the same in-place fold. Never a dropped write. (A block laundered through Erlang FFI is outside this decision, BT-3917.)  Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any, stdlib,user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class; `Adr0133EnumerableStdlib` is a user class that `uses:` the same stdlib `Enumerable` (BT-3915), whose provisions forward to `elements` rather than walking with `self do:`."
     },
     {
       "id": "stdlib-test-announcements-introspection-test",
@@ -23213,6 +23262,77 @@
       "explanation": "BT-2355: Actor-context outer-local threading corpus.  Each method threads an *outer local* (not an Actor state field) inside an Actor method body and returns the final threaded value. These exercise the construct families that previously dropped the mutation in Actor context:   - write-only / read+write conditionals (ifTrue:, ifTrue:ifFalse:) non-last   - foldl predicate ops (count:, detect:) non-last   - threading-construct local-assignment RHS (loops, conditionals)  Sibling to the value-type corpus exercised by vt_threading_constructs_test.bt (BT-2342); this is the Actor-context companion."
     },
     {
+      "id": "stdlib-test-fixtures-adr0127stdlib-rank",
+      "title": "Adr0127StdlibRank",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "<",
+        "Adr0127StdlibRank",
+        "Value",
+        "adr0127stdlib_rank",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3915: a user value that `uses:` the stdlib's `Comparable`. It writes\n// only the required `<`; `>`, `<=`, `>=`, `between:and:`, `min:` and `max:`\n// are the stdlib's provisions. Driven by\n// stdlib/test/adr0127stdlib_trait_test.bt.\n\nValue subclass: Adr0127StdlibRank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  < other :: Adr0127StdlibRank -> Boolean => self.level < other level",
+      "explanation": "BT-3915: a user value that `uses:` the stdlib's `Comparable`. It writes only the required `<`; `>`, `<=`, `>=`, `between:and:`, `min:` and `max:` are the stdlib's provisions. Driven by stdlib/test/adr0127stdlib_trait_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-adr0127stdlib-worker",
+      "title": "Adr0127StdlibWorker",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Adr0127StdlibWorker",
+        "Value",
+        "adr0127stdlib_worker",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "isIdle",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3915: the element class of adr0127stdlib_worker_pool.bt.\n\nValue subclass: Adr0127StdlibWorker\n  field: idle :: Boolean = true\n\n  isIdle -> Boolean => self.idle",
+      "explanation": "BT-3915: the element class of adr0127stdlib_worker_pool.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-adr0127stdlib-worker-pool",
+      "title": "Adr0127StdlibWorkerPool",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Adr0127StdlibWorkerPool",
+        "actor",
+        "adr0127stdlib_worker_pool",
+        "async",
+        "concurrent",
+        "elements",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "process",
+        "property",
+        "subclassing"
+      ],
+      "source": "// BT-3915: docs/beamtalk-language-features.md § Traits' `WorkerPool` — a\n// typed actor that `uses: Enumerable(Worker)` from the stdlib — with the\n// fixture-prefixed class names. Driven by\n// stdlib/test/adr0127stdlib_trait_test.bt.\n\ntyped Actor subclass: Adr0127StdlibWorkerPool\n  uses: Enumerable(Adr0127StdlibWorker)\n  state: workers :: List(Adr0127StdlibWorker) = #()\n\n  elements -> List(Adr0127StdlibWorker) => self.workers",
+      "explanation": "BT-3915: docs/beamtalk-language-features.md § Traits' `WorkerPool` — a typed actor that `uses: Enumerable(Worker)` from the stdlib — with the fixture-prefixed class names. Driven by stdlib/test/adr0127stdlib_trait_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-adr0131block-arity-actor",
       "title": "Adr0131BlockArityActor",
       "category": "stdlib-fixtures",
@@ -28503,6 +28623,28 @@
       "explanation": "BT-3903 (ADR 0133 Phase 1), carrying BT-3843's repro: a user collection that defines its own `anySatisfy:` (class wins over the trait's provision, ADR 0127 §3) with deliberately different semantics: it looks only at the first element. Driven by adr0133enumerable_user.bt."
     },
     {
+      "id": "stdlib-test-fixtures-adr0133enumerable-stdlib",
+      "title": "Adr0133EnumerableStdlib",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Adr0133EnumerableStdlib",
+        "Value",
+        "adr0133enumerable_stdlib",
+        "elements",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3915: a user collection that `uses:` the stdlib's own `Enumerable` —\n// not a package-local trait — so every iteration message is the stdlib's\n// provision over the required `elements` snapshot. Driven by\n// adr0133enumerable_user.bt (stdlib/test/adr0133enumerable_user_test.bt) and\n// stdlib/test/adr0127stdlib_trait_test.bt.\n\nValue subclass: Adr0133EnumerableStdlib\n  uses: Enumerable(Integer)\n  field: items :: List(Integer) = #()\n\n  elements -> List(Integer) => self.items",
+      "explanation": "BT-3915: a user collection that `uses:` the stdlib's own `Enumerable` — not a package-local trait — so every iteration message is the stdlib's provision over the required `elements` snapshot. Driven by adr0133enumerable_user.bt (stdlib/test/adr0133enumerable_user_test.bt) and stdlib/test/adr0127stdlib_trait_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-adr0133enumerable-user",
       "title": "Adr0133EnumerableUser",
       "category": "stdlib-fixtures",
@@ -28585,8 +28727,8 @@
         "transform",
         "where"
       ],
-      "source": "// BT-3903 (ADR 0133 Phase 1): the Smalltalk idiom \"define `do:`, inherit the\n// rest\" as a package-local trait. A user package cannot `uses:` the stdlib's\n// own `Enumerable` today (only the stdlib build carries stdlib protocol\n// definitions; BT-3915), and `Enumerable` requires `elements` rather than\n// `do:` anyway, so this trait is the shape ADR 0133 § Consequences describes:\n// one required `do:`, and the iteration messages provided on top of it, each\n// a block literal sent with `self do:` that writes the provision's own local.\n// Users: adr0133enumerable_{forwarding,hand_walk,own_any}.bt.\n\nProtocol define: Adr0133EnumerableWalkable\n  /// Required: evaluate `block` with each element, in order.\n  do: block -> Object\n\n  inject: initial into: block =>\n    acc := initial\n    self do: [:x | acc := block value: acc value: x]\n    acc\n\n  collect: block =>\n    out := #()\n    self do: [:x | out := out add: (block value: x)]\n    out\n\n  select: block =>\n    out := #()\n    self do: [:x | (block value: x) ifTrue: [out := out add: x]]\n    out\n\n  detect: block ifNone: noneBlock =>\n    self do: [:x | (block value: x) ifTrue: [^x]]\n    noneBlock value\n\n  anySatisfy: block =>\n    self do: [:x | (block value: x) ifTrue: [^true]]\n    false",
-      "explanation": "BT-3903 (ADR 0133 Phase 1): the Smalltalk idiom \"define `do:`, inherit the rest\" as a package-local trait. A user package cannot `uses:` the stdlib's own `Enumerable` today (only the stdlib build carries stdlib protocol definitions; BT-3915), and `Enumerable` requires `elements` rather than `do:` anyway, so this trait is the shape ADR 0133 § Consequences describes: one required `do:`, and the iteration messages provided on top of it, each a block literal sent with `self do:` that writes the provision's own local. Users: adr0133enumerable_{forwarding,hand_walk,own_any}.bt."
+      "source": "// BT-3903 (ADR 0133 Phase 1): the Smalltalk idiom \"define `do:`, inherit the\n// rest\" as a package-local trait. The stdlib's `Enumerable` requires\n// `elements` rather than `do:` (a user class `uses:` it in\n// adr0133enumerable_stdlib.bt, BT-3915), so this trait is the shape ADR 0133\n// § Consequences describes:\n// one required `do:`, and the iteration messages provided on top of it, each\n// a block literal sent with `self do:` that writes the provision's own local.\n// Users: adr0133enumerable_{forwarding,hand_walk,own_any}.bt.\n\nProtocol define: Adr0133EnumerableWalkable\n  /// Required: evaluate `block` with each element, in order.\n  do: block -> Object\n\n  inject: initial into: block =>\n    acc := initial\n    self do: [:x | acc := block value: acc value: x]\n    acc\n\n  collect: block =>\n    out := #()\n    self do: [:x | out := out add: (block value: x)]\n    out\n\n  select: block =>\n    out := #()\n    self do: [:x | (block value: x) ifTrue: [out := out add: x]]\n    out\n\n  detect: block ifNone: noneBlock =>\n    self do: [:x | (block value: x) ifTrue: [^x]]\n    noneBlock value\n\n  anySatisfy: block =>\n    self do: [:x | (block value: x) ifTrue: [^true]]\n    false",
+      "explanation": "BT-3903 (ADR 0133 Phase 1): the Smalltalk idiom \"define `do:`, inherit the rest\" as a package-local trait. The stdlib's `Enumerable` requires `elements` rather than `do:` (a user class `uses:` it in adr0133enumerable_stdlib.bt, BT-3915), so this trait is the shape ADR 0133 § Consequences describes: one required `do:`, and the iteration messages provided on top of it, each a block literal sent with `self do:` that writes the provision's own local. Users: adr0133enumerable_{forwarding,hand_walk,own_any}.bt."
     },
     {
       "id": "stdlib-test-fixtures-aliased-self-send-actor",

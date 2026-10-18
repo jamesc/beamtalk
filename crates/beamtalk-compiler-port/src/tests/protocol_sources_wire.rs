@@ -13,17 +13,17 @@
 
 use super::*;
 
-const COMPARABLE_SOURCE: &str = "Protocol define: Comparable\n\
+const RANKED_SOURCE: &str = "Protocol define: Ranked\n\
      \x20 < other :: Self -> Boolean\n\n\
      \x20 max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]";
 
 const VERSION_SOURCE: &str = "Value subclass: Version\n\
-     \x20 uses: Comparable\n\
+     \x20 uses: Ranked\n\
      \x20 field: major :: Integer = 0\n\n\
      \x20 < other :: Version -> Boolean => self.major < other major";
 
 /// Negative control: without `protocol_sources`, `Version`'s `uses:
-/// Comparable` cannot resolve — `Comparable` is defined in neither this
+/// Ranked` cannot resolve — `Ranked` is defined in neither this
 /// request's own source nor any external map — so `compile` reports the
 /// "unknown protocol" diagnostic `trait_expansion::expand_module` documents,
 /// not a successful compile.
@@ -39,20 +39,17 @@ fn compile_without_protocol_sources_reports_unknown_protocol() {
     assert_eq!(
         response_status(&response).as_deref(),
         Some("error"),
-        "expected an unresolved `uses: Comparable` to fail compilation: {response:?}"
+        "expected an unresolved `uses: Ranked` to fail compilation: {response:?}"
     );
 }
 
-/// Positive case: `protocol_sources => #{"Comparable" => <its .bt source>}`
-/// lets `Version`'s `uses: Comparable` flatten `max:` in from the
+/// Positive case: `protocol_sources => #{"Ranked" => <its .bt source>}`
+/// lets `Version`'s `uses: Ranked` flatten `max:` in from the
 /// wire-carried protocol source, exactly as a real protocol-reload fan-out
 /// recompile would supply it.
 #[test]
 fn compile_with_protocol_sources_flattens_cross_file_uses() {
-    let protocol_sources = Term::from(Map::from([(
-        binary("Comparable"),
-        binary(COMPARABLE_SOURCE),
-    )]));
+    let protocol_sources = Term::from(Map::from([(binary("Ranked"), binary(RANKED_SOURCE))]));
     let request = Map::from([
         (atom("command"), atom("compile")),
         (atom("source"), binary(VERSION_SOURCE)),
@@ -64,7 +61,7 @@ fn compile_with_protocol_sources_flattens_cross_file_uses() {
     assert_eq!(
         response_status(&response).as_deref(),
         Some("ok"),
-        "expected `protocol_sources` to resolve `uses: Comparable`: {response:?}"
+        "expected `protocol_sources` to resolve `uses: Ranked`: {response:?}"
     );
     let core_erlang =
         response_field_str(&response, "core_erlang").expect("compile response has core_erlang");
@@ -76,13 +73,13 @@ fn compile_with_protocol_sources_flattens_cross_file_uses() {
 
 /// A `protocol_sources` entry whose source doesn't actually parse to a
 /// protocol named after its own key (a malformed/stale entry) degrades
-/// gracefully — `Version` still fails to resolve `uses: Comparable`, exactly
+/// gracefully — `Version` still fails to resolve `uses: Ranked`, exactly
 /// as if `protocol_sources` had been omitted, rather than the whole request
 /// erroring over one unrelated bad entry.
 #[test]
 fn compile_with_unparseable_protocol_source_degrades_to_unknown_protocol() {
     let protocol_sources = Term::from(Map::from([(
-        binary("Comparable"),
+        binary("Ranked"),
         binary("this is not valid beamtalk source :::"),
     )]));
     let request = Map::from([
@@ -97,5 +94,34 @@ fn compile_with_unparseable_protocol_source_degrades_to_unknown_protocol() {
         response_status(&response).as_deref(),
         Some("error"),
         "a malformed protocol_sources entry must not silently succeed: {response:?}"
+    );
+}
+
+/// BT-3915: the REPL/workspace path resolves the stdlib's own `Comparable`
+/// with no `protocol_sources` at all — the stdlib's provision-bearing
+/// protocols are the last tier of `uses:` resolution on every surface.
+#[test]
+fn compile_flattens_a_stdlib_protocol_without_protocol_sources() {
+    let source = "Value subclass: Version\n\
+         \x20 uses: Comparable\n\
+         \x20 field: major :: Integer = 0\n\n\
+         \x20 < other :: Version -> Boolean => self.major < other major";
+    let request = Map::from([
+        (atom("command"), atom("compile")),
+        (atom("source"), binary(source)),
+        (atom("module_name"), binary("bt@version")),
+    ]);
+
+    let response = handle_compile(&request);
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "expected `uses: Comparable` to resolve to the stdlib protocol: {response:?}"
+    );
+    let core_erlang =
+        response_field_str(&response, "core_erlang").expect("compile response has core_erlang");
+    assert!(
+        core_erlang.contains("between:and:"),
+        "the stdlib's `between:and:` provision should be flattened in: {core_erlang}"
     );
 }

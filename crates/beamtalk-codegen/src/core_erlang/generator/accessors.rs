@@ -513,6 +513,25 @@ impl CoreErlangGenerator {
         self.class_context_mut().stdlib_mode = value;
     }
 
+    /// Sets the protocol sources flattened provisions map through (ADR 0127
+    /// §3, "Source locations"), plus the source of every stdlib protocol a
+    /// `uses:` in a module declaring `module_protocols` can resolve to
+    /// (BT-3915). The stdlib's own build carries its protocols' sources live,
+    /// so call this after [`Self::set_stdlib_mode`].
+    pub(in crate::core_erlang) fn set_protocol_sources(
+        &mut self,
+        mut protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+        module_protocols: &[beamtalk_core::ast::ProtocolDefinition],
+    ) {
+        if !self.stdlib_mode() {
+            beamtalk_core::semantic_analysis::stdlib_protocols::seed_stdlib_protocol_sources(
+                &mut protocol_sources,
+                module_protocols,
+            );
+        }
+        self.protocol_sources = protocol_sources;
+    }
+
     /// Returns a mutable reference to the class context, creating it if absent.
     pub(in crate::core_erlang) fn class_context_mut(&mut self) -> &mut ClassContext {
         self.class_context.get_or_insert_with(ClassContext::new)

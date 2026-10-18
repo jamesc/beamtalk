@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3915: the element class of adr0127stdlib_worker_pool.bt.
+
+Value subclass: Adr0127StdlibWorker
+  field: idle :: Boolean = true
+
+  isIdle -> Boolean => self.idle
