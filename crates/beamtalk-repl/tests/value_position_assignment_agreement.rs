@@ -70,6 +70,9 @@ fn the_rejection_names_exactly_the_local_assignments_the_repl_drops() {
                             Some(
                                 DiagnosticCategory::ValuePositionLocalAssignment
                                     | DiagnosticCategory::UnmigratedLocalThreading
+                                    // ADR 0133 (BT-3902): an assignment in an
+                                    // escaping block is that error's alone.
+                                    | DiagnosticCategory::Tier2BlockNoReturnChannel
                             )
                         )
                 });
