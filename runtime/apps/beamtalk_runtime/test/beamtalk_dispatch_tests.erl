@@ -1593,3 +1593,81 @@ bt3482_drain_trace_calls(Acc) ->
     after 0 ->
         lists:reverse(Acc)
     end.
+
+%%% ============================================================================
+%%% call_threaded/3 — ADR 0132 tier gate (GH-4367)
+%%% ============================================================================
+
+%% Hand-written Tier 2 block `[t := t + 1]` over a hand-packed Acc:
+%% the shape ADR 0131 codegen emits.
+ct4367_increment_t() ->
+    fun(Acc) ->
+        T = maps:get('__local__t', Acc) + 1,
+        {T, Acc#{'__local__t' => T}}
+    end.
+
+%% Start a minimal class whose module exports `value:` (for non-fun callable
+%% path tests). Uses beamtalk_threaded_wire_test_helper which already exports
+%% `'value:'/2` returning `{called_with, X}`.
+ct4367_start_callable_class(Name) ->
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_threaded_wire_test_helper,
+        meta => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
+    unlink(Pid),
+    Pid.
+
+call_threaded_test_() ->
+    {setup, fun setup/0, fun teardown/1, [
+        {"Tier 1 fun is applied to Args and Acc is returned unchanged", fun() ->
+            Acc = #{'__local__t' => 5},
+            ?assertEqual(
+                {7, Acc},
+                beamtalk_dispatch:call_threaded(fun(X) -> X + 1 end, [6], Acc)
+            )
+        end},
+        {"Tier 2 fun (arity N+1) is applied with Acc appended; answers its own Acc", fun() ->
+            ?assertEqual(
+                {1, #{'__local__t' => 1}},
+                beamtalk_dispatch:call_threaded(ct4367_increment_t(), [], #{'__local__t' => 0})
+            )
+        end},
+        {"Tier 2 fun with arguments receives Args prepended, Acc last", fun() ->
+            Block = fun(X, Acc) -> {X, Acc#{'__local__x' => X}} end,
+            ?assertEqual(
+                {3, #{'__local__x' => 3}},
+                beamtalk_dispatch:call_threaded(Block, [3], #{})
+            )
+        end},
+        {"wrong-arity fun raises structured arity_mismatch, not badarity", fun() ->
+            try beamtalk_dispatch:call_threaded(fun(A, B, C) -> {A, B, C} end, [], #{}) of
+                R -> ?assertEqual(raised, {returned, R})
+            catch
+                error:#{error := #beamtalk_error{} = E} ->
+                    ?assertMatch(
+                        #beamtalk_error{kind = arity_mismatch, class = 'Block', selector = value},
+                        E
+                    );
+                error:#beamtalk_error{} = E ->
+                    ?assertMatch(
+                        #beamtalk_error{kind = arity_mismatch, class = 'Block', selector = value},
+                        E
+                    )
+            end
+        end},
+        {"non-fun callable gets the value-family send; Acc is returned unchanged", fun() ->
+            Pid = ct4367_start_callable_class('BT4367Callable'),
+            try
+                Callable = #{'$beamtalk_class' => 'BT4367Callable'},
+                Acc = #{'__local__t' => 9},
+                ?assertEqual(
+                    {{called_with, 4}, Acc},
+                    beamtalk_dispatch:call_threaded(Callable, [4], Acc)
+                )
+            after
+                catch gen_server:stop(Pid, normal, 5000)
+            end
+        end}
+    ]}.
