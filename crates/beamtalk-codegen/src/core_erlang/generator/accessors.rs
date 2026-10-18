@@ -394,7 +394,7 @@ impl CoreErlangGenerator {
     /// comparable type. A superset of [`Self::param_is_numeric`]: bare
     /// comparison BIFs are correct for `Character`/`String` too (both define
     /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
-    /// the bare-BIF fast path and skips the `is_object` guard.
+    /// the bare-BIF fast path and skips the runtime comparison guard.
     pub(in crate::core_erlang) fn param_is_comparable(&self, name: &str) -> bool {
         self.current_method_param_types
             .get(name)
