@@ -423,15 +423,10 @@ impl CoreErlangGenerator {
                 class.is_abstract,
             )));
             // Record field declared types so `self.<field>`
-            // comparisons/arithmetic on object-typed fields route through the
-            // guard rather than silently term-ordering / `badarith`-ing. An
-            // actor's own `self.f :=` writes are its fields' normal writers,
-            // so untyped numeric fields may be trusted from them.
-            self.set_class_field_types(
-                class,
-                module,
-                crate::core_erlang::field_types::UntypedTrust::FromClassSource,
-            );
+            // comparisons/arithmetic on object-typed and untyped fields route
+            // through the guard rather than silently term-ordering /
+            // `badarith`-ing (`spawnWith:` can store any object, BT-3925).
+            self.set_class_field_types(class);
 
             // Collect sealed method selectors for direct-call optimization.
             // Only sealed classes benefit: the dispatch fast path checks is_class_sealed().
@@ -575,12 +570,7 @@ impl CoreErlangGenerator {
 
             // Generate parameter list and populate current_method_params
             // (needed for @primitive codegen which reads current_method_params).
-            let (mut frame, params) = MethodFrame::enter(
-                self,
-                selector_name.as_str(),
-                &method.parameters,
-                MethodBoundary::Actor,
-            );
+            let (mut frame, params) = MethodFrame::enter(self, method, MethodBoundary::Actor);
 
             // Parameters, then Self, then State
             let mut all_params: Vec<String> = params;

@@ -32,7 +32,8 @@
 //! output) so a regression is bisectable to a single call site.
 
 use super::CoreErlangGenerator;
-use beamtalk_core::ast::ParameterDefinition;
+use super::field_types::trusted_param_types;
+use beamtalk_core::ast::MethodDefinition;
 
 /// Which version counter [`MethodFrame::enter`] resets on entry — the one
 /// axis that varies across the method-codegen call sites this guard
@@ -68,10 +69,12 @@ pub(in crate::core_erlang) struct MethodFrame<'a> {
 impl<'a> MethodFrame<'a> {
     /// Enters a method body's codegen scope: resets `boundary`'s version
     /// counter(s), pushes a fresh variable scope, clears per-method
-    /// parameter tracking, records `selector_name` as the current selector
+    /// parameter tracking, records `method`'s selector as the current selector
     /// (restored to whatever it was before `enter` when the returned guard
-    /// drops), and binds each of `parameters` via `fresh_var`, recording its
-    /// declared type for the arithmetic fast-path classifier. For
+    /// drops), and binds each of its parameters via `fresh_var`, recording
+    /// the declared type of each one [`trusted_param_types`] trusts (a name
+    /// the body never rebinds, BT-3921) for the operator fast-path
+    /// classifiers. For
     /// [`MethodBoundary::ClassMethod`], also binds `self` to `ClassSelf` in
     /// the fresh scope and marks `in_class_method` (cleared again on drop)
     /// — both must happen after the scope push and before the parameter
@@ -80,8 +83,7 @@ impl<'a> MethodFrame<'a> {
     /// declaration order.
     pub(in crate::core_erlang) fn enter(
         generator: &'a mut CoreErlangGenerator,
-        selector_name: &str,
-        parameters: &[ParameterDefinition],
+        method: &MethodDefinition,
         boundary: MethodBoundary,
     ) -> (Self, Vec<String>) {
         match boundary {
@@ -94,6 +96,7 @@ impl<'a> MethodFrame<'a> {
         generator.push_scope();
         generator.current_method_params.clear();
         generator.clear_method_param_types();
+        let selector_name = method.selector.name();
         let prev_selector = generator
             .current_method_selector
             .replace(selector_name.to_string());
@@ -103,21 +106,27 @@ impl<'a> MethodFrame<'a> {
             generator.set_in_class_method(true);
         }
 
-        let param_vars = parameters
+        let param_vars = method
+            .parameters
             .iter()
             .map(|p| {
                 let var_name = generator.fresh_var(&p.name.name);
                 generator.current_method_params.push(var_name.clone());
-                generator.record_method_param_type(&p.name.name, p.type_annotation.as_ref());
                 var_name
             })
             .collect();
+        for (name, type_name) in trusted_param_types(method) {
+            generator.record_method_param_type(name, type_name);
+        }
 
         // A `uses:`-flattened method's spans are offsets into its protocol's
         // file, so for the duration of the frame map lines (and stamp the
         // `file` of line annotations) through that protocol's source.
         let prev_source = generator
-            .flattened_method_source(selector_name, boundary == MethodBoundary::ClassMethod)
+            .flattened_method_source(
+                selector_name.as_str(),
+                boundary == MethodBoundary::ClassMethod,
+            )
             .map(|protocol_source| {
                 let prev_path = generator.source_path.clone();
                 let prev_text = generator

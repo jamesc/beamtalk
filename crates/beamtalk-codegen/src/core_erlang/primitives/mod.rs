@@ -116,29 +116,27 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
 /// inline BIF, so the fail-loud cross-check (and `generate_primitive`'s hard
 /// error in `mod.rs`) must not flag them as unmapped. (Both labels lower
 /// identically when quoted — only `is_quoted` drives the body codegen — so the
-/// ADR 0101 substrate methods relabelled `@primitive`→`@intrinsic "=="`/`"class"`
-/// etc. stay on this list, since their selectors are operators/keyword selectors
-/// that cannot be bare-identifier structural intrinsics.)
+/// ADR 0101 substrate methods relabelled `@primitive`→`@intrinsic "class"`
+/// etc. stay on this list, since their selectors are keyword selectors that
+/// cannot be bare-identifier structural intrinsics.)
 ///
 /// Each entry is `(defining class, quoted selector)`. These are
-/// call-site-intercepted reflective / identity / dynamic-dispatch operations:
-/// their compiled method body is only a placeholder reached via indirect
-/// dispatch (e.g. `perform:`), so the runtime-dispatch fallback is the correct
-/// lowering for that body. See `dispatch_codegen.rs`
-/// (`beamtalk_object_class:class_send/3`) and `operators.rs` (binary-operator
-/// interception).
+/// call-site-intercepted reflective / dynamic-dispatch operations whose
+/// dynamic sends are also answered before the method body is reached (the
+/// value-type `dispatch/3` arms for `class` / `perform:withArguments:`, the
+/// actor and class-object dispatchers), so the runtime-dispatch fallback is
+/// an unreachable placeholder. See `dispatch_codegen.rs`
+/// (`beamtalk_object_class:class_send/3`).
 ///
 /// Keep this list minimal: a quoted primitive that maps 1:1 to a runtime
-/// function should be added to a per-class BIF table instead, not here.
+/// function should be added to a per-class BIF table instead, not here. A
+/// `ProtoObject` placeholder that a dynamic send *can* reach re-enters
+/// `bt@stdlib@proto_object:dispatch/3` with its own selector and loops forever
+/// — that is why the equality operators and the timeout / local `perform`
+/// variants are lowered in `generate_proto_object_bif` instead (BT-3919).
 const RUNTIME_DISPATCHED_PRIMITIVES: &[(&str, &str)] = &[
-    ("ProtoObject", "=="),
-    ("ProtoObject", "/="),
-    ("ProtoObject", "=:="),
-    ("ProtoObject", "=/="),
     ("ProtoObject", "class"),
     ("ProtoObject", "perform:withArguments:"),
-    ("ProtoObject", "perform:withArguments:timeout:"),
-    ("ProtoObject", "performLocally:withArguments:"),
     ("Object", "class"),
 ];
 
@@ -446,6 +444,23 @@ mod tests {
             &["Other".to_string()],
         ));
         assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_symbol_ordering() {
+        // BT-3924: Symbol defines `< > <= >=` (atom order = alphabetical).
+        for (sel, erl) in [("<", "<"), (">", ">"), ("<=", "=<"), (">=", ">=")] {
+            let result = doc_to_string(generate_primitive_bif(
+                "Symbol",
+                sel,
+                &["Other".to_string()],
+            ));
+            assert_eq!(
+                result,
+                Some(format!("call 'erlang':'{erl}'(Self, Other)")),
+                "Symbol {sel}"
+            );
+        }
     }
 
     #[test]
@@ -2149,6 +2164,58 @@ mod tests {
             "Object",
             "perform:withArguments:"
         ));
+        // BT-3919: reachable by a dynamic send, so lowered to a real body.
+        for selector in [
+            "==",
+            "/=",
+            "=:=",
+            "=/=",
+            "perform:withArguments:timeout:",
+            "performLocally:withArguments:",
+        ] {
+            assert!(!is_runtime_dispatched_primitive("ProtoObject", selector));
+        }
+    }
+
+    /// BT-3919: `ProtoObject`'s equality bodies are the Erlang BIF, not the
+    /// runtime-dispatch placeholder that re-entered
+    /// `bt@stdlib@proto_object:dispatch/3` with the same selector.
+    #[test]
+    fn test_proto_object_equality_lowers_to_bif() {
+        for (selector, erlang_op) in [("==", "=="), ("/=", "/="), ("=:=", "=:="), ("=/=", "=/=")] {
+            let result = doc_to_string(generate_primitive_bif(
+                "ProtoObject",
+                selector,
+                &["Other".to_string()],
+            ));
+            assert_eq!(
+                result,
+                Some(format!("call 'erlang':'{erlang_op}'(Self, Other)")),
+                "ProtoObject {selector}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_proto_object_perform_variants_do_not_self_dispatch() {
+        let timeout = doc_to_string(generate_primitive_bif(
+            "ProtoObject",
+            "perform:withArguments:timeout:",
+            &["Sel".to_string(), "Args".to_string(), "Ms".to_string()],
+        ));
+        assert_eq!(
+            timeout,
+            Some("call 'beamtalk_message_dispatch':'send'(Self, Sel, Args, Ms)".to_string())
+        );
+        let local = doc_to_string(generate_primitive_bif(
+            "ProtoObject",
+            "performLocally:withArguments:",
+            &["Sel".to_string(), "Args".to_string()],
+        ));
+        assert_eq!(
+            local,
+            Some("call 'beamtalk_object_class':'local_call'(Self, Sel, Args)".to_string())
+        );
     }
 
     #[test]

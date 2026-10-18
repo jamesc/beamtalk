@@ -21,9 +21,11 @@ fn test_if_true_with_field_mutation_generates_inline_case() {
 
     eprintln!("Generated code for ifTrue: with field mutation:\n{code}");
 
-    // Should use inline case expression — not beamtalk_message_dispatch:send
+    // Should use inline case expression — not a runtime `ifTrue:` send. (The
+    // untyped `self.count + 1` has its own operator guard, whose fallback is a
+    // `send` of `+`, BT-3925.)
     assert!(
-        !code.contains("'send'(") || !code.contains("'ifTrue:'"),
+        !code.contains(", 'ifTrue:', ["),
         "ifTrue: with mutation should NOT go through runtime dispatch. Got:\n{code}"
     );
 

@@ -11,7 +11,7 @@
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, UntypedTrust, classify_fields,
+    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
@@ -361,20 +361,20 @@ impl CoreErlangGenerator {
         self.current_method_param_types.clear();
     }
 
-    /// Records a method parameter's declared type for the arithmetic
-    /// fast-path classifier (keyed by **source** name → simple type name).
-    /// Only `Simple` annotations are recorded; anything else is left absent so
-    /// the classifier falls back to the runtime `is_number` guard, which is
-    /// always correct.
+    /// Records a method parameter's declared simple type for the operator
+    /// fast-path classifiers (keyed by **source** name → simple type name).
+    /// Callers record only the parameters
+    /// [`trusted_param_types`](crate::core_erlang::field_types::trusted_param_types)
+    /// answers — a `Simple` annotation on a name the body never rebinds — so
+    /// anything else is left absent and the classifier falls back to the
+    /// runtime guard, which is always correct.
     pub(in crate::core_erlang) fn record_method_param_type(
         &mut self,
         source_name: &str,
-        annotation: Option<&beamtalk_core::ast::TypeAnnotation>,
+        type_name: &str,
     ) {
-        if let Some(beamtalk_core::ast::TypeAnnotation::Simple(id)) = annotation {
-            self.current_method_param_types
-                .insert(source_name.to_string(), id.name.to_string());
-        }
+        self.current_method_param_types
+            .insert(source_name.to_string(), type_name.to_string());
     }
 
     /// Whether `name` refers to a `:: Integer/Float/Number`-annotated
@@ -389,7 +389,7 @@ impl CoreErlangGenerator {
     /// comparable type. A superset of [`Self::param_is_numeric`]: bare
     /// comparison BIFs are correct for `Character`/`String` too (both define
     /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
-    /// the bare-BIF fast path and skips the `is_object` guard.
+    /// the bare-BIF fast path and skips the runtime comparison guard.
     pub(in crate::core_erlang) fn param_is_comparable(&self, name: &str) -> bool {
         self.current_method_param_types
             .get(name)
@@ -400,40 +400,18 @@ impl CoreErlangGenerator {
     /// of `class`, for the operator fast-path classifiers. Replaces any
     /// previously-recorded facts (call once per class at codegen entry).
     ///
-    /// Own fields are classified from the class source by
-    /// [`classify_fields`] — declared types in full (unions included), untyped
-    /// fields by their default and every in-class `self.f :=` write (including
-    /// standalone `Class >> sel` methods for this class in `module`) when
-    /// `trust` allows it: an Actor's own writes are its fields' normal
-    /// writers, a Value's are not (its keyword constructor runs outside the
-    /// class). `classState:` variables are classified from the class methods
-    /// only in a **sealed** class: an inherited class method runs over a
-    /// subclass's redeclared variable (ADR 0130), whose default and writers
-    /// this class cannot see. Inherited
+    /// Own fields and `classState:` variables are classified by their
+    /// declaration alone ([`classify_fields`]): a declared type is recorded in
+    /// full (unions included), an untyped field is always guarded, whatever
+    /// its default or the class's own writes (BT-3925 — `spawnWith:`, keyword
+    /// constructors, subclasses and extensions write fields too). Inherited
     /// fields get their declared type from the class hierarchy; an inherited
-    /// *untyped* field has no visible writers, so it gets no fact and is
-    /// guarded (BT-3892).
+    /// untyped field gets no fact and is guarded (BT-3892).
     pub(in crate::core_erlang) fn set_class_field_types(
         &mut self,
         class: &beamtalk_core::ast::ClassDefinition,
-        module: &beamtalk_core::ast::Module,
-        trust: UntypedTrust,
     ) {
-        let standalone = |class_side: bool| {
-            module
-                .method_definitions
-                .iter()
-                .filter(move |d| {
-                    d.class_name.name == class.name.name && d.is_class_method == class_side
-                })
-                .map(|d| &d.method)
-        };
-        let instance_writers: Vec<&beamtalk_core::ast::MethodDefinition> =
-            class.methods.iter().chain(standalone(false)).collect();
-        let class_writers: Vec<&beamtalk_core::ast::MethodDefinition> =
-            class.class_methods.iter().chain(standalone(true)).collect();
-
-        let mut fields = classify_fields(&class.state, &instance_writers, trust);
+        let mut fields = classify_fields(&class.state);
         if let (Some(hierarchy), Some(superclass)) =
             (self.class_hierarchy.as_ref(), class.superclass.as_ref())
         {
@@ -447,13 +425,7 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        let class_var_trust = if class.is_sealed {
-            UntypedTrust::FromClassSource
-        } else {
-            UntypedTrust::Never
-        };
-        self.current_class_var_types =
-            classify_fields(&class.class_variables, &class_writers, class_var_trust);
+        self.current_class_var_types = classify_fields(&class.class_variables);
     }
 
     /// Populates instance-field facts for an **extension** method from the
@@ -482,30 +454,28 @@ impl CoreErlangGenerator {
     }
 
     /// Whether a `self.<name>` read is known to hold a value on which the
-    /// operator BIF for `primitive_set` is correct, so the fast path may stay
+    /// operator BIF for `op` is correct, so the fast path may stay
     /// bare. Inside a class method `self.<name>` is a class variable, so the
     /// class-side facts are consulted. A name with no fact is guarded — the
     /// runtime guard is always correct (BT-3892).
-    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, primitive_set: &[&str]) -> bool {
+    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, op: BareOperator) -> bool {
         let facts = if self.in_class_method() {
             &self.current_class_var_types
         } else {
             &self.current_class_field_types
         };
-        facts
-            .get(name)
-            .is_some_and(|fact| fact.is_bare(primitive_set))
+        facts.get(name).is_some_and(|fact| fact.is_bare(op))
     }
 
     /// `self.<field>` is comparison-bare when known primitive-ordered
-    /// (numeric, `Character`, or `String`).
+    /// (numeric, `Character`, or `String`) and not nilable (BT-3924).
     pub(in crate::core_erlang) fn field_is_comparable(&self, name: &str) -> bool {
-        self.field_is_bare(name, COMPARABLE_TYPES)
+        self.field_is_bare(name, BareOperator::Comparison)
     }
 
     /// `self.<field>` is arithmetic-bare when known numeric.
     pub(in crate::core_erlang) fn field_is_numeric(&self, name: &str) -> bool {
-        self.field_is_bare(name, NUMERIC_TYPES)
+        self.field_is_bare(name, BareOperator::Arithmetic)
     }
 
     /// Returns whether stdlib mode is active.
