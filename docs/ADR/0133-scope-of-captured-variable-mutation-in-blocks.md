@@ -1,7 +1,7 @@
 # ADR 0133: Scope of Captured-Variable Mutation in Blocks
 
 ## Status
-Proposed (2026-10-18)
+Accepted (2026-10-18); Proposed 2026-10-18
 
 Decides between two destinations for the state-threading compiler. If accepted
 as written, this ADR **supersedes ADR 0132** (callee-side threaded entry points)

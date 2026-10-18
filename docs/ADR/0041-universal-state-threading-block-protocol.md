@@ -64,6 +64,16 @@ This duality means:
 - The `BlockContext` enum (`ControlFlow`/`Stored`/`Passed`) exists solely to route between these two paths
 - Two parallel codegen paths (pure and stateful) must be maintained for every control-flow construct
 
+## Amendment (ADR 0133, 2026-10-18)
+
+The claim that local mutations work in *all* blocks is narrowed by
+[ADR 0133](0133-scope-of-captured-variable-mutation-in-blocks.md): a block
+may assign a captured local, field or class variable only as the direct
+argument of a control construct or a compiler-known collection message; a
+block that escapes may read but not assign, and the compiler reports it. The
+Tier 1 / Tier 2 block protocol below stays, scoped to those constructs and
+the stdlib collections.
+
 ## Decision
 
 Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.

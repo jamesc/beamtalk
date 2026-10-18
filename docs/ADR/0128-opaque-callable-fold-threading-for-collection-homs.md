@@ -1,8 +1,13 @@
 # ADR 0128: Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs
 
 ## Status
-Implemented (2026-09-24). Scope extended by BT-3615 (2026-09-24) — see
+Superseded by [ADR 0133](0133-scope-of-captured-variable-mutation-in-blocks.md) (2026-10-18); Implemented 2026-09-24. Scope extended by BT-3615 (2026-09-24) — see
 §Scope and §Amendment (BT-3615).
+
+Under ADR 0133 a block that reaches an actor method as a parameter cannot
+have assigned captured variables, so a non-literal callable forwarded to a
+collection message is the plain send and this fold is removed (ADR 0133
+Phase 2).
 
 ## Context
 

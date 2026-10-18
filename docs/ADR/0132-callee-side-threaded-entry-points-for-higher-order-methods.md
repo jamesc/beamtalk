@@ -1,7 +1,13 @@
 # ADR 0132: Callee-Side Threaded Entry Points for Higher-Order Methods
 
 ## Status
-Accepted (2026-10-17); Proposed 2026-10-16
+Superseded by [ADR 0133](0133-scope-of-captured-variable-mutation-in-blocks.md) (2026-10-18); Accepted 2026-10-17; Proposed 2026-10-16
+
+ADR 0133 decides that a block which escapes (stored, returned, passed to a
+user-defined method or sent to another process) may read captured variables
+but not assign them, so no callee-side threaded entry is needed. Phases 0a
+to 1c shipped (BT-3866 to BT-3871); nothing in Beamtalk called a threaded
+entry before this ADR was superseded, and ADR 0133 Phase 2 removes them.
 
 ## Implementation Tracking
 
