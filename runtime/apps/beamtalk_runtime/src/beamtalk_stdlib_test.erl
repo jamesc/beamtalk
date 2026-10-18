@@ -85,6 +85,12 @@ report_results(TestModule, Results) ->
     Passed = length([ok || {pass, _} <- Results]),
     Skipped = length([ok || {skip, _} <- Results]),
     Failed = length(Results) - Passed - Skipped,
+    %% EUnit shows a failed test's output as `output:<<"...`, which would glue
+    %% the first FAIL line onto that prefix and hide it from the parser.
+    case Failed of
+        0 -> ok;
+        _ -> io:format("~n")
+    end,
     %% Print individual failures first (before summary)
     lists:foreach(
         fun

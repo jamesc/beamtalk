@@ -338,7 +338,7 @@ fn extract_to_btscript_files(
 /// The fixture's class module is already loaded (it is `@load`ed by the
 /// chapter's btscript), so the wrapper only hands the class to
 /// `beamtalk_test_runner:run_class_for_eunit/2`, which runs it through the
-/// `BUnit` runner and prints the `FAIL`/`RESULTS:` lines `report_results` reads.
+/// `BUnit` runner and prints the `FAIL`/`RESULTS:` lines `parse_eunit_output` reads.
 fn bunit_eunit_wrapper(eunit_module: &str, class_name: &str, fixture_path: &str) -> String {
     let module = erlang_atom(eunit_module);
     let test_fn = erlang_atom(&format!("{eunit_module}_test_"));

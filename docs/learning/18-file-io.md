@@ -139,7 +139,7 @@ TestCase subclass: Ch18Streams
     result := (File open: self.tmpDir ++ "/data.txt" do: [:h |
       (h lines select: [:l | l size <= 3]) asList
     ]) unwrap
-    self assert: result size equals: 3
+    self assert: result size equals: 2    // "one" and "two"
 ```
 
 Stream operations are **lazy** — `take:` and `select:` don't read the whole
