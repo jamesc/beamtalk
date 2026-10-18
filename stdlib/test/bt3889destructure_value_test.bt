@@ -39,5 +39,5 @@ TestCase subclass: Bt3889DestructureValueTest
     self assert: a n equals: 1
     self assert: (a lastCf: false) equals: #(3, 4)
 
-  testActorStatefulBlock =>
-    self assert: Bt3889DestructureValueActor spawn tier2Block equals: #(#(#(1, 1), #(2, 3)), 3)
+  testActorBlockThroughASelfSend =>
+    self assert: Bt3889DestructureValueActor spawn tier2Block equals: #(#(1, 10), #(2, 20))

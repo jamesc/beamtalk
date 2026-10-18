@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0133 Phase 1 (BT-3902): a block may assign a captured variable only
+// where the compiler lowers it in place, as the block literal written directly
+// as the argument (or receiver) of a control construct or a compiler-known
+// collection message. A block that escapes may read captured variables but
+// not assign them; the compiler reports the assignment, naming how the block
+// escapes. The REPL root reports the same diagnostic as a method (surface
+// parity; BT-3858): each rejected input is refused before it runs, so no
+// binding changes. This case folds in the former PIN-BUG cases
+// adr0131_section6_escape_pins.btscript (BT-3806) and
+// adr0132_section6_pins.btscript (BT-3866), whose shapes are now this error.
+//
+// @load tests/repl-protocol/fixtures/adr0132_section6_callee.bt
+
+t := 0
+// => 0
+
+// ===========================================================================
+// The inline shapes still work from the REPL.
+// ===========================================================================
+
+#(1, 2, 3) do: [:x | t := t + x]
+// => _
+
+t
+// => 6
+
+[t < 10] whileTrue: [t := t + 1]
+// => nil
+
+t
+// => 10
+
+[t := t + 1] value
+// => 11
+
+r := #(1, 2) inject: 0 into: [:acc :x | t := t + 1. acc + x]
+// => 3
+
+t
+// => 13
+
+// Reads of a captured binding in an escaping block are fine.
+reader := [t + 1]
+// => Block/0
+
+reader value
+// => 14
+
+// ===========================================================================
+// Escaping shapes are compile errors, and leave `t` unchanged.
+// ===========================================================================
+
+t := 0
+// => 0
+
+// Passed to a user higher-order class method (ADR 0132's I1; I2 below).
+Adr0132ReplCallee calleeDirect: [t := t + 1]
+// => ERROR: `t` is assigned in a block passed to
+
+Adr0132ReplCallee calleeDo: [t := t + 1]
+// => ERROR: `t` is assigned in a block passed to
+
+// Stored in a binding (ADR 0132's I6 stored it, then sent it to `do:`).
+blk := [:x | t := t + x]
+// => ERROR: `t` is assigned in a block stored in `blk`
+
+// The value of the input (BT-3858: it used to be displayed, and the first
+// `value` raised).
+[t := t + 1]
+// => ERROR: `t` is assigned in a block that is the value of the expression
+
+// The value of a conditional arm, stored.
+c := true ifTrue: [[t := t + 10]] ifFalse: [[0]]
+// => ERROR: `t` is assigned in a block stored in `c`
+
+// An element of a collection literal.
+d := #([t := t + 100])
+// => ERROR: `t` is assigned in a block placed in a collection literal
+
+// None of the rejected inputs ran.
+t
+// => 0
+
+// The fix the message names: the block answers the value; the caller assigns.
+t := Adr0132ReplCallee calleeDirect: [t + 1]
+// => 1
+
+// ===========================================================================
+// A method body reports the same diagnostic when its class is loaded: the
+// actor self-send that ADR 0131 §6 exempted (BT-3755) is an escape.
+// ===========================================================================
+
+// @load-error tests/repl-protocol/fixtures/adr0133_escaping_block_error.bt => `t` is assigned in a block passed to `twice:`, which is not a construct the compiler threads it through

@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3755 (ADR 0131 §6), generalized by BT-3866 (ADR 0132 Phase 0a, epic
-// BT-3865): actor column of the ADR 0132 §"The inventory" shapes ADR 0131 §6
-// rejects today (see adr0132section6_class.bt.pending for the shape key).
-// Each `probe*` method compiled and answered 0 (write dropped) or raised before
-// BT-3755 (probed on the debug build); each is now a §6 compile error. The
-// `callee*` methods are the callees; they compile on their own. I2 is
-// BT-3755's four probes; I3 is a callee that is not `sealed` (overridable);
-// I6 is a stored block as the callable of `do:`. I1 and a same-class I4 chain
-// to a `sealed` direct-invoking callee already compile (BT-3755, see
-// adr0131section6exemptions_actor.bt) and I7/I8 are class-side only. Inert:
-// the runner discovers only `.bt`. ADR 0132 moves each shape it fixes into a
-// compiled fixture.
+// BT-3865): actor column of the ADR 0132 §"The inventory" shapes (see
+// adr0132section6_class.bt.rejected for the shape key). Each `probe*` method
+// compiled and answered 0 (write dropped) or raised before BT-3755 (probed on
+// the debug build); each is now a permanent ADR 0133 escaping-block compile
+// error (BT-3902). The `callee*` methods are the callees; they compile on
+// their own. I2 is BT-3755's four probes; I3 is a callee that is not `sealed`
+// (overridable); I6 is a stored block as the callable of `do:`. I1 and a
+// same-class I4 chain to a `sealed` direct-invoking callee, which BT-3755
+// exempted, are adr0133former_exemptions_actor.bt.rejected; I7/I8 are
+// class-side only. Inert: the runner discovers only `.bt`.
 //
-// `adr0132_section6_inventory_pins` in beamtalk-core checks that every
-// `probe*` method is rejected and no `callee*` method is.
+// `adr0133_rejected_fixtures_report_the_escaping_assignment` in beamtalk-core
+// checks that every `probe*` method is reported at its assignment and no
+// `callee*` method is.
 //
 // Not representable here (one class per file), pinned by
 // `section6_actor_self_send_to_a_non_threading_callee_is_an_error` instead:

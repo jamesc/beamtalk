@@ -56,12 +56,6 @@ Actor subclass: Adr0131LocalRebindActor
       ]
     #[r, t]
 
-  s4 =>
-    t := 0
-    b := [t := t + 1]
-    b value
-    t
-
   s5 =>
     t := 0
     r := 4 =:= 5

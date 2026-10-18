@@ -55,13 +55,12 @@ myVar := #increment
 
 // --- Semantic warnings (BT-407) ---
 
-// BT-851: Captured variable mutation in stored closure is now supported via Tier 2
-// stateful blocks. Stored closures with mutations now compile successfully and
-// propagate mutations back to the caller.
+// ADR 0133 (BT-3902): a stored closure may read captured variables but not
+// assign them (BT-851 had made this compile as a Tier 2 stateful block).
 count := 0
 // => 0
 myBlock := [count := count + 1]
-// => Block/1
+// => ERROR: `count` is assigned in a block stored in `myBlock`
 
 // --- BT-665: New local definitions in stored closures ---
 

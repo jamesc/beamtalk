@@ -425,6 +425,32 @@ code.
   carry). Neither Symphony nor the stdlib has such a class today; the
   `Enumerable` users in the stdlib (`Ets`, `ChangeLog`) are stdlib code.
 
+  > **Amendment (2026-10-18, BT-3903): honour.** Measured on `main`, the
+  > premise above is wrong in the user's favour: a block literal that
+  > writes, sent with a compiler-known collection message (`do:`,
+  > `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`,
+  > …), is lowered in place as a fold over `beamtalk_collection:to_list/1`,
+  > which drives the receiver's own `do:` with a pure block. So the write
+  > threads for any receiver with a working `do:`, whether that `do:`
+  > forwards to a stdlib collection or walks by hand, and whether the other
+  > messages are the class's, a trait's provisions or absent. The decision
+  > is to keep that: a user collection with `do:` honours writing blocks
+  > from these messages, and neither `trait_expansion.rs` nor the protocol
+  > sources carry a gate of their own (a provision written as `self do:
+  > [... acc := ...]` is the same in-place fold in a value or plain class;
+  > not yet in an `Actor`'s own method, where it drops the write today,
+  > BT-3918, the reason `Enumerable` is built on `elements`). An actor
+  > with `do:` honours writing blocks sent from another process. With a
+  > writing block,
+  > these messages *mean* the fold over `do:`: a class that overrides one
+  > of them (other than `do:`) with different semantics does not run its
+  > override (BT-3843's repro, pinned; BT-3916 may replace this with a
+  > refusal). Pinned by `stdlib/test/adr0133enumerable_user_test.bt`. Two
+  > corrections to the bullet: `Enumerable` requires `elements`, not
+  > `do:`; and a user package cannot yet `uses:` a stdlib protocol at all
+  > (BT-3915), so the test's user collections use a package-local trait
+  > over `do:`, and `Ets` stands in for a real `uses: Enumerable` class.
+
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.
 - Non-local return from any block, escaping or not, is unchanged.
@@ -459,6 +485,7 @@ do (the block then threads through the user's `do:` only if that `do:` is
 also protocol-provided or forwards to a stdlib collection), or they refuse it
 with `stateful_block_dispatch` like any user method. Either answer is
 acceptable under this ADR; the one that is not is dropping the write.
+*Decided (BT-3903): honour; see the amendment under § Consequences.*
 
 **Phase 2: removal (L).** In dependency order: the caller-side hook that was
 never emitted; `send_threaded/4`, `call_threaded/3`,

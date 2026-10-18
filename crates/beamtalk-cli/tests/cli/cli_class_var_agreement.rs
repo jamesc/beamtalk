@@ -14,8 +14,10 @@
 //! interpretation says, so the three spellings agree with each other.
 //!
 //! One property, `class_var_agreement_enabled_shapes`, draws [`Shapes::ENABLED`]:
-//! every shape, `local_touch` (an outer local mutated inside a protected
-//! block) included since ADR 0131 Phase 5a (BT-3751). It is a normal test
+//! every shape that compiles, `local_touch` (an outer local mutated inside a
+//! protected block) included since ADR 0131 Phase 5a (BT-3751), and
+//! `stored_value` left out since ADR 0133 made it a compile error (BT-3902).
+//! It is a normal test
 //! (ADR 0130 Phase 3, BT-3713); `just test-class-var-corpus` runs it with a
 //! larger draw.
 //!
@@ -745,7 +747,8 @@ fn property(shapes: Shapes) {
 #[test]
 fn class_var_agreement_enabled_shapes() {
     // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
-    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED` (every shape).
+    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED`
+    // (every shape that compiles).
     property(corpus_shapes_from_env(Shapes::ENABLED));
 }
 

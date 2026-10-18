@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3903 (ADR 0133 Phase 1): call sites that send the compiler-known
+// collection messages to a user collection (`do:` plus a trait providing the
+// rest, adr0133enumerable_walkable.bt) or to the stdlib's own `uses:
+// Enumerable` class `Ets`, with a block
+// literal, once with a block that assigns a captured local ("Write") and once
+// with a pure block ("Pure"). `bag` is an untyped parameter, so the receiver
+// is known only at run time. Each Write method answers the message's result
+// and the captured local, so the test sees both the value and the write. The
+// expected answers are in stdlib/test/adr0133enumerable_user_test.bt.
+
+Object subclass: Adr0133EnumerableUser
+
+  class doWrite: bag =>
+    t := 0
+    bag do: [:x | t := t + x]
+    t
+
+  class injectWrite: bag =>
+    n := 0
+    sum := bag
+      inject: 0
+      into: [:acc :x |
+        n := n + 1
+        acc + x
+      ]
+    #[sum, n]
+
+  class collectWrite: bag =>
+    n := 0
+    r := bag
+      collect: [:x |
+        n := n + 1
+        x * 10
+      ]
+    #[r, n]
+
+  class selectWrite: bag =>
+    n := 0
+    r := bag
+      select: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #[r, n]
+
+  class detectWrite: bag =>
+    n := 0
+    r := bag
+      detect: [:x |
+        n := n + 1
+        x > 1
+      ]
+      ifNone: [nil]
+    #[r, n]
+
+  class detectNoneWrite: bag =>
+    n := 0
+    r := bag
+      detect: [:x |
+        n := n + 1
+        x > 100
+      ]
+      ifNone: [#none]
+    #[r, n]
+
+  class anySatisfyWrite: bag =>
+    n := 0
+    r := bag
+      anySatisfy: [:x |
+        n := n + 1
+        x > 2
+      ]
+    #[r, n]
+
+  class injectPure: bag => bag inject: 0 into: [:acc :x | acc + x]
+
+  class collectPure: bag => bag collect: [:x | x * 10]
+
+  class selectPure: bag => bag select: [:x | x > 1]
+
+  class detectPure: bag => bag detect: [:x | x > 1] ifNone: [nil]
+
+  class detectNonePure: bag => bag detect: [:x | x > 100] ifNone: [#none]
+
+  class anySatisfyPure: bag => bag anySatisfy: [:x | x > 2]

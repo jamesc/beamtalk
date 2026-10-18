@@ -133,52 +133,15 @@ TestCase subclass: ThreadedClassEntryTest
       ThreadedEntryFixture twice: [:x :y | x]
     ] raise: #arity_mismatch
 
-  // --- the plain entry refuses a Tier 2 block (BT-3871 review) ---------------
+  // --- the plain entry and a Tier 2 block (BT-3871 review) -------------------
   //
-  // The plain entry has no caller map to thread: a block that assigns a captured
-  // variable reaching it through a late-bound send must raise the error the plain
-  // path always raised, with the block unrun, never run with its writes dropped.
-  // ADR 0131 section 6 rejects the direct shapes at compile time, so each block is
-  // laundered through an Erlang FFI tuple (exempt from section 6), as in
-  // blocks_test.bt; if that exemption narrows, these tests must change.
-  testAWritingBlockSentToADynamicReceiverIsRefusedNotDropped =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryFixture
-    self should: [c twice: laundered] raise: #stateful_block_dispatch
-    self assert: t equals: 0
-
-  testAWritingBlockSentByPerformIsRefusedNotDropped =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryFixture
-    self should: [
-      c perform: #twice: withArguments: (Erlang lists duplicate: 1 of: laundered)
-    ] raise: #stateful_block_dispatch
-    self assert: t equals: 0
-
-  testAWritingBlockPassedOnThroughAForwardIsRefused =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryFixture
-    self should: [c twiceVia: laundered] raise: #stateful_block_dispatch
-    self assert: t equals: 0
-
-  testAWritingBlockGivenToACollectionCallableIsRefused =>
-    t := 0
-    @expect dead_assignment
-    writer := [:x | t := t + x]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryFixture
-    self should: [c each: #(1, 2) do: laundered] raise: #stateful_block_dispatch
-    self assert: t equals: 0
-
+  // The plain entry has no caller map to thread, so a (marked, BT-3885) Tier 2
+  // block reaching it raises `stateful_block_dispatch`, unrun. ADR 0133
+  // (BT-3902) makes a block that assigns a captured variable and escapes a
+  // compile error, so no Beamtalk source can build one any more; the refusal is
+  // pinned from Erlang (beamtalk_threaded_class_entries_tests.erl) until ADR
+  // 0133 Phase 2 removes the entries.
+  //
   // A wrong-arity block (one argument too many) has a Tier 2 block's arity but not
   // its mark (BT-3885), so it is the arity mistake it is, and it is not run.
   testAWrongArityBlockIsAnArityMismatch =>
@@ -193,34 +156,10 @@ TestCase subclass: ThreadedClassEntryTest
     ] raise: #arity_mismatch
     self deny: ((Erlang erlang get_keys) includes: #bt3885Ran)
 
-  // The refusal names the class method the caller sent, not the `value` the body
-  // would have sent the block.
-  testTheRefusalNamesTheClassMethod =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryFixture
-    error := [c twice: laundered] on: Exception do: [:e | e]
-    self assert: error selector equals: #twice:
-    self assert: (error message includesSubstring: "'twice:' on ThreadedEntryFixture class") equals: true
-    self assert: (error message includesSubstring: "the block was not run") equals: true
-
-  // --- the gate with a real Acc map: the Tier 2 caller path (BT-3885) ---------
+  // --- the gate with a real Acc map (BT-3885) --------------------------------
   //
-  // No Beamtalk caller emits a threaded send before ADR 0132 Phase 1e, so these
-  // call the gate directly through the FFI, as that send will.
-  testACompiledTier2BlockIsThreadedWithARealAcc =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    reply := (Erlang beamtalk_dispatch)
-      call_threaded: laundered
-      with: #()
-      with: #{}
-    self assert: (reply at: 1) equals: 1
-
+  // No Beamtalk caller emits a threaded send, so these call the gate directly
+  // through the FFI.
   testAWrongArityBlockGivenARealAccIsNotRun =>
     Erlang erlang erase: #bt3885Ran
     self
@@ -246,17 +185,8 @@ TestCase subclass: ThreadedClassEntryTest
       ]
       raise: #arity_mismatch
 
-  // The same through an INHERITED class method: the subclass resolves `twice:` to
-  // the parent's module and its plain wrapper.
-  testAWritingBlockSentToAnInheritedClassMethodIsRefusedNotDropped =>
-    t := 0
-    @expect dead_assignment
-    writer := [t := t + 1]
-    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    c := ThreadedEntryChild
-    self should: [c twice: laundered] raise: #stateful_block_dispatch
-    self assert: t equals: 0
-
+  // An INHERITED class method: the subclass resolves `twice:` to the parent's
+  // module and its plain wrapper.
   testAPureBlockThroughAnInheritedClassMethodStillWorks =>
     c := ThreadedEntryChild
     self assert: (c twice: [9]) equals: 9

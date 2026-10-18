@@ -581,8 +581,28 @@ reports semantic diagnostics (CLI `build`/`check`/`lint`/`test`, REPL eval and
 load, LSP `textDocument/publishDiagnostics`, MCP `lint`/`diagnostic_summary`)
 reports the same message at the same span. No operation is surface-specific.
 
-- Category `Tier2BlockNoReturnChannel` (permanent): a block that writes an
-  outer local flows to a send that cannot return the write.
+- Category `Tier2BlockNoReturnChannel` (permanent; ADR 0133's escaping-block
+  diagnostic, BT-3902): a block that assigns a captured local escapes (is
+  stored in a local, returned, stored in a field or class variable, placed in
+  a collection literal, answered by a collection operation's block, or passed
+  to any method the compiler does not lower in place). Message "`t` is
+  assigned in a block <shape>" at the assignment, a note at the block, and a
+  note listing the threading constructs generated from
+  `state_threading_selectors::assignment_threading_constructs`. One source,
+  `validators/local_threading.rs`, for CLI `build`/`check`/`lint`/`test`, REPL
+  eval and load, LSP and MCP: the same message at the same span everywhere.
+  - **REPL behaviour change (BT-3858, mandated by ADR 0133 Phase 1).** The
+    REPL root used to skip the escape check: `[t := t + 1]` as an input's
+    value, `b := [t := t + 1]` and `d := #([t := t + 1])` compiled and the
+    first later `value` raised. Each is now this compile error, before the
+    input runs, so no binding changes; a block passed to a user method from
+    the prompt was already one. The message text changed on every surface
+    (it was "block writes outer local `t`, but `sel:` cannot return the
+    write"). Pinned by `tests/repl-protocol/cases/adr0133_escaping_block.btscript`.
+  - **Actor exemption retired (BT-3755).** A writing block passed to a
+    `sealed` method of an actor's own class, or a stored block sent `value` in
+    an actor method, compiled and threaded its write; both are now this error
+    on every surface.
 - Category `UnmigratedLocalThreading` (temporary; BT-3841 retires it): a
   local-threading construct whose blocks write an outer local sits in a
   position that does not thread the write back yet, including the statement
@@ -774,9 +794,9 @@ reports the same message at the same span. No operation is surface-specific.
   read from the workspace binding of the same name) and keep its write; it
   now raises and leaves the bindings unchanged. It is a run-time error, not a
   compile error: no new compile error, and the display format is unchanged.
-- The REPL sees only the current input: a stored block bound in one input and
-  sent `value` in a later one is not seen by the §6 check and still raises
-  `stateful_block_dispatch` at run time.
+- The REPL sees only the current input, but a block that assigns a captured
+  binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
+  hand a later one a writing block to send `value`.
 
 ### `internal:` ThreadedIr verifier warning (ADR 0111 Addendum 17, BT-3724)
 

@@ -25,8 +25,9 @@
 // `adr0131_probe_matrix_pins` in
 // crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs, which
 // checks that every pending fixture method is rejected and every method here
-// is not. Class and value-type s4 (`b := [t := t + 1]. b value`) is a
-// permanent §6 error and is pinned only there.
+// is not. s4 (`b := [t := t + 1]. b value`) is a permanent ADR 0133
+// escaping-block error in every context (the actor column compiled until
+// BT-3902) and is pinned only there.
 //
 // Value-type o5/o13 differ from the ADR table's "pass": a value type cannot
 // write `self.n :=` (ADR 0042), so the fixture passes the same construct to
@@ -55,8 +56,6 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testS3Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) s3) equals: #[3, 2]
-
-  testS4Actor => self assert: ((Adr0131LocalRebindActor spawn) s4) equals: 1
 
   testS5Class => self assert: (Adr0131LocalRebindClass s5) equals: #[1, 1]
 
