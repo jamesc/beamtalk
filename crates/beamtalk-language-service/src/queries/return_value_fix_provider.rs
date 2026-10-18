@@ -42,8 +42,7 @@
 //! selector and the check: "Assign the result of `twice:` to `t` (check
 //! `twice:` answers the block's value)".
 //!
-//! The
-//! escape analysis is not re-derived here: the diagnostic names the
+//! The escape analysis is not re-derived here: the diagnostic names the
 //! assignment (its span) and the block (the note spanning it), and this
 //! provider only checks the AST shape around them. Every edit is delimited by
 //! AST spans.
@@ -178,8 +177,9 @@ fn assignment_count(block: &Block) -> usize {
 
 /// The span of the statement whose expression is a synchronous message send
 /// with the block literal at `block_span` as its receiver or one of its
-/// arguments, with the send's selector and (a copy of) that block. Searches every statement sequence
-/// of the module: the top-level expressions, method bodies and block bodies.
+/// arguments, with the send's selector and (a copy of) that block. Searches
+/// every statement sequence of the module: the top-level expressions, method
+/// bodies and block bodies.
 fn statement_sending_block(module: &Module, block_span: Span) -> Option<(Span, EcoString, Block)> {
     let mut found = None;
     for_each_expr_seq(module, |seq| {

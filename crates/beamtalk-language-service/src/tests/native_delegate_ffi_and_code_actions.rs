@@ -432,7 +432,7 @@ fn code_actions_return_value_not_offered_for_two_locals() {
     assert!(
         !actions
             .iter()
-            .any(|a| a.title.contains("Return the new value")),
+            .any(|a| a.title.starts_with("Assign the result of")),
         "{actions:?}"
     );
 }
