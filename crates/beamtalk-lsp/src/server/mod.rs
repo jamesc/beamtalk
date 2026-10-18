@@ -572,9 +572,11 @@ impl LanguageServer for Backend {
 
     /// Returns code actions available at the requested range.
     ///
-    /// Currently surfaces "Add annotation: -> `ClassName`" quick-fixes for
+    /// Surfaces "Add annotation: -> `ClassName`" quick-fixes for
     /// unannotated methods whose return type the `TypeChecker` can infer
-    /// (ADR 0045 Phase 1b).
+    /// (ADR 0045 Phase 1b), and the ADR 0133 "return the value instead" fix
+    /// on the escaping-block diagnostic (BT-3914). Each action's edits are
+    /// sent as one `WorkspaceEdit`.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "source files over 4GB are not supported"
@@ -608,17 +610,19 @@ impl LanguageServer for Backend {
         let lsp_actions: CodeActionResponse = actions
             .into_iter()
             .map(|action| {
-                let insert_pos = offset_to_position(action.insert_at as usize, &source);
-                let edit_range = Range {
-                    start: insert_pos,
-                    end: insert_pos,
-                };
-                let text_edit = TextEdit {
-                    range: edit_range,
-                    new_text: action.new_text.to_string(),
-                };
+                let text_edits = action
+                    .edits
+                    .iter()
+                    .map(|edit| TextEdit {
+                        range: Range {
+                            start: offset_to_position(edit.span.start() as usize, &source),
+                            end: offset_to_position(edit.span.end() as usize, &source),
+                        },
+                        new_text: edit.new_text.to_string(),
+                    })
+                    .collect();
                 let mut changes = HashMap::new();
-                changes.insert(uri.clone(), vec![text_edit]);
+                changes.insert(uri.clone(), text_edits);
                 let lsp_action = CodeAction {
                     title: action.title.to_string(),
                     kind: Some(CodeActionKind::QUICKFIX),

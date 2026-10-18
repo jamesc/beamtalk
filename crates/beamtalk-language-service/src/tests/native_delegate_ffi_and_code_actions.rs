@@ -186,10 +186,13 @@ fn code_actions_returns_annotation_suggestion_for_unary_method() {
         "title should mention inferred type: {title}",
         title = action.title
     );
-    assert_eq!(action.new_text, "-> Integer ", "wrong inserted text");
+    assert_eq!(
+        action.edits[0].new_text, "-> Integer ",
+        "wrong inserted text"
+    );
 
     // Verify insertion point is at the `=>` of the method
-    let before_body = &source[..action.insert_at as usize];
+    let before_body = &source[..action.edits[0].span.start() as usize];
     assert!(
         before_body.ends_with("count "),
         "insertion should be before `=>`, got prefix: {before_body:?}"
@@ -209,7 +212,7 @@ fn code_actions_returns_annotation_suggestion_for_early_return_method() {
 
     let action = &actions[0];
     assert!(action.title.contains("Integer"));
-    assert_eq!(action.new_text, "-> Integer ");
+    assert_eq!(action.edits[0].new_text, "-> Integer ");
 }
 
 #[test]
@@ -301,7 +304,7 @@ fn code_actions_returns_annotation_for_keyword_method() {
         "expected one code action for keyword method"
     );
     assert!(actions[0].title.contains("String"));
-    assert_eq!(actions[0].new_text, "-> String ");
+    assert_eq!(actions[0].edits[0].new_text, "-> String ");
 }
 
 #[test]
@@ -366,4 +369,66 @@ fn find_references_selector_cross_file_unary() {
     assert!(refs.len() >= 2);
     assert!(refs.iter().any(|r| r.file == file_a));
     assert!(refs.iter().any(|r| r.file == file_b));
+}
+
+// ── ADR 0133 "return the value instead" (BT-3914) ────────────
+
+/// The escaping-block diagnostic's quick-fix: the block answers the new value
+/// and the statement sending it assigns it, which clears the diagnostic.
+#[test]
+fn code_actions_return_value_instead_on_escaping_block() {
+    use beamtalk_core::source_analysis::DiagnosticCategory;
+
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("src/Twice.bt");
+    let source = "Object subclass: Twice\n  class twice: b => b value. b value\n\n  \
+                  class run =>\n    t := 0\n    Twice twice: [t := t + 1]\n    t\n";
+    service.update_file(file.clone(), source.to_string());
+    let escaping = |diagnostics: &[crate::Diagnostic]| {
+        diagnostics
+            .iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .count()
+    };
+    assert_eq!(escaping(&service.diagnostics(&file)), 1);
+
+    let at = len32(&source[..source.find("t + 1]").unwrap()]);
+    let actions = service.code_actions(&file, at, at);
+    let fix = actions
+        .iter()
+        .find(|a| a.title.contains("Return the new value of `t`"))
+        .unwrap_or_else(|| panic!("no return-value action: {actions:?}"));
+
+    let mut fixed = source.to_string();
+    for edit in fix.edits.iter().rev() {
+        fixed.replace_range(edit.span.as_range(), &edit.new_text);
+    }
+    assert!(
+        fixed.contains("    t := Twice twice: [t + 1]\n"),
+        "unexpected rewrite: {fixed}"
+    );
+    service.update_file(file.clone(), fixed);
+    assert_eq!(escaping(&service.diagnostics(&file)), 0);
+}
+
+/// Not offered when the block assigns more than one captured local: the
+/// diagnostic keeps its message and no rewrite is suggested.
+#[test]
+fn code_actions_return_value_not_offered_for_two_locals() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("src/Twice.bt");
+    let source = "Object subclass: Twice\n  class twice: b => b value. b value\n\n  \
+                  class run =>\n    t := 0\n    u := 0\n    \
+                  Twice twice: [u := u + 1. t := t + 1]\n    t + u\n";
+    service.update_file(file.clone(), source.to_string());
+    assert!(service.diagnostics(&file).iter().any(|d| d.category
+        == Some(beamtalk_core::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel)));
+    let at = len32(&source[..source.find("t := t + 1]").unwrap()]);
+    let actions = service.code_actions(&file, at, at);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| a.title.contains("Return the new value")),
+        "{actions:?}"
+    );
 }

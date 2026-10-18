@@ -82,7 +82,7 @@ pub use runtime_delegate::{
 pub use value_objects::{
     ByteOffset, CallHierarchyTarget, CodeAction, Completion, CompletionKind, Diagnostic,
     DocumentSymbol, DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position,
-    SignatureHelp, SignatureInfo,
+    SignatureHelp, SignatureInfo, SourceEdit,
 };
 
 use beamtalk_core::ast::{
@@ -157,7 +157,9 @@ pub trait LanguageService {
     /// Returns code actions available at the given byte range in a file.
     ///
     /// Returns "Add annotation: -> `ClassName`" quick-fixes for unannotated
-    /// methods whose return type can be inferred by the `TypeChecker`.
+    /// methods whose return type can be inferred by the `TypeChecker`, and
+    /// the ADR 0133 "return the value instead" fix on an escaping-block
+    /// diagnostic (`queries::return_value_fix_provider`).
     /// Should respond in <50ms for typical file sizes.
     fn code_actions(&self, file: &Utf8PathBuf, start: u32, end: u32) -> Vec<CodeAction>;
 }
@@ -2141,6 +2143,17 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
+        let source = &file_data.source;
+        // ADR 0133 (BT-3914): "return the value instead" on the escaping-block
+        // diagnostic, keyed off the diagnostic itself (no escape analysis here).
+        let mut actions = crate::queries::return_value_fix_provider::compute_return_value_actions(
+            &file_data.module,
+            source,
+            || self.diagnostics(file),
+            start,
+            end,
+        );
+
         let inferred = beamtalk_core::semantic_analysis::type_checker::infer_method_return_types(
             &file_data.module,
             self.project_index.hierarchy(),
@@ -2148,11 +2161,8 @@ impl LanguageService for SimpleLanguageService {
         );
 
         if inferred.is_empty() {
-            return Vec::new();
+            return actions;
         }
-
-        let source = &file_data.source;
-        let mut actions = Vec::new();
 
         for class in &file_data.module.classes {
             for (method, is_class_method) in class
