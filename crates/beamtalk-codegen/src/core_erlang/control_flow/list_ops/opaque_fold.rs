@@ -198,7 +198,7 @@ impl CoreErlangGenerator {
     /// `detect:ifNone:`'s `ifNone:` handler in a fold over `Acc`, bound by
     /// [`Self::bind_if_none_handler_for_acc`]: a zero-argument callable (a
     /// threading parameter is never used inside it,
-    /// [`beamtalk_core::semantic_analysis::tier2_callee`]) invoked through
+    /// ADR 0132 §1) invoked through
     /// `call_threaded/3` like every callable the body runs, so a block answers
     /// its value with the fold's final `Acc`, and a non-fun handler (an object
     /// answering `value`, `nil`) gets the `value` send the plain path gives it

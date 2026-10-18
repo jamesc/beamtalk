@@ -164,10 +164,6 @@ pub struct CoreErlangGenerator {
     /// Phase 2 (BT-3904) removed the class-method threaded entries, the only
     /// threaded bodies; deleted with the `Acc` family by BT-3905.
     pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState,
-    /// The names of every class defined in the module being compiled (ADR 0132
-    /// §1: "the unit"), read by the threaded-body producer's forward
-    /// classification. Never set since BT-3904; deleted by BT-3905.
-    pub(in crate::core_erlang) unit_class_names: std::collections::HashSet<String>,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -481,7 +477,6 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             in_threaded_body: false,
             threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState::default(),
-            unit_class_names: std::collections::HashSet::new(),
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),

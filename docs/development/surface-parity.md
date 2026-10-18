@@ -712,14 +712,10 @@ reports the same message at the same span. No operation is surface-specific.
   on every surface (CLI, REPL load of a class definition, LSP, MCP). REPL
   expressions (the REPL root) are not affected, and the REPL display is
   unchanged. Tracked for lowering in BT-3878.
-- An actor instance self-send of a block that writes an outer local is
-  accepted only for a callee of the same class that threads the block
-  (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every
-  surface. A callee defined by a superclass or in another file is never seen,
-  so the self-send is an error in the REPL and LSP as well. A self-send made
-  from a standalone `Ac >> method` is always an error, even when the callee is
-  `sealed` in the same module: codegen's class pre-scan reads only the methods
-  in the class body.
+- An actor instance self-send of a block that writes an outer local is an
+  error whatever the callee (ADR 0133, BT-3902: an escaping writing block;
+  the same-class threading exemption of BT-3755 is gone, and its threading
+  index with it, BT-3906); it is the same error on every surface.
 - All three are errors with no `[diagnostics]` key and no `@expect` category.
 - **`do:` as a producer (ADR 0131 Phase 2c, BT-3796).** `do:` joined the
   loop-and-fold producer table (`producer_body_arg_index`), so a `do:` whose

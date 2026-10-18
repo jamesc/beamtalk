@@ -24,11 +24,21 @@ use super::{CodeGenError, Result};
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::normalize_cascade;
-use beamtalk_core::semantic_analysis::tier2_callee::{
-    ThreadingUse, UseShape, classify_threading_use, forward_target_of,
-};
 use beamtalk_core::source_analysis::Span;
 use std::collections::HashSet;
+
+/// How a node used a threading parameter. Never constructed since BT-3906
+/// deleted its classifier (`tier2_callee::classify_threading_use`).
+#[expect(
+    dead_code,
+    reason = "no threaded body exists since BT-3904; BT-3905 deletes this module"
+)]
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) enum ThreadingUse {
+    Invocation,
+    CallableHom,
+    Forward,
+}
 
 /// The per-body state of a threaded body. Always empty since BT-3904 (see the
 /// module docs).
@@ -129,15 +139,6 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// Whether a send to `receiver` resolves inside the unit, exactly as the
-    /// threading index resolved it (`forward_target_of`).
-    fn forward_resolves(&self, receiver: &Expression) -> bool {
-        forward_target_of(receiver, &self.class_name().into(), true, &|c| {
-            self.unit_class_names.contains(c)
-        })
-        .is_some()
-    }
-
     /// The use of a threading parameter that the node `expr` itself is (never
     /// one in a child), with the index of the parameter in the body's list.
     /// Pure: the probe `subexpr_needs_prelude` and the producer share it.
@@ -145,19 +146,11 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> Option<(usize, ThreadingUse)> {
-        if !self.in_threaded_body {
-            return None;
-        }
-        self.threaded_body
-            .params
-            .iter()
-            .enumerate()
-            .find_map(|(i, name)| {
-                match classify_threading_use(expr, name, &|r| self.forward_resolves(r)) {
-                    UseShape::Use(kind) => Some((i, kind)),
-                    UseShape::NotAUse | UseShape::Malformed => None,
-                }
-            })
+        // BT-3906 deleted the use classifier with the threading index
+        // (`tier2_callee`), and nothing sets `in_threaded_body` since
+        // BT-3904: no node is a use, in a threaded body or out of one.
+        let _ = (expr, self.in_threaded_body);
+        None
     }
 
     /// Whether `expr` is a use or holds one at a node `threaded_expression`
@@ -220,7 +213,7 @@ impl CoreErlangGenerator {
         let value = match kind {
             ThreadingUse::Invocation => self.lower_threaded_invocation(expr, span)?,
             ThreadingUse::CallableHom => self.lower_threaded_callable_hom(expr, span)?,
-            ThreadingUse::Forward { .. } => self.lower_threaded_forward(expr)?,
+            ThreadingUse::Forward => self.lower_threaded_forward(expr)?,
         };
         self.finish_precompiled_scope(scope)?;
         prelude.extend(value.prelude);

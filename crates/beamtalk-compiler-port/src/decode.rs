@@ -292,7 +292,6 @@ pub(crate) fn parse_method_infos_from_map(
                     .and_then(term_to_atom)
                     .is_some_and(|v| v == "internal"),
                 spawns_block: false,
-                threading_params: Vec::new(),
                 return_type,
                 param_types,
                 doc: None,

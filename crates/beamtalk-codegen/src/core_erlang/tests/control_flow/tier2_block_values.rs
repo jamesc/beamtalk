@@ -896,8 +896,8 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
 
 #[test]
 fn test_bt3755_self_send_promotes_block_only_for_a_callee_that_threads_it() {
-    // The class pre-scan reads the same predicate as the ADR 0131 §6
-    // diagnostic (`semantic_analysis::tier2_callee`): a captured-local write
+    // The class pre-scan reads the actor-channel predicate
+    // (`block_facts::callee_threads_block_param`): a captured-local write
     // is packed into the actor state around the self-send only when the
     // callee is a sealed method of the class that invokes the block directly.
     let threading = "Actor subclass: Ctr\n  sealed ap: b => b value\n\n  run =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n";

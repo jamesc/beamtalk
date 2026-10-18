@@ -749,7 +749,6 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![Some(DeclaredType::parse("Block(R)"))],
             doc: None,
