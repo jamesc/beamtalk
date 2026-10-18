@@ -16,10 +16,10 @@
 //! actor methods) compiles with a silent verifier, and with the gate split the verifier reports
 //! every one.
 
-use super::local_producer_agreement::{CONSTRUCTS, body_sources};
+use super::local_producer_agreement::{CONSTRUCTS, body_sources, loop_body_agreement};
 use super::local_producer_agreement_lookup::rejected;
 use super::verifier_report;
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
 
 /// The BT-3839 repro, in each method kind.
 fn repro_sources() -> [String; 3] {
@@ -34,7 +34,8 @@ fn repro_sources() -> [String; 3] {
 /// `do:`-kind fold frames whose body's last statement is `{s}`, or a loop or fold around it. Only
 /// the `do:` tail can end in a raw value: under the same split, a `collect:` / `inject:into:` /
 /// predicate body still ends in its correctly shaped epilogue, and the write the missed producer
-/// drops (inside an opaque statement) is outside what `FoldLocalsNotCarried` checks.
+/// drops (inside an opaque statement) is outside what `FoldLocalsNotCarried` checks; the
+/// loop-body producer-agreement check catches it ([`OTHER_FOLD_FRAMES`]).
 const FOLD_TAIL_FRAMES: &[&str] = &[
     "#(1, 2) do: [:k | {s}]",
     "#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | {s}]",
@@ -67,11 +68,6 @@ fn programs() -> Vec<(String, String)> {
     out
 }
 
-/// Whether a compile's panic message is a verifier finding (rather than a structured rejection).
-fn is_verifier_report(report: &str) -> bool {
-    report.contains("ThreadedIr verify found")
-}
-
 #[test]
 fn the_bt3839_repro_is_reported_when_the_fold_statement_gate_splits() {
     for src in repro_sources() {
@@ -88,22 +84,20 @@ fn the_bt3839_repro_is_reported_when_the_fold_statement_gate_splits() {
 
 #[test]
 fn every_fold_ending_in_a_producer_compiles_with_a_silent_verifier() {
-    let mut accepted = 0;
-    let failures: Vec<String> = programs()
-        .into_iter()
-        .filter_map(|(name, src)| match verifier_report(&src, None) {
-            None => {
-                accepted += 1;
-                None
-            }
-            Some(report) if is_verifier_report(&report) => Some(format!("{name}: {report}")),
-            Some(_) => None,
+    // `programs` keeps only what the Phase 0 / §6 checks accept, so any panic here (a verifier
+    // report or a codegen crash) is a failure.
+    let programs = programs();
+    let failures: Vec<String> = programs
+        .iter()
+        .filter_map(|(name, src)| {
+            verifier_report(src, None).map(|report| format!("{name}: {report}"))
         })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
     assert!(
-        accepted >= 400,
-        "only {accepted} programs compile: the corpus has thinned out"
+        programs.len() >= 400,
+        "only {} programs compile: the corpus has thinned out",
+        programs.len()
     );
 }
 
@@ -111,9 +105,6 @@ fn every_fold_ending_in_a_producer_compiles_with_a_silent_verifier() {
 fn a_fold_ending_in_a_producer_is_reported_when_the_statement_gate_splits() {
     let mut unreported = Vec::new();
     for (name, src) in programs() {
-        if verifier_report(&src, None).is_some() {
-            continue;
-        }
         match verifier_report(&src, Some(LocalRebindFault::SplitFoldStatementGate)) {
             Some(report) if report.contains("FoldLocalsNotCarried") => {}
             Some(report) => unreported.push(format!("{name}: wrong report: {report}")),
@@ -121,4 +112,47 @@ fn a_fold_ending_in_a_producer_is_reported_when_the_statement_gate_splits() {
         }
     }
     assert!(unreported.is_empty(), "{}", unreported.join("\n\n"));
+}
+
+/// Fold frames of every other kind whose body holds `{s}` before its own tail: under the gate
+/// split each still ends in a correctly shaped accumulator, so `FoldLocalsNotCarried` stays
+/// silent and the dropped write is the producer-agreement check's to catch.
+const OTHER_FOLD_FRAMES: &[&str] = &[
+    "#(1, 2) collect: [:k | {s}. k]",
+    "#(1, 2) inject: 0 into: [:a :k | {s}. a + k]",
+    "#(1, 2) anySatisfy: [:k | {s}. false]",
+    "#(1, 2) allSatisfy: [:k | {s}. true]",
+    "#(1, 2) collect: [:k | 2 timesRepeat: [{s}]. k]",
+];
+
+#[test]
+fn a_split_gate_in_any_other_fold_kind_is_caught_by_the_producer_agreement_check() {
+    let mut compared = 0;
+    let mut uncaught = Vec::new();
+    for frame in OTHER_FOLD_FRAMES {
+        for construct in CONSTRUCTS {
+            for statement in TAIL_STATEMENTS {
+                for src in body_sources(frame, construct, statement) {
+                    match loop_body_agreement(&src) {
+                        Ok(0) => continue,
+                        Ok(_) => compared += 1,
+                        Err(disagreement) => panic!("agrees unfaulted: {disagreement}"),
+                    }
+                    let faulted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        fault::with(LocalRebindFault::SplitFoldStatementGate, || {
+                            loop_body_agreement(&src)
+                        })
+                    }));
+                    if matches!(faulted, Ok(Ok(_))) {
+                        uncaught.push(format!("{frame} / {statement} / {construct}\n{src}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(uncaught.is_empty(), "{}", uncaught.join("\n\n"));
+    assert!(
+        compared >= 100,
+        "only {compared} programs compared: the corpus has thinned out"
+    );
 }

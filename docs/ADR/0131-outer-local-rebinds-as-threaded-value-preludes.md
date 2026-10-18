@@ -601,7 +601,9 @@ Each check fails on a repro before the fix:
   gate and statement classifier are split again. It checks the shape, not
   which versions the accumulator reads: a write lost inside an opaque
   statement before a correctly shaped tail (the same split in a `collect:`
-  body) is caught by the producer-agreement corpora instead.
+  body) is caught by the loop-body producer-agreement check instead, which
+  `fold_locals_carried_corpus.rs` runs under the same fault for the
+  `collect:`, `inject:into:` and satisfy folds.
 
 `report_threaded_ir_verify_errors` reports all six. Nothing gets a new
 `debug_assert!`.

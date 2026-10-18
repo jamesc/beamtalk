@@ -594,86 +594,102 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
         for construct in CONSTRUCTS {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
-                    let (module, parse_diags) = parse(lex_with_eof(&src));
-                    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
-                    let analysis = analyse_full(&module, AnalysisContext::default());
-                    let rejected = analysis.diagnostics.iter().any(|d| {
-                        d.severity == Severity::Error
-                            && matches!(
-                                d.category,
-                                Some(
-                                    DiagnosticCategory::UnmigratedLocalThreading
-                                        | DiagnosticCategory::Tier2BlockNoReturnChannel
-                                )
-                            )
-                    });
-                    if rejected {
-                        continue;
-                    }
-                    let class = &module.classes[0];
-                    let method = class
-                        .methods
-                        .iter()
-                        .chain(&class.class_methods)
-                        .next()
-                        .expect("one method");
-                    let mut expected = core_producers(&method.body);
-                    let mut value_bearing = HashSet::new();
-                    let kind = kind_of(&src);
-                    for stmt in &method.body {
-                        core_body_producers(
-                            &stmt.expression,
-                            false,
-                            kind,
-                            &mut expected,
-                            &mut value_bearing,
-                        );
-                    }
-                    // An actor fold frame (any enclosing one, BT-3796) lowers
-                    // only the statement itself through the producer: Phase 0
-                    // must reject every value-bearing site there (BT-3797,
-                    // `r := xs inject: ...` in a `do:`, and the same site in a
-                    // letrec nested in the fold). The narrowing is the shared
-                    // `is_loop_body_producer_site`, which codegen's
-                    // `with_body_producer_sites` reads too, so the lowered
-                    // set compared below drops those sites as well.
-                    assert!(
-                        !src.starts_with("Actor") || value_bearing.is_empty(),
-                        "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"
-                    );
-                    let (generated, records) = recording_producers(|| {
-                        generate_module_with_warnings(&module, CodegenOptions::new("agree"))
-                    });
-                    assert!(generated.is_ok(), "{src}: {:?}", generated.err());
-                    let lowered: HashMap<Span, Vec<String>> = records
-                        .into_iter()
-                        .filter(|(_, names)| !names.is_empty())
-                        .collect();
-                    for (span, names) in &expected {
-                        assert_eq!(
-                            lowered.get(span),
-                            Some(names),
-                            "the core rule accepts the construct at {span:?} as a producer \
-                             threading {names:?}, but codegen lowered {lowered:?}\n{src}"
-                        );
-                        checked += 1;
-                    }
-                    let mut whole = HashSet::new();
-                    for stmt in &method.body {
-                        whole_values(&stmt.expression, &mut whole);
-                    }
-                    for (span, names) in &lowered {
-                        assert!(
-                            expected.contains_key(span) || whole.contains(span),
-                            "codegen lowered the construct at {span:?} as a producer \
-                             threading {names:?}, but the core rule names {expected:?}\n{src}"
-                        );
+                    match loop_body_agreement(&src) {
+                        Ok(compared) => checked += compared,
+                        Err(disagreement) => panic!("{disagreement}"),
                     }
                 }
             }
         }
     }
     assert!(checked > 100, "only {checked} loop-body sites compared");
+}
+
+/// The loop-body agreement check for one program: `Ok` with the number of
+/// producer sites compared (0 when the Phase 0 / §6 checks reject it), or
+/// `Err` naming where the core rule and codegen's producer lowering disagree.
+/// Also run with the fold statement gate split (BT-3863,
+/// `fold_locals_carried_corpus.rs`), where it must disagree.
+pub(super) fn loop_body_agreement(src: &str) -> Result<usize, String> {
+    let (module, parse_diags) = parse(lex_with_eof(src));
+    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    let rejected = analysis.diagnostics.iter().any(|d| {
+        d.severity == Severity::Error
+            && matches!(
+                d.category,
+                Some(
+                    DiagnosticCategory::UnmigratedLocalThreading
+                        | DiagnosticCategory::Tier2BlockNoReturnChannel
+                )
+            )
+    });
+    if rejected {
+        return Ok(0);
+    }
+    let class = &module.classes[0];
+    let method = class
+        .methods
+        .iter()
+        .chain(&class.class_methods)
+        .next()
+        .expect("one method");
+    let mut expected = core_producers(&method.body);
+    let mut value_bearing = HashSet::new();
+    let kind = kind_of(src);
+    for stmt in &method.body {
+        core_body_producers(
+            &stmt.expression,
+            false,
+            kind,
+            &mut expected,
+            &mut value_bearing,
+        );
+    }
+    // An actor fold frame (any enclosing one, BT-3796) lowers
+    // only the statement itself through the producer: Phase 0
+    // must reject every value-bearing site there (BT-3797,
+    // `r := xs inject: ...` in a `do:`, and the same site in a
+    // letrec nested in the fold). The narrowing is the shared
+    // `is_loop_body_producer_site`, which codegen's
+    // `with_body_producer_sites` reads too, so the lowered
+    // set compared below drops those sites as well.
+    if src.starts_with("Actor") && !value_bearing.is_empty() {
+        return Err(format!(
+            "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"
+        ));
+    }
+    let (generated, records) = recording_producers(|| {
+        generate_module_with_warnings(&module, CodegenOptions::new("agree"))
+    });
+    if let Err(e) = generated {
+        return Err(format!("{src}: {e:?}"));
+    }
+    let lowered: HashMap<Span, Vec<String>> = records
+        .into_iter()
+        .filter(|(_, names)| !names.is_empty())
+        .collect();
+    for (span, names) in &expected {
+        if lowered.get(span) != Some(names) {
+            return Err(format!(
+                "the core rule accepts the construct at {span:?} as a producer \
+                 threading {names:?}, but codegen lowered {lowered:?}\n{src}"
+            ));
+        }
+    }
+    let mut whole = HashSet::new();
+    for stmt in &method.body {
+        whole_values(&stmt.expression, &mut whole);
+    }
+    for (span, names) in &lowered {
+        if !(expected.contains_key(span) || whole.contains(span)) {
+            return Err(format!(
+                "codegen lowered the construct at {span:?} as a producer \
+                 threading {names:?}, but the core rule names {expected:?}\n{src}"
+            ));
+        }
+    }
+    Ok(expected.len())
 }
 
 // ---------------------------------------------------------------------------

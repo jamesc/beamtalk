@@ -316,7 +316,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// the `do:` tail can) or in the other mode's accumulator. A write lost
     /// inside an opaque statement before a correctly shaped tail (a nested
     /// loop the statement classifier missed, ending a `collect:` body) is
-    /// the producer-agreement corpora's to catch, not this check's.
+    /// the loop-body producer-agreement check's to catch, not this check's
+    /// (proved under the same fault by `fold_locals_carried_corpus.rs`).
     FoldLocalsNotCarried {
         threads: Vec<String>,
         found: Option<FoldCarry>,
@@ -705,9 +706,9 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
     if threads.is_empty() {
         return Vec::new();
     }
-    let found = match body.last() {
-        Some(ThreadedStmt::FoldAccumulator { carry, .. }) => Some(carry),
-        _ => None,
+    let (found, at) = match body.last() {
+        Some(ThreadedStmt::FoldAccumulator { carry, span, .. }) => (Some(carry), *span),
+        _ => (None, at),
     };
     let carried = match (mode, found) {
         (ThreadingMode::TupleAcc(_), Some(FoldCarry::Locals(locals))) => locals == threads,
@@ -720,10 +721,7 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
     vec![VerifyError::FoldLocalsNotCarried {
         threads: threads.to_vec(),
         found: found.cloned(),
-        at: match body.last() {
-            Some(ThreadedStmt::FoldAccumulator { span, .. }) => *span,
-            _ => at,
-        },
+        at,
     }]
 }
 
