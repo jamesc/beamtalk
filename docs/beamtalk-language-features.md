@@ -684,7 +684,7 @@ Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the p
 
 ##### Equality operators cannot be overridden
 
-Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997):
+Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997). A *dynamic* send — `x perform: #'==' withArguments: #(y)`, `x respondsTo: #'=='` — works on every receiver (integers, pids, references, value objects, actors): it reaches `ProtoObject`'s declarations, whose bodies are the same BIFs (BT-3919).
 
 ```beamtalk
 Value subclass: Money

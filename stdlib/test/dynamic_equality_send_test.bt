@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3919: a *dynamic* send of an equality operator (`perform:`,
+// `respondsTo:`) must reach ProtoObject's `==` / `/=` / `=:=` / `=/=` for every
+// receiver kind. A call-site `a == b` is lowered straight to the Erlang BIF
+// (ADR 0002), but a dynamic send walks the receiver's dispatch chain: value
+// types stopped at Object (raising does_not_understand), and ProtoObject's own
+// method bodies re-entered its dispatch/3 forever (an actor timed out).
+
+TestCase subclass: DynamicEqualitySendTest
+
+  testIntegerPerformEquals =>
+    self assert: (1 perform: #'==' withArguments: #(1))
+    self deny: (1 perform: #'==' withArguments: #(2))
+
+  testIntegerPerformLooseEqualsFloat =>
+    self assert: (1 perform: #'==' withArguments: #(1.0))
+    self deny: (1 perform: #'=:=' withArguments: #(1.0))
+
+  testIntegerRespondsToEquals =>
+    self assert: (1 respondsTo: #'==')
+
+  testPidPerformEquals =>
+    p := Erlang erlang self
+    self assert: (p perform: #'==' withArguments: #(p))
+
+  testPidRespondsToEquals =>
+    self assert: (Erlang erlang self respondsTo: #'==')
+
+  testReferencePerformEquals =>
+    r := Erlang erlang make_ref
+    other := Erlang erlang make_ref
+    self assert: (r perform: #'==' withArguments: #(r))
+    self deny: (r perform: #'==' withArguments: #(other))
+
+  testFloatPerformEquals =>
+    self assert: (1.0 perform: #'==' withArguments: #(1))
+
+  testSymbolPerformEquals =>
+    self assert: (#a perform: #'==' withArguments: #(#a))
+
+  testListPerformEquals =>
+    self assert: (#(1) perform: #'==' withArguments: #(#(1)))
+
+  testValuePerformEquals =>
+    d := Duration seconds: 3
+    self assert: (d perform: #'==' withArguments: #(d))
+    self assert: (d respondsTo: #'==')
+
+  testPerformInequality =>
+    self assert: (1 perform: #'/=' withArguments: #(2))
+    self assert: (#a perform: #'=/=' withArguments: #(#b))
+
+  testActorPerformEquals =>
+    c := Counter spawn
+    self assert: (c perform: #'==' withArguments: #(c))
+    c stop
+
+  testUnknownSelectorStillDoesNotUnderstand =>
+    self deny: (1 respondsTo: #noSuchSelectorBT3919)
+    self should: [1 perform: #noSuchSelectorBT3919] raise: #does_not_understand

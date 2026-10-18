@@ -74,10 +74,6 @@ end,
 EunitApps = [beamtalk_runtime, beamtalk_workspace, beamtalk_compiler],
 EunitExcluded = [
     %% {Module, "why it cannot run in the default EUnit pass"}
-    {beamtalk_opaque_type_tests,
-        "red, BT-3919: a dynamic `==` send to a Pid/Port/Reference raises "
-        "does_not_understand and respondsTo: #== answers false (also for Integer), so "
-        "pid_equality_inherited and {pid,port,reference}_responds_to fail"}
 ],
 RuntimeRoot = filename:dirname(filename:absname(SCRIPT)),
 ErlFilesIn = fun(SubDir) ->

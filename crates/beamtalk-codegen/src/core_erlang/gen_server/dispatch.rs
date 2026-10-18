@@ -172,10 +172,8 @@ impl CoreErlangGenerator {
         // Delegate dynamically (by class name, through
         // beamtalk_dispatch:responds_to/2's live registry walk), not via a
         // module name resolved at this class's own compile time — see
-        // SuperclassDelegation's doc comment. ProtoObject is the hierarchy
-        // root with no further module to delegate to (mirrors
-        // superclass_module_name's own ProtoObject special case), so no
-        // superclass delegation is emitted for it.
+        // SuperclassDelegation's doc comment. No superclass delegation is
+        // emitted for a direct ProtoObject subclass.
         let superclass_name = class.superclass_name();
         let superclass = (superclass_name != "ProtoObject")
             .then_some(SuperclassDelegation::Dynamic(superclass_name));

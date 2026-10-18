@@ -4438,14 +4438,19 @@ impl CoreErlangGenerator {
 
     /// Computes the module name for a superclass in the dispatch chain.
     ///
-    /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
-    /// all stdlib types → `bt@stdlib@{snake_case}`.
+    /// Returns `None` only for `ProtoObject`'s own superclass (`nil`, spelled
+    /// `"none"` by `ClassDefinition::superclass_name`) — `ProtoObject` is the root
+    /// of the hierarchy, so its `dispatch/3` raises `does_not_understand` and
+    /// there is no module to delegate to. `Object` (and any other `ProtoObject
+    /// subclass:`) delegates to `bt@stdlib@proto_object`, so the methods
+    /// `ProtoObject` defines (`==`, `/=`, `=:=`, `=/=`, …) are reachable by a
+    /// dynamic send to any value (BT-3919). For stdlib classes, applies the
+    /// ADR 0016 naming convention: all stdlib types → `bt@stdlib@{snake_case}`.
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix.
     fn superclass_module_name(&self, superclass: &str) -> Option<String> {
-        if superclass == "ProtoObject" {
+        if superclass == "none" {
             return None;
         }
         Some(self.compiled_module_name(superclass))
