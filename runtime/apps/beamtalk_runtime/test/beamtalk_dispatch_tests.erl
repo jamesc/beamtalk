@@ -1601,10 +1601,11 @@ bt3482_drain_trace_calls(Acc) ->
 %% Hand-written Tier 2 block `[t := t + 1]` over a hand-packed Acc:
 %% the shape ADR 0131 codegen emits.
 ct4367_increment_t() ->
-    fun(Acc) ->
+    %% Under the Tier 2 mark codegen gives every Tier 2 block (BT-3885).
+    beamtalk_tier2_test_block:mark(fun(Acc) ->
         T = maps:get('__local__t', Acc) + 1,
         {T, Acc#{'__local__t' => T}}
-    end.
+    end).
 
 %% Start a minimal class whose module exports `value:` (for non-fun callable
 %% path tests). Uses beamtalk_threaded_wire_test_helper which already exports
@@ -1635,7 +1636,9 @@ call_threaded_test_() ->
             )
         end},
         {"Tier 2 fun with arguments receives Args prepended, Acc last", fun() ->
-            Block = fun(X, Acc) -> {X, Acc#{'__local__x' => X}} end,
+            Block = beamtalk_tier2_test_block:mark(fun(X, Acc) ->
+                {X, Acc#{'__local__x' => X}}
+            end),
             ?assertEqual(
                 {3, #{'__local__x' => 3}},
                 beamtalk_dispatch:call_threaded(Block, [3], #{})

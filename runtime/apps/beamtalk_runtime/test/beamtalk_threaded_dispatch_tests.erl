@@ -56,12 +56,13 @@ with_class(Name, Meta, Fun) ->
     end.
 
 %% The hand-written Tier 2 block `[t := t + 1]` over a hand-packed `Acc`:
-%% `fun(Acc) -> {Value, Acc1}`, the shape ADR 0131 codegen emits.
+%% `fun(Acc) -> {Value, Acc1}`, the shape ADR 0131 codegen emits, under the
+%% Tier 2 mark codegen gives it (BT-3885).
 increment_t() ->
-    fun(Acc) ->
+    beamtalk_tier2_test_block:mark(fun(Acc) ->
         T = maps:get('__local__t', Acc) + 1,
         {T, Acc#{'__local__t' => T}}
-    end.
+    end).
 
 %% `Fun` raises `#beamtalk_error{kind = stateful_block_dispatch}` with the
 %% precise ADR 0132 §4 form for `Class` and `Selector`.
@@ -117,7 +118,9 @@ call_threaded_test_() ->
             )
         end},
         {"a Tier 2 fun with arguments receives Acc last", fun() ->
-            Block = fun(X, Acc) -> {X, Acc#{'__local__x' => X}} end,
+            Block = beamtalk_tier2_test_block:mark(fun(X, Acc) ->
+                {X, Acc#{'__local__x' => X}}
+            end),
             ?assertEqual(
                 {3, #{'__local__x' => 3}}, beamtalk_dispatch:call_threaded(Block, [3], #{})
             )
@@ -151,15 +154,38 @@ call_threaded_test_() ->
         end},
         {"a plain block one argument too many raises arity_mismatch, not a badarg downstream",
             fun() ->
-                %% `fun(X) -> X end` called with no arguments has arity N+1, so the
-                %% gate applies it as a Tier 2 fun; its reply is not `{Result, Map}`.
+                %% `fun(X) -> X end` called with no arguments has arity N+1 but
+                %% no Tier 2 mark (BT-3885), so the gate refuses it unapplied.
                 try beamtalk_dispatch:call_threaded(fun(X) -> X end, [], #{}) of
                     R -> ?assertEqual(raised, {returned, R})
                 catch
                     error:#{error := #beamtalk_error{} = E} ->
                         ?assertMatch(#beamtalk_error{kind = arity_mismatch, class = 'Block'}, E)
                 end
-            end}
+            end},
+        {"an unmarked block one argument too many is not run (BT-3885)", fun() ->
+            Self = self(),
+            Wrong = fun(_X) ->
+                Self ! ran,
+                1
+            end,
+            ?assertError(
+                #{error := #beamtalk_error{kind = arity_mismatch}},
+                beamtalk_dispatch:call_threaded(Wrong, [], #{n => 1})
+            ),
+            receive
+                ran -> ?assert(false)
+            after 0 -> ok
+            end
+        end},
+        {"an unmarked block answering {ok, Map} is not a Tier 2 reply (BT-3885)", fun() ->
+            ?assertError(
+                #{error := #beamtalk_error{kind = arity_mismatch}},
+                beamtalk_dispatch:call_threaded(
+                    fun(_X) -> {ok, #{foreign => map}} end, [], #{n => 1}
+                )
+            )
+        end}
     ]}.
 
 %%====================================================================

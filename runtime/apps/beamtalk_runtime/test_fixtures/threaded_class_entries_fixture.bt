@@ -88,3 +88,22 @@ sealed Object subclass: ThreadedClassEntriesFixture
   class sealed plain: n => n + 1
 
   class sealed storeAway: b => #(1, 2) collect: [:x | b]
+
+  // BT-3885: a Tier 2 block (it writes the captured `t`) and a pure block as
+  // codegen compiles them, laundered through an Erlang FFI tuple (exempt from
+  // ADR 0131 section 6, as in blocks_test.bt), so the EUnit gate tests can check
+  // the runtime recognises the mark codegen mints, end to end.
+  class sealed writerBlock =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer)
+
+  class sealed pureBlock: n => [:x | x + n]
+
+  // A Tier 2 block that answers a pure block created inside it.
+  class sealed nestingWriterBlock =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1. [:x | x]]
+    Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer)
