@@ -31,11 +31,13 @@
       "sumOver:with:": {"entry_fn": "__t2_class_sumOver:with:", "positions": [1]},
       "twice:": {"entry_fn": "__t2_class_twice:", "positions": [0]},
       "twiceVia:": {"entry_fn": "__t2_class_twiceVia:", "positions": [0]},
+      "two:via:": {"entry_fn": "__t2_class_two:via:", "positions": [0, 1]},
+      "two:with:": {"entry_fn": "__t2_class_two:with:", "positions": [0, 1]},
       "viaOwn:": {"entry_fn": "__t2_class_viaOwn:", "positions": [0]},
       "withLocals:": {"entry_fn": "__t2_class_withLocals:", "positions": [0]}
     },
     "unthreaded_selectors": [],
     "unthreaded_class_selectors": ["plain:", "storeAway:", "callThen:firstPositiveIn:", "guarded:flag:", "find:", "nlrForward:", "nlrFold:with:"],
-    "why": "ADR 0132 Phase 1c (BT-3871): a class method with a threading parameter (an invocation, the callable of a collection HOM, a same-class pass-on, as a conditional's receiver, in a cascade) advertises its entry and positions; `plain:` (no block), `storeAway:` (stores the block, ADR 0132 section 1) and every method whose body holds a block that does `^` (`callThen:firstPositiveIn:`, `guarded:flag:`, `find:`, `nlrForward:`, `nlrFold:with:`: the `^` could answer a stale `Acc`, BT-3871 review; ADR 0132 Phase 3) advertise none."
+    "why": "ADR 0132 Phase 1c (BT-3871): a class method with a threading parameter (an invocation, the callable of a collection HOM, a same-class pass-on, as a conditional's receiver, in a cascade, and two parameters with one used inside the other's argument, `two:with:` / `two:via:`, BT-3890) advertises its entry and positions; `plain:` (no block), `storeAway:` (stores the block, ADR 0132 section 1) and every method whose body holds a block that does `^` (`callThen:firstPositiveIn:`, `guarded:flag:`, `find:`, `nlrForward:`, `nlrFold:with:`: the `^` could answer a stale `Acc`, BT-3871 review; ADR 0132 Phase 3) advertise none."
   }
 ]
