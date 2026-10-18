@@ -36,7 +36,6 @@ TestCase subclass: Adr0133EnumerableUserTest
     ] ensure: [table delete]
 
   // --- `do:` forwarding to the inner List ---
-
   testForwardingDoWrite =>
     self assert: (Adr0133EnumerableUser doWrite: self forwarding) equals: 6
 
@@ -65,7 +64,6 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser anySatisfyPure: self forwarding)
 
   // --- `do:` by hand (a `whileTrue:` over an index) ---
-
   testHandWalkDoWrite =>
     self assert: (Adr0133EnumerableUser doWrite: self handWalk) equals: 6
 
@@ -94,30 +92,52 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser anySatisfyPure: self handWalk)
 
   // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---
-
   testEtsWrite =>
-    self withEts: [:t |
-      self assert: (Adr0133EnumerableUser doWrite: t) equals: 6
-      self assert: (Adr0133EnumerableUser injectWrite: t) equals: #[6, 3]
-      self assert: (Adr0133EnumerableUser collectWrite: t) equals: #[#(10, 20, 30), 3]
-      self assert: (Adr0133EnumerableUser selectWrite: t) equals: #[#(2, 3), 3]
-      self assert: (Adr0133EnumerableUser detectWrite: t) equals: #[2, 2]
-      self assert: (Adr0133EnumerableUser detectNoneWrite: t) equals: #[#none, 3]
-      self assert: (Adr0133EnumerableUser anySatisfyWrite: t) equals: #[true, 3]
-    ]
+    self
+      withEts: [:t |
+        self assert: (Adr0133EnumerableUser doWrite: t) equals: 6
+        self assert: (Adr0133EnumerableUser injectWrite: t) equals: #[6, 3]
+        self assert: (Adr0133EnumerableUser collectWrite: t) equals: #[#(10, 20, 30), 3]
+        self assert: (Adr0133EnumerableUser selectWrite: t) equals: #[#(2, 3), 3]
+        self assert: (Adr0133EnumerableUser detectWrite: t) equals: #[2, 2]
+        self assert: (Adr0133EnumerableUser detectNoneWrite: t) equals: #[#none, 3]
+        self assert: (Adr0133EnumerableUser anySatisfyWrite: t) equals: #[true, 3]
+      ]
 
   testEtsPure =>
-    self withEts: [:t |
-      self assert: (Adr0133EnumerableUser injectPure: t) equals: 6
-      self assert: (Adr0133EnumerableUser collectPure: t) equals: #(10, 20, 30)
-      self assert: (Adr0133EnumerableUser selectPure: t) equals: #(2, 3)
-      self assert: (Adr0133EnumerableUser detectPure: t) equals: 2
-      self assert: (Adr0133EnumerableUser detectNonePure: t) equals: #none
-      self assert: (Adr0133EnumerableUser anySatisfyPure: t)
-    ]
+    self
+      withEts: [:t |
+        self assert: (Adr0133EnumerableUser injectPure: t) equals: 6
+        self assert: (Adr0133EnumerableUser collectPure: t) equals: #(10, 20, 30)
+        self assert: (Adr0133EnumerableUser selectPure: t) equals: #(2, 3)
+        self assert: (Adr0133EnumerableUser detectPure: t) equals: 2
+        self assert: (Adr0133EnumerableUser detectNonePure: t) equals: #none
+        self assert: (Adr0133EnumerableUser anySatisfyPure: t)
+      ]
+
+  // --- An actor with only `do:`, from another process ---
+  // The writing form folds over the actor's `do:`; the pure form would be
+  // `does_not_understand` (it has no `inject:into:`), so only writes here.
+  testActorWrite =>
+    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}
+    [
+      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
+      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]
+      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]
+      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]
+      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]
+      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
+    ] ensure: [a stop]
+
+  testActorSelfDoWritePinBug =>
+    // PIN-BUG (BT-3918): inside the actor's own method, `self do:` with a
+    // writing block silently drops the write and answers 0, not 6. A fix
+    // flips this to `equals: 6` (or the shape becomes a compile error and
+    // this test and `selfDoSum` go).
+    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}
+    [self assert: a selfDoSum equals: 0] ensure: [a stop]
 
   // --- BT-3843: the class's own `anySatisfy:` ---
-
   testOwnAnySatisfyPure =>
     // The class's own method runs: it looks only at the first element.
     self deny: (Adr0133EnumerableUser anySatisfyPure: self ownAny)

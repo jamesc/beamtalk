@@ -12,8 +12,9 @@ Value subclass: Adr0133EnumerableHandWalk
 
   do: block =>
     i := 1
-    [i <= self.items size] whileTrue: [
-      block value: (self.items at: i)
-      i := i + 1
-    ]
+    [i <= self.items size]
+      whileTrue: [
+        block value: (self.items at: i)
+        i := i + 1
+      ]
     nil

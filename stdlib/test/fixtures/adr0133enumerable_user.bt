@@ -20,53 +20,60 @@ Object subclass: Adr0133EnumerableUser
 
   class injectWrite: bag =>
     n := 0
-    sum := bag inject: 0 into: [:acc :x |
-      n := n + 1
-      acc + x
-    ]
+    sum := bag
+      inject: 0
+      into: [:acc :x |
+        n := n + 1
+        acc + x
+      ]
     #[sum, n]
 
   class collectWrite: bag =>
     n := 0
-    r := bag collect: [:x |
-      n := n + 1
-      x * 10
-    ]
+    r := bag
+      collect: [:x |
+        n := n + 1
+        x * 10
+      ]
     #[r, n]
 
   class selectWrite: bag =>
     n := 0
-    r := bag select: [:x |
-      n := n + 1
-      x > 1
-    ]
+    r := bag
+      select: [:x |
+        n := n + 1
+        x > 1
+      ]
     #[r, n]
 
   class detectWrite: bag =>
     n := 0
-    r := bag detect: [:x |
-      n := n + 1
-      x > 1
-    ] ifNone: [nil]
+    r := bag
+      detect: [:x |
+        n := n + 1
+        x > 1
+      ]
+      ifNone: [nil]
     #[r, n]
 
   class detectNoneWrite: bag =>
     n := 0
-    r := bag detect: [:x |
-      n := n + 1
-      x > 100
-    ] ifNone: [#none]
+    r := bag
+      detect: [:x |
+        n := n + 1
+        x > 100
+      ]
+      ifNone: [#none]
     #[r, n]
 
   class anySatisfyWrite: bag =>
     n := 0
-    r := bag anySatisfy: [:x |
-      n := n + 1
-      x > 2
-    ]
+    r := bag
+      anySatisfy: [:x |
+        n := n + 1
+        x > 2
+      ]
     #[r, n]
-
-  class doPure: bag => bag do: [:x | x + 1]
 
   class injectPure: bag => bag inject: 0 into: [:acc :x | acc + x]
 
