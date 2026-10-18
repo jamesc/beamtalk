@@ -602,10 +602,9 @@ fn test_field_assignment_in_field_stored_block_no_error() {
 }
 
 #[test]
-fn test_captured_variable_mutation_in_stored_block_no_warning() {
-    // ADR 0041 Phase 3: Captured variable mutations in stored blocks are
-    // valid and supported via the Tier 2 stateful block protocol. Tier 2
-    // threads state through StateAcc maps so mutations propagate correctly.
+fn test_captured_variable_mutation_in_stored_block_is_the_escaping_block_error() {
+    // ADR 0041 Phase 3 made captured variable mutations in stored blocks
+    // valid via the Tier 2 stateful block protocol; ADR 0133 retires that.
     let count_def = Expression::Assignment {
         target: Box::new(Expression::Identifier(Identifier::new(
             "count",
@@ -655,10 +654,17 @@ fn test_captured_variable_mutation_in_stored_block_no_warning() {
     let module = Module::new(vec![bare(count_def), bare(block_assignment)], test_span());
     let result = analyse(&module);
 
-    // Should have NO diagnostic — captured variable mutations in stored blocks are valid
+    // ADR 0133 amends ADR 0041: a stored block may read captured variables
+    // but not assign them, so the one diagnostic is the escaping-block error.
     assert_eq!(
-        result.diagnostics.len(),
-        0,
+        result
+            .diagnostics
+            .iter()
+            .map(|d| d.category)
+            .collect::<Vec<_>>(),
+        vec![Some(
+            crate::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel
+        )],
         "Unexpected diagnostics: {:?}",
         result.diagnostics
     );

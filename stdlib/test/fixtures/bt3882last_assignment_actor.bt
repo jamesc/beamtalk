@@ -27,15 +27,9 @@ Actor subclass: Bt3882LastAssignmentActor
     self.n := 9
     _r := self n
 
-  // LocalAssignSelfSend, Tier 2 block argument
-  tier2SelfSend =>
-    t := 0
-    _r := self
-      opaqueInject: 0
-      into: [:a :i |
-        t := t + i
-        a + i
-      ]
+  // LocalAssignSelfSend, block argument (a Tier 2 one, which wrote `t`, is an
+  // ADR 0133 escaping-block compile error since BT-3902)
+  tier2SelfSend => _r := self opaqueInject: 0 into: [:a :i | a + i]
 
   // LocalAssignControlFlow, conditional with a field write
   conditional: c =>

@@ -44,8 +44,9 @@ use std::rc::Rc;
 /// A set of language shapes the generator may use.
 ///
 /// The full set is what ADR 0130 and ADR 0131 must make correct;
-/// [`Shapes::ENABLED`] is the set the BEAM execution property enforces, and
-/// since ADR 0131 Phase 5a (BT-3751) it is the full set.
+/// [`Shapes::ENABLED`] is the set the BEAM execution property enforces: since
+/// ADR 0131 Phase 5a (BT-3751) the full set, less the one shape ADR 0133 made
+/// a compile error ([`Shapes::STORED_VALUE`], BT-3902).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Shapes(u32);
 
@@ -111,7 +112,9 @@ impl Shapes {
     /// bound and sent `value` in the method body (`b := [t := t + 1. t]. v :=
     /// b value`): in a class or value-type method there is no callee, so the
     /// block is an inline producer over a fresh map (ADR 0132 Phase 0b, I5).
-    /// Needs [`Shapes::LOCAL_TOUCH`], which declares the local.
+    /// Needs [`Shapes::LOCAL_TOUCH`], which declares the local. Since ADR 0133
+    /// (BT-3902) the escaping-block compile error rejects it, so it is not in
+    /// [`Shapes::ENABLED`].
     pub const STORED_VALUE: Shapes = Shapes(1 << 19);
 
     /// No shapes: straight-line writes and arithmetic only.
@@ -201,13 +204,19 @@ impl Shapes {
         })
     }
 
-    /// The shapes the BEAM execution agreement property enforces: every shape.
+    /// The shapes the BEAM execution agreement property enforces: every shape
+    /// that compiles.
     ///
     /// ADR 0130 Phase 3 (BT-3713) flipped the properties from the three shapes
     /// that passed before it (writing and plain self-sends, `ifTrue:`, early
     /// `^`) to all but [`Shapes::LOCAL_TOUCH`]; ADR 0131 Phase 5a (BT-3751)
-    /// added it, once every local-threading construct was a producer.
-    pub const ENABLED: Shapes = Shapes::all();
+    /// added it, once every local-threading construct was a producer. ADR 0133
+    /// (BT-3902) took [`Shapes::STORED_VALUE`] out: a stored block that
+    /// assigns a captured local is now the escaping-block compile error, so
+    /// the program does not build (codegen's agreement properties, which do
+    /// not run semantic analysis, still draw it until ADR 0133 Phase 2 removes
+    /// the producer, BT-3908).
+    pub const ENABLED: Shapes = Shapes::all().without(Shapes::STORED_VALUE);
 }
 
 // ---------------------------------------------------------------------------
@@ -2172,7 +2181,7 @@ mod tests {
             assert!(!without.contains("t + ("), "seed {seed}:\n{without}");
         }
         assert!(seen, "no local_touch program has `t + (<protected block>)`");
-        assert_eq!(Shapes::ENABLED, Shapes::all());
+        assert_eq!(Shapes::ENABLED, Shapes::all().without(Shapes::STORED_VALUE));
     }
 
     /// An error that escapes the invocation discards every write it made.

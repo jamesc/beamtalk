@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers a compile error: an actor method passes a block that
+// assigns a captured local to a `sealed` method of its own class (ADR 0133,
+// BT-3902; ADR 0131 §6 exempted this shape until then, BT-3755). Used by
+// tests/repl-protocol/cases/adr0133_escaping_block.btscript via
+// `// @load-error`.
+
+Actor subclass: Adr0133EscapingBlockErrorFixture
+
+  sealed twice: b =>
+    b value
+    b value
+
+  run =>
+    t := 0
+    self twice: [t := t + 1]
+    t

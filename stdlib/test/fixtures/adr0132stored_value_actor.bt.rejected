@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3867 (ADR 0132 Phase 0b, I5): the actor column of the stored-block
+// matrix, which compiled and threaded the write through the actor `State`.
+// ADR 0133 Phase 1 (BT-3902): a block stored in a local may read captured
+// variables but not assign them, so each `st*` method is now an
+// escaping-block compile error ("`t` is assigned in a block stored in `b`").
+// Inert: the runner discovers only `.bt`;
+// `adr0133_rejected_fixtures_report_the_escaping_assignment` (beamtalk-core)
+// is the assertion. The columns are adr0132stored_value_{class,value,actor}.bt.rejected.
+
+Actor subclass: Adr0132StoredValueActor
+
+  stValue =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    t
+
+  stTwice =>
+    t := 0
+    b := [t := t + 1]
+    b value
+    b value
+    t
+
+  stArg =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 5
+    t
+
+  stCascade =>
+    t := 0
+    b := [:n | t := t + n]
+    b value: 1; value: 2
+    t

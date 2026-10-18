@@ -47,7 +47,11 @@
 //!      nested in the receiver or a non-block argument of another send is
 //!      accepted, pinned (runtime) at the argument of a self-send, the
 //!      argument and the receiver of a keyword send, and two folds in one
-//!      statement (`adr0131section6exemptions_actor.bt`, `calleeNest*`);
+//!      statement (the former `adr0131section6exemptions_actor.bt`,
+//!      `calleeNest*`: since ADR 0133, BT-3902, the §6 check no longer reads
+//!      this predicate and rejects every such self-send, so the shapes are
+//!      reachable only from codegen tests until ADR 0133 Phase 2 deletes
+//!      this module);
 //!    - passed as a bare argument of a method-body self-send to another
 //!      callee of the same class that itself threads that parameter.
 //!

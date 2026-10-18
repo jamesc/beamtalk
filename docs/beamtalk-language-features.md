@@ -763,7 +763,7 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. A stored closure that writes an outer local works only where the write can be handed back: in an actor instance method when the stored block is sent `value` (or its siblings) as a method-body statement or passed to a `sealed` self-send that threads it (ADR 0041 Tier 2, ADR 0131 §6), in a class or value-type method when it is sent `value` (or its siblings) in the method body, where it is evaluated in place exactly like `[...] value` (ADR 0132 Phase 0b), and wherever the block is invoked by a control-flow construct that threads locals (`do:`, `inject:into:`, `on:do:`, ...). Anywhere else (a user-defined higher-order method, a collection literal) no callee can return the write and the compiler rejects it with the ["block writes outer local" error](#what-works-and-what-doesnt). A block that writes an outer local and escapes the method (returned, stored in a field, or placed in a collection literal) is also a compile error (ADR 0131 §6, see [Control Flow and Mutations](#what-works-and-what-doesnt)).
+**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
 
 ```beamtalk
 // ❌ ERROR: field assignment inside stored closure
@@ -2689,7 +2689,7 @@ The compiler uses a two-tier optimization for block mutations:
 - **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
 - **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
 
-**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), in every method kind and in the REPL, including when the construct is an operand of a larger expression, and, in a few top-level shapes, in stored closures (sent `value` in the method body of any method kind) and, in an actor instance method, in blocks passed to the actor's own methods. Where the write cannot be handed back the compiler rejects the program instead of dropping the write (see [What Works and What Doesn't](#what-works-and-what-doesnt)). **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
+**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), written directly as the message's argument, in every method kind and in the REPL, including when the construct is an operand of a larger expression. A block that assigns a captured local and escapes (stored, returned, or passed to any other method, the actor's own methods included) is a compile error ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which amends ADR 0041's "local mutations work in all blocks"; see [What Works and What Doesn't](#what-works-and-what-doesnt)). The Tier 2 protocol remains inside the stdlib's own collection messages for dynamic receivers. **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
@@ -2733,6 +2733,23 @@ result := 0
 1 to: 10 do: [:n | result := result + n]
 // result = 55 (sum of 1..10)
 ```
+
+**The rule** ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md)): a block may assign a variable it captured only where the compiler lowers the block in place, that is, as the block literal written directly as the argument (or, for `value` and the loops, the receiver) of a control construct or a compiler-known collection message. A block that **escapes**, by being stored in a variable, returned, placed in a collection literal, or passed to any other method (a user-defined method, a class or actor, a stdlib method outside the known list), may read captured variables but not assign them. The compiler reports the assignment, names how the block escapes, and lists the messages that do thread assignments. The idiom is to have the block answer the new value and assign it where the block is called:
+
+```beamtalk
+// ❌ ERROR: `t` is assigned in a block passed to `twice:`, which is not a
+//    construct the compiler threads it through
+t := 0
+Twice twice: [t := t + 1]
+
+// ✅ The block answers the value; the caller assigns it
+t := Twice twice: [t + 1]
+
+// ✅ A construct the compiler threads
+2 timesRepeat: [t := t + 1]
+```
+
+This departs from Pharo, where `Twice twice: [t := t + 1]` answers 2: it relies on a heap shared between a block and its home method, which the BEAM does not have (see `docs/beamtalk-principles.md` §4). Reads of captured variables, and `^` from any block, are unaffected. The same diagnostic is reported by `beamtalk build`, the REPL, the LSP and MCP.
 
 **Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are your own, a trait's provisions, or absent (ADR 0133, BT-3903; an actor's `self do:` from inside its own method does not thread the write yet, BT-3918). With a writing block these messages therefore *mean* the fold over `do:`: a class that overrides, say, `anySatisfy:` with different semantics does not run its override for a writing block (BT-3916). A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
 
@@ -2779,18 +2796,36 @@ processItems =>
 
 ### What Works and What Doesn't
 
-**A block that writes an outer local needs a way back** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block literal that assigns a local of the enclosing method (a *Tier 2 block value*, ADR 0041), or a local bound to such a block and never reassigned, may only be used where its write can be threaded back: as the block of a control-flow message (`whileTrue:`, `do:`, `inject:into:`, the conditionals, `on:do:`/`ensure:`, `Result tryDo:`, `[...] value`, and the handlers of a `Dictionary`'s `at:ifAbsent:`, `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a method body, a conditional or `on:do:` block, or a loop or fold body), or, in an actor instance method at the top level of the method body, as a bare `[...]` argument of a plain `self` send (not `super`, not a cascade) whose block reads every outer local it writes, or as a stored block (bound by a method-body statement) sent `value` in method-body statements only. In a class or value-type method a stored block (bound once by a method-body statement, whose uses are all `value`-family sends outside any nested block) sent `value`, `value:`, `value:value:` or a `value`-family cascade is evaluated in place, exactly like `[...] value`, wherever that is accepted: as a statement, an assignment's value or a `^` value (`b := [t := t + 1]. b value. t` answers 1; ADR 0132 Phase 0b). The block must not be rebound, its outer locals must not be reassigned between the binding and the send, and a cascade must be a statement, an assignment's value or a `^` value. Passing it to any other send (a user-defined higher-order method, `at:ifAbsentPut:`, `removeKey:ifAbsent:`, a class-side `self` send, `items do: b`) or any other use of a stored one in a class or value-type method is a compile error, because no callee can return the write. An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary).
+**A block that assigns a captured local may not escape** ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which made ADR 0131 §6's error the permanent rule). A block literal that assigns a local of the enclosing method (a *Tier 2 block value*, ADR 0041) may only be written where the compiler lowers it in place: as the block of a control-flow message (`whileTrue:`, `do:`, `inject:into:`, the conditionals, `on:do:`/`ensure:`, `Result tryDo:`, `[...] value`, and the handlers of a `Dictionary`'s `at:ifAbsent:`, `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a method body, a conditional or `on:do:` block, or a loop or fold body). A block that escapes is a compile error in every context (class, value-type and actor methods, and the REPL), reported at the assignment and naming the shape:
 
-These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block sent `value:`) and in the REPL the handler is still a compile error.
+| Shape | Message |
+|---|---|
+| `f := [t := t + 1]` | `` `t` is assigned in a block stored in `f` `` |
+| `^[t := t + 1]` | `` `t` is assigned in a block returned from `run` `` |
+| `self forEach: [:o \| t := t + o]` | `` `t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through `` |
+| `Logger onEvent: [:e \| seen := seen + 1]` | `` `seen` is assigned in a block passed to a class method (`onEvent:`); it would run in another process `` |
+| `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
+| `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
+
+A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires. A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
+
+These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
 ```text
-error: block writes outer local `count`, but `ap:` cannot return the write
-  = help: return the new value from the block and assign it: `count := ... ap: [... count + 1]`,
-          or use a control-flow message (`do:`, `inject:into:`, `on:do:`) that threads locals
+error: `count` is assigned in a block passed to a class method (`ap:`); it would run in another process
+  = the block
+  = a block that is stored, returned, or passed to a method the compiler does not lower in place
+    may read captured variables but not assign them (ADR 0133). The messages that thread
+    assignments, with the block written directly as the argument, are the control constructs
+    (ifTrue:, ..., value:value:value:) and the collection messages (do:, ..., at:ifPresent:ifAbsent:)
+  help: return the new value from the block and assign it where it is called:
+        `count := ... ap: [... count + 1]`
 ```
 
+The note's list is generated from `crates/beamtalk-core/src/state_threading_selectors.rs`, the one list codegen reads.
+
 ```beamtalk
-// ❌ ERROR (class or value-type method): `ap:` cannot return the write
+// ❌ ERROR: `ap:` is not a construct the compiler threads the block through
 count := 0
 CvA ap: [count := count + 1]
 
@@ -2801,13 +2836,13 @@ count := CvA ap: [count + 1]
 10 timesRepeat: [count := count + 1]
 ```
 
-**A block that escapes the method is also a compile error** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). A block that writes an outer local and escapes the method without being sent — returned via `^`, implicit last expression, stored in a field or class variable, or placed in a collection literal — is rejected at compile time. A local bound to such a block counts as the block, whether bound directly (`b := [..]. ^b`), through a conditional arm (`b := c ifTrue: [[..]] ifFalse: [nil]`) or through another local (`c := b. ^c`). A method whose last statement is a local assignment answers the assigned value (class, value-type and actor methods alike), so a block that is that value is returned from the method:
+A block that escapes the method without being sent — returned via `^`, implicit last expression, stored in a field or class variable, or placed in a collection literal — is the same error. A method whose last statement is a local assignment answers the assigned value (class, value-type and actor methods alike), so a block stored there is returned too; it is reported as stored:
 
 ```text
-error: block writes outer local `count`, but it is returned from the method and nothing can return the write
-  = help: once the method returns, no later call of the block can hand `count` back:
-          keep the state in a field (`self.count := self.count + 1`) or return the new value
-          from the block and assign it where the block is called
+error: `count` is assigned in a block returned from `makeCounter`
+  help: once the block has left this scope, no later call of it can hand `count` back:
+        keep the state in a field (`self.count := self.count + 1`) or return the new value
+        from the block and assign it where the block is called
 ```
 
 ```beamtalk
@@ -2826,8 +2861,6 @@ listOfBlocks =>
     count := 0
     #([count := count + 1])
 ```
-
-**Actor self-send exemption** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md) §6). In an actor instance method, a `self` send with a state-writing block argument is accepted only when the callee is a `sealed` method of the *same* class that provably threads the block — direct `b value` invocations as statements, assignments, or returns in the callee's body, the bare callable form of a collection HOM (`#(1) do: b`), or forwarding to another such method. Inherited, non-sealed, overridable, or otherwise unverifiable callees are a compile error.
 
 **What works where** ([ADR 0131](ADR/0131-outer-local-rebinds-as-threaded-value-preludes.md)). A construct whose blocks write a local of the enclosing method (a *local-threading producer*) answers its value and keeps those writes. The writes are returned alongside the value and rebound in the enclosing frame, so the construct can sit wherever an expression can, not only as a statement. The constructs are the loops and collection messages in the table above (`do:`, `collect:`, `inject:into:`, `eachWithIndex:`, `do:separatedBy:`, `keysAndValuesDo:`, `doWithKey:`, `anySatisfy:`, `allSatisfy:`, `detect:`, `detect:ifNone:`), the conditionals (`ifTrue:`, `ifNil:`, `and:`/`or:`, ...), `on:do:`/`ensure:`, `Result tryDo:`, a block literal sent `value`, and `Dictionary at:ifAbsent:`, `at:ifPresent:` and `at:ifPresent:ifAbsent:`. The positions that work are:
 
@@ -2916,7 +2949,7 @@ increment =>
 | Property | ✅ Benefit |
 |----------|-----------|
 | **Universal** | Local variable mutations work in every control-flow block — no whitelist; a block with no way back is a compile error, not a lost write |
-| **Smalltalk-like** | Natural iteration patterns work, including user-defined HOMs |
+| **Smalltalk-like** | Natural iteration patterns work; a user-defined HOM takes a block that answers a value (ADR 0133) |
 | **Safe** | Field mutations in stored closures are caught at compile time |
 | **Good DX** | Clear errors with fix suggestions |
 | **BEAM-idiomatic** | Compiles to tail recursion + state threading |

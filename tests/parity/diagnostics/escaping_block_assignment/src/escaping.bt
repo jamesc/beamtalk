@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0133 (BT-3902): each method assigns a captured local in a block that
+// escapes, so each is one `Tier2BlockNoReturnChannel` error, reported by the
+// one recognizer in beamtalk-core on every surface.
+
+sealed Object subclass: Twice
+  class sealed twice: b =>
+    b value
+    b value
+
+Object subclass: Escaping
+  class passed =>
+    t := 0
+    Twice twice: [t := t + 1]
+    t
+
+  class stored =>
+    t := 0
+    f := [t := t + 1]
+    f value
+    t
+
+  class returned =>
+    t := 0
+    ^[t := t + 1]

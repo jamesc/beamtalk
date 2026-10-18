@@ -23,6 +23,7 @@
 //! | `unreadable_target`          | unreadable target file (Unix only) |
 //! | `unreadable_package`         | unreadable extraction file (Unix only) |
 //! | `native_declaration_location`| misplaced `declare native:` block |
+//! | `escaping_block_assignment`  | ADR 0133 escaping-block assignment |
 //!
 //! Each fixture is checked four ways. A minimum diagnostic count is
 //! locked in **per surface** so legitimate-but-bounded divergences (e.g.
@@ -294,6 +295,22 @@ fn corpus_cases() -> Vec<CorpusCase> {
             },
             unreadable_files: &[],
             why: "BT-3404: a declare native: block outside stubs/ must be reported on every surface",
+        },
+        CorpusCase {
+            name: "escaping_block_assignment",
+            lsp_target: "src/escaping.bt",
+            lint_target: "",
+            // Three escaping blocks (passed, stored, returned), each one
+            // categorised `Tier2BlockNoReturnChannel` error from the one
+            // recognizer in beamtalk-core.
+            expected: ExpectedCounts {
+                cli_lint: 3,
+                mcp_lint: 3,
+                mcp_summary: 3,
+                lsp: 3,
+            },
+            unreadable_files: &[],
+            why: "BT-3902: the ADR 0133 escaping-block diagnostic must be reported on every surface",
         },
     ]
 }

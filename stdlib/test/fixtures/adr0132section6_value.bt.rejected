@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3866 (ADR 0132 Phase 0a, epic BT-3865): value-type column of the ADR 0132
-// §"The inventory" shapes ADR 0131 §6 rejects today (see
-// adr0132section6_class.bt.pending for the layout and the shape key). The
-// `probe*` instance methods are `Tier2BlockNoReturnChannel` compile errors;
-// the `callee*` methods compile on their own. I1 and I4 are probed both
-// through the literal class (`class` callees) and as an instance self-send;
-// I7 is class-side only and is pinned in the class column. Inert: the runner
-// discovers only `.bt`.
+// §"The inventory" shapes (see adr0132section6_class.bt.rejected for the
+// layout and the shape key). The `probe*` instance methods are permanent
+// ADR 0133 escaping-block compile errors (BT-3902); the `callee*` methods
+// compile on their own. I1 and I4 are probed both through the literal class
+// (`class` callees) and as an instance self-send; I7 is class-side only and is
+// pinned in the class column. Inert: the runner discovers only `.bt`.
 //
-// `adr0132_section6_inventory_pins` in beamtalk-core checks that every
-// `probe*` method is rejected and no `callee*` method is.
+// `adr0133_rejected_fixtures_report_the_escaping_assignment` in beamtalk-core
+// checks that every `probe*` method is reported at its assignment and no
+// `callee*` method is.
 
 Value subclass: Adr0132Section6Value
 

@@ -591,10 +591,12 @@ fn inline_send(e: &mut Expression, name: &str, block: &Block) -> bool {
             // Copied ASTs (the block body and parameters at each send, split
             // cascade arguments) share their original spans, so span-keyed
             // side tables keep one site's answer for all copies. Sites can
-            // differ (argument type, statement versus value position); that is
-            // pinned end to end by `Adr0132StoredValueTest testMixedSites`
-            // (stdlib/test/adr0132stored_value_test.bt) and, for the checker,
-            // by `section6_inlined_copies_sharing_spans_are_judged_like_literals`.
+            // differ (argument type, statement versus value position). Since
+            // ADR 0133 (BT-3902) the escaping-block diagnostic rejects every
+            // stored writing block before codegen, so this rewrite is reached
+            // only from codegen tests until ADR 0133 Phase 2 deletes it
+            // (BT-3908); its runtime pins are the inert
+            // stdlib/test/fixtures/adr0132stored_value_*.bt.rejected.
             let mut body: Vec<ExpressionStatement> = block
                 .parameters
                 .iter()

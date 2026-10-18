@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3866 (ADR 0132 Phase 0a): callee classes for
-// cases/adr0132_section6_pins.btscript. Two user higher-order class methods
+// BT-3866 (ADR 0132 Phase 0a): callee classes, now for
+// cases/adr0133_escaping_block.btscript (BT-3902). Two user higher-order class methods
 // that invoke their block parameter.
 
 Object subclass: Adr0132ReplCallee
