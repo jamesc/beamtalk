@@ -48,6 +48,7 @@ setup() ->
 %% The Tier 2 / Tier 1 blocks and the plain-against-entry differential are
 %% shared with the value-type suite (`beamtalk_threaded_entry_test_helper`).
 t2(Arity, F) -> beamtalk_threaded_entry_test_helper:t2(Arity, F).
+t1(Arity, F) -> beamtalk_threaded_entry_test_helper:t1(Arity, F).
 
 mark(F) -> beamtalk_tier2_test_block:mark(F).
 
