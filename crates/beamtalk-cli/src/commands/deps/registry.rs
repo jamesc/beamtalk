@@ -360,7 +360,7 @@ pub fn ensure_index(
 /// `$HOME`) — sharing the cache is a nice-to-have, resolving a dependency is
 /// not.
 ///
-/// Under `cfg(test)`, a [`test_support::IsolatedRegistryCache`] installed on
+/// Under `cfg(test)`, a `test_support::IsolatedRegistryCache` installed on
 /// the calling thread outranks all of the above, so unit tests never resolve
 /// to the real user-level cache (see [`ensure_git_index`]'s guard).
 fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
@@ -999,7 +999,9 @@ pub(crate) mod test_support {
     }
 
     /// A per-test registry cache root, installed on the creating thread and
-    /// deleted on drop.
+    /// deleted on drop. Guards on one thread restore the previous root, so
+    /// nested caches must drop in reverse order of creation (which plain
+    /// scoped locals do).
     pub(crate) struct IsolatedRegistryCache {
         // Declared before `dir` so the thread-local is uninstalled before the
         // directory it names is deleted.
@@ -1406,12 +1408,17 @@ git = "g"
 
     #[test]
     fn test_isolated_registry_cache_is_removed_on_drop() {
+        // `test_ensure_index_clones_git_registry` proves clones land under
+        // `cache.path()`; this checks that the root itself goes away. A
+        // plain file stands in for the clone, whose read-only git objects
+        // would make this assertion OS-dependent.
         let cache = IsolatedRegistryCache::new();
         let root = cache.path().to_path_buf();
-        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
-        ensure_index(&RegistryLocation::Git(url), &utf8(&project), false).unwrap();
-        assert!(root.is_dir());
+        let cache_root = registry_cache_root("https://example.test/registry", &utf8(&project));
+        assert!(cache_root.starts_with(&root), "{cache_root}");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        std::fs::write(cache_root.join("marker"), "x").unwrap();
 
         drop(cache);
         assert!(!root.exists(), "the isolated cache root must be deleted");
