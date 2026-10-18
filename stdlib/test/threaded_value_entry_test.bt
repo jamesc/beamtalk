@@ -60,7 +60,7 @@ TestCase subclass: ThreadedValueEntryTest
   testAStaticPassOnToASealedMethodStillWorks =>
     self assert: (ThreadedOpenValueFixture new viaSealed: [4]) equals: 4
 
-  testAUseHoldingAnotherParametersUseCompilesAsBefore =>
+  testAUseHoldingAnotherParametersUseAnswersAsBefore =>
     self assert: (ThreadedOpenValueFixture new both: [:x |
       x + 1
     ] with: [10]) equals: 11

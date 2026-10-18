@@ -496,26 +496,12 @@ impl ThreadingIndex {
         let Some(param) = method.parameters.get(*index) else {
             return false;
         };
-        // ADR 0132 Phase 1d (BT-3872): on the instance side, the method's other
-        // parameters, whose uses a use may not hold.
-        let others: Vec<&str> = if *class_side {
-            Vec::new()
-        } else {
-            method
-                .parameters
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| i != index)
-                .map(|(_, p)| p.name.name.as_str())
-                .collect()
-        };
         let ctx = RootCtx {
             unit_classes,
             assumed,
             class: class_def,
             class_side: *class_side,
             name: param.name.name.as_str(),
-            others,
         };
         method.body.iter().all(|s| ctx.expr_ok(&s.expression))
             && !crate::semantic_analysis::facts::body_has_block_nlr(&method.body)
@@ -669,39 +655,11 @@ struct RootCtx<'a> {
     class: &'a ClassDefinition,
     class_side: bool,
     name: &'a str,
-    /// Instance side only (ADR 0132 Phase 1d, BT-3872): the method's other
-    /// parameters. A use of one parameter that holds a use of another
-    /// (`self foo: a bar: (b value)`, `a value: (b value)`) is lowered as the
-    /// first one's use alone, so the second's would have no `Acc` step:
-    /// neither is threading, and the method keeps its plain entry. A bare
-    /// mention (`b value: x`) is not a use and is unaffected. Over-approximate,
-    /// as the rest of the predicate. (The class side's twin is BT-3890.)
-    others: Vec<&'a str>,
 }
 
 impl RootCtx<'_> {
     fn mentions(&self, expr: &Expression) -> bool {
         stored_block_var_uses(expr, self.name) != (false, false)
-    }
-
-    /// Whether `expr` is a use of `name` or of another parameter that holds a
-    /// use of the other (see `others`): both are then non-threading.
-    fn shares_a_use_with_another_candidate(&self, expr: &Expression) -> bool {
-        let fwd = |r: &Expression| self.forward_target(r).is_some();
-        let is_use = |e: &Expression, name: &str| {
-            matches!(classify_threading_use(e, name, &fwd), UseShape::Use(_))
-        };
-        let use_holding = |user: &str, held: &str| {
-            if !is_use(expr, user) {
-                return false;
-            }
-            let mut holds = false;
-            crate::ast_walker::walk_expression(expr, &mut |e| holds |= is_use(e, held));
-            holds
-        };
-        self.others
-            .iter()
-            .any(|other| use_holding(self.name, other) || use_holding(other, self.name))
     }
 
     /// The `(class, class side)` a send to `receiver` resolves to inside the
@@ -725,9 +683,6 @@ impl RootCtx<'_> {
                 !self.mentions(target) && self.expr_ok(value)
             }
             Expression::Cascade { .. } | Expression::MessageSend { .. } => {
-                if self.shares_a_use_with_another_candidate(expr) {
-                    return false;
-                }
                 match classify_threading_use(expr, self.name, &|r| self.forward_target(r).is_some())
                 {
                     UseShape::Malformed => false,
@@ -752,13 +707,33 @@ impl RootCtx<'_> {
                     // Any other send: the parameter may only appear inside an
                     // operand that is itself an allowed use (`(b value) + 1`,
                     // `self foo: (b value: 2)`). A bare occurrence, or one
-                    // inside a block literal, falls through to `false`.
+                    // inside a block literal, falls through to `false`. The
+                    // operands are the ones codegen's sequencing rule walks: a
+                    // conditional / `and:` / `or:` send sequences its receiver
+                    // only (its arguments are its arms, lowered by the
+                    // conditional itself), so a mention in one of its
+                    // arguments (`nil ifNil: (b value)`, `f and: (b value)`)
+                    // is not a root use.
                     UseShape::NotAUse => match expr {
                         Expression::MessageSend {
                             receiver,
+                            selector,
                             arguments,
                             ..
-                        } => self.expr_ok(receiver) && arguments.iter().all(|a| self.expr_ok(a)),
+                        } => {
+                            let conditional =
+                                crate::state_threading_selectors::is_conditional_selector(
+                                    selector.name().as_str(),
+                                );
+                            self.expr_ok(receiver)
+                                && arguments.iter().all(|a| {
+                                    if conditional {
+                                        !self.mentions(a)
+                                    } else {
+                                        self.expr_ok(a)
+                                    }
+                                })
+                        }
                         _ => false,
                     },
                 }
@@ -912,33 +887,7 @@ mod tests {
         ] {
             assert_eq!(inst(&idx, "C", sel), vec![0], "{sel}");
         }
-        // ADR 0132 Phase 1d (BT-3872): `a`'s invocation holds `b`'s, which the
-        // lowering of `a`'s use cannot step `Acc` for: neither threads.
-        assert!(inst(&idx, "C", "two:with:").is_empty());
-    }
-
-    #[test]
-    fn a_use_holding_another_parameters_use_threads_neither_on_the_instance_side() {
-        let idx = index(
-            "sealed Object subclass: C\n  foo: x bar: y => x value. y\n  \
-             run: a with: b => self foo: a bar: (b value)\n  \
-             fold: a with: b => self items inject: (b value) into: a\n  \
-             call: a with: b => a value: (b value)\n  \
-             side: a with: b => (a value) + (b value)\n  \
-             bare: a with: x => a value: x\n  \
-             class run: a with: b => self foo: a bar: (b value)\n  \
-             class foo: x bar: y => x value. y\n",
-        );
-        for sel in ["run:with:", "fold:with:", "call:with:"] {
-            assert!(inst(&idx, "C", sel).is_empty(), "{sel} must not thread");
-        }
-        // Two uses side by side, and a use whose argument merely mentions a
-        // non-block parameter, still thread.
-        assert_eq!(inst(&idx, "C", "side:with:"), vec![0, 1]);
-        assert_eq!(inst(&idx, "C", "bare:with:"), vec![0]);
-        assert_eq!(inst(&idx, "C", "foo:bar:"), vec![0]);
-        // The class side is unchanged here (BT-3890 decides it).
-        assert_eq!(idx.params("C", true, "run:with:"), vec![0, 1]);
+        assert_eq!(inst(&idx, "C", "two:with:"), vec![0, 1]);
     }
 
     #[test]
@@ -965,9 +914,17 @@ mod tests {
              nested: b =>\n    f := [b value]\n    f value\n  \
              unused: b => 1\n  \
              outside: b => other foo: b\n  literal: b => #(b)\n  \
-             seedToo: b => ^self items inject: b into: b\n",
+             seedToo: b => ^self items inject: b into: b\n  \
+             condArg: b => nil ifNil: (b value)\n  \
+             andArg: b => true and: (b value)\n  \
+             orArg: b => false or: (b value)\n  \
+             notNilArg: b x: x => x ifNotNil: (b value)\n",
         );
         for sel in [
+            "condArg:",
+            "andArg:",
+            "orArg:",
+            "notNilArg:x:",
             "stored:",
             "returnedBare:",
             "ffi:",

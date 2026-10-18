@@ -17,9 +17,10 @@
 //!   a generated corpus of use shapes × field-writing constructs, each checked
 //!   with `assert_acc_linear`, the verifier (one `MethodBody` per body) and
 //!   `erlc`;
-//! - the shapes the index refuses (a `^` block, a use holding another
-//!   parameter's use) compiling as plain methods, and the loud refusal of a use
-//!   inside a construct.
+//! - a use holding another threading parameter's use threading both (BT-3890's
+//!   rule, through the shared producer);
+//! - the shape the index refuses (a `^` block) compiling as a plain method, and
+//!   the loud refusal of a use inside a construct.
 
 use super::threaded_class_entry::{
     Entries, assert_acc_linear, entries_with, function_text, repo_path, try_codegen,
@@ -370,16 +371,32 @@ fn every_stdlib_instance_entry_is_defined_exported_and_advertised() {
     );
 }
 
-// ─── Shapes the index refuses compile as plain methods ─────────────────────
+// ─── Two threading parameters; shapes the index refuses ────────────────────
 
 #[test]
-fn a_use_holding_another_parameters_use_compiles_as_a_plain_method() {
+fn a_use_holding_another_parameters_use_threads_both() {
+    // BT-3890's rule, through the shared producer: `b`'s use inside `a`'s
+    // forward is sequenced ahead of it and steps `Acc` first.
     let code = codegen(OBJECT_FIXTURE);
-    assert!(!code.contains("'__t2_both:with:'"), "{code}");
-    assert!(code.contains("'both:with:'/3 = "), "{code}");
-    // Two uses side by side still thread both.
+    let both = function_text(&code, "'__t2_both:with:'/4");
+    let inner = both
+        .find("call 'beamtalk_dispatch':'call_threaded'(_b")
+        .unwrap_or_else(|| panic!("{both}"));
+    let outer = both
+        .find("'beamtalk_message_dispatch':'send'(Self, 'foo:bar:'")
+        .unwrap_or_else(|| panic!("{both}"));
+    assert!(inner < outer, "{both}");
+    assert_acc_linear(both, "both:with:");
+    // Two uses side by side thread both too.
     assert!(code.contains("'__t2_run:with:'/4 = "), "{code}");
     assert_entries_equal_the_index(OBJECT_FIXTURE, &code);
+    assert_eq!(
+        index_instance_side(OBJECT_FIXTURE)
+            .into_iter()
+            .find(|(sel, _, _)| sel == "both:with:")
+            .map(|(_, positions, _)| positions),
+        Some(vec![0, 1])
+    );
     assert_compiles_through_erlc("test", &code);
 }
 

@@ -117,6 +117,13 @@ pub(super) mod fault {
         /// nothing), so the elided write is not an identity
         /// (`HeldRebindNotIdentity`).
         StaleHeld,
+        /// BT-3863: a fold body's statement classifier recognises none of
+        /// its statements as a local-threading producer or a construct with
+        /// carried mutations, while the fold's own gate still threads the
+        /// locals they write: the gate split BT-3839 removed. A fold whose
+        /// last statement is such a construct then ends in its raw value
+        /// instead of its accumulator (`FoldLocalsNotCarried`).
+        SplitFoldStatementGate,
     }
 
     thread_local! {

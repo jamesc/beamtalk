@@ -13,10 +13,10 @@
 //   - `beamtalk_threaded_value_entries_tests`, which calls each entry directly
 //     with a hand-packed `Acc` and each plain function with a pure block, and
 //     asserts the two agree on the result and the block invocations.
-// `detectFirst:in:` and `firstAfter:in:` hold a block that does `^`, and
-// `both:with:` a use of `a` that holds a use of `b`: the index gives them no
-// threading parameter, so they compile as plain methods. `plain:` has no
-// block; `storeAway:` stores it.
+// `detectFirst:in:` and `firstAfter:in:` hold a block that does `^`: the index
+// gives them no threading parameter, so they compile as plain methods.
+// `both:with:` is a use of `a` holding a use of `b`: both thread, `b`'s step
+// first (BT-3890). `plain:` has no block; `storeAway:` stores it.
 
 sealed Object subclass: ThreadedValueEntriesFixture
   twice: b => b value. b value

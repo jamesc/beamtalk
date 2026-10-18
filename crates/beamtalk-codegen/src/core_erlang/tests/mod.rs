@@ -110,6 +110,28 @@ pub(crate) fn codegen(src: &str) -> String {
         .expect("codegen should succeed")
 }
 
+/// The debug-build panic message of compiling `src` with `fault` active (for a verifier
+/// finding, `report_threaded_ir_verify_errors`'s), or `None` when the compile succeeds.
+///
+/// Shared by the verifier corpora that prove a check fires under fault injection.
+pub(crate) fn verifier_report(
+    src: &str,
+    fault: Option<crate::core_erlang::threaded_expr::fault::LocalRebindFault>,
+) -> Option<String> {
+    let compile = || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)));
+    let result = match fault {
+        Some(fault) => crate::core_erlang::threaded_expr::fault::with(fault, compile),
+        None => compile(),
+    };
+    result.err().map(|payload| {
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+            .unwrap_or_default()
+    })
+}
+
 /// Builds a Module with a `Value subclass: Point` with x and y slots.
 pub(crate) fn make_value_subclass_point() -> Module {
     let class = ClassDefinition {
@@ -181,6 +203,7 @@ mod dispatch;
 mod expect_directive_statement;
 mod expressions;
 mod field_assignment_value_position;
+mod fold_locals_carried_corpus;
 mod gen_server;
 mod hybrid_field_rebind_corpus;
 mod late_reconcile_conformance;

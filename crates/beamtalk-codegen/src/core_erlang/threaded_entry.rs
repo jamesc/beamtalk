@@ -343,12 +343,19 @@ impl CoreErlangGenerator {
 
     /// The spans of the uses of a threading parameter at the method root of
     /// `expr`: `expr` itself, the value of a `:=` or `^`, and the operands the
-    /// sequencing rule walks (`threaded_expression`), recursively. A use is
-    /// not descended into (its arguments do not mention the parameter).
+    /// sequencing rule walks (`threaded_expression`), recursively. A use's own
+    /// operands are walked too: they never mention *its* parameter
+    /// (`classify_threading_use`), but may use another threading parameter of
+    /// the body (`a value: (b value)`, `self apply: a to: (b value)`), which
+    /// the index admits for both and the producer sequences ahead of the use
+    /// ([`Self::use_children`]).
     fn collect_root_uses(&self, expr: &Expression, out: &mut HashSet<Span>) {
         let inner = expr.unwrap_parens();
         if self.threaded_use_at(inner).is_some() {
             out.insert(inner.span());
+            for child in Self::use_children(inner) {
+                self.collect_root_uses(child, out);
+            }
         } else if let Some(children) = Self::sequenced_send_children(inner) {
             for child in children {
                 self.collect_root_uses(child, out);
@@ -548,6 +555,14 @@ impl CoreErlangGenerator {
                     .to_string(),
             ));
         }
+        // The use's operands first, by the one sequencing rule every covered
+        // send follows: an operand that is itself a use of another threading
+        // parameter (`a value: (b value)`) steps `Acc` here, in evaluation
+        // order, and the lowering below reads its value back
+        // (`precompiled_subexprs`) instead of compiling it in place, where its
+        // step would be scoped away or refused as a use outside the root.
+        let children = Self::use_children(expr);
+        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
         let value = match kind {
             ThreadingUse::Invocation => self.lower_threaded_invocation(expr, span)?,
             ThreadingUse::CallableHom => self.lower_threaded_callable_hom(expr, span)?,
@@ -555,7 +570,35 @@ impl CoreErlangGenerator {
                 self.lower_threaded_forward(expr, position, span)?
             }
         };
-        Ok(Some(value))
+        self.finish_precompiled_scope(scope)?;
+        prelude.extend(value.prelude);
+        Ok(Some(ThreadedValue {
+            prelude,
+            value: value.value,
+        }))
+    }
+
+    /// The operands of the use `expr` (paren-unwrapped) that the sequencing
+    /// rule walks: a send's receiver and non-block arguments
+    /// ([`Self::sequenced_send_children`]); a cascade's non-block arguments,
+    /// message by message (its receiver is the parameter itself). The same
+    /// list [`Self::collect_root_uses`] descends into and
+    /// [`Self::threaded_use_producer`] sequences ahead of the use.
+    fn use_children(expr: &Expression) -> Vec<&Expression> {
+        match expr {
+            Expression::MessageSend { .. } => {
+                Self::sequenced_send_children(expr).unwrap_or_default()
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => normalize_cascade(receiver, messages)
+                .1
+                .into_iter()
+                .flat_map(|(_, args)| args.iter())
+                .filter(|arg| !matches!(arg, Expression::Block(_)))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// A conditional send (`ifTrue:`, `and:`, `ifNil:`, ...) whose receiver

@@ -112,28 +112,29 @@ pub fn run(class_name: &str, force: bool) -> Result<()> {
 
 /// Find the `.bt` file for the given class name.
 ///
-/// Searches in order:
-/// 1. `{ClassName}.bt` in current directory
-/// 2. `src/{ClassName}.bt`
-/// 3. `lib/{ClassName}.bt`
+/// Searches the current directory, `src/` and `lib/`, for the conventional
+/// `snake_case` file name (`DatabasePool` → `database_pool.bt`) and then the
+/// class name as written (`DatabasePool.bt`).
 fn find_bt_file(class_name: &str) -> Result<Utf8PathBuf> {
-    let candidates = [
-        Utf8PathBuf::from(format!("{class_name}.bt")),
-        Utf8PathBuf::from(format!("src/{class_name}.bt")),
-        Utf8PathBuf::from(format!("lib/{class_name}.bt")),
-    ];
+    let snake = beamtalk_core::ast::to_module_name(class_name);
+    let candidates: Vec<Utf8PathBuf> = ["", "src/", "lib/"]
+        .iter()
+        .flat_map(|dir| {
+            [
+                Utf8PathBuf::from(format!("{dir}{snake}.bt")),
+                Utf8PathBuf::from(format!("{dir}{class_name}.bt")),
+            ]
+        })
+        .collect();
 
-    for candidate in &candidates {
-        if candidate.exists() {
-            return Ok(candidate.clone());
-        }
+    if let Some(found) = candidates.iter().find(|c| c.exists()) {
+        return Ok(found.clone());
     }
 
+    let searched: Vec<String> = candidates.iter().map(|c| format!("  {c}")).collect();
     miette::bail!(
-        "Cannot find '{class_name}.bt'. Searched:\n  {}\n  {}\n  {}",
-        candidates[0],
-        candidates[1],
-        candidates[2]
+        "Cannot find the source file for '{class_name}'. Searched:\n{}",
+        searched.join("\n")
     );
 }
 
@@ -572,5 +573,28 @@ Actor subclass: MyActor native: my_actor
             !output.contains("@doc"),
             "Should not contain EDoc @doc comments"
         );
+    }
+
+    /// `find_bt_file` finds the conventional `snake_case` file, then the
+    /// class name as written.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn test_find_bt_file_snake_case_then_class_name() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+        std::fs::create_dir("src").unwrap();
+        std::fs::write("src/database_pool.bt", "").unwrap();
+        std::fs::write("src/LegacyName.bt", "").unwrap();
+
+        let snake = find_bt_file("DatabasePool");
+        let camel = find_bt_file("LegacyName");
+        let missing = find_bt_file("Nowhere");
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        assert_eq!(snake.unwrap(), Utf8PathBuf::from("src/database_pool.bt"));
+        assert_eq!(camel.unwrap(), Utf8PathBuf::from("src/LegacyName.bt"));
+        let err = format!("{:?}", missing.unwrap_err());
+        assert!(err.contains("src/nowhere.bt"), "{err}");
     }
 }

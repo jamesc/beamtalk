@@ -4,8 +4,8 @@
 // BT-3872 (ADR 0132 Phase 1d): an open `Value subclass:`. An open
 // method's self-send is late-bound (a subclass may override it), so its pass-on
 // stays a plain send; a `sealed` method's binds to this module's entry. A use of
-// `a` that holds a use of `b` (`both:with:`) threads neither and compiles as a
-// plain method. Read by threaded_value_entry_test.bt.
+// `a` that holds a use of `b` (`both:with:`) threads both, `b` first (BT-3890).
+// Read by threaded_value_entry_test.bt.
 
 Value subclass: ThreadedOpenValueFixture
 

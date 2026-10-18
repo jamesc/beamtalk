@@ -19,10 +19,11 @@ and a Tier 2 block, and the plain function with the matching pure block, and
 assert the two agree on the result and the block invocations
 (`beamtalk_threaded_entry_test_helper:differential/6`); that a body writing a
 field threads `Self` beside `Acc`; that the plain function refuses a Tier 2 block
-before running it, also when it arrives through a dynamic send; that the methods
-the index gives no threading parameter (a `^` block, a use holding another
-parameter's use) have no entry; and that the compiled metadata resolves the
-entry through `send_threaded/4`.
+before running it, also when it arrives through a dynamic send; that a use
+holding another parameter's use threads both, the inner one first (BT-3890);
+that the methods the index gives no threading parameter (a `^` block) have no
+entry; and that the compiled metadata resolves the entry through
+`send_threaded/4`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -127,6 +128,21 @@ entries_test_() ->
             ?assertEqual(12, R),
             ?assertEqual([[6]], Log),
             ?assertEqual([log, untouched], lists:sort(maps:keys(Acc)))
+        end},
+        {"both:with: threads both blocks, the inner use first (BT-3890)", fun() ->
+            %% `self apply: a to: (b value)`: `b value` steps Acc, then `a`
+            %% is passed on to `apply:to:`'s entry with the stepped Acc.
+            ?assertEqual(
+                11, ?MOD:'both:with:'(?MOD:new(), fun(X) -> X + 1 end, fun() -> 10 end)
+            ),
+            {R, Acc} = ?MOD:'__t2_both:with:'(
+                ?MOD:new(),
+                t2(1, fun(X) -> X + 1 end),
+                t2(0, fun() -> 10 end),
+                #{log => []}
+            ),
+            ?assertEqual(11, R),
+            ?assertEqual([[], [10]], maps:get(log, Acc))
         end}
     ]}.
 
@@ -247,12 +263,6 @@ no_entry_test_() ->
         {"a ^ block beside a root invocation: no entry", fun() ->
             no_entry(?MOD, ?CLASS, 'firstAfter:in:', 2),
             ?assertEqual(7, send(?MOD:new(), 'firstAfter:in:', [fun() -> ok end, [-1, 7]]))
-        end},
-        {"a use holding another parameter's use: no entry, compiles as before", fun() ->
-            no_entry(?MOD, ?CLASS, 'both:with:', 2),
-            ?assertEqual(
-                11, ?MOD:'both:with:'(?MOD:new(), fun(X) -> X + 1 end, fun() -> 10 end)
-            )
         end},
         {"no block, or a stored block: no entry", fun() ->
             no_entry(?MOD, ?CLASS, 'plain:', 1),

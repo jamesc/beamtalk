@@ -17,6 +17,10 @@ This is a [Beamtalk](https://www.beamtalk.dev) project that compiles to the BEAM
 - Implicit returns (last expression is the return value)
 - Use `^` only for early returns, never on the last expression
 - Newlines separate statements (no periods)
+- One class per `.bt` file, named in snake_case after the class (`CheckRegistry` → `check_registry.bt`)
+- `Value subclass:` declares immutable `field:` slots, `Actor subclass:` declares mutable `state:` slots, and `Object subclass:` holds no instance data
+- Type annotations use `::` (`field: x :: Integer = 0`); equality is `=:=` (strict) or `==` (loose), never `=`
+- Erlang FFI calls return a `Result` (`ifOk:ifError:`, `andThen:`, `unwrap`)
 
 ## Build Commands
 
