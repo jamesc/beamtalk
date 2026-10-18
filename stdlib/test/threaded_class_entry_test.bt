@@ -20,6 +20,9 @@ TestCase subclass: ThreadedClassEntryTest
   testApplyToPassesTheArgument =>
     self assert: (ThreadedEntryFixture apply: [:x | x + 1] to: 4) equals: 5
 
+  testASecondParameterUsedInsideTheFirstsArgument =>
+    self assert: (ThreadedEntryFixture two: [:x | x * 10] with: [4]) equals: 40
+
   // --- the callable argument of a collection message ----------------------
   testEachDoVisitsEveryItemAndAnswersNil =>
     self assert: (ThreadedEntryFixture each: #(1, 2, 3) do: [:x |

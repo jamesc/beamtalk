@@ -44,6 +44,13 @@ sealed Object subclass: ThreadedClassEntriesFixture
 
   class sealed bothOf: b => (b value: 1) + (b value: 2)
 
+  // Two threading parameters, one invoked inside the other's argument: `b`'s
+  // step is sequenced ahead of `a`'s (the index threads both).
+  class sealed two: a with: b => a value: (b value)
+
+  // The same, through a static forward (`a` passed on, `b` used in an operand).
+  class sealed two: a via: b => self apply: a to: (b value)
+
   class sealed doubled: b =>
     r := b value: 3.
     r * 2

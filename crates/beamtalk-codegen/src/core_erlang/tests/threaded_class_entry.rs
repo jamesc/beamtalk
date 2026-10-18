@@ -600,6 +600,96 @@ fn acc_is_a_family_of_a_body_only_where_it_holds_a_use() {
     );
 }
 
+// ─── A use inside another use's operand ─────────────────────────────────────
+
+/// Two threading parameters, one used inside the other's operand: the index
+/// threads both (`classify_threading_use` forbids a use's operands to mention
+/// only *its* parameter), and the producer sequences the inner use ahead of
+/// the outer one, so every `Acc` step is minted at the root in evaluation
+/// order. Before the fix the inner use was refused as "inside a construct".
+const TWO_PARAMS: &str = "sealed Object subclass: TwoParams
+  class sealed apply: b to: x => b value: x
+
+  class sealed two: a with: b => a value: (b value)
+
+  class sealed fwd: a with: b => self apply: a to: (b value)
+
+  class sealed each: b with: c => (b value) do: c
+
+  class sealed plus: a with: b => (a value) + (b value)
+
+  class sealed cascaded: a with: b => a value: (b value); value: (b value: 1)
+";
+// (`cascaded:with:`: the index's cascade rule does not walk a cascade's
+// operands, so `b` is not a threading parameter there and its invocations are
+// plain; `a` threads, two steps. Pinned so the two cannot drift.)
+
+/// The same shapes in an open class: `self apply:to:` is late-bound (a plain
+/// send with `Acc` unchanged), its operand still a root use.
+const TWO_PARAMS_OPEN: &str = "Object subclass: TwoParamsOpen
+  class apply: b to: x => b value: x
+
+  class fwd: a with: b => self apply: a to: (b value)
+";
+
+#[test]
+fn a_use_inside_another_uses_operand_is_sequenced_ahead_of_it() {
+    let code = codegen(TWO_PARAMS);
+    assert_entries_equal_the_index(TWO_PARAMS, &code);
+    for (selector, arity, steps) in [
+        ("two:with:", 4, 2),
+        ("fwd:with:", 4, 2),
+        ("each:with:", 4, 2),
+        ("plus:with:", 4, 2),
+        ("cascaded:with:", 4, 2),
+    ] {
+        let entry = crate::core_erlang::selector_mangler::threaded_class_fn_name(selector);
+        let text = function_text(&code, &format!("'{entry}'/{arity}"));
+        assert_acc_linear(text, selector);
+        assert_eq!(
+            text.matches("let Acc@").count(),
+            steps,
+            "{selector}: one Acc step per use\n{text}"
+        );
+    }
+    // `a value: (b value)`: `b`'s step (from `Acc@0`) lands before `a`'s.
+    let two = function_text(&code, "'__t2_class_two:with:'/4");
+    let b_step = two
+        .find("'call_threaded'(_b")
+        .unwrap_or_else(|| panic!("{two}"));
+    let a_step = two
+        .find("'call_threaded'(_a")
+        .unwrap_or_else(|| panic!("{two}"));
+    assert!(
+        two[b_step..].starts_with("'call_threaded'(_b") && two[b_step..].contains(", [], Acc@0)"),
+        "{two}"
+    );
+    assert!(b_step < a_step, "{two}");
+    assert!(two[a_step..].contains("Acc@1)"), "{two}");
+    // `self apply: a to: (b value)`: `b`'s step, then the callee entry with `Acc@1`.
+    let fwd = function_text(&code, "'__t2_class_fwd:with:'/4");
+    let b_step = fwd
+        .find("'call_threaded'(_b")
+        .unwrap_or_else(|| panic!("{fwd}"));
+    let call = fwd
+        .find("'__t2_class_apply:to:'(ClassSelf")
+        .unwrap_or_else(|| panic!("{fwd}"));
+    assert!(b_step < call, "{fwd}");
+    assert!(fwd[call..].contains("Acc@1)"), "{fwd}");
+    assert_compiles_through_erlc("test", &code);
+
+    let code = codegen(TWO_PARAMS_OPEN);
+    assert_entries_equal_the_index(TWO_PARAMS_OPEN, &code);
+    let fwd = function_text(&code, "'__t2_class_fwd:with:'/4");
+    assert_acc_linear(fwd, "fwd:with: (open)");
+    // The inner use steps `Acc` once; the late-bound forward is a plain send.
+    assert_eq!(fwd.matches("let Acc@").count(), 1, "{fwd}");
+    assert!(fwd.contains("'call_threaded'(_b"), "{fwd}");
+    assert!(fwd.contains(", [], Acc@0)"), "{fwd}");
+    assert!(!fwd.contains("'__t2_class_apply:to:'"), "{fwd}");
+    assert_compiles_through_erlc("test", &code);
+}
+
 // ─── The generated corpus: use shapes × surrounding constructs ─────────────
 
 /// One way a threading parameter `b` is used at the method root, with the

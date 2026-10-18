@@ -5,7 +5,7 @@
 // Each of these compiles to one body over `Acc` (`'__t2_class_<sel>'`) with the
 // plain `'class_<sel>'` as a wrapper over it; nothing calls a threaded entry
 // from Beamtalk yet (ADR 0132 Phase 1e), so the BUnit test
-// (adr0132_threaded_class_entry_test.bt) pins that the PLAIN entry answers
+// (threaded_class_entry_test.bt) pins that the PLAIN entry answers
 // exactly what the structural fallback did, with pure blocks. The threaded
 // entries are exercised directly from Erlang by
 // runtime/apps/beamtalk_runtime/test/beamtalk_threaded_class_entries_tests.erl.
@@ -25,11 +25,17 @@ sealed Object subclass: ThreadedEntryFixture
 
   class sealed apply: b to: x => b value: x
 
+  // Two threading parameters, one invoked inside the other's argument (both
+  // thread; `b`'s step is sequenced ahead of `a`'s).
+  class sealed two: a with: b => a value: (b value)
+
   class sealed sumOver: items with: b => items inject: 0 into: b
 
   class sealed detectIn: items with: b => items detect: b ifNone: [0]
 
-  // A `^` from a block beside an invocation: the NLR carries Acc.
+  // A `^` block beside an invocation. The body holds a block that does `^`,
+  // so the method has NO threaded entry (`facts::body_has_block_nlr`, ADR 0132
+  // Phase 1c deviation note) and compiles as before; the NLR carries no Acc.
   class sealed callThen: b firstPositiveIn: items =>
     b value
     items do: [:x | x > 0 ifTrue: [^x]]

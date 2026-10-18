@@ -160,6 +160,37 @@ entries_test_() ->
             ?assertEqual(30, R),
             ?assertEqual([[1], [2]], Log)
         end},
+        {"two:with: threads a second parameter's use inside the first's argument", fun() ->
+            %% `a value: (b value)`: `b`'s step lands before `a`'s, and the
+            %% threaded entry answers what the plain entry answers.
+            put(log, []),
+            Plain = ?MOD:'class_two:with:'(nil, t1(1, fun(X) -> X * 10 end), t1(0, fun() -> 4 end)),
+            PlainLog = erase(log),
+            ?assertEqual(40, Plain),
+            ?assertEqual([[], [4]], PlainLog),
+            {R, Acc1} = ?MOD:'__t2_class_two:with:'(
+                nil,
+                t2(1, fun(X) -> X * 10 end),
+                t2(0, fun() -> 4 end),
+                #{log => [], untouched => kept}
+            ),
+            ?assertEqual(40, R),
+            ?assertEqual([[], [4]], maps:get(log, Acc1)),
+            ?assertEqual(kept, maps:get(untouched, Acc1))
+        end},
+        {"two:via: does the same through a static forward", fun() ->
+            {R, Acc1} = ?MOD:'__t2_class_two:via:'(
+                nil,
+                t2(1, fun(X) -> X + 1 end),
+                t2(0, fun() -> 6 end),
+                #{log => []}
+            ),
+            ?assertEqual(7, R),
+            ?assertEqual([[], [6]], maps:get(log, Acc1)),
+            ?assertEqual(
+                7, ?MOD:'class_two:via:'(nil, fun(X) -> X + 1 end, fun() -> 6 end)
+            )
+        end},
         {"doubled: uses an invocation as an assigned value", fun() ->
             {R, Log, _} = differential('doubled:', [], 0, 1, fun(X) -> X * 10 end),
             ?assertEqual(60, R),
