@@ -1041,8 +1041,9 @@ pub(crate) enum Residual {
     /// module). A local bound outside the loop is the Phase 0 check's.
     LoopConditionArmWrite,
     /// BT-3875: a `match:` arm (body or guard) that writes an outer local
-    /// drops the write (BT-3817 made it an error in methods; the REPL
-    /// answered the stale value silently).
+    /// drops the write. BT-3817 made it this error in methods; the REPL
+    /// answered the stale value until BT-3864 rejected the arm's assignment
+    /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
 }
 
@@ -1061,7 +1062,8 @@ struct ResidualDenied {
 /// consolidation lowers them, each a compile error in the contexts where it
 /// was measured crashing or answering wrong on a BEAM. The probe cells are the
 /// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
-/// the REPL `match` lines; `residual_deny_set_pins` pins each repro. BT-3911
+/// the REPL `match` line; the `residual_*` tests in
+/// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
 /// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
 /// `GroupByValue` row.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
@@ -1078,8 +1080,8 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         fixed_by: "BT-3911",
     },
     // Class, value-type and actor methods since BT-3817; the REPL since
-    // BT-3909 (maintainer-approved REPL output change: the input was
-    // accepted and answered the stale value).
+    // BT-3909 (maintainer-approved REPL output change: the same input drew
+    // the BT-3864 value-position error before).
     ResidualDenied {
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
