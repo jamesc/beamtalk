@@ -656,3 +656,69 @@ matches_pattern_uppercase_flanked_underscore_no_wildcard_test() ->
 %% returns nomatch, which falls to the nomatch -> false branch (line 313).
 matches_pattern_interior_segment_nomatch_test() ->
     ?assertNot(beamtalk_stdlib_test:matches_pattern(<<"a _ c _ e">>, <<"a b x e">>)).
+
+%%% ============================================================================
+%%% report_results/2 — BUnit result shapes (BT-3927)
+%%% ============================================================================
+
+%% Run Fun() with its IO captured; returns {FunOutcome, CapturedBinary}.
+%% FunOutcome is {ok, Value} or {error, Reason} for an `error` exception.
+capture_output(Fun) ->
+    Sink = spawn(fun() -> capture_sink([]) end),
+    OldGL = group_leader(),
+    group_leader(Sink, self()),
+    Outcome =
+        try
+            {ok, Fun()}
+        catch
+            error:Reason -> {error, Reason}
+        after
+            group_leader(OldGL, self())
+        end,
+    Sink ! {get, self()},
+    receive
+        {captured, Output} -> {Outcome, Output}
+    after 5000 -> error(capture_timeout)
+    end.
+
+capture_sink(Acc) ->
+    receive
+        {get, From} ->
+            From ! {captured, unicode:characters_to_binary(lists:reverse(Acc))};
+        {io_request, From, ReplyAs, {put_chars, _Enc, Chars}} ->
+            From ! {io_reply, ReplyAs, ok},
+            capture_sink([Chars | Acc]);
+        {io_request, From, ReplyAs, {put_chars, _Enc, M, F, A}} ->
+            From ! {io_reply, ReplyAs, ok},
+            capture_sink([apply(M, F, A) | Acc]);
+        {io_request, From, ReplyAs, _Request} ->
+            From ! {io_reply, ReplyAs, ok},
+            capture_sink(Acc)
+    end.
+
+%% A skipped BUnit test is neither passed nor failed, so it does not fail EUnit.
+report_results_skip_is_neither_passed_nor_failed_test() ->
+    {Outcome, Output} = capture_output(fun() ->
+        beamtalk_stdlib_test:report_results(btst_label, [
+            {pass, <<"Foo>>testA">>}, {skip, <<"Foo>>testB">>}
+        ])
+    end),
+    ?assertEqual({ok, ok}, Outcome),
+    ?assertNotEqual(nomatch, binary:match(Output, <<"RESULTS:btst_label:1:0\n">>)),
+    ?assertEqual(nomatch, binary:match(Output, <<"FAIL">>)).
+
+%% A failed BUnit test method prints a FAIL block whose every message line is
+%% indented (so the Rust parser keeps it in the block) and fails EUnit.
+report_results_test_failure_prints_indented_block_test() ->
+    {Outcome, Output} = capture_output(fun() ->
+        beamtalk_stdlib_test:report_results(btst_label, [
+            {pass, <<"Foo>>testA">>},
+            {test_failure, <<"Foo>>testB">>, <<"Expected 1, got 2\nat Foo>>testB">>}
+        ])
+    end),
+    ?assertEqual({error, {test_failures, 1}}, Outcome),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(Output, <<"FAIL Foo>>testB\n  Expected 1, got 2\n  at Foo>>testB\n">>)
+    ),
+    ?assertNotEqual(nomatch, binary:match(Output, <<"RESULTS:btst_label:1:1\n">>)).

@@ -230,11 +230,13 @@ Converting to strings:
 ## Characters
 
 A character literal is written with a `$` prefix. Characters represent a
-single Unicode codepoint and are stored as integers.
+single Unicode codepoint and are stored as integers, but a character literal
+is statically a `Character`, so it answers `Character` to `class` and
+dispatches through the Character methods.
 
 ```beamtalk
 $A        // => 65
-$a class  // => Integer
+$a class  // => Character
 ```
 
 Character predicates work on the integer codepoint:

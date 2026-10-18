@@ -28,11 +28,10 @@ TestCase subclass: Ch14MapDestructuring
     self assert: c equals: 3
 
   testMissingKeyRaises =>
-    result := [
+    kind := [
       #{#missing => _val} := #{#present => 42}
-      #did_not_raise
-    ] on: RuntimeError do: [:e | e message includesSubstring: "badkey"]
-    self assert: result equals: true
+    ] on: Error do: [:e | e kind]
+    self assert: kind equals: #key_error
 
   testInCollectBlock =>
     dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]

@@ -3,25 +3,33 @@
 
 name: CI
 
+# docs/learning/** is put back after '!docs/**' (a later pattern overrides an
+# earlier one): its fixtures and chapters feed corpus.json (check-corpus) and
+# the test-learn job (BT-3927), so a learning-guide-only change must still
+# run CI. ci-docs-only.yml excludes it for the same reason.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'SECURITY.md'
-      - '.github/skills/**'
-      - '.devcontainer/**'
+    paths:
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - 'docs/learning/**'
+      - '!LICENSE'
+      - '!SECURITY.md'
+      - '!.github/skills/**'
+      - '!.devcontainer/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'SECURITY.md'
-      - '.github/skills/**'
-      - '.devcontainer/**'
+    paths:
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - 'docs/learning/**'
+      - '!LICENSE'
+      - '!SECURITY.md'
+      - '!.github/skills/**'
+      - '!.devcontainer/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -705,6 +713,84 @@ jobs:
 
       - name: Dialyzer spec validation (generated -spec attributes)
         run: just dialyzer-specs
+
+  # ─── Learning-guide doctests (BT-3927) ─────────────────────────────────
+  # `just test-learn` compiles every docs/learning/ fixture and runs the
+  # chapters' ```beamtalk blocks. It used to run nowhere in CI, so a fixture
+  # that stopped compiling (ch12validation_error.bt against the file/class
+  # name rule) went unnoticed. On a PR it runs only when the diff touches
+  # docs/learning/, this workflow, the Justfile, or the doctest pipeline
+  # itself (test-docs wrapper generation and test-class discovery, the BUnit
+  # result entries, the FAIL/RESULTS: reporter and its parser); on a push
+  # to main it always runs, so a compiler change that breaks the guide still
+  # surfaces there.
+  test-learn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check whether this change touches docs/learning/ or the doctest pipeline
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              docs/learning/ .github/workflows/ci.yml Justfile \
+              'crates/beamtalk-cli/src/commands/test*.rs' \
+              crates/beamtalk-cli/src/beam_compiler.rs \
+              runtime/apps/beamtalk_runtime/src/beamtalk_stdlib_test.erl \
+              runtime/apps/beamtalk_stdlib/src/beamtalk_test_case.erl \
+              runtime/apps/beamtalk_stdlib/src/beamtalk_test_runner.erl | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.filter.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        if: steps.filter.outputs.run == 'true'
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        if: steps.filter.outputs.run == 'true'
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Erlang/rebar3 artifacts
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Rust dependencies
+        if: steps.filter.outputs.run == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Test learning guide (docs/learning/)
+        if: steps.filter.outputs.run == 'true'
+        run: just test-learn
 
   test-integration:
     runs-on: ubuntu-latest

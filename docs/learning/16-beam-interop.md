@@ -158,7 +158,7 @@ TestCase subclass: Ch16PracticalPatterns
   testCallingCryptoHash =>
     // crypto:hash/2 — SHA-256 (returns binary):
     hash := Erlang crypto hash: #sha256 with: "hello"
-    self assert: hash class equals: String    // binary → String
+    self assert: hash class equals: Binary    // raw bytes, not valid UTF-8 → Binary
 
   testListsFlattening =>
     nested := #[#[1, 2], #[3, 4], #[5]]

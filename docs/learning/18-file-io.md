@@ -109,11 +109,11 @@ TestCase subclass: Ch18Streams
   field: tmpDir = "target/bt-doctest-tmp/ch18streams"
   field: nl = ""
   setUp =>
-    updated := self withNl: (String fromCodePoint: 10)
-    File mkdirAll: updated tmpDir
-    File writeAll: updated tmpDir ++ "/data.txt"
-      contents: "one" ++ updated nl ++ "two" ++ updated nl ++ "three" ++ updated nl ++ "four" ++ updated nl ++ "five"
-    updated
+    nl := String fromCodePoint: 10
+    File mkdirAll: self.tmpDir
+    File writeAll: self.tmpDir ++ "/data.txt"
+      contents: "one" ++ nl ++ "two" ++ nl ++ "three" ++ nl ++ "four" ++ nl ++ "five"
+    self withNl: nl
   tearDown =>
     File deleteAll: self.tmpDir
     self
@@ -139,7 +139,7 @@ TestCase subclass: Ch18Streams
     result := (File open: self.tmpDir ++ "/data.txt" do: [:h |
       (h lines select: [:l | l size <= 3]) asList
     ]) unwrap
-    self assert: result size equals: 3
+    self assert: result size equals: 2    // "one" and "two"
 ```
 
 Stream operations are **lazy** — `take:` and `select:` don't read the whole

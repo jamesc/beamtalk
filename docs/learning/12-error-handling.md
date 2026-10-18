@@ -5,7 +5,7 @@
 <!-- btfixture: fixtures/ch12parser_test.bt -->
 <!-- btfixture: fixtures/ch12dnu.bt -->
 <!-- btfixture: fixtures/ch12validator.bt -->
-<!-- btfixture: fixtures/ch12validation_error.bt -->
+<!-- btfixture: fixtures/validation_error.bt -->
 <!-- btfixture: fixtures/ch12custom_errors.bt -->
 <!-- btfixture: fixtures/ch12ensure.bt -->
 
