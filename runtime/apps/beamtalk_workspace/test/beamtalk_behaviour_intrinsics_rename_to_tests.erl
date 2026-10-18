@@ -88,6 +88,9 @@ widget_user_source() ->
 %%====================================================================
 
 setup() ->
+    %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
+    %% `no_workspace` unless this node records a workspace capability.
+    ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
@@ -140,6 +143,7 @@ teardown(_) ->
         end,
         ['Bt3278Widget', 'Bt3278WidgetRenamed', 'Bt3278WidgetSub', 'Bt3278WidgetUser']
     ),
+    ok = beamtalk_capability:clear(),
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
@@ -410,6 +414,9 @@ register_dynamic_class(ClassName) ->
     beamtalk_test_dynamic_class:register(ClassName).
 
 setup_dynamic_with_reference() ->
+    %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
+    %% `no_workspace` unless this node records a workspace capability.
+    ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
@@ -449,6 +456,7 @@ teardown_dynamic_with_reference(_Fixture) ->
         end,
         ['Bt3278DynSource', 'Bt3278DynRenamed', 'Bt3278DynUser']
     ),
+    ok = beamtalk_capability:clear(),
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)

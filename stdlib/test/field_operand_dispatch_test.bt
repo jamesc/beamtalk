@@ -1,0 +1,116 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3892: an arithmetic or comparison operator whose left operand is a direct
+// field read `self.f` must dispatch to the held object's operator when `f` is
+// untyped (default nil) or union-typed (`:: Point | Nil`), exactly as for a
+// plain object-typed field — not take the numeric-only path and raise
+// `does_not_understand` for `plusFromNumber:`. Covered in a Value
+// (`FieldOperandValueHolder`), an Actor (`FieldOperandActorHolder`) and this
+// TestCase's own fields, alongside the untyped numeric-counter shape, which
+// must keep working. A Value field with a numeric default but set to an object
+// by the keyword constructor is covered too (`FieldOperandDefaultHolder`).
+//
+// The point and holder classes live in `fixtures/` (one class per file).
+
+TestCase subclass: FieldOperandDispatchTest
+  field: origin = nil
+  field: unionOrigin :: FieldOperandPoint | Nil = nil
+  field: typedOrigin :: FieldOperandPoint = FieldOperandPoint new
+  field: count = 0
+
+  setUp =>
+    pt := FieldOperandPoint x: 3 y: 4
+    ((self withOrigin: pt) withUnionOrigin: pt) withTypedOrigin: pt
+
+  /// `(3,4) op (1,2)` for `+ -`, `(3,4) op 2` for `* /`.
+  expectedArith -> Array =>
+    #[FieldOperandPoint x: 4 y: 6, FieldOperandPoint x: 2 y: 2, FieldOperandPoint x: 6 y: 8, FieldOperandPoint x: 1 y: 2]
+
+  /// `(3,4) op (4,0)` by magnitude (7 vs 4) for `< > <= >=`.
+  expectedCompare -> Array => #[false, true, false, true]
+
+  q -> FieldOperandPoint => FieldOperandPoint x: 1 y: 2
+
+  /// The comparison operand. Its magnitude order (7 > 4) disagrees with the
+  /// Erlang term order of the two maps (`x`: 3 < 4), so a comparison that
+  /// skipped dispatch and term-ordered the maps would answer the opposite.
+  cq -> FieldOperandPoint => FieldOperandPoint x: 4 y: 0
+
+  holder -> FieldOperandValueHolder =>
+    pt := FieldOperandPoint x: 3 y: 4
+    FieldOperandValueHolder
+      p: pt
+      tp: pt
+      ok: pt
+      count: 0
+
+  // ── Value ───────────────────────────────────────────────────────────────
+  testValueUntypedFieldArithmeticDispatches =>
+    self assert: (self holder arithUntyped: self q) equals: self expectedArith
+
+  testValueUntypedFieldComparisonDispatches =>
+    self assert: (self holder compareUntyped: self cq) equals: self expectedCompare
+
+  testValueUnionFieldArithmeticDispatches =>
+    self assert: (self holder arithUnion: self q) equals: self expectedArith
+
+  testValueUnionFieldComparisonDispatches =>
+    self assert: (self holder compareUnion: self cq) equals: self expectedCompare
+
+  testValueTypedFieldArithmeticDispatches =>
+    self assert: (self holder arithTyped: self q) equals: self expectedArith
+
+  testValueTypedFieldComparisonDispatches =>
+    self assert: (self holder compareTyped: self cq) equals: self expectedCompare
+
+  testValueNumericCounter =>
+    h := self holder bumped bumped bumped
+    self assert: h count equals: 3
+    self assert: (h countBelow: 4)
+    self deny: (h countBelow: 3)
+
+  /// A numeric default proves nothing about a Value field: the keyword
+  /// constructor, sent from outside the class, set it to a point.
+  testValueNumericDefaultFieldSetByConstructorDispatches =>
+    h := FieldOperandDefaultHolder origin: (FieldOperandPoint x: 3 y: 4)
+    self assert: (h arith: self q) equals: self expectedArith
+    self assert: (h compare: self cq) equals: self expectedCompare
+
+  // ── Actor ───────────────────────────────────────────────────────────────
+  testActorFieldsDispatch =>
+    a := FieldOperandActorHolder spawn
+    a place: (FieldOperandPoint x: 3 y: 4)
+    self assert: (a arithUntyped: self q) equals: self expectedArith
+    self assert: (a compareUntyped: self cq) equals: self expectedCompare
+    self assert: (a arithUnion: self q) equals: self expectedArith
+    self assert: (a compareUnion: self cq) equals: self expectedCompare
+    self assert: (a arithTyped: self q) equals: self expectedArith
+    self assert: (a compareTyped: self cq) equals: self expectedCompare
+    a stop
+
+  testActorNumericCounter =>
+    a := FieldOperandActorHolder spawn
+    a increment
+    a increment
+    self assert: a increment equals: 3
+    self assert: (a countBelow: 4)
+    self deny: (a countBelow: 3)
+    a stop
+
+  // ── TestCase (this class's own fields, set in setUp) ───────────────────
+  testTestCaseUntypedFieldDispatches =>
+    self assert: #[self.origin + self q, self.origin - self q, self.origin * 2, self.origin / 2] equals: self expectedArith
+    self assert: #[self.origin < self cq, self.origin > self cq, self.origin <= self cq, self.origin >= self cq] equals: self expectedCompare
+
+  testTestCaseUnionFieldDispatches =>
+    self assert: #[self.unionOrigin + self q, self.unionOrigin - self q, self.unionOrigin * 2, self.unionOrigin / 2] equals: self expectedArith
+    self assert: #[self.unionOrigin < self cq, self.unionOrigin > self cq, self.unionOrigin <= self cq, self.unionOrigin >= self cq] equals: self expectedCompare
+
+  testTestCaseTypedFieldDispatches =>
+    self assert: #[self.typedOrigin + self q, self.typedOrigin - self q, self.typedOrigin * 2, self.typedOrigin / 2] equals: self expectedArith
+    self assert: #[self.typedOrigin < self cq, self.typedOrigin > self cq, self.typedOrigin <= self cq, self.typedOrigin >= self cq] equals: self expectedCompare
+
+  testTestCaseNumericCounter =>
+    self assert: self.count + 1 equals: 1
+    self assert: self.count < 1

@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3892 fixture: the Actor counterpart of `FieldOperandValueHolder` — the
+// untyped (default nil), union-typed and plain-typed slots are assigned a
+// `FieldOperandPoint` by `place:`, and `count` is an untyped numeric counter.
+
+Actor subclass: FieldOperandActorHolder
+  state: p = nil
+  state: tp :: FieldOperandPoint | Nil = nil
+  state: ok :: FieldOperandPoint = FieldOperandPoint new
+  state: count = 0
+
+  /// Store `pt` in all three object slots.
+  place: pt :: FieldOperandPoint -> Nil =>
+    self.p := pt
+    self.tp := pt
+    self.ok := pt
+    nil
+
+  /// `+ - * /` on the untyped slot.
+  arithUntyped: q :: FieldOperandPoint -> Array =>
+    #[self.p + q, self.p - q, self.p * 2, self.p / 2]
+
+  /// `< > <= >=` on the untyped slot.
+  compareUntyped: q :: FieldOperandPoint -> Array =>
+    #[self.p < q, self.p > q, self.p <= q, self.p >= q]
+
+  /// `+ - * /` on the union-typed slot.
+  arithUnion: q :: FieldOperandPoint -> Array =>
+    #[self.tp + q, self.tp - q, self.tp * 2, self.tp / 2]
+
+  /// `< > <= >=` on the union-typed slot.
+  compareUnion: q :: FieldOperandPoint -> Array =>
+    #[self.tp < q, self.tp > q, self.tp <= q, self.tp >= q]
+
+  /// `+ - * /` on the plain-typed slot.
+  arithTyped: q :: FieldOperandPoint -> Array =>
+    #[self.ok + q, self.ok - q, self.ok * 2, self.ok / 2]
+
+  /// `< > <= >=` on the plain-typed slot.
+  compareTyped: q :: FieldOperandPoint -> Array =>
+    #[self.ok < q, self.ok > q, self.ok <= q, self.ok >= q]
+
+  /// The numeric-counter shape: `self.count := self.count + 1`.
+  increment -> Integer =>
+    self.count := self.count + 1
+    self.count
+
+  /// Whether the counter is below `n` (comparison on the untyped counter).
+  countBelow: n :: Integer -> Boolean => self.count < n

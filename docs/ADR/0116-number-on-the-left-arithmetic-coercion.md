@@ -956,6 +956,51 @@ If untyped-field arithmetic's silent-badarith risk ever becomes a real
 problem in practice, revisit both operands together as one design pass —
 not the right operand alone.
 
+## Addendum (2026-10-18): BT-3892 — untyped/union `self.<field>` trust revisited, both operands
+
+The risk above became real: `field: p = nil` set to a `Point` in `setUp`, then
+`self.p + q`, skipped the left guard, hit `badarith`, and was routed to
+`plusFromNumber:` on `q` — a DNU that never sent `+` to the `Point`. Union-typed
+fields (`:: Point | Nil`) had the same failure because only simple annotations
+were recorded. Per the addendum above, both operands were revisited together,
+by changing what `receiver_is_statically_numeric` (and its comparison twin)
+know about a field, not by splitting the predicate:
+
+- A declared field records its full type; a union is bare only when every
+  non-`Nil` member is in the operator's primitive set.
+- An untyped Actor `state:` field, or a `classState:` variable of a sealed
+  class, is trusted as numeric only on evidence from the class's own source:
+  a numeric-literal default and every in-class `self.f :=` writing a numeric
+  literal, a numeric-typed parameter whose name the method body does not
+  rebind, another trusted field, or `+ - * / %` over two such operands.
+  `self.count := self.count + 1` keeps the bare BIF; `state: p = nil` (or any
+  field assigned an object) is guarded.
+- An untyped field of a Value, Object or TestCase is never trusted, whatever
+  its default: its usual writer is the keyword constructor (`H origin: aPoint`)
+  sent from outside the class, which the class source cannot show.
+- A `classState:` variable of a class that is not sealed is never trusted: an
+  inherited class method runs over a subclass's redeclared variable (ADR 0130),
+  whose default and writers the declaring class cannot see.
+- A field with no visible evidence (inherited untyped, an extension target's
+  untyped field) is guarded. Class methods consult `classState:` facts built
+  the same way from the class methods.
+
+Both operands still share one rule, so the right-operand gap closes with the
+left. Open-world writers the class source cannot show (`spawnWith:`,
+`fieldAt:put:`, a subclass writing an inherited untyped `state:` field, a
+class-side extension of a sealed class writing a `classState:` variable) are
+not tracked: the literal default is taken as the field's declared shape.
+Actor `state:` is deliberately not gated on `sealed` the way `classState:`
+is, because that would guard the counter pattern in every open Actor. All of
+these cases are decided together in BT-3925. The implementation is
+`crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
+
+A union with a `Nil` member (`:: Integer | Nil`) stays bare for comparisons as
+well as arithmetic. Guarding it would change nothing: `nil` is not an object,
+so the runtime comparison guard sends it to the bare BIF too, and `nil < 5`
+answers `false` wherever it appears. Making comparisons on `nil` raise is a
+language-wide change to that guard, tracked in BT-3924.
+
 ## Implementation Tracking
 
 **Parent:** BT-2712 (Phase 4 of BT-2708, already tracked this ADR's spec —
