@@ -1280,6 +1280,7 @@ impl CoreErlangGenerator {
                 // (Direct — the RHS is a computed map, not a static field Put);
                 // the tuple unpack and threaded-local rebinds stay opaque Statements.
                 BodyExprKind::DestructureAssignmentControlFlow => {
+                    let mut rhs_value = None;
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                         // Evaluate RHS (returns {Value, State} tuple)
                         let tuple_var = self.fresh_temp_var("CfTuple");
@@ -1351,13 +1352,11 @@ impl CoreErlangGenerator {
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
                         }
+                        rhs_value = Some(actual_val);
                     }
                     if is_last {
-                        let post_state = self.current_state_var();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["{'reply', 'nil', ", leaf::var(post_state), "}"],
-                            span,
-                        ));
+                        let reply = self.destructure_reply_doc(rhs_value)?;
+                        stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
                 // Real state Bind: the RHS's element 2 IS the next `State`
@@ -1621,6 +1620,7 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::DestructureAssignment => {
+                    let mut rhs_value = None;
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                         // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
                         // the RHS's state-effecting sub-expressions land in
@@ -1631,18 +1631,17 @@ impl CoreErlangGenerator {
                         // substitutes the already-sequenced value.
                         let rhs_scope =
                             self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        let (binding_docs, rhs_var) =
+                            self.generate_destructure_bindings_with_value(pattern, value)?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
                         }
                         self.finish_precompiled_scope(rhs_scope)?;
+                        rhs_value = Some(rhs_var);
                     }
                     if is_last {
-                        let post_state = self.current_state_var();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["{'reply', 'nil', ", leaf::var(post_state), "}"],
-                            span,
-                        ));
+                        let reply = self.destructure_reply_doc(rhs_value)?;
+                        stmts.push(ThreadedStmt::Statement(reply, span));
                     }
                 }
                 BodyExprKind::SuperSend => {
@@ -1979,6 +1978,25 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "{'reply', ",
             leaf::var(var),
+            ", ",
+            leaf::var(post_state),
+            "}"
+        ])
+    }
+
+    /// Emit the `{'reply', Rhs, State}` close for a destructuring assignment
+    /// `{a, b} := expr` in last position: it evaluates to its right-hand side,
+    /// `rhs_value` the variable bound to it (BT-3889).
+    fn destructure_reply_doc(&mut self, rhs_value: Option<String>) -> Result<Document<'static>> {
+        let rhs = rhs_value.ok_or_else(|| {
+            CodeGenError::Internal(
+                "destructure_reply_doc: a destructuring arm bound no right-hand side".to_string(),
+            )
+        })?;
+        let post_state = self.current_state_var();
+        Ok(docvec![
+            "{'reply', ",
+            leaf::var(rhs),
             ", ",
             leaf::var(post_state),
             "}"
@@ -2813,6 +2831,13 @@ impl CoreErlangGenerator {
 
     /// Generates code for the last expression in a class method body.
     fn generate_class_method_last_expr(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        // BT-3889: a destructuring assignment evaluates to its right-hand side.
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            let (mut docs, rhs_var) =
+                self.generate_destructure_bindings_with_value(pattern, value)?;
+            docs.push(leaf::var(rhs_var));
+            return Ok(Document::Vec(docs));
+        }
         // A last-position threading construct (counted/while loop or foldl list-op
         // yielding a `{value, StateAcc}` tuple) or a read+write conditional must unwrap the
         // construct's logical value rather than leak the raw tuple (or crash on the 0-arg

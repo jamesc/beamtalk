@@ -4091,6 +4091,19 @@ The rest element must be the last in the pattern. Rest patterns are supported in
 
 > **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
 
+### Value of a Destructuring Assignment (BT-3889)
+
+A destructuring assignment evaluates to its right-hand side, as `x := expr` evaluates to `expr`. Destructuring is a statement, so this is the value of a body whose last statement it is: a method (class, value-type and actor methods alike), a block, a conditional arm, a protected block (`on:do:`, `ensure:`), and the element, accumulator or key a `collect:`, `inject:into:` or `groupBy:` body answers:
+
+```beamtalk
+swap => {a, b} := self pair       // answers the pair, not nil
+
+#(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]
+// => #(#(1, 2), #(3, 2))
+```
+
+The REPL displays the same value. Destructuring is not an expression, so it cannot appear as an operand (`r := ({a, b} := pair)` is a compile error).
+
 ---
 
 ## Live Patching

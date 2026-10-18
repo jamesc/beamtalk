@@ -1691,17 +1691,26 @@ impl CoreErlangGenerator {
             }
             VtBodyExprKind::DestructureAssignment => {
                 if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    let (binding_docs, rhs_var) =
+                        self.generate_destructure_bindings_with_value(pattern, value)?;
                     if is_last {
-                        // Destructuring as last expression: emit bindings then return Self
+                        // BT-3889: a destructuring assignment evaluates to its
+                        // right-hand side, the method's value (the `{Value,
+                        // Self}` pair when the method has a `^` in a block).
                         for d in binding_docs {
                             body_parts.push(docvec!["    ", d]);
                         }
-                        let final_self = self.current_self_var();
                         if has_nlr {
-                            body_parts.push(docvec!["    {'nil', ", leaf::var(final_self), "}\n",]);
+                            let final_self = self.current_self_var();
+                            body_parts.push(docvec![
+                                "    {",
+                                leaf::var(rhs_var),
+                                ", ",
+                                leaf::var(final_self),
+                                "}\n",
+                            ]);
                         } else {
-                            body_parts.push(docvec!["    ", leaf::var(final_self), "\n"]);
+                            body_parts.push(docvec!["    ", leaf::var(rhs_var), "\n"]);
                         }
                     } else {
                         for d in binding_docs {

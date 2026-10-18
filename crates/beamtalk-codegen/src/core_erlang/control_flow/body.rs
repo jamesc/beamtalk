@@ -860,7 +860,8 @@ impl CoreErlangGenerator {
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 has_plain_lets = true;
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                let (binding_docs, rhs_var) =
+                    self.generate_destructure_bindings_with_value(pattern, value)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }
@@ -870,6 +871,7 @@ impl CoreErlangGenerator {
                         kind,
                         pred_var.as_ref(),
                         has_mutations,
+                        &rhs_var,
                         span,
                     );
                 }
@@ -1897,12 +1899,16 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// The `is_last` tail of a destructuring assignment `{a, b} := expr`,
+    /// whose value is its right-hand side `rhs_var` (BT-3889): the element
+    /// `collect:` gathers, the `inject:into:` accumulator, or the predicate.
     fn lower_destructure_last_expr(
         &self,
         stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
         has_mutations: bool,
+        rhs_var: &str,
         span: Span,
     ) {
         match kind {
@@ -1921,7 +1927,13 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec!["{['nil' | AccList], ", leaf::var(fs), "}",],
+                    docvec![
+                        "{[",
+                        leaf::var(rhs_var.to_string()),
+                        " | AccList], ",
+                        leaf::var(fs),
+                        "}",
+                    ],
                     span,
                 ));
             }
@@ -1936,7 +1948,13 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let ", leaf::var(pv.clone()), " = 'false' in ",],
+                        docvec![
+                            "let ",
+                            leaf::var(pv.clone()),
+                            " = ",
+                            leaf::var(rhs_var.to_string()),
+                            " in ",
+                        ],
                         span,
                     ));
                 }
@@ -1949,7 +1967,13 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec!["{'nil', ", leaf::var(fs), "}"],
+                    docvec![
+                        "{",
+                        leaf::var(rhs_var.to_string()),
+                        ", ",
+                        leaf::var(fs),
+                        "}"
+                    ],
                     span,
                 ));
             }
