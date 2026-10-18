@@ -294,6 +294,8 @@ mod tests {
         assert!(actions(source, "t := t + 1", "[u := 1. t := t + 1]").is_empty());
     }
 
+    /// A field write; a class variable is written the same way (`self.x :=`
+    /// in a class method), so this covers both.
     #[test]
     fn not_offered_for_a_field_write_alongside() {
         let source = "t := 0\nTwice twice: [self.n := 1. t := t + 1]\nt";
