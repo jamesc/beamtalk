@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3903 (ADR 0133 Phase 1), carrying BT-3843's repro: a user collection
+// that defines its own `anySatisfy:` (class wins over the trait's provision,
+// ADR 0127 §3) with deliberately different semantics: it looks only at the
+// first element. Driven by adr0133enumerable_user.bt.
+
+Value subclass: Adr0133EnumerableOwnAny
+  uses: Adr0133EnumerableWalkable
+  field: items = #()
+
+  do: block => self.items do: block
+
+  anySatisfy: block =>
+    self.items isEmpty ifTrue: [^false]
+    block value: self.items first
