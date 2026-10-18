@@ -707,13 +707,33 @@ impl RootCtx<'_> {
                     // Any other send: the parameter may only appear inside an
                     // operand that is itself an allowed use (`(b value) + 1`,
                     // `self foo: (b value: 2)`). A bare occurrence, or one
-                    // inside a block literal, falls through to `false`.
+                    // inside a block literal, falls through to `false`. The
+                    // operands are the ones codegen's sequencing rule walks: a
+                    // conditional / `and:` / `or:` send sequences its receiver
+                    // only (its arguments are its arms, lowered by the
+                    // conditional itself), so a mention in one of its
+                    // arguments (`nil ifNil: (b value)`, `f and: (b value)`)
+                    // is not a root use.
                     UseShape::NotAUse => match expr {
                         Expression::MessageSend {
                             receiver,
+                            selector,
                             arguments,
                             ..
-                        } => self.expr_ok(receiver) && arguments.iter().all(|a| self.expr_ok(a)),
+                        } => {
+                            let conditional =
+                                crate::state_threading_selectors::is_conditional_selector(
+                                    selector.name().as_str(),
+                                );
+                            self.expr_ok(receiver)
+                                && arguments.iter().all(|a| {
+                                    if conditional {
+                                        !self.mentions(a)
+                                    } else {
+                                        self.expr_ok(a)
+                                    }
+                                })
+                        }
                         _ => false,
                     },
                 }
@@ -894,9 +914,17 @@ mod tests {
              nested: b =>\n    f := [b value]\n    f value\n  \
              unused: b => 1\n  \
              outside: b => other foo: b\n  literal: b => #(b)\n  \
-             seedToo: b => ^self items inject: b into: b\n",
+             seedToo: b => ^self items inject: b into: b\n  \
+             condArg: b => nil ifNil: (b value)\n  \
+             andArg: b => true and: (b value)\n  \
+             orArg: b => false or: (b value)\n  \
+             notNilArg: b x: x => x ifNotNil: (b value)\n",
         );
         for sel in [
+            "condArg:",
+            "andArg:",
+            "orArg:",
+            "notNilArg:x:",
             "stored:",
             "returnedBare:",
             "ffi:",
