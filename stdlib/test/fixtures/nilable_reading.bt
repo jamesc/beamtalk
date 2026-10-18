@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3924 fixture: a value type whose fields are nilable primitives
+// (`:: Integer | Nil`, `:: String | Nil`). A comparison on such a field routes
+// through the runtime comparison guard, so a `nil` value raises
+// `does_not_understand` instead of being silently term-ordered by the bare
+// Erlang BIF (`nil < 5` used to answer `false`).
+
+Value subclass: NilableReading
+  field: value :: Integer | Nil = nil
+  field: label :: String | Nil = nil
+
+  /// Whether the reading is below `limit` (DNU when the value is nil).
+  below: limit :: Integer -> Boolean => self.value < limit
+
+  /// Whether the reading is at or above `limit` (DNU when the value is nil).
+  atLeast: limit :: Integer -> Boolean => self.value >= limit
+
+  /// Whether the label sorts before `other` (DNU when the label is nil).
+  labelBefore: other :: String -> Boolean => self.label < other

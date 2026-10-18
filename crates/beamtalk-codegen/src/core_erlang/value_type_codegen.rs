@@ -9,7 +9,6 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use crate::core_erlang::field_types::UntypedTrust;
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -279,9 +278,7 @@ impl CoreErlangGenerator {
         )));
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
-        // A value's fields are set by its keyword constructor from outside the
-        // class, so untyped fields are never trusted as numeric (BT-3892).
-        self.set_class_field_types(class, module, UntypedTrust::Never);
+        self.set_class_field_types(class);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., object.bt defines `new => @primitive basicNew`)
@@ -1896,12 +1893,7 @@ impl CoreErlangGenerator {
 
         // Bind parameters via fresh_var (not to_core_var) so names go through
         // the counter and can't collide with sequencing temp vars.
-        let (mut frame, user_params) = MethodFrame::enter(
-            self,
-            method.selector.name().as_str(),
-            &method.parameters,
-            MethodBoundary::ValueType,
-        );
+        let (mut frame, user_params) = MethodFrame::enter(self, method, MethodBoundary::ValueType);
         let mut params = vec!["Self".to_string()];
         params.extend(user_params);
 
@@ -4439,14 +4431,19 @@ impl CoreErlangGenerator {
 
     /// Computes the module name for a superclass in the dispatch chain.
     ///
-    /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
-    /// all stdlib types → `bt@stdlib@{snake_case}`.
+    /// Returns `None` only for `ProtoObject`'s own superclass (`nil`, spelled
+    /// `"none"` by `ClassDefinition::superclass_name`) — `ProtoObject` is the root
+    /// of the hierarchy, so its `dispatch/3` raises `does_not_understand` and
+    /// there is no module to delegate to. `Object` (and any other `ProtoObject
+    /// subclass:`) delegates to `bt@stdlib@proto_object`, so the methods
+    /// `ProtoObject` defines (`==`, `/=`, `=:=`, `=/=`, …) are reachable by a
+    /// dynamic send to any value (BT-3919). For stdlib classes, applies the
+    /// ADR 0016 naming convention: all stdlib types → `bt@stdlib@{snake_case}`.
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix.
     fn superclass_module_name(&self, superclass: &str) -> Option<String> {
-        if superclass == "ProtoObject" {
+        if superclass == "none" {
             return None;
         }
         Some(self.compiled_module_name(superclass))

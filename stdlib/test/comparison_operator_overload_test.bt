@@ -5,9 +5,10 @@
 // messages, so a user value-type can overload them and have `aMoney < bMoney`
 // dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which
 // defines a total order over *every* term and would silently term-order an
-// object — the codegen guard discriminates on "is this a Beamtalk object?", so
-// a type with no comparison operator falls through to a `does_not_understand`
-// DNU rather than a silently-wrong term-order result.
+// object — the codegen guard keeps the bare BIF only for numbers, characters
+// and strings (BT-3924) and dispatches everything else, so a type with no
+// comparison operator falls through to a `does_not_understand` DNU rather than
+// a silently-wrong term-order result.
 //
 // The `Money` and `Widget` value-types live in `fixtures/` (one class per file).
 

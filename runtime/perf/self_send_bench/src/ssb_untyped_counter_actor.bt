@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3925: Actor counter whose `state:` field is untyped. `loop:` is the hot
+// field-arithmetic + field-comparison loop; `increment` is the same update
+// reached by a message send. SsbTypedCounterActor is the `:: Integer`
+// baseline, which always takes the bare-BIF fast path.
+
+Actor subclass: SsbUntypedCounterActor
+  state: count = 0
+
+  increment => self.count := self.count + 1
+
+  loop: n :: Integer -> Integer =>
+    self.count := 0
+    [self.count < n] whileTrue: [self.count := self.count + 1]
+    n

@@ -42,30 +42,25 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %%% ============================================================================
 
 -doc """
-True if `X` is a Beamtalk object whose comparison must route through message
-dispatch rather than a bare Erlang term-order BIF.
-
-Erlang's `<`/`=<`/`>`/`>=` define a *total order over every term* and never
-raise, so a user value-type compared with a bare BIF would silently compare by
-term-order instead of dispatching to its overloaded operator. The comparison
-codegen guard therefore discriminates on "is this a Beamtalk object?" — not
-"is this a number" (the arithmetic guard's `is_number`, which is safe only
-because non-numbers there `badarith`).
+True if `X` is a Beamtalk object (as opposed to a primitive term).
 
 Returns `true` for value-type / tagged-collection instances (maps carrying the
 `'$beamtalk_class'` key), live actor and class objects (`#beamtalk_object{}`),
 and actor process refs (pids). Primitives — numbers, atoms, binaries
 (strings), characters (integers), lists, and plain (untagged) maps — return
-`false`, so the fast path keeps Erlang's total term-order for them.
+`false`. Used, for example, to tell a `Dictionary` (an untagged map) from a
+value-type instance (a tagged map).
+
+The comparison-operator codegen guard does *not* use this: it inlines a
+primitive-comparable test (`is_number` or `is_binary` → bare BIF, everything
+else → dispatch), so that non-object primitives such as `nil` raise
+`does_not_understand` instead of being silently term-ordered (BT-3924).
 
 Limitation (single-node assumption): the pid case delegates to
 `beamtalk_actor:is_beamtalk_actor/1`, which reads `process_info(Pid,
 dictionary)` and so returns `false` for a **remote** actor pid (another node)
-just as it does for a dead one. A comparison of two remote actor refs would
-therefore take the bare term-order path rather than dispatching. This is
-correct for single-node deployments (actor refs are always local); distributed
-comparison of actor references is not a supported use case. Tagged value-type
-maps and `#beamtalk_object{}` refs are node-agnostic and unaffected.
+just as it does for a dead one. Tagged value-type maps and
+`#beamtalk_object{}` refs are node-agnostic and unaffected.
 """.
 -spec is_object(term()) -> boolean().
 is_object(X) when is_map(X) ->
