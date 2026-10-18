@@ -405,9 +405,7 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
       'method_info' => ~{}~,
       'class_method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -448,9 +446,7 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
       'method_info' => ~{}~,
       'class_method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~

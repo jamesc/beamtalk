@@ -14,7 +14,7 @@ use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
     AccParam, BindOp, CarrierSlot, CloseContext, FrameId, MethodBodyKind, RebindFrame,
     RebindLowering, RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
-    VersionPrefix, VersionedVar, canonical_families,
+    VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
@@ -676,8 +676,10 @@ pub(in crate::core_erlang) fn build_method_body(
 /// `Acc` ([`RebindShape::for_frame`]).
 ///
 /// The non-REPL root of a method with no threading parameter stays the
-/// implicit root (`RebindFrame::implicit_root`); this builder is for the
-/// threaded entry only.
+/// implicit root (`RebindFrame::implicit_root`); this builder was for the
+/// threaded entry only, removed by ADR 0133 Phase 2 (BT-3904), so it is
+/// test-only until BT-3905 deletes the `Acc` family.
+#[cfg(test)]
 pub(in crate::core_erlang) fn build_threaded_method_body(
     frame: FrameId,
     families: &[VersionPrefix],
@@ -690,7 +692,7 @@ pub(in crate::core_erlang) fn build_threaded_method_body(
         kind: MethodBodyKind::Threaded,
         frame,
         threads: Vec::new(),
-        families: canonical_families(&with_acc),
+        families: super::ir::canonical_families(&with_acc),
         body,
         span,
     }

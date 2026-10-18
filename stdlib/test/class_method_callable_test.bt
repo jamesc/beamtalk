@@ -1,0 +1,102 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// A class method that hands its block parameter on to a collection message
+// sends it to the receiver as written: a Dictionary, a String and a Stream
+// answer what they always did (a Stream stays lazy, so a detect: over an
+// infinite one terminates), and a ClassBuilder class-method fun registered
+// beside an invocation of the parameter answers its bare value. Kept from
+// the ADR 0132 threaded-entry test when ADR 0133 Phase 2 (BT-3904) removed
+// the entries.
+//
+// Also pinned: invoking, passing on and spreading a block parameter, an
+// inherited class method taking a block, and the error a wrong-arity block
+// raises. (A `^` from a block inside a class method is covered by
+// class_method_non_local_return_test.bt.)
+//
+// Fixtures: fixtures/class_method_callable_fixture.bt,
+// fixtures/class_method_callable_parent.bt, fixtures/class_method_callable_child.bt,
+// fixtures/class_method_args_only_callable.bt.
+
+TestCase subclass: ClassMethodCallableTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid =>
+    d := Dictionary new
+    d at: #a put: 1
+    d at: #b put: 2
+    self assert: (ClassMethodCallableFixture collectIn: d with: [:x |
+      x
+    ]) equals: (d collect: [:x | x])
+    self assert: (ClassMethodCallableFixture each: d do: [:x |
+      x
+    ]) equals: (d do: [:x | x])
+
+  testACollectionMessageOnAStreamStaysLazy =>
+    s := ClassMethodCallableFixture collectIn: (Stream on: #(1, 2, 3)) with: [:x |
+      x * 2
+    ]
+    self assert: (s isKindOf: Stream)
+    self assert: s asList equals: #(2, 4, 6)
+
+  testDetectOnAnInfiniteStreamTerminates =>
+    self
+      assert: (ClassMethodCallableFixture
+        detectIn: (Stream from: 1)
+        with: [:x | x > 3]
+        none: [0])
+      equals: 4
+
+  testACollectionMessageOnAStringAnswersWhatItAlwaysDid =>
+    self assert: (ClassMethodCallableFixture collectIn: "abc" with: [:c |
+      c
+    ]) equals: ("abc" collect: [:c | c])
+
+  testTwiceAnswersTheBlocksLastValue =>
+    self assert: (ClassMethodCallableFixture twice: [7]) equals: 7
+
+  testASameClassPassOnHandsTheBlockOn =>
+    self assert: (ClassMethodCallableFixture twiceVia: [8]) equals: 8
+
+  testAnInheritedClassMethodTakesTheBlock =>
+    self assert: (ClassMethodCallableChild twice: [9]) equals: 9
+
+  // A block of one argument where the method sends `value` raises the same
+  // structured error an instance method's `b value` does (before ADR 0133
+  // Phase 2, BT-3904, the threaded entry's gate raised `arity_mismatch`).
+  testAWrongArityBlockRaisesStatefulBlockDispatch =>
+    self should: [
+      ClassMethodCallableFixture twice: [:x | x]
+    ] raise: #stateful_block_dispatch
+
+  testValueWithArgumentsOnABlock =>
+    self assert: (ClassMethodCallableFixture spread: [:x :y |
+      x + y
+    ] with: #(3, 4)) equals: 7
+
+  // A non-block callable is sent `valueWithArguments:` itself, never
+  // `value:value:`.
+  testValueWithArgumentsOnACallableThatAnswersOnlyValueWithArguments =>
+    self assert: (ClassMethodCallableFixture spread: ClassMethodArgsOnlyCallable new with: #(1, 2)) equals: 2
+
+  // A non-list argument raises what the expression raises outside a class
+  // method.
+  testValueWithArgumentsOfANonListRaisesWhatTheExpressionRaises =>
+    @expect type
+    direct := [[:x | x] valueWithArguments: 5] on: Exception do: [:e | e kind]
+    viaClassMethod := [
+      ClassMethodCallableFixture spread: [:x | x] with: 5
+    ] on: Exception do: [:e | e kind]
+    self assert: viaClassMethod equals: direct
+
+  testAClassBuilderFunAfterAnInvocationAnswersItsBareValue =>
+    ClassMethodCallableFixture buildAfter: [1]
+    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltAfter
+    self assert: self.cls hi equals: 42
+
+  testAClassBuilderFunBeforeAnInvocationAnswersItsBareValue =>
+    ClassMethodCallableFixture buildBefore: [1]
+    self.cls := (Erlang beamtalk_interface) findClass: #ClassMethodCallableBuiltBefore
+    self assert: self.cls hi equals: 42
