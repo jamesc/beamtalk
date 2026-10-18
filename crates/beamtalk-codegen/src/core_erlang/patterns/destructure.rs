@@ -39,9 +39,23 @@ impl CoreErlangGenerator {
         pattern: &Pattern,
         value: &Expression,
     ) -> Result<Vec<Document<'static>>> {
-        let (docs, _rhs_var, _bound) =
-            self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        let (docs, _rhs_var) = self.generate_destructure_bindings_with_value(pattern, value)?;
         Ok(docs)
+    }
+
+    /// Like [`Self::generate_destructure_bindings`], also returning the
+    /// variable bound to the evaluated right-hand side: the value of the
+    /// destructuring assignment, which a body whose last statement it is
+    /// answers (BT-3889; `{a, b} := expr` evaluates to `expr`, like
+    /// `x := expr`).
+    pub(in crate::core_erlang) fn generate_destructure_bindings_with_value(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+    ) -> Result<(Vec<Document<'static>>, String)> {
+        let (docs, rhs_var, _bound) =
+            self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        Ok((docs, rhs_var))
     }
 
     /// Like [`Self::generate_destructure_bindings`] but takes a pre-evaluated variable name

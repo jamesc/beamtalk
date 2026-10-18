@@ -1843,9 +1843,14 @@ impl CoreErlangGenerator {
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 // E4 — exempt from Bind modeling, same as C5: no state
                 // version is produced or consumed, every binding is plain.
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                let (binding_docs, rhs_var) =
+                    self.generate_destructure_bindings_with_value(pattern, value)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
+                }
+                if is_last {
+                    // BT-3889: the block answers the right-hand side.
+                    result_var = rhs_var;
                 }
             } else if is_last {
                 if has_direct_field_assignments {

@@ -18,13 +18,12 @@
 //! [`super::expressions`].
 
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
-use super::util::index_lit;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression, Pattern};
+use beamtalk_core::ast::{Block, Expression};
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
@@ -33,8 +32,8 @@ use beamtalk_core::ast::{Block, Expression, Pattern};
 /// their own doc comments.
 pub(super) enum BlockExprKind {
     /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
-    /// Carries `is_last` so the handler can append `'nil'` when the destructure
-    /// is the final expression in the block.
+    /// Carries `is_last` so the handler can answer the right-hand side (the
+    /// destructure's value, BT-3889) when it is the final expression in the block.
     Destructure { is_last: bool },
     /// Last expression (general case) — its value is the block's result.
     LastExpr,
@@ -630,14 +629,16 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                let (binding_docs, rhs_var) =
+                    self.generate_destructure_bindings_with_value(pattern, value)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }
                 if is_last {
+                    // BT-3889: the block answers the right-hand side.
                     let final_version = self.state_version();
                     stmts.push(ThreadedStmt::Return(
-                        ValueRef::Literal("'nil'"),
+                        ValueRef::Var(rhs_var),
                         VersionedVar::new(VersionPrefix::State, final_version, frame),
                         span,
                     ));
@@ -821,11 +822,10 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Handle destructure assignment expressions in block bodies.
-    ///
-    /// Dispatches to sub-helpers by pattern kind: array, tuple, map.
-    /// When `is_last` is true, appends `'nil'` as the block result value since
-    /// destructuring only creates bindings and does not produce a value itself.
+    /// Handle destructure assignment expressions in block bodies, through
+    /// the shared destructuring extraction. When `is_last` is true the block
+    /// answers the right-hand side: a destructuring assignment evaluates to it
+    /// (BT-3889).
     fn generate_block_destructure(
         &mut self,
         expr: &Expression,
@@ -834,125 +834,10 @@ impl CoreErlangGenerator {
         let Expression::DestructureAssignment { pattern, value, .. } = expr else {
             unreachable!("caller guarantees DestructureAssignment");
         };
-
-        match pattern {
-            Pattern::Array { elements, rest, .. } => {
-                let mut doc =
-                    self.generate_block_array_destructure(elements, rest.as_deref(), value)?;
-                if is_last {
-                    doc = docvec![doc, "'nil'"];
-                }
-                Ok(doc)
-            }
-            Pattern::Tuple { .. } | Pattern::Map { .. } => {
-                let mut docs = self.generate_destructure_bindings(pattern, value)?;
-                if is_last {
-                    docs.push(Document::Str("'nil'"));
-                }
-                Ok(Document::Vec(docs))
-            }
-            _ => Err(CodeGenError::UnsupportedFeature {
-                feature: "Unsupported destructuring pattern kind".to_string(),
-                span: Some(value.span()),
-            }),
+        let (mut docs, rhs_var) = self.generate_destructure_bindings_with_value(pattern, value)?;
+        if is_last {
+            docs.push(leaf::var(rhs_var));
         }
-    }
-
-    /// Generate array destructure bindings in a block body.
-    ///
-    /// Example: `#[a, b] := expr` generates:
-    ///   `let _Arr1 = <expr> in let A = send(_Arr1, 'at:', [1]) in let B = send(...) in`
-    /// With rest: `#[a, ...rest] := expr` additionally generates:
-    ///   `let Rest = beamtalk_array:slice_from(_Arr1, 2) in`
-    fn generate_block_array_destructure(
-        &mut self,
-        elements: &[Pattern],
-        rest: Option<&Pattern>,
-        value: &Expression,
-    ) -> Result<Document<'static>> {
-        let arr_var = self.fresh_temp_var("Arr");
-        let val_doc = self.expression_doc(value)?;
-        let mut docs = vec![docvec![
-            "let ",
-            leaf::var(arr_var.clone()),
-            " = ",
-            val_doc,
-            " in "
-        ]];
-
-        for (idx, elem) in elements.iter().enumerate() {
-            let one_based = index_lit(idx + 1);
-            match elem {
-                Pattern::Variable(id) => {
-                    let core_var = Self::to_core_erlang_var(&id.name);
-                    self.bind_var(&id.name, &core_var);
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'beamtalk_message_dispatch':'send'(",
-                        leaf::var(arr_var.clone()),
-                        ", 'at:', [",
-                        one_based,
-                        "]) in "
-                    ]);
-                }
-                Pattern::Literal(lit, _span) => {
-                    // Guard-check: extract element and assert it equals the
-                    // literal.  Raises `{badmatch, Array}` on mismatch.
-                    let elem_var = self.fresh_temp_var("Elem");
-                    let guard_ok_var = self.fresh_temp_var("GuardOk");
-                    let mismatch_var = self.fresh_temp_var("Mismatch");
-                    let lit_doc = self.generate_literal(lit)?;
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(elem_var.clone()),
-                        " = call 'beamtalk_message_dispatch':'send'(",
-                        leaf::var(arr_var.clone()),
-                        ", 'at:', [",
-                        one_based,
-                        "]) in "
-                    ]);
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(guard_ok_var),
-                        " = case ",
-                        leaf::var(elem_var),
-                        " of <",
-                        lit_doc,
-                        "> when 'true' -> 'ok' <",
-                        leaf::var(mismatch_var),
-                        "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                        leaf::var(arr_var.clone()),
-                        "}) end in "
-                    ]);
-                }
-                Pattern::Wildcard(_) => {} // no binding needed
-                _ => {
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: "Nested patterns in array destructuring".to_string(),
-                        span: Some(elem.span()),
-                    });
-                }
-            }
-        }
-
-        // Rest pattern: `...rest` binds remaining elements as a sub-array
-        // Pattern::Wildcard — no binding needed, only Variable generates code.
-        if let Some(Pattern::Variable(id)) = rest {
-            let core_var = Self::to_core_erlang_var(&id.name);
-            self.bind_var(&id.name, &core_var);
-            let from_idx = index_lit(elements.len() + 1);
-            docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'beamtalk_array':'slice_from'(",
-                leaf::var(arr_var.clone()),
-                ", ",
-                from_idx,
-                ") in "
-            ]);
-        }
-
         Ok(Document::Vec(docs))
     }
 

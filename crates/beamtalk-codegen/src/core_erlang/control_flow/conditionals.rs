@@ -2356,11 +2356,18 @@ impl CoreErlangGenerator {
                             for d in binding_docs {
                                 stmts.push(ThreadedStmt::Statement(d, span));
                             }
+                            if is_last {
+                                // BT-3889: the arm answers the right-hand side.
+                                last_result = Some(ValueRef::Var(field_val_var));
+                            }
                         } else {
-                            let binding_docs =
-                                self.generate_destructure_bindings(pattern, value)?;
+                            let (binding_docs, rhs_var) =
+                                self.generate_destructure_bindings_with_value(pattern, value)?;
                             for d in binding_docs {
                                 stmts.push(ThreadedStmt::Statement(d, span));
+                            }
+                            if is_last {
+                                last_result = Some(ValueRef::Var(rhs_var));
                             }
                         }
                     }
@@ -2618,6 +2625,9 @@ impl CoreErlangGenerator {
                             self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
+                        }
+                        if is_last {
+                            last_result = Some(ValueRef::Var(actual_val));
                         }
                     }
                 }

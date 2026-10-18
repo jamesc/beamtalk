@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its
+// right-hand side, like `x := expr`. One method per lowering that ends a body
+// in one: the method body (with and without a `^` in a block), a block, a
+// conditional arm (plain and one that threads a local), a protected block
+// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,
+// `groupBy:`, plain and threading a local). Asserted in
+// bt3889destructure_value_test.bt.
+
+Actor subclass: Bt3889DestructureValueActor
+  state: n = 0
+
+  last => #(_a, _b) := #(1, 2)
+
+  lastNlr: c =>
+    c ifTrue: [^0]
+    #(_a, _b) := #(1, 2)
+
+  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)
+
+  lastMap => #{#k => _v} := #{#k => 1}
+
+  block => [#(_a, _b) := #(1, 2)] value
+
+  arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]
+
+  threadedArm: c =>
+    t := 0
+    r := c
+      ifTrue: [
+        t := 5
+        #(_a, _b) := #(t, 2)
+      ]
+      ifFalse: [0]
+    #(r, t)
+
+  onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]
+
+  ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]
+
+  collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]
+
+  threadedCollect =>
+    t := 0
+    r := #(1, 3)
+      collect: [:x |
+        t := t + x
+        #(_a, _b) := #(x, t)
+      ]
+    #(r, t)
+
+  // A predicate: the right-hand side is not a boolean, so it raises like any
+  // other non-boolean predicate.
+  select => #(1) select: [:x | #(_a, _b) := #(x, 2)]
+
+  inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]
+
+  // No `groupBy` here: an actor `groupBy:` whose block binds a local answers
+  // the raw fold tuple whatever its last statement (BT-3897).
+
+  // DestructureAssignmentControlFlow: the right-hand side writes a field.
+  lastCf: c =>
+    #(_a, _b) := c
+      ifTrue: [
+        self.n := 1
+        #(1, 2)
+      ]
+      ifFalse: [#(3, 4)]
+
+  n => self.n
+
+  // A stateful (Tier 2) block: it writes a captured local and crosses a
+  // self-send to a collection primitive.
+  sealed opaqueCollect: block => #(1, 2) collect: block
+
+  tier2Block =>
+    t := 0
+    r := self
+      opaqueCollect: [:x |
+        t := t + x
+        #(_a, _b) := #(x, t)
+      ]
+    #(r, t)
