@@ -212,8 +212,9 @@ error: block assigns captured variable `t`, but `twice:` is not a construct
           `t := Twice twice: [t + 1]`
   = note: a block passed to a user-defined method, stored, or returned may read
           captured variables but not assign them (ADR 0133). The messages that
-          thread assignments are the control constructs and the collection
-          messages; `beamtalk explain stateful-blocks` lists them.
+          thread assignments are the control constructs (ifTrue:, whileTrue:,
+          to:do:, on:do:, ...) and the collection messages (do:, collect:,
+          inject:into:, detect:ifNone:, ...).
 ```
 
 ### Error examples
@@ -448,8 +449,9 @@ answers "does this block literal escape, and which captured variables does it
 assign". It emits the diagnostic above at the assignment span, with the
 shape-specific fragment and the fix. The ADR 0132 §6 inventory's `PIN-BUG`
 cases flip to positive diagnostic tests. The LSP reports it as a diagnostic
-with a code action. `beamtalk explain stateful-blocks` lists the known
-constructs from `state_threading_selectors.rs` so the list has one source.
+with a code action. The note's list of known constructs is generated from
+`state_threading_selectors.rs` so the list has one source (there is no
+`beamtalk explain` command; the note carries the list).
 Decide here, with a test, what a `uses: Enumerable` class's expanded
 `inject:into:` / `collect:` / `select:` do with a Tier 2 block: they are
 stdlib code, so they may honour the Tier 2 protocol as the stdlib collections
@@ -513,10 +515,24 @@ protocol tests.
 - **Docs.** `docs/beamtalk-language-features.md` § Blocks gains the rule and
   the idiom; ADR 0041's §Decision gets an amendment note pointing here.
 
+## Implementation Tracking
+
+**Epic:** BT-3901
+**Issues:** BT-3902, BT-3903 (Phase 1); BT-3904, BT-3905, BT-3906, BT-3907,
+BT-3908 (Phase 2); BT-3909 (Phase 2/3 boundary); BT-3910, BT-3911, BT-3912,
+BT-3913 (Phase 3); BT-3914 (LSP code action)
+**Status:** Planned
+
+The ADR 0131 residuals epic BT-3883 is cancelled and replaced by BT-3901:
+BT-3862, BT-3858 and BT-3843 are absorbed by BT-3902 and BT-3903; BT-3860,
+BT-3833, BT-3841, BT-3861, BT-3875, BT-3876, BT-3878, BT-3891 and BT-3897 are
+duplicates of the Phase 3 issue that closes each of them.
+
 ## References
 
-- Related issues: BT-3899 (this ADR), BT-3865 (ADR 0132 Epic, on hold),
-  BT-3883 (ADR 0131 residuals; Phase 3 acceptance), BT-3890 and #4372 (the
+- Related issues: BT-3899 (this ADR), BT-3901 (implementation Epic), BT-3865
+  (ADR 0132 Epic, cancelled), BT-3883 (ADR 0131 residuals, replaced by
+  BT-3901; Phase 3 acceptance), BT-3890 and #4372 (the
   review that prompted this), BT-3841, BT-3860, BT-3891, BT-3893, BT-3894,
   BT-3895, BT-3885
 - Related ADRs: ADR 0041 (amended), ADR 0128 (superseded), ADR 0132
