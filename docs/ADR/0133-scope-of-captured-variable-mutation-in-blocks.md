@@ -526,7 +526,10 @@ BT-3913 (Phase 3); BT-3914 (LSP code action)
 The ADR 0131 residuals epic BT-3883 is cancelled and replaced by BT-3901:
 BT-3862, BT-3858 and BT-3843 are absorbed by BT-3902 and BT-3903; BT-3860,
 BT-3833, BT-3841, BT-3861, BT-3875, BT-3876, BT-3878, BT-3891 and BT-3897 are
-duplicates of the Phase 3 issue that closes each of them.
+duplicates of the Phase 3 issue that closes each of them. Three codegen
+residuals filed outside BT-3883 (BT-3849, BT-3853, BT-3854) are duplicates of
+BT-3911 and BT-3912 for the same reason, and BT-3884 moves under BT-3901 next
+to BT-3902.
 
 ## References
 
