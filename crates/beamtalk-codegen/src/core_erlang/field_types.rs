@@ -18,7 +18,7 @@
 //!   guard would send it to the bare BIF anyway. Every other shape (generic,
 //!   singleton, false-or, …) is an object type and is guarded.
 //! * An **untyped** field of an **Actor** (`state:`) or a `classState:`
-//!   variable is trusted as numeric only on positive evidence gathered from
+//!   variable of a **sealed** class is trusted as numeric only on positive evidence gathered from
 //!   the class's own source ([`FieldTypeFact::UntypedNumeric`]): its default is
 //!   a numeric literal *and* every in-class `self.f := e` writes a
 //!   numeric-evidenced `e` (a numeric literal, a numeric-typed parameter,
@@ -34,7 +34,11 @@
 //!   target's untyped field, a name codegen knows nothing about) is guarded —
 //!   the guard is always correct, merely not free.
 //!
-//! Open-world writers an Actor's source cannot show — `spawnWith:`,
+//! A `classState:` variable of a class that is not sealed is never trusted:
+//! an inherited class method runs over a subclass's redeclared variable
+//! (ADR 0130), with a default and writers this class cannot see.
+//!
+//! Open-world writers an Actor's source cannot show — `spawnWith:` (BT-3925),
 //! `fieldAt:put:`, or a subclass assigning an inherited untyped field — are
 //! not tracked: for an Actor's own untyped field the literal default is taken
 //! as its declared shape.
@@ -105,7 +109,7 @@ fn is_nil_type(ty: &DeclaredType) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum UntypedTrust {
     /// The class's own writes are the fields' normal writers (an Actor's
-    /// `state:`, any class's `classState:`).
+    /// `state:`, a sealed class's `classState:`).
     FromClassSource,
     /// The fields' usual writer is outside the class (a Value's keyword
     /// constructor), so untyped fields are never trusted.

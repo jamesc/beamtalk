@@ -411,8 +411,10 @@ impl CoreErlangGenerator {
     /// standalone `Class >> sel` methods for this class in `module`) when
     /// `trust` allows it: an Actor's own writes are its fields' normal
     /// writers, a Value's are not (its keyword constructor runs outside the
-    /// class). `classState:` variables are always classified from the class
-    /// methods, their only writers. Inherited
+    /// class). `classState:` variables are classified from the class methods
+    /// only in a **sealed** class: an inherited class method runs over a
+    /// subclass's redeclared variable (ADR 0130), whose default and writers
+    /// this class cannot see. Inherited
     /// fields get their declared type from the class hierarchy; an inherited
     /// *untyped* field has no visible writers, so it gets no fact and is
     /// guarded (BT-3892).
@@ -450,11 +452,13 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        self.current_class_var_types = classify_fields(
-            &class.class_variables,
-            &class_writers,
-            UntypedTrust::FromClassSource,
-        );
+        let class_var_trust = if class.is_sealed {
+            UntypedTrust::FromClassSource
+        } else {
+            UntypedTrust::Never
+        };
+        self.current_class_var_types =
+            classify_fields(&class.class_variables, &class_writers, class_var_trust);
     }
 
     /// Populates instance-field facts for an **extension** method from the

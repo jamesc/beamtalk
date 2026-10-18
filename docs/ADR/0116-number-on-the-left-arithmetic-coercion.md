@@ -968,8 +968,8 @@ know about a field, not by splitting the predicate:
 
 - A declared field records its full type; a union is bare only when every
   non-`Nil` member is in the operator's primitive set.
-- An untyped Actor `state:` field (or `classState:` variable) is trusted as
-  numeric only on evidence from the class's own source: a numeric-literal
+- An untyped Actor `state:` field, or a `classState:` variable of a sealed
+  class, is trusted as numeric only on evidence from the class's own source: a numeric-literal
   default and every in-class `self.f :=` writing a numeric literal, a
   numeric-typed parameter whose name the method body does not rebind, another
   trusted field, or `+ - * / %` over two such operands.
@@ -978,13 +978,16 @@ know about a field, not by splitting the predicate:
 - An untyped field of a Value, Object or TestCase is never trusted, whatever
   its default: its usual writer is the keyword constructor (`H origin: aPoint`)
   sent from outside the class, which the class source cannot show.
+- A `classState:` variable of a class that is not sealed is never trusted: an
+  inherited class method runs over a subclass's redeclared variable (ADR 0130),
+  whose default and writers the declaring class cannot see.
 - A field with no visible evidence (inherited untyped, an extension target's
   untyped field) is guarded. Class methods consult `classState:` facts built
   the same way from the class methods.
 
 Both operands still share one rule, so the right-operand gap closes with the
-left. Open-world writers an Actor's source cannot show (`spawnWith:`,
-`fieldAt:put:`) are not tracked: an Actor's untyped field's literal default is
+left. Open-world writers an Actor's source cannot show (`spawnWith:`, tracked
+in BT-3925; `fieldAt:put:`) are not tracked: an Actor's untyped field's literal default is
 taken as its declared shape. The implementation is
 `crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
 

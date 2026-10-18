@@ -653,7 +653,7 @@ fn test_bt3892_actor_counter_stays_bare_and_poisoned_field_is_guarded() {
 #[test]
 fn test_bt3892_class_variable_facts_drive_class_method_operators() {
     let core = crate::core_erlang::tests::codegen(
-        "Object subclass: Reg\n  classState: hits = 0\n  classState: last = nil\n  \
+        "sealed Object subclass: Reg\n  classState: hits = 0\n  classState: last = nil\n  \
          class bump => self.hits := self.hits + 1\n  \
          class shifted: q => self.last + q\n",
     );
@@ -664,6 +664,20 @@ fn test_bt3892_class_variable_facts_drive_class_method_operators() {
     assert!(
         method_body_contains(&core, "class_shifted:", "call 'erlang':'is_number'("),
         "an untyped nil-default class variable must be guarded:\n{core}"
+    );
+}
+
+#[test]
+fn test_bt3892_class_variables_of_unsealed_class_are_guarded() {
+    // A subclass may redeclare `hits` with a non-numeric default and inherit
+    // `bump`, which then runs over the subclass's variable (ADR 0130).
+    let core = crate::core_erlang::tests::codegen(
+        "Object subclass: Reg\n  classState: hits = 0\n  \
+         class bump => self.hits := self.hits + 1\n",
+    );
+    assert!(
+        method_body_contains(&core, "class_bump", "call 'erlang':'is_number'("),
+        "an unsealed class's untyped class variable must be guarded:\n{core}"
     );
 }
 
