@@ -356,7 +356,7 @@ module 'class_var_mutation_before_block_relay' ['start_link'/1, 'start_link'/2, 
     let _Th6 = call 'beamtalk_dispatch':'call_threaded'(_aBlock4, [], Acc@0) in let _ThV7 = call 'erlang':'element'(1, _Th6) in let Acc@1 = call 'erlang':'element'(2, _Th6) in let _seq5 = _ThV7 in let _ThAnswer8 = _seq5 in {_ThAnswer8, Acc@1}
 
 'class_helper:'/2 = fun (ClassSelf, _aBlock4) ->
-    call 'erlang':'element'(1, apply '__t2_class_helper:'/3 (ClassSelf, _aBlock4, 'plain'))
+    call 'erlang':'element'(1, apply '__t2_class_helper:'/3 (ClassSelf, _aBlock4, {'plain', 'RelayClassCtr class', 'helper:'}))
 
 'class_mutateThenRelay'/1 = fun (ClassSelf) ->
     let _CVKey13 = {'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)} in     let _NlrToken9 = call 'erlang':'make_ref'() in

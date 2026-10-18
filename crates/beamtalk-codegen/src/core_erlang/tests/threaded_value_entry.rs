@@ -124,7 +124,8 @@ fn a_direct_invocation_is_a_body_over_acc_with_a_plain_wrapper() {
     assert_eq!(
         normalized(function_text(&code, "'twice:'/2")),
         "'twice:'/2 = fun (Self, _b1) -> \
-         call 'erlang':'element'(1, apply '__t2_twice:'/3 (Self, _b1, 'plain'))"
+         call 'erlang':'element'(1, apply '__t2_twice:'/3 \
+         (Self, _b1, {'plain', 'SealedValue', 'twice:'}))"
     );
     assert_compiles_through_erlc("test", &code);
 }
@@ -319,7 +320,8 @@ fn an_annotated_entry_has_a_spec_over_the_acc_map() {
     );
     assert!(
         code.contains(
-            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, {'atom', 0, 'plain'}]}]}, \
+            "{'type', 0, 'union', [{'type', 0, 'map', 'any'}, {'type', 0, 'tuple', \
+             [{'atom', 0, 'plain'}, {'type', 0, 'atom', []}, {'type', 0, 'atom', []}]}]}]}, \
              {'type', 0, 'tuple', [{'type', 0, 'integer', []}, {'type', 0, 'union', "
         ),
         "{code}"

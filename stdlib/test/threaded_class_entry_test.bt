@@ -130,12 +130,72 @@ TestCase subclass: ThreadedClassEntryTest
     self should: [c each: #(1, 2) do: laundered] raise: #stateful_block_dispatch
     self assert: t equals: 0
 
-  // A wrong-arity block (one argument too many) is the same error (it is
-  // indistinguishable from a Tier 2 block by arity); that it is not run first is
-  // asserted in beamtalk_threaded_class_entries_tests.erl.
-  testAWrongArityBlockIsRefused =>
+  // A wrong-arity block (one argument too many) has a Tier 2 block's arity but not
+  // its mark (BT-3885), so it is the arity mistake it is, and it is not run.
+  testAWrongArityBlockIsAnArityMismatch =>
     c := ThreadedEntryFixture
-    self should: [c twice: [:x | x]] raise: #stateful_block_dispatch
+    self should: [c twice: [:x | x]] raise: #arity_mismatch
+
+  testAWrongArityBlockIsNotRunBeforeTheError =>
+    Erlang erlang erase: #bt3885Ran
+    c := ThreadedEntryFixture
+    self should: [
+      c twice: [:x | Erlang erlang put: #bt3885Ran value: true]
+    ] raise: #arity_mismatch
+    self deny: ((Erlang erlang get_keys) includes: #bt3885Ran)
+
+  // The refusal names the class method the caller sent, not the `value` the body
+  // would have sent the block.
+  testTheRefusalNamesTheClassMethod =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    c := ThreadedEntryFixture
+    error := [c twice: laundered] on: Exception do: [:e | e]
+    self assert: error selector equals: #twice:
+    self assert: (error message includesSubstring: "'twice:' on ThreadedEntryFixture class") equals: true
+    self assert: (error message includesSubstring: "the block was not run") equals: true
+
+  // --- the gate with a real Acc map: the Tier 2 caller path (BT-3885) ---------
+  //
+  // No Beamtalk caller emits a threaded send before ADR 0132 Phase 1e, so these
+  // call the gate directly through the FFI, as that send will.
+  testACompiledTier2BlockIsThreadedWithARealAcc =>
+    t := 0
+    @expect dead_assignment
+    writer := [t := t + 1]
+    laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
+    reply := (Erlang beamtalk_dispatch)
+      call_threaded: laundered
+      with: #()
+      with: #{}
+    self assert: (reply at: 1) equals: 1
+
+  testAWrongArityBlockGivenARealAccIsNotRun =>
+    Erlang erlang erase: #bt3885Ran
+    self
+      should: [
+        (Erlang beamtalk_dispatch)
+          call_threaded: [:x | Erlang erlang put: #bt3885Ran value: true]
+          with: #()
+          with: #{}
+      ]
+      raise: #arity_mismatch
+    self deny: ((Erlang erlang get_keys) includes: #bt3885Ran)
+
+  // An Erlang FFI result shaped like a Tier 2 reply (`{ok, #{...}}`) from a
+  // wrong-arity block is never taken for one.
+  testAWrongArityBlockAnsweringAnOkMapIsNotATier2Reply =>
+    ffi := [:x | Erlang erlang list_to_tuple: #(#ok, #{#foreign => 1})]
+    self
+      should: [
+        (Erlang beamtalk_dispatch)
+          call_threaded: ffi
+          with: #()
+          with: #{}
+      ]
+      raise: #arity_mismatch
 
   // The same through an INHERITED class method: the subclass resolves `twice:` to
   // the parent's module and its plain wrapper.

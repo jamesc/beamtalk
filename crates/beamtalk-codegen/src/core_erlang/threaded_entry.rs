@@ -14,11 +14,13 @@
 //! ```erlang
 //! '__t2_class_twice:'/3 = fun (ClassSelf, ABlock, Acc@0) -> {Result, Acc@N}
 //! 'class_twice:'/2 = fun (ClassSelf, ABlock) ->
-//!     call 'erlang':'element'(1, apply '__t2_class_twice:'/3 (ClassSelf, ABlock, 'plain'))
+//!     call 'erlang':'element'(1, apply '__t2_class_twice:'/3
+//!         (ClassSelf, ABlock, {'plain', 'Twice class', 'twice:'}))
 //!
 //! '__t2_twice:'/3 = fun (Self, ABlock, Acc@0) -> {Result, Acc@N}
 //! 'twice:'/2 = fun (Self, ABlock) ->
-//!     call 'erlang':'element'(1, apply '__t2_twice:'/3 (Self, ABlock, 'plain'))
+//!     call 'erlang':'element'(1, apply '__t2_twice:'/3
+//!         (Self, ABlock, {'plain', 'Twice', 'twice:'}))
 //! ```
 //!
 //! Both kinds share everything below: the recognizer, the use producers, the
@@ -32,11 +34,14 @@
 //! writes a field the body's families are `[SelfVt, Acc]` (`Acc` last); the
 //! field writes thread `SelfVt` exactly as in any value-type method.
 //!
-//! The wrapper has no caller map to thread, so it hands the body the atom
-//! `'plain'` as `Acc@0` (never used as a map: only `call_threaded/3`, forwards
-//! and the NLR slot touch `Acc`). With it `call_threaded/3` runs a Tier 1 block
-//! as before and raises `stateful_block_dispatch` *without running* a Tier 2
-//! one, so a late-bound caller never has a block's writes dropped silently.
+//! The wrapper has no caller map to thread, so it hands the body the
+//! plain-entry sentinel `{'plain', ClassTag, Selector}` as `Acc@0`
+//! (`threading_abi::plain_entry_acc_doc`, `ClassTag` the metaclass or the
+//! class; never used as a map: only `call_threaded/3`, forwards and the NLR
+//! slot touch `Acc`). With it `call_threaded/3` runs a Tier 1 block as before
+//! and raises `stateful_block_dispatch` naming this method *without running* a
+//! Tier 2 one (recognised by its mark, BT-3885), so a late-bound caller never
+//! has a block's writes dropped silently.
 //!
 //! The body is a `ThreadedStmt::MethodBody` frame over the trailing `Acc`
 //! family; every use of a threading parameter is a *producer* in the sense of
@@ -1017,20 +1022,25 @@ impl CoreErlangGenerator {
     }
 }
 
-/// The plain entry's body: `element(1, apply Entry/Arity(Args..., 'plain'))`,
+/// The plain entry's body: `element(1, apply Entry/Arity(Args..., Sentinel))`,
 /// the wrapper over a threaded entry (ADR 0132 §2, as amended by the BT-3871
 /// review). `args` are the receiver (`ClassSelf` or `Self`) and the user
-/// parameters; the `plain` sentinel stands in for the caller's map it does not
-/// have (`call_threaded/3` runs a Tier 1 block and raises
+/// parameters; the plain-entry sentinel
+/// (`threading_abi::plain_entry_acc_doc` for `class_name`'s `selector`, on
+/// `class_side` or the instance side) stands in for the caller's map it does
+/// not have (`call_threaded/3` runs a Tier 1 block and raises
 /// `stateful_block_dispatch` for a Tier 2 one rather than drop its writes).
 /// Shared by the class-method and the value-type entries.
 pub(in crate::core_erlang) fn plain_wrapper_call_doc(
     entry_fn: String,
     entry_arity: usize,
     args: &[String],
+    (class_name, class_side, selector): (&str, bool, &str),
 ) -> Document<'static> {
     let mut call_args: Vec<Document<'static>> = args.iter().cloned().map(leaf::var).collect();
-    call_args.push(leaf::atom("plain"));
+    call_args.push(super::threading_abi::plain_entry_acc_doc(
+        class_name, class_side, selector,
+    ));
     docvec![
         "call 'erlang':'element'(1, apply ",
         leaf::fname(entry_fn, entry_arity),

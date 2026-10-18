@@ -2045,33 +2045,38 @@ impl CoreErlangGenerator {
             arity,
             &params,
             fun_doc,
-            !positions.is_empty(),
+            (!positions.is_empty()).then_some(class_def.name.name.as_str()),
             &annotate,
         ))
     }
 
     /// The definitions of a value-type method: `'<sel>'/N = <fun>`, or, for a
-    /// method with a threaded entry (ADR 0132 §2), the entry
-    /// `'__t2_<sel>'/N+1 = <fun>` and, under today's name and arity, the plain
-    /// wrapper over it (the `plain` sentinel, the bare result), which
-    /// `'dispatch'/3` keeps calling. `annotate` adds the method's source line.
+    /// method of `threaded_in` (the class) with a threaded entry (ADR 0132 §2),
+    /// the entry `'__t2_<sel>'/N+1 = <fun>` and, under today's name and arity,
+    /// the plain wrapper over it (the plain-entry sentinel, the bare result),
+    /// which `'dispatch'/3` keeps calling. `annotate` adds the source line.
     fn value_type_method_defs(
         mangled: String,
         arity: usize,
         params: &[String],
         fun_doc: Document<'static>,
-        threaded: bool,
+        threaded_in: Option<&str>,
         annotate: &dyn Fn(Document<'static>) -> Document<'static>,
     ) -> Document<'static> {
-        if !threaded {
+        let Some(class_name) = threaded_in else {
             return docvec![leaf::fname(mangled, arity), " = ", annotate(fun_doc), "\n",];
-        }
+        };
         let entry_fn = super::selector_mangler::threaded_fn_name(&mangled);
         let wrapper_doc = docvec![
             "fun (",
             join(params.iter().cloned().map(leaf::var), &Document::Str(", ")),
             ") ->\n    ",
-            super::threaded_entry::plain_wrapper_call_doc(entry_fn.clone(), arity + 1, params),
+            super::threaded_entry::plain_wrapper_call_doc(
+                entry_fn.clone(),
+                arity + 1,
+                params,
+                (class_name, false, &mangled),
+            ),
             "\n",
         ];
         docvec![

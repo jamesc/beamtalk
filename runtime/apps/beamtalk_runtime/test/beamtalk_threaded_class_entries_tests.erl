@@ -28,9 +28,12 @@ pure block, and assert that
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include("beamtalk_threading_abi.hrl").
 
 -define(MOD, 'bt@threaded_class_entries_fixture').
 -define(CLASS, 'ThreadedClassEntriesFixture').
+%% The plain-entry sentinel, as the plain wrapper of `twice:` passes it.
+-define(PLAIN, ?BT_PLAIN_ENTRY_ACC('ThreadedClassEntriesFixture class', 'twice:')).
 
 setup() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
@@ -45,6 +48,8 @@ setup() ->
 %% The Tier 2 / Tier 1 blocks and the plain-against-entry differential are
 %% shared with the value-type suite (`beamtalk_threaded_entry_test_helper`).
 t2(Arity, F) -> beamtalk_threaded_entry_test_helper:t2(Arity, F).
+
+mark(F) -> beamtalk_tier2_test_block:mark(F).
 
 plain_fn(Selector) -> list_to_atom("class_" ++ atom_to_list(Selector)).
 entry_fn(Selector) -> list_to_atom("__t2_class_" ++ atom_to_list(Selector)).
@@ -264,14 +269,42 @@ plain_refuses_tier2_test_() ->
             ),
             ?assertEqual(undefined, get(ran))
         end},
-        {"a side-effecting block of the wrong arity does not run before the error", fun() ->
+        {"a side-effecting block of the wrong arity is an arity_mismatch, unrun", fun() ->
+            %% One argument too many is not a Tier 2 block unless it carries
+            %% the mark (BT-3885), so this is the arity mistake it is.
             Wrong = fun(_A) ->
                 put(ran, true),
                 1
             end,
             ?assertEqual(
-                stateful_block_dispatch, refused(fun() -> ?MOD:'class_twice:'(nil, Wrong) end)
+                arity_mismatch, refused(fun() -> ?MOD:'class_twice:'(nil, Wrong) end)
             ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"the refusal names the class method, not the value send", fun() ->
+            try
+                ?MOD:'class_twice:'(nil, ran_t2(0)),
+                ?assert(false)
+            catch
+                error:#{error := #beamtalk_error{} = E} ->
+                    ?assertMatch(
+                        #beamtalk_error{
+                            kind = stateful_block_dispatch,
+                            class = 'ThreadedClassEntriesFixture class',
+                            selector = 'twice:',
+                            details = #{reason := plain_entry}
+                        },
+                        E
+                    ),
+                    ?assertEqual(
+                        <<
+                            "'twice:' on ThreadedClassEntriesFixture class cannot thread a "
+                            "block that assigns captured variables through this send; "
+                            "the block was not run"
+                        >>,
+                        E#beamtalk_error.message
+                    )
+            end,
             ?assertEqual(undefined, get(ran))
         end},
         {"a dynamic class send of a Tier 2 block raises and runs nothing", fun() ->
@@ -291,13 +324,13 @@ plain_refuses_tier2_test_() ->
             ?assertEqual(undefined, get(ran))
         end},
         {"call_threaded/3 with the sentinel never answers a map", fun() ->
-            ?assertEqual({3, plain}, beamtalk_dispatch:call_threaded(fun() -> 3 end, [], plain)),
+            ?assertEqual({3, ?PLAIN}, beamtalk_dispatch:call_threaded(fun() -> 3 end, [], ?PLAIN)),
             ?assertEqual(
-                {3, plain}, beamtalk_dispatch:call_threaded(fun(X) -> X end, [3], plain)
+                {3, ?PLAIN}, beamtalk_dispatch:call_threaded(fun(X) -> X end, [3], ?PLAIN)
             ),
             ?assertEqual(
                 stateful_block_dispatch,
-                refused(fun() -> beamtalk_dispatch:call_threaded(ran_t2(0), [], plain) end)
+                refused(fun() -> beamtalk_dispatch:call_threaded(ran_t2(0), [], ?PLAIN) end)
             ),
             ?assertEqual(undefined, get(ran))
         end},
@@ -311,19 +344,25 @@ plain_refuses_tier2_test_() ->
                 1
             end,
             ?assertEqual(
-                {1, plain}, beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b], plain)
+                {1, ?PLAIN}, beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b], ?PLAIN)
+            ),
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() ->
+                    beamtalk_dispatch:call_threaded_with_arguments(Three, [a, b], ?PLAIN)
+                end)
             ),
             ?assertEqual(
                 stateful_block_dispatch,
                 refused(fun() ->
-                    beamtalk_dispatch:call_threaded_with_arguments(Three, [a, b], plain)
+                    beamtalk_dispatch:call_threaded_with_arguments(mark(Three), [a, b], ?PLAIN)
                 end)
             ),
             ?assertEqual(undefined, get(ran)),
             ?assertEqual(
                 arity_mismatch,
                 refused(fun() ->
-                    beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b, c, d], plain)
+                    beamtalk_dispatch:call_threaded_with_arguments(Two, [a, b, c, d], ?PLAIN)
                 end)
             ),
             ?assertEqual(
@@ -337,6 +376,89 @@ plain_refuses_tier2_test_() ->
             ?assertEqual(
                 {nil, #{}}, beamtalk_dispatch:call_threaded(ran_t2(0), [], #{})
             )
+        end}
+    ]}.
+
+%%====================================================================
+%% The threaded entry with a real Acc map: a block that is not Tier 2 is
+%% never run as one (BT-3885)
+%%====================================================================
+
+%% A plain block that takes one argument more than it is called with has the
+%% arity of a Tier 2 block. It must raise `arity_mismatch` *before* it runs
+%% (it would see the caller's Acc as its argument), and whatever it would have
+%% answered (an Erlang FFI `{ok, Map}` included) must never become the
+%% caller's Acc.
+map_acc_refuses_wrong_arity_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a side-effecting block one argument too many does not run", fun() ->
+            Wrong = fun(_A) ->
+                put(ran, true),
+                1
+            end,
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() -> ?MOD:'__t2_class_twice:'(nil, Wrong, #{n => 1}) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end},
+        {"a wrong-arity block answering {ok, Map} is not a Tier 2 reply", fun() ->
+            Ffi = fun(_A) -> {ok, #{foreign => map}} end,
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() -> ?MOD:'__t2_class_twice:'(nil, Ffi, #{n => 1}) end)
+            )
+        end},
+        {"the same through the callable of a collection fold", fun() ->
+            Wrong = fun(_X, _Y) ->
+                put(ran, true),
+                {ok, #{foreign => map}}
+            end,
+            ?assertEqual(
+                arity_mismatch,
+                refused(fun() -> ?MOD:'__t2_class_each:do:'(nil, [1, 2], Wrong, #{}) end)
+            ),
+            ?assertEqual(undefined, get(ran))
+        end}
+    ]}.
+
+%%====================================================================
+%% The mark codegen mints is the mark the gate reads (BT-3885)
+%%====================================================================
+
+compiled_mark_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a compiled Tier 2 block carries the mark; a pure block does not", fun() ->
+            Writer = ?MOD:class_writerBlock(nil),
+            ?assert(is_function(Writer, 1)),
+            ?assert(beamtalk_dispatch:is_tier2_block(Writer)),
+            Pure = ?MOD:'class_pureBlock:'(nil, 1),
+            ?assert(is_function(Pure, 1)),
+            ?assertNot(beamtalk_dispatch:is_tier2_block(Pure))
+        end},
+        {"a compiled Tier 2 block threads through the entry with a real Acc", fun() ->
+            Writer = ?MOD:class_writerBlock(nil),
+            ?assertEqual(
+                {2, #{'__local__t' => 2, kept => yes}},
+                ?MOD:'__t2_class_twice:'(nil, Writer, #{'__local__t' => 0, kept => yes})
+            )
+        end},
+        {"a compiled pure block of one argument too many is refused unrun", fun() ->
+            Pure = ?MOD:'class_pureBlock:'(nil, 1),
+            ?assertEqual(
+                arity_mismatch, refused(fun() -> ?MOD:'__t2_class_twice:'(nil, Pure, #{}) end)
+            )
+        end},
+        {"a plain fun created inside a Tier 2 block is not marked", fun() ->
+            Outer = ?MOD:class_nestingWriterBlock(nil),
+            {Inner, _} = Outer(#{}),
+            ?assert(is_function(Inner, 1)),
+            ?assert(beamtalk_dispatch:is_tier2_block(Outer)),
+            ?assertNot(beamtalk_dispatch:is_tier2_block(Inner))
+        end},
+        {"non-funs and external funs are not marked", fun() ->
+            ?assertNot(beamtalk_dispatch:is_tier2_block(42)),
+            ?assertNot(beamtalk_dispatch:is_tier2_block(fun maps:put/3))
         end}
     ]}.
 
@@ -369,21 +491,21 @@ nlr_into_use_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"the review repro: find: hands the caller block a ^ block", fun() ->
             %% `[:k | count := count + 1. k value: 42]` as a Tier 2 fun.
-            T2 = fun(K, Acc) ->
+            T2 = mark(fun(K, Acc) ->
                 Acc1 = bump(Acc),
                 {K(42), Acc1}
-            end,
+            end),
             nlr_case('find:', [T2], {42, #{count => 1}}, [fun(K) -> K(42) end], 42)
         end},
         {"a ^ block passed on through a forward", fun() ->
-            T2 = fun(K, Acc) ->
+            T2 = mark(fun(K, Acc) ->
                 Acc1 = bump(Acc),
                 {K(6), Acc1}
-            end,
+            end),
             nlr_case('nlrForward:', [T2], {6, #{count => 1}}, [fun(K) -> K(6) end], 6)
         end},
         {"a ^ block as a fold's ifNone: handler", fun() ->
-            T2 = fun(_X, Acc) -> {false, bump(Acc)} end,
+            T2 = mark(fun(_X, Acc) -> {false, bump(Acc)} end),
             nlr_case(
                 'nlrFold:with:', [[1, 2], T2], {0, #{count => 2}}, [[1, 2], fun(_) -> false end], 0
             )

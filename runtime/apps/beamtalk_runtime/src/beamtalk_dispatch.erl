@@ -68,10 +68,12 @@ super(Selector, Args, Self, State, CurrentClass)
     check_extension/2,
     send_threaded/4,
     call_threaded/3,
-    call_threaded_with_arguments/3
+    call_threaded_with_arguments/3,
+    is_tier2_block/1
 ]).
 
 -include("beamtalk.hrl").
+-include("beamtalk_threading_abi.hrl").
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -85,6 +87,9 @@ super(Selector, Args, Self, State, CurrentClass)
 -type bt_self() :: term().
 -type state() :: map().
 -type class_name() :: atom().
+%% The `Acc` the plain entry of a threaded class method hands its body
+%% (`?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)`, ADR 0132 §2).
+-type plain_entry_acc() :: {plain, atom(), selector()}.
 -type dispatch_result() :: {reply, term(), state()} | {error, #beamtalk_error{}}.
 
 %%% ============================================================================
@@ -792,82 +797,134 @@ raise_no_threaded_entry(Receiver, Selector) ->
 Invoke a callable that may be a Tier 2 block, threading `Acc` (ADR 0132 §2).
 
 The per-invocation tier gate every threaded entry uses for a threading
-parameter, answering `{Result, Acc1}`:
+parameter, answering `{Result, Acc1}`. **The tier is decided before anything
+is applied** (BT-3885): a fun of arity `length(Args) + 1` is a Tier 2 block only
+when it carries the Tier 2 mark (`is_tier2_block/1`, the `letrec` name codegen
+mints every Tier 2 fun under, `beamtalk_threading_abi.hrl`); otherwise it is a
+plain block of the wrong arity, and it is never run.
 
-- with the atom `plain` as `Acc` (the sentinel the plain entry of a threaded
-  class method passes: it has no caller map), a fun of arity `length(Args)` is
-  applied and answers `{Result, plain}`; a fun of arity `length(Args) + 1` (a
-  Tier 2 block, or a plain block of the wrong arity) raises the structured
-  `stateful_block_dispatch` *without running*, because its writes would be
-  dropped; a non-fun callable gets the ordinary `value`-family send. `plain`
-  is never used as a map;
-- otherwise, with a map `Acc`, a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
-  `{Result, Acc}` unchanged;
-- a fun of arity `length(Args) + 1` (Tier 2) is applied to `Args ++ [Acc]` and
-  answers its own `{Result, Acc1}`; a reply of any other shape means the fun was
-  a plain block of the wrong arity, and raises the structured `arity_mismatch`;
-- any other fun raises a structured `arity_mismatch`, never a raw `badarity`;
+- a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
+  `{Result, Acc}` with `Acc` unchanged;
+- with a map `Acc`, a marked fun of arity `length(Args) + 1` (Tier 2) is applied
+  to `Args ++ [Acc]` and answers its own `{Result, Acc1}`;
+- with the plain-entry sentinel `?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)` as
+  `Acc` (what the plain entry of a threaded class method passes: it has no
+  caller map), a marked fun of arity `length(Args) + 1` raises the structured
+  `stateful_block_dispatch` naming `ClassTag>>Selector`, *without running*,
+  because its writes would be dropped. The sentinel is never used as a map;
+- any other fun (an unmarked fun of arity `length(Args) + 1` included) raises a
+  structured `arity_mismatch`, unrun, never a raw `badarity`;
 - a non-fun callable (a `Symbol`, an object answering `value:`, ADR 0128's
   opaque callables) gets the ordinary `value`-family send and answers
   `{Result, Acc}`.
 """.
--spec call_threaded(term(), args(), map() | plain) -> {term(), map() | plain}.
-call_threaded(Block, Args, plain) when is_function(Block), is_list(Args) ->
-    %% The plain entry of a threaded class method (BT-3871 review): there is no
-    %% caller map to thread, so a Tier 2 block cannot be run - its writes would
-    %% be dropped silently. Decide on arity *before* applying anything, so the
-    %% block never runs and the error is the one the plain path always raised.
+-spec call_threaded(term(), args(), map() | plain_entry_acc()) ->
+    {term(), map() | plain_entry_acc()}.
+call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args) ->
     N = length(Args),
-    case erlang:is_function(Block, N) of
-        true ->
-            {erlang:apply(Block, Args), plain};
-        false ->
-            case erlang:is_function(Block, N + 1) of
-                true -> raise_stateful_block_dispatch(N);
-                false -> raise_block_arity_mismatch(block_arity(Block), N)
-            end
-    end;
-call_threaded(Callable, Args, plain) when is_list(Args) ->
-    {
-        beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)),
-        plain
-    };
-call_threaded(Block, Args, Acc) when is_function(Block), is_list(Args), is_map(Acc) ->
-    N = length(Args),
-    N1 = N + 1,
     case erlang:is_function(Block, N) of
         true ->
             {erlang:apply(Block, Args), Acc};
-        false when is_function(Block, N1) ->
-            %% A Tier 2 fun answers `{Result, Acc1}`. A plain block that merely
-            %% takes one argument more than it is called with answers anything
-            %% else: that is the arity mistake the plain path has always
-            %% reported, not a Tier 2 block, so it raises the same structured
-            %% error instead of a raw `badarg` at the caller's `element/2`.
-            case erlang:apply(Block, Args ++ [Acc]) of
-                {_Result, Acc1} = Reply when is_map(Acc1) -> Reply;
-                _NotATier2Reply -> raise_block_arity_mismatch(N1, N)
-            end;
         false ->
-            raise_block_arity_mismatch(block_arity(Block), N)
+            case erlang:is_function(Block, N + 1) andalso is_tier2_block(Block, N + 1) of
+                true -> call_tier2(Block, Args, Acc);
+                false -> raise_block_arity_mismatch(block_arity(Block), N)
+            end
     end;
-call_threaded(Callable, Args, Acc) when is_list(Args), is_map(Acc) ->
+call_threaded(Callable, Args, Acc) when is_list(Args) ->
     {beamtalk_message_dispatch:send(Callable, value_selector(length(Args)), value_args(Args)), Acc}.
+
+-spec call_tier2(function(), args(), map() | plain_entry_acc()) -> {term(), map()}.
+call_tier2(Block, Args, Acc) when is_map(Acc) ->
+    case erlang:apply(Block, Args ++ [Acc]) of
+        {_Result, Acc1} = Reply when is_map(Acc1) -> Reply;
+        %% Only codegen mints the mark, and it always answers this shape.
+        Other -> erlang:error({malformed_tier2_reply, Other})
+    end;
+call_tier2(_Block, Args, ?BT_PLAIN_ENTRY_ACC(ClassTag, Selector)) ->
+    %% The plain entry of a threaded class method (BT-3871 review): there is
+    %% no caller map to thread, so a Tier 2 block cannot be run - its writes
+    %% would be dropped silently.
+    raise_plain_entry_refusal(ClassTag, Selector, length(Args)).
+
+-doc """
+True when `Fun` is a Tier 2 block: a fun minted under the Tier 2 mark
+(`?BT_TIER2_BLOCK_NAME`, ADR 0132 / BT-3885).
+
+Codegen binds every Tier 2 block fun with `letrec 'BtTier2Block'/A = fun ...`,
+and the Erlang compiler names the lifted function of a `letrec` fun
+`-<Function>/<Arity>-BtTier2Block/<A>-<N>-` (an anonymous fun is
+`-<Function>/<Arity>-anonymous-<N>-`, an Erlang `fun` `-<Function>/<Arity>-fun-<N>-`),
+so `erlang:fun_info(Fun, name)` carries the mark on the fun value: the gate
+reads it instead of applying the fun to find out. Only the *last* segment
+counts, so a plain fun created inside a Tier 2 block is not marked.
+""".
+-spec is_tier2_block(term()) -> boolean().
+is_tier2_block(Fun) when is_function(Fun) ->
+    is_tier2_block(Fun, block_arity(Fun));
+is_tier2_block(_) ->
+    false.
+
+%% `is_tier2_block/1` for a fun the caller already knows has arity `Arity`
+%% (the gate's hot path: one `fun_info/2`, no pattern compilation).
+-spec is_tier2_block(function(), arity()) -> boolean().
+is_tier2_block(Fun, Arity) ->
+    {name, Name} = erlang:fun_info(Fun, name),
+    is_tier2_fun_name(atom_to_binary(Name, utf8), Arity).
+
+%% Reads `Name` from the end, without building a search pattern: it must end in
+%% `-<Mark>/<Arity>-<N>-`, `<N>` one or more digits.
+-spec is_tier2_fun_name(binary(), arity()) -> boolean().
+is_tier2_fun_name(Name, Arity) ->
+    Last = byte_size(Name) - 1,
+    Last >= 1 andalso binary:at(Name, Last) =:= $- andalso
+        lifted_index_start(Name, Last - 1, Last - 1, Arity).
+
+%% Scans the digits of `<N>` backwards from `Pos` (`End` is its last digit).
+-spec lifted_index_start(binary(), integer(), integer(), arity()) -> boolean().
+lifted_index_start(Name, Pos, End, Arity) when Pos >= 0 ->
+    case binary:at(Name, Pos) of
+        D when D >= $0, D =< $9 -> lifted_index_start(Name, Pos - 1, End, Arity);
+        $- when Pos < End -> lifted_arity(Name, Pos - 1, Arity, 0, 1);
+        _ -> false
+    end;
+lifted_index_start(_Name, _Pos, _End, _Arity) ->
+    false.
+
+%% Reads the `<Arity>` digits backwards from `Pos` into `Value` (`Scale` is
+%% the next digit's place value), then expects `-<Mark>/` before them.
+-spec lifted_arity(binary(), integer(), arity(), non_neg_integer(), pos_integer()) ->
+    boolean().
+lifted_arity(Name, Pos, Arity, Value, Scale) when Pos >= 0 ->
+    case binary:at(Name, Pos) of
+        D when D >= $0, D =< $9 ->
+            lifted_arity(Name, Pos - 1, Arity, Value + (D - $0) * Scale, Scale * 10);
+        $/ when Scale > 1, Value =:= Arity ->
+            %% A literal: the compiler folds `atom_to_binary/2` of an atom.
+            Mark = <<"-", (atom_to_binary(?BT_TIER2_BLOCK_NAME, utf8))/binary>>,
+            MarkLen = byte_size(Mark),
+            Pos >= MarkLen andalso binary:part(Name, Pos - MarkLen, MarkLen) =:= Mark;
+        _ ->
+            false
+    end;
+lifted_arity(_Name, _Pos, _Arity, _Value, _Scale) ->
+    false.
 
 -doc """
 `call_threaded/3` for `Callable valueWithArguments: Xs` (ADR 0132 §2).
 
 A fun with a list `Xs` is gated exactly as `call_threaded(Callable, Xs, Acc)`,
 like every other invocation: a fun of the wrong arity raises the structured
-`arity_mismatch` (or, with the `plain` sentinel and one argument too many,
-`stateful_block_dispatch`) where the plain `valueWithArguments:` lowering
+`arity_mismatch` (or, for a Tier 2 block with the plain-entry sentinel,
+`stateful_block_dispatch`), unrun, where the plain `valueWithArguments:` lowering
 raised a raw `badarity`, the same change `value:` gets. Everything else keeps
 the plain lowering's behaviour: a fun with a non-list `Xs` is applied as it
 always was (raising the same error), and a non-fun callable is sent
 `valueWithArguments:` itself, never `value:`/`value:value:`, with `Acc`
 unchanged.
 """.
--spec call_threaded_with_arguments(term(), term(), map() | plain) -> {term(), map() | plain}.
+-spec call_threaded_with_arguments(term(), term(), map() | plain_entry_acc()) ->
+    {term(), map() | plain_entry_acc()}.
 call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block), is_list(Xs) ->
     call_threaded(Block, Xs, Acc);
 call_threaded_with_arguments(Block, Xs, Acc) when is_function(Block) ->
@@ -880,23 +937,37 @@ block_arity(Block) ->
     {arity, Arity} = erlang:fun_info(Block, arity),
     Arity.
 
--spec raise_stateful_block_dispatch(non_neg_integer()) -> no_return().
-raise_stateful_block_dispatch(N) ->
-    Selector = value_selector(N),
-    Error0 = beamtalk_error:new(stateful_block_dispatch, 'Block', Selector),
+-doc """
+Raise the refusal of a Tier 2 block that reached the plain entry of class method
+`ClassTag>>Selector` (BT-3871 review, BT-3885): a late-bound send (`perform:`,
+a variable receiver) has no caller map to thread its writes into, so the block
+is refused before it runs. The error names the class method the caller sent,
+never the `value` the body would have sent it.
+""".
+-spec raise_plain_entry_refusal(atom(), selector(), non_neg_integer()) -> no_return().
+raise_plain_entry_refusal(ClassTag, Selector, N) ->
+    Error0 = beamtalk_error:new(stateful_block_dispatch, ClassTag, Selector),
     Error1 = beamtalk_error:with_message(
         Error0,
-        beamtalk_error:generate_message(stateful_block_dispatch, 'Block', Selector)
+        beamtalk_error:generate_message(stateful_block_dispatch, ClassTag, {plain_entry, Selector})
     ),
+    %% atom_to_binary rather than io_lib:format: see raise_no_threaded_entry/2.
     Error2 = beamtalk_error:with_hint(
         Error1,
-        <<
-            "Wrong argument count, or the block assigns captured variables and "
-            "the method does not thread its block: return the new value from the "
-            "block and assign it where it is called"
-        >>
+        iolist_to_binary([
+            <<"`">>,
+            atom_to_binary(Selector, utf8),
+            <<"` on `">>,
+            atom_to_binary(ClassTag, utf8),
+            <<
+                "` was reached by a send that cannot thread the block's writes: "
+                "return the new value from the block and assign it where it is called"
+            >>
+        ])
     ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(
+        beamtalk_error:with_details(Error2, #{reason => plain_entry, block_arity => N + 1})
+    ).
 
 -spec value_selector(non_neg_integer()) -> selector().
 value_selector(0) -> value;

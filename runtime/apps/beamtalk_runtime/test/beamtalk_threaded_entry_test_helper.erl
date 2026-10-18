@@ -26,11 +26,16 @@ Shared helpers for the ADR 0132 threaded-entry EUnit suites
 
 -export([t2/2, t1/2, differential/6, ran_t2/1, refused/1]).
 
--doc "A Tier 2 block of user arity N that logs its arguments in `Acc`.".
+-doc """
+A Tier 2 block of user arity N that logs its arguments in `Acc`, minted under
+the Tier 2 mark the gate reads (BT-3885, `beamtalk_tier2_test_block:mark/1`).
+""".
 -spec t2(0..2, function()) -> function().
-t2(0, F) -> fun(Acc) -> step(F, [], Acc) end;
-t2(1, F) -> fun(A, Acc) -> step(F, [A], Acc) end;
-t2(2, F) -> fun(A, B, Acc) -> step(F, [A, B], Acc) end.
+t2(0, F) -> mark(fun(Acc) -> step(F, [], Acc) end);
+t2(1, F) -> mark(fun(A, Acc) -> step(F, [A], Acc) end);
+t2(2, F) -> mark(fun(A, B, Acc) -> step(F, [A, B], Acc) end).
+
+mark(F) -> beamtalk_tier2_test_block:mark(F).
 
 step(F, Args, Acc) ->
     {erlang:apply(F, Args), Acc#{log => maps:get(log, Acc, []) ++ [Args]}}.
@@ -71,18 +76,18 @@ differential({Mod, PlainFn, EntryFn}, Receiver, Others, BlockPos, BlockArity, F)
     ?assertEqual(kept, maps:get(untouched, Acc1)),
     {Result, PlainLog, Acc1}.
 
--doc "A Tier 2 block of arity N that records in the process dictionary that it ran.".
+-doc "A marked Tier 2 block of arity N that records in the process dictionary that it ran.".
 -spec ran_t2(0..1) -> function().
 ran_t2(0) ->
-    fun(Acc) ->
+    mark(fun(Acc) ->
         put(ran, true),
         {nil, Acc}
-    end;
+    end);
 ran_t2(1) ->
-    fun(_A, Acc) ->
+    mark(fun(_A, Acc) ->
         put(ran, true),
         {nil, Acc}
-    end.
+    end).
 
 -doc "Runs `Fun`, answering `ok` or the kind of the structured error it raised.".
 -spec refused(fun(() -> term())) -> ok | atom().
