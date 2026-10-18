@@ -22,6 +22,12 @@ preservation (timeout, actor_dead), and lifecycle method exclusion.
 setup() ->
     %% Ensure telemetry and runtime deps are available
     _ = application:ensure_all_started(telemetry),
+    %% beamtalk_actor and beamtalk_trace_store gate on
+    %% `erlang:function_exported(telemetry, ...)`, which is false until the
+    %% `telemetry` module itself is loaded — starting the app does not load
+    %% it. Load it so this suite does not depend on an earlier suite in the
+    %% same VM having done so.
+    {module, telemetry} = code:ensure_loaded(telemetry),
     %% Start instance registry if not running
     case whereis(beamtalk_object_instances) of
         undefined ->
@@ -956,7 +962,7 @@ trace_context_in_traces_test_() ->
                     ?assert(length(DispatchTraces) >= 1),
                     [Trace | _] = DispatchTraces,
                     %% Trace context should be merged into the trace event
-                    ?assertEqual(<<"wf-trace-1">>, maps:get(workflowId, Trace))
+                    ?assertEqual(<<"wf-trace-1">>, maps:get(<<"workflowId">>, Trace))
                 after
                     gen_server:stop(Pid),
                     erase('$beamtalk_trace_ctx'),
@@ -1105,8 +1111,8 @@ causal_root_span_test_() ->
                     ],
                     ?assert(length(DispatchTraces) >= 1),
                     [Trace | _] = DispatchTraces,
-                    ?assertEqual(TraceId, maps:get(trace_id, Trace)),
-                    ?assertEqual(SpanId, maps:get(span_id, Trace))
+                    ?assertEqual(TraceId, maps:get(<<"trace_id">>, Trace)),
+                    ?assertEqual(SpanId, maps:get(<<"span_id">>, Trace))
                 after
                     gen_server:stop(Pid)
                 end
@@ -1291,7 +1297,7 @@ causal_multi_hop_chain_test_() ->
                     ?assertEqual(3, length(DispatchTraces)),
 
                     %% Verify different span_ids
-                    SpanIds = [maps:get(span_id, T) || T <- DispatchTraces],
+                    SpanIds = [maps:get(<<"span_id">>, T) || T <- DispatchTraces],
                     ?assertEqual(3, length(lists:usort(SpanIds)))
                 after
                     gen_server:stop(PidA)

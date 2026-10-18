@@ -8,11 +8,7 @@ Tests for beamtalk_ws_handler WebSocket push behaviour.
 
 Drives the Cowboy WebSocket callbacks (`init/2`, `websocket_init/1`,
 `websocket_handle/2`, `websocket_info/2`, `terminate/3`) directly.
-These live in this module — the `_tests` companion of `beamtalk_ws_handler` —
-rather than a standalone suite, because `rebar3 eunit --app=...` (used by the
-coverage harness) only auto-discovers a source module's `Module_tests`
-companion. A standalone `*_callbacks_tests` module compiles but is silently
-skipped under `--app`, so its coverage never reaches the merged badge.
+These live in this module, the `_tests` companion of `beamtalk_ws_handler`.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk_ws_state.hrl").

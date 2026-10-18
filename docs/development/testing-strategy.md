@@ -131,13 +131,12 @@ TCP `repl_protocol` E2E suite or plain unit tests:
   paths are covered by live-port integration EUnit tests (they spawn the
   real Rust compiler port).
 
-> **`--app` discovery gotcha:** `coverage-runtime` runs
-> `rebar3 eunit --app=<app>`, which only auto-discovers a source module's
-> `Module_tests` **companion**. A standalone `*_callbacks_tests` suite
-> compiles fine but is silently skipped under `--app`, so its coverage
-> never reaches the merged badge. Keep callback/unit tests for a source
-> module in that module's `_tests` companion (e.g.
-> `beamtalk_ws_handler_tests`).
+> **Standalone suites run too:** `coverage-runtime` and `test-runtime` run
+> the generated EUnit test set (see
+> [Erlang Runtime Unit Tests](#5-erlang-runtime-unit-tests)), so a
+> standalone suite in `test/` (e.g. a `*_callbacks_tests` module with no
+> `src/` counterpart) runs and its coverage reaches the merged badge just
+> like a `Module_tests` companion's.
 
 **Genuinely unreachable (documented out-of-scope, not forced):** the
 `create_session` `{error, Reason}` arm (the session supervisor's
@@ -456,9 +455,42 @@ EUnit tests for the Erlang runtime modules.
 
 **Running:**
 ```bash
-cd runtime
-rebar3 eunit --module=beamtalk_actor_tests
+just test-runtime                              # every suite (what CI runs)
+cd runtime && rebar3 eunit --module=beamtalk_actor_tests   # one suite
 ```
+
+**Every suite runs — the test set is generated (BT-3896).** `just test-runtime`,
+`just coverage-runtime` and CI run a bare `rebar3 eunit` (no `--app`), which
+uses the `eunit_tests` list that `runtime/rebar.config.script` builds at
+config-load time for `beamtalk_runtime`, `beamtalk_workspace` and
+`beamtalk_compiler`:
+
+- `{application, App}` for each app — every source module plus its
+  `Module_tests` companion (wherever in the three apps' `test/` dirs it lives);
+- `{module, M}` for every other module in those `test/` dirs that defines a
+  zero-arity `*_test`/`*_test_` function (EUnit's own discovery rule), so a
+  standalone suite such as `beamtalk_dist_wire_tests` or a companion of a
+  `beamtalk_stdlib` source module (`beamtalk_tuple_tests`) is picked up with
+  no registration step. Fixtures and helpers define no tests and are left out.
+
+Do not pass `--app=...` in a recipe or workflow: EUnit's `{application, App}`
+spec alone never reaches a test-dir module with no `src/` counterpart, which
+is how ~50 suites were silently skipped before BT-3896. Do not wire a suite
+into another via `{module, ...}` generators either — it runs on its own.
+
+All of these suites share **one VM**, standalone suites after the companions.
+A fixture must start (and load) what it needs itself — the runtime app, the
+stdlib classes (`beamtalk_stdlib:init/0`), the `telemetry` module, a
+workspace capability (`beamtalk_capability:set/1`) — rather than rely on an
+earlier suite having done so, and must not assume a registry it shares with
+other suites (live actors, class processes) is empty.
+
+The only way to leave a suite out of the default run is the `EunitExcluded`
+list in `runtime/rebar.config.script`, one `{Module, "reason"}` entry each.
+Entries without a reason, or for a module that no longer exists or is now
+reached as a companion, fail the config load. An entry is a known-red suite
+waiting on a fix (its reason names the failing tests); delete the entry in the
+PR that fixes it.
 
 **Example** (`beamtalk_future_tests.erl`):
 ```erlang

@@ -1572,7 +1572,10 @@ measure-adr0131-statements: build-stdlib
     cargo build --workspace --features beamtalk-core/measure-bypass
     cargo test -p beamtalk-cli --features beamtalk-core/measure-bypass --test cli adr0131_ -- --ignored --nocapture --test-threads=1
 
-# Note: Auto-discovers all *_tests modules. New test files are included automatically.
+# Bare `rebar3 eunit` (no --app/--module) runs the `eunit_tests` set that
+# runtime/rebar.config.script generates: every app's source modules + their
+# `_tests` companions, plus every standalone test-dir suite (BT-3896). Never
+# pass --app here: it silently skips test-dir suites with no src/ counterpart.
 # Run Erlang runtime unit tests
 # Output: summary only on success, full output on failure
 [unix]
@@ -1581,7 +1584,7 @@ test-runtime: build-stdlib
     #!/usr/bin/env bash
     set -eo pipefail
     echo "🧪 Running Erlang runtime unit tests..."
-    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 BEAMTALK_NO_FOREGROUND_PRUNE=1 rebar3 eunit --cover=false --app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler 2>&1); then
+    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 BEAMTALK_NO_FOREGROUND_PRUNE=1 rebar3 eunit --cover=false 2>&1); then
         echo "$OUTPUT" | tail -2
     else
         echo "$OUTPUT"
@@ -1599,7 +1602,7 @@ test-runtime: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
@@ -1766,11 +1769,11 @@ coverage-rust-cobertura: _coverage-rust-run-tests
     cargo llvm-cov report --ignore-filename-regex '{{llvm_cov_ignore}}' --cobertura --output-path coverage.cobertura.xml
 
 # Unix-only: uses bash process substitution and piping
-# Note: Auto-discovers all *_tests modules. New test files are included automatically.
-# Two-pass EUnit strategy: Run 1 covers beamtalk_runtime + beamtalk_workspace (without
-# listing beamtalk_stdlib as an explicit --app, so bt@*.beam files in
-# apps/beamtalk_stdlib/ebin/ stay on the code path). Run 2 covers beamtalk_stdlib Erlang
-# modules via --dir. Both coverdata files are merged into eunit.coverdata before reporting.
+# Two-pass EUnit strategy: Run 1 is a bare `rebar3 eunit`, which runs the generated
+# `eunit_tests` set from runtime/rebar.config.script (beamtalk_runtime, _workspace and
+# _compiler plus every standalone test-dir suite, BT-3896; beamtalk_stdlib is not an
+# EUnit app there, so bt@*.beam files in apps/beamtalk_stdlib/ebin/ stay on the code
+# path). Run 2 covers beamtalk_stdlib Erlang modules via --dir. Both coverdata files are merged into eunit.coverdata before reporting.
 # Generate Erlang runtime coverage
 [unix]
 coverage-runtime: build-stdlib
@@ -1778,10 +1781,10 @@ coverage-runtime: build-stdlib
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    # Run 1: runtime + workspace + compiler tests.
+    # Run 1: runtime + workspace + compiler tests (the generated `eunit_tests` set).
     # bt@*.beam files are findable via apps/beamtalk_stdlib/ebin/ (project app ebin
-    # stays on the code path when beamtalk_stdlib is not listed as an explicit --app).
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler --cover 2>&1); then
+    # stays on the code path since beamtalk_stdlib is not an EUnit app in that set).
+    if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ EUnit tests (runtime+workspace+compiler) failed"
         exit 1

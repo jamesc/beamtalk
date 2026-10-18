@@ -19,9 +19,11 @@ no-op reverse).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% A bare `self` expression evaluates to the bound value, with no runtime
-%% primitives required.
-eval_with_self_returns_bound_self_test() ->
-    ?assertEqual({ok, 42}, beamtalk_repl_eval:eval_with_self(42, <<"self">>)).
+%% primitives required (only the compiler, which this suite starts itself
+%% rather than relying on an earlier suite in the same VM having done so).
+eval_with_self_returns_bound_self_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        ?_assertEqual({ok, 42}, beamtalk_repl_eval:eval_with_self(42, <<"self">>))}.
 
 %% `eval_with_self/2` always rejects a class-definition-shaped
 %% source via `eval_not_an_expression_error/0` — it must not register (or,
@@ -45,12 +47,15 @@ eval_with_self_class_definition_does_not_touch_alias_xref_test_() ->
         )
     end}.
 
-alias_xref_setup() ->
+compiler_setup() ->
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
         {error, {already_started, _}} -> ok
-    end,
+    end.
+
+alias_xref_setup() ->
+    ok = compiler_setup(),
     case whereis(beamtalk_alias_xref) of
         undefined -> {ok, _} = beamtalk_alias_xref:start_link();
         _Pid -> ok
@@ -62,9 +67,14 @@ alias_xref_teardown(_) ->
 
 %% Repeated `evaluate:` calls in one process reuse a single module-name atom
 %% (cached in the process dictionary), so a tight loop cannot exhaust the atom
-%% table, and each transient module is fully unloaded after its call. EUnit runs
-%% each test in its own process, so the cached name starts empty here.
-eval_with_self_reuses_module_and_unloads_test() ->
+%% table, and each transient module is fully unloaded after its call. The test
+%% body runs in a fresh process (`{spawn, ...}`), so the cached name starts
+%% empty here whatever ran earlier in the same EUnit process.
+eval_with_self_reuses_module_and_unloads_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_reuses_module_and_unloads())}}.
+
+eval_with_self_reuses_module_and_unloads() ->
     ?assertEqual(undefined, get('$beamtalk_inspector_eval_module')),
     ?assertEqual({ok, 1}, beamtalk_repl_eval:eval_with_self(1, <<"self">>)),
     Module = get('$beamtalk_inspector_eval_module'),
