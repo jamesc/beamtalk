@@ -101,6 +101,26 @@ entries_test_() ->
             ?assertEqual(nil, R),
             ?assertEqual([[1], [2], [3]], Log)
         end},
+        {"each:do: on a non-list receiver takes the plain send with Acc unchanged", fun() ->
+            %% A `Dictionary` (a map) is not folded (`to_list` would change what
+            %% the method answers for a `Dictionary`, a `Stream`, a user
+            %% collection): it is sent `do:` itself, and `Acc` passes through.
+            put(seen, []),
+            Acc = #{log => [], untouched => kept},
+            {R, Acc1} = ?MOD:'__t2_class_each:do:'(
+                nil, #{a => 1}, fun(X) -> put(seen, [X | get(seen)]) end, Acc
+            ),
+            ?assertEqual(Acc, Acc1),
+            ?assertEqual(R, ?MOD:'class_each:do:'(nil, #{a => 1}, fun(_) -> ok end)),
+            ?assertEqual([1], get(seen))
+        end},
+        {"detectIn:with: on a non-list receiver falls back to its own detect:ifNone:", fun() ->
+            Acc = #{log => []},
+            ?assertEqual(
+                {0, Acc},
+                ?MOD:'__t2_class_detectIn:with:'(nil, #{a => 1}, fun(X) -> X > 5 end, Acc)
+            )
+        end},
         {"twiceVia: passes the block on to a same-class entry", fun() ->
             {R, Log, _} = differential('twiceVia:', [], 0, 0, fun() -> 4 end),
             ?assertEqual(4, R),

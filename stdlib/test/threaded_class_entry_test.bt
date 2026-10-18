@@ -12,6 +12,9 @@
 // Fixture: fixtures/threaded_entry_fixture.bt.
 
 TestCase subclass: ThreadedClassEntryTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
 
   // --- direct invocation ---------------------------------------------------
   testTwiceAnswersTheBlocksLastValue =>
@@ -43,6 +46,49 @@ TestCase subclass: ThreadedClassEntryTest
     self assert: (ThreadedEntryFixture detectIn: #(1, 2) with: [:x |
       x > 5
     ]) equals: 0
+
+  // --- non-list receivers take the plain send (the fold is for lists) --------
+  testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid =>
+    d := Dictionary new
+    d at: #a put: 1
+    d at: #b put: 2
+    self assert: (ThreadedEntryFixture collectIn: d with: [:x |
+      x
+    ]) equals: (d collect: [:x | x])
+    self assert: (ThreadedEntryFixture each: d do: [:x |
+      x
+    ]) equals: (d do: [:x | x])
+
+  testACollectionMessageOnAStreamStaysLazy =>
+    s := ThreadedEntryFixture collectIn: (Stream on: #(1, 2, 3)) with: [:x |
+      x * 2
+    ]
+    self assert: (s isKindOf: Stream)
+    self assert: s asList equals: #(2, 4, 6)
+
+  testDetectOnAnInfiniteStreamTerminates =>
+    self
+      assert: (ThreadedEntryFixture
+        detectIn: (Stream from: 1)
+        with: [:x | x > 3]
+        none: [0])
+      equals: 4
+
+  testACollectionMessageOnAStringAnswersWhatItAlwaysDid =>
+    self assert: (ThreadedEntryFixture collectIn: "abc" with: [:c |
+      c
+    ]) equals: ("abc" collect: [:c | c])
+
+  // --- a ClassBuilder fun inside a threaded body ----------------------------
+  testAClassBuilderFunAfterTheUseAnswersItsBareValue =>
+    ThreadedEntryFixture buildAfter: [1]
+    self.cls := (Erlang beamtalk_interface) findClass: #ThreadedEntryBuiltAfter
+    self assert: self.cls hi equals: 42
+
+  testAClassBuilderFunBeforeTheUseAnswersItsBareValue =>
+    ThreadedEntryFixture buildBefore: [1]
+    self.cls := (Erlang beamtalk_interface) findClass: #ThreadedEntryBuiltBefore
+    self assert: self.cls hi equals: 42
 
   // --- a same-class pass-on -------------------------------------------------
   testTwiceViaPassesTheBlockOn =>

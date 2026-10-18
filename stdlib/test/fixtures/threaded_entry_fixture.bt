@@ -33,6 +33,27 @@ sealed Object subclass: ThreadedEntryFixture
 
   class sealed detectIn: items with: b => items detect: b ifNone: [0]
 
+  class sealed collectIn: items with: b => items collect: b
+
+  class sealed detectIn: items with: b none: c => items detect: b ifNone: c
+
+  // A ClassBuilder fun inside a threaded body is a class method of its own
+  // (no Acc, answers its bare value), wherever it sits relative to the use.
+  class sealed buildAfter: b =>
+    b value
+    Object classBuilder name: #ThreadedEntryBuiltAfter;
+      superclass: Object;
+      classMethods: #{#hi => [:_self | 42]};
+      register
+
+  class sealed buildBefore: b =>
+    cls := Object classBuilder name: #ThreadedEntryBuiltBefore;
+      superclass: Object;
+      classMethods: #{#hi => [:_self | 42]};
+      register
+    b value
+    cls
+
   // A `^` block beside an invocation. The body holds a block that does `^`,
   // so the method has NO threaded entry (`facts::body_has_block_nlr`, ADR 0132
   // Phase 1c deviation note) and compiles as before; the NLR carries no Acc.

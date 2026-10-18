@@ -606,9 +606,16 @@ fn acc_is_a_family_of_a_body_only_where_it_holds_a_use() {
 /// threads both (`classify_threading_use` forbids a use's operands to mention
 /// only *its* parameter), and the producer sequences the inner use ahead of
 /// the outer one, so every `Acc` step is minted at the root in evaluation
-/// order. Before the fix the inner use was refused as "inside a construct".
+/// order. Before the fix the inner use was refused as "inside a construct"
+/// (BT-3890: a compile error on a method that compiled before ADR 0132).
 const TWO_PARAMS: &str = "sealed Object subclass: TwoParams
   class sealed apply: b to: x => b value: x
+
+  class sealed foo: x bar: y => x value. y
+
+  class sealed run: a with: b => self foo: a bar: (b value)
+
+  class sealed sum: xs from: b with: a => xs inject: (b value) into: a
 
   class sealed two: a with: b => a value: (b value)
 
@@ -637,6 +644,8 @@ fn a_use_inside_another_uses_operand_is_sequenced_ahead_of_it() {
     let code = codegen(TWO_PARAMS);
     assert_entries_equal_the_index(TWO_PARAMS, &code);
     for (selector, arity, steps) in [
+        ("run:with:", 4, 2),
+        ("sum:from:with:", 5, 2),
         ("two:with:", 4, 2),
         ("fwd:with:", 4, 2),
         ("each:with:", 4, 2),
@@ -687,6 +696,132 @@ fn a_use_inside_another_uses_operand_is_sequenced_ahead_of_it() {
     assert!(fwd.contains("'call_threaded'(_b"), "{fwd}");
     assert!(fwd.contains(", [], Acc@0)"), "{fwd}");
     assert!(!fwd.contains("'__t2_class_apply:to:'"), "{fwd}");
+    assert_compiles_through_erlc("test", &code);
+}
+
+// ─── Review findings on #4361 ───────────────────────────────────────────────
+
+/// A conditional / `and:` / `or:` send sequences its receiver only, so a
+/// mention of the parameter in one of its *arguments* is not a root use: the
+/// index leaves the parameter plain (no entry) and the method compiles exactly
+/// as before ADR 0132. Before the fix the index admitted it and codegen refused
+/// the method with a misleading Phase 3 error.
+const CONDITIONAL_ARGS: &str = "sealed Object subclass: CondArgs
+  class sealed condArg: b => nil ifNil: (b value)
+
+  class sealed andArg: b => true and: (b value)
+
+  class sealed orArg: b => false or: (b value)
+
+  class sealed notNilArg: b x: x => x ifNotNil: (b value)
+";
+
+#[test]
+fn a_mention_in_a_conditional_argument_is_not_a_use_and_the_method_compiles() {
+    let code = codegen(CONDITIONAL_ARGS);
+    assert_entries_equal_the_index(CONDITIONAL_ARGS, &code);
+    assert!(!code.contains("__t2_class_"), "{code}");
+    assert!(!code.contains("Acc@"), "{code}");
+    assert_compiles_through_erlc("test", &code);
+}
+
+/// A `ClassBuilder` `classMethods:` fun inside a threaded body is a class
+/// method of its own: it is lowered with no `Acc`, answers its bare value, and
+/// does not count as (or disturb) the enclosing body's uses, wherever the
+/// cascade sits relative to them. Before the fix the fun inherited the body's
+/// threaded state (`AdvDyn hi` answered `{42, plain}`), and a builder placed
+/// before the use failed with "a threading-parameter use ... was not lowered".
+const BUILDER_IN_BODY: &str = "sealed Object subclass: Builders
+  class sealed after: b =>
+    b value.
+    Object classBuilder name: #BuiltAfter; superclass: Object; classMethods: #{#hi => [:_self | 42]}; register
+
+  class sealed before: b =>
+    Object classBuilder name: #BuiltBefore; superclass: Object; classMethods: #{#hi => [:_self | 42]}; register.
+    b value
+";
+
+#[test]
+fn a_class_builder_fun_inside_a_threaded_body_is_a_plain_class_method() {
+    let code = codegen(BUILDER_IN_BODY);
+    assert_entries_equal_the_index(BUILDER_IN_BODY, &code);
+    for selector in ["after:", "before:"] {
+        let entry = crate::core_erlang::selector_mangler::threaded_class_fn_name(selector);
+        let text = function_text(&code, &format!("'{entry}'/3"));
+        assert_acc_linear(text, selector);
+        // The one use steps `Acc` once, and the body's answer is the only
+        // `{Value, Acc}` pair: the builder fun answers its bare `42`.
+        assert_eq!(text.matches("let Acc@").count(), 1, "{text}");
+        assert_eq!(text.matches("Acc@1}").count(), 1, "{text}");
+        assert_eq!(
+            text.matches("_ThAnswer").count(),
+            2,
+            "one answer binding, read once\n{text}"
+        );
+    }
+    assert_compiles_through_erlc("test", &code);
+}
+
+/// The fold over `Acc` runs for a list receiver only; any other receiver is
+/// sent the collection message itself with `Acc` unchanged, exactly as the
+/// plain lowering did before ADR 0132 (a `Dictionary collect:` answers a
+/// `Dictionary`, an infinite `Stream detect:ifNone:` terminates). And the
+/// `ifNone:` handler goes through `call_threaded/3`, so a non-block handler
+/// gets its `value` send instead of a raw `apply` crash.
+const NON_LIST_RECEIVERS: &str = "sealed Object subclass: Receivers
+  class sealed each: items do: b => items do: b
+
+  class sealed collectIn: items with: b => items collect: b
+
+  class sealed sumOver: items with: b => items inject: 0 into: b
+
+  class sealed detectIn: items with: b => items detect: b ifNone: [0]
+
+  class sealed detectIn: items with: b none: c => items detect: b ifNone: c
+
+  class sealed countIn: items with: b => items count: b
+
+  class sealed allIn: items with: b => items allSatisfy: b
+";
+
+#[test]
+fn a_fold_over_acc_takes_the_plain_send_for_a_non_list_receiver() {
+    let code = codegen(NON_LIST_RECEIVERS);
+    assert_entries_equal_the_index(NON_LIST_RECEIVERS, &code);
+    for (selector, arity, sent) in [
+        ("each:do:", 4, "'do:', [_Callable"),
+        ("collectIn:with:", 4, "'collect:', [_Callable"),
+        ("sumOver:with:", 4, "'inject:into:', [_temp"),
+        ("detectIn:with:", 4, "'detect:ifNone:', [_Callable"),
+        ("detectIn:with:none:", 5, "'detect:ifNone:', [_Callable"),
+        ("countIn:with:", 4, "'count:', [_Callable"),
+        ("allIn:with:", 4, "'allSatisfy:', [_Callable"),
+    ] {
+        let entry = crate::core_erlang::selector_mangler::threaded_class_fn_name(selector);
+        let text = function_text(&code, &format!("'{entry}'/{arity}"));
+        assert_acc_linear(text, selector);
+        // The receiver is guarded once, the fold in the list arm and the plain
+        // send (with the fold's seed `Acc`) in the other.
+        assert_eq!(text.matches("'is_list'(").count(), 1, "{selector}\n{text}");
+        let fallback = format!("'beamtalk_message_dispatch':'send'(_temp");
+        let at = text
+            .find(&fallback)
+            .unwrap_or_else(|| panic!("{selector}: no plain send\n{text}"));
+        assert!(
+            text[at..].contains(sent),
+            "{selector}: wrong message\n{text}"
+        );
+        assert!(
+            text[at..].contains("]), Acc@0}"),
+            "{selector}: the plain send must pass Acc through\n{text}"
+        );
+        // No `to_list` conversion: a non-list receiver is never folded.
+        assert!(!text.contains("'to_list'"), "{selector}\n{text}");
+    }
+    // The `ifNone:` handler is gated, never `apply`d bare.
+    let text = function_text(&code, "'__t2_class_detectIn:with:none:'/5");
+    assert!(text.contains("'call_threaded'(_c"), "{text}");
+    assert!(!text.contains(" = apply _c"), "{text}");
     assert_compiles_through_erlc("test", &code);
 }
 

@@ -2482,6 +2482,13 @@ impl CoreErlangGenerator {
         // not a block literal: it takes no enclosing block's class-variable
         // capture (ADR 0130 §5).
         let saved_class_var_capture = self.class_var_capture.take();
+        // ADR 0132 §2: the fun is a class method of its own, never a part of an
+        // enclosing threaded body (BT-3871 review): it threads no `Acc`, so its
+        // body must not see the enclosing entry's threading parameters, mint
+        // its `Acc` versions or answer `{Result, Acc}`. Saved and restored on
+        // every exit path.
+        let saved_threaded_body = std::mem::take(&mut self.threaded_body);
+        let saved_in_threaded_body = std::mem::replace(&mut self.in_threaded_body, false);
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -2527,6 +2534,8 @@ impl CoreErlangGenerator {
                 Err(e) => {
                     self.block_depth = saved_block_depth;
                     self.class_var_capture = saved_class_var_capture;
+                    self.threaded_body = saved_threaded_body;
+                    self.in_threaded_body = saved_in_threaded_body;
                     self.pop_scope();
                     return Err(e);
                 }
@@ -2541,6 +2550,8 @@ impl CoreErlangGenerator {
 
         self.block_depth = saved_block_depth;
         self.class_var_capture = saved_class_var_capture;
+        self.threaded_body = saved_threaded_body;
+        self.in_threaded_body = saved_in_threaded_body;
         self.pop_scope();
         Ok(doc)
     }
