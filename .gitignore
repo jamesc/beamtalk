@@ -127,7 +127,8 @@ _rel/
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
 
-# Lint stamp files (track fingerprints for pre-push hook)
+# Lint stamp files (scripts/lint-stamp.sh: fingerprints the pre-push hook and `just lint-*` share)
+.lint-rust-stamp
 .lint-erlang-stamp
 .lint-js-stamp
 .lint-beamtalk-stamp

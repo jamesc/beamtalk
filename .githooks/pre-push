@@ -4,13 +4,13 @@
 #
 # Pre-push hook: run linting before pushing.
 #
-# - lint-rust (clippy + fmt-check-rust) always runs (~1s)
-# - lint-erlang (dialyzer) runs only if Erlang sources changed (~9s)
-# - lint-js runs only if JS/TS sources changed
-# - lint-beamtalk (fmt-check-beamtalk) runs only if .bt/.btscript sources changed
-#
-# Stamp files (.lint-erlang-stamp, .lint-js-stamp, .lint-beamtalk-stamp) track the
-# last-linted fingerprint of each language's sources.
+# Each language's lint runs only if its sources changed since that lint last
+# passed: lint-rust (clippy + fmt-check-rust, ~1 min over the workspace),
+# lint-erlang (dialyzer), lint-js, lint-beamtalk and lint-elixir. The
+# fingerprints and stamp files (.lint-<lang>-stamp) live in
+# scripts/lint-stamp.sh, shared with the Justfile: the `just lint-<lang>`
+# recipes write the stamp on success, so a lint that `just lint` or
+# `just ci-changed` just ran is not repeated here.
 
 set -euo pipefail
 
@@ -40,24 +40,21 @@ if all_changes_in_skip_dirs; then
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-ERLANG_STAMP="$REPO_ROOT/.lint-erlang-stamp"
-JS_STAMP="$REPO_ROOT/.lint-js-stamp"
-BT_STAMP="$REPO_ROOT/.lint-beamtalk-stamp"
-ELIXIR_STAMP="$REPO_ROOT/.lint-elixir-stamp"
+STAMP="$REPO_ROOT/scripts/lint-stamp.sh"
 
-# Compute a fingerprint of tracked files matching the given patterns.
-fingerprint() {
-  git ls-files -- "$@" | git hash-object --stdin-paths | { sha1sum 2>/dev/null || shasum -a 1; } | cut -d' ' -f1
+# Run `just lint-<lang>` unless scripts/lint-stamp.sh says <lang>'s sources are
+# unchanged since that lint last passed (the recipe writes the stamp itself).
+lint_if_changed() {
+  local lang="$1" icon="$2"
+  if "$STAMP" check "$lang"; then
+    echo "⏭️  lint-$lang: no changes since last lint, skipping"
+  else
+    echo "$icon Running lint-$lang..."
+    just "lint-$lang"
+  fi
 }
 
-stamp_matches() {
-  local stamp_file="$1"
-  local current_fp="$2"
-  [[ -f "$stamp_file" ]] && [[ "$(cat "$stamp_file")" == "$current_fp" ]]
-}
-
-echo "🔍 Running lint-rust..."
-just lint-rust
+lint_if_changed rust "🔍"
 
 # Non-ASCII in Erlang binary literals is silently truncated to a control
 # character (BT-3026). Unstamped: it covers *.escript as well as *.erl/*.hrl,
@@ -66,40 +63,9 @@ just lint-rust
 echo "🔍 Running lint-binary-literal-encoding..."
 just lint-binary-literal-encoding
 
-ERLANG_FP="$(fingerprint '*.erl' '*.hrl')"
-if stamp_matches "$ERLANG_STAMP" "$ERLANG_FP"; then
-  echo "⏭️  lint-erlang: no Erlang changes since last lint, skipping"
-else
-  echo "🔬 Running lint-erlang..."
-  just lint-erlang
-  echo "$ERLANG_FP" > "$ERLANG_STAMP"
-fi
-
-JS_FP="$(fingerprint '*.js' '*.ts' '*.jsx' '*.tsx')"
-if stamp_matches "$JS_STAMP" "$JS_FP"; then
-  echo "⏭️  lint-js: no JS/TS changes since last lint, skipping"
-else
-  echo "🔎 Running lint-js..."
-  just lint-js
-  echo "$JS_FP" > "$JS_STAMP"
-fi
-
-BT_FP="$(fingerprint '*.bt' '*.btscript')"
-if stamp_matches "$BT_STAMP" "$BT_FP"; then
-  echo "⏭️  lint-beamtalk: no Beamtalk changes since last lint, skipping"
-else
-  echo "🔍 Running lint-beamtalk..."
-  just lint-beamtalk
-  echo "$BT_FP" > "$BT_STAMP"
-fi
-
-ELIXIR_FP="$(fingerprint 'editors/liveview/*.ex' 'editors/liveview/*.exs')"
-if stamp_matches "$ELIXIR_STAMP" "$ELIXIR_FP"; then
-  echo "⏭️  lint-elixir: no Elixir changes since last lint, skipping"
-else
-  echo "🔬 Running lint-elixir..."
-  just lint-elixir
-  echo "$ELIXIR_FP" > "$ELIXIR_STAMP"
-fi
+lint_if_changed erlang "🔬"
+lint_if_changed js "🔎"
+lint_if_changed beamtalk "🔍"
+lint_if_changed elixir "🔬"
 
 echo "✅ All lint checks passed"

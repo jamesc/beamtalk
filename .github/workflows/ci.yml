@@ -42,11 +42,34 @@ jobs:
         # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
         os: [ubuntu-latest, macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
+    # change) is ~28 min on Windows (11 min of dependency build alone), and a
+    # job the timeout cancels never reaches the post step that saves the
+    # cache, so it would stay cold on every rerun. Warm runs are 15-22 min.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The Rust corpus tier (`just test-corpus`, the state-threading agreement and
+      # corpus proofs, ~13 min) runs on a PR only when scripts/ci/corpus-gate.sh says
+      # the changed paths can affect it (the same script `just ci-changed` calls, so
+      # the path list has one home); on a push to main it always runs. Linux only
+      # (the tests are OS-independent).
+      - name: Decide whether the Rust corpus tier runs
+        id: corpus
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | scripts/ci/corpus-gate.sh; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -63,6 +86,28 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
+      # `just test-rust` runs the Rust tests through cargo-nextest (one scheduler
+      # across every test binary, see the Justfile). Prebuilt from nextest's own
+      # CDN, the same source scripts/setup-cloud.sh uses: nextest refuses a source
+      # build without --locked, and this needs no GitHub release API. Pinned.
+      - name: Install cargo-nextest
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux) platform=linux ;;
+            macOS) platform=mac ;;
+            Windows) platform=windows-tar ;;
+          esac
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          # On Windows CARGO_HOME is a native path (C:\Users\...); Git Bash's tar
+          # needs the POSIX spelling.
+          if [ "${{ runner.os }}" = "Windows" ]; then cargo_home="$(cygpath -u "$cargo_home")"; fi
+          bin="$cargo_home/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+            "https://get.nexte.st/0.9.148/${platform}" | tar -xz -C "$bin"
+          cargo nextest --version
+
       # Node.js only needed on Linux for fmt-check-js (Windows fmt-check skips JS/Erlang checks)
       - name: Setup Node.js
         if: runner.os != 'Windows'
@@ -74,6 +119,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Cache Erlang/rebar3 artifacts (Unix)
         if: runner.os != 'Windows'
@@ -111,6 +158,9 @@ jobs:
       - name: Build, lint, and fast tests
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
+        # The full Rust suite (`test-rust`) runs on Linux only; macOS and Windows run
+        # `test-rust-platform`, which skips the two pure compiler crates whose
+        # platform-independent corpus tests were ~15 of the step's ~21 minutes per OS.
         # On Windows, fmt-check skips Erlang/JS checks (platform-agnostic, Linux covers them).
         # lint-workaround-comments (BT-2347 ratchet) is a no-op on Windows and enforces
         # the same allowlist gate here that `just ci` enforces locally (BT-2841).
@@ -126,7 +176,11 @@ jobs:
         # `{'$bt_nlr', ...}` patterns in runtime sources (use the ?IS_NLR guard instead).
         # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
         # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
-        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar
+        run: just build clippy fmt-check ${{ runner.os == 'Linux' && 'test-rust' || 'test-rust-platform' }} lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar
+
+      - name: Rust corpus tier (state-threading agreement and corpus proofs)
+        if: runner.os == 'Linux' && steps.corpus.outputs.run == 'true'
+        run: just test-corpus
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -225,6 +279,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Check corpus.json is up to date
         run: just check-corpus
@@ -254,6 +310,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Check beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen
         run: just check-codegen-boundary
@@ -325,6 +383,8 @@ jobs:
       - name: Cache Rust dependencies
         if: steps.filter.outputs.run == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Run corpus .core diff against origin/main
         if: steps.filter.outputs.run == 'true'
@@ -381,6 +441,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Compute OTP support-window matrix
         id: otp-matrix
@@ -450,6 +512,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build
         run: just build
@@ -534,6 +598,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build
         run: just build
@@ -603,6 +669,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build
         run: just build
@@ -667,6 +735,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build
         run: just build
@@ -736,6 +806,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build
         run: just build
@@ -799,6 +871,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # cargo-llvm-cov
