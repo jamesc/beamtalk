@@ -16,7 +16,9 @@
 //! actor methods) compiles with a silent verifier, and with the gate split the verifier reports
 //! every one.
 
-use super::local_producer_agreement::{CONSTRUCTS, body_sources, loop_body_agreement};
+use super::local_producer_agreement::{
+    AgreementFailure, CONSTRUCTS, body_sources, loop_body_agreement,
+};
 use super::local_producer_agreement_lookup::rejected;
 use super::verifier_report;
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
@@ -136,7 +138,10 @@ fn a_split_gate_in_any_other_fold_kind_is_caught_by_the_producer_agreement_check
                     match loop_body_agreement(&src) {
                         Ok(0) => continue,
                         Ok(_) => compared += 1,
-                        Err(disagreement) => panic!("agrees unfaulted: {disagreement}"),
+                        Err(
+                            AgreementFailure::Codegen(failure)
+                            | AgreementFailure::Disagreement(failure),
+                        ) => panic!("fails unfaulted: {failure}"),
                     }
                     let faulted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         fault::with(LocalRebindFault::SplitFoldStatementGate, || {
@@ -144,9 +149,14 @@ fn a_split_gate_in_any_other_fold_kind_is_caught_by_the_producer_agreement_check
                         })
                     }));
                     // Only a disagreement the agreement check reports counts: a panic (a
-                    // verifier finding, a codegen crash) is not that check catching it.
+                    // verifier finding, a codegen crash) or a codegen error is not that check
+                    // catching it.
                     match faulted {
-                        Ok(Err(_)) => {}
+                        Ok(Err(AgreementFailure::Disagreement(_))) => {}
+                        Ok(Err(AgreementFailure::Codegen(e))) => uncaught.push(format!(
+                            "{frame} / {statement} / {construct}: codegen failed, not an \
+                             agreement finding: {e}"
+                        )),
                         Ok(Ok(_)) => {
                             uncaught.push(format!("{frame} / {statement} / {construct}\n{src}"));
                         }

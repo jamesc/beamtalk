@@ -596,7 +596,10 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                 for src in body_sources(frame, construct, statement) {
                     match loop_body_agreement(&src) {
                         Ok(compared) => checked += compared,
-                        Err(disagreement) => panic!("{disagreement}"),
+                        Err(
+                            AgreementFailure::Codegen(failure)
+                            | AgreementFailure::Disagreement(failure),
+                        ) => panic!("{failure}"),
                     }
                 }
             }
@@ -605,12 +608,21 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     assert!(checked > 100, "only {checked} loop-body sites compared");
 }
 
+/// Why [`loop_body_agreement`] failed for one program.
+#[derive(Debug)]
+pub(super) enum AgreementFailure {
+    /// Codegen returned an error, so nothing was compared.
+    Codegen(String),
+    /// The core rule and codegen's producer lowering disagree.
+    Disagreement(String),
+}
+
 /// The loop-body agreement check for one program: `Ok` with the number of
 /// producer sites compared (0 when the Phase 0 / §6 checks reject it), or
-/// `Err` naming where the core rule and codegen's producer lowering disagree.
-/// Also run with the fold statement gate split (BT-3863,
-/// `fold_locals_carried_corpus.rs`), where it must disagree.
-pub(super) fn loop_body_agreement(src: &str) -> Result<usize, String> {
+/// why it failed. Also run with the fold statement gate split (BT-3863,
+/// `fold_locals_carried_corpus.rs`), where it must report a
+/// [`AgreementFailure::Disagreement`].
+pub(super) fn loop_body_agreement(src: &str) -> Result<usize, AgreementFailure> {
     let (module, parse_diags) = parse(lex_with_eof(src));
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     let analysis = analyse_full(&module, AnalysisContext::default());
@@ -655,15 +667,15 @@ pub(super) fn loop_body_agreement(src: &str) -> Result<usize, String> {
     // `with_body_producer_sites` reads too, so the lowered
     // set compared below drops those sites as well.
     if src.starts_with("Actor") && !value_bearing.is_empty() {
-        return Err(format!(
+        return Err(AgreementFailure::Disagreement(format!(
             "Phase 0 accepted an actor fold-body value site {value_bearing:?}\n{src}"
-        ));
+        )));
     }
     let (generated, records) = recording_producers(|| {
         generate_module_with_warnings(&module, CodegenOptions::new("agree"))
     });
     if let Err(e) = generated {
-        return Err(format!("{src}: {e:?}"));
+        return Err(AgreementFailure::Codegen(format!("{src}: {e:?}")));
     }
     let lowered: HashMap<Span, Vec<String>> = records
         .into_iter()
@@ -671,10 +683,10 @@ pub(super) fn loop_body_agreement(src: &str) -> Result<usize, String> {
         .collect();
     for (span, names) in &expected {
         if lowered.get(span) != Some(names) {
-            return Err(format!(
+            return Err(AgreementFailure::Disagreement(format!(
                 "the core rule accepts the construct at {span:?} as a producer \
                  threading {names:?}, but codegen lowered {lowered:?}\n{src}"
-            ));
+            )));
         }
     }
     let mut whole = HashSet::new();
@@ -683,10 +695,10 @@ pub(super) fn loop_body_agreement(src: &str) -> Result<usize, String> {
     }
     for (span, names) in &lowered {
         if !(expected.contains_key(span) || whole.contains(span)) {
-            return Err(format!(
+            return Err(AgreementFailure::Disagreement(format!(
                 "codegen lowered the construct at {span:?} as a producer \
                  threading {names:?}, but the core rule names {expected:?}\n{src}"
-            ));
+            )));
         }
     }
     Ok(expected.len())

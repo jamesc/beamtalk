@@ -1512,6 +1512,9 @@ impl CoreErlangGenerator {
                 } else {
                     "StateAcc".to_string()
                 };
+                // The lambda answers the predicate; the `StateAcc{N}` leaves it
+                // through the process dictionary (`erlang:put`), and that map is
+                // what the tag records as carried.
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
