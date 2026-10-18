@@ -156,21 +156,21 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// `detect:ifNone:`'s `ifNone:` handler in a fold over `Acc`: a
-    /// zero-argument callable (a threading parameter is never used inside it,
-    /// [`beamtalk_core::semantic_analysis::tier2_callee`]) invoked through
-    /// `call_threaded/3` like every callable the body runs, so a block answers
-    /// its value with the fold's final `Acc`, and a non-fun handler (an object
-    /// answering `value`, `nil`) gets the `value` send the plain path gives it
-    /// instead of a raw `apply` that crashes.
-    fn generate_if_none_value_with_acc(
+    /// Binds `detect:ifNone:`'s `ifNone:` handler once for a fold over `Acc`,
+    /// in source order (after the callable) and before the `is_list` guard, so
+    /// the list arm and the plain-send arm share one evaluation: the handler
+    /// expression is compiled exactly once (an operand pre-sequenced by
+    /// `threaded_use_producer`, `xs detect: b ifNone: (a value)`, is read back
+    /// once) and runs eagerly whatever the receiver's type, as the plain send
+    /// always evaluated its arguments. Answers `(binding, var)`.
+    fn bind_if_none_handler_for_acc(
         &mut self,
         if_none: &Expression,
-        acc_var: &str,
-    ) -> Result<Document<'static>> {
-        // A handler that writes an outer local is a stateful (arity-1) fun this
-        // `apply … ()` could not call: reject it loudly rather than crash at
-        // run time (the ADR 0131 producer for it is Phase 3's, ADR 0132 §2).
+    ) -> Result<(Document<'static>, String)> {
+        // A handler that writes an outer local is a stateful (arity-1) fun the
+        // zero-argument `call_threaded/3` below would refuse at run time:
+        // reject it loudly at compile time instead (the ADR 0131 producer for
+        // it is Phase 3's, ADR 0132 §2).
         if let Expression::Block(block) = if_none.unwrap_parens()
             && !Self::captured_mutations_for_block(block).is_empty()
         {
@@ -182,13 +182,35 @@ impl CoreErlangGenerator {
             });
         }
         let none_code = self.expression_doc(if_none)?;
-        Ok(docvec![
+        let none_var = self.fresh_temp_var("IfNone");
+        Ok((
+            docvec![
+                "let ",
+                leaf::var(none_var.clone()),
+                " = ",
+                none_code,
+                " in "
+            ],
+            none_var,
+        ))
+    }
+
+    /// `detect:ifNone:`'s `ifNone:` handler in a fold over `Acc`, bound by
+    /// [`Self::bind_if_none_handler_for_acc`]: a zero-argument callable (a
+    /// threading parameter is never used inside it,
+    /// [`beamtalk_core::semantic_analysis::tier2_callee`]) invoked through
+    /// `call_threaded/3` like every callable the body runs, so a block answers
+    /// its value with the fold's final `Acc`, and a non-fun handler (an object
+    /// answering `value`, `nil`) gets the `value` send the plain path gives it
+    /// instead of a raw `apply` that crashes.
+    fn generate_if_none_value_with_acc(none_var: &str, acc_var: &str) -> Document<'static> {
+        docvec![
             "call 'beamtalk_dispatch':'call_threaded'(",
-            none_code,
+            leaf::var(none_var.to_string()),
             ", [], ",
             leaf::var(acc_var.to_string()),
             ")",
-        ])
+        ]
     }
 
     /// Whether `expr` (paren-unwrapped here) is a whole collection-HOM send
@@ -438,6 +460,7 @@ impl CoreErlangGenerator {
         // ADR 0132 §2 (module docs): over `Acc`, `case is_list(Recv) of true ->
         // <the fold> ; false -> {send(Recv, Sel, [Args...]), Acc} end`. The
         // guard opens here and `plain_fallback` closes it after the fold.
+        let mut if_none_var: Option<String> = None;
         let plain_fallback: Option<Document<'static>> = match &carrier {
             FoldCarrier::ActorState => None,
             FoldCarrier::Acc { seed } => {
@@ -447,7 +470,11 @@ impl CoreErlangGenerator {
                 }
                 send_args.push(leaf::var(callable_var.clone()));
                 if let OpaqueFoldOp::DetectIfNone { if_none } = op {
-                    send_args.push(self.expression_doc(if_none)?);
+                    // Bound once, here, for both arms (see the binder's docs).
+                    let (binding, var) = self.bind_if_none_handler_for_acc(if_none)?;
+                    docs.push(binding);
+                    send_args.push(leaf::var(var.clone()));
+                    if_none_var = Some(var);
                 }
                 docs.push(docvec![
                     "case call 'erlang':'is_list'(",
@@ -721,9 +748,12 @@ impl CoreErlangGenerator {
                     FoldCarrier::ActorState => {
                         self.generate_if_none_branch_tuple(if_none, &final_state)?
                     }
-                    FoldCarrier::Acc { .. } => {
-                        self.generate_if_none_value_with_acc(if_none, &final_state)?
-                    }
+                    FoldCarrier::Acc { .. } => Self::generate_if_none_value_with_acc(
+                        if_none_var
+                            .as_deref()
+                            .expect("the Acc carrier binds the ifNone: handler before the guard"),
+                        &final_state,
+                    ),
                 };
                 docs.push(docvec![
                     "case call 'erlang':'element'(2, ",

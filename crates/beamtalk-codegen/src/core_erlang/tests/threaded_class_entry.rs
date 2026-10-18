@@ -625,6 +625,8 @@ const TWO_PARAMS: &str = "sealed Object subclass: TwoParams
 
   class sealed plus: a with: b => (a value) + (b value)
 
+  class sealed pick: xs with: b dflt: a => xs detect: b ifNone: (a value)
+
   class sealed cascaded: a with: b => a value: (b value); value: (b value: 1)
 ";
 // (`cascaded:with:`: the index's cascade rule does not walk a cascade's
@@ -650,6 +652,9 @@ fn a_use_inside_another_uses_operand_is_sequenced_ahead_of_it() {
         ("fwd:with:", 4, 2),
         ("each:with:", 4, 2),
         ("plus:with:", 4, 2),
+        // `(a value)` is the `ifNone:` handler: pre-sequenced once, read back
+        // once (the handler is bound before the `is_list` guard for both arms).
+        ("pick:with:dflt:", 5, 2),
         ("cascaded:with:", 4, 2),
     ] {
         let entry = crate::core_erlang::selector_mangler::threaded_class_fn_name(selector);
@@ -675,6 +680,21 @@ fn a_use_inside_another_uses_operand_is_sequenced_ahead_of_it() {
     );
     assert!(b_step < a_step, "{two}");
     assert!(two[a_step..].contains("Acc@1)"), "{two}");
+    // `xs detect: b ifNone: (a value)`: `a`'s step lands first, its value is
+    // bound once and handed to both arms of the receiver guard.
+    let pick = function_text(&code, "'__t2_class_pick:with:dflt:'/5");
+    let a_step = pick
+        .find("'call_threaded'(_a")
+        .unwrap_or_else(|| panic!("{pick}"));
+    let guard = pick.find("'is_list'(").unwrap_or_else(|| panic!("{pick}"));
+    let bind = pick.find("let _IfNone").unwrap_or_else(|| panic!("{pick}"));
+    assert!(a_step < bind && bind < guard, "{pick}");
+    assert_eq!(pick.matches("'call_threaded'(_IfNone").count(), 1, "{pick}");
+    assert_eq!(
+        pick.matches("'detect:ifNone:', [_Callable").count(),
+        1,
+        "{pick}"
+    );
     // `self apply: a to: (b value)`: `b`'s step, then the callee entry with `Acc@1`.
     let fwd = function_text(&code, "'__t2_class_fwd:with:'/4");
     let b_step = fwd
@@ -820,8 +840,8 @@ fn a_fold_over_acc_takes_the_plain_send_for_a_non_list_receiver() {
     }
     // The `ifNone:` handler is gated, never `apply`d bare.
     let text = function_text(&code, "'__t2_class_detectIn:with:none:'/5");
-    assert!(text.contains("'call_threaded'(_c"), "{text}");
-    assert!(!text.contains(" = apply _c"), "{text}");
+    assert!(text.contains("'call_threaded'(_IfNone"), "{text}");
+    assert!(!text.contains(" = apply _"), "{text}");
     assert_compiles_through_erlc("test", &code);
 }
 
