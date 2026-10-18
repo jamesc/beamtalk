@@ -145,8 +145,11 @@ fn escaping_block_messages_name_the_shape() {
         ),
         (
             in_class("r := #(1) collect: [:x | [t := t + x]]\nr"),
-            "`t` is assigned in a block answered by a collection operation's block, into the \
-             operation's result",
+            "`t` is assigned in a block answered by the block of a collection operation",
+        ),
+        (
+            in_class("r := #(1) select: [:x | [t := t + x]]\nr"),
+            "`t` is assigned in a block answered by the block of a collection operation",
         ),
         (
             in_class("x := [t := t + 1] foo\nx"),
@@ -195,6 +198,68 @@ fn escaping_block_note_lists_exactly_the_threading_constructs() {
                 || crate::state_threading_selectors::is_dictionary_inline_lookup(bare)
                 || crate::state_threading_selectors::is_try_do_selector(bare),
             "{selector} is not a threading construct"
+        );
+    }
+}
+
+/// A block literal that reaches a send as the value of an argument or receiver
+/// expression (a conditional arm, an evaluated block, a protected body, a
+/// parenthesized block) escapes like a bare one (PR #4382 review); an
+/// argument that only *runs* a writing block in place does not.
+#[test]
+fn escaping_block_through_an_argument_or_receiver_value_is_reported() {
+    for body in [
+        "CvA ap: (4 > 3 ifTrue: [[t := t + 1]] ifFalse: [[0]])\nt",
+        "CvA ap: [[t := t + 1]] value\nt",
+        "CvA ap: ([[t := t + 1]] on: Error do: [:e | nil])\nt",
+        "CvA ap: ([t := t + 1])\nt",
+        "#(1) do: (4 > 3 ifTrue: [[:x | t := t + x]] ifFalse: [[:x | x]])\nt",
+        "(4 > 3 ifTrue: [[t := t + 1]] ifFalse: [[0]]) value\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                1,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
+    }
+    for body in [
+        "CvA ap: [t := t + 1. 5] value\nt",
+        "CvA ap: (4 > 3 ifTrue: [t := t + 1. 1] ifFalse: [0])\nt",
+        "CvA ap: (4 > 3 ifTrue: [[t + 1]] ifFalse: [[0]])\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                0,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
+    }
+}
+
+/// One diagnostic per assignment: a value-position assignment inside an
+/// escaping block is the escaping-block error only, not also BT-3864's
+/// `ValuePositionLocalAssignment` at the same span (PR #4382 review).
+#[test]
+fn value_position_write_in_an_escaping_block_is_reported_once() {
+    for src in [
+        in_class("b := [CvA ap: (t := 1)]\nt"),
+        in_value("b := [CvA ap: (t := 1)]\nt"),
+    ] {
+        let all = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
+        let errors: Vec<_> = all
+            .iter()
+            // (`in_value` has two classes in one module, an uncategorised error.)
+            .filter(|d| d.severity == Severity::Error && d.category.is_some())
+            .collect();
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert_eq!(
+            errors[0].category,
+            Some(DiagnosticCategory::Tier2BlockNoReturnChannel)
         );
     }
 }

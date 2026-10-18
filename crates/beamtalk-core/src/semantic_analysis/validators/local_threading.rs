@@ -1167,10 +1167,19 @@ fn report_value_position_assignments(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for found in value_position_local_assignments(body, context.root_method_kind()) {
+        // One diagnostic per assignment: an assignment a `match:`-arm error or
+        // the ADR 0133 escaping-block error (reported at the assignment)
+        // already reports is not reported again.
         let reported = diagnostics.iter().any(|d| {
             d.span == found.span
                 && d.severity == crate::source_analysis::Severity::Error
-                && d.category == Some(DiagnosticCategory::UnmigratedLocalThreading)
+                && matches!(
+                    d.category,
+                    Some(
+                        DiagnosticCategory::UnmigratedLocalThreading
+                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+                    )
+                )
         });
         if reported {
             continue;
@@ -1231,8 +1240,10 @@ enum Escape {
     StoredState,
     /// An element of a collection literal.
     InLiteral,
-    /// The value of a value-returning collection operation's block, so an
-    /// element of (or the answer of) the operation's result.
+    /// The value of the block of a value-returning collection operation
+    /// (`collect:`, `inject:into:`, `select:`, `detect:ifNone:`, ...): it
+    /// leaves the block into the operation's machinery (its result, for
+    /// `collect:` and the folds; a predicate's answer otherwise).
     CollectionResult,
     /// An argument of an ordinary send of this selector: a user-defined method,
     /// or a stdlib method outside the known list.
@@ -1267,10 +1278,7 @@ impl Escape {
             },
             Self::StoredState => "stored in a field or class variable".to_string(),
             Self::InLiteral => "placed in a collection literal".to_string(),
-            Self::CollectionResult => {
-                "answered by a collection operation's block, into the operation's result"
-                    .to_string()
-            }
+            Self::CollectionResult => "answered by the block of a collection operation".to_string(),
             Self::Passed(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
             ),
@@ -2293,31 +2301,36 @@ impl<'d> Walker<'d> {
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }
-                Expression::Parenthesized { .. } => {
-                    if let Expression::Block(block) = receiver.unwrap_parens() {
+                Expression::Block(_) => {}
+                // Any other receiver that evaluates to a block literal, a
+                // parenthesized one or one answered by a conditional arm, an
+                // evaluated block or a protected body ([`value_blocks`]), is a
+                // block value sent `sel`.
+                _ => {
+                    for block in value_blocks(receiver) {
                         self.report_literal(block, &Escape::Receiver(sel.clone()));
                     }
                 }
-                _ => {}
             }
         }
-        // Block literal arguments. A parenthesized block argument is a block
-        // value in every send.
+        // Block arguments. Only a bare `[...]` argument of a construct send (or a
+        // lookup producer's handler) is lowered in place; any other argument that
+        // evaluates to a block literal ([`value_blocks`]: the literal itself,
+        // parenthesized, or answered by a conditional arm, an evaluated block or
+        // a protected body) is a block value passed to `sel`, in every send.
         let escape = if inlined {
             self.passed_escape(receiver, &sel)
         } else {
             Escape::Cascade(sel.clone())
         };
         for (index, arg) in arguments.iter().enumerate() {
-            match arg {
-                Expression::Block(_) if construct_send || handler_indices.contains(&index) => {}
-                Expression::Block(block) => self.report_literal(block, &escape),
-                Expression::Parenthesized { .. } => {
-                    if let Expression::Block(block) = arg.unwrap_parens() {
-                        self.report_literal(block, &escape);
-                    }
-                }
-                _ => {}
+            if matches!(arg, Expression::Block(_))
+                && (construct_send || handler_indices.contains(&index))
+            {
+                continue;
+            }
+            for block in value_blocks(arg) {
+                self.report_literal(block, &escape);
             }
         }
     }

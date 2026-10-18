@@ -2805,7 +2805,7 @@ processItems =>
 | `self forEach: [:o \| t := t + o]` | `` `t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through `` |
 | `Logger onEvent: [:e \| seen := seen + 1]` | `` `seen` is assigned in a block passed to a class method (`onEvent:`); it would run in another process `` |
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
-| `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by a collection operation's block, into the operation's result `` |
+| `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
 
 A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires. A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 

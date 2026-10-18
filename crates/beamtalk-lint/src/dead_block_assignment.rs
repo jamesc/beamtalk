@@ -647,19 +647,25 @@ Object subclass: Foo
     }
 
     /// An assignment in a message argument within a stored block is in value
-    /// position: since BT-3864 it is a `ValuePositionLocalAssignment` compile
-    /// error, which owns the report, so the lint steps back.
+    /// position (BT-3864's `ValuePositionLocalAssignment`) and in a block that
+    /// escapes (ADR 0133). One compile error owns the assignment, the
+    /// escaping-block one (BT-3902: one diagnostic per assignment), so the
+    /// lint steps back.
     #[test]
     fn assignment_in_msg_arg_inside_block_is_the_compile_errors() {
         let src = "x := 0.\nblk := [foo bar: (x := 1)]";
         let diags = lint(src);
         assert!(diags.is_empty(), "the compile error reports it: {diags:?}");
         let (module, _) = parse(lex_with_eof(src));
-        let errors = beamtalk_core::semantic_analysis::analyse(&module).diagnostics;
-        assert!(
-            errors.iter().any(|d| d.category
-                == Some(DiagnosticCategory::ValuePositionLocalAssignment)
-                && d.message.contains("`x`")),
+        let errors: Vec<_> = beamtalk_core::semantic_analysis::analyse(&module)
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.message.contains("`x`"))
+            .collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(
+            errors[0].category,
+            Some(DiagnosticCategory::Tier2BlockNoReturnChannel),
             "{errors:?}"
         );
     }
