@@ -300,15 +300,10 @@ fn extract_family_slots_honors_a_nonzero_base_arity() {
 }
 
 #[test]
-fn extract_family_slots_orders_acc_last() {
-    // ADR 0132 §2: `Acc` is a trailing family, extracted after `State` and
-    // `SelfVt` whatever order the eligible set arrives in.
-    let acc = |version| VersionedVar::new(VersionPrefix::Acc, version, FrameId::ROOT);
-    let families = ThreadedFamilies::from_matches(&[
-        VersionPrefix::Acc,
-        VersionPrefix::SelfVt,
-        VersionPrefix::State,
-    ]);
+fn extract_family_slots_orders_state_first_whatever_the_input_order() {
+    // ADR 0122 Decision 2: `State` is extracted before `SelfVt` whatever order
+    // the eligible set arrives in (`threaded_ir::FAMILY_SLOT_ORDER`).
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt, VersionPrefix::State]);
     let stmts = extract_family_slots(
         "Tuple",
         1,
@@ -316,7 +311,6 @@ fn extract_family_slots_orders_acc_last() {
         |prefix| match prefix {
             VersionPrefix::State => FamilyVersionStep::new(state(0), state(1)),
             VersionPrefix::SelfVt => FamilyVersionStep::new(self_vt(0), self_vt(1)),
-            VersionPrefix::Acc => FamilyVersionStep::new(acc(0), acc(1)),
             other => panic!("unexpected family queried: {other:?}"),
         },
         span(),
@@ -324,8 +318,7 @@ fn extract_family_slots_orders_acc_last() {
     assert_eq!(
         render_extracted(&stmts),
         "let State1 = call 'erlang':'element'(2, Tuple) in \
-         let Self1 = call 'erlang':'element'(3, Tuple) in \
-         let Acc@1 = call 'erlang':'element'(4, Tuple) in "
+         let Self1 = call 'erlang':'element'(3, Tuple) in "
     );
 }
 
