@@ -793,4 +793,55 @@ mod tests {
         assert!(content.contains("beamtalk-mcp"));
         assert!(content.contains("--start"));
     }
+
+    /// Every ```beamtalk block in the scaffolded agent docs must parse and
+    /// pass semantic analysis. These files are copied into every new project
+    /// and read by coding agents as ground truth, so an example that no longer
+    /// compiles (a `state:` on an `Object`, a bare `=`) teaches the wrong
+    /// language. Blocks fenced as ```text are exempt (deliberately wrong code).
+    #[test]
+    fn test_scaffold_agent_docs_beamtalk_snippets_compile() {
+        use beamtalk_core::semantic_analysis::analyse;
+        use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+        use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+        let templates = [
+            ("agents.md", include_str!("../../templates/agents.md")),
+            (
+                "copilot-instructions.md",
+                include_str!("../../templates/copilot-instructions.md"),
+            ),
+        ];
+        let mut failures = Vec::new();
+        let mut checked = 0;
+        for (file, markdown) in templates {
+            let mut in_beamtalk = false;
+            let mut snippet = String::new();
+            for event in Parser::new(markdown) {
+                match event {
+                    Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang))) => {
+                        in_beamtalk = lang.as_ref() == "beamtalk";
+                        snippet.clear();
+                    }
+                    Event::Text(text) if in_beamtalk => snippet.push_str(&text),
+                    Event::End(TagEnd::CodeBlock) if in_beamtalk => {
+                        in_beamtalk = false;
+                        checked += 1;
+                        let (module, mut diags) = parse(lex_with_eof(&snippet));
+                        diags.extend(analyse(&module).diagnostics);
+                        for d in diags.iter().filter(|d| d.severity == Severity::Error) {
+                            failures.push(format!("{file}: {}\n---\n{snippet}---", d.message));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(checked > 0, "no ```beamtalk blocks found in the templates");
+        assert!(
+            failures.is_empty(),
+            "scaffold template snippets fail to compile:\n{}",
+            failures.join("\n\n")
+        );
+    }
 }
