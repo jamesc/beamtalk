@@ -58,7 +58,10 @@ Actor subclass: Bt3889DestructureValueActor
   inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]
 
   // No `groupBy` here: an actor `groupBy:` whose block binds a local answers
-  // the raw fold tuple whatever its last statement (BT-3897).
+  // the raw fold tuple whatever its last statement (BT-3897), and as a
+  // receiver it is a compile error since BT-3909 (pinned by
+  // `residual_group_by_value_is_an_error_where_the_carrier_leaks`); BT-3912
+  // re-enables it.
 
   // DestructureAssignmentControlFlow: the right-hand side writes a field.
   lastCf: c =>

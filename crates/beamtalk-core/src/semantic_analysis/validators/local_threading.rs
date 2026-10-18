@@ -50,12 +50,12 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, captured_local_mutations, conditional_arm_blocks, conditional_producer_writes,
-    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
-    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_safe_value_family_selector, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, producer_body_block,
+    RootMethodKind, analyze_block, captured_local_mutations, conditional_arm_blocks,
+    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
+    exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
+    is_loop_body_producer_site, is_safe_value_family_selector, is_threaded_frame_body,
+    literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
     stored_block_var_uses, value_blocks, value_locals, value_position_local_assignments,
@@ -1020,6 +1020,120 @@ fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext
         .any(|row| row.denies(kind, position, context))
 }
 
+/// A shape of [`RESIDUAL_DENY_SET`]: a residual of ADR 0131 that crashes or
+/// answers wrong today but that [`DENY_SET`] and [`ALLOW_SET`] cannot name,
+/// because its threaded set ([`construct_outer_local_writes`]) is empty (the
+/// block binds a local of its own, or writes only a field) or it is not a
+/// construct send at all (`match:`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Residual {
+    /// BT-3897: a `groupBy:` whose literal block binds a local, writes a
+    /// field or sends to `self` is lowered as the threaded fold in an actor
+    /// method and at the REPL, and only some positions unpack its
+    /// `{Map, StateAcc}` result ([`group_by_value_unpacked`]); anywhere else
+    /// the raw tuple is the value, or the REPL raises. Class and value-type
+    /// methods answer the map.
+    GroupByValue,
+    /// BT-3891: an assignment inside an arm of a conditional (`ifTrue:`,
+    /// `ifNil:`, `and:`/`or:` families) nested anywhere in the condition
+    /// block of a `whileTrue:`/`whileFalse:` loop, to a local not bound
+    /// outside the loop, emits an unbound `StateAcc` (`erlc` rejects the
+    /// module). A local bound outside the loop is the Phase 0 check's.
+    LoopConditionArmWrite,
+    /// BT-3875: a `match:` arm (body or guard) that writes an outer local
+    /// drops the write (BT-3817 made it an error in methods; the REPL
+    /// answered the stale value silently).
+    MatchArmWrite,
+}
+
+/// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
+struct ResidualDenied {
+    shape: Residual,
+    contexts: &'static [MethodContext],
+    /// The issue that recorded the shape.
+    issue: &'static str,
+    /// The ADR 0133 Phase 3 issue whose lowering fixes it, deleting the row
+    /// and flipping its `PIN-BUG` tests.
+    fixed_by: &'static str,
+}
+
+/// ADR 0133 Phase 3 (BT-3909): the residual shapes made loud before the IR
+/// consolidation lowers them, each a compile error in the contexts where it
+/// was measured crashing or answering wrong on a BEAM. The probe cells are the
+/// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
+/// the REPL `match` lines; `residual_deny_set_pins` pins each repro. BT-3911
+/// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
+/// `GroupByValue` row.
+const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
+    ResidualDenied {
+        shape: Residual::GroupByValue,
+        contexts: &[Actor, Repl],
+        issue: "BT-3897",
+        fixed_by: "BT-3912",
+    },
+    ResidualDenied {
+        shape: Residual::LoopConditionArmWrite,
+        contexts: &[Class, ValueType, Actor],
+        issue: "BT-3891",
+        fixed_by: "BT-3911",
+    },
+    // Class, value-type and actor methods since BT-3817; the REPL since
+    // BT-3909 (maintainer-approved REPL output change: the input was
+    // accepted and answered the stale value).
+    ResidualDenied {
+        shape: Residual::MatchArmWrite,
+        contexts: &[Class, ValueType, Actor, Repl],
+        issue: "BT-3875",
+        fixed_by: "BT-3911",
+    },
+];
+
+/// The [`RESIDUAL_DENY_SET`] row that makes `shape` an error in `context`.
+fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static ResidualDenied> {
+    // The measurement harness compiles the probe cells these rows reject
+    // (`match:` arms are not probe cells: BT-3817's error is not bypassed).
+    if position_check_bypassed() && shape != Residual::MatchArmWrite {
+        return None;
+    }
+    RESIDUAL_DENY_SET
+        .iter()
+        .find(|row| row.shape == shape && row.contexts.contains(&context))
+}
+
+/// Whether the value of a `groupBy:` threaded fold at `position` in `context`
+/// is unpacked from its `{Map, StateAcc}` carrier ([`Residual::GroupByValue`],
+/// measured on a BEAM for BT-3909). In an actor method: a method-body
+/// statement or a statement inside a block whose value is discarded (not the
+/// block's last), the value of an assignment to a local outside any closure,
+/// and a method-body field assignment or `^`. At the REPL only a top-level
+/// statement or assignment: inside any block the fold's bindings-map carrier
+/// leaks or raises. `last` is whether the statement is the last of its
+/// innermost block; `in_closure` whether a closure (a block its construct does
+/// not inline) encloses it.
+fn group_by_value_unpacked(
+    context: MethodContext,
+    position: Position,
+    depth: usize,
+    last: bool,
+    in_closure: bool,
+) -> bool {
+    if context == Repl {
+        return depth == 0
+            && matches!(
+                position,
+                Position::Statement | Position::AssignValue { nested: false }
+            );
+    }
+    match position {
+        Position::Statement => depth == 0 || !last,
+        Position::AssignValue { .. } => !in_closure,
+        Position::FieldAssignValue { nested: false } | Position::ReturnValue { nested: false } => {
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
 /// statement unless [`DENY_SET`] lists it, anything else only if
 /// [`ALLOW_SET`] does.
@@ -1683,6 +1797,7 @@ impl<'d> Walker<'d> {
                 arguments,
                 ..
             } => {
+                self.check_residuals(expr, position);
                 self.check_construct(expr, position);
                 let top = self.top_level(position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
@@ -1793,7 +1908,7 @@ impl<'d> Walker<'d> {
                     let (ids, _) =
                         crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                     self.scope.push(ids.into_iter().map(|id| id.name).collect());
-                    if self.context != Repl {
+                    if residual_denied(Residual::MatchArmWrite, self.context).is_some() {
                         self.report_match_arm_writes(arm);
                     }
                     if let Some(guard) = &arm.guard {
@@ -2468,14 +2583,151 @@ impl<'d> Walker<'d> {
         }
     }
 
+    /// The [`RESIDUAL_DENY_SET`] checks of a send: an actor `groupBy:` whose
+    /// fold result is not unpacked at `position`
+    /// ([`Residual::GroupByValue`]), and a loop condition that assigns a local
+    /// inside a conditional arm ([`Residual::LoopConditionArmWrite`]).
+    fn check_residuals(&mut self, expr: &Expression, position: Position) {
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        else {
+            return;
+        };
+        match (
+            selector.name().as_str(),
+            receiver.as_ref(),
+            arguments.first(),
+        ) {
+            ("groupBy:", _, Some(Expression::Block(block))) => {
+                self.check_group_by_value(expr, block, position);
+            }
+            (
+                "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse",
+                Expression::Block(cond),
+                _,
+            ) => {
+                self.check_loop_condition_arm_writes(&selector.name(), cond);
+            }
+            _ => {}
+        }
+    }
+
+    /// [`Residual::GroupByValue`] (BT-3897): an actor or REPL `groupBy:` whose
+    /// block codegen lowers as the threaded fold (it binds a local, writes a
+    /// field or sends to `self`: [`analyze_block`]'s facts, which codegen's
+    /// `needs_mutation_threading` reads; a superset at the REPL, where only a
+    /// local write threads) and that writes no
+    /// outer local (that is the Phase 0 check's), at a position whose value is
+    /// the raw `{Map, StateAcc}` tuple.
+    fn check_group_by_value(&mut self, expr: &Expression, block: &Block, position: Position) {
+        let Some(row) = residual_denied(Residual::GroupByValue, self.context) else {
+            return;
+        };
+        let analysis = analyze_block(block);
+        if analysis.local_writes.is_empty() && !analysis.has_state_effects() {
+            return;
+        }
+        if !self.writes_of(block).is_empty() {
+            return;
+        }
+        let last = self.last_statements.last().copied().unwrap_or(false);
+        let in_closure = self.containers.contains(&Container::Other);
+        if group_by_value_unpacked(self.context, position, self.depth, last, in_closure) {
+            return;
+        }
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "`groupBy:` binds a local, writes a field or sends to `self` in its block, \
+                     but as {position} in {context} its result is not unpacked from the fold's \
+                     state yet ({issue}, until {fixed_by})",
+                    context = self.context,
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                expr.span(),
+            )
+            .with_hint(
+                "assign the `groupBy:` result to a local in a statement of its own \
+                 (`groups := items groupBy: [...]`) and use the local here",
+            )
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
+    }
+
+    /// [`Residual::LoopConditionArmWrite`] (BT-3891): the first assignment in
+    /// the condition block `cond` of a `selector` loop that sits inside an arm
+    /// of a conditional ([`conditional_arm_blocks`]), at any depth and through
+    /// any nested block, to a local not bound outside the loop (a local bound
+    /// outside is the Phase 0 check's: it writes an outer local from a loop).
+    fn check_loop_condition_arm_writes(&mut self, selector: &str, cond: &Block) {
+        let Some(row) = residual_denied(Residual::LoopConditionArmWrite, self.context) else {
+            return;
+        };
+        let mut arm_spans: Vec<Span> = Vec::new();
+        let mut assignments: Vec<(EcoString, Span)> = Vec::new();
+        for stmt in &cond.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Some(arms) = conditional_arm_blocks(e) {
+                    arm_spans.extend(arms.iter().map(|b| b.span));
+                }
+                match e {
+                    Expression::Assignment { target, .. } => {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            assignments.push((id.name.clone(), e.span()));
+                        }
+                    }
+                    Expression::DestructureAssignment { pattern, .. } => {
+                        let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                        assignments.extend(ids.into_iter().map(|id| (id.name, e.span())));
+                    }
+                    _ => {}
+                }
+            });
+        }
+        let Some((name, span)) = assignments.into_iter().find(|(name, span)| {
+            !self.is_bound(name)
+                && arm_spans
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
+        }) else {
+            return;
+        };
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "the `{selector}` condition assigns `{name}` inside a conditional arm, but \
+                     in {context} the assignment is not threaded out of the condition yet \
+                     ({issue}, until {fixed_by})",
+                    context = self.context,
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "compute the condition without assigning inside a conditional arm: assign \
+                 `{name}` in a statement of the condition block or the loop body, and test \
+                 its value in the arm"
+            ))
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
+    }
+
     /// A `match:` arm that assigns an outer local. The arm is an expression,
     /// not a block, so no construct threads its write back to the method
     /// (BT-3817): compiling it would drop the write silently. BT-3823 kept this
     /// error rather than lowering `match:` as a producer: that needs a `match:`
     /// family in the shared producer rule and a frame per arm in codegen's
-    /// `match_lowering`, which is BT-3875. The REPL is exempt from this error;
-    /// there the arm's assignment is the value-position error (BT-3864),
-    /// pinned in `adr0131_local_rebind.btscript`. Walks the whole
+    /// `match_lowering`, which is BT-3875. The contexts are the
+    /// [`Residual::MatchArmWrite`] row's: the REPL was exempt (its arm
+    /// assignment drew only the value-position error, BT-3864) until BT-3909
+    /// gave it the same error as a method, pinned in
+    /// `adr0131_local_rebind.btscript`. Walks the whole
     /// arm (guard and body) without entering a nested block literal, whose
     /// writes are the constructs' own business; the arm's pattern variables
     /// (the innermost scope frame, already pushed) are the arm's own.

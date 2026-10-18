@@ -70,6 +70,8 @@ pub fn probe_rows() -> Vec<ProbeRow> {
 /// - `detect-ifnone`: `detect:ifNone:` (search block or handler writes);
 /// - `detect-plain`: a plain `detect:` (kind `det`);
 /// - `satisfy`: `anySatisfy:`;
+/// - `group-by`: `groupBy:` (BT-3897);
+/// - `match-arm`: a `match:` arm (BT-3875);
 /// - `other`: anything else (empty today).
 #[must_use]
 pub fn statement_family(container: &str, kind: &str) -> &'static str {
@@ -83,13 +85,15 @@ pub fn statement_family(container: &str, kind: &str) -> &'static str {
         "dinS" | "dinH" => "detect-ifnone",
         "det" => "detect-plain",
         "any" => "satisfy",
+        "groupBy" => "group-by",
+        "match" => "match-arm",
         _ => "other",
     }
 }
 
 /// The block-role group of a statement-matrix container: where the statement
 /// sits (`method-body`, `arm`, `protected-body`, `handler`, `loop-body`,
-/// `arm-loop-mix` for an arm around a loop or a loop around an arm,
+/// `loop-condition`, `arm-loop-mix` for an arm around a loop or a loop around an arm,
 /// `nested-loop` for a loop in a `do:` body or in another loop,
 /// `evaluated-block`).
 #[must_use]
@@ -100,6 +104,7 @@ pub fn container_group(container: &str) -> &'static str {
         "prot" | "protLast" | "ens" | "ensLast" | "protArm" => "protected-body",
         "handler" | "ensBlk" => "handler",
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "iterIter" => "loop-body",
+        "cond" => "loop-condition",
         "armIter" | "iterArm" | "armLoop" | "loopArm" | "timesArm" => "arm-loop-mix",
         "loopIter" | "timesIter" | "loopLoop" | "timesLoop" | "iterLoop" | "collLoop"
         | "valLoop" | "iterTimes" | "collTimes" | "valTimes" => "nested-loop",
@@ -140,6 +145,9 @@ pub fn expected_answer(container: &str, target: &str, kind: &str) -> i64 {
         .find(|(k, _, _)| *k == kind)
         .unwrap_or_else(|| panic!("unknown kind {kind}"))
         .2;
+    if target == "fresh" {
+        return 0;
+    }
     let accumulates = target != "local" && (kind != "while" || target == "dlocal");
     if accumulates {
         total * container_runs(container)
@@ -213,7 +221,10 @@ impl Matrix {
                             if context == "value" && *position == "field" {
                                 continue;
                             }
-                            for (kind, _, _) in STATEMENT_PROBE_KINDS {
+                            for (kind, _, _) in STATEMENT_PROBE_KINDS
+                                .iter()
+                                .filter(|(k, _, _)| !STATEMENT_ONLY_KINDS.contains(k))
+                            {
                                 cells.push([
                                     context.to_string(),
                                     (*container).to_string(),
@@ -410,7 +421,20 @@ pub const STATEMENT_PROBE_KINDS: &[(&str, &str, i64)] = &[
     // the block writes once (BT-3841; the miss that raises `not_found` is
     // covered by BUnit, a probe cannot answer after raising).
     ("det", "#(1, 2) detect: [:e | @ := @ + 1X. e > 0]", 1),
+    // ADR 0133 Phase 3 residuals (BT-3909), statement matrix only
+    // ([`STATEMENT_ONLY_KINDS`]): a `groupBy:` whose result is a receiver
+    // (BT-3897, with the `fresh` target), and a `match:` arm (BT-3875).
+    (
+        "groupBy",
+        "(#(1, 3) groupBy: [:e | @ := @ + eX. e > 2]) at: true",
+        4,
+    ),
+    ("match", "3 match: [_ -> (@ := @ + 1X)]", 1),
 ];
+
+/// The kinds of [`STATEMENT_PROBE_KINDS`] probed only in the statement
+/// matrix: the operand matrix (`Matrix::Operand`) does not measure them.
+pub const STATEMENT_ONLY_KINDS: &[&str] = &["groupBy", "match"];
 
 /// The block roles of the statement-position probe matrix, with `S` for the
 /// probed statement.
@@ -497,6 +521,8 @@ pub const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
     ("iterTimes", "2 timesRepeat: [#(1, 2) do: [:z | S]]"),
     ("collTimes", "2 timesRepeat: [#(1, 2) collect: [:z | S. z]]"),
     ("valTimes", "2 timesRepeat: [[S] value]"),
+    // A statement of a `whileTrue:` condition block (BT-3891, BT-3909).
+    ("cond", "i := 0. [S. i < 2] whileTrue: [i := i + 1]"),
     // REPL-only roles.
     ("replLoop", "[t < 100] whileTrue: [S. t := t + 100]"),
 ];
@@ -505,7 +531,8 @@ pub const STATEMENT_PROBE_CONTAINERS: &[(&str, &str)] = &[
 /// the construct writes and how the block reads it back: `outer` writes the
 /// method-level `t`; `local` writes a local `u` of the innermost block and
 /// then sets `t := u`; `direct` first writes `t := t + 0` in the block;
-/// `dlocal` writes `u` and then `t := t + u`; `cvar`, `selfsend` and
+/// `dlocal` writes `u` and then `t := t + u`; `fresh` binds a local `u` of
+/// the construct's own block and writes no `t` (BT-3909); `cvar`, `selfsend` and
 /// `cvarOuter` write `t` with a class-variable write or a self-send inside
 /// the construct's block, or a class-variable write before it.
 ///
@@ -525,7 +552,7 @@ pub fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) ->
     let extra = match target {
         "cvar" => ". self.n := 1",
         "selfsend" => ". self plain",
-        "cvarOuter" | "outer" | "local" | "direct" | "dlocal" => "",
+        "cvarOuter" | "outer" | "local" | "direct" | "dlocal" | "fresh" => "",
         other => panic!("unknown target {other}"),
     };
     let snippet = snippet.replace('X', extra);
@@ -534,6 +561,7 @@ pub fn statement_probe(kind: &str, container: &str, target: &str, cond: &str) ->
         "dlocal" => format!("u := 0. {}. t := t + u", snippet.replace('@', "u")),
         "direct" => format!("t := t + 0. {}", snippet.replace('@', "t")),
         "cvarOuter" => format!("self.n := 1. {}", snippet.replace('@', "t")),
+        "fresh" => snippet.replace("@ := @ + ", "u := ").replace('@', "u"),
         _ => snippet.replace('@', "t"),
     };
     template.replace('S', &stmt).replace("%c", cond)
