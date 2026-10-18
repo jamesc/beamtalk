@@ -8,6 +8,7 @@
 // plain method. Read by threaded_value_entry_test.bt.
 
 Value subclass: ThreadedOpenValueFixture
+
   twice: b =>
     b value
     b value

@@ -33,13 +33,19 @@ TestCase subclass: ThreadedValueEntryTest
     self assert: (ThreadedValueEntryFixture new twiceVia: [8]) equals: 8
 
   testSumWithFoldsTheCallable =>
-    self assert: (ThreadedValueEntryFixture new sumWith: [:acc :x | acc + x]) equals: 6
+    self assert: (ThreadedValueEntryFixture new sumWith: [:acc :x |
+      acc + x
+    ]) equals: 6
 
   testDetectFirstFindsTheFirstMatch =>
-    self assert: (ThreadedValueEntryFixture new detectFirst: [:x | x > 1]) equals: 2
+    self assert: (ThreadedValueEntryFixture new detectFirst: [:x |
+      x > 1
+    ]) equals: 2
 
   testDetectFirstAnswersNilWithoutAMatch =>
-    self assert: (ThreadedValueEntryFixture new detectFirst: [:x | x > 5]) equals: nil
+    self assert: (ThreadedValueEntryFixture new detectFirst: [:x |
+      x > 5
+    ]) equals: nil
 
   testAReturnFromABlockBesideAnInvocationIsUnchanged =>
     self assert: (ThreadedValueEntryFixture new firstAfter: [1]) equals: 2
@@ -55,7 +61,9 @@ TestCase subclass: ThreadedValueEntryTest
     self assert: (ThreadedOpenValueFixture new viaSealed: [4]) equals: 4
 
   testAUseHoldingAnotherParametersUseCompilesAsBefore =>
-    self assert: (ThreadedOpenValueFixture new both: [:x | x + 1] with: [10]) equals: 11
+    self assert: (ThreadedOpenValueFixture new both: [:x |
+      x + 1
+    ] with: [10]) equals: 11
 
   // --- a field write beside the threading parameter ------------------------------
   testAFieldWrittenBeforeTheInvocationIsSeenByIt =>
@@ -91,8 +99,12 @@ TestCase subclass: ThreadedValueEntryTest
     @expect dead_assignment
     writer := [t := t + 1]
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    self should: [ThreadedValueEntryFixture new twiceVia: laundered] raise: #stateful_block_dispatch
-    self should: [ThreadedOpenValueFixture new viaSealed: laundered] raise: #stateful_block_dispatch
+    self should: [
+      ThreadedValueEntryFixture new twiceVia: laundered
+    ] raise: #stateful_block_dispatch
+    self should: [
+      ThreadedOpenValueFixture new viaSealed: laundered
+    ] raise: #stateful_block_dispatch
     self assert: t equals: 0
 
   testAWritingBlockGivenToACollectionCallableIsRefused =>
@@ -100,7 +112,9 @@ TestCase subclass: ThreadedValueEntryTest
     @expect dead_assignment
     writer := [:x | t := t + x]
     laundered := (Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: writer))
-    self should: [ThreadedValueEntryFixture new each: laundered] raise: #stateful_block_dispatch
+    self should: [
+      ThreadedValueEntryFixture new each: laundered
+    ] raise: #stateful_block_dispatch
     self assert: t equals: 0
 
   testAWritingBlockToAFieldWritingMethodIsRefused =>
