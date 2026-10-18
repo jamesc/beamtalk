@@ -18,9 +18,11 @@
 └── .gitignore
 ```
 
-Each `.bt` file holds exactly one class, and the file name matches the class
-name (`src/Counter.bt` declares `Counter`). Putting two classes in one file is
-a compile error.
+Each `.bt` file holds exactly one class, named in snake_case after it:
+`Counter` lives in `src/counter.bt`, `CheckRegistry` in
+`src/check_registry.bt`, `CounterTest` in `test/counter_test.bt`. Putting two
+classes in one file is a compile error, and so is a file name that doesn't
+match its class.
 
 ## Build & Run
 
@@ -146,7 +148,7 @@ it from source.
 `describe` lists the rest (tracing, refactoring renames, packages, nodes).
 
 Useful `evaluate` expressions: `Beamtalk help: Counter` (class docs),
-`Workspace load: "src/Counter.bt"`, `Counter reload`, `Workspace classes`.
+`Workspace load: "src/counter.bt"`, `Counter reload`, `Workspace classes`.
 
 ## Essential Patterns
 

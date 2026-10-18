@@ -7,7 +7,7 @@
 >
 > **Per-class method counts** below are derived directly from `stdlib/src/*.bt` by counting top-level method
 > signatures (2-space-indented lines containing `=>`, excluding `///` doc comments). Re-run per class with:
-> `grep -cP '^  (?!//)\S.*=>' stdlib/src/ClassName.bt` (counts both class- and instance-side methods). This
+> `grep -cP '^  (?!//)\S.*=>' stdlib/src/class_name.bt` (counts both class- and instance-side methods). This
 > undercounts nothing but can double-count a rare multi-line keyword signature that itself contains a nested
 > `=>` before the real one — spot-check unusually large deltas. The **Mechanism** column is derived the same
 > way: a body of exactly `@primitive ...` is `@primitive selector`, a body containing `@intrinsic` is

@@ -103,7 +103,7 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 | [Dictionary](../stdlib/src/dictionary.bt) | Key-value map |
 | [Regex](../stdlib/src/regex.bt) | Regular expression matching (PCRE2) |
 | [DateTime](../stdlib/src/date_time.bt) | Date and time operations |
-| [JSON](../stdlib/src/JSON.bt) | JSON parsing and encoding |
+| [JSON](../stdlib/src/json.bt) | JSON parsing and encoding |
 | [Collection](../stdlib/src/collection.bt) | Abstract collection protocol |
 
 See [stdlib/src/README.md](../stdlib/src/README.md) for detailed documentation.

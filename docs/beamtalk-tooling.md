@@ -47,8 +47,8 @@ For full details on `beamtalk.toml`, dependencies, lockfiles, qualified names, a
 
 | Variant | Command | What you get |
 |---------|---------|--------------|
-| Library (default) | `beamtalk new foo` | `beamtalk.toml`, `src/Foo.bt`, `test/FooTest.bt` |
-| Application | `beamtalk new foo --app` | Above plus `[application]` in toml, `src/FooAppSup.bt`, `src/Main.bt` |
+| Library (default) | `beamtalk new foo` | `beamtalk.toml`, `src/foo.bt`, `test/foo_test.bt` |
+| Application | `beamtalk new foo --app` | Above plus `[application]` in toml, `src/foo_app_sup.bt`, `src/main.bt` |
 
 Both variants generate a `Justfile`, `.github/workflows/ci.yml`, `AGENTS.md`, and `.mcp.json`.
 
@@ -141,7 +141,7 @@ Beamtalk uses a namespaced BEAM module naming scheme to avoid collisions in the 
 | Package (`beamtalk.toml` present) | `bt@<package>@<relative_path>` | `bt@myapp@Counter` |
 | Single file (no manifest) | `bt@<module>` | `bt@Counter` |
 
-Subdirectories within `src/` are reflected in the module name: `src/models/User.bt` in package `myapp` becomes `bt@myapp@models@User`.
+Subdirectories within `src/` are reflected in the module name: `src/models/user.bt` in package `myapp` becomes `bt@myapp@models@user`.
 
 ### Dependency Compilation Order
 
@@ -782,7 +782,7 @@ Method bodies and batch-compiled code use only the class registry. `bind:as:` re
 The typical interactive development cycle:
 
 ```beamtalk
-> :load src/Counter.bt          // Load the class
+> :load src/counter.bt          // Load the class
 Loaded: Counter
 
 > c := Counter spawn            // Try it out
@@ -791,7 +791,7 @@ Actor(Counter, 0.234.0)
 > c increment
 1
 
-// ... edit Counter.bt in your editor ...
+// ... edit counter.bt in your editor ...
 
 > :reload Counter               // Hot-reload the change
 Counter
@@ -799,7 +799,7 @@ Counter
 > c increment                   // Existing actor uses new code
 11
 
-> :load test/CounterTest.bt     // Load tests
+> :load test/counter_test.bt     // Load tests
 Loaded: CounterTest
 
 > :test CounterTest             // Run tests
@@ -1045,10 +1045,10 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-src/AccountService.bt         AccountService     92.3%  (48/52 expressions)
-src/Router.bt                 Router             87.1%  (54/62 expressions)
-src/ConfigLoader.bt           ConfigLoader       71.4%  (30/42 expressions)
-src/MyApp.bt                  MyApp              45.0%  (9/20 expressions)
+src/account_service.bt        AccountService     92.3%  (48/52 expressions)
+src/router.bt                 Router             87.1%  (54/62 expressions)
+src/config_loader.bt          ConfigLoader       71.4%  (30/42 expressions)
+src/my_app.bt                 MyApp              45.0%  (9/20 expressions)
 ──────────────────────────────────────────────────────────────────────
 Total                                            80.1%  (141/176 expressions)
 ```
@@ -1072,14 +1072,14 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-src/MyApp.bt                  MyApp              45.0%  (9/20 expressions)
+src/my_app.bt                 MyApp              45.0%  (9/20 expressions)
 ──────────────────────────────────────────────────────────────────────
 Total                                            45.0%  (9/20 expressions)
 
 Dynamic expressions:
-  src/MyApp.bt:12:5                              (unannotated return)
-  src/MyApp.bt:15:9                              (dynamic receiver)
-  src/MyApp.bt:18:5                              (dynamic receiver)
+  src/my_app.bt:12:5                             (unannotated return)
+  src/my_app.bt:15:9                             (dynamic receiver)
+  src/my_app.bt:18:5                             (dynamic receiver)
   ...
 ```
 
@@ -1106,7 +1106,7 @@ The command exits non-zero if total coverage falls below the threshold. JSON out
   "classes": [
     {
       "name": "AccountService",
-      "file": "src/AccountService.bt",
+      "file": "src/account_service.bt",
       "total": 52,
       "typed": 48,
       "coverage_percent": 92.3

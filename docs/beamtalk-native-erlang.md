@@ -331,7 +331,7 @@ Rather than writing the gen_server boilerplate by hand, use the `generate native
 beamtalk generate native DatabasePool
 ```
 
-This reads `src/DatabasePool.bt` (or `DatabasePool.bt` in the current directory), extracts the `native:` module name and all `self delegate` methods, and generates a skeleton Erlang file:
+This reads `src/database_pool.bt` (or `database_pool.bt` in the current directory; a file named `DatabasePool.bt` is also found), extracts the `native:` module name and all `self delegate` methods, and generates a skeleton Erlang file:
 
 ```erlang
 %% Generated from DatabasePool.bt — fill in implementations
@@ -521,7 +521,7 @@ This walkthrough creates a key-value store backed by an ETS table. ETS tables re
 
 ### Step 1: Define the Beamtalk API
 
-Create `src/KeyValueStore.bt`:
+Create `src/key_value_store.bt`:
 
 ```beamtalk
 // Copyright 2026 James Casey
@@ -643,7 +643,7 @@ basic_test() ->
     gen_server:stop(Pid).
 ```
 
-Create `test/KeyValueStoreTest.bt` for BUnit tests of the Beamtalk API:
+Create `test/key_value_store_test.bt` for BUnit tests of the Beamtalk API:
 
 ```beamtalk
 // Copyright 2026 James Casey
