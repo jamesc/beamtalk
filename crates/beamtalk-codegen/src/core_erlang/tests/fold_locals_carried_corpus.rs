@@ -143,8 +143,17 @@ fn a_split_gate_in_any_other_fold_kind_is_caught_by_the_producer_agreement_check
                             loop_body_agreement(&src)
                         })
                     }));
-                    if matches!(faulted, Ok(Ok(_))) {
-                        uncaught.push(format!("{frame} / {statement} / {construct}\n{src}"));
+                    // Only a disagreement the agreement check reports counts: a panic (a
+                    // verifier finding, a codegen crash) is not that check catching it.
+                    match faulted {
+                        Ok(Err(_)) => {}
+                        Ok(Ok(_)) => {
+                            uncaught.push(format!("{frame} / {statement} / {construct}\n{src}"));
+                        }
+                        Err(_) => uncaught.push(format!(
+                            "{frame} / {statement} / {construct}: panicked (verifier or codegen), \
+                             not an agreement finding\n{src}"
+                        )),
                     }
                 }
             }
