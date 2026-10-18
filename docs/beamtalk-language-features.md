@@ -2734,6 +2734,8 @@ result := 0
 // result = 55 (sum of 1..10)
 ```
 
+**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are your own, a trait's provisions, or absent (ADR 0133, BT-3903). With a writing block these messages therefore *mean* the fold over `do:`: a class that overrides, say, `anySatisfy:` with different semantics does not run its override for a writing block (BT-3916). A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
+
 ### Field Mutations
 
 Mutations to actor state (`self.field`) work the same way:

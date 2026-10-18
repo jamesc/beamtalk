@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3903 (ADR 0133 Phase 1): a user collection whose `do:` forwards to its
+// inner `List`; every other iteration message is provided by the trait
+// (adr0133enumerable_walkable.bt). Driven by adr0133enumerable_user.bt.
+
+Value subclass: Adr0133EnumerableForwarding
+  uses: Adr0133EnumerableWalkable
+  field: items = #()
+
+  do: block => self.items do: block
