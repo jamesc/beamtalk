@@ -195,6 +195,15 @@ Advances git dependencies to the latest commit matching their spec (the latest t
 
 You can always edit `beamtalk.toml` directly instead of using `beamtalk deps add`. The CLI commands are convenience wrappers — the manifest file is the source of truth.
 
+## Stdlib or Package?
+
+When deciding whether a class belongs in the standard library or in its own package, apply one rule:
+
+- **Stdlib:** wrappers over what OTP itself provides, and anything the toolchain needs (the compiler, REPL, test runner, tracing, workspace). `Json` (OTP 27's `json` module, also used by the runtime's traces and workspace metadata), `File`, `Ets`, `Timer`, `Subprocess` and `Supervisor` are stdlib.
+- **Package:** anything that brings a third-party native dependency, or that is domain-specific rather than general-purpose. `http` (`gun`, `cowboy`) and `yaml` (`yamerl`) are packages, and so are `collections` (specialised data structures beyond the core `List`/`Dictionary`/`Set`) and applications such as `exdura`.
+
+The deciding question is what an install pays for. A stdlib class costs every Beamtalk installation, so it must cost nothing beyond OTP; a package costs only the projects that depend on it. Being "just a data format" is not on its own a reason to extract: JSON stays in the stdlib because it adds no dependency and the runtime already relies on it (BT-2700).
+
 ## Package Registry
 
 A **registry dependency** (`yaml = "0.2.1"` in `[dependencies]`) is resolved through a *registry index* into a `(git url, tag)` pair, which then flows through the same git-dependency machinery a `{ git = ..., tag = ... }` entry uses — cloned into `_build/deps/`, pinned to an exact commit SHA in `beamtalk.lock`. The registry itself never hosts source code; it is only a lookup table from `(name, version)` to a git repository and tag.
