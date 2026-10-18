@@ -598,6 +598,21 @@ pub(in crate::core_erlang) enum BindOp {
 
 // ─── Statements ─────────────────────────────────────────────────────────────
 
+/// What a [`ThreadedStmt::FoldAccumulator`] threads to the next iteration
+/// besides the fold kind's own result channel(s) (BT-3863).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum FoldCarry {
+    /// A tuple accumulator's repack of the current binding of each named
+    /// local, in tuple order (`ThreadingPlan::current_vars_doc`).
+    Locals(Vec<String>),
+    /// A map accumulator's `StateAcc` (the current version, or the incoming
+    /// map when the body advanced nothing).
+    StateMap,
+    /// The body's last value and nothing else: the shape only a fold that
+    /// threads nothing may end in.
+    Value,
+}
+
 /// One statement of the lowered IR. See [`VersionPrefix`]'s doc comment for
 /// why `NlrCatch`/`Return` are test-only for now (the Phase A0 prototype only
 /// exercises `Threaded`/`Bind`).
@@ -843,6 +858,24 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// opacity) and `exit_arm` (a named, deliberate limitation); a
     /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
+
+    /// ADR 0131 §4 (BT-3863): a fold lambda body's last statement, the
+    /// accumulator `lists:foldl` hands to the next iteration and, after the
+    /// last one, to the code after the fold. `value` is that accumulator's
+    /// hand-built `Document`, rendered verbatim exactly like a
+    /// [`Statement`](Self::Statement)'s; `carry` records what it threads, as
+    /// typed data the verifier reads instead of the opaque text. Built by
+    /// every `BodyKind` epilogue in `control_flow/body.rs`.
+    ///
+    /// A fold frame that threads locals must end in one whose `carry` is its
+    /// mode's: the locals it threads, in order, for a tuple accumulator; the
+    /// `StateAcc` map for a map accumulator
+    /// ([`VerifyError::FoldLocalsNotCarried`](super::verify::VerifyError::FoldLocalsNotCarried)).
+    FoldAccumulator {
+        carry: FoldCarry,
+        value: Document<'static>,
+        span: Span,
+    },
 
     /// ADR 0130 §4: a compiled `on:do:`'s class-variable catch boundary, both
     /// halves as one unit: the `entry` snapshot `let` bound before the `try`,

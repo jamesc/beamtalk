@@ -30,11 +30,11 @@
 //!    means giving these programs an oracle (taken arm: the fold's state; other arm /
 //!    passthrough: `START`) and running them like [`oracle_programs`].
 
-use super::codegen;
 use super::field_assignment_value_position::{
     VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, is_fold_writing_position,
 };
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use super::{codegen, verifier_report};
+use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
 
 /// `(case name, program)` for every statement-level shape x every fold-writing position.
@@ -59,23 +59,6 @@ fn verifier_programs() -> Vec<(String, String)> {
         }
     }
     out
-}
-
-/// The verifier's debug-build report for `src` compiled with `fault` active (the panic message of
-/// `report_threaded_ir_verify_errors`), or `None` when the compile succeeds.
-fn verifier_report(src: &str, fault: Option<LocalRebindFault>) -> Option<String> {
-    let compile = || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)));
-    let result = match fault {
-        Some(fault) => fault::with(fault, compile),
-        None => compile(),
-    };
-    result.err().map(|payload| {
-        payload
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
-            .unwrap_or_default()
-    })
 }
 
 #[test]

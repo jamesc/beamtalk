@@ -22,6 +22,7 @@
 //!   membership), and the `ConstructTuple`/`DiscardLocals`/`MethodBody`/
 //!   `BranchArm` nodes
 //! - [`fold_family`] — BT-3827 `FoldFamilyNotCarried` over fold lambda bodies
+//! - [`fold_locals`] — BT-3863 `FoldLocalsNotCarried` over fold lambda bodies
 //! - [`threaded_entry`] — ADR 0132 §2/§3: the `Acc` family, `ScopeKind::Threaded`,
 //!   the threaded `MethodBody` builder, and `AccAsScratchSeed` / `OwnLocalKeyInAcc` /
 //!   `NlrSlotShapeMismatch` / `ActorStateInThreadedBlock`
@@ -60,6 +61,7 @@ mod class_method_scope;
 mod close_and_value;
 mod dual_run;
 mod fold_family;
+mod fold_locals;
 mod local_rebind;
 mod lower_and_render_shim;
 mod render_naming;

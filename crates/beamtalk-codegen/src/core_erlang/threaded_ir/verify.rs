@@ -15,10 +15,10 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LOCAL_STATE_KEY_PREFIX,
-    MethodBodyKind, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering,
-    RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
-    VersionedVar, canonical_families,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
+    LOCAL_STATE_KEY_PREFIX, MethodBodyKind, NlrThrowShape, OnDoCatchVars, RebindFrame,
+    RebindFrameKind, RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt,
+    ThreadingMode, ValueRef, VersionPrefix, VersionedVar, canonical_families,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -296,6 +296,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// shape the fold lowering used to reject rather than miscompile. Applies
     /// to every fold of every kind; checked by [`verify_fold_family_carried`].
     FoldFamilyNotCarried { family: VersionPrefix, at: Span },
+
+    /// BT-3863 (ADR 0131 §4): a fold frame that threads outer locals
+    /// (`threads`, non-empty) does not end its lambda body in the
+    /// accumulator its mode carries them in: its last statement is not a
+    /// [`ThreadedStmt::FoldAccumulator`] whose `carry` is the repack of
+    /// `threads` (in order) for a tuple accumulator, or the `StateAcc` map
+    /// for a map accumulator. The next iteration then reads its locals out
+    /// of whatever the body ended with (BT-3839: a nested loop's raw value
+    /// in place of the repacked tuple), and every write is silently lost
+    /// (`erlc`-clean). `found` is the carry the body ended in, or `None`
+    /// when its last statement is not a fold accumulator at all. Checked
+    /// by [`verify_fold_locals_carried`].
+    FoldLocalsNotCarried {
+        threads: Vec<String>,
+        found: Option<FoldCarry>,
+        at: Span,
+    },
 
     /// BT-3835: a [`ThreadedStmt::LocalRebind`] lowered to
     /// [`RebindLowering::MapHeld`](super::ir::RebindLowering::MapHeld) — the
@@ -662,6 +679,44 @@ pub(in crate::core_erlang) fn verify_fold_family_carried(
     }
 }
 
+/// BT-3863, [`VerifyError::FoldLocalsNotCarried`] over one fold lambda body
+/// (the statement list of a `Foldl*` `Threaded` node with `mode`, threading
+/// `threads`): when it threads any local, its last statement must be the
+/// [`ThreadedStmt::FoldAccumulator`] that carries them the way `mode` does.
+/// Needs no version history (like [`verify_fold_family_carried`]), so it runs
+/// on the body fragment alone, before `carry_fold_families` wraps the
+/// accumulator in the `Self` family's `Return`.
+pub(in crate::core_erlang) fn verify_fold_locals_carried(
+    body: &[ThreadedStmt],
+    mode: &ThreadingMode,
+    threads: &[String],
+    at: Span,
+) -> Vec<VerifyError> {
+    if threads.is_empty() {
+        return Vec::new();
+    }
+    let found = match body.last() {
+        Some(ThreadedStmt::FoldAccumulator { carry, .. }) => Some(carry),
+        _ => None,
+    };
+    let carried = match (mode, found) {
+        (ThreadingMode::TupleAcc(_), Some(FoldCarry::Locals(locals))) => locals == threads,
+        (ThreadingMode::StateAcc(_), Some(FoldCarry::StateMap)) => true,
+        _ => false,
+    };
+    if carried {
+        return Vec::new();
+    }
+    vec![VerifyError::FoldLocalsNotCarried {
+        threads: threads.to_vec(),
+        found: found.cloned(),
+        at: match body.last() {
+            Some(ThreadedStmt::FoldAccumulator { span, .. }) => *span,
+            _ => at,
+        },
+    }]
+}
+
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
 /// (`target`) and how many `Bind`s consume it as their `source`. `VersionedVar`
 /// already encodes frame identity, so counts naturally stay frame-scoped
@@ -715,6 +770,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::NlrThrow { .. }
             | ThreadedStmt::Return(..)
             | ThreadedStmt::Statement(..)
+            | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
@@ -1329,7 +1385,12 @@ impl VerifyWalk<'_> {
             //
             // ADR 0131: a `ConstructTuple`/`DiscardLocals` is checked with
             // its siblings, by `check_construct_rebinds` (`ThreadedLocalDropped`).
+            //
+            // BT-3863: a `FoldAccumulator` is checked against its fold frame
+            // by `verify_fold_locals_carried`, which runs on the fold body
+            // before `carry_fold_families` can wrap it.
             ThreadedStmt::Statement(..)
+            | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
             ThreadedStmt::NlrCatch { slot, span, .. } => self.check_nlr_slot(slot.clone(), *span),

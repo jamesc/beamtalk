@@ -592,8 +592,15 @@ Each check fails on a repro before the fix:
 - **`StateEffectEscapesExpression`** (ADR 0118 §5), already defined, now also
   reported for a `LocalRebind` left in a prelude that is closed in an
   `Opaque` context (a Tier 1 closure body or an FFI argument).
+- **`VerifyError::FoldLocalsNotCarried { threads, found }`** (added by
+  BT-3863). A fold frame that threads locals must end its lambda body in the
+  accumulator that carries them: a typed `FoldAccumulator` whose carry is the
+  repack of `threads` for a tuple accumulator, or the `StateAcc` map for a map
+  accumulator. Fails on the BT-3839 repro (a nested loop's raw value returned
+  as a `do:` accumulator) when the fold's gate and statement classifier are
+  split again.
 
-`report_threaded_ir_verify_errors` reports all five. Nothing gets a new
+`report_threaded_ir_verify_errors` reports all six. Nothing gets a new
 `debug_assert!`.
 
 ### 5. `Result tryDo:` is a catch-boundary construct

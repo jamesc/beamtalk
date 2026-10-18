@@ -143,7 +143,7 @@ const CLOSURE_FRAMES: &[&str] = &[
 ];
 
 /// Whether the Phase 0 / §6 checks reject `src`.
-fn rejected(src: &str) -> bool {
+pub(super) fn rejected(src: &str) -> bool {
     let (module, parse_diags) = parse(lex_with_eof(src));
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     analyse_full(&module, AnalysisContext::default())

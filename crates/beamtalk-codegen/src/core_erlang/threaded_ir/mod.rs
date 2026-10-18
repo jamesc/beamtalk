@@ -90,16 +90,16 @@ pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars,
-    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
-    ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, LoopCounter, NlrThrowShape,
+    OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
+    TryRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // ADR 0132 §2: the one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
 pub(super) use verify::{
     SequencedSibling, ThreadedBodyKind, VerifyError, verify_bind_frames,
-    verify_fold_family_carried, verify_sibling_reads,
+    verify_fold_family_carried, verify_fold_locals_carried, verify_sibling_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name
