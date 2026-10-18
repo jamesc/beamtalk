@@ -4102,6 +4102,8 @@ swap => {a, b} := self pair       // answers the pair, not nil
 // => #(#(1, 2), #(3, 2))
 ```
 
+A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. In an actor method, a `groupBy:` whose block binds a local currently answers the raw fold result rather than the dictionary, whatever its last statement ([BT-3897](https://linear.app/beamtalk/issue/BT-3897)).
+
 The REPL displays the same value. Destructuring is not an expression, so it cannot appear as an operand (`r := ({a, b} := pair)` is a compile error).
 
 ---

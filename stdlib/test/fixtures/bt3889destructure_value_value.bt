@@ -50,6 +50,10 @@ Value subclass: Bt3889DestructureValueValue
       ]
     #(r, t)
 
+  // A predicate: the right-hand side is not a boolean, so it raises like any
+  // other non-boolean predicate.
+  select => #(1) select: [:x | #(_a, _b) := #(x, 2)]
+
   inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]
 
   groupBy => (#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) at: #(true, 0)

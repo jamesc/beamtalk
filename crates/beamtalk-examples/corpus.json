@@ -18328,11 +18328,17 @@
         "constructor",
         "create",
         "extends",
+        "for each",
+        "for-each",
+        "forEach",
         "gen_server",
         "genserver",
         "inherit",
         "inheritance",
         "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
         "mutate",
         "mutation",
         "object",
@@ -18345,7 +18351,7 @@
         "testClass",
         "testValue"
       ],
-      "source": "// BT-3889: a destructuring assignment evaluates to its right-hand side in every\n// method kind and body-ending position. See fixtures/bt3889destructure_value_*.bt.\n\nTestCase subclass: Bt3889DestructureValueTest\n\n  check: o =>\n    self assert: o last equals: #(1, 2)\n    self assert: (o lastNlr: false) equals: #(1, 2)\n    self assert: (o lastNlr: true) equals: 0\n    self assert: o lastTuple equals: (Erlang erlang list_to_tuple: #(1, 2))\n    self assert: o lastMap equals: #{#k => 1}\n    self assert: o block equals: #(1, 2)\n    self assert: (o arm: true) equals: #(1, 2)\n    self assert: (o arm: false) equals: 0\n    self assert: (o threadedArm: true) equals: #(#(5, 2), 5)\n    self assert: o onDo equals: #(1, 2)\n    self assert: o ensure equals: #(1, 2)\n    self assert: o collect equals: #(#(1, 2), #(3, 2))\n    self assert: (o threadedCollect) equals: #(#(#(1, 1), #(3, 4)), 4)\n    self assert: o inject equals: #(3, #(1, 0))\n\n  testClass =>\n    self check: Bt3889DestructureValueClass\n    self assert: Bt3889DestructureValueClass groupBy equals: #(3)\n\n  testValue =>\n    self check: Bt3889DestructureValueValue new\n    self assert: Bt3889DestructureValueValue new groupBy equals: #(3)\n\n  testActor => self check: Bt3889DestructureValueActor spawn\n\n  testActorControlFlowRightHandSide =>\n    a := Bt3889DestructureValueActor spawn\n    self assert: (a lastCf: true) equals: #(1, 2)\n    self assert: a n equals: 1\n    self assert: (a lastCf: false) equals: #(3, 4)\n\n  testActorStatefulBlock =>\n    self assert: Bt3889DestructureValueActor spawn tier2Block equals: #(#(#(1, 1), #(2, 3)), 3)",
+      "source": "// BT-3889: a destructuring assignment evaluates to its right-hand side in every\n// method kind and body-ending position. See fixtures/bt3889destructure_value_*.bt.\n\nTestCase subclass: Bt3889DestructureValueTest\n\n  check: o =>\n    self assert: o last equals: #(1, 2)\n    self assert: (o lastNlr: false) equals: #(1, 2)\n    self assert: (o lastNlr: true) equals: 0\n    self assert: o lastTuple equals: (Erlang erlang list_to_tuple: #(1, 2))\n    self assert: o lastMap equals: #{#k => 1}\n    self assert: o block equals: #(1, 2)\n    self assert: (o arm: true) equals: #(1, 2)\n    self assert: (o arm: false) equals: 0\n    self assert: (o threadedArm: true) equals: #(#(5, 2), 5)\n    self assert: o onDo equals: #(1, 2)\n    self assert: o ensure equals: #(1, 2)\n    self assert: o collect equals: #(#(1, 2), #(3, 2))\n    self assert: (o threadedCollect) equals: #(#(#(1, 1), #(3, 4)), 4)\n    self assert: o inject equals: #(3, #(1, 0))\n    self assert: ([o select] on: Error do: [:e | #raised]) equals: #raised\n\n  testClass =>\n    self check: Bt3889DestructureValueClass\n    self assert: Bt3889DestructureValueClass groupBy equals: #(3)\n\n  testValue =>\n    self check: Bt3889DestructureValueValue new\n    self assert: Bt3889DestructureValueValue new groupBy equals: #(3)\n\n  testActor => self check: Bt3889DestructureValueActor spawn\n\n  testActorControlFlowRightHandSide =>\n    a := Bt3889DestructureValueActor spawn\n    self assert: (a lastCf: true) equals: #(1, 2)\n    self assert: a n equals: 1\n    self assert: (a lastCf: false) equals: #(3, 4)\n\n  testActorStatefulBlock =>\n    self assert: Bt3889DestructureValueActor spawn tier2Block equals: #(#(#(1, 1), #(2, 3)), 3)",
       "explanation": "BT-3889: a destructuring assignment evaluates to its right-hand side in every method kind and body-ending position. See fixtures/bt3889destructure_value_*.bt."
     },
     {
@@ -30298,6 +30304,8 @@
         "ensure",
         "extends",
         "field",
+        "filter",
+        "filtering",
         "fold",
         "for each",
         "for-each",
@@ -30330,15 +30338,17 @@
         "process",
         "property",
         "reduce",
+        "select",
         "set",
         "subclassing",
         "threadedArm:",
         "threadedCollect",
         "tier2Block",
         "transform",
-        "unless"
+        "unless",
+        "where"
       ],
-      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nActor subclass: Bt3889DestructureValueActor\n  state: n = 0\n\n  last => #(_a, _b) := #(1, 2)\n\n  lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  lastMap => #{#k => _v} := #{#k => 1}\n\n  block => [#(_a, _b) := #(1, 2)] value\n\n  arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  // No `groupBy` here: an actor `groupBy:` whose block binds a local answers\n  // the raw fold tuple whatever its last statement (BT-3897).\n\n  // DestructureAssignmentControlFlow: the right-hand side writes a field.\n  lastCf: c =>\n    #(_a, _b) := c\n      ifTrue: [\n        self.n := 1\n        #(1, 2)\n      ]\n      ifFalse: [#(3, 4)]\n\n  n => self.n\n\n  // A stateful (Tier 2) block: it writes a captured local and crosses a\n  // self-send to a collection primitive.\n  sealed opaqueCollect: block => #(1, 2) collect: block\n\n  tier2Block =>\n    t := 0\n    r := self\n      opaqueCollect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)",
+      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nActor subclass: Bt3889DestructureValueActor\n  state: n = 0\n\n  last => #(_a, _b) := #(1, 2)\n\n  lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  lastMap => #{#k => _v} := #{#k => 1}\n\n  block => [#(_a, _b) := #(1, 2)] value\n\n  arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  // A predicate: the right-hand side is not a boolean, so it raises like any\n  // other non-boolean predicate.\n  select => #(1) select: [:x | #(_a, _b) := #(x, 2)]\n\n  inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  // No `groupBy` here: an actor `groupBy:` whose block binds a local answers\n  // the raw fold tuple whatever its last statement (BT-3897).\n\n  // DestructureAssignmentControlFlow: the right-hand side writes a field.\n  lastCf: c =>\n    #(_a, _b) := c\n      ifTrue: [\n        self.n := 1\n        #(1, 2)\n      ]\n      ifFalse: [#(3, 4)]\n\n  n => self.n\n\n  // A stateful (Tier 2) block: it writes a captured local and crosses a\n  // self-send to a collection primitive.\n  sealed opaqueCollect: block => #(1, 2) collect: block\n\n  tier2Block =>\n    t := 0\n    r := self\n      opaqueCollect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)",
       "explanation": "BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its right-hand side, like `x := expr`. One method per lowering that ends a body in one: the method body (with and without a `^` in a block), a block, a conditional arm (plain and one that threads a local), a protected block (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`, `groupBy:`, plain and threading a local). Asserted in bt3889destructure_value_test.bt."
     },
     {
@@ -30360,6 +30370,8 @@
         "conditional",
         "ensure",
         "extends",
+        "filter",
+        "filtering",
         "fold",
         "for each",
         "for-each",
@@ -30385,14 +30397,16 @@
         "object",
         "onDo",
         "reduce",
+        "select",
         "set",
         "subclassing",
         "threadedArm:",
         "threadedCollect",
         "transform",
-        "unless"
+        "unless",
+        "where"
       ],
-      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nObject subclass: Bt3889DestructureValueClass\n\n  class last => #(_a, _b) := #(1, 2)\n\n  class lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  class lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  class lastMap => #{#k => _v} := #{#k => 1}\n\n  class block => [#(_a, _b) := #(1, 2)] value\n\n  class arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  class threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  class onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  class ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  class collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  class threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  class inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  class groupBy =>\n    (#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) at: #(true, 0)",
+      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nObject subclass: Bt3889DestructureValueClass\n\n  class last => #(_a, _b) := #(1, 2)\n\n  class lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  class lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  class lastMap => #{#k => _v} := #{#k => 1}\n\n  class block => [#(_a, _b) := #(1, 2)] value\n\n  class arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  class threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  class onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  class ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  class collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  class threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  // A predicate: the right-hand side is not a boolean, so it raises like any\n  // other non-boolean predicate.\n  class select => #(1) select: [:x | #(_a, _b) := #(x, 2)]\n\n  class inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  class groupBy =>\n    (#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) at: #(true, 0)",
       "explanation": "BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its right-hand side, like `x := expr`. One method per lowering that ends a body in one: the method body (with and without a `^` in a block), a block, a conditional arm (plain and one that threads a local), a protected block (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`, `groupBy:`, plain and threading a local). Asserted in bt3889destructure_value_test.bt."
     },
     {
@@ -30414,6 +30428,8 @@
         "conditional",
         "ensure",
         "extends",
+        "filter",
+        "filtering",
         "fold",
         "for each",
         "for-each",
@@ -30438,15 +30454,17 @@
         "negation",
         "onDo",
         "reduce",
+        "select",
         "set",
         "subclassing",
         "threadedArm:",
         "threadedCollect",
         "transform",
         "unless",
-        "value"
+        "value",
+        "where"
       ],
-      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nValue subclass: Bt3889DestructureValueValue\n\n  last => #(_a, _b) := #(1, 2)\n\n  lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  lastMap => #{#k => _v} := #{#k => 1}\n\n  block => [#(_a, _b) := #(1, 2)] value\n\n  arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  groupBy => (#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) at: #(true, 0)",
+      "source": "// BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its\n// right-hand side, like `x := expr`. One method per lowering that ends a body\n// in one: the method body (with and without a `^` in a block), a block, a\n// conditional arm (plain and one that threads a local), a protected block\n// (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`,\n// `groupBy:`, plain and threading a local). Asserted in\n// bt3889destructure_value_test.bt.\n\nValue subclass: Bt3889DestructureValueValue\n\n  last => #(_a, _b) := #(1, 2)\n\n  lastNlr: c =>\n    c ifTrue: [^0]\n    #(_a, _b) := #(1, 2)\n\n  lastTuple => {_a, _b} := Erlang erlang list_to_tuple: #(1, 2)\n\n  lastMap => #{#k => _v} := #{#k => 1}\n\n  block => [#(_a, _b) := #(1, 2)] value\n\n  arm: c => c ifTrue: [#(_a, _b) := #(1, 2)] ifFalse: [0]\n\n  threadedArm: c =>\n    t := 0\n    r := c\n      ifTrue: [\n        t := 5\n        #(_a, _b) := #(t, 2)\n      ]\n      ifFalse: [0]\n    #(r, t)\n\n  onDo => [#(_a, _b) := #(1, 2)] on: Error do: [:e | 0]\n\n  ensure => [#(_a, _b) := #(1, 2)] ensure: [nil]\n\n  collect => #(1, 3) collect: [:x | #(_a, _b) := #(x, 2)]\n\n  threadedCollect =>\n    t := 0\n    r := #(1, 3)\n      collect: [:x |\n        t := t + x\n        #(_a, _b) := #(x, t)\n      ]\n    #(r, t)\n\n  // A predicate: the right-hand side is not a boolean, so it raises like any\n  // other non-boolean predicate.\n  select => #(1) select: [:x | #(_a, _b) := #(x, 2)]\n\n  inject => #(1, 3) inject: 0 into: [:acc :x | #(_a, _b) := #(x, acc)]\n\n  groupBy => (#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) at: #(true, 0)",
       "explanation": "BT-3889: a destructuring assignment `#(a, b) := expr` evaluates to its right-hand side, like `x := expr`. One method per lowering that ends a body in one: the method body (with and without a `^` in a block), a block, a conditional arm (plain and one that threads a local), a protected block (`on:do:`, `ensure:`), and the fold epilogues (`collect:`, `inject:into:`, `groupBy:`, plain and threading a local). Asserted in bt3889destructure_value_test.bt."
     },
     {
