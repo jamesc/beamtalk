@@ -932,6 +932,10 @@ fn test_directory_change() {
 
 See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation details of the named lock system.
 
+### Registry Cache Isolation
+
+A `beamtalk-cli` unit test that resolves against a git-backed registry (usually a throwaway `file://` repo) must create a `registry::test_support::IsolatedRegistryCache` first. It points the registry cache at a per-test temp directory, removed on drop, instead of the real `~/.beamtalk/registry/`, where each temp registry URL would otherwise leave a cache directory behind for good. `ensure_index` panics under `cfg(test)` when a test reaches a git registry without one, so a missing guard fails the test. The override is thread-local, so these tests need no `#[serial(env_var)]`; a test that resolves on threads it spawns calls `cache.enter()` on each of them. Subprocess tests built on `cli_common::beamtalk()` get the same isolation through `BEAMTALK_REGISTRY_CACHE_DIR` ([BT-3900](https://linear.app/beamtalk/issue/BT-3900)).
+
 ### Test Fixtures
 
 **BUnit fixtures (Smalltalk image model):** Place fixture `.bt` files in `stdlib/test/fixtures/`. These are automatically compiled and available to all BUnit test files — no `@load` directives needed. Just use the fixture class name directly in your test methods. This mirrors the Smalltalk approach where all classes exist in the running image.

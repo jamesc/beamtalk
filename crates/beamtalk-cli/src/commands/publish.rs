@@ -628,6 +628,7 @@ fn commit_and_push_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::deps::registry::test_support::IsolatedRegistryCache;
     use crate::commands::util::to_forward_slash;
     use camino::Utf8PathBuf;
     use serial_test::serial;
@@ -696,7 +697,14 @@ mod tests {
     /// bare repo standing in for the registry index, referenced from the
     /// library's manifest via `[registry] url` (so tests never touch process
     /// environment variables).
+    ///
+    /// The fixture also owns an [`IsolatedRegistryCache`], so `run()` clones
+    /// the index into a per-test temp root (removed with the fixture)
+    /// instead of the real `~/.beamtalk/registry/` (BT-3900). It is
+    /// thread-local, so `run()` and `index_dir()` must be called on the
+    /// thread that created the fixture.
     struct TestFixture {
+        _registry_cache: IsolatedRegistryCache,
         // Kept alive for the duration of the test — dropping deletes the tempdir.
         _origin_bare: TempDir,
         // Read back by `index_dir()` — not just kept alive, hence no
@@ -708,12 +716,12 @@ mod tests {
     impl TestFixture {
         /// Where `run()` cached this fixture's registry index clone.
         ///
-        /// The default cache lives outside the project (not a
-        /// fixed `_build/registry/index/`) in a shared, user-level
-        /// directory keyed by the registry URL, so tests resolve it the same
-        /// way production code does — via `ensure_index` — rather than
-        /// hardcoding a path. `refresh: false` is safe here: every caller
-        /// only inspects this after a `run()` that already cloned it.
+        /// The cache lives outside the project (not a fixed
+        /// `_build/registry/index/`) in a directory keyed by the registry
+        /// URL, so tests resolve it the same way production code does — via
+        /// `ensure_index` — rather than hardcoding a path. `refresh: false`
+        /// is safe here: every caller only inspects this after a `run()`
+        /// that already cloned it.
         fn index_dir(&self) -> Utf8PathBuf {
             let location = RegistryLocation::Git(file_url(self.index_bare.path()));
             registry::ensure_index(&location, &utf8(&self.library), false).unwrap()
@@ -721,6 +729,8 @@ mod tests {
     }
 
     fn setup(pkg_name: &str, version: &str, description: Option<&str>) -> TestFixture {
+        let registry_cache = IsolatedRegistryCache::new();
+
         // Bare repo standing in for the library's `origin`.
         let origin_bare = TempDir::new().unwrap();
         run_git(origin_bare.path(), &["init", "--bare"]);
@@ -776,6 +786,7 @@ mod tests {
         run_git(library.path(), &["push", "origin", "HEAD:main"]);
 
         TestFixture {
+            _registry_cache: registry_cache,
             _origin_bare: origin_bare,
             index_bare,
             library,

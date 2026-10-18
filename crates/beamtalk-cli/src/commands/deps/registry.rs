@@ -359,7 +359,16 @@ pub fn ensure_index(
 /// the home directory cannot be determined (e.g. a minimal sandbox with no
 /// `$HOME`) — sharing the cache is a nice-to-have, resolving a dependency is
 /// not.
+///
+/// Under `cfg(test)`, a [`test_support::IsolatedRegistryCache`] installed on
+/// the calling thread outranks all of the above, so unit tests never resolve
+/// to the real user-level cache (see [`ensure_git_index`]'s guard).
 fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
+    #[cfg(test)]
+    if let Some(root) = test_support::isolated_root() {
+        return root.join(cache_key(url));
+    }
+
     if let Ok(dir) = std::env::var(REGISTRY_CACHE_DIR_ENV_VAR) {
         let trimmed = dir.trim();
         if !trimmed.is_empty() {
@@ -458,6 +467,17 @@ fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
 /// Clone or refresh the git registry index into its cache directory
 /// (see the module-level "Cache location" section).
 fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result<Utf8PathBuf> {
+    // Unit tests must never clone (or even lock) under the real, shared
+    // `~/.beamtalk/registry/`: each throwaway `file://` registry hashes to a
+    // fresh cache directory there that nothing ever removes (BT-3900).
+    #[cfg(test)]
+    assert!(
+        test_support::isolated_root().is_some(),
+        "a test reached the git registry cache for '{url}' without an isolated \
+         cache root; create a `registry::test_support::IsolatedRegistryCache` \
+         for the duration of the test"
+    );
+
     let cache_root = registry_cache_root(url, project_root);
     let index_dir = cache_root.join("index");
 
@@ -930,8 +950,91 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
     }
 }
 
+/// Test-only isolation of the git registry cache (BT-3900).
+///
+/// Every unit test that can reach [`ensure_index`] with a git-backed
+/// registry creates an [`IsolatedRegistryCache`] first. It points
+/// [`registry_cache_root`] at a fresh temp directory for the calling thread
+/// and deletes that directory when dropped, so a test run leaves nothing
+/// behind in the real `~/.beamtalk/registry/`. [`ensure_git_index`] panics
+/// under `cfg(test)` when no isolated root is installed, so a test that
+/// forgets one fails instead of silently littering the user's cache.
+///
+/// The override is thread-local rather than an environment variable, so
+/// tests using it need no `#[serial(env_var)]` and cannot leak their cache
+/// root into a concurrently running test. A test that resolves on threads
+/// it spawns installs the same root on each of them with
+/// [`IsolatedRegistryCache::enter`].
+#[cfg(test)]
+pub(crate) mod test_support {
+    use camino::{Utf8Path, Utf8PathBuf};
+    use std::cell::RefCell;
+    use tempfile::TempDir;
+
+    thread_local! {
+        static ISOLATED_ROOT: RefCell<Option<Utf8PathBuf>> = const { RefCell::new(None) };
+    }
+
+    /// The cache root installed on the calling thread, if any.
+    pub(super) fn isolated_root() -> Option<Utf8PathBuf> {
+        ISOLATED_ROOT.with(|root| root.borrow().clone())
+    }
+
+    /// Restores the calling thread's previous isolated root on drop.
+    #[must_use = "the isolated cache root is uninstalled when this guard drops"]
+    pub(crate) struct ThreadRootGuard {
+        prev: Option<Utf8PathBuf>,
+    }
+
+    impl Drop for ThreadRootGuard {
+        fn drop(&mut self) {
+            let prev = self.prev.take();
+            ISOLATED_ROOT.with(|root| *root.borrow_mut() = prev);
+        }
+    }
+
+    fn install(path: Utf8PathBuf) -> ThreadRootGuard {
+        let prev = ISOLATED_ROOT.with(|root| root.borrow_mut().replace(path));
+        ThreadRootGuard { prev }
+    }
+
+    /// A per-test registry cache root, installed on the creating thread and
+    /// deleted on drop.
+    pub(crate) struct IsolatedRegistryCache {
+        // Declared before `dir` so the thread-local is uninstalled before the
+        // directory it names is deleted.
+        _guard: ThreadRootGuard,
+        dir: TempDir,
+    }
+
+    impl IsolatedRegistryCache {
+        /// Create a fresh temp cache root and install it on this thread.
+        pub(crate) fn new() -> Self {
+            let dir = TempDir::new().expect("create isolated registry cache dir");
+            let path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())
+                .expect("temp dir path is UTF-8");
+            Self {
+                _guard: install(path),
+                dir,
+            }
+        }
+
+        /// The isolated cache root (per-registry caches live underneath it).
+        pub(crate) fn path(&self) -> &Utf8Path {
+            Utf8Path::from_path(self.dir.path()).expect("temp dir path is UTF-8")
+        }
+
+        /// Install this cache root on the calling thread too, for a test that
+        /// resolves on threads it spawns. The guard must not outlive `self`.
+        pub(crate) fn enter(&self) -> ThreadRootGuard {
+            install(self.path().to_path_buf())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_support::IsolatedRegistryCache;
     use super::*;
     use crate::commands::util::to_forward_slash;
     use tempfile::TempDir;
@@ -1267,17 +1370,15 @@ git = "g"
         (dir, format!("file://{s}"))
     }
 
+    // Every git-backed test below creates an `IsolatedRegistryCache` first:
+    // it routes the clone into a per-test temp root (removed on drop) instead
+    // of the real `~/.beamtalk/registry/`, and `ensure_git_index` panics
+    // without one (BT-3900). The override is thread-local, so these tests
+    // need no `#[serial(env_var)]` against the env-var override tests below.
+
     #[test]
-    // `registry_cache_root` reads `REGISTRY_CACHE_DIR_ENV_VAR` at
-    // call time, and this test relies on it being unset (so the index lands
-    // under the real, shared `~/.beamtalk/registry/`). Without joining the
-    // `env_var` serial group, a concurrently running test that *does* set
-    // the override (e.g. `test_registry_cache_root_env_var_override`) can
-    // flip it mid-test — `ensure_index` and the `registry_cache_root` call
-    // used to compute the expected path would then disagree, since each
-    // reads the env var independently.
-    #[serial_test::serial(env_var)]
     fn test_ensure_index_clones_git_registry() {
+        let cache = IsolatedRegistryCache::new();
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
@@ -1285,11 +1386,12 @@ git = "g"
         let index_root =
             ensure_index(&RegistryLocation::Git(url.clone()), &project_root, false).unwrap();
 
-        // The clone lands in the shared, user-level cache — never
-        // inside the project's `_build/` — so N projects pointing at the
-        // same registry URL share one clone instead of each cloning it
+        // The clone lands in the cache root keyed by the registry URL —
+        // never inside the project's `_build/` — so N projects pointing at
+        // the same registry URL share one clone instead of each cloning it
         // separately.
         let cache_root = registry_cache_root(&url, &project_root);
+        assert_eq!(cache_root, cache.path().join(cache_key(&url)));
         assert_eq!(index_root, cache_root.join("index"));
         assert!(
             !index_root.starts_with(&project_root),
@@ -1300,39 +1402,58 @@ git = "g"
             read_entry(&index_root, "yaml").unwrap().unwrap().name,
             "yaml"
         );
-
-        let _ = std::fs::remove_dir_all(&cache_root);
     }
 
     #[test]
-    // See the serialization note on `test_ensure_index_clones_git_registry`.
-    #[serial_test::serial(env_var)]
+    fn test_isolated_registry_cache_is_removed_on_drop() {
+        let cache = IsolatedRegistryCache::new();
+        let root = cache.path().to_path_buf();
+        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        ensure_index(&RegistryLocation::Git(url), &utf8(&project), false).unwrap();
+        assert!(root.is_dir());
+
+        drop(cache);
+        assert!(!root.exists(), "the isolated cache root must be deleted");
+        assert!(
+            test_support::isolated_root().is_none(),
+            "dropping the cache must uninstall its thread-local root"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "without an isolated cache root")]
+    fn test_ensure_index_git_without_isolated_cache_panics_in_tests() {
+        // The BT-3900 guard: a test that forgets `IsolatedRegistryCache`
+        // fails loudly rather than cloning into the real user-level cache.
+        // It fires before any lock file or clone is created.
+        let project = TempDir::new().unwrap();
+        let _ = ensure_index(
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            &utf8(&project),
+            false,
+        );
+    }
+
+    #[test]
     fn test_resolve_release_through_git_registry() {
+        let _cache = IsolatedRegistryCache::new();
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let location = RegistryLocation::Git(url);
 
         let release = resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
         assert_eq!(release.tag, "release-0.2.1");
-
-        let RegistryLocation::Git(url) = &location else {
-            unreachable!()
-        };
-        let _ = std::fs::remove_dir_all(registry_cache_root(url, &utf8(&project)));
     }
 
     /// A newly published version is picked up by the miss-then-refresh retry.
     #[test]
-    // See the serialization note on `test_ensure_index_clones_git_registry`.
-    // This test calls `ensure_index`/`resolve_release` twice (once to seed
-    // the cache, once to observe the refresh); an env var flip between the
-    // two calls would send them to different cache directories.
-    #[serial_test::serial(env_var)]
     fn test_resolve_release_refresh_picks_up_new_version() {
+        let _cache = IsolatedRegistryCache::new();
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
-        let location = RegistryLocation::Git(url.clone());
+        let location = RegistryLocation::Git(url);
 
         // Populate the local clone at the current index state.
         resolve_release(&project_root, &location, "yaml", "0.2.1").unwrap();
@@ -1348,16 +1469,13 @@ git = "g"
         let release = resolve_release(&project_root, &location, "yaml", "0.3.0").unwrap();
         assert_eq!(release.version, "0.3.0");
         assert_eq!(release.tag, "v0.3.0");
-
-        let _ = std::fs::remove_dir_all(registry_cache_root(&url, &project_root));
     }
 
     /// A refresh that cannot reach the remote must leave the working index
     /// intact rather than deleting it and failing.
     #[test]
-    // See the serialization note on `test_ensure_index_clones_git_registry`.
-    #[serial_test::serial(env_var)]
     fn test_failed_refresh_keeps_existing_index() {
+        let _cache = IsolatedRegistryCache::new();
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
@@ -1379,16 +1497,13 @@ git = "g"
             index_dir.join("packages/yaml.toml").is_file(),
             "a failed refresh must not delete the usable index"
         );
-
-        let _ = std::fs::remove_dir_all(&cache_root);
     }
 
     #[test]
-    // `ensure_git_index` computes `registry_cache_root` before
-    // validating the URL, so this still touches the env-var-dependent path;
-    // see the serialization note on `test_ensure_index_clones_git_registry`.
-    #[serial_test::serial(env_var)]
     fn test_ensure_index_rejects_dangerous_registry_url() {
+        // `ensure_git_index` takes the cache lock before validating the URL,
+        // so even this rejected URL needs an isolated cache root.
+        let _cache = IsolatedRegistryCache::new();
         let project = TempDir::new().unwrap();
         let err = ensure_index(
             &RegistryLocation::Git("ext::sh -c 'touch /tmp/pwned'".to_string()),
@@ -1638,37 +1753,37 @@ git = "g"
     /// or MCP lookup) resolving against the same git registry at once must
     /// both succeed, and must never see a half-swapped index.
     #[test]
-    // See the serialization note on `test_ensure_index_clones_git_registry`.
-    // The concurrency this test cares about (multiple threads racing the
-    // same registry) is internal to the test itself; serializing against
-    // *other tests* just keeps the env var stable for the duration.
-    #[serial_test::serial(env_var)]
     fn test_concurrent_resolutions_against_same_registry_both_succeed() {
+        let cache = IsolatedRegistryCache::new();
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
-        let location = RegistryLocation::Git(url.clone());
+        let location = RegistryLocation::Git(url);
 
-        let handles: Vec<_> = (0..8)
-            .map(|_| {
-                let location = location.clone();
-                std::thread::spawn(move || {
-                    // Each thread gets its own project root — sharing is
-                    // across *projects*, so the interesting race is threads
-                    // with different project_root values converging on the
-                    // same cache directory.
-                    let project = TempDir::new().unwrap();
-                    let release =
-                        resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
-                    assert_eq!(release.tag, "release-0.2.1");
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let location = location.clone();
+                    let cache = &cache;
+                    scope.spawn(move || {
+                        // The isolated cache root is thread-local; install
+                        // the test's one on this worker so every thread
+                        // races on the same cache directory.
+                        let _entered = cache.enter();
+                        // Each thread gets its own project root — sharing is
+                        // across *projects*, so the interesting race is
+                        // threads with different project_root values
+                        // converging on the same cache directory.
+                        let project = TempDir::new().unwrap();
+                        let release =
+                            resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
+                        assert_eq!(release.tag, "release-0.2.1");
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        for handle in handles {
-            handle.join().expect("thread panicked");
-        }
-
-        let project = TempDir::new().unwrap();
-        let _ = std::fs::remove_dir_all(registry_cache_root(&url, &utf8(&project)));
+            for handle in handles {
+                handle.join().expect("thread panicked");
+            }
+        });
     }
 
     // ── Lookup ───────────────────────────────────────────────────────
@@ -1846,9 +1961,8 @@ git = "g"
     }
 
     #[test]
-    // See the serialization note on `test_ensure_index_clones_git_registry`.
-    #[serial_test::serial(env_var)]
     fn test_resolve_latest_release_through_git_registry() {
+        let _cache = IsolatedRegistryCache::new();
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let location = RegistryLocation::Git(url);

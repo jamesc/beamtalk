@@ -89,6 +89,15 @@ pub fn beamtalk() -> Command {
         // *process* left behind (e.g. Ctrl-C/timeout kill skipped the
         // thread-local `Drop`).
         .env("BEAMTALK_CACHE_DIR", thread_cache_dir())
+        // Keep any git-backed registry clone in the same per-thread
+        // directory rather than the real `~/.beamtalk/registry/`, where each
+        // throwaway `file://` test registry would leave a directory behind
+        // (BT-3900). The unit-test counterpart is
+        // `registry::test_support::IsolatedRegistryCache`.
+        .env(
+            "BEAMTALK_REGISTRY_CACHE_DIR",
+            thread_cache_dir().join("registry"),
+        )
         // Disable colored output so assertions on text content are stable.
         .env("NO_COLOR", "1")
         // Quiet tracing — some tests assert on stderr content.
