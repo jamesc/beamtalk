@@ -808,7 +808,20 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-lint-stamp
+
+# Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
+# root and from `editors/vscode` (where `lint-js` writes it), with and without
+# the GIT_DIR/GIT_WORK_TREE/GIT_PREFIX a git hook exports, so the pre-push
+# hook's skip check and the recipes' stamps agree. Restores the existing stamp.
+# Unix-only like the stamps themselves; Linux CI covers it.
+[unix]
+test-lint-stamp:
+    @bash scripts/ci/test-lint-stamp.sh
+
+[windows]
+test-lint-stamp:
+    @echo "test-lint-stamp: skipped on Windows (covered by Linux CI)"
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
