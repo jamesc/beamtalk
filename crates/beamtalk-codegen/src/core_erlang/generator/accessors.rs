@@ -366,20 +366,20 @@ impl CoreErlangGenerator {
         self.current_method_param_types.clear();
     }
 
-    /// Records a method parameter's declared type for the arithmetic
-    /// fast-path classifier (keyed by **source** name → simple type name).
-    /// Only `Simple` annotations are recorded; anything else is left absent so
-    /// the classifier falls back to the runtime `is_number` guard, which is
-    /// always correct.
+    /// Records a method parameter's declared simple type for the operator
+    /// fast-path classifiers (keyed by **source** name → simple type name).
+    /// Callers record only the parameters
+    /// [`trusted_param_types`](crate::core_erlang::field_types::trusted_param_types)
+    /// answers — a `Simple` annotation on a name the body never rebinds — so
+    /// anything else is left absent and the classifier falls back to the
+    /// runtime guard, which is always correct.
     pub(in crate::core_erlang) fn record_method_param_type(
         &mut self,
         source_name: &str,
-        annotation: Option<&beamtalk_core::ast::TypeAnnotation>,
+        type_name: &str,
     ) {
-        if let Some(beamtalk_core::ast::TypeAnnotation::Simple(id)) = annotation {
-            self.current_method_param_types
-                .insert(source_name.to_string(), id.name.to_string());
-        }
+        self.current_method_param_types
+            .insert(source_name.to_string(), type_name.to_string());
     }
 
     /// Whether `name` refers to a `:: Integer/Float/Number`-annotated

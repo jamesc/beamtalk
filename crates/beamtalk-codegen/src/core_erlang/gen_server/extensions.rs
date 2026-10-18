@@ -280,12 +280,7 @@ impl CoreErlangGenerator {
         // an unknown target clears to the bare-BIF status quo.
         self.set_extension_target_field_types(ext.class_name.name.as_str());
 
-        let (mut frame, param_vars) = MethodFrame::enter(
-            self,
-            method.selector.name().as_str(),
-            &method.parameters,
-            boundary,
-        );
+        let (mut frame, param_vars) = MethodFrame::enter(self, method, boundary);
         let arg_prelude = Self::extension_params_prelude_doc(&param_vars);
 
         let needs_nlr = frame
@@ -422,12 +417,7 @@ impl CoreErlangGenerator {
         let prev_extension_target =
             self.replace_extension_target_class(Some(ext.class_name.name.to_string()));
 
-        let (mut frame, param_vars) = MethodFrame::enter(
-            self,
-            method.selector.name().as_str(),
-            &method.parameters,
-            MethodBoundary::ClassMethod,
-        );
+        let (mut frame, param_vars) = MethodFrame::enter(self, method, MethodBoundary::ClassMethod);
         let arg_prelude = Self::extension_params_prelude_doc(&param_vars);
 
         let needs_nlr = frame

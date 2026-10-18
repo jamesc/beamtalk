@@ -590,12 +590,7 @@ impl CoreErlangGenerator {
 
             // Generate parameter list and populate current_method_params
             // (needed for @primitive codegen which reads current_method_params).
-            let (mut frame, params) = MethodFrame::enter(
-                self,
-                selector_name.as_str(),
-                &method.parameters,
-                MethodBoundary::Actor,
-            );
+            let (mut frame, params) = MethodFrame::enter(self, method, MethodBoundary::Actor);
 
             // Parameters, then Self, then State
             let mut all_params: Vec<String> = params;

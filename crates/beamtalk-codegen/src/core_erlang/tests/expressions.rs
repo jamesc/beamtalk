@@ -681,6 +681,54 @@ fn test_bt3892_class_variables_of_unsealed_class_are_guarded() {
     );
 }
 
+#[test]
+fn test_bt3921_rebound_typed_param_name_is_guarded() {
+    // A typed parameter's name is trusted only where it still means the
+    // parameter: a block parameter, local or destructuring pattern variable
+    // of the same name may hold an object (a `Point` element), so its
+    // operators keep the runtime guard and dispatch.
+    let core = crate::core_erlang::tests::codegen(
+        "Value subclass: H\n  \
+         blockAdd: n :: Integer in: xs => xs collect: [:n | n + 1]\n  \
+         blockLt: n :: Integer in: xs => xs collect: [:n | n < 1]\n  \
+         localAdd: n :: Integer with: p => n := p. n + 1\n  \
+         localLt: n :: Integer with: p => n := p. n < 1\n  \
+         patternAdd: n :: Integer from: t => {n, _} := t. n + 1\n  \
+         patternLt: n :: Integer from: t => {n, _} := t. n < 1\n  \
+         rightAdd: n :: Integer in: xs => xs collect: [:n | 1 + n]\n  \
+         plainAdd: n :: Integer => n + 1\n  \
+         plainLt: n :: Integer => n < 1\n  \
+         plainRight: n :: Integer => 1 + n\n",
+    );
+    for sel in ["blockAdd:in:", "localAdd:with:", "patternAdd:from:"] {
+        assert!(
+            method_body_contains(&core, sel, "call 'erlang':'is_number'("),
+            "{sel}: a rebound typed-param name must be guarded:\n{core}"
+        );
+    }
+    for sel in ["blockLt:in:", "localLt:with:", "patternLt:from:"] {
+        assert!(
+            method_body_contains(&core, sel, "'is_object'("),
+            "{sel}: a rebound typed-param name must be guarded:\n{core}"
+        );
+    }
+    // ADR 0116: the right operand shares the predicate, so a shadowed name on
+    // the right reaches the number-on-the-left coercion `try`.
+    assert!(
+        method_body_contains(&core, "rightAdd:in:", "try call 'erlang':'+'("),
+        "a rebound typed-param name on the right must take the coercion path:\n{core}"
+    );
+    // A typed parameter the body never rebinds stays on the bare BIF.
+    for sel in ["plainAdd:", "plainLt:", "plainRight:"] {
+        assert!(
+            !method_body_contains(&core, sel, "is_number")
+                && !method_body_contains(&core, sel, "'is_object'(")
+                && !method_body_contains(&core, sel, "try call"),
+            "{sel}: an unshadowed typed param must stay bare:\n{core}"
+        );
+    }
+}
+
 // comparison operators (`< > <= >=`) are dispatchable messages. The
 // bare-BIF fast path holds for statically-comparable receivers (numeric / char
 // / string literals, `self` in Integer/Float/Character/String, and

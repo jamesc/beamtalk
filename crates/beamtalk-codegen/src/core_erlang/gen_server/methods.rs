@@ -121,12 +121,7 @@ impl CoreErlangGenerator {
         indent_level: isize,
     ) -> Result<Document<'static>> {
         let selector_name = method.selector.name();
-        let (mut frame, param_vars) = MethodFrame::enter(
-            self,
-            selector_name.as_str(),
-            &method.parameters,
-            MethodBoundary::Actor,
-        );
+        let (mut frame, param_vars) = MethodFrame::enter(self, method, MethodBoundary::Actor);
 
         // Populate tier2_block_params for this method from pre-scanned info.
         frame.tier2_block_params.clear();
@@ -2168,12 +2163,8 @@ impl CoreErlangGenerator {
             // are neither passed in nor returned)
             let arity = method.selector.arity() + 1;
 
-            let (mut frame, param_vars) = MethodFrame::enter(
-                self,
-                selector_name.as_str(),
-                &method.parameters,
-                MethodBoundary::ClassMethod,
-            );
+            let (mut frame, param_vars) =
+                MethodFrame::enter(self, method, MethodBoundary::ClassMethod);
 
             // ADR 0132 §2: a class method with a threading parameter is one
             // body over `Acc` with two entries. The positions are

@@ -144,23 +144,10 @@ pub(in crate::core_erlang) fn classify_fields(
     loop {
         let mut rejected: Vec<String> = Vec::new();
         for method in writers {
-            // A typed parameter is evidence only while its name means the
-            // parameter: a block parameter, local or pattern variable of the
-            // same name (shadowing is a warning, not an error) may hold
-            // anything, and the walk below does not track scopes.
-            let rebound = names_rebound_in(method);
-            let numeric_params: HashSet<&str> = method
-                .parameters
-                .iter()
-                .filter(|p| {
-                    matches!(
-                        p.type_annotation.as_ref(),
-                        Some(beamtalk_core::ast::TypeAnnotation::Simple(id))
-                            if NUMERIC_TYPES.contains(&id.name.as_str())
-                    )
-                })
-                .map(|p| p.name.name.as_str())
-                .filter(|name| !rebound.contains(*name))
+            let numeric_params: HashSet<&str> = trusted_param_types(method)
+                .into_iter()
+                .filter(|(_, ty)| NUMERIC_TYPES.contains(ty))
+                .map(|(name, _)| name)
                 .collect();
             for stmt in &method.body {
                 ast_walker::walk_expression(&stmt.expression, &mut |e| {
@@ -190,6 +177,33 @@ pub(in crate::core_erlang) fn classify_fields(
                 None => FieldTypeFact::Untyped,
             };
             (d.name.name.to_string(), fact)
+        })
+        .collect()
+}
+
+/// The `(name, simple type name)` of each of `method`'s parameters whose
+/// `Simple` type annotation may be trusted throughout the body (BT-3921).
+///
+/// A typed parameter is evidence only while its name means the parameter: a
+/// block parameter, local or pattern variable of the same name (shadowing is
+/// a warning, not an error) may hold anything, and neither the field
+/// classifier's walk nor the operator fast-path classifiers
+/// (`receiver_is_statically_numeric` / `receiver_is_statically_comparable`,
+/// which match an identifier against the method's parameters by name) track
+/// scopes. So a parameter whose name the body rebinds anywhere is left out —
+/// its operators keep the runtime guard, which is always correct. Parameters
+/// with no annotation or a non-`Simple` one are left out too.
+pub(in crate::core_erlang) fn trusted_param_types(method: &MethodDefinition) -> Vec<(&str, &str)> {
+    let rebound = names_rebound_in(method);
+    method
+        .parameters
+        .iter()
+        .filter(|p| !rebound.contains(p.name.name.as_str()))
+        .filter_map(|p| match p.type_annotation.as_ref() {
+            Some(beamtalk_core::ast::TypeAnnotation::Simple(id)) => {
+                Some((p.name.name.as_str(), id.name.as_str()))
+            }
+            _ => None,
         })
         .collect()
 }

@@ -208,7 +208,8 @@ impl CoreErlangGenerator {
     /// AST / codegen context — no type-inference pass:
     /// * a numeric literal receiver (`1 + x`),
     /// * `self` inside a numeric class (`Integer`/`Float` method bodies),
-    /// * an identifier bound to a `:: Integer/Float/Number` parameter, and
+    /// * an identifier bound to a `:: Integer/Float/Number` parameter whose
+    ///   name the method body never rebinds (BT-3921), and
     /// * a `self.<field>` read whose field is known numeric
     ///   ([`FieldTypeFact`](crate::core_erlang::field_types::FieldTypeFact)).
     ///
@@ -269,7 +270,7 @@ impl CoreErlangGenerator {
     /// * `self` inside a builtin comparable class
     ///   (`Integer`/`Float`/`Character`/`String`),
     /// * an identifier bound to a `:: Integer/Float/Number/Character/String`
-    ///   parameter, and
+    ///   parameter whose name the method body never rebinds (BT-3921), and
     /// * a `self.<field>` read whose field is known primitive-ordered.
     ///
     /// The `self.<field>` case is **type-aware**, and the

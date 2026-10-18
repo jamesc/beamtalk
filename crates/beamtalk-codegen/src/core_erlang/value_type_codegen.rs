@@ -1900,12 +1900,7 @@ impl CoreErlangGenerator {
 
         // Bind parameters via fresh_var (not to_core_var) so names go through
         // the counter and can't collide with sequencing temp vars.
-        let (mut frame, user_params) = MethodFrame::enter(
-            self,
-            method.selector.name().as_str(),
-            &method.parameters,
-            MethodBoundary::ValueType,
-        );
+        let (mut frame, user_params) = MethodFrame::enter(self, method, MethodBoundary::ValueType);
         let mut params = vec!["Self".to_string()];
         params.extend(user_params);
 
