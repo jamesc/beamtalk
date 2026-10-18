@@ -1132,7 +1132,7 @@ fn group_by_value_unpacked(
 }
 
 /// The construct blocks in which an actor `r := <groupBy: fold>` unpacks the
-/// fold, each proven by a checked-in BUnit cell (`adr0133residuals_test.bt`,
+/// fold, each proven by a checked-in `BUnit` cell (`adr0133residuals_test.bt`,
 /// the fixture method named): `(selector, block)`, where `block` is `None`
 /// for the receiver block and `Some(i)` for argument `i`. An allow-list keyed
 /// on the exact construct block, not on its family: an assignment directly in
