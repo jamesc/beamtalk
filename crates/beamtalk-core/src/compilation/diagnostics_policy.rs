@@ -684,12 +684,6 @@ pub fn apply_protocol_expect_directives(
     // `ProtocolRegistry::add_pre_loaded` and the protocol source map.
     let mut by_protocol: BTreeMap<&str, Vec<ExpectDirectiveEntry>> = BTreeMap::new();
     for protocol in protocols {
-        // A provision is identified by (package, name), not by bare name
-        // (BT-3915): the stdlib's own protocols are matched only by a
-        // stdlib-stamped origin, which this function never matches (below).
-        if is_stdlib_package(protocol.package.as_deref()) {
-            continue;
-        }
         by_protocol
             .entry(protocol.name.name.as_str())
             .or_insert_with(|| {

@@ -502,6 +502,9 @@ impl<'a> ProtocolLookup<'a> {
     /// the carried protocols first, then the stdlib's ([`resolve_stdlib_protocol`]).
     fn resolve(&self, use_: &ProtocolUse) -> Option<&'a ProtocolDefinition> {
         let key = protocol_use_key(use_);
+        if qualifies_the_stdlib(&key, self.current_package) {
+            return resolve_stdlib_protocol(&key, self.current_package);
+        }
         resolve_protocol_entry(&self.protocols, &key, self.current_package, |p| {
             p.package.is_none()
         })
@@ -541,6 +544,20 @@ pub fn stdlib_resolved_uses(
         }
     }
     uses
+}
+
+/// Whether `key` is a `stdlib@Name` qualified use outside the stdlib's own
+/// build (BT-3915). Such a key names the stdlib's protocol and nothing else:
+/// it resolves against the stdlib tier only, so an unstamped (current-package)
+/// `Name` cannot capture it even where the package is unknown (`None` — REPL,
+/// self-sufficient codegen, the LSP's placeholder package), which
+/// [`resolve_protocol_entry`]'s "unknown package answers any qualifier" rule
+/// would otherwise allow. Every surface thus agrees with `beamtalk build`.
+fn qualifies_the_stdlib(key: &str, current_package: Option<&str>) -> bool {
+    !stdlib_protocols::is_stdlib_package(current_package)
+        && key
+            .split_once('@')
+            .is_some_and(|(qualifier, _)| qualifier == stdlib_protocols::STDLIB_PACKAGE)
 }
 
 /// The last tier of `uses:` resolution (BT-3915): a key that resolves in
@@ -606,6 +623,9 @@ pub fn resolve_protocol_key<'a>(
     key: &str,
     current_package: Option<&str>,
 ) -> Option<&'a ProtocolDefinition> {
+    if qualifies_the_stdlib(key, current_package) {
+        return resolve_stdlib_protocol(key, current_package);
+    }
     resolve_protocol_entry(external_protocols, key, current_package, |p| {
         p.package.is_none()
     })

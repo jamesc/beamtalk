@@ -351,11 +351,26 @@ Value subclass: Rank
 
   < other => self.level < other level",
     );
-    let uses = stdlib_resolved_uses(&module, &HashMap::new(), Some("my_app"));
-    assert!(
-        uses.contains(&("Rank".into(), "Comparable".into())),
-        "{uses:?}"
-    );
+    // Every surface agrees: a known package (`beamtalk build`) and an unknown
+    // one (`None` — REPL/workspace, self-sufficient codegen, the LSP's
+    // placeholder package) both resolve `stdlib@Comparable` to the stdlib's.
+    for package in [Some("my_app"), None] {
+        let uses = stdlib_resolved_uses(&module, &HashMap::new(), package);
+        assert!(
+            uses.contains(&("Rank".into(), "Comparable".into())),
+            "{package:?}: {uses:?}"
+        );
+        let carried = first_wins_protocol_map(module.protocols.iter().cloned());
+        let resolved = resolve_protocol_key(&carried, "stdlib@Comparable", package)
+            .expect("stdlib@Comparable resolves");
+        assert_eq!(resolved.package.as_deref(), Some("stdlib"), "{package:?}");
+    }
+    // Flattened with no package (the REPL's case), `Rank` gets the stdlib's
+    // `between:and:`, which the local `Comparable` does not provide.
+    let mut flattened = module.clone();
+    let (diagnostics, _) = expand_module(&mut flattened, &HashMap::new());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(find_method(find_class(&flattened, "Rank"), "between:and:").is_some());
 
     let local = parse_source(
         "Protocol define: Comparable

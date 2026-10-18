@@ -125,3 +125,40 @@ fn compile_flattens_a_stdlib_protocol_without_protocol_sources() {
         "the stdlib's `between:and:` provision should be flattened in: {core_erlang}"
     );
 }
+
+/// BT-3915: on the REPL/workspace path (no package identity), a
+/// `uses: stdlib@Comparable` resolves to the stdlib's protocol even when the
+/// workspace carries its own `Comparable` on the wire — as `beamtalk build`
+/// resolves it.
+#[test]
+fn compile_resolves_qualified_stdlib_use_beside_a_carried_namesake() {
+    let user_comparable = "Protocol define: Comparable\n\
+         \x20 < other :: Self -> Boolean\n\n\
+         \x20 localOnly -> Integer => 1";
+    let source = "Value subclass: Version\n\
+         \x20 uses: stdlib@Comparable\n\
+         \x20 field: major :: Integer = 0\n\n\
+         \x20 < other :: Version -> Boolean => self.major < other major";
+    let request = Map::from([
+        (atom("command"), atom("compile")),
+        (atom("source"), binary(source)),
+        (atom("module_name"), binary("bt@version")),
+        (
+            atom("protocol_sources"),
+            Term::from(Map::from([(binary("Comparable"), binary(user_comparable))])),
+        ),
+    ]);
+
+    let response = handle_compile(&request);
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "{response:?}"
+    );
+    let core_erlang =
+        response_field_str(&response, "core_erlang").expect("compile response has core_erlang");
+    assert!(
+        core_erlang.contains("between:and:") && !core_erlang.contains("localOnly"),
+        "expected the stdlib's provisions, not the carried Comparable's: {core_erlang}"
+    );
+}
