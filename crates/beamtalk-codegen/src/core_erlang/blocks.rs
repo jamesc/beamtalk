@@ -222,10 +222,7 @@ impl CoreErlangGenerator {
     /// Generates a Tier 2 stateful block (ADR 0041 Phase 0).
     ///
     /// Emits a block with the stateful calling convention:
-    /// `fun(Param1, ..., ParamN, StateAcc) -> {Result, NewStateAcc}`,
-    /// bound under the Tier 2 mark (`letrec 'BtTier2Block'/N+1 = fun ... in
-    /// 'BtTier2Block'/N+1`, [`super::threading_abi`]) so the runtime can
-    /// recognise it without applying it.
+    /// `fun(Param1, ..., ParamN, StateAcc) -> {Result, NewStateAcc}`
     ///
     /// Captured-mutated variables are unpacked from `StateAcc` at the start,
     /// assignments thread through `StateAcc` via `maps:put`, and the final
@@ -354,14 +351,7 @@ impl CoreErlangGenerator {
 
         let (body_doc, _branch_final) = result?;
 
-        // ADR 0132 / BT-3885: mint the fun under the Tier 2 mark, so
-        // `call_threaded/3` can tell it from a plain block of one argument
-        // more *before* applying it (`threading_abi`). Every Tier 2 block fun
-        // is created here.
-        Ok(super::threading_abi::tier2_block_fun_doc(
-            docvec![header, body_doc],
-            block.parameters.len() + 1,
-        ))
+        Ok(docvec![header, body_doc])
     }
 
     /// Generates an Erlang-compatible wrapper for a block at an Erlang call site.

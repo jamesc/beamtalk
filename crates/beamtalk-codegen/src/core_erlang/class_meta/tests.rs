@@ -886,12 +886,12 @@ fn test_meta_direct_class_methods_maps_selector_to_safe_fn() {
     );
 }
 
-// ─── ADR 0132 §1: `tier2_methods` / `tier2_class_methods` ──────────────────
+// ─── ADR 0133 Phase 2: no `tier2_methods` / `tier2_class_methods` ──────────
 
 #[test]
-fn test_meta_tier2_keys_emitted_empty_by_default() {
-    // ADR 0132 Phase 0c (BT-3868): both keys are always present, beside
-    // `direct_class_methods`, so the runtime reads them from every module.
+fn test_meta_carries_no_tier2_keys() {
+    // ADR 0133 Phase 2 (BT-3904): no threaded entries are generated, so the
+    // ADR 0132 keys are not emitted; the runtime reads a missing key as none.
     let module = module_with(make_actor_class("Counter"));
     let output = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -903,119 +903,7 @@ fn test_meta_tier2_keys_emitted_empty_by_default() {
     )
     .to_pretty_string();
     assert!(
-        output.contains("'tier2_methods' => ~{}~"),
-        "meta map should carry an empty tier2_methods. Got: {output}"
+        !output.contains("tier2_methods") && !output.contains("tier2_class_methods"),
+        "meta map should carry no tier2 keys. Got: {output}"
     );
-    assert!(
-        output.contains("'tier2_class_methods' => ~{}~"),
-        "meta map should carry an empty tier2_class_methods. Got: {output}"
-    );
-}
-
-#[test]
-fn test_meta_tier2_entries_render_selector_to_entry_and_positions() {
-    let module = module_with(make_actor_class("Counter"));
-    let instance = vec![
-        Tier2Entry {
-            selector: "inject:into:".to_string(),
-            entry_fn: "__t2_inject:into:".to_string(),
-            positions: vec![1],
-        },
-        Tier2Entry {
-            selector: "each:do:".to_string(),
-            entry_fn: "__t2_each:do:".to_string(),
-            positions: vec![0, 1],
-        },
-    ];
-    let class_side = vec![Tier2Entry {
-        selector: "twice:".to_string(),
-        entry_fn: "__t2_class_twice:".to_string(),
-        positions: vec![0],
-    }];
-    let provenance = MetaProvenance {
-        tier2_methods: &instance,
-        tier2_class_methods: &class_side,
-        ..MetaProvenance::default()
-    };
-    let output = CoreErlangGenerator::build_meta_map_doc(
-        module.classes.first().unwrap(),
-        &module,
-        false,
-        false,
-        None,
-        provenance,
-    )
-    .to_pretty_string();
-    // Sorted by selector, whatever order the entries were collected in.
-    assert!(
-        output.contains(
-            "'tier2_methods' => ~{'each:do:' => {'__t2_each:do:', [0, 1]}, \
-             'inject:into:' => {'__t2_inject:into:', [1]}}~"
-        ),
-        "tier2_methods should map selector to {{entry, positions}}. Got: {output}"
-    );
-    assert!(
-        output.contains("'tier2_class_methods' => ~{'twice:' => {'__t2_class_twice:', [0]}}~"),
-        "tier2_class_methods should map selector to {{entry, positions}}. Got: {output}"
-    );
-}
-
-/// Render one expected map of `tier2_meta_conformance.json` the way the
-/// Erlang side reads it back (`selector => {EntryFn, [Positions]}`), as Core
-/// Erlang map text. Independent of `meta_tier2_entry` on purpose: the fixture,
-/// not the emitter, is the source of truth both sides are pinned to.
-fn render_expected_tier2_map(expected: &serde_json::Value) -> String {
-    let map = expected.as_object().expect("expected map is a JSON object");
-    let mut selectors: Vec<&String> = map.keys().collect();
-    selectors.sort();
-    let entries: Vec<String> = selectors
-        .into_iter()
-        .map(|sel| {
-            let entry = &map[sel];
-            let entry_fn = entry["entry_fn"].as_str().expect("entry.entry_fn");
-            let positions: Vec<String> = entry["positions"]
-                .as_array()
-                .expect("entry.positions")
-                .iter()
-                .map(|p| p.as_u64().expect("position is a u64").to_string())
-                .collect();
-            format!("'{sel}' => {{'{entry_fn}', [{}]}}", positions.join(", "))
-        })
-        .collect();
-    format!("~{{{}}}~", entries.join(", "))
-}
-
-#[test]
-fn tier2_meta_matches_shared_conformance_fixture() {
-    // CLAUDE.md § No duplicate implementations: the key names and shape of
-    // the threaded-entry metadata cross the Rust/Erlang boundary, so both
-    // sides are pinned to one fixture. The Erlang half is
-    // `beamtalk_threaded_dispatch_tests` (`conformance_test_/0`), which loads
-    // the same `.bt` class compiled by `compile_fixtures.escript` and reads it
-    // back through the registry accessors.
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("repo root")
-        .to_path_buf();
-    let corpus_path =
-        repo_root.join("runtime/apps/beamtalk_runtime/test/fixtures/tier2_meta_conformance.json");
-    let raw = std::fs::read_to_string(&corpus_path)
-        .unwrap_or_else(|e| panic!("read corpus {}: {e}", corpus_path.display()));
-    let cases: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("corpus is a JSON array");
-    assert!(!cases.is_empty(), "corpus must have cases");
-
-    for case in &cases {
-        let source_fixture = case["source_fixture"].as_str().expect("source_fixture");
-        let src = std::fs::read_to_string(repo_root.join(source_fixture))
-            .unwrap_or_else(|e| panic!("read fixture {source_fixture}: {e}"));
-        let code = crate::core_erlang::tests::codegen(&src);
-        for key in ["tier2_methods", "tier2_class_methods"] {
-            let fragment = format!("'{key}' => {}", render_expected_tier2_map(&case[key]));
-            assert!(
-                code.contains(&fragment),
-                "{source_fixture}: expected `{fragment}` in __beamtalk_meta/0. Got:\n{code}"
-            );
-        }
-    }
 }

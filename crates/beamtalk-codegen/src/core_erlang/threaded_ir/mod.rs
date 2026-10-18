@@ -83,8 +83,10 @@ pub(super) use build::{
 };
 #[cfg(test)]
 pub(super) use build::{build_local_rebind, build_method_body};
-// ADR 0132 §2's threaded `MethodBody` builder: the class-method threaded body
-// (Phase 1c) is its first production caller.
+// ADR 0132 §2's threaded `MethodBody` builder. Test-only since ADR 0133 Phase 2
+// removed its one production caller, the class-method threaded entry
+// (BT-3904); BT-3905 deletes it with the `Acc` family.
+#[cfg(test)]
 pub(super) use build::build_threaded_method_body;
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.

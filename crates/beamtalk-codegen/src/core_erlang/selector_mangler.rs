@@ -43,11 +43,6 @@ const CLASS_METHOD_PREFIX: &str = "class_";
 /// and its direct call sites must agree on this name.
 const SEALED_PREFIX: &str = "__sealed_";
 
-/// ADR 0132 §1: the prefix of a class method's threaded entry, `'__t2_class_<sel>'`
-/// (mirroring `class_<sel>`, and keeping a class with both `twice:` and
-/// `class twice:` compiling).
-const THREADED_CLASS_PREFIX: &str = "__t2_class_";
-
 /// The prefix used for `self delegate` dispatch function names in native
 /// facade modules.
 ///
@@ -124,22 +119,6 @@ pub fn sealed_fn_name(selector: &str) -> String {
     } else {
         let hash = fnv1a_64(selector.as_bytes());
         format!("{SEALED_PREFIX}kw_{hash:016x}")
-    }
-}
-
-/// Returns a safe function name atom for a class method's threaded entry
-/// (ADR 0132 §2): `'__t2_class_{selector}'`, the body over `Acc` that the plain
-/// `class_{selector}` wraps. Hashed exactly as [`sealed_fn_name`] hashes a long
-/// selector (`"__t2_class_kw_<16-hex>"`), so the entry name never exceeds the
-/// atom limit; the runtime never derives it (it reads the name from
-/// `tier2_class_methods`, which codegen emits from this function).
-#[must_use]
-pub fn threaded_class_fn_name(selector: &str) -> String {
-    if THREADED_CLASS_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
-        format!("{THREADED_CLASS_PREFIX}{selector}")
-    } else {
-        let hash = fnv1a_64(selector.as_bytes());
-        format!("{THREADED_CLASS_PREFIX}kw_{hash:016x}")
     }
 }
 
@@ -253,20 +232,6 @@ mod tests {
         let r2 = sealed_fn_name(&long);
         assert_eq!(r1, r2);
         assert!(r1.starts_with("__sealed_kw_"));
-    }
-
-    #[test]
-    fn threaded_class_fn_name_short_and_long() {
-        assert_eq!(threaded_class_fn_name("twice:"), "__t2_class_twice:");
-        assert_eq!(threaded_class_fn_name("run"), "__t2_class_run");
-        // "__t2_class_" is 11 chars: 244 + 11 = 255 fits, 245 is hashed.
-        let fits = "a".repeat(244);
-        assert_eq!(threaded_class_fn_name(&fits), format!("__t2_class_{fits}"));
-        let long = "a".repeat(245);
-        let hashed = threaded_class_fn_name(&long);
-        assert!(hashed.starts_with("__t2_class_kw_"), "{hashed}");
-        assert_eq!(hashed.len(), 11 + 3 + 16);
-        assert_eq!(hashed, threaded_class_fn_name(&long));
     }
 
     #[test]

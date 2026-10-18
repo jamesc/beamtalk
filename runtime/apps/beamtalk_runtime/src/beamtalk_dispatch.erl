@@ -73,7 +73,14 @@ super(Selector, Args, Self, State, CurrentClass)
 ]).
 
 -include("beamtalk.hrl").
--include("beamtalk_threading_abi.hrl").
+
+%% The ADR 0132 Tier 2 mark and plain-entry sentinel `call_threaded/3` reads.
+%% Codegen no longer mints either (ADR 0133 Phase 2, BT-3904: the class-method
+%% threaded entries and the generated `beamtalk_threading_abi.hrl` are gone),
+%% so only Erlang code (`beamtalk_tier2_test_block`) produces them; BT-3907
+%% removes this gate with the rest of the runtime floor.
+-define(BT_TIER2_BLOCK_NAME, 'BtTier2Block').
+-define(BT_PLAIN_ENTRY_ACC(ClassTag, Selector), {plain, ClassTag, Selector}).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -799,9 +806,10 @@ Invoke a callable that may be a Tier 2 block, threading `Acc` (ADR 0132 §2).
 The per-invocation tier gate every threaded entry uses for a threading
 parameter, answering `{Result, Acc1}`. **The tier is decided before anything
 is applied** (BT-3885): a fun of arity `length(Args) + 1` is a Tier 2 block only
-when it carries the Tier 2 mark (`is_tier2_block/1`, the `letrec` name codegen
-mints every Tier 2 fun under, `beamtalk_threading_abi.hrl`); otherwise it is a
-plain block of the wrong arity, and it is never run.
+when it carries the Tier 2 mark (`is_tier2_block/1`, the fun name
+`?BT_TIER2_BLOCK_NAME`); otherwise it is a plain block of the wrong arity, and
+it is never run. Since ADR 0133 Phase 2 (BT-3904) codegen mints no marked fun
+and passes no sentinel; only Erlang code reaches this gate.
 
 - a fun of arity `length(Args)` (Tier 1) is applied to `Args` and answers
   `{Result, Acc}` with `Acc` unchanged;

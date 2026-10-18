@@ -172,7 +172,7 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
     // shift whenever unrelated codegen changes the counter sequence before
     // this point).
     assert!(
-        regex::Regex::new(r"let Blk = \(letrec 'BtTier2Block'/2 = fun \(_\w+, StateAcc\) ->")
+        regex::Regex::new(r"let Blk = fun \(_\w+, StateAcc\) ->")
             .unwrap()
             .is_match(&code),
         "blk must compile to a 2-arity Tier 2 fun (block param + trailing \

@@ -114,10 +114,11 @@ pub struct CoreErlangGenerator {
     /// entry's body (one `MethodBody` frame over the trailing `Acc` family).
     /// Read only through [`Self::threaded_body_kind`], which derives the
     /// body's kind from `context`/`in_class_method`. Never set in
-    /// production yet: the threaded body lowering (ADR 0132 Phases 1c/1d)
-    /// is the first setter, so every method compiles exactly as before. That
-    /// setter must scope it to the one body it lowers (set on entry, restored
-    /// on exit, including on error), or the next method inherits `Acc`.
+    /// production: its only setter, the class-method threaded entry (ADR 0132
+    /// Phase 1c), was removed by ADR 0133 Phase 2 (BT-3904), and BT-3905
+    /// deletes this flag with the `Acc` family. A setter would have to scope
+    /// it to the one body it lowers (set on entry, restored on exit,
+    /// including on error), or the next method inherits `Acc`.
     ///
     /// **The first setter must generalise these single-family sites first.**
     /// While set, `eligible_families` adds `Acc` (so a class body's set is
@@ -158,20 +159,15 @@ pub struct CoreErlangGenerator {
     /// recognised use (`generate_identifier`). BT-3872 reuses the same rules
     /// for `[SelfVt, Acc]`.
     pub(in crate::core_erlang) in_threaded_body: bool,
-    /// ADR 0132 §2: the per-body state of the threaded entry being lowered
-    /// (its threading parameters, the `Acc` version counter); empty outside
-    /// one. Scoped by `begin_threaded_class_body` / `end_threaded_class_body`.
-    pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState,
+    /// ADR 0132 §2: the per-body state of a threaded body (its threading
+    /// parameters, the `Acc` version counter). Always empty since ADR 0133
+    /// Phase 2 (BT-3904) removed the class-method threaded entries, the only
+    /// threaded bodies; deleted with the `Acc` family by BT-3905.
+    pub(in crate::core_erlang) threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState,
     /// The names of every class defined in the module being compiled (ADR 0132
-    /// §1: "the unit"), so a forward `Other sel: b` resolves exactly as the
-    /// threading index resolved it (`tier2_callee::forward_target_of`).
+    /// §1: "the unit"), read by the threaded-body producer's forward
+    /// classification. Never set since BT-3904; deleted by BT-3905.
     pub(in crate::core_erlang) unit_class_names: std::collections::HashSet<String>,
-    /// ADR 0132 §1: the class being compiled's own class-side threaded entries,
-    /// emitted as `'tier2_class_methods'` in `__beamtalk_meta/0`. Collected from
-    /// the same `MethodInfo::threading_params` answer the entries are emitted
-    /// from (`CoreErlangGenerator::class_method_threading_positions`).
-    pub(in crate::core_erlang) own_tier2_class_methods:
-        Vec<crate::core_erlang::class_meta::Tier2Entry>,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -484,9 +480,8 @@ impl CoreErlangGenerator {
             state_threading: VersionCounter::new(),
             in_loop_body: false,
             in_threaded_body: false,
-            threaded_body: crate::core_erlang::threaded_entry::ThreadedBodyState::default(),
+            threaded_body: crate::core_erlang::threaded_body::ThreadedBodyState::default(),
             unit_class_names: std::collections::HashSet::new(),
-            own_tier2_class_methods: Vec::new(),
             branch_frame_counter: 0,
             active_branch_frame: 0,
             loop_mode: LoopMode::new(),
