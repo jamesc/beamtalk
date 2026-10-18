@@ -162,7 +162,7 @@ Object subclass: {class_name}
 "#
     );
     fs::write(
-        path.join("src").join(format!("{class_name}.bt")),
+        path.join("src").join(source_file_name(&class_name)),
         canonical_bt(&content),
     )
     .into_diagnostic()
@@ -190,7 +190,7 @@ Supervisor subclass: {sup_name}
 "
     );
     fs::write(
-        path.join("src").join(format!("{sup_name}.bt")),
+        path.join("src").join(source_file_name(&sup_name)),
         canonical_bt(&sup_content),
     )
     .into_diagnostic()
@@ -209,11 +209,11 @@ Object subclass: {main_name}
 "#
     );
     fs::write(
-        path.join("src").join("Main.bt"),
+        path.join("src").join(source_file_name("Main")),
         canonical_bt(&main_content),
     )
     .into_diagnostic()
-    .wrap_err("Failed to create Main.bt")
+    .wrap_err("Failed to create main.bt")
 }
 
 fn write_sample_test(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
@@ -241,7 +241,7 @@ TestCase subclass: {class_name}
 "
     );
     fs::write(
-        path.join("test").join(format!("{class_name}.bt")),
+        path.join("test").join(source_file_name(&class_name)),
         canonical_bt(&content),
     )
     .into_diagnostic()
@@ -364,6 +364,12 @@ fn write_mcp_json(path: &Utf8Path) -> Result<()> {
 
 /// Convert a `snake_case` package name to a `PascalCase` class name.
 /// If `suffix` is non-empty, it is appended.
+/// The `.bt` file for a class: its `snake_case` module name, the same folding
+/// the file/class agreement check applies (`MyLibTest` → `my_lib_test.bt`).
+fn source_file_name(class_name: &str) -> String {
+    format!("{}.bt", beamtalk_core::ast::to_module_name(class_name))
+}
+
 fn to_class_name(name: &str, suffix: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = true;
@@ -451,7 +457,7 @@ mod tests {
     #[serial(cwd)]
     fn test_new_library_creates_class_file() {
         let (_temp, project_path) = create_test_project("my_lib", false);
-        let class_path = project_path.join("src").join("MyLib.bt");
+        let class_path = project_path.join("src").join("my_lib.bt");
         assert!(class_path.exists(), "library class file should exist");
 
         let content = fs::read_to_string(class_path).unwrap();
@@ -463,7 +469,7 @@ mod tests {
     #[serial(cwd)]
     fn test_new_library_creates_test_file() {
         let (_temp, project_path) = create_test_project("my_lib", false);
-        let test_path = project_path.join("test").join("MyLibTest.bt");
+        let test_path = project_path.join("test").join("my_lib_test.bt");
         assert!(test_path.exists(), "library test file should exist");
 
         let content = fs::read_to_string(test_path).unwrap();
@@ -514,7 +520,7 @@ mod tests {
     #[serial(cwd)]
     fn test_new_app_creates_supervisor() {
         let (_temp, project_path) = create_test_project("my_app", true);
-        let sup_path = project_path.join("src").join("MyAppAppSup.bt");
+        let sup_path = project_path.join("src").join("my_app_app_sup.bt");
         assert!(sup_path.exists(), "supervisor file should exist");
 
         let content = fs::read_to_string(sup_path).unwrap();
@@ -526,8 +532,8 @@ mod tests {
     #[serial(cwd)]
     fn test_new_app_creates_main() {
         let (_temp, project_path) = create_test_project("my_app", true);
-        let main_path = project_path.join("src").join("Main.bt");
-        assert!(main_path.exists(), "Main.bt should exist for app");
+        let main_path = project_path.join("src").join("main.bt");
+        assert!(main_path.exists(), "main.bt should exist for app");
 
         let content = fs::read_to_string(main_path).unwrap();
         assert!(content.contains("Object subclass: Main"));
@@ -655,11 +661,11 @@ mod tests {
     fn test_new_project_with_underscores_and_digits() {
         let (_temp, project_path) = create_test_project("my_cool_project123", false);
         assert!(project_path.exists());
-        // Library class should be named MyCoolProject123.bt
+        // Class MyCoolProject123 lives in the snake_case my_cool_project123.bt
         assert!(
             project_path
                 .join("src")
-                .join("MyCoolProject123.bt")
+                .join("my_cool_project123.bt")
                 .exists()
         );
     }
@@ -792,5 +798,56 @@ mod tests {
         assert!(content.contains("mcpServers"));
         assert!(content.contains("beamtalk-mcp"));
         assert!(content.contains("--start"));
+    }
+
+    /// Every ```beamtalk block in the scaffolded agent docs must parse and
+    /// pass semantic analysis. These files are copied into every new project
+    /// and read by coding agents as ground truth, so an example that no longer
+    /// compiles (a `state:` on an `Object`, a bare `=`) teaches the wrong
+    /// language. Blocks fenced as ```text are exempt (deliberately wrong code).
+    #[test]
+    fn test_scaffold_agent_docs_beamtalk_snippets_compile() {
+        use beamtalk_core::semantic_analysis::analyse;
+        use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+        use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+        let templates = [
+            ("agents.md", include_str!("../../templates/agents.md")),
+            (
+                "copilot-instructions.md",
+                include_str!("../../templates/copilot-instructions.md"),
+            ),
+        ];
+        let mut failures = Vec::new();
+        let mut checked = 0;
+        for (file, markdown) in templates {
+            let mut in_beamtalk = false;
+            let mut snippet = String::new();
+            for event in Parser::new(markdown) {
+                match event {
+                    Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang))) => {
+                        in_beamtalk = lang.as_ref() == "beamtalk";
+                        snippet.clear();
+                    }
+                    Event::Text(text) if in_beamtalk => snippet.push_str(&text),
+                    Event::End(TagEnd::CodeBlock) if in_beamtalk => {
+                        in_beamtalk = false;
+                        checked += 1;
+                        let (module, mut diags) = parse(lex_with_eof(&snippet));
+                        diags.extend(analyse(&module).diagnostics);
+                        for d in diags.iter().filter(|d| d.severity == Severity::Error) {
+                            failures.push(format!("{file}: {}\n---\n{snippet}---", d.message));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(checked > 0, "no ```beamtalk blocks found in the templates");
+        assert!(
+            failures.is_empty(),
+            "scaffold template snippets fail to compile:\n{}",
+            failures.join("\n\n")
+        );
     }
 }

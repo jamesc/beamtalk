@@ -475,10 +475,10 @@ my_app/
 ├── beamtalk.toml           # Package manifest
 ├── beamtalk.lock           # Dependency lockfile (generated)
 ├── src/                    # Source files
-│   ├── Main.bt             # Entry point (by convention)
-│   └── Counter.bt          # Additional classes
+│   ├── main.bt             # Entry point (by convention)
+│   └── counter.bt          # Additional classes
 ├── test/                   # BUnit tests
-│   └── CounterTest.bt
+│   └── counter_test.bt
 ├── _build/                 # Build output (generated)
 │   └── dev/
 │       └── ebin/           # .beam files + .app file
@@ -488,12 +488,12 @@ my_app/
 └── .gitignore
 ```
 
-Source files in `src/` compile to BEAM modules named `bt@{package}@{class}`:
+Each file holds one class and is named in snake_case after it (`Counter` → `counter.bt`, `CheckRegistry` → `check_registry.bt`), which is also the module name the compiler derives. Source files in `src/` compile to BEAM modules named `bt@{package}@{class}`:
 
 ```text
-src/Counter.bt    → bt@my_app@counter
-src/Main.bt       → bt@my_app@main
-src/util/Math.bt  → bt@my_app@util@math
+src/counter.bt    → bt@my_app@counter
+src/main.bt       → bt@my_app@main
+src/util/math.bt  → bt@my_app@util@math
 ```
 
 Subdirectories within `src/` are namespacing only — they do not create subpackages. The entire `src/` tree belongs to one flat package.
@@ -508,8 +508,8 @@ When `beamtalk build` runs in a directory with `beamtalk.toml`:
 $ cd my_app
 $ beamtalk build
 Building my_app v0.1.0
-  Compiling Counter.bt → bt@my_app@counter
-  Compiling Main.bt → bt@my_app@main
+  Compiling counter.bt → bt@my_app@counter
+  Compiling main.bt → bt@my_app@main
   Generating my_app.app
 Build complete: 2 modules in _build/dev/ebin/
 ```
@@ -571,7 +571,7 @@ version = "0.1.0"
 description = "Shared utilities"
 ```
 
-**`my_app/src/Main.bt`:**
+**`my_app/src/main.bt`:**
 ```beamtalk
 Object subclass: Main
   /// Entry point — called by the application supervisor.

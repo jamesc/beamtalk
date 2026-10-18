@@ -50,7 +50,7 @@ fn new_app_emits_application_supervisor() {
         toml.contains("[application]"),
         "application package should have [application] section; got:\n{toml}"
     );
-    assert!(proj.join("src/Main.bt").exists(), "src/Main.bt missing");
+    assert!(proj.join("src/main.bt").exists(), "src/main.bt missing");
 }
 
 /// BT-3648 (ADR 0129): a freshly generated application prints its greeting
