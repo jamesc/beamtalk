@@ -145,10 +145,9 @@ pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;
 mod supervisor_codegen;
-mod threaded_entry;
+mod threaded_body;
 mod threaded_expr;
 mod threaded_ir;
-pub mod threading_abi;
 mod threading_analysis;
 mod util;
 mod value_accessors;
@@ -377,16 +376,8 @@ impl CoreErlangGenerator {
                     // variables are written in place, so a `^` unwinding out
                     // of a class method has nothing to hand back beside the
                     // value, and the slot is `nil`.
-                    // ADR 0132 §2: a threaded entry's body is the exception. Its
-                    // `^` carries the `Acc` version in scope — the caller's
-                    // writes made before the `^` — in the state slot, and the
-                    // body's catch answers `{Val, AccAtThrow}`.
                     let state_doc = if self.in_class_method() {
-                        if self.in_threaded_body {
-                            leaf::var(self.current_acc_var_name())
-                        } else {
-                            leaf::atom("nil")
-                        }
+                        leaf::atom("nil")
                     } else if self.context == CodeGenContext::Actor {
                         leaf::var(self.current_state_var())
                     } else {

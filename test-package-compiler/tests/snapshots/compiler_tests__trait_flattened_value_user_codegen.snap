@@ -133,9 +133,7 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -172,9 +170,7 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 1,
-      'direct_class_methods' => ~{}~,
-      'tier2_methods' => ~{}~,
-      'tier2_class_methods' => ~{}~
+      'direct_class_methods' => ~{}~
     }~
 
 end

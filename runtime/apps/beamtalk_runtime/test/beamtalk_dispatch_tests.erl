@@ -21,7 +21,6 @@ and beamtalk_object_class registry for realistic testing.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
--include("beamtalk_threading_abi.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Teardown
@@ -1601,8 +1600,8 @@ bt3482_drain_trace_calls(Acc) ->
 
 %% call_threaded/3 itself is covered by beamtalk_threaded_dispatch_tests.
 
-%% The Tier 2 mark the EUnit helper spells is the generated one, at every
-%% arity, and the gate's check accepts it (BT-3885).
+%% The Tier 2 mark the EUnit helper spells is the gate's, at every arity, and
+%% the gate's check accepts it (BT-3885).
 tier2_mark_test_() ->
     Marked = [
         beamtalk_tier2_test_block:mark(fun(Acc) -> {1, Acc} end),
@@ -1615,7 +1614,7 @@ tier2_mark_test_() ->
             {name, Name} = erlang:fun_info(M, name),
             {arity, Arity} = erlang:fun_info(M, arity),
             Mark =
-                "-" ++ atom_to_list(?BT_TIER2_BLOCK_NAME) ++ "/" ++ integer_to_list(Arity) ++ "-",
+                "-BtTier2Block/" ++ integer_to_list(Arity) ++ "-",
             ?assertNotEqual(nomatch, string:find(atom_to_list(Name), Mark)),
             ?assert(beamtalk_dispatch:is_tier2_block(M))
         end)

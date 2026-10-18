@@ -49,29 +49,6 @@ pub(crate) struct MetaProvenance<'a> {
     /// as `'direct_class_methods'` so the runtime never re-derives eligibility.
     /// Empty for classes with none (and for native facades).
     pub direct_class_methods: &'a [(String, String)],
-    /// ADR 0132 §1: this class's instance-side threaded entries, emitted as
-    /// `'tier2_methods'`. Empty until ADR 0132 Phase 1d generates entries.
-    pub tier2_methods: &'a [Tier2Entry],
-    /// ADR 0132 §1: this class's class-side threaded entries, emitted as
-    /// `'tier2_class_methods'`. Empty until ADR 0132 Phase 1c generates entries.
-    pub tier2_class_methods: &'a [Tier2Entry],
-}
-
-/// ADR 0132 §1: one advertised threaded entry point — a method that accepts a
-/// Tier 2 (stateful) block at `positions` and answers `{Result, Acc}` from
-/// `entry_fn`. Rendered into `__beamtalk_meta/0` as
-/// `'<selector>' => {'<entry_fn>', [Positions...]}`; the runtime caches it in
-/// `beamtalk_class_metadata` and resolves it through
-/// `beamtalk_class_dispatch:lookup_threaded_entry/3` /
-/// `lookup_threaded_class_entry/3`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Tier2Entry {
-    /// The raw selector (`'twice:'`).
-    pub selector: String,
-    /// The entry function's name (`'__t2_class_twice:'`).
-    pub entry_fn: String,
-    /// The 0-based argument positions the entry threads a block through.
-    pub positions: Vec<usize>,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -416,9 +393,6 @@ impl CoreErlangGenerator {
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
-            // ADR 0132 §1: threaded entry points (always emitted, `~{}~` when none).
-            Self::meta_tier2_entry("tier2_methods", provenance.tier2_methods),
-            Self::meta_tier2_entry("tier2_class_methods", provenance.tier2_class_methods),
             extra_entries,
             "\n    }~",
         ]
@@ -469,43 +443,6 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("}~"));
         docvec![",\n      'direct_class_methods' => ", Document::Vec(parts)]
-    }
-
-    /// ADR 0132 §1: `'<key>' => ~{Selector => {EntryFn, [Positions]}}~`,
-    /// including its leading separator. Always emitted (`~{}~` when empty), so
-    /// a module compiled after the key existed is distinguishable from an older
-    /// one; the runtime reads a missing key as "no entries" either way.
-    /// Entries are rendered sorted by selector so the emitted text is
-    /// deterministic whatever order the caller collected them in.
-    pub(super) fn meta_tier2_entry(key: &'static str, entries: &[Tier2Entry]) -> Document<'static> {
-        let mut sorted: Vec<&Tier2Entry> = entries.iter().collect();
-        sorted.sort_by(|a, b| a.selector.cmp(&b.selector));
-        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
-        for (i, entry) in sorted.into_iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            let mut positions: Vec<Document<'static>> = vec![Document::Str("[")];
-            for (j, position) in entry.positions.iter().enumerate() {
-                if j > 0 {
-                    positions.push(Document::Str(", "));
-                }
-                // An argument position always fits: a method has far fewer
-                // than i64::MAX parameters.
-                positions.push(leaf::int_lit(i64::try_from(*position).unwrap_or(i64::MAX)));
-            }
-            positions.push(Document::Str("]"));
-            parts.push(docvec![
-                leaf::atom(entry.selector.clone()),
-                " => {",
-                leaf::atom(entry.entry_fn.clone()),
-                ", ",
-                Document::Vec(positions),
-                "}",
-            ]);
-        }
-        parts.push(Document::Str("}~"));
-        docvec![",\n      ", leaf::atom(key), " => ", Document::Vec(parts)]
     }
 
     /// ADR 0098 Phase 3: emit the `beamtalk_version` / `otp_release` provenance
