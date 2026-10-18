@@ -3571,6 +3571,38 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
         "r := nil\n[r isNil] whileTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
         "r := nil\n1 to: 1 do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
         "r := nil\n1 timesRepeat: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // Every block not in `GROUP_BY_ASSIGN_BLOCKS` (no BUnit cell proves
+        // it unpacks) stays rejected, keyed on the exact construct block.
+        // anySatisfy:
+        "r := nil\n#(1) anySatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // allSatisfy:
+        "r := nil\n#(1) allSatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // detect: search
+        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // detect:ifNone: search
+        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true] ifNone: [0]\nr",
+        // select:
+        "r := nil\n#(1) select: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // ifNil:
+        "r := nil\nnil ifNil: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // ifTrue:ifFalse:
+        "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]] ifFalse: [nil]\nr",
+        // and:
+        "r := nil\ntrue and: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // or:
+        "r := nil\nfalse or: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // at:ifAbsent:
+        "r := nil\n#{#a => 1} at: #k ifAbsent: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // tryDo:
+        "r := nil\nResult tryDo: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // on:do: handler
+        "r := nil\n[Error signal: \"x\"] on: Error do: [:e | r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // keysAndValuesDo:
+        "r := nil\n#{#a => 1} keysAndValuesDo: [:kk :v | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // eachWithIndex:
+        "r := nil\n#(1) eachWithIndex: [:z :j | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // [...] value
+        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]] value\nr",
         // Measured right, but keyed on every enclosing role: an arm in a
         // loop body stays rejected (loud, not silent).
         "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
