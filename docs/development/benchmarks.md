@@ -1510,3 +1510,48 @@ send from ~2.2 us to ~1.1-1.3 us. The rest is `apply_class_method_in_context/6` 
 "within 2x of the direct call" (~270 ns) needs a new call shape for the inherited case, not a flag, and a
 resolution cache would need a hierarchy-wide epoch bumped by every class-metadata write. That is a separate
 design; the numbers above are its starting point.
+
+## BT-3925: guarding untyped Actor `state:` fields
+
+Question: an untyped Actor `state:` field with a numeric default (`state: count = 0`) was trusted as
+numeric when every in-class write was numeric, so `self.count + 1` / `self.count < n` compiled to the bare
+BIF. `spawnWith:` (and subclasses, extensions, `fieldAt:put:`) can store an object there, which then hit a
+raw `badarith` instead of the object's `+`. What does guarding every untyped field cost?
+
+### Method
+
+`runtime/perf/self_send_bench`, `beamtalk run SsbMain counters` (debug CLI): `SsbUntypedCounterActor`
+(`state: count = 0`) and `SsbTypedCounterActor` (`state: count :: Integer = 0`), each with
+`loop: n => [self.count < n] whileTrue: [self.count := self.count + 1]` (2,000,000 iterations inside one
+actor call) and `increment` (200,000 actor sends). "bare" is the compiler before BT-3925 (untyped counter
+trusted); "guarded" is the same compiler with Actor trust switched to never (`is_number` guard on `+`,
+`beamtalk_primitive:is_object` guard on `<`). 9 interleaved rounds (bare, guarded, bare, ...), ns/op,
+median [min-max]. Shared 4-core VM under heavy load (load average ~22), so only medians of interleaved
+rounds mean anything.
+
+| case | bare (before) | guarded (BT-3925) |
+|---|---|---|
+| untyped `loop:` | 140 [92-191] | 42 [32-80] |
+| `:: Integer` `loop:` (identical code both sides) | 199 [107-379] | 127 [113-183] |
+| untyped `increment` send | 13498 [11679-16948] | 12853 [10444-15392] |
+| `:: Integer` `increment` send | 12345 [10920-14676] | 13249 [10006-17792] |
+
+To take the gen_server and the machine noise out, the generated Core Erlang of both packages was renamed,
+loaded into one VM, and `dispatch('loop:', [2000000], nil, #{count => 0})` called directly, 15 rounds
+per module, two passes (sequential, then round-robin): bare untyped 78 / 87 ns, bare typed 80 / 100 ns,
+guarded untyped 35 / 36 ns, guarded typed (same code as bare typed) 157 / 83 ns.
+
+### Findings
+
+- The guarded untyped loop is not slower than the bare one; it measured faster in every round of both
+  harnesses. The BEAM assembly of the guarded loop is strictly more work (an `is_number` test before the
+  `+`, an external `is_object` call before the `<`), so the speed-up is not the guard itself and is not
+  claimed as one; what matters is that the guard costs nothing measurable here.
+- A message send (~12-13 us here) dwarfs either form, so `increment` shows no difference.
+- The guard wraps only the operator. Compiling `self.count < n ifTrue: [self.count := self.count + 1]`
+  (alone and inside an inlined `1 to: n do:`) both ways gives the same inline state-threading `case` and
+  `letrec` loop; the only change is the `case is_number(...)` / `case is_object(...)` around each
+  operator. No optimisation depends on the bare path.
+
+Decision: untyped fields (`state:`, `field:`, `classState:`, sealed or not) are always guarded; a
+`:: Integer` / `:: Float` / `:: Number` annotation is the way to get the bare BIF.

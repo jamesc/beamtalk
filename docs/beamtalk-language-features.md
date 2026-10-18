@@ -686,6 +686,38 @@ This holds however the receiver is typed: an untyped local or parameter, or an `
 
 The **argument** is not checked: a number, character or string receiver compares against an argument of any other kind by the BEAM's term order, so `5 < nil` answers `true` rather than raising. Comparison operators have no number-on-the-left coercion (see above).
 
+##### Arithmetic and comparison on fields: annotate numeric state
+
+Arithmetic and comparison operators are messages, so `self.count + 1` must
+dispatch to the object's `+` when `count` holds a `Point` or `Money`. The
+compiler emits the bare Erlang arithmetic/comparison instruction only when it
+*knows* the operand is a primitive; otherwise it adds a runtime type test that
+sends the message to objects. For a field, "knows" means the declared type: a
+field annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast
+path, and comparisons also accept `:: Character` / `:: String`. A union with
+`Nil` (`:: Integer | Nil`) stays bare for arithmetic only; its comparisons get
+the runtime test so a `nil` raises instead of term-ordering (see Comparison
+above). An **untyped** field always gets the runtime test,
+whatever its default, because writers outside the class can store any object in
+it (BT-3925):
+
+```beamtalk
+Actor subclass: Counter
+  state: count = 0                       // untyped: guarded
+  increment => self.count := self.count + 1
+
+c := Counter spawnWith: #{#count => aPoint}
+c increment                              // sends Point>>+, no badarith
+
+Actor subclass: FastCounter
+  state: count :: Integer = 0            // annotated: bare arithmetic
+  increment => self.count := self.count + 1
+```
+
+The test is cheap (the BT-3925 counter benchmark measured no slowdown, see
+`docs/development/benchmarks.md`), but annotating numeric state with
+`:: Integer` is the documented way to get the bare instruction.
+
 #### Equality (lowest precedence)
 - `=:=` - Strict equality (Erlang `=:=`): `5 =:= 5` → `true`
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`

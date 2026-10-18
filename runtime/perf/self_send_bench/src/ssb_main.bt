@@ -62,7 +62,37 @@ Object subclass: SsbMain
       report: "instance_on_do_raise_loop"
       ns: (self timeOnDo: SsbOnDoRaiseObject new n: rn)
       n: rn
+    self counters
     nil
+
+  // BT-3925: Actor counter with an untyped vs a `:: Integer` `state:` field.
+  // `beamtalk run SsbMain counters` runs just these cases.
+  class counters =>
+    n := 2000000
+    self
+      report: "actor_counter_loop_untyped"
+      ns: (self timeActor: SsbUntypedCounterActor spawn n: n)
+      n: n
+    self
+      report: "actor_counter_loop_typed"
+      ns: (self timeActor: SsbTypedCounterActor spawn n: n)
+      n: n
+    sn := 200000
+    self
+      report: "actor_counter_send_untyped"
+      ns: (self timeSends: SsbUntypedCounterActor spawn n: sn)
+      n: sn
+    self
+      report: "actor_counter_send_typed"
+      ns: (self timeSends: SsbTypedCounterActor spawn n: sn)
+      n: sn
+    nil
+
+  class timeSends: a n: n =>
+    1000 timesRepeat: [a increment]
+    start := DateTime monotonicNow
+    n timesRepeat: [a increment]
+    DateTime monotonicNow - start
 
   class timeOnDo: o n: n =>
     o run: 1000

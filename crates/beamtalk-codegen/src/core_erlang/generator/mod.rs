@@ -255,11 +255,9 @@ pub struct CoreErlangGenerator {
     /// runtime type ([`FieldTypeFact`](crate::core_erlang::field_types::FieldTypeFact)),
     /// for the operator fast-path classifiers. A `self.<field>` read stays on
     /// the bare BIF only when its fact says so: a declared primitive type (a
-    /// union counts when every non-`Nil` member is primitive), or an untyped
-    /// field with numeric evidence (numeric-literal default, numeric in-class
-    /// writes — keeps the `self.count := self.count + 1` counter bare). Any
-    /// other field, and any name absent from the map, routes through the
-    /// runtime guard so an object value dispatches (BT-3892). Populated at
+    /// union counts when every non-`Nil` member is primitive). Untyped
+    /// fields, and any name absent from the map, route through the runtime
+    /// guard so an object value dispatches (BT-3892, BT-3925). Populated at
     /// value-type / actor / supervisor class entry and for extension targets.
     pub(in crate::core_erlang) current_class_field_types:
         std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,

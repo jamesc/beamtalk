@@ -226,26 +226,27 @@ impl CoreErlangGenerator {
     /// * a `self.<field>` read whose field is known numeric
     ///   ([`FieldTypeFact`](crate::core_erlang::field_types::FieldTypeFact)).
     ///
-    /// A field is known numeric when its declared type is numeric (a union
-    /// counts when every non-`Nil` member is), or — for an **untyped** Actor
-    /// `state:` field or a sealed class's `classState:` variable — when its
-    /// default is a numeric literal and every in-class `self.f :=` write is
-    /// numeric. Untyped fields of a Value, Object or `TestCase` are never
-    /// trusted: their keyword constructor runs outside the class. That keeps
-    /// the broad `self.count := self.count + 1` counter pattern (and the dependent `ifTrue:` inline-case
-    /// state-threading optimisation) on the bare path, while an untyped field
-    /// that defaults to `nil` or is assigned an object (`field: p = nil`, set
-    /// to a `Point` in `setUp`), a union with an object member
-    /// (`:: Point | Nil`), or an explicit object type (`:: Money`) routes
-    /// through the `is_number` guard so `self.p + x` dispatches to the
-    /// object's `+` (BT-3892).
+    /// A field is known numeric only when its declared type is numeric (a
+    /// union counts when every non-`Nil` member is). An **untyped** field is
+    /// never trusted, whatever its default: `spawnWith:`, a keyword
+    /// constructor, a subclass or an extension can store an object in it
+    /// (BT-3925). So `state: count :: Integer = 0` keeps
+    /// `self.count := self.count + 1` on the bare BIF, while an untyped field
+    /// (`state: count = 0`, `field: p = nil` set to a `Point` in `setUp`), a
+    /// union with an object member (`:: Point | Nil`), or an explicit object
+    /// type (`:: Money`) routes through the `is_number` guard so `self.p + x`
+    /// dispatches to the object's `+` (BT-3892). The guard only wraps the
+    /// operator: an `ifTrue:` on a guarded comparison still compiles to the
+    /// same inline state-threading `case`, and the guarded Actor counter
+    /// measured no slower than the bare one (BT-3925,
+    /// `docs/development/benchmarks.md`).
     ///
     /// ADR 0116 reuses this same predicate, unmodified, to gate the
     /// number-on-the-left coercion mechanism's *right* operand — per the
     /// ADR's own "Trigger condition, refined" spec ("a numeric/untyped field —
-    /// the exact same rule already applied to the left operand"). With the
-    /// BT-3892 evidence rule an untyped `self.extra` without numeric evidence
-    /// in `self.total + self.extra` now reaches the `try`/`catch` and a
+    /// the exact same rule already applied to the left operand"). Since an
+    /// untyped field is never trusted (BT-3892, BT-3925), an untyped
+    /// `self.extra` in `self.total + self.extra` reaches the `try`/`catch` and a
     /// non-numeric `extra` dispatches to `plusFromNumber:` (closing the
     /// BT-3266 gap).
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
@@ -297,10 +298,10 @@ impl CoreErlangGenerator {
     /// runtime guard, making `self.lo < other lo` dispatch to `Money>><` — and
     /// an `:: Integer | Nil` field holding `nil` raise `does_not_understand`.
     /// The same field facts as [`Self::receiver_is_statically_numeric`] apply
-    /// (BT-3892): numeric / `Character` / `String` declared fields (unions of
-    /// those, but — unlike arithmetic — no union with a `Nil` member, BT-3924),
-    /// and untyped fields with numeric evidence, stay on the bare comparison
-    /// BIF; everything else is guarded.
+    /// (BT-3892, BT-3925): numeric / `Character` / `String` declared fields
+    /// (unions of those, but — unlike arithmetic — no union with a `Nil`
+    /// member, BT-3924) stay on the bare comparison BIF; everything else,
+    /// untyped fields included, is guarded.
     pub(in crate::core_erlang) fn receiver_is_statically_comparable(
         &self,
         expr: &Expression,

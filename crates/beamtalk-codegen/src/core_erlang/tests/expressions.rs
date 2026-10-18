@@ -487,8 +487,8 @@ fn test_number_coercion_try_catch_compiles_through_erlc() {
 #[test]
 fn test_number_coercion_untyped_self_field_right_operand_is_guarded() {
     // BT-3892 (fixes the BT-3266 pin): the right-operand gate reuses
-    // `receiver_is_statically_numeric`, which no longer trusts an untyped
-    // `self.field` without numeric evidence — so `5 + self.extra` reaches the
+    // `receiver_is_statically_numeric`, which never trusts an untyped
+    // `self.field` — so `5 + self.extra` reaches the
     // ADR 0116 try/catch and a non-numeric `extra` dispatches to
     // `plusFromNumber:` instead of raw-crashing on badarith.
     let mut generator = CoreErlangGenerator::new("test");
@@ -500,15 +500,15 @@ fn test_number_coercion_untyped_self_field_right_operand_is_guarded() {
         .to_pretty_string();
     assert!(
         output.contains("try ") && output.contains("send_number_coercion"),
-        "an untyped self.field right operand without numeric evidence must take \
+        "an untyped self.field right operand must take \
          the coercion try/catch — got: {output}"
     );
 }
 
 #[test]
 fn test_number_coercion_untyped_self_fields_both_sides_are_guarded() {
-    // BT-3892: `self.total + self.extra` with both fields untyped and no
-    // numeric evidence is guarded on the left (`is_number`) and takes the
+    // BT-3892: `self.total + self.extra` with both fields untyped is
+    // guarded on the left (`is_number`) and takes the
     // coercion try/catch for the right.
     let mut generator = CoreErlangGenerator::new("test");
     let left = self_field_access("total");
@@ -519,20 +519,19 @@ fn test_number_coercion_untyped_self_fields_both_sides_are_guarded() {
         .to_pretty_string();
     assert!(
         output.contains("call 'erlang':'is_number'(") && output.contains("send_number_coercion"),
-        "untyped fields without numeric evidence must be guarded — got: {output}"
+        "untyped fields must be guarded — got: {output}"
     );
 }
 
 #[test]
-fn test_number_coercion_numeric_untyped_self_fields_both_sides_stay_bare() {
-    // BT-3892: untyped fields WITH numeric evidence (numeric-literal default,
-    // numeric in-class writes) keep the zero-cost bare BIF on both operands.
-    use crate::core_erlang::field_types::FieldTypeFact;
+fn test_number_coercion_numeric_typed_self_fields_both_sides_stay_bare() {
+    // BT-3925: numeric-annotated fields keep the zero-cost bare BIF on both
+    // operands (an untyped field is guarded whatever its default).
     let mut generator = CoreErlangGenerator::new("test");
     for f in ["total", "extra"] {
         generator
             .current_class_field_types
-            .insert(f.to_string(), FieldTypeFact::UntypedNumeric);
+            .insert(f.to_string(), declared_field("Integer"));
     }
     let left = self_field_access("total");
     let right = self_field_access("extra");
@@ -544,7 +543,7 @@ fn test_number_coercion_numeric_untyped_self_fields_both_sides_stay_bare() {
         !output.contains("try ")
             && !output.contains("is_number")
             && output.contains("call 'erlang':'+'("),
-        "numeric-evidenced untyped fields must stay bare — got: {output}"
+        "numeric-typed fields must stay bare — got: {output}"
     );
 }
 
@@ -656,44 +655,54 @@ fn test_bt3924_nilable_primitive_field_comparison_is_guarded() {
 }
 
 #[test]
-fn test_bt3892_actor_counter_stays_bare_and_poisoned_field_is_guarded() {
+fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
     // Actor methods are inlined into `dispatch/4`, so each shape gets its own
-    // minimal class and the assertion is over the whole module.
-    let counter = crate::core_erlang::tests::codegen(
+    // minimal class and the assertion is over the whole module. An untyped
+    // counter is guarded even when every in-class write is numeric (and the
+    // actor is sealed): `spawnWith:` may have stored an object in it.
+    for src in [
         "Actor subclass: Ctr\n  state: count = 0\n  \
          increment => self.count := self.count + 1\n  \
          reset => self.count := 0\n  \
          below: n => self.count < n\n",
+        "sealed Actor subclass: Ctr\n  state: count = 0\n  \
+         increment => self.count := self.count + 1\n  \
+         below: n => self.count < n\n",
+    ] {
+        let untyped = crate::core_erlang::tests::codegen(src);
+        assert!(
+            untyped.contains("call 'erlang':'is_number'(") && untyped.contains("'is_binary'("),
+            "an untyped counter must be guarded:\n{untyped}"
+        );
+    }
+    let typed = crate::core_erlang::tests::codegen(
+        "Actor subclass: Ctr\n  state: count :: Integer = 0\n  \
+         increment => self.count := self.count + 1\n  \
+         below: n => self.count < n\n",
     );
     assert!(
-        !counter.contains("is_number") && !counter.contains("'is_binary'("),
-        "untyped counter with only numeric writes must stay bare:\n{counter}"
-    );
-    let poisoned = crate::core_erlang::tests::codegen(
-        "Actor subclass: Ctr\n  state: origin = 0\n  \
-         place: pt => self.origin := pt\n  \
-         shifted: q => self.origin + q\n",
-    );
-    assert!(
-        poisoned.contains("call 'erlang':'is_number'("),
-        "a field assigned a non-numeric value must be guarded:\n{poisoned}"
+        !typed.contains("is_number") && !typed.contains("'is_binary'("),
+        "an `:: Integer` counter must stay bare:\n{typed}"
     );
 }
 
 #[test]
-fn test_bt3892_class_variable_facts_drive_class_method_operators() {
+fn test_bt3925_class_variable_facts_drive_class_method_operators() {
+    // Untyped class variables are guarded even in a sealed class; an
+    // annotated one stays bare.
     let core = crate::core_erlang::tests::codegen(
-        "sealed Object subclass: Reg\n  classState: hits = 0\n  classState: last = nil\n  \
+        "sealed Object subclass: Reg\n  classState: hits = 0\n  \
+         classState: typedHits :: Integer = 0\n  \
          class bump => self.hits := self.hits + 1\n  \
-         class shifted: q => self.last + q\n",
+         class bumpTyped => self.typedHits := self.typedHits + 1\n",
     );
     assert!(
-        !method_body_contains(&core, "class_bump", "is_number"),
-        "numeric class-variable counter must stay bare:\n{core}"
+        method_body_contains(&core, "class_bump", "call 'erlang':'is_number'("),
+        "an untyped class variable must be guarded:\n{core}"
     );
     assert!(
-        method_body_contains(&core, "class_shifted:", "call 'erlang':'is_number'("),
-        "an untyped nil-default class variable must be guarded:\n{core}"
+        !method_body_contains(&core, "class_bumpTyped", "is_number"),
+        "an `:: Integer` class variable must stay bare:\n{core}"
     );
 }
 
@@ -738,7 +747,7 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
     }
     for sel in ["blockLt:in:", "localLt:with:", "patternLt:from:"] {
         assert!(
-            method_body_contains(&core, sel, "'is_object'("),
+            method_body_contains(&core, sel, "'is_binary'("),
             "{sel}: a rebound typed-param name must be guarded:\n{core}"
         );
     }
@@ -752,7 +761,7 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
     for sel in ["plainAdd:", "plainLt:", "plainRight:"] {
         assert!(
             !method_body_contains(&core, sel, "is_number")
-                && !method_body_contains(&core, sel, "'is_object'(")
+                && !method_body_contains(&core, sel, "'is_binary'(")
                 && !method_body_contains(&core, sel, "try call"),
             "{sel}: an unshadowed typed param must stay bare:\n{core}"
         );
@@ -968,14 +977,12 @@ fn declared_field(ty: &str) -> crate::core_erlang::field_types::FieldTypeFact {
 }
 
 #[test]
-fn test_comparison_primitive_and_numeric_untyped_field_stay_bare() {
-    // Integer-typed fields and untyped fields with numeric evidence keep the
-    // bare comparison BIF (preserves counter/accumulator hot paths and their
-    // state-threading).
-    use crate::core_erlang::field_types::FieldTypeFact;
+fn test_comparison_numeric_typed_field_stays_bare() {
+    // Numeric-typed fields keep the bare comparison BIF (the counter /
+    // accumulator fast path).
     for (field_name, fact) in [
         ("count", declared_field("Integer")),
-        ("x", FieldTypeFact::UntypedNumeric),
+        ("x", declared_field("Float")),
     ] {
         let mut generator = CoreErlangGenerator::new("test");
         generator
@@ -1019,14 +1026,42 @@ fn test_arith_object_typed_field_is_guarded() {
 }
 
 #[test]
-fn test_arith_numeric_and_numeric_untyped_field_stay_bare() {
-    // Numeric-typed fields and untyped fields with numeric evidence keep the
-    // bare arithmetic BIF — no regression to the `self.count := self.count + 1`
-    // counter pattern.
+fn test_untyped_field_is_guarded_for_arith_and_comparison() {
+    // BT-3925: an untyped field is guarded even when it is an Actor's
+    // numeric-default counter — `spawnWith:` (or a subclass, an extension, a
+    // keyword constructor) may have stored an object in it.
     use crate::core_erlang::field_types::FieldTypeFact;
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .current_class_field_types
+        .insert("count".to_string(), FieldTypeFact::Untyped);
+    let left = self_field_access("count");
+    let one = vec![Expression::Literal(Literal::Integer(1), Span::new(10, 11))];
+    let arith = generator
+        .generate_binary_op("+", &left, &one)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        arith.contains("call 'erlang':'is_number'("),
+        "untyped field arithmetic must be guarded; got: {arith}"
+    );
+    let compare = generator
+        .generate_binary_op("<", &left, &one)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        compare.contains("call 'erlang':'is_binary'("),
+        "untyped field comparison must be guarded; got: {compare}"
+    );
+}
+
+#[test]
+fn test_arith_numeric_typed_field_stays_bare() {
+    // Numeric-typed fields keep the bare arithmetic BIF — the
+    // `self.count := self.count + 1` counter fast path.
     for (field_name, fact) in [
         ("count", declared_field("Integer")),
-        ("x", FieldTypeFact::UntypedNumeric),
+        ("x", declared_field("Number")),
     ] {
         let mut generator = CoreErlangGenerator::new("test");
         generator

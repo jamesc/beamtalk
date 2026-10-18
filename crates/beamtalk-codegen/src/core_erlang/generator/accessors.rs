@@ -11,7 +11,7 @@
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, UntypedTrust, classify_fields,
+    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
@@ -405,40 +405,18 @@ impl CoreErlangGenerator {
     /// of `class`, for the operator fast-path classifiers. Replaces any
     /// previously-recorded facts (call once per class at codegen entry).
     ///
-    /// Own fields are classified from the class source by
-    /// [`classify_fields`] — declared types in full (unions included), untyped
-    /// fields by their default and every in-class `self.f :=` write (including
-    /// standalone `Class >> sel` methods for this class in `module`) when
-    /// `trust` allows it: an Actor's own writes are its fields' normal
-    /// writers, a Value's are not (its keyword constructor runs outside the
-    /// class). `classState:` variables are classified from the class methods
-    /// only in a **sealed** class: an inherited class method runs over a
-    /// subclass's redeclared variable (ADR 0130), whose default and writers
-    /// this class cannot see. Inherited
+    /// Own fields and `classState:` variables are classified by their
+    /// declaration alone ([`classify_fields`]): a declared type is recorded in
+    /// full (unions included), an untyped field is always guarded, whatever
+    /// its default or the class's own writes (BT-3925 — `spawnWith:`, keyword
+    /// constructors, subclasses and extensions write fields too). Inherited
     /// fields get their declared type from the class hierarchy; an inherited
-    /// *untyped* field has no visible writers, so it gets no fact and is
-    /// guarded (BT-3892).
+    /// untyped field gets no fact and is guarded (BT-3892).
     pub(in crate::core_erlang) fn set_class_field_types(
         &mut self,
         class: &beamtalk_core::ast::ClassDefinition,
-        module: &beamtalk_core::ast::Module,
-        trust: UntypedTrust,
     ) {
-        let standalone = |class_side: bool| {
-            module
-                .method_definitions
-                .iter()
-                .filter(move |d| {
-                    d.class_name.name == class.name.name && d.is_class_method == class_side
-                })
-                .map(|d| &d.method)
-        };
-        let instance_writers: Vec<&beamtalk_core::ast::MethodDefinition> =
-            class.methods.iter().chain(standalone(false)).collect();
-        let class_writers: Vec<&beamtalk_core::ast::MethodDefinition> =
-            class.class_methods.iter().chain(standalone(true)).collect();
-
-        let mut fields = classify_fields(&class.state, &instance_writers, trust);
+        let mut fields = classify_fields(&class.state);
         if let (Some(hierarchy), Some(superclass)) =
             (self.class_hierarchy.as_ref(), class.superclass.as_ref())
         {
@@ -452,13 +430,7 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        let class_var_trust = if class.is_sealed {
-            UntypedTrust::FromClassSource
-        } else {
-            UntypedTrust::Never
-        };
-        self.current_class_var_types =
-            classify_fields(&class.class_variables, &class_writers, class_var_trust);
+        self.current_class_var_types = classify_fields(&class.class_variables);
     }
 
     /// Populates instance-field facts for an **extension** method from the
