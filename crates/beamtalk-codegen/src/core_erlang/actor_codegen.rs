@@ -417,8 +417,14 @@ impl CoreErlangGenerator {
             )));
             // Record field declared types so `self.<field>`
             // comparisons/arithmetic on object-typed fields route through the
-            // guard rather than silently term-ordering / `badarith`-ing.
-            self.set_class_field_types(&class.state);
+            // guard rather than silently term-ordering / `badarith`-ing. An
+            // actor's own `self.f :=` writes are its fields' normal writers,
+            // so untyped numeric fields may be trusted from them.
+            self.set_class_field_types(
+                class,
+                module,
+                crate::core_erlang::field_types::UntypedTrust::FromClassSource,
+            );
 
             // Collect sealed method selectors for direct-call optimization.
             // Only sealed classes benefit: the dispatch fast path checks is_class_sealed().

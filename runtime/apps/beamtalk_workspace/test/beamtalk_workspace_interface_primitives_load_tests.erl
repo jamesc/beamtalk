@@ -353,7 +353,7 @@ start_supervisor_attaches_and_is_idempotent(#{tmp := Tmp, unique := U}) ->
                 %% returns the SAME handle rather than erroring or
                 %% double-registering.
                 ?assertEqual(First, Second),
-                ?assertEqual(1, length(beamtalk_workspace_interface_primitives:supervisors()))
+                ?assertEqual(1, length(beamtalk_node:local_supervisors()))
             end)
         )
     ].
@@ -387,7 +387,7 @@ stop_supervisor_detaches_workspace_child(#{tmp := Tmp, unique := U}) ->
                 _ = beamtalk_workspace_interface_primitives:startSupervisor(SupClassObj),
                 StopResult = beamtalk_workspace_interface_primitives:stopSupervisor(SupClassObj),
                 ?assertEqual(nil, StopResult),
-                ?assertEqual(0, length(beamtalk_workspace_interface_primitives:supervisors()))
+                ?assertEqual(0, length(beamtalk_node:local_supervisors()))
             end)
         )
     ].

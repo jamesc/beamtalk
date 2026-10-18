@@ -45,8 +45,14 @@ pub fn emit_beamtalk_version(workspace_root: &Path) {
     // Uses `git rev-parse --git-path` to resolve each path correctly in both
     // regular repos and worktrees (where HEAD is worktree-private but refs
     // and packed-refs live in the shared git-common-dir).
+    // Only paths that exist: Cargo reruns a build script on every build while
+    // one of its rerun-if-changed paths is missing, and a fresh CI checkout has
+    // no `packed-refs`, so beamtalk-cli and beamtalk-compiler-port (and every
+    // crate above them) recompiled on every cargo command (BT-3879). Refs
+    // packed into a later `packed-refs` leave `refs/heads`/`refs/tags`, so
+    // that change still reruns the script.
     for p in ["HEAD", "refs/heads", "refs/tags", "packed-refs"] {
-        if let Some(path) = git_path(p) {
+        if let Some(path) = git_path(p).filter(|path| Path::new(path).exists()) {
             println!("cargo:rerun-if-changed={path}");
         }
     }

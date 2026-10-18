@@ -68,7 +68,10 @@ register_test_classes() ->
         instance_methods => #{},
         instance_variables => []
     }),
-    ensure_class_started('Counter', #{
+    %% Fresh, not `ensure_class_started/2`: a `Counter` class another suite in
+    %% the same EUnit VM left running can have lost its metadata rows, which
+    %% hides it from `allClasses`. This suite's `Counter` is its own fixture.
+    restart_class('Counter', #{
         name => 'Counter',
         module => counter,
         superclass => 'Object',
@@ -79,6 +82,13 @@ register_test_classes() ->
         instance_variables => [value]
     }),
     ok.
+
+restart_class(ClassName, ClassInfo) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined -> ok;
+        Pid -> catch gen_server:stop(Pid, normal, 5000)
+    end,
+    ensure_class_started(ClassName, ClassInfo).
 
 ensure_class_started(ClassName, ClassInfo) ->
     case beamtalk_object_class:start_link(ClassName, ClassInfo) of

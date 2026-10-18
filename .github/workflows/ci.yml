@@ -45,7 +45,12 @@ jobs:
     # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
     # change) is ~28 min on Windows (11 min of dependency build alone), and a
     # job the timeout cancels never reaches the post step that saves the
-    # cache, so it would stay cold on every rerun. Warm runs are 15-22 min.
+    # cache, so it would stay cold on every rerun. Warm runs were 17-24.5 min
+    # on Windows, of which 4.6 min was cargo recompiling the whole workspace at
+    # the start of the test step and 1.5 min recompiling it again for the
+    # doctests; BT-3879 removed both (see the beamtalk-build profile in
+    # Cargo.toml, `test-rust-platform` in the Justfile, and
+    # emit_beamtalk_version in crates/beamtalk-build).
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,7 +165,8 @@ jobs:
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
         # The full Rust suite (`test-rust`) runs on Linux only; macOS and Windows run
         # `test-rust-platform`, which skips the two pure compiler crates whose
-        # platform-independent corpus tests were ~15 of the step's ~21 minutes per OS.
+        # platform-independent corpus tests were ~15 of the step's ~21 minutes per OS
+        # (a nextest filterset, so the test build reuses `just build`'s artifacts).
         # On Windows, fmt-check skips Erlang/JS checks (platform-agnostic, Linux covers them).
         # lint-workaround-comments (BT-2347 ratchet) is a no-op on Windows and enforces
         # the same allowlist gate here that `just ci` enforces locally (BT-2841).

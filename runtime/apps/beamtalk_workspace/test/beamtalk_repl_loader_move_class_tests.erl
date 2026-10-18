@@ -222,6 +222,10 @@ setup_dynamic() ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
+    %% (Re)load the stdlib classes: a suite earlier in the same EUnit VM may
+    %% have stopped every class process, and the stdlib refusal case needs a
+    %% real, `.beam`-backed stdlib class to classify as `stdlib`.
+    ok = beamtalk_stdlib:init(),
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
@@ -272,9 +276,12 @@ move_class_dynamic_no_source_file(#{proj_dir := ProjDir}) ->
 move_class_stdlib_refusal_test_() ->
     {setup, fun setup_dynamic/0, fun teardown_dynamic/1, fun move_class_stdlib_refusal/1}.
 
+%% `Bag`, not `Object`: many runtime suites register a hand-built stand-in
+%% `Object` class (no `.beam` file, so it classifies as dynamic) in the same
+%% EUnit VM; none replaces `Bag`, which `setup_dynamic/0` (re)loads.
 move_class_stdlib_refusal(#{proj_dir := ProjDir}) ->
-    NewPath = list_to_binary(filename:join(ProjDir, "object.bt")),
-    Result = beamtalk_repl_loader:move_class('Object', NewPath),
+    NewPath = list_to_binary(filename:join(ProjDir, "bag.bt")),
+    Result = beamtalk_repl_loader:move_class('Bag', NewPath),
     [
         ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result)
     ].

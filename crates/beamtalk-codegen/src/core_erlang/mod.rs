@@ -130,6 +130,7 @@ mod error;
 mod errors;
 mod expr_shape;
 mod expressions;
+mod field_types;
 mod gen_server;
 pub(in crate::core_erlang) mod generator;
 mod intrinsics;

@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3892 fixture: a Value holding a `FieldOperandPoint` in an untyped field
+// (default nil), a union-typed field (`:: FieldOperandPoint | Nil`) and a
+// plain-typed field, plus an untyped numeric counter. Each `self.<field> op q`
+// must dispatch to the point's operator, not the numeric-only path.
+
+Value subclass: FieldOperandValueHolder
+  field: p = nil
+  field: tp :: FieldOperandPoint | Nil = nil
+  field: ok :: FieldOperandPoint = FieldOperandPoint new
+  field: count = 0
+
+  /// `+ - * /` on the untyped field.
+  arithUntyped: q :: FieldOperandPoint -> Array =>
+    #[self.p + q, self.p - q, self.p * 2, self.p / 2]
+
+  /// `< > <= >=` on the untyped field.
+  compareUntyped: q :: FieldOperandPoint -> Array =>
+    #[self.p < q, self.p > q, self.p <= q, self.p >= q]
+
+  /// `+ - * /` on the union-typed field.
+  arithUnion: q :: FieldOperandPoint -> Array =>
+    #[self.tp + q, self.tp - q, self.tp * 2, self.tp / 2]
+
+  /// `< > <= >=` on the union-typed field.
+  compareUnion: q :: FieldOperandPoint -> Array =>
+    #[self.tp < q, self.tp > q, self.tp <= q, self.tp >= q]
+
+  /// `+ - * /` on the plain-typed field.
+  arithTyped: q :: FieldOperandPoint -> Array =>
+    #[self.ok + q, self.ok - q, self.ok * 2, self.ok / 2]
+
+  /// `< > <= >=` on the plain-typed field.
+  compareTyped: q :: FieldOperandPoint -> Array =>
+    #[self.ok < q, self.ok > q, self.ok <= q, self.ok >= q]
+
+  /// The numeric-counter shape: an untyped field only ever written numbers.
+  bumped -> FieldOperandValueHolder => self withCount: self.count + 1
+
+  /// Whether the counter is below `n` (comparison on the untyped counter).
+  countBelow: n :: Integer -> Boolean => self.count < n

@@ -205,34 +205,35 @@ impl CoreErlangGenerator {
     /// Mirrors the gradual-typing contract: an annotation (or a syntactic fact)
     /// *removes* the guard; its absence keeps the guard, which is always correct.
     /// Recognises sources of numeric certainty already present in the
-    /// AST / codegen context — no new analysis pass:
+    /// AST / codegen context — no type-inference pass:
     /// * a numeric literal receiver (`1 + x`),
     /// * `self` inside a numeric class (`Integer`/`Float` method bodies),
     /// * an identifier bound to a `:: Integer/Float/Number` parameter, and
-    /// * a `self.<field>` read whose field is numeric-typed or untyped.
+    /// * a `self.<field>` read whose field is known numeric
+    ///   ([`FieldTypeFact`](crate::core_erlang::field_types::FieldTypeFact)).
     ///
-    /// The `self.<field>` case keeps numeric / untyped instance-field arithmetic
-    /// on the bare path — both to avoid regressing the broad
-    /// `self.count := self.count + 1` counter pattern (and the dependent
-    /// `ifTrue:` inline-case state-threading optimisation) and because untyped
-    /// fields carry no type information. A field with an explicit **non-numeric**
-    /// declared type (e.g. `field: lo :: Money`) instead routes through the
-    /// `is_number` guard so `self.lo + x` dispatches to the field type's `+`. (On
-    /// the arithmetic path a non-number field would otherwise `badarith`; on the
-    /// comparison path the analogous miss is *silently wrong* — see
-    /// [`Self::receiver_is_statically_comparable`].)
+    /// A field is known numeric when its declared type is numeric (a union
+    /// counts when every non-`Nil` member is), or — for an **untyped** Actor
+    /// `state:` field or a sealed class's `classState:` variable — when its
+    /// default is a numeric literal and every in-class `self.f :=` write is
+    /// numeric. Untyped fields of a Value, Object or `TestCase` are never
+    /// trusted: their keyword constructor runs outside the class. That keeps
+    /// the broad `self.count := self.count + 1` counter pattern (and the dependent `ifTrue:` inline-case
+    /// state-threading optimisation) on the bare path, while an untyped field
+    /// that defaults to `nil` or is assigned an object (`field: p = nil`, set
+    /// to a `Point` in `setUp`), a union with an object member
+    /// (`:: Point | Nil`), or an explicit object type (`:: Money`) routes
+    /// through the `is_number` guard so `self.p + x` dispatches to the
+    /// object's `+` (BT-3892).
     ///
     /// ADR 0116 reuses this same predicate, unmodified, to gate the
     /// number-on-the-left coercion mechanism's *right* operand — per the
-    /// ADR's own "Trigger condition, refined" spec, which explicitly folds
-    /// "a numeric/untyped field" into "the exact same rule already applied
-    /// to the left operand." That reuse means the untyped-field leniency
-    /// above (deliberately tuned for the left operand's hot-loop counter
-    /// pattern) reproduces on the right side too: an untyped `self.extra` in
-    /// `self.total + self.extra` is trusted as numeric and never reaches the
-    /// new `try`/`catch`, so a non-numeric `extra` still raw-crashes on
-    /// `badarith` at runtime instead of dispatching to `plusFromNumber:` —
-    /// not fixed here.
+    /// ADR's own "Trigger condition, refined" spec ("a numeric/untyped field —
+    /// the exact same rule already applied to the left operand"). With the
+    /// BT-3892 evidence rule an untyped `self.extra` without numeric evidence
+    /// in `self.total + self.extra` now reaches the `try`/`catch` and a
+    /// non-numeric `extra` dispatches to `plusFromNumber:` (closing the
+    /// BT-3266 gap).
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {
@@ -244,8 +245,8 @@ impl CoreErlangGenerator {
                     self.param_is_numeric(&id.name)
                 }
             }
-            // `self.<field>` stays bare only when the field is numeric-typed or
-            // untyped (see doc above); explicit object-typed fields are guarded.
+            // `self.<field>` stays bare only when the field is known numeric
+            // (see doc above); every other field is guarded.
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
@@ -269,7 +270,7 @@ impl CoreErlangGenerator {
     ///   (`Integer`/`Float`/`Character`/`String`),
     /// * an identifier bound to a `:: Integer/Float/Number/Character/String`
     ///   parameter, and
-    /// * a `self.<field>` read whose field is primitive-ordered-typed or untyped.
+    /// * a `self.<field>` read whose field is known primitive-ordered.
     ///
     /// The `self.<field>` case is **type-aware**, and the
     /// stakes are higher here than for arithmetic: `erlang:'<'` is a total order
@@ -278,8 +279,10 @@ impl CoreErlangGenerator {
     /// a wrong boolean, not a `badarith`. So a field with an explicit
     /// non-primitive declared type (e.g. `field: lo :: Money`) routes through the
     /// `is_object` guard, making `self.lo < other lo` dispatch to `Money>><`.
-    /// Numeric / `Character` / `String` fields, and untyped fields (no info, kept
-    /// bare for status quo), stay on the bare comparison BIF.
+    /// The same field facts as [`Self::receiver_is_statically_numeric`] apply
+    /// (BT-3892): numeric / `Character` / `String` declared fields (unions
+    /// whose non-`Nil` members all are), and untyped fields with numeric
+    /// evidence, stay on the bare comparison BIF; everything else is guarded.
     pub(in crate::core_erlang) fn receiver_is_statically_comparable(
         &self,
         expr: &Expression,
