@@ -916,10 +916,6 @@ impl CoreErlangGenerator {
         // extraction the consumer emits after the construct is fixed at
         // compile time and runs whichever arm executed.
         let families = self.exception_construct_families(&[receiver_block, handler_block]);
-        // ADR 0132: this construct's `family_version`/`set_family_version`
-        // thread `SelfVt` only; a protected body or handler holding a use of a
-        // threading parameter (`Acc`) is refused, never dropped.
-        self.reject_unthreadable_acc_family(families.as_slice(), "on:do:", receiver_block.span)?;
         // The construct's own live baseline for whichever family `families`
         // names (0 when `families` is empty; never read in that case) —
         // restored between arms (they are siblings: only one ever runs) and
@@ -1258,8 +1254,6 @@ impl CoreErlangGenerator {
         // from the AST up front so every arm's return tuple agrees on the
         // shape.
         let families = self.exception_construct_families(&[receiver_block, cleanup_block]);
-        // ADR 0132: see `generate_on_do_with_mutations`.
-        self.reject_unthreadable_acc_family(families.as_slice(), "ensure:", receiver_block.span)?;
         // The construct's own live baselines — restored between arms and
         // once more after the construct (see `generate_on_do_with_mutations`).
         let outer_self = self.self_version();

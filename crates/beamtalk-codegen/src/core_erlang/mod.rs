@@ -145,7 +145,6 @@ pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;
 mod supervisor_codegen;
-mod threaded_body;
 mod threaded_expr;
 mod threaded_ir;
 mod threading_analysis;
