@@ -1105,7 +1105,8 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # them with other recipes (`just build clippy fmt-check test-rust lint-...`),
 # and a variadic recipe would swallow every following recipe name as a test
 # filter (nextest then runs 0 tests and the later recipes never run). The
-# package selection is the one parameter of the hidden `_test-rust`.
+# package selection and the skipped packages are parameters of the hidden
+# `_test-rust`.
 # Output: failures + the summary line only.
 #
 # Two tiers. `test-rust` is the fast tier: everything except `corpus_tests`.
@@ -1150,22 +1151,36 @@ test-corpus:
 # CI runs this on macOS and Windows and the full `test-rust` on Linux; nothing
 # about those two crates' tests depends on the OS, so running them three times
 # bought nothing. New crates are included here by default.
-test-rust-platform: (_test-rust "--workspace --exclude beamtalk-codegen --exclude beamtalk-repl")
+#
+# The two crates' tests are left out by a nextest filterset over the whole
+# workspace, not by `cargo --exclude` (BT-3879): `--exclude beamtalk-repl` drops
+# the `test` feature its dev-dependency turns on in beamtalk-codegen, so cargo
+# rebuilt beamtalk-codegen and every crate above it instead of reusing
+# `just build`'s artifacts (~4.5 min of the Windows CI leg, plus ~1.5 min more
+# for the doctests). Their doctests still run (seconds). The cargo-test
+# fallback (no nextest) has no filterset, so it uses `--exclude`.
+platform_independent_crates := "beamtalk-codegen beamtalk-repl"
+platform_skip_filterset := replace(replace_regex(platform_independent_crates, '(\S+)', 'package(=${1})'), " ", " | ")
+platform_skip_cargo_args := "--workspace " + replace_regex(platform_independent_crates, '(\S+)', '--exclude ${1}')
 
-# ARGS is the cargo package selection, e.g. `--workspace --exclude <crate>`.
+test-rust-platform: (_test-rust "" platform_skip_filterset platform_skip_cargo_args)
+
+# ARGS is the cargo package selection, e.g. `-p <crate>`. SKIP_FILTERSET is a
+# nextest filterset of tests not to run, and SKIP_CARGO_ARGS the same packages
+# as cargo-test arguments for the no-nextest fallback (see `test-rust-platform`).
 # `cargo test --doc` runs the doctests nextest does not. The criterion bench
 # smoke is not here: see `test-benches-smoke` (nightly only, BT-3886).
 [unix]
-_test-rust ARGS:
+_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }} || exit $?
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }} || exit $?
         rest=()
     else
         echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier and the bench smoke too)"
-        rest=(--all-targets)
+        rest=("--all-targets {{ SKIP_CARGO_ARGS }}")
     fi
     for targets in "${rest[@]}" "--doc"; do
         output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
@@ -1175,9 +1190,9 @@ _test-rust ARGS:
     echo "✅ Rust tests complete"
 
 [windows]
-_test-rust ARGS:
+_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} {{ SKIP_CARGO_ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
 
