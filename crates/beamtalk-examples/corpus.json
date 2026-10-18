@@ -16501,7 +16501,7 @@
         "testValuePure",
         "testValueReadOnly"
       ],
-      "source": "// BT-3756 (ADR 0131 §6): a block that writes no local of the enclosing method\n// still works when it escapes the method (returned, stored in a field, placed\n// in a collection literal). Only a block that writes an outer local is a\n// compile error there (Rust tests, `ESCAPE_SHAPES`).\n\nTestCase subclass: Adr0131Section6EscapeTest\n\n  testActorPure =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedPure value: 1) equals: 2\n\n  testActorOwnLocal =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedOwnLocal value: 3) equals: 7\n\n  testActorReadOnly =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedReadOnly value: 1) equals: 11\n\n  testActorStoredFieldWriter =>\n    a := Adr0131Section6EscapeActor spawn\n    a storedFieldWriter\n    a runStored\n    a runStored\n    self assert: a count equals: 2\n\n  testClassPure =>\n    self assert: (Adr0131Section6EscapeClass returnedPure value: 1) equals: 2\n\n  testClassOwnLocal =>\n    self assert: (Adr0131Section6EscapeClass returnedOwnLocal value: 3) equals: 7\n\n  testClassReadOnly =>\n    self assert: (Adr0131Section6EscapeClass returnedReadOnly value: 1) equals: 11\n\n  testClassLiteral =>\n    self assert: (Adr0131Section6EscapeClass literalOfPure last value: 4) equals: 8\n\n  testValuePure =>\n    self assert: (Adr0131Section6EscapeValue new returnedPure value: 1) equals: 2\n\n  testValueOwnLocal =>\n    self assert: (Adr0131Section6EscapeValue new returnedOwnLocal value: 3) equals: 7\n\n  testValueReadOnly =>\n    self assert: (Adr0131Section6EscapeValue new returnedReadOnly value: 1) equals: 11\n\n  testValueLiteral =>\n    self assert: (Adr0131Section6EscapeValue new literalOfPure first value: 4) equals: 5\n\n  // BT-3859: a method whose last statement is a local assignment answers the\n  // assigned value in a class or value-type method. An actor method answers\n  // `nil` there today, a bug tracked in BT-3882 (pinned below), so ADR 0131\n  // §6 reports a Tier 2 block there as dropped in an actor rather than\n  // returned. An assignment that is the last statement of a conditional arm\n  // answers the value in all three.\n  testLastStatementAssignmentAnswersClass =>\n    self assert: Adr0131Section6EscapeClass lastStatementAssignment equals: 5\n    self assert: (Adr0131Section6EscapeClass lastStatementBlockAssignment value: 1) equals: 2\n    self assert: (Adr0131Section6EscapeClass lastStatementArmAssignment: true) equals: 7\n\n  testLastStatementAssignmentAnswersValue =>\n    v := Adr0131Section6EscapeValue new\n    self assert: v lastStatementAssignment equals: 5\n    self assert: (v lastStatementBlockAssignment value: 1) equals: 2\n    self assert: (v lastStatementArmAssignment: true) equals: 7\n\n  testLastStatementAssignmentAnswersActor =>\n    a := Adr0131Section6EscapeActor spawn\n    // PIN-BUG BT-3882: correct answer 5.\n    self assert: a lastStatementAssignment equals: nil\n    // PIN-BUG BT-3882: correct answer the block (`value: 1` answers 2).\n    self assert: a lastStatementBlockAssignment equals: nil\n    self assert: (a lastStatementArmAssignment: true) equals: 7",
+      "source": "// BT-3756 (ADR 0131 §6): a block that writes no local of the enclosing method\n// still works when it escapes the method (returned, stored in a field, placed\n// in a collection literal). Only a block that writes an outer local is a\n// compile error there (Rust tests, `ESCAPE_SHAPES`).\n\nTestCase subclass: Adr0131Section6EscapeTest\n\n  testActorPure =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedPure value: 1) equals: 2\n\n  testActorOwnLocal =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedOwnLocal value: 3) equals: 7\n\n  testActorReadOnly =>\n    self assert: (Adr0131Section6EscapeActor spawn returnedReadOnly value: 1) equals: 11\n\n  testActorStoredFieldWriter =>\n    a := Adr0131Section6EscapeActor spawn\n    a storedFieldWriter\n    a runStored\n    a runStored\n    self assert: a count equals: 2\n\n  testClassPure =>\n    self assert: (Adr0131Section6EscapeClass returnedPure value: 1) equals: 2\n\n  testClassOwnLocal =>\n    self assert: (Adr0131Section6EscapeClass returnedOwnLocal value: 3) equals: 7\n\n  testClassReadOnly =>\n    self assert: (Adr0131Section6EscapeClass returnedReadOnly value: 1) equals: 11\n\n  testClassLiteral =>\n    self assert: (Adr0131Section6EscapeClass literalOfPure last value: 4) equals: 8\n\n  testValuePure =>\n    self assert: (Adr0131Section6EscapeValue new returnedPure value: 1) equals: 2\n\n  testValueOwnLocal =>\n    self assert: (Adr0131Section6EscapeValue new returnedOwnLocal value: 3) equals: 7\n\n  testValueReadOnly =>\n    self assert: (Adr0131Section6EscapeValue new returnedReadOnly value: 1) equals: 11\n\n  testValueLiteral =>\n    self assert: (Adr0131Section6EscapeValue new literalOfPure first value: 4) equals: 5\n\n  // BT-3859, BT-3882: a method whose last statement is a local assignment\n  // answers the assigned value in class, value-type and actor methods alike,\n  // so ADR 0131 §6 reports a Tier 2 block there as returned in all three. An\n  // assignment that is the last statement of a conditional arm answers the\n  // value too.\n  testLastStatementAssignmentAnswersClass =>\n    self assert: Adr0131Section6EscapeClass lastStatementAssignment equals: 5\n    self assert: (Adr0131Section6EscapeClass lastStatementBlockAssignment value: 1) equals: 2\n    self assert: (Adr0131Section6EscapeClass lastStatementArmAssignment: true) equals: 7\n\n  testLastStatementAssignmentAnswersValue =>\n    v := Adr0131Section6EscapeValue new\n    self assert: v lastStatementAssignment equals: 5\n    self assert: (v lastStatementBlockAssignment value: 1) equals: 2\n    self assert: (v lastStatementArmAssignment: true) equals: 7\n\n  testLastStatementAssignmentAnswersActor =>\n    a := Adr0131Section6EscapeActor spawn\n    self assert: a lastStatementAssignment equals: 5\n    self assert: (a lastStatementBlockAssignment value: 1) equals: 2\n    self assert: (a lastStatementArmAssignment: true) equals: 7",
       "explanation": "BT-3756 (ADR 0131 §6): a block that writes no local of the enclosing method still works when it escapes the method (returned, stored in a field, placed in a collection literal). Only a block that writes an outer local is a compile error there (Rust tests, `ESCAPE_SHAPES`)."
     },
     {
@@ -18276,6 +18276,41 @@
       ],
       "source": "// BT-3779: stateful sort: must erase its per-call process-dictionary key on\n// every exit path (normal return, ^ out of the comparator, exception).\n\nTestCase subclass: Bt3779SortNlrEraseTest\n  field: actor = nil\n\n  setUp => self.actor := Bt3779SortNlrEraseActor spawn\n\n  tearDown => self.actor isNil ifFalse: [self.actor stop]\n\n  testNlrOutOfComparatorLeavesNoEntry =>\n    before := self.actor pdictSize\n    self assert: self.actor nlrSort equals: 0\n    self assert: self.actor nlrSort equals: 0\n    self assert: self.actor nlrSort equals: 0\n    self assert: self.actor pdictSize equals: before\n\n  testNlrStillCarriesComparatorState =>\n    self assert: self.actor nlrSort equals: 0\n    self assert: self.actor count equals: 1\n\n  testNormalSortLeavesNoEntry =>\n    before := self.actor pdictSize\n    self assert: self.actor normalSort equals: #(1, 2, 3)\n    self assert: self.actor normalSort equals: #(1, 2, 3)\n    self assert: self.actor pdictSize equals: before\n\n  testExceptionOutOfComparatorLeavesNoEntry =>\n    before := self.actor pdictSize\n    self assert: self.actor raisingSort equals: #caught\n    self assert: self.actor raisingSort equals: #caught\n    self assert: self.actor pdictSize equals: before",
       "explanation": "BT-3779: stateful sort: must erase its per-call process-dictionary key on every exit path (normal return, ^ out of the comparator, exception)."
+    },
+    {
+      "id": "stdlib-test-bt3882last-assignment-test",
+      "title": "Bt3882LastAssignmentTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Bt3882LastAssignmentTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "bt3882last_assignment_test",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testConditional",
+        "testFieldWrite",
+        "testFold",
+        "testLoop",
+        "testPure",
+        "testSelfSend",
+        "testTier2SelfSend",
+        "testTier2Value"
+      ],
+      "source": "// BT-3882: an actor method whose last statement is `x := expr` answers the\n// value of `expr` (it answered `nil`), on every body-lowering arm. See\n// fixtures/bt3882last_assignment_actor.bt.\n\nTestCase subclass: Bt3882LastAssignmentTest\n\n  testPure => self assert: Bt3882LastAssignmentActor spawn pure equals: 5\n\n  testFieldWrite =>\n    a := Bt3882LastAssignmentActor spawn\n    self assert: a fieldWrite equals: 4\n    self assert: a n equals: 4\n\n  testSelfSend =>\n    self assert: Bt3882LastAssignmentActor spawn selfSend equals: 9\n\n  testTier2SelfSend =>\n    self assert: Bt3882LastAssignmentActor spawn tier2SelfSend equals: 6\n\n  testConditional =>\n    a := Bt3882LastAssignmentActor spawn\n    self assert: (a conditional: true) equals: 2\n    self assert: a n equals: 1\n    self assert: (a conditional: false) equals: 3\n\n  testFold =>\n    a := Bt3882LastAssignmentActor spawn\n    self assert: a fold equals: 6\n    self assert: a n equals: 3\n\n  testLoop => self assert: Bt3882LastAssignmentActor spawn loop equals: nil\n\n  testTier2Value =>\n    self assert: (Bt3882LastAssignmentActor spawn tier2Value: [:x |\n      x + 1\n    ]) equals: 2",
+      "explanation": "BT-3882: an actor method whose last statement is `x := expr` answers the value of `expr` (it answered `nil`), on every body-lowering arm. See fixtures/bt3882last_assignment_actor.bt."
     },
     {
       "id": "stdlib-test-cascade-class-var-rebind-receiver-position-test",
@@ -28209,7 +28244,7 @@
         "subclassing",
         "unless"
       ],
-      "source": "// BT-3756 (ADR 0131 §6): the neighbours of the escaping shapes that stay\n// legal because the block writes no local of the method frame: a pure\n// closure, a closure that writes only its own locals, a closure over a\n// read-only outer local, and (actor) a field-writing closure stored in a\n// field and run by a later call. The shapes\n// that are rejected, `^[t := t + 1]` and its siblings, have no compiled\n// fixture (they do not compile); they are pinned in\n// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs\n// (`ESCAPE_SHAPES`). adr0131section6escape_test.bt asserts these run.\n\nActor subclass: Adr0131Section6EscapeActor\n  state: n = 0\n  state: h = nil\n\n  returnedPure => [:x | x + 1]\n\n  returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  storedFieldWriter =>\n    self.h := [self.n := self.n + 1]\n    nil\n\n  runStored => self.h value\n\n  count => self.n\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (pinned in adr0131section6escape_test.bt; BT-3882).\n  lastStatementAssignment => _r := 5\n\n  lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
+      "source": "// BT-3756 (ADR 0131 §6): the neighbours of the escaping shapes that stay\n// legal because the block writes no local of the method frame: a pure\n// closure, a closure that writes only its own locals, a closure over a\n// read-only outer local, and (actor) a field-writing closure stored in a\n// field and run by a later call. The shapes\n// that are rejected, `^[t := t + 1]` and its siblings, have no compiled\n// fixture (they do not compile); they are pinned in\n// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs\n// (`ESCAPE_SHAPES`). adr0131section6escape_test.bt asserts these run.\n\nActor subclass: Adr0131Section6EscapeActor\n  state: n = 0\n  state: h = nil\n\n  returnedPure => [:x | x + 1]\n\n  returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  storedFieldWriter =>\n    self.h := [self.n := self.n + 1]\n    nil\n\n  runStored => self.h value\n\n  count => self.n\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (asserted in adr0131section6escape_test.bt; BT-3882).\n  lastStatementAssignment => _r := 5\n\n  lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
       "explanation": "BT-3756 (ADR 0131 §6): the neighbours of the escaping shapes that stay legal because the block writes no local of the method frame: a pure closure, a closure that writes only its own locals, a closure over a read-only outer local, and (actor) a field-writing closure stored in a field and run by a later call. The shapes that are rejected, `^[t := t + 1]` and its siblings, have no compiled fixture (they do not compile); they are pinned in crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs (`ESCAPE_SHAPES`). adr0131section6escape_test.bt asserts these run."
     },
     {
@@ -28253,7 +28288,7 @@
         "subclassing",
         "unless"
       ],
-      "source": "// BT-3756 (ADR 0131 §6): class-method column of\n// adr0131section6escape_actor.bt (blocks that write no local of the method\n// frame stay legal when returned or placed in a collection literal).\n\nObject subclass: Adr0131Section6EscapeClass\n\n  class returnedPure => [:x | x + 1]\n\n  class returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  class returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  class literalOfPure => #([:x | x + 1], [:x | x * 2])\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (pinned in adr0131section6escape_test.bt; BT-3882).\n  class lastStatementAssignment => _r := 5\n\n  class lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  class lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
+      "source": "// BT-3756 (ADR 0131 §6): class-method column of\n// adr0131section6escape_actor.bt (blocks that write no local of the method\n// frame stay legal when returned or placed in a collection literal).\n\nObject subclass: Adr0131Section6EscapeClass\n\n  class returnedPure => [:x | x + 1]\n\n  class returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  class returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  class literalOfPure => #([:x | x + 1], [:x | x * 2])\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (asserted in adr0131section6escape_test.bt; BT-3882).\n  class lastStatementAssignment => _r := 5\n\n  class lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  class lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
       "explanation": "BT-3756 (ADR 0131 §6): class-method column of adr0131section6escape_actor.bt (blocks that write no local of the method frame stay legal when returned or placed in a collection literal)."
     },
     {
@@ -28297,7 +28332,7 @@
         "unless",
         "value"
       ],
-      "source": "// BT-3756 (ADR 0131 §6): value-type column of\n// adr0131section6escape_actor.bt (blocks that write no local of the method\n// frame stay legal when returned or placed in a collection literal).\n\nValue subclass: Adr0131Section6EscapeValue\n\n  returnedPure => [:x | x + 1]\n\n  returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  literalOfPure => #([:x | x + 1], [:x | x * 2])\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (pinned in adr0131section6escape_test.bt; BT-3882).\n  lastStatementAssignment => _r := 5\n\n  lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
+      "source": "// BT-3756 (ADR 0131 §6): value-type column of\n// adr0131section6escape_actor.bt (blocks that write no local of the method\n// frame stay legal when returned or placed in a collection literal).\n\nValue subclass: Adr0131Section6EscapeValue\n\n  returnedPure => [:x | x + 1]\n\n  returnedOwnLocal =>\n    ^[:x |\n      y := x * 2\n      y + 1\n    ]\n\n  returnedReadOnly =>\n    t := 10\n    ^[:x | x + t]\n\n  literalOfPure => #([:x | x + 1], [:x | x * 2])\n\n  // BT-3859: what a method whose last statement is a local assignment\n  // answers (asserted in adr0131section6escape_test.bt; BT-3882).\n  lastStatementAssignment => _r := 5\n\n  lastStatementBlockAssignment => _b := [:x | x + 1]\n\n  lastStatementArmAssignment: c => c ifTrue: [_r := 7] ifFalse: [nil]",
       "explanation": "BT-3756 (ADR 0131 §6): value-type column of adr0131section6escape_actor.bt (blocks that write no local of the method frame stay legal when returned or placed in a collection literal)."
     },
     {
@@ -30148,6 +30183,61 @@
       ],
       "source": "// BT-3814: a `super` send whose operand is a state-changing self-send must sequence the\n// operand: the dispatch reads the post-operand state and the operand's rebind is kept.\n\nBt3814SuperBase subclass: Bt3814SuperOperand\n  state: calls = 0\n\n  bump => self.calls := self.calls + 1\n\n  superLast => super addAmount: self bump\n\n  superNonLast =>\n    super addAmount: self bump\n    super addAmount: self bump\n    self.value\n\n  getCalls => self.calls",
       "explanation": "BT-3814: a `super` send whose operand is a state-changing self-send must sequence the operand: the dispatch reads the post-operand state and the operand's rebind is kept."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3882last-assignment-actor",
+      "title": "Bt3882LastAssignmentActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt3882LastAssignmentActor",
+        "accumulate",
+        "actor",
+        "aggregate",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "bt3882last_assignment_actor",
+        "concurrent",
+        "conditional",
+        "conditional:",
+        "extends",
+        "field",
+        "fieldWrite",
+        "fold",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "mutate",
+        "mutation",
+        "n",
+        "negation",
+        "opaqueInject:into:",
+        "process",
+        "property",
+        "pure",
+        "reduce",
+        "selfSend",
+        "set",
+        "subclassing",
+        "tier2SelfSend",
+        "tier2Value:",
+        "unless"
+      ],
+      "source": "// BT-3882: an actor method whose last statement is a local assignment\n// answers the assigned value, as class and value-type methods do. The\n// methods cover the actor body-lowering arms that reply with the bound\n// local (`BodyExprKind::LocalAssign*` in gen_server/methods.rs): pure,\n// field-write RHS, self-send, Tier 2 self-send, conditional, fold and loop.\n// Asserted in bt3882last_assignment_test.bt.\n\nActor subclass: Bt3882LastAssignmentActor\n  state: n = 0\n\n  n => self.n\n\n  sealed opaqueInject: initial into: block =>\n    #(1, 2, 3) inject: initial into: block\n\n  // LocalAssignPure\n  pure => _r := 5\n\n  // LocalAssignPure, field-write RHS\n  fieldWrite => _r := (self.n := 4)\n\n  // LocalAssignSelfSend\n  selfSend =>\n    self.n := 9\n    _r := self n\n\n  // LocalAssignSelfSend, Tier 2 block argument\n  tier2SelfSend =>\n    t := 0\n    _r := self\n      opaqueInject: 0\n      into: [:a :i |\n        t := t + i\n        a + i\n      ]\n\n  // LocalAssignControlFlow, conditional with a field write\n  conditional: c =>\n    _r := c\n      ifTrue: [\n        self.n := 1\n        2\n      ]\n      ifFalse: [3]\n\n  // LocalAssignControlFlow, fold with a field write\n  fold =>\n    _r := #(1, 2, 3)\n      inject: 0\n      into: [:a :i |\n        self.n := i\n        a + i\n      ]\n\n  // LocalAssignControlFlow, loop threading a local\n  loop =>\n    t := 0\n    _r := 1 to: 3 do: [:i | t := t + i]\n\n  // A value send to a block parameter. (A last-statement `b := [..]` has no\n  // later use, so it is never a promoted LocalAssignTier2Block.)\n  tier2Value: blk => _r := blk value: 1",
+      "explanation": "BT-3882: an actor method whose last statement is a local assignment answers the assigned value, as class and value-type methods do. The methods cover the actor body-lowering arms that reply with the bound local (`BodyExprKind::LocalAssign*` in gen_server/methods.rs): pure, field-write RHS, self-send, Tier 2 self-send, conditional, fold and loop. Asserted in bt3882last_assignment_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-calculator",

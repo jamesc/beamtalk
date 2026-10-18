@@ -31,7 +31,7 @@
 //! - [`typed_params_knowledge_scope_and_cross_file`] — typed block
 //!   parameters, `KnowledgeScope`, and cross-file extension visibility
 
-use super::test_helpers::test_span;
+use super::test_helpers::{parse_module, test_span};
 use super::*;
 
 use crate::ast::{

@@ -29,7 +29,8 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 ```bash
 just ci          # Full CI checks
 just build       # Build Rust + Erlang runtime
-just test        # Rust + stdlib + BUnit + runtime tests
+just test        # Rust fast tier + stdlib + BUnit + runtime tests
+just test-corpus # Rust slow tier: state-threading agreement/corpus proofs (~13 min); run when touching compiler crates
 just test-stdlib # Compiled language feature tests (~14s)
 just test-bunit  # BUnit TestCase tests
 just verify-threaded-ir  # ThreadedIr verify() over full stdlib + bootstrap-test corpus

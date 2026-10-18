@@ -838,22 +838,10 @@ fn pass_on(expr: &Expression, name: &str) -> Option<(EcoString, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Module;
-
-    fn parse(src: &str) -> Module {
-        let (module, diags) =
-            crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
-        assert!(
-            diags
-                .iter()
-                .all(|d| d.severity != crate::source_analysis::Severity::Error),
-            "fixture must parse: {diags:?}"
-        );
-        module
-    }
+    use crate::semantic_analysis::test_helpers::parse_module;
 
     fn index(src: &str) -> ThreadingIndex {
-        ThreadingIndex::build(&parse(src).classes, &|_, _, _| false)
+        ThreadingIndex::build(&parse_module(src).classes, &|_, _, _| false)
     }
 
     fn inst(idx: &ThreadingIndex, class: &str, sel: &str) -> Vec<usize> {
@@ -1095,7 +1083,7 @@ mod tests {
         let src = "Object subclass: C\n  parallelCollect: b => self parallelCollect: b maxConcurrency: 4\n  \
                    parallelCollect: b maxConcurrency: n => b value\n  \
                    viaClass: b => C go: b\n  class go: b => b value\n";
-        let module = parse(src);
+        let module = parse_module(src);
         let spawning = |class: &str, class_side: bool, sel: &str| {
             class == "C" && !class_side && sel == "parallelCollect:maxConcurrency:"
         };
@@ -1111,7 +1099,7 @@ mod tests {
 
     #[test]
     fn actor_channel_rejects_the_callable_also_used_as_a_seed() {
-        let module = parse(
+        let module = parse_module(
             "Actor subclass: Ac\n  sealed fold: b => ^self items inject: b into: b\n  \
              sealed ok: b => ^self items inject: 0 into: b\n",
         );
@@ -1122,7 +1110,7 @@ mod tests {
 
     #[test]
     fn actor_channel_predicate_is_unchanged_on_a_cycle() {
-        let module = parse("Actor subclass: Ac\n  sealed loop: b => self loop: b\n");
+        let module = parse_module("Actor subclass: Ac\n  sealed loop: b => self loop: b\n");
         assert!(!callee_threads_block_param(&module.classes[0], "loop:", 0));
     }
 }

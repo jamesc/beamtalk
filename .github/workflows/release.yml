@@ -83,6 +83,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build distribution
         run: just dist
@@ -156,6 +158,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build and install distribution
         run: just install dist
@@ -229,6 +233,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build and install distribution
         run: just install dist
@@ -301,6 +307,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build Rust (release)
         run: cargo build --all-targets --release --quiet
