@@ -51,7 +51,7 @@ impl CoreErlangGenerator {
         // Record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields dispatch here too,
         // consistent with value-type and actor modules.
-        self.set_class_field_types(&class.state);
+        self.set_class_field_types(class, module);
 
         match class.supervisor_kind.as_ref().ok_or_else(|| {
             CodeGenError::Internal("supervisor_kind must be set for supervisor module".to_string())

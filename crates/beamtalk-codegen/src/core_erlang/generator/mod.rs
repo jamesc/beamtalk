@@ -251,17 +251,23 @@ pub struct CoreErlangGenerator {
     /// annotations never leak into the next.
     pub(in crate::core_erlang) current_method_param_types:
         std::collections::HashMap<String, String>,
-    /// Maps an instance field's source name → its declared
-    /// `Simple` type name, for the operator fast-path classifiers. Lets a
-    /// `self.<field>` read with an explicit **non-primitive** (object) type be
-    /// routed through the runtime guard so it dispatches (e.g. `self.lo < x`
-    /// where `lo :: Money` reaches `Money>><`) instead of silently term-ordering
-    /// the tagged map. Primitive-typed and *untyped* fields are absent from the
-    /// guarding decision and stay on the bare BIF, preserving the counter /
-    /// accumulator hot paths and their state-threading optimisations. Populated
-    /// at value-type / actor class entry; cleared in extension bodies (which
-    /// don't carry the target class's field types).
-    pub(in crate::core_erlang) current_class_field_types: std::collections::HashMap<String, String>,
+    /// Maps an instance field's source name → what codegen knows about its
+    /// runtime type ([`FieldTypeFact`](crate::core_erlang::field_types::FieldTypeFact)),
+    /// for the operator fast-path classifiers. A `self.<field>` read stays on
+    /// the bare BIF only when its fact says so: a declared primitive type (a
+    /// union counts when every non-`Nil` member is primitive), or an untyped
+    /// field with numeric evidence (numeric-literal default, numeric in-class
+    /// writes — keeps the `self.count := self.count + 1` counter bare). Any
+    /// other field, and any name absent from the map, routes through the
+    /// runtime guard so an object value dispatches (BT-3892). Populated at
+    /// value-type / actor / supervisor class entry and for extension targets.
+    pub(in crate::core_erlang) current_class_field_types:
+        std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,
+    /// The class-side counterpart of `current_class_field_types`: facts for
+    /// the class's `classState:` variables, consulted for `self.<name>` reads
+    /// inside class methods (BT-3892).
+    pub(in crate::core_erlang) current_class_var_types:
+        std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,
     /// ADR 0118 phase 1a: sub-expressions `threaded_expression`'s
     /// sequencing rule (`util.rs`) has already compiled — each one's value
     /// (a sequencing temp, or a state-effecting producer's pure result
@@ -494,6 +500,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
+            current_class_var_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,

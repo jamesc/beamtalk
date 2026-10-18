@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3892 fixture: a value-type point overloading the arithmetic operators
+// `+ - * /` and the comparison operators `< > <= >=`, held in untyped,
+// union-typed and plain-typed fields by the `FieldOperand*` fixtures so that
+// `self.<field> + q` must dispatch to these methods.
+
+Value subclass: FieldOperandPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+
+  /// Component-wise sum.
+  + other :: FieldOperandPoint -> FieldOperandPoint =>
+    FieldOperandPoint x: self.x + other x y: self.y + other y
+
+  /// Component-wise difference.
+  - other :: FieldOperandPoint -> FieldOperandPoint =>
+    FieldOperandPoint x: self.x - other x y: self.y - other y
+
+  /// Scale by an integer factor.
+  * k :: Integer -> FieldOperandPoint =>
+    FieldOperandPoint x: self.x * k y: self.y * k
+
+  /// Integer-divide each component by `k`.
+  / k :: Integer -> FieldOperandPoint =>
+    FieldOperandPoint x: (self.x div: k) y: (self.y div: k)
+
+  /// Manhattan magnitude, the order the comparison operators use.
+  magnitude -> Integer => self.x + self.y
+
+  /// Less than, by magnitude.
+  < other :: FieldOperandPoint -> Boolean => self magnitude < other magnitude
+
+  /// Greater than, by magnitude.
+  > other :: FieldOperandPoint -> Boolean => self magnitude > other magnitude
+
+  /// Less than or equal, by magnitude.
+  <= other :: FieldOperandPoint -> Boolean => self magnitude <= other magnitude
+
+  /// Greater than or equal, by magnitude.
+  >= other :: FieldOperandPoint -> Boolean => self magnitude >= other magnitude

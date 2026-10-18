@@ -956,6 +956,33 @@ If untyped-field arithmetic's silent-badarith risk ever becomes a real
 problem in practice, revisit both operands together as one design pass —
 not the right operand alone.
 
+## Addendum (2026-10-18): BT-3892 — untyped/union `self.<field>` trust revisited, both operands
+
+The risk above became real: `field: p = nil` set to a `Point` in `setUp`, then
+`self.p + q`, skipped the left guard, hit `badarith`, and was routed to
+`plusFromNumber:` on `q` — a DNU that never sent `+` to the `Point`. Union-typed
+fields (`:: Point | Nil`) had the same failure because only simple annotations
+were recorded. Per the addendum above, both operands were revisited together,
+by changing what `receiver_is_statically_numeric` (and its comparison twin)
+know about a field, not by splitting the predicate:
+
+- A declared field records its full type; a union is bare only when every
+  non-`Nil` member is in the operator's primitive set.
+- An untyped field is trusted as numeric only on evidence from the class's own
+  source: a numeric-literal default and every in-class `self.f :=` writing a
+  numeric literal, a numeric-typed parameter, another trusted field, or
+  `+ - * / %` over two such operands. `self.count := self.count + 1` keeps the
+  bare BIF; `field: p = nil` (or any field assigned an object) is guarded.
+- A field with no visible evidence (inherited untyped, an extension target's
+  untyped field) is guarded. Class methods consult `classState:` facts built
+  the same way from the class methods.
+
+Both operands still share one rule, so the right-operand gap closes with the
+left. Open-world writers (keyword constructors / `with*:`, `spawnWith:`,
+`fieldAt:put:`) are not tracked: an untyped field's literal default is taken
+as its declared shape. The implementation is
+`crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
+
 ## Implementation Tracking
 
 **Parent:** BT-2712 (Phase 4 of BT-2708, already tracked this ADR's spec —

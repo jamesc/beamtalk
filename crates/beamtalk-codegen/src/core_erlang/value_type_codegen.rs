@@ -278,7 +278,7 @@ impl CoreErlangGenerator {
         )));
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
-        self.set_class_field_types(&class.state);
+        self.set_class_field_types(class, module);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., object.bt defines `new => @primitive basicNew`)
