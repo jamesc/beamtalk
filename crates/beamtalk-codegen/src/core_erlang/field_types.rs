@@ -18,9 +18,10 @@
 //!   guard would send it to the bare BIF anyway. Every other shape (generic,
 //!   singleton, false-or, …) is an object type and is guarded.
 //! * An **untyped** field of an **Actor** (`state:`) or a `classState:`
-//!   variable of a **sealed** class is trusted as numeric only on positive evidence gathered from
-//!   the class's own source ([`FieldTypeFact::UntypedNumeric`]): its default is
-//!   a numeric literal *and* every in-class `self.f := e` writes a
+//!   variable of a **sealed** class is trusted as numeric only on positive
+//!   evidence gathered from the class's own source
+//!   ([`FieldTypeFact::UntypedNumeric`]): its default is a numeric literal
+//!   *and* every in-class `self.f := e` writes a
 //!   numeric-evidenced `e` (a numeric literal, a numeric-typed parameter,
 //!   another numeric-evidenced field, or `+ - * / %` over two
 //!   numeric-evidenced operands). This keeps the `self.count := self.count + 1`
@@ -38,10 +39,15 @@
 //! an inherited class method runs over a subclass's redeclared variable
 //! (ADR 0130), with a default and writers this class cannot see.
 //!
-//! Open-world writers an Actor's source cannot show — `spawnWith:` (BT-3925),
-//! `fieldAt:put:`, or a subclass assigning an inherited untyped field — are
-//! not tracked: for an Actor's own untyped field the literal default is taken
-//! as its declared shape.
+//! Open-world writers the class source cannot show — `spawnWith:`,
+//! `fieldAt:put:`, a subclass assigning an inherited untyped `state:` field,
+//! or a class-side extension of a sealed class writing a `classState:`
+//! variable — are not tracked (BT-3925): the literal default is taken as the
+//! field's declared shape. An Actor's `state:` is deliberately *not* gated on
+//! `sealed` the way `classState:` is: that would guard the
+//! `self.count := self.count + 1` counter in every open Actor, and the
+//! subclass-write case shares BT-3925's open-world gap with `spawnWith:`, so
+//! it is decided there together.
 
 use std::collections::{HashMap, HashSet};
 

@@ -214,11 +214,11 @@ impl CoreErlangGenerator {
     ///
     /// A field is known numeric when its declared type is numeric (a union
     /// counts when every non-`Nil` member is), or — for an **untyped** Actor
-    /// `state:` or `classState:` field — when its default is a numeric literal
-    /// and every in-class `self.f :=` write is numeric. Untyped fields of a
-    /// Value, Object or `TestCase` are never trusted: their keyword constructor
-    /// runs outside the class. That keeps the broad `self.count := self.count + 1`
-    /// counter pattern (and the dependent `ifTrue:` inline-case
+    /// `state:` field or a sealed class's `classState:` variable — when its
+    /// default is a numeric literal and every in-class `self.f :=` write is
+    /// numeric. Untyped fields of a Value, Object or `TestCase` are never
+    /// trusted: their keyword constructor runs outside the class. That keeps
+    /// the broad `self.count := self.count + 1` counter pattern (and the dependent `ifTrue:` inline-case
     /// state-threading optimisation) on the bare path, while an untyped field
     /// that defaults to `nil` or is assigned an object (`field: p = nil`, set
     /// to a `Point` in `setUp`), a union with an object member

@@ -969,10 +969,10 @@ know about a field, not by splitting the predicate:
 - A declared field records its full type; a union is bare only when every
   non-`Nil` member is in the operator's primitive set.
 - An untyped Actor `state:` field, or a `classState:` variable of a sealed
-  class, is trusted as numeric only on evidence from the class's own source: a numeric-literal
-  default and every in-class `self.f :=` writing a numeric literal, a
-  numeric-typed parameter whose name the method body does not rebind, another
-  trusted field, or `+ - * / %` over two such operands.
+  class, is trusted as numeric only on evidence from the class's own source:
+  a numeric-literal default and every in-class `self.f :=` writing a numeric
+  literal, a numeric-typed parameter whose name the method body does not
+  rebind, another trusted field, or `+ - * / %` over two such operands.
   `self.count := self.count + 1` keeps the bare BIF; `state: p = nil` (or any
   field assigned an object) is guarded.
 - An untyped field of a Value, Object or TestCase is never trusted, whatever
@@ -986,9 +986,13 @@ know about a field, not by splitting the predicate:
   the same way from the class methods.
 
 Both operands still share one rule, so the right-operand gap closes with the
-left. Open-world writers an Actor's source cannot show (`spawnWith:`, tracked
-in BT-3925; `fieldAt:put:`) are not tracked: an Actor's untyped field's literal default is
-taken as its declared shape. The implementation is
+left. Open-world writers the class source cannot show (`spawnWith:`,
+`fieldAt:put:`, a subclass writing an inherited untyped `state:` field, a
+class-side extension of a sealed class writing a `classState:` variable) are
+not tracked: the literal default is taken as the field's declared shape.
+Actor `state:` is deliberately not gated on `sealed` the way `classState:`
+is, because that would guard the counter pattern in every open Actor. All of
+these cases are decided together in BT-3925. The implementation is
 `crates/beamtalk-codegen/src/core_erlang/field_types.rs`.
 
 A union with a `Nil` member (`:: Integer | Nil`) stays bare for comparisons as
