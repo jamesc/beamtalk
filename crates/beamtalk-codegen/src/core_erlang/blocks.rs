@@ -19,11 +19,12 @@
 
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
+use crate::core_erlang::threading_analysis::{ThreadedConstruct, ThreadedLocals};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
@@ -529,6 +530,47 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
+    /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
+    /// lowers a loop or fold statement inside an opaque `let _ = ( ... )`, so
+    /// the loop's rebind of a local the body assigned (`n := 0. xs do: [:y |
+    /// n := n + y]. n`) is scoped inside that statement: the block would
+    /// answer the pre-loop value with the pre-loop state, silently. Until the
+    /// body is a frame that lowers the loop as a producer, that shape is a
+    /// compile error instead. The loop is recognised by the one recognizer
+    /// ([`Self::threaded_locals_of`], the rule `threaded_locals_of` and the
+    /// Phase 0 check share), for the statement itself or an assignment's value.
+    fn reject_loop_rebind_of_body_local(
+        &self,
+        stmt: &Expression,
+        body_locals: &[String],
+    ) -> Result<()> {
+        let construct = match stmt {
+            Expression::Assignment { value, .. } => value.as_ref(),
+            other => other,
+        };
+        let Some(set) = self.threaded_locals_of(construct) else {
+            return Ok(());
+        };
+        if !matches!(
+            set.construct,
+            ThreadedConstruct::Inline(LocalThreadingFamily::Loop | LocalThreadingFamily::Fold)
+        ) {
+            return Ok(());
+        }
+        let Some(local) = set.names.iter().find(|n| body_locals.contains(n)) else {
+            return Ok(());
+        };
+        Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "a block an actor self-send passes to a Tier 2 method assigns local `{local}` \
+                 and rebinds it inside a loop or fold; the block would answer the value from \
+                 before the loop (BT-3939, until BT-3947). Compute the loop in a method of its \
+                 own and call it from the block"
+            ),
+            span: Some(construct.span()),
+        })
+    }
+
     /// Generates the body of a Tier 2 stateful block with state threading.
     ///
     /// ADR 0111 close-out (the last real production
@@ -555,10 +597,18 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let filtered_body = super::util::collect_body_exprs(&block.body);
+        // BT-3939: the locals this body has assigned so far.
+        let mut body_locals: Vec<String> = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
+            self.reject_loop_rebind_of_body_local(expr, &body_locals)?;
+            if let Expression::Assignment { target, .. } = expr {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    body_locals.push(id.name.to_string());
+                }
+            }
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
