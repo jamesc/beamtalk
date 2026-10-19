@@ -21,6 +21,13 @@
 //! The runner resolves the path relative to the markdown file, injects a `// @load` directive
 //! into the generated btscript, and compiles the fixture before running assertions.
 //! Fixture files that contain `TestCase subclass:` are also run as `BUnit` test suites.
+//!
+//! ## Chapter-embedded test classes
+//!
+//! A ` ```beamtalk ` block in the chapter that defines a `TestCase subclass:` is itself
+//! compiled and run (BT-3932): each top-level class is staged to `<ClassName>.bt` and
+//! loaded, so the chapter text is the single source of truth. Precede the fence with
+//! `<!-- btskip -->` to exclude an illustrative, non-compilable block.
 
 use super::test_stdlib::{
     CompiledTestFile, TestRunOptions, compile_erl_files, compile_single_test_file, erlang_atom,
@@ -66,7 +73,7 @@ pub(crate) fn extract_btscript_from_markdown(content: &str) -> String {
         } else if in_block && trimmed.starts_with("```") {
             in_block = false;
             // Only keep blocks that contain at least one assertion.
-            if current_block.contains("// =>") {
+            if current_block.contains("// =>") && !is_testcase_block(&current_block) {
                 result.push_str(&current_block);
                 result.push('\n'); // blank line between blocks
             }
@@ -78,6 +85,78 @@ pub(crate) fn extract_btscript_from_markdown(content: &str) -> String {
     }
 
     result
+}
+
+/// Return `true` if a code block defines a `BUnit` test class (`TestCase subclass:` at line start).
+fn is_testcase_block(block: &str) -> bool {
+    block.lines().any(|l| l.starts_with("TestCase subclass:"))
+}
+
+/// Class name declared by a top-level `Super subclass: Name ...` line, if `line` is one.
+fn class_decl_name(line: &str) -> Option<&str> {
+    if line.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let (_, rest) = line.split_once(" subclass: ")?;
+    let name = rest.split_whitespace().next()?;
+    let name = name.split('(').next().unwrap_or(name);
+    (!name.is_empty()).then_some(name)
+}
+
+/// Split a block into one `(class_name, source)` entry per top-level class.
+///
+/// The compiler accepts one class per file, so a chapter block that defines a helper class
+/// next to its `TestCase` is staged as several files.
+fn split_top_level_classes(block: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in block.lines() {
+        if let Some(name) = class_decl_name(line) {
+            out.push((name.to_string(), String::new()));
+        }
+        if let Some((_, src)) = out.last_mut() {
+            src.push_str(line);
+            src.push('\n');
+        }
+    }
+    out
+}
+
+/// Marker placed on the line before a fence to exclude an illustrative (non-compilable)
+/// `TestCase subclass:` block from the chapter-embedded test run.
+const SKIP_MARKER: &str = "<!-- btskip -->";
+
+/// Extract the chapter-embedded ` ```beamtalk ` blocks that define a `TestCase subclass:`.
+///
+/// The chapter text is the single source of truth for its test classes: each block is
+/// returned as `(class_name, source)` so the runner can compile and run it directly
+/// (BT-3932) instead of keeping a hand-maintained fixture copy that drifts.
+pub(crate) fn extract_testcase_blocks(content: &str) -> Vec<(String, String)> {
+    let mut blocks = Vec::new();
+    let mut in_block = false;
+    let mut skip_block = false;
+    let mut prev_line = "";
+    let mut current = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !in_block && (trimmed == "```beamtalk" || trimmed == "``` beamtalk") {
+            in_block = true;
+            skip_block = prev_line == SKIP_MARKER;
+            current.clear();
+        } else if in_block && trimmed.starts_with("```") {
+            in_block = false;
+            if !skip_block && is_testcase_block(&current) {
+                blocks.extend(split_top_level_classes(&current));
+            }
+            current.clear();
+        } else if in_block {
+            current.push_str(line);
+            current.push('\n');
+        }
+        if !trimmed.is_empty() {
+            prev_line = trimmed;
+        }
+    }
+    blocks
 }
 
 /// Pre-process btscript content so that inline `// =>` assertions become next-line assertions.
@@ -273,6 +352,27 @@ fn extract_to_btscript_files(
                 bunit_fixtures.push(BunitFixture {
                     source_md: md_file.clone(),
                     fixture_path: abs_path.clone(),
+                });
+            }
+        }
+
+        // Chapter-embedded `TestCase subclass:` blocks are compiled and run directly.
+        let fixture_stage = btscript_dir.join("chapter_fixtures");
+        for (class_name, source) in extract_testcase_blocks(&content) {
+            fs::create_dir_all(fixture_stage.as_std_path())
+                .into_diagnostic()
+                .wrap_err("Failed to create chapter fixture staging directory")?;
+            let path = fixture_stage.join(format!("{class_name}.bt"));
+            let header =
+                "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
+            fs::write(&path, format!("{header}{source}"))
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to write chapter test class '{class_name}'"))?;
+            let _ = writeln!(load_preamble, "// @load {path}");
+            if has_bunit_tests(&source) {
+                bunit_fixtures.push(BunitFixture {
+                    source_md: md_file.clone(),
+                    fixture_path: path,
                 });
             }
         }
@@ -573,6 +673,22 @@ mod tests {
     }
 
     // ── extract_btscript_from_markdown ─────────────────────────────────────
+
+    #[test]
+    fn test_extract_testcase_blocks_splits_classes_and_honours_skip() {
+        let md = "```beamtalk\nValue subclass: Money\n  field: a = 0\n\nTestCase subclass: MoneyTest\n  testA => 1\n```\n\n<!-- btskip -->\n```beamtalk\nTestCase subclass: Sketch\n  testB => ...\n```\n\n```beamtalk\n1 + 1  // => 2\n```\n";
+        let blocks = extract_testcase_blocks(md);
+        let names: Vec<&str> = blocks.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Money", "MoneyTest"]);
+        assert!(blocks[1].1.starts_with("TestCase subclass: MoneyTest"));
+        assert!(!blocks[0].1.contains("TestCase"));
+    }
+
+    #[test]
+    fn test_extract_btscript_skips_testcase_blocks() {
+        let md = "```beamtalk\nTestCase subclass: T\n  testA => 1 // => 1\n```\n";
+        assert!(extract_btscript_from_markdown(md).is_empty());
+    }
 
     #[test]
     fn test_extract_empty_markdown() {

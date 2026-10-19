@@ -1,13 +1,6 @@
 <!-- btfixture: fixtures/parser.bt -->
 <!-- btfixture: fixtures/validator.bt -->
-<!-- btfixture: fixtures/ch12exceptions.bt -->
-<!-- btfixture: fixtures/ch12result.bt -->
-<!-- btfixture: fixtures/ch12parser_test.bt -->
-<!-- btfixture: fixtures/ch12dnu.bt -->
-<!-- btfixture: fixtures/ch12validator.bt -->
 <!-- btfixture: fixtures/validation_error.bt -->
-<!-- btfixture: fixtures/ch12custom_errors.bt -->
-<!-- btfixture: fixtures/ch12ensure.bt -->
 
 ## Error Handling
 
@@ -284,11 +277,11 @@ TestCase subclass: Ch12Validator
 
   testNilRaises =>
     v := Validator new
-    self should: [v validate: nil] raise: #beamtalk_error
+    self should: [v validate: nil] raise: #user_error
 
   testNegativeRaises =>
     v := Validator new
-    self should: [v validate: -1] raise: #beamtalk_error
+    self should: [v validate: -1] raise: #user_error
 ```
 
 ## Summary

@@ -1,9 +1,5 @@
 <!-- btfixture: fixtures/counter.bt -->
 <!-- btfixture: fixtures/stack.bt -->
-<!-- btfixture: fixtures/ch13basic_tests.bt -->
-<!-- btfixture: fixtures/ch13assertions.bt -->
-<!-- btfixture: fixtures/ch13setup_example.bt -->
-<!-- btfixture: fixtures/stack_test.bt -->
 
 ## Testing with BUnit
 
@@ -147,7 +143,7 @@ Actor subclass: Stack
   state: items = nil
 
   initialize =>
-    self.items := #[]
+    self.items := #()
 
   push: item =>
     self.items := self.items add: item
@@ -155,7 +151,7 @@ Actor subclass: Stack
   pop =>
     self.items isEmpty ifTrue: [self error: "Stack underflow"]
     top := self.items last
-    self.items := self.items copyFrom: 1 to: self.items size - 1
+    self.items := self.items take: self.items size - 1
     top
 
   peek =>
@@ -195,10 +191,10 @@ TestCase subclass: StackTest
     self assert: self.stack size equals: 1
 
   testPopFromEmptyRaises =>
-    self should: [self.stack pop] raise: #beamtalk_error
+    self should: [self.stack pop] raise: #user_error
 
   testPeekFromEmptyRaises =>
-    self should: [self.stack peek] raise: #beamtalk_error
+    self should: [self.stack peek] raise: #user_error
 ```
 
 ### Test naming conventions
@@ -252,6 +248,7 @@ run once per class, not once per test.
 
 `setUpOnce` returns a fixture value accessible in each test via `self suiteFixture`:
 
+<!-- btskip -->
 ```beamtalk
 TestCase subclass: DatabaseTest
   field: conn = nil
@@ -272,6 +269,7 @@ TestCase subclass: DatabaseTest
 
 Define a test class:
 
+<!-- btskip -->
 ```beamtalk
 TestCase subclass: MyTest
   field: fixture = nil

@@ -1,9 +1,3 @@
-<!-- btfixture: fixtures/ch14array_destructuring.bt -->
-<!-- btfixture: fixtures/ch14map_destructuring.bt -->
-<!-- btfixture: fixtures/ch14tuple_destructuring.bt -->
-<!-- btfixture: fixtures/ch14binary_patterns.bt -->
-<!-- btfixture: fixtures/ch14match_patterns.bt -->
-
 ## Pattern Matching
 
 Beamtalk supports destructuring assignment for arrays, maps, and Erlang tuples.
@@ -114,10 +108,9 @@ TestCase subclass: Ch14MapDestructuring
     self assert: c equals: 3
 
   testMissingKeyRaises =>
-    kind := [
+    self should: [
       #{#missing => _val} := #{#present => 42}
-    ] on: Error do: [:e | e kind]
-    self assert: kind equals: #key_error
+    ] raise: #key_error
 
   testInCollectBlock =>
     dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]
@@ -138,29 +131,29 @@ This is mainly useful when interoperating with Erlang code that returns
 TestCase subclass: Ch14TupleDestructuring
 
   testBasic =>
-    {a, b} := Erlang erlang list_to_tuple: #[10, 20]
+    {a, b} := Erlang erlang list_to_tuple: #(10, 20)
     self assert: a equals: 10
     self assert: b equals: 20
 
   testTaggedTuple =>
     // Common Erlang pattern: {ok, Value} or {error, Reason}
-    {status, value} := Erlang erlang list_to_tuple: #[#ok, 42]
+    {status, value} := Tuple withAll: #(#ok, 42)
     self assert: status equals: #ok
     self assert: value equals: 42
 
   testLiteralPatternInFirstSlot =>
     // A literal in the pattern matches only that value:
-    {#ok, value} := Erlang erlang list_to_tuple: #[#ok, 42]
+    {#ok, value} := Tuple withAll: #(#ok, 42)
     self assert: value equals: 42
 
   testLiteralMismatchRaises =>
-    // Mismatch raises a RuntimeError (badmatch):
+    // Mismatch raises an internal_error (badmatch):
     self should: [
-      {#ok, _val} := Erlang erlang list_to_tuple: #[#error, 42]
-    ] raise: RuntimeError
+      {#ok, _val} := Tuple withAll: #(#error, 42)
+    ] raise: #internal_error
 
   testWildcard =>
-    {_, b} := Erlang erlang list_to_tuple: #[#ignore, 99]
+    {_, b} := Tuple withAll: #(#ignore, 99)
     self assert: b equals: 99
 ```
 

@@ -1,10 +1,6 @@
 <!-- btfixture: fixtures/counter.bt -->
 <!-- btfixture: fixtures/bank_account.bt -->
 <!-- btfixture: fixtures/id_generator.bt -->
-<!-- btfixture: fixtures/ch11actors.bt -->
-<!-- btfixture: fixtures/ch11bank_account.bt -->
-<!-- btfixture: fixtures/ch11multiple_actors.bt -->
-<!-- btfixture: fixtures/ch11cast_send.bt -->
 
 ## Actors
 
@@ -250,11 +246,11 @@ TestCase subclass: Ch11BankAccount
   testWithdrawInsufficientFunds =>
     account := BankAccount spawn
     account deposit: 50
-    self should: [account withdraw: 100] raise: #beamtalk_error
+    self should: [account withdraw: 100] raise: #user_error
 
   testDepositNegativeAmount =>
     account := BankAccount spawn
-    self should: [account deposit: -10] raise: #beamtalk_error
+    self should: [account deposit: -10] raise: #user_error
 ```
 
 ## Multiple actors working together
