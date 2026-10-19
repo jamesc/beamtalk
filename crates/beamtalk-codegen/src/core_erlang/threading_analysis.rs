@@ -382,12 +382,18 @@ impl CoreErlangGenerator {
     /// [`Self::threaded_locals_of`]'s set for `expr` (which also covers its
     /// Tier 2 shapes) and core's [`expression_threaded_writes`], under the
     /// same scope predicate. Sorted, deduplicated.
+    ///
+    /// `also_bound` widens the scope with names the caller knows are bound
+    /// outside the constructs although the generator's scope does not hold them
+    /// yet (BT-3939: a local the same statement assigns before the construct
+    /// runs); the narrow-scope callers pass `&[]`.
     pub(in crate::core_erlang) fn reachable_threaded_locals(
         &self,
         expr: &Expression,
+        also_bound: &[String],
     ) -> Vec<String> {
         let mut names = Self::write_names(expression_threaded_writes(expr, &|name| {
-            self.binds_threadable_local(name)
+            self.binds_threadable_local(name) || also_bound.iter().any(|a| a == name)
         }));
         if let Some(set) = self.threaded_locals_of(expr) {
             names.extend(set.names);

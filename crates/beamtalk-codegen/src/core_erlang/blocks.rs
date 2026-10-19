@@ -570,8 +570,9 @@ impl CoreErlangGenerator {
     /// nested in an operand, a conditional arm or a `[...] value` block is
     /// seen) threads, that this body itself bound (`bound_since`: assigned,
     /// destructured, however first bound) and that is neither a block parameter
-    /// nor a captured-mutated variable the caller seeds into `StateAcc`.
-    /// `scope_depth` is the variable-scope depth at the body's entry.
+    /// nor a captured-mutated variable the caller seeds into `StateAcc`. A name
+    /// assigned elsewhere in the same statement, even after the construct, also
+    /// counts (conservative: see `assigned_outside_closures`). `scope_depth` is the variable-scope depth at the body's entry.
     fn reject_loop_rebind_of_body_local(
         &self,
         stmt: &Expression,
@@ -594,18 +595,9 @@ impl CoreErlangGenerator {
         // when the statement is lowered, so the scope sees neither the local
         // nor the construct's write to it. Conservatively, every name assigned
         // anywhere in the statement outside a closure counts as bound by the
-        // body, and the one threaded-writes walker is asked with that scope.
+        // body (an assignment *after* the construct too).
         let assigned = Self::assigned_outside_closures(subject);
-        let mut names = self.reachable_threaded_locals(subject);
-        for write in beamtalk_core::semantic_analysis::block_facts::expression_threaded_writes(
-            subject,
-            &|name| self.binds_threadable_local(name) || assigned.iter().any(|a| a == name),
-        ) {
-            let name = write.name.to_string();
-            if !names.contains(&name) {
-                names.push(name);
-            }
-        }
+        let names = self.reachable_threaded_locals(subject, &assigned);
         let Some(local) = names.into_iter().find(|n| {
             (self.bound_since(n, scope_depth) || assigned.contains(n))
                 && !is_param(n)
@@ -617,8 +609,9 @@ impl CoreErlangGenerator {
             feature: format!(
                 "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
                  other construct; the block would answer the value, and the state, from \
-                 before it (BT-3939, until BT-3947). Compute it in a method of its own and \
-                 call that from the block"
+                 before it (BT-3939, until BT-3947). An assignment to it elsewhere in the same \
+                 statement counts too. Compute it in a method of its own and call that \
+                 from the block"
             ),
             span: Some(subject.span()),
         })

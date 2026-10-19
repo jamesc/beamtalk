@@ -126,6 +126,29 @@ fn a_local_bound_earlier_in_the_same_statement_is_an_error() {
     );
 }
 
+/// The binding is made inside an INLINED block (a conditional arm, an
+/// evaluated `[...] value`): that block's own frame lowers the loop, so the
+/// Tier 2 gate (a local the Tier 2 body itself binds) does not apply. Checked
+/// on a BEAM by `stdlib/test/bt3939tier2inlined_test.bt` (all answer the
+/// post-loop value); here, over the generated constructs, that they compile.
+const INLINED_BINDING_POSITIONS: &[&str] = &[
+    "flag ifTrue: [n := 0. {c}. n] ifFalse: [0]",
+    "r := [n := 0. {c}. n] value. r",
+    "flag ifTrue: [flag ifTrue: [n := 0. {c}. n] ifFalse: [1]] ifFalse: [0]",
+];
+
+#[test]
+fn a_local_bound_inside_an_inlined_block_is_that_blocks_own() {
+    for position in INLINED_BINDING_POSITIONS {
+        for construct in CONSTRUCTS {
+            let body = position.replace("{c}", construct);
+            for src in hosts(&body) {
+                compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
+            }
+        }
+    }
+}
+
 // PIN-BUG BT-3947: the one source path to a Tier 2 body that survives BT-3922
 // (found empirically): a block passed to an Erlang FFI call that writes a
 // captured local goes through `generate_erlang_interop_wrapper` and answered
