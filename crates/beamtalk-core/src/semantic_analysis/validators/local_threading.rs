@@ -1396,6 +1396,10 @@ enum Escape {
     /// An argument of an ordinary send of this selector: a user-defined method,
     /// or a stdlib method outside the known list.
     Passed(EcoString),
+    /// An argument of this collection message sent to `self` or `super` in
+    /// an actor instance method: a dispatched self-send, so the actor's own
+    /// method runs the block, not the inlined collection loop (BT-3908).
+    ActorSelfSend(&'static str, EcoString),
     /// A handler of this `Dictionary` lookup where the compiler does not lower
     /// it in place (BT-3798: its receiver is statically not a `Dictionary`,
     /// or the lookup is not in a producer position).
@@ -1429,6 +1433,10 @@ impl Escape {
             Self::CollectionResult => "answered by the block of a collection operation".to_string(),
             Self::Passed(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
+            ),
+            Self::ActorSelfSend(receiver, selector) => format!(
+                "passed to `{receiver} {selector}`, which runs the actor's own `{selector}` method \
+                 rather than the collection loop the compiler threads it through"
             ),
             Self::Lookup(selector) => format!(
                 "passed to `{selector}` where the compiler does not thread it (the receiver is \
@@ -1464,6 +1472,10 @@ impl Escape {
                  the new value from the block and assign it where the block is called"
                 )
             }
+            Self::ActorSelfSend(_, selector) => format!(
+                "send `{selector}` to the collection itself (`self.items {selector} [...]`), \
+                 or return the new value from the block and assign it where it is called"
+            ),
             Self::Passed(selector)
             | Self::Lookup(selector)
             | Self::ClassMethod(selector)
@@ -1834,7 +1846,15 @@ impl<'d> Walker<'d> {
                 self.check_residuals(expr, position);
                 self.check_construct(expr, position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
-                self.check_send(receiver, selector, arguments, true, lookup_producer);
+                let dispatched = self.is_actor_self_send_fold(expr);
+                self.check_send(
+                    receiver,
+                    selector,
+                    arguments,
+                    true,
+                    lookup_producer,
+                    dispatched,
+                );
                 // The role of each block literal the construct inlines (the
                 // same recognizer as `check_construct`); any other block is a
                 // block value.
@@ -1928,9 +1948,9 @@ impl<'d> Walker<'d> {
                     if let Expression::Block(block) = shared.unwrap_parens() {
                         self.report_literal(block, &Escape::Cascade(selector.name()));
                     }
-                    self.check_send(shared, selector, arguments, false, false);
+                    self.check_send(shared, selector, arguments, false, false, false);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments, false, false);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false, false, false);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -2422,10 +2442,30 @@ impl<'d> Walker<'d> {
         }
     }
 
+    /// Whether `expr` is a collection-message send (a `Fold`-family
+    /// [`local_threading_construct`]: `do:`, `collect:`, `inject:into:`, ...)
+    /// to `self` or `super` in an actor instance method. Codegen never lowers
+    /// it in place: it is a dispatched self-send, so its block literal is
+    /// passed to the actor's own method and escapes. Its writes were carried
+    /// only by the callee's ADR 0128 opaque-callable fold, which ADR 0133
+    /// removed (BT-3908).
+    fn is_actor_self_send_fold(&self, expr: &Expression) -> bool {
+        let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() else {
+            return false;
+        };
+        self.context == Actor
+            && (matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+                || matches!(receiver.unwrap_parens(), Expression::Super(_)))
+            && local_threading_construct(expr)
+                .is_some_and(|c| c.family == LocalThreadingFamily::Fold)
+    }
+
     /// The ADR 0133 check for one send: its literal block arguments and
     /// receiver. `inlined` is false for a cascade message, which codegen never
-    /// inlines. A block passed to any other method escapes, an actor self-send
-    /// to a `sealed` method of the same class included (ADR 0133 retires the
+    /// inlines; `dispatched` is true for an actor self-send of a collection
+    /// message ([`Self::is_actor_self_send_fold`]), whose block escapes. A
+    /// block passed to any other method escapes, an actor self-send to a
+    /// `sealed` method of the same class included (ADR 0133 retires the
     /// BT-912/BT-3755 exemption).
     fn check_send(
         &mut self,
@@ -2434,6 +2474,7 @@ impl<'d> Walker<'d> {
         arguments: &[Expression],
         inlined: bool,
         lookup_producer: bool,
+        dispatched: bool,
     ) {
         let sel = selector.name();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
@@ -2444,7 +2485,10 @@ impl<'d> Walker<'d> {
         // send of a §1 selector (`local_threading_construct`).
         // (`tryDo:` is a §1 construct only sent to the `Result` class: any other
         // receiver takes the ordinary path.)
+        // Not for an actor self-send of a collection message, which is
+        // dispatched (`is_actor_self_send_fold`).
         let construct_send = inlined
+            && !dispatched
             && (is_section1_selector(&sel)
                 || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
         // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup
@@ -2492,7 +2536,14 @@ impl<'d> Walker<'d> {
         // evaluates to a block literal ([`value_blocks`]: the literal itself,
         // parenthesized, or answered by a conditional arm, an evaluated block or
         // a protected body) is a block value passed to `sel`, in every send.
-        let escape = if inlined {
+        let escape = if dispatched {
+            let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                "super"
+            } else {
+                "self"
+            };
+            Escape::ActorSelfSend(word, sel.clone())
+        } else if inlined {
             self.passed_escape(receiver, &sel)
         } else {
             Escape::Cascade(sel.clone())

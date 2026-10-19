@@ -13,10 +13,9 @@
 //! execution) and asserts each spelling answers what the reference
 //! interpretation says, so the three spellings agree with each other.
 //!
-//! One property, `class_var_agreement_enabled_shapes`, draws [`Shapes::ENABLED`]:
-//! every shape that compiles, `local_touch` (an outer local mutated inside a
-//! protected block) included since ADR 0131 Phase 5a (BT-3751), and
-//! `stored_value` left out since ADR 0133 made it a compile error (BT-3902).
+//! One property, `class_var_agreement_enabled_shapes`, draws [`Shapes::all`]:
+//! every shape, `local_touch` (an outer local mutated inside a protected
+//! block) included since ADR 0131 Phase 5a (BT-3751).
 //! It is a normal test
 //! (ADR 0130 Phase 3, BT-3713); `just test-class-var-corpus` runs it with a
 //! larger draw.
@@ -747,9 +746,8 @@ fn property(shapes: Shapes) {
 #[test]
 fn class_var_agreement_enabled_shapes() {
     // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
-    // failure belongs to (names: `Shapes::names`); default is `Shapes::ENABLED`
-    // (every shape that compiles).
-    property(corpus_shapes_from_env(Shapes::ENABLED));
+    // failure belongs to (names: `Shapes::names`); default is every shape.
+    property(corpus_shapes_from_env(Shapes::all()));
 }
 
 /// `MIN_ENVIRONMENT_PROGRAMS` small programs, program `i` from seed
@@ -761,7 +759,7 @@ fn fixture_cases() -> Vec<Case> {
             index,
             seed: 1000 + index as u64,
             size: 1,
-            program: gen_program(1000 + index as u64, 1, Shapes::ENABLED),
+            program: gen_program(1000 + index as u64, 1, Shapes::all()),
         })
         .collect()
 }

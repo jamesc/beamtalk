@@ -22,7 +22,6 @@ use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::semantic_analysis::block_facts::{
     RootMethodKind, value_position_local_assignments,
 };
-use beamtalk_core::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
 use std::collections::HashSet;
@@ -58,24 +57,10 @@ fn predicate(module: &Module) -> HashSet<Span> {
             .iter()
             .map(|m| (m, RootMethodKind::Class));
         for (method, kind) in methods.chain(class_methods) {
-            // ADR 0132 Phase 0b (BT-3867): the check and the pre-codegen
-            // lowering see a class or value-type body with each promotable
-            // stored block inlined at its sends, so the predicate does too.
-            let params: Vec<_> = method
-                .parameters
-                .iter()
-                .map(|p| p.name.name.clone())
-                .collect();
-            let inlined = (kind != RootMethodKind::Actor)
-                .then(|| inline_stored_tier2_values(&method.body, &params))
-                .flatten();
             out.extend(
-                value_position_local_assignments(
-                    inlined.as_deref().unwrap_or(&method.body),
-                    Some(kind),
-                )
-                .into_iter()
-                .map(|found| found.span),
+                value_position_local_assignments(&method.body, Some(kind))
+                    .into_iter()
+                    .map(|found| found.span),
             );
         }
     }

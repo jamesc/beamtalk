@@ -274,7 +274,7 @@ fn bt_3737_ci_seeds_pass_verified_codegen() {
     ] {
         // Without `block_local` (BT-3834), so each seed draws the program
         // that failed then.
-        let program = gen_program(seed, 3, Shapes::ENABLED.without(Shapes::BLOCK_LOCAL));
+        let program = gen_program(seed, 3, Shapes::all().without(Shapes::BLOCK_LOCAL));
         if let Err(e) = check_program(0, &program) {
             panic!("seed {seed}: {e}");
         }

@@ -48,17 +48,6 @@ pub struct BlockMutationAnalysis {
     /// potential mutation source, since the field may hold a Tier 2 (state-mutating)
     /// block that would otherwise silently skip state threading.
     pub has_field_value_call: bool,
-    /// ADR 0128 (BT-3615): whether the block contains a collection-HOM send
-    /// (`items do: block`, `items inject: 0 into: block`, …) forwarding an
-    /// OPAQUE (non-literal) callable —
-    /// [`crate::state_threading_selectors::is_opaque_callable_hom_send`].
-    /// Like `has_field_value_call`, conservative: the callable may be a
-    /// Tier 2 block whose captured-local writes ride the actor `State` map,
-    /// so in an Actor instance method the send threads `State` (codegen's
-    /// opaque-callable fold) and an enclosing conditional/loop must thread
-    /// it too rather than discard the send's updated `State`. Propagated
-    /// out of nested blocks the same way.
-    pub has_opaque_callable_hom_send: bool,
 }
 
 impl BlockMutationAnalysis {
@@ -73,14 +62,10 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns true if the block has any state-affecting operations.
-    /// This includes field writes, self-sends, `self.field value(:...)` calls,
-    /// and collection HOMs forwarding an opaque callable (which may all
-    /// mutate actor state).
+    /// This includes field writes, self-sends and `self.field value(:...)`
+    /// calls (which may all mutate actor state).
     pub fn has_state_effects(&self) -> bool {
-        !self.field_writes.is_empty()
-            || self.has_self_sends
-            || self.has_field_value_call
-            || self.has_opaque_callable_hom_send
+        !self.field_writes.is_empty() || self.has_self_sends || self.has_field_value_call
     }
 
     /// Whether a loop or fold over this block is lowered with mutation
@@ -716,9 +701,6 @@ fn analyze_expression(
             ..
         } => {
             record_send_target(receiver, selector, analysis);
-            if crate::state_threading_selectors::is_opaque_callable_hom_send(expr) {
-                analysis.has_opaque_callable_hom_send = true;
-            }
             // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
@@ -789,9 +771,6 @@ fn analyze_expression(
             // is itself a potential mutation source visible to the outer analysis.
             if nested_analysis.has_field_value_call {
                 analysis.has_field_value_call = true;
-            }
-            if nested_analysis.has_opaque_callable_hom_send {
-                analysis.has_opaque_callable_hom_send = true;
             }
             // Propagate self-sends the same way — a self-send inside a
             // block passed to select:/collect:/do:/etc. (this is exactly that
@@ -1152,9 +1131,6 @@ fn propagate_inline_block_writes(
         .extend(nested.self_send_selectors.iter().cloned());
     if nested.has_field_value_call {
         analysis.has_field_value_call = true;
-    }
-    if nested.has_opaque_callable_hom_send {
-        analysis.has_opaque_callable_hom_send = true;
     }
 }
 
@@ -2866,17 +2842,11 @@ fn walk_construct_blocks(
 // ---------------------------------------------------------------------------
 
 /// The outer locals a block literal both reads and writes (`local_writes` ∩
-/// `captured_reads` of [`analyze_block`]), sorted: the set codegen's Tier 2
+/// `captured_reads` of its [`analyze_block`] analysis), sorted: the set codegen's Tier 2
 /// block protocol threads back (`captured_mutations_for_block`). A block whose
 /// outer-local write is not in this set (a write-only write, or one this
 /// analysis does not propagate out of a nested block) is not promoted, and
 /// the write is lost.
-#[must_use]
-pub fn captured_local_mutations(block: &Block) -> Vec<String> {
-    captured_local_mutations_from_analysis(&analyze_block(block))
-}
-
-/// [`captured_local_mutations`] from an already-computed analysis.
 #[must_use]
 pub fn captured_local_mutations_from_analysis(analysis: &BlockMutationAnalysis) -> Vec<String> {
     analysis
@@ -3135,9 +3105,10 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
 //    - the same direct invocation as the right-hand side of `x := ...` in the
 //      body of a statement-level `do:` loop, where `x` is a local bound
 //      before the loop;
-//    - the **callable argument of a collection HOM** that codegen lowers
-//      through the ADR 0128 opaque-callable fold
-//      ([`is_opaque_callable_hom_send`]), in operand position of a
+//    - the **callable argument of a collection HOM**
+//      ([`is_opaque_callable_hom_send`]; codegen lowered it through the
+//      ADR 0128 opaque-callable fold until ADR 0133 removed that fold,
+//      BT-3908), in operand position of a
 //      method-body statement or inside the branches of a conditional, the
 //      body of `to:do:` or the condition of `whileTrue:`/`whileFalse:`;
 //    - passed as a bare argument of a method-body self-send to another
@@ -3956,42 +3927,6 @@ mod tests {
             analysis.self_send_selectors,
             ["log".to_string(), "bump:".to_string()].into()
         );
-    }
-
-    #[test]
-    fn test_opaque_callable_hom_send_is_a_state_effect() {
-        // ADR 0128 / BT-3615: a collection HOM forwarding an opaque callable
-        // may thread actor `State` (the callable can be a Tier 2 block), so
-        // an enclosing conditional/loop block must see it as a state effect —
-        // at the block's own top level and propagated out of a nested block
-        // or an inline conditional arm.
-        for src in [
-            "[items do: blk]",
-            "[:x | x inject: 0 into: blk]",
-            "[flag ifTrue: [items count: blk]]",
-            "[items do: [:x | x collect: blk]]",
-        ] {
-            let analysis = analyze_block(&parse_block(src));
-            assert!(
-                analysis.has_opaque_callable_hom_send,
-                "{src}: should set has_opaque_callable_hom_send"
-            );
-            assert!(
-                analysis.has_state_effects(),
-                "{src}: should be a state effect"
-            );
-        }
-        for src in [
-            "[items do: [:x | x]]",
-            "[self do: blk]",
-            "[items reject: blk]",
-        ] {
-            let analysis = analyze_block(&parse_block(src));
-            assert!(
-                !analysis.has_opaque_callable_hom_send,
-                "{src}: should NOT set has_opaque_callable_hom_send"
-            );
-        }
     }
 
     #[test]
