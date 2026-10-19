@@ -548,16 +548,26 @@ impl CoreErlangGenerator {
     /// `generate_while_loop_direct` (its only caller — the
     /// `ThreadedIr` while-direct pilot this was also shared with, ADR 0111
     /// Addendum 2/13, was deleted).
+    ///
+    /// ADR 0133 Phase 3 (BT-3911, closes BT-3891): the condition closure is a
+    /// frame of its own ([`ThreadingPlan::condition_rebind_frame`]), so a
+    /// conditional nested in it is lowered against the closure's scratch map
+    /// (private: the closure has no `StateAcc` to continue), not the
+    /// enclosing frame's.
     fn generate_loop_condition_body(
         &mut self,
         condition: &Expression,
+        plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
-            if let Expression::Block(cond_block) = condition {
-                this.generate_block_body(cond_block)
-            } else {
-                this.generate_expression(condition)
-            }
+            let frame = this.current_branch_frame();
+            this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
+                if let Expression::Block(cond_block) = condition {
+                    this.generate_block_body(cond_block)
+                } else {
+                    this.generate_expression(condition)
+                }
+            })
         })
     }
 
@@ -645,7 +655,7 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        let cond_body_doc = self.generate_loop_condition_body(condition)?;
+        let cond_body_doc = self.generate_loop_condition_body(condition, plan)?;
         let condition_stmt = ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -1002,11 +1012,14 @@ impl CoreErlangGenerator {
         let cond_result = self.with_branch_context(|this| {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
-            let result = if let Expression::Block(cond_block) = condition {
-                this.generate_block_body(cond_block)
-            } else {
-                this.generate_expression(condition)
-            };
+            let frame = this.current_branch_frame();
+            let result = this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
+                if let Expression::Block(cond_block) = condition {
+                    this.generate_block_body(cond_block)
+                } else {
+                    this.generate_expression(condition)
+                }
+            });
             this.loop_mode.in_hybrid_loop = prev_hybrid;
             result
         });

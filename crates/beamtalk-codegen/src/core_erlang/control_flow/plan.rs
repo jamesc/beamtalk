@@ -652,6 +652,19 @@ impl ThreadingPlan {
         }
     }
 
+    /// ADR 0133 Phase 3 (BT-3911): the frame a `whileTrue:`/`whileFalse:`
+    /// condition closure (frame `frame`) is lowered in when it is not part of
+    /// the loop's own `StateAcc` frame: the loop's mode, threading nothing
+    /// (the closure is called once per iteration and hands back only its
+    /// boolean, so no outer local leaves it).
+    pub(in crate::core_erlang) fn condition_rebind_frame(&self, frame: FrameId) -> RebindFrame {
+        RebindFrame {
+            frame,
+            kind: RebindFrameKind::Loop(self.threading_mode()),
+            threads: Vec::new(),
+        }
+    }
+
     /// ADR 0122 Decision 2/3: the storage families this plan threads
     /// through its own extra trailing slot, in canonical order — see
     /// [`Self::threaded_families`]'s (the field's) own doc comment for the

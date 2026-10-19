@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3911 (ADR 0133 Phase 3): arm-bearing constructs as frames, in an actor
+// method. See stdlib/test/bt3911arm_frames_test.bt and its class and
+// value-type siblings.
+
+Actor subclass: Bt3911ArmFramesActor
+  state: n = 0
+  state: k = 3
+
+  condAnd: m :: Integer =>
+    i := 0
+    [i < m and: [x := i. x < 5]] whileTrue: [i := i + 1]
+    i
+
+  condIfTrue: m :: Integer =>
+    i := 0
+    [i < m ifTrue: [x := i. x]. i < 4] whileTrue: [i := i + 1]
+    i
+
+  condIfNil: m :: Integer =>
+    i := 0
+    [nil ifNil: [x := i. x + 1]. i < m] whileTrue: [i := i + 1]
+    i
+
+  condOrWhileFalse: m :: Integer =>
+    i := 0
+    [i >= m or: [x := i. x < 0]] whileFalse: [i := i + 1]
+    i
+
+  condNested: m :: Integer =>
+    i := 0
+    [i < m and: [x := i. x < 5 and: [y := x + 1. y < 4]]] whileTrue: [i := i + 1]
+    i
+
+  // Nestings of the arm in the condition: through a `do:` body, through a
+  // closure, and writing a local the condition itself bound first.
+  condDoBody: m :: Integer =>
+    i := 0
+    [#(1) do: [:e | e > 0 ifTrue: [x := e. x]]. i < m] whileTrue: [i := i + 1]
+    i
+
+  condBoundBefore: m :: Integer =>
+    i := 0
+    [x := 0. m > 0 ifTrue: [x := 1]. i < (m + x) - 1] whileTrue: [i := i + 1]
+    i
+
+  // A body that writes a field, and a condition that reads one.
+  condAndFieldBody: m :: Integer =>
+    i := 0
+    [i < m and: [x := i. x < 5]] whileTrue: [
+      i := i + 1
+      self.n := self.n + 1
+    ]
+    #[i, self.n]
+
+  condAndFieldRead =>
+    i := 0
+    [i < self.k and: [x := i. x < 5]] whileTrue: [i := i + 1]
+    i

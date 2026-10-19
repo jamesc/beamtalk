@@ -25,9 +25,9 @@ statement	group-by	value	1	0	0
 statement	keyed-do	actor	94	0	0
 statement	keyed-do	class	104	0	0
 statement	keyed-do	value	94	0	0
-statement	other	actor	1142	0	9
-statement	other	class	1252	0	9
-statement	other	value	1070	0	9
+statement	other	actor	1145	0	6
+statement	other	class	1255	0	6
+statement	other	value	1073	0	6
 statement	satisfy	actor	94	0	0
 statement	satisfy	class	104	0	0
 statement	satisfy	value	94	0	0
@@ -37,9 +37,9 @@ statement-group	handler	detect-ifnone	actor	12
 statement-group	handler	detect-plain	actor	6
 statement-group	loop-body	detect-ifnone	actor	24
 statement-group	loop-body	detect-plain	actor	12
-statement-group	loop-condition	other	actor	9
-statement-group	loop-condition	other	class	9
-statement-group	loop-condition	other	value	9
+statement-group	loop-condition	other	actor	6
+statement-group	loop-condition	other	class	6
+statement-group	loop-condition	other	value	6
 statement-group	method-body	group-by	actor	1
 statement-group	nested-loop	detect-ifnone	actor	16
 statement-group	nested-loop	detect-plain	actor	8

@@ -6294,15 +6294,15 @@ value	valTimes	dlocal	det	ok
 # block binds a local, as a receiver (BT-3897: the actor and the REPL answer
 # the raw carrier tuple), and a REPL `match:` arm writing an outer local
 # (BT-3875: the value-position error before BT-3909, now the `match:` arm error).
-actor	cond	fresh	and	bad
-actor	cond	fresh	ifNil	bad
-actor	cond	fresh	ifTrue	bad
-class	cond	fresh	and	bad
-class	cond	fresh	ifNil	bad
-class	cond	fresh	ifTrue	bad
-value	cond	fresh	and	bad
-value	cond	fresh	ifNil	bad
-value	cond	fresh	ifTrue	bad
+actor	cond	fresh	and	ok
+actor	cond	fresh	ifNil	ok
+actor	cond	fresh	ifTrue	ok
+class	cond	fresh	and	ok
+class	cond	fresh	ifNil	ok
+class	cond	fresh	ifTrue	ok
+value	cond	fresh	and	ok
+value	cond	fresh	ifNil	ok
+value	cond	fresh	ifTrue	ok
 actor	top	fresh	groupBy	bad
 class	top	fresh	groupBy	ok
 value	top	fresh	groupBy	ok

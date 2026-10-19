@@ -3548,26 +3548,22 @@ fn residual_messages(src: &str, repl_vars: Option<&[&str]>) -> Vec<String> {
     diags.into_iter().map(|d| d.message.to_string()).collect()
 }
 
-/// PIN-BUG BT-3911 (closes BT-3891): an assignment inside a conditional arm
-/// nested in a `whileTrue:`/`whileFalse:` condition block emitted an unbound
-/// `StateAcc` (`erlc` rejected the module) in class, value-type and actor
-/// methods; BT-3909 makes it a compile error. BT-3911 lowers the condition
-/// block as a frame, deletes the `LoopConditionArmWrite` row and flips these
-/// to accepted. The REPL answers right and is not rejected.
+/// BT-3911 (closes BT-3891): an assignment inside a conditional arm nested in
+/// a `whileTrue:`/`whileFalse:` condition block emitted an unbound `StateAcc`
+/// (`erlc` rejected the module) in class, value-type and actor methods, until
+/// the condition closure became a frame of its own (a nested conditional's
+/// scratch map is then the closure's private one). The shapes are accepted in
+/// every context; `stdlib/test/bt3911_arm_frames_test.bt` runs them.
 #[test]
-fn residual_loop_condition_arm_write_is_an_error_in_methods() {
+fn loop_condition_arm_write_is_accepted() {
     // The BT-3891 repro, verbatim.
     let repro = "Object subclass: Repro\n  class f: n :: Integer -> Integer =>\n    i := 0\n    [i < n and: [x := i. x < 5]] whileTrue: [i := i + 1]\n    i\n";
-    let messages = residual_messages(repro, None);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(
-        messages[0].contains("the `whileTrue:` condition assigns `x` inside a conditional arm")
-            && messages[0].contains("BT-3891, until BT-3911"),
-        "{messages:?}"
-    );
+    assert!(residual_messages(repro, None).is_empty());
     // The BT-3891 shape matrix rows that failed, plus the measured nestings:
     // through a `do:` body or a closure in the condition, and a local bound
-    // in the condition before the arm.
+    // in the condition before the arm; and the controls (a direct write in
+    // the condition, the same `and:` outside a loop, an arm write in the loop
+    // body), which were always accepted.
     for body in [
         "i := 0\n[i < 3 and: [x := i. x < 5]] whileTrue: [i := i + 1]\ni",
         "i := 0\n[i >= 3 or: [x := i. x >= 5]] whileFalse: [i := i + 1]\ni",
@@ -3576,19 +3572,6 @@ fn residual_loop_condition_arm_write_is_an_error_in_methods() {
         "i := 0\n[#(1) do: [:e | true ifTrue: [x := e]]. i < 3] whileTrue: [i := i + 1]\ni",
         "i := 0\n[[:k | true ifTrue: [x := k]] value: 1. i < 3] whileTrue: [i := i + 1]\ni",
         "i := 0\n[x := 0. true ifTrue: [x := 1]. i < 3] whileTrue: [i := i + 1]\ni",
-    ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let messages = residual_messages(&src, None);
-            assert!(
-                messages.iter().any(|m| m.contains("BT-3891")),
-                "{src}: {messages:?}"
-            );
-        }
-    }
-    // Controls that compile and answer right: a direct write in the
-    // condition, the same `and:` outside a loop, an arm write in the loop
-    // body, and the REPL.
-    for body in [
         "i := 0\n[x := i. x < 3] whileTrue: [i := i + 1]\ni",
         "i := 3\ni < 5 and: [x := i. x < 5]\ni",
         "i := 0\n[i < 3] whileTrue: [true ifTrue: [x := i]. i := i + 1]\ni",
