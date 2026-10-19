@@ -19,12 +19,11 @@
 
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::{ThreadedConstruct, ThreadedLocals};
+use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
-use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
@@ -340,7 +339,7 @@ impl CoreErlangGenerator {
             }
 
             // Generate body expressions with state threading
-            this.generate_block_stateful_body(block, frame, &mut stmts)?;
+            this.generate_block_stateful_body(block, frame, captured_vars, &mut stmts)?;
             let branch_final = this.state_version();
             Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
                 stmts,
@@ -531,43 +530,55 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
-    /// lowers a loop or fold statement inside an opaque `let _ = ( ... )`, so
-    /// the loop's rebind of a local the body assigned (`n := 0. xs do: [:y |
-    /// n := n + y]. n`) is scoped inside that statement: the block would
-    /// answer the pre-loop value with the pre-loop state, silently. Until the
-    /// body is a frame that lowers the loop as a producer, that shape is a
-    /// compile error instead. The loop is recognised by the one recognizer
-    /// ([`Self::threaded_locals_of`], the rule `threaded_locals_of` and the
-    /// Phase 0 check share), for the statement itself or an assignment's value.
+    /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
+    /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
+    /// is scoped inside that statement: the block would answer the value, and
+    /// the state, from before the loop, silently. Until the body is a frame
+    /// that lowers the loop as a producer, that shape is a compile error.
+    ///
+    /// The rule is semantic, not syntactic: any name a construct reachable from
+    /// `stmt` without crossing a closure (`reachable_threaded_locals`, the
+    /// recognizer `threaded_locals_of` and the Phase 0 check share, so a loop
+    /// nested in an operand, a conditional arm or a `[...] value` block is
+    /// seen) threads, that this body itself bound (`bound_since`: assigned,
+    /// destructured, however first bound) and that is neither a block parameter
+    /// nor a captured-mutated variable the caller seeds into `StateAcc`.
+    /// `scope_depth` is the variable-scope depth at the body's entry.
     fn reject_loop_rebind_of_body_local(
         &self,
         stmt: &Expression,
-        body_locals: &[String],
+        block: &Block,
+        captured_vars: &[String],
+        scope_depth: usize,
     ) -> Result<()> {
-        let construct = match stmt {
-            Expression::Assignment { value, .. } => value.as_ref(),
+        // An assignment's, destructuring's or `^`'s own write is not a
+        // construct's: look at the value it holds.
+        let subject = match stmt {
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. } => value.as_ref(),
             other => other,
         };
-        let Some(set) = self.threaded_locals_of(construct) else {
-            return Ok(());
-        };
-        if !matches!(
-            set.construct,
-            ThreadedConstruct::Inline(LocalThreadingFamily::Loop | LocalThreadingFamily::Fold)
-        ) {
-            return Ok(());
-        }
-        let Some(local) = set.names.iter().find(|n| body_locals.contains(n)) else {
+        let is_param = |n: &str| block.parameters.iter().any(|p| p.name == n);
+        let Some(local) = self
+            .reachable_threaded_locals(subject)
+            .into_iter()
+            .find(|n| {
+                self.bound_since(n, scope_depth)
+                    && !is_param(n)
+                    && !captured_vars.iter().any(|c| c == n)
+            })
+        else {
             return Ok(());
         };
         Err(CodeGenError::UnsupportedFeature {
             feature: format!(
-                "a block an actor self-send passes to a Tier 2 method assigns local `{local}` \
-                 and rebinds it inside a loop or fold; the block would answer the value from \
-                 before the loop (BT-3939, until BT-3947). Compute the loop in a method of its \
-                 own and call it from the block"
+                "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
+                 other construct; the block would answer the value, and the state, from \
+                 before it (BT-3939, until BT-3947). Compute it in a method of its own and \
+                 call that from the block"
             ),
-            span: Some(construct.span()),
+            span: Some(subject.span()),
         })
     }
 
@@ -594,21 +605,16 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
         frame: threaded_ir::FrameId,
+        captured_vars: &[String],
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let filtered_body = super::util::collect_body_exprs(&block.body);
-        // BT-3939: the locals this body has assigned so far.
-        let mut body_locals: Vec<String> = Vec::new();
+        let scope_depth = self.scope_depth();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
-            self.reject_loop_rebind_of_body_local(expr, &body_locals)?;
-            if let Expression::Assignment { target, .. } = expr {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    body_locals.push(id.name.to_string());
-                }
-            }
+            self.reject_loop_rebind_of_body_local(expr, block, captured_vars, scope_depth)?;
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
