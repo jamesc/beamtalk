@@ -318,11 +318,11 @@ to_list_for_threading(Recv, Selector) ->
                         Selector,
                         [
                             <<
-                                " defines a collection message outside the stdlib, which the "
+                                " defines a collection message outside the stdlib that the "
                                 "stdlib's '"
                             >>,
                             atom_to_binary(Selector, utf8),
-                            <<"' can run through">>
+                            <<"' may run through; the in-place fold would skip it">>
                         ]
                     )
             end;
@@ -335,7 +335,7 @@ to_list_for_threading(Recv, Selector) ->
                 [
                     <<" answers '">>,
                     atom_to_binary(Selector, utf8),
-                    <<"' with a method outside the stdlib">>
+                    <<"' with a method outside the stdlib, which cannot return that write">>
                 ]
             )
     end.
@@ -349,7 +349,7 @@ refuse_writing_fold(Class, Selector, Reason) ->
             <<"The block assigns a variable of the enclosing method, but ">>,
             atom_to_binary(Class, utf8),
             Reason,
-            <<", which cannot return that write">>
+            <<".">>
         ])
     ),
     beamtalk_error:raise(
