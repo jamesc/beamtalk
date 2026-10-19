@@ -172,6 +172,17 @@
 - **§6 escape check follows bindings and aliases (ADR 0131 §6; BT-3859)** — a block that writes an outer local and escapes through a local binding (`b := [...]. ^b`) or a plain alias (`c := b. ^c`) is now caught by the §6 escape check. In actor methods, the diagnostic now says the block is dropped unrun rather than returned (#4356)
 - Fix: a `value`-family send to a block literal of another arity (`[t := t + 1] value: 1`, `[:k | t := t + k] value`) now raises `arity_mismatch` in all contexts including the REPL, instead of silently ignoring extra arguments or reading wrong bindings (BT-3881, #4358)
 - **Actor `detect:`/`detect:ifNone:` in nested positions that lose block-local statement cells are now compile errors (ADR 0131; BT-3776)** — actor `detect:` folds in protected bodies, handlers, and counted-loop bodies that write block-local variables are now rejected instead of silently producing wrong answers (#4349)
+- **Escaping-block captured-local assignment is a compile error everywhere (ADR 0133 Phase 1; BT-3902)** — a block may assign a captured local only where the compiler lowers it in place (the block literal written as the argument or receiver of a control construct or a compiler-known collection message). A block that escapes — stored, returned, passed to a method the compiler does not lower in place, or placed in a collection literal — may read captured variables but not assign them. This replaces the runtime `Cannot call 'value' on Block … captures mutable state` error with a compile-time diagnostic, and also rejects writing blocks at the REPL root and the actor self-send exemption (BT-912/BT-3755). The diagnostic suggests the value-returning idiom: `t := Twice twice: [t + 1]` (#4382)
+- **A destructuring assignment evaluates to its right-hand side (BT-3889)** — `{a, b} := expr` now evaluates to `expr` in every context: actor, class and value-type methods, blocks, conditional arms, protected bodies, and fold epilogues (`collect:`, `inject:into:`, `groupBy:`). Previously the value varied by context (mostly `nil`) (#4376)
+- **Actor method answers the value of a last-statement local assignment (BT-3882)** — an actor method whose last statement is `x := expr` now answers `expr` instead of `nil`, matching class and value-type methods (#4364)
+- Fix: `nil < 5` silently answered `false` — comparison operators now dispatch as messages to the receiver, so `nil`, booleans, lists and tuples raise `does_not_understand`. Numbers, characters, strings and symbols define their ordering; everything else must define its own. `Symbol` gains `< > <= >=` primitives (BT-3924, #4387)
+- Fix: untyped fields always go through the operator guard — untyped `state:`, `field:` and `classState:` fields now always get a runtime type test for arithmetic and comparison operators, since writers outside the class can store any object. Annotating with `:: Integer` / `:: Float` / `:: Number` gets the bare fast path (BT-3925, #4387)
+- Fix: `self.field + obj` on an untyped or union-typed field skipped the `is_number` guard and raised a misleading DNU for `plusFromNumber:` — the operator guard now respects declared type and detects fields that can hold non-numeric values (BT-3892, #4381)
+- Fix: dynamic `==` / `/=` / `=:=` / `=/=` sends (`x perform: #'=='`) raised DNU on value types — `ProtoObject`'s equality methods now have real bodies and value types delegate unknown selectors through to `ProtoObject` (BT-3919, #4387)
+- Fix: an extension method that raised crashed the actor — the extension branch now returns `{error, E, State}`, rolling back state the same way a normal method crash does (BT-3920, #4387)
+- Fix: a shadowed typed parameter kept the bare operator BIF — `trusted_param_types` now drops parameters whose names are rebound in the method body (BT-3921, #4387)
+- Fix: `respondsTo:` on a value type now answers `true` for `ProtoObject`'s selectors, matching actors (BT-3919, #4387)
+- **Verifier check: `FoldLocalsNotCarried`** — the `ThreadedIr` verifier now rejects a fold body that does not return its accumulator, catching an internal codegen invariant violation at verify time instead of producing wrong answers at runtime (BT-3863, #4370)
 
 ### Runtime
 
@@ -201,6 +212,22 @@
 - Extract `format_sorted_atom_list` to shared CLI util, replacing duplicate implementations in `app_file` and `build_stdlib` (#4338)
 - Enumeration fold re-projection tied to the producer question; core owns the separator span (BT-3855, #4359)
 - Removed temporary BT-3820 class-call timeout diagnostics (BT-3828, #4362)
+- ADR 0133 Phase 2: remove class-method threaded entries and the threading ABI — class methods no longer take or return a threaded-entry map; codegen and the runtime dispatch path are simplified (BT-3904, #4386)
+- ADR 0133 Phase 2: remove the `Acc` family and the threaded-body state from `ThreadedIr` and the generator (BT-3905, #4390)
+- ADR 0133 Phase 2: remove the threading index and `MethodInfo::threading_params` (BT-3906, #4391)
+- ADR 0132 Phase 1c: threaded entry for class methods — class methods now emit a threaded entry that the runtime reads to decide whether to route through the stateful dispatch path (BT-3871, #4361)
+- ADR 0132: mark Tier 2 funs so `call_threaded/3` decides the tier before applying (BT-3885, #4373)
+- ADR 0132 Phase 1c post-merge review fixes for the threaded class entry (BT-3890, #4372)
+- ADR 0133 Phase 1: decide and pin what a `uses: Enumerable` class does with a Tier 2 block (BT-3903, #4380)
+
+### Tooling
+
+- **LSP code action: "return the value instead" (ADR 0133 Phase 4; BT-3914)** — a quick-fix for the escaping-block assignment diagnostic rewrites a `[t := t + 1]` block to the value-returning idiom `t := Twice twice: [t + 1]`. Offered when the block is the argument of a synchronous send statement and has exactly one assignment as its last statement (#4384)
+- **`beamtalk new` generates snake_case file names** — `src/foo.bt`, `test/foo_test.bt` instead of `src/Foo.bt`, `test/FooTest.bt`. `beamtalk generate native` also finds snake_case files. Existing CamelCase projects keep compiling (#4371)
+- **`beamtalk new` AGENTS.md template refreshed** — rewritten against the current language reference, covers class kinds, Results, destructuring, actors, BUnit fixtures and a corrected pitfalls table (#4371)
+- Fix: `install.sh --nightly` no longer makes a GitHub API call — downloads the nightly archive directly, avoiding API rate limits that caused spurious "No nightly release found" errors in CI. The latest-release lookup now sends `GITHUB_TOKEN`/`GH_TOKEN` when set and retries up to 3 times (#4375)
+- **`just test-learn` validates learning-doc fixtures in CI** — every code block in the learning docs is now compiled during CI; eight stale examples (bare `=` equality, `Object subclass:` with `state:`, `Result` FFI returns, etc.) were fixed (BT-3927, #4393)
+- CI now uses `cargo-nextest` for test execution, per-crate `opt-level` for build speed, and a gated corpus tier (`just test-corpus`) that runs only when compiler crates are touched (#4360)
 
 ### Standard Library
 
