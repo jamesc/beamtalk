@@ -10,6 +10,34 @@
 use super::*;
 
 const APPLY_PENDING_STOP: &str = "call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)";
+const CLEAR_PENDING_STOP: &str = "call 'beamtalk_actor':'clear_pending_stop'()";
+
+/// Every gen_server callback the actor codegen can emit.
+const CALLBACK_HEADERS: [&str; 4] = [
+    "'handle_continue'/2 = fun",
+    "'handle_cast'/2 = fun",
+    "'handle_call'/3 = fun",
+    "'handle_info'/2 = fun",
+];
+
+/// Any callback that runs a Beamtalk dispatch must clear a stale request on
+/// entry and apply its own on exit — so a callback added later that
+/// dispatches but forgets the wrap fails here.
+fn assert_dispatching_callbacks_wrapped(code: &str) -> usize {
+    let mut dispatching = 0;
+    for header in CALLBACK_HEADERS {
+        let body = extract_core_fn(code, header)
+            .unwrap_or_else(|| panic!("{header} must be present in generated code"));
+        if body.contains("'safe_dispatch'(") {
+            dispatching += 1;
+            assert!(
+                body.contains(CLEAR_PENDING_STOP) && body.contains(APPLY_PENDING_STOP),
+                "{header} dispatches, so it must clear and apply the pending stop. Got:\n{body}"
+            );
+        }
+    }
+    dispatching
+}
 
 fn generate(src: &str, module_name: &str) -> String {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -28,18 +56,8 @@ fn test_dispatching_callbacks_apply_pending_stop() {
         ),
         "stopper",
     );
-    for header in [
-        "'handle_continue'/2 = fun",
-        "'handle_cast'/2 = fun",
-        "'handle_call'/3 = fun",
-    ] {
-        let body = extract_core_fn(&code, header)
-            .unwrap_or_else(|| panic!("{header} must be present in generated code"));
-        assert!(
-            body.contains(APPLY_PENDING_STOP),
-            "{header} must pass its result through apply_pending_stop/1. Got:\n{body}"
-        );
-    }
+    // handle_continue (initialize), handle_cast and handle_call dispatch.
+    assert_eq!(assert_dispatching_callbacks_wrapped(&code), 3);
 }
 
 #[test]
@@ -51,11 +69,9 @@ fn test_server_handle_info_applies_pending_stop() {
         ),
         "info_stopper",
     );
-    let body = extract_core_fn(&code, "'handle_info'/2 = fun")
-        .expect("handle_info/2 must be present in generated code");
-    assert!(
-        body.contains(APPLY_PENDING_STOP),
-        "Server-subclass handle_info/2 must pass its result through \
-         apply_pending_stop/1. Got:\n{body}"
-    );
+    // No initialize here, so handle_continue does not dispatch; a Server's
+    // handle_info dispatches handleInfo: alongside handle_cast/handle_call.
+    assert_eq!(assert_dispatching_callbacks_wrapped(&code), 3);
+    let info = extract_core_fn(&code, "'handle_info'/2 = fun").expect("handle_info/2");
+    assert!(info.contains(APPLY_PENDING_STOP), "Got:\n{info}");
 }

@@ -14,8 +14,6 @@ TestCase subclass: ActorStopWithTest
   testSelfStopFromHandleInfoWithTupleReason =>
     table := Ets new: #stopWithHandleInfo type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithHandleInfo}
-    // Unlink: a {shutdown, _} exit signal would otherwise reach this process.
-    Erlang erlang unlink: server pid
     server onExit: [:reason | table at: #exitReason put: reason]
     expected := Tuple withAll: #(#shutdown, #peer_closed)
     Erlang erlang send: server pid msg: #close
@@ -29,7 +27,6 @@ TestCase subclass: ActorStopWithTest
     // The caller still gets the method's reply; the stop happens after.
     table := Ets new: #stopWithAfterReply type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithAfterReply}
-    Erlang erlang unlink: server pid
     self assert: (server stopSelfWith: #shutdown) equals: #stillRunning
     50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
@@ -45,6 +42,41 @@ TestCase subclass: ActorStopWithTest
     self assert: (table at: #reason) equals: #normal
     table delete
 
+  testSelfStopWithTimeoutIsDeferredToo =>
+    table := Ets new: #stopWithSelfTimeout type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithSelfTimeout}
+    self assert: (server stopSelfWithTimeout: #shutdown) equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testFirstSelfStopRequestWins =>
+    table := Ets new: #stopWithTwice type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithTwice}
+    self assert: server stopTwice equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #reason) equals: #normal
+    table delete
+
+  testSelfStopStillHappensWhenMethodThenRaises =>
+    table := Ets new: #stopWithThenFail type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithThenFail}
+    self should: [server stopThenFail] raise: #user_error
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testSelfStopFromFireAndForgetCast =>
+    table := Ets new: #stopWithCast type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithCast}
+    server stopSelfWith: #shutdown!
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
   testUnrelatedInfoMessageDoesNotStop =>
     server := StopWithServer spawn
     Erlang erlang send: server pid msg: #tick
@@ -57,8 +89,6 @@ TestCase subclass: ActorStopWithTest
     table := Ets new: #stopWithExternal type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithExternal}
     server onExit: [:reason | table at: #exitReason put: reason]
-    // Unlink: a {shutdown, _} exit signal would otherwise reach this process.
-    Erlang erlang unlink: server pid
     expected := Tuple withAll: #(#shutdown, #local_closed)
     self assert: (server stopWith: expected) equals: #ok
     self deny: server isAlive
@@ -79,7 +109,6 @@ TestCase subclass: ActorStopWithTest
   testExternalStopWithTimeout =>
     table := Ets new: #stopWithTimeout type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithTimeout}
-    Erlang erlang unlink: server pid
     self assert: (server stopWith: #shutdown timeout: 1000) equals: #ok
     self assert: (table at: #reason) equals: #shutdown
     table delete

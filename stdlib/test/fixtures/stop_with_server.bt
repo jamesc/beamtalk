@@ -23,6 +23,19 @@ Server subclass: StopWithServer
     self stop
     #stillRunning
 
+  stopSelfWithTimeout: reason =>
+    self stopWith: reason timeout: 10
+    #stillRunning
+
+  stopTwice =>
+    self stop
+    self stopWith: #second
+    #stillRunning
+
+  stopThenFail =>
+    self stopWith: #shutdown
+    self error: "boom after stop request"
+
   handled => self.handled
 
   terminate: reason =>

@@ -95,6 +95,7 @@ module 'actor_state_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 'handle_continue'/2 = fun (Continue, State) ->
+    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
     let _CallbackResult =
         case Continue of
             <'initialize'> when 'true' ->
@@ -107,6 +108,7 @@ module 'actor_state_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 'handle_cast'/2 = fun (Msg, State) ->
+    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
     let _CallbackResult =
         case Msg of
             <{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
@@ -173,6 +175,7 @@ module 'actor_state_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 'handle_call'/3 = fun (Msg, From, State) ->
+    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
     let _CallbackResult =
         case Msg of
             <{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->

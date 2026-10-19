@@ -252,13 +252,18 @@ handle_getValue([], State) ->
 %% delegates here. Reached only when the send was not intercepted at the
 %% send site — i.e. a self-send from inside one of the actor's own methods.
 -export([dispatch/3]).
+-ifdef(TEST).
+-export([intrinsic_selector/1]).
+-endif.
 
 %% BT-3967: deferred self-stop. Every gen_server callback that runs a
 %% Beamtalk dispatch (this module's own and every compiled actor's
 %% generated handle_continue/handle_call/handle_cast/handle_info) passes its
 %% return value through apply_pending_stop/1, which turns it into a
-%% `{stop, ...}` return when the dispatch requested `self stopWith:`.
--export([apply_pending_stop/1]).
+%% `{stop, ...}` return when the dispatch requested `self stopWith:`;
+%% clear_pending_stop/0 runs first so a request can never leak in from
+%% anywhere else.
+-export([clear_pending_stop/0, apply_pending_stop/1]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
@@ -1884,9 +1889,23 @@ Returns `ok`, or `{exit, ExitReason}` when `gen_server:stop/3` itself
 exited (timeout, or the actor died with some other reason first).
 """.
 -spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
-stop_actor(ActorPid, Reason, _Timeout) when ActorPid =:= self() ->
-    request_deferred_stop(Reason);
+stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
+    %% Defer only inside a dispatching callback — the same guard as the
+    %% Layer 1 self-send fast path in sync_send/3. '$bt_actor_state' is
+    %% stashed by every callback wrapped with apply_pending_stop/1, so a
+    %% request recorded here is guaranteed to be consumed. Anywhere else
+    %% (e.g. a hand-written native gen_server) there is nothing to consume
+    %% it, so fall through and let gen_server:stop/3 fail visibly
+    %% (calling_self) instead of answering ok and never stopping.
+    case get('$bt_actor_state') of
+        undefined -> stop_external(ActorPid, Reason, Timeout);
+        _ -> request_deferred_stop(Reason)
+    end;
 stop_actor(ActorPid, Reason, Timeout) ->
+    stop_external(ActorPid, Reason, Timeout).
+
+-spec stop_external(pid(), term(), timeout()) -> ok | {exit, term()}.
+stop_external(ActorPid, Reason, Timeout) ->
     try gen_server:stop(ActorPid, Reason, Timeout) of
         ok -> ok
     catch
@@ -1967,6 +1986,17 @@ request_deferred_stop(Reason) ->
     ok.
 
 -doc """
+BT-3967: discard any deferred self-stop request. Called on entry to every
+callback wrapped with apply_pending_stop/1, so only a request made by that
+callback's own dispatch can stop the actor — never a stale one recorded by
+some unwrapped path earlier.
+""".
+-spec clear_pending_stop() -> ok.
+clear_pending_stop() ->
+    _ = erase(?PENDING_STOP_KEY),
+    ok.
+
+-doc """
 BT-3967: apply a deferred self-stop to a gen_server callback's return value.
 
 If the dispatch that just ran requested `self stopWith: Reason` (see
@@ -1990,9 +2020,12 @@ apply_pending_stop(Result) ->
 
 -spec pending_stop_result(term(), term()) -> term().
 pending_stop_result({reply, Reply, State}, Reason) -> {stop, Reason, Reply, State};
+%% A `{continue, _}` / timeout action is dropped: once the actor has asked to
+%% stop, no further step runs.
 pending_stop_result({reply, Reply, State, _Action}, Reason) -> {stop, Reason, Reply, State};
 pending_stop_result({noreply, State}, Reason) -> {stop, Reason, State};
 pending_stop_result({noreply, State, _Action}, Reason) -> {stop, Reason, State};
+%% Any other value — already a `{stop, ...}` — wins over the request.
 pending_stop_result(Other, _Reason) -> Other.
 
 -doc """
@@ -2006,16 +2039,20 @@ share one implementation; the stop family defers via stop_actor/3 because
 `Self`'s pid is the calling process.
 """.
 -spec dispatch(atom(), list(), #beamtalk_object{}) -> term().
-dispatch(Intrinsic, Args, #beamtalk_object{pid = Pid}) ->
+dispatch(Intrinsic, Args, #beamtalk_object{class = Class, pid = Pid}) ->
     case intrinsic_selector(Intrinsic) of
         undefined ->
             beamtalk_exception_handler:reraise(
-                beamtalk_error:new(does_not_understand, 'Actor', Intrinsic)
+                beamtalk_error:new(does_not_understand, Class, Intrinsic)
             );
         Selector ->
             sync_send(Pid, Selector, Args)
     end.
 
+%% Every selector here must have its own sync_send/3 clause ahead of the
+%% generic Layer 1 self-send clause; otherwise a self-send would re-enter the
+%% same Actor method through self_dispatch/2 and loop. The eunit test
+%% bt3967_every_actor_intrinsic_is_mapped_test checks actor.bt against this.
 -spec intrinsic_selector(atom()) -> atom() | undefined.
 intrinsic_selector(actorStop) -> stop;
 intrinsic_selector(actorStopWith) -> 'stopWith:';
@@ -2463,6 +2500,7 @@ Errors in async-with-future are communicated via future rejection.
 -spec handle_cast(term(), map()) -> {noreply, map()} | {stop, term(), map()}.
 handle_cast(Msg, State) ->
     %% BT-3967: honour a `self stopWith:` requested during the dispatch.
+    ok = clear_pending_stop(),
     apply_pending_stop(do_handle_cast(Msg, State)).
 
 -spec do_handle_cast(term(), map()) -> {noreply, map()}.
@@ -2587,6 +2625,7 @@ Dispatches to method and returns result immediately.
     {reply, term(), map()} | {stop, term(), term(), map()}.
 handle_call(Msg, From, State) ->
     %% BT-3967: honour a `self stopWith:` requested during the dispatch.
+    ok = clear_pending_stop(),
     apply_pending_stop(do_handle_call(Msg, From, State)).
 
 -spec do_handle_call(term(), term(), map()) -> {reply, term(), map()}.

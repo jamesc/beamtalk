@@ -708,14 +708,16 @@ Object subclass: Actor
   /// `#shutdown` and `{shutdown, term}` tuples as clean stops: no crash
   /// report, and a `#transient` supervised child is not restarted. Any
   /// other reason (an error, an exception) is a crash — it is logged, a
-  /// `#transient` child is restarted, and processes linked to the actor
-  /// (such as the one that spawned it) receive the exit signal.
+  /// `#transient` child is restarted, and any process linked to the actor
+  /// (its supervisor, or the spawner of a `spawnAs:` actor) receives the
+  /// exit signal. Plain `spawn` / `spawnWith:` do not link.
   ///
   /// From another process this waits up to 5 seconds for the actor to
   /// terminate; stopping an already-stopped actor succeeds silently. Sent
   /// to `self` from inside one of the actor's own methods, it takes effect
   /// after the current message has been handled (a pending caller still
-  /// gets its reply), then the actor terminates.
+  /// gets its reply), then the actor terminates. Stopping itself from
+  /// `initialize` makes the `spawn` fail.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -725,7 +727,7 @@ Object subclass: Actor
   sealed stopWith: reason :: Object -> Symbol => @intrinsic "actorStopWith"
 
   /// Stop this actor with a chosen exit reason, waiting up to `timeout`
-  /// milliseconds for it to terminate (`gen_server:stop/3`).
+  /// milliseconds (or `#infinity`) for it to terminate (`gen_server:stop/3`).
   ///
   /// Same semantics as `stopWith:`; raises an error if the actor has not
   /// terminated within `timeout`. Sent to `self`, the timeout is ignored —
@@ -735,7 +737,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// worker stopWith: #shutdown timeout: 1000   // => #ok
   /// ```
-  sealed stopWith: reason :: Object timeout: timeout :: Integer -> Symbol =>
+  sealed stopWith: reason :: Object timeout: timeout :: Timeout -> Symbol =>
     @intrinsic "actorStopWithTimeout"
 
   /// Forcefully kill this actor (exit(Pid, kill)).

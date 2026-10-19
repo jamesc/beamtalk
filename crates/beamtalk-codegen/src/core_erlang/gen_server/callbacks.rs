@@ -1243,8 +1243,12 @@ impl CoreErlangGenerator {
     /// returned — by turning `{reply, R, S}` / `{noreply, S}` into
     /// `{stop, Reason, R, S}` / `{stop, Reason, S}`. Any other return value,
     /// and every callback with no pending request, passes through unchanged.
+    /// `clear_pending_stop/0` runs first, so only a request made by this
+    /// callback's own dispatch can take effect.
     fn pending_stop_wrap(body: Document<'static>) -> Document<'static> {
         docvec![
+            "let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in",
+            line(),
             "let _CallbackResult =",
             nest(INDENT, docvec![line(), body]),
             line(),
