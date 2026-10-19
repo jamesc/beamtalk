@@ -47,7 +47,7 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, block_literal_arity_matches, conditional_arm_blocks,
+    RootMethodKind, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
@@ -2524,16 +2524,14 @@ impl<'d> Walker<'d> {
                 }
                 // BT-3884: a block literal sent a `value`-family selector of
                 // another arity (`[t := t + 1] value: 1`) is applied, never
-                // inlined ([`block_literal_arity_matches`]): the send raises
+                // inlined ([`block_literal_of_other_arity`]): the send raises
                 // `arity_mismatch` and the body never runs, so the block
                 // neither threads its writes nor escapes with them. (A
                 // parenthesized block is a block value, below, whatever its
                 // arity: it is compiled as a closure.)
-                Expression::Block(block)
-                    if selector
-                        .well_known()
-                        .is_some_and(crate::ast::WellKnownSelector::is_block_value)
-                        && !block_literal_arity_matches(block, arguments.len()) => {}
+                Expression::Block(_)
+                    if block_literal_of_other_arity(receiver, selector, arguments.len())
+                        .is_some() => {}
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }

@@ -1471,10 +1471,10 @@ impl LocalThreadingConstruct<'_> {
 ///   `repeat`) or a block `value` send: its literal block receiver.
 ///
 /// A `value`-family send is a [`LocalThreadingFamily::BlockValue`] construct
-/// only when its block literal's arity is the send's
-/// ([`block_literal_arity_matches`], BT-3884), the rule codegen's inlining
-/// reads (`applies_block_of_other_arity`): a block literal of another arity
-/// is applied and raises `arity_mismatch`, so the send is no construct.
+/// only when its block literal's arity is the send's (BT-3884): a block
+/// literal of another arity ([`block_literal_of_other_arity`], the predicate
+/// codegen's lowering reads) is applied and raises `arity_mismatch`, so the
+/// send is no construct.
 ///
 /// Only direct `[...]` literals count, because only those are inlined. A
 /// parenthesized or stored block is a block value (ADR 0131 §6).
@@ -1504,12 +1504,12 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         _ => None,
     };
     // BT-3884: a `value`-family send is a block evaluation only when the
-    // block literal's arity is the send's ([`block_literal_arity_matches`]).
-    // One of another arity (`[t := t + 1] value: 1`) is applied, never
-    // inlined: it raises `arity_mismatch` and its body never runs, so it is
-    // no construct and its writes are no state effect of the send.
-    let evaluated_block =
-        receiver_block.filter(|block| block_literal_arity_matches(block, arguments.len()));
+    // block literal's arity is the send's. One of another arity
+    // ([`block_literal_of_other_arity`]: `[t := t + 1] value: 1`) is applied,
+    // never inlined: it raises `arity_mismatch` and its body never runs, so it
+    // is no construct and its writes are no state effect of the send.
+    let evaluated_block = receiver_block
+        .filter(|_| block_literal_of_other_arity(receiver, selector, arguments.len()).is_none());
     let literal_args = || {
         arguments.iter().filter_map(|a| match a {
             Expression::Block(b) => Some(b),
@@ -2401,14 +2401,39 @@ pub fn repl_producer_writes(
 /// `[:k | t := t + k] value`) is never inlined, in the REPL (root or arm) or
 /// in a class, value-type or actor method: it is applied, so it raises the
 /// same structured `arity_mismatch` error as any other block called with the
-/// wrong number of arguments, and its body never runs (codegen's
-/// `applies_block_of_other_arity`). The one arity rule every inlining of a
-/// block literal `value` send reads, and the analyser's: such a send is no
-/// [`LocalThreadingFamily::BlockValue`] construct ([`local_threading_construct`],
-/// BT-3884), so no check reports a write of its body.
+/// wrong number of arguments, and its body never runs
+/// ([`block_literal_of_other_arity`]). The one arity rule every inlining of a
+/// block literal `value` send reads.
 #[must_use]
 pub fn block_literal_arity_matches(block: &Block, arity: usize) -> bool {
     block.parameters.len() == arity
+}
+
+/// BT-3884: the block literal `receiver` when it is sent the `value`-family
+/// `selector` ([`is_safe_value_family_selector`]) with `arity` arguments and
+/// its arity is not the send's ([`block_literal_arity_matches`]), or `None`.
+/// Such a send is applied, never inlined: codegen lowers it through
+/// `generate_block_arity_mismatch`, a stand-in fun of the block's own arity
+/// whose application raises the structured `arity_mismatch` error, and the
+/// body never runs. So it is no [`LocalThreadingFamily::BlockValue`]
+/// construct ([`local_threading_construct`]), and the ADR 0133 escaping-block
+/// check reports no write of it. The one predicate codegen's lowering, the
+/// recognizer and the escape check read.
+#[must_use]
+pub fn block_literal_of_other_arity<'a>(
+    receiver: &'a Expression,
+    selector: &MessageSelector,
+    arity: usize,
+) -> Option<&'a Block> {
+    match receiver {
+        Expression::Block(block)
+            if is_safe_value_family_selector(selector)
+                && !block_literal_arity_matches(block, arity) =>
+        {
+            Some(block)
+        }
+        _ => None,
+    }
 }
 
 /// BT-3823: the block of an *evaluated block* in the REPL sense: a

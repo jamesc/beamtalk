@@ -87,7 +87,7 @@ impl CoreErlangGenerator {
     /// Returns captured mutation variable names if `expr` is a
     /// `[block] value`/`value:`/etc. with a literal block that mutates outer locals,
     /// sent a selector of the block's own arity (BT-3881: a block of another
-    /// arity is applied, never inlined, [`Self::applies_block_of_other_arity`]).
+    /// arity is applied, never inlined, `block_literal_of_other_arity`).
     pub(super) fn inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
         if let Expression::MessageSend {
             receiver,
@@ -99,7 +99,14 @@ impl CoreErlangGenerator {
             let is_value_selector = selector
                 .well_known()
                 .is_some_and(beamtalk_core::ast::well_known::WellKnownSelector::is_block_value);
-            if is_value_selector && !Self::applies_block_of_other_arity(receiver, arguments.len()) {
+            if is_value_selector
+                && beamtalk_core::semantic_analysis::block_facts::block_literal_of_other_arity(
+                    receiver,
+                    selector,
+                    arguments.len(),
+                )
+                .is_none()
+            {
                 if let Expression::Block(block) = receiver.as_ref() {
                     let mutations = Self::captured_mutations_for_block(block);
                     if !mutations.is_empty() {

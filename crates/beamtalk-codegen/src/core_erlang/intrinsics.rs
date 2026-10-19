@@ -179,7 +179,7 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // Block unary `value` is a well-known selector — dispatch via the enum.
         if matches!(selector.well_known(), Some(WellKnownSelector::Value)) {
-            return self.try_generate_block_value_unary(receiver, arguments);
+            return self.try_generate_block_value_unary(receiver, selector, arguments);
         }
 
         // `repeat` is well-known; dispatch via the enum.
@@ -211,6 +211,7 @@ impl CoreErlangGenerator {
     fn try_generate_block_value_unary(
         &mut self,
         receiver: &Expression,
+        selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         // A bare class name as receiver (e.g. `Foo value`) is a
@@ -235,8 +236,10 @@ impl CoreErlangGenerator {
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
-        if let Expression::Block(block) = receiver
-            && Self::applies_block_of_other_arity(receiver, 0)
+        if let Some(block) =
+            beamtalk_core::semantic_analysis::block_facts::block_literal_of_other_arity(
+                receiver, selector, 0,
+            )
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
@@ -344,7 +347,12 @@ impl CoreErlangGenerator {
                 | WellKnownSelector::ValueValue
                 | WellKnownSelector::ValueValueValue,
             ) => {
-                return self.try_generate_block_value_keyword(receiver, arguments, selector_name);
+                return self.try_generate_block_value_keyword(
+                    receiver,
+                    selector,
+                    arguments,
+                    selector_name,
+                );
             }
             Some(WellKnownSelector::OnDo) => {
                 debug_assert_eq!(arguments.len(), 2);
@@ -444,6 +452,7 @@ impl CoreErlangGenerator {
     fn try_generate_block_value_keyword(
         &mut self,
         receiver: &Expression,
+        selector: &MessageSelector,
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
@@ -459,8 +468,12 @@ impl CoreErlangGenerator {
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
-        if let Expression::Block(block) = receiver
-            && Self::applies_block_of_other_arity(receiver, arguments.len())
+        if let Some(block) =
+            beamtalk_core::semantic_analysis::block_facts::block_literal_of_other_arity(
+                receiver,
+                selector,
+                arguments.len(),
+            )
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
@@ -837,7 +850,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3823, BT-3881: a block literal sent a `value` selector of another
-    /// arity, in the REPL or a method ([`Self::applies_block_of_other_arity`]):
+    /// arity, in the REPL or a method (`block_literal_of_other_arity`):
     /// its arguments are evaluated
     /// and applied to a stand-in `fun` of the block's own arity, so the send
     /// raises the same structured `badarity` error (`Wrong number of

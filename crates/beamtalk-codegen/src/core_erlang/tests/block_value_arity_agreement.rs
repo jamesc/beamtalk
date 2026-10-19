@@ -1,24 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3884: the analyser's `BlockValue` classification and codegen's inlining
-//! of a block literal's `value` send agree, over every `value`-family
-//! selector and every block arity from 0 to 4, in class, value-type and actor
-//! methods.
+//! BT-3884: the analyser's view of a block literal sent a `value`-family
+//! selector and codegen's lowering of it agree, over every such selector and
+//! every block arity from 0 to 4, in class, value-type and actor methods.
 //!
-//! `beamtalk-core`'s `local_threading_construct` names a send a
-//! `LocalThreadingFamily::BlockValue` construct exactly when codegen compiles
-//! the block's body in place (no `fun` for the block). Both read the one
-//! arity rule, `block_literal_arity_matches` (BT-3881): a block literal sent a
-//! selector of another arity is applied to a stand-in fun (`apply _Arity`),
-//! raises `arity_mismatch` and never runs its body, so the analyser reports no
-//! write for it, in any position, and the ADR 0133 escaping-block check does
-//! not report it as escaping either.
+//! Codegen lowers the send one of three ways, and each has exactly one
+//! analyser counterpart:
+//!
+//! - the body compiled in place: `local_threading_construct` names the send
+//!   a `LocalThreadingFamily::BlockValue` construct;
+//! - applied to a stand-in fun of the block's own arity (`apply _Arity`), the
+//!   body never compiled: `block_literal_of_other_arity` (BT-3881), the one
+//!   predicate the recognizer, codegen's lowering and the escape check read.
+//!   It raises `arity_mismatch`, so the analyser reports no write for it, in
+//!   any position;
+//! - compiled as a closure (a selector codegen does not inline): the ADR 0133
+//!   escaping-block check reports the block.
 
 use super::codegen;
 use beamtalk_core::ast::{Expression, WellKnownSelector};
 use beamtalk_core::semantic_analysis::block_facts::{
-    LocalThreadingFamily, local_threading_construct,
+    LocalThreadingFamily, block_literal_of_other_arity, local_threading_construct,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
@@ -80,56 +83,108 @@ fn parse_send(src: &str) -> Expression {
         .expression
 }
 
-/// Whether the analyser classifies `src` as a `BlockValue` construct.
-fn analyser_block_value(src: &str) -> bool {
-    local_threading_construct(&parse_send(src))
-        .is_some_and(|construct| construct.family == LocalThreadingFamily::BlockValue)
+/// How codegen lowered the block literal of the send in `code`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lowering {
+    /// The body compiled in place, with no `fun` for the block.
+    Inlined,
+    /// Applied to a stand-in fun of the block's arity; the body never compiled.
+    Applied,
+    /// The body compiled inside a `fun`: the block is a closure value.
+    Closure,
 }
 
-/// Whether codegen compiled the block body of the send in `code` in place:
-/// the body's marker is in the method and no `fun` opens between the
-/// statement before the send (`t := 0`) and it.
-fn codegen_inlines(code: &str) -> bool {
+fn lowering(code: &str) -> Lowering {
     let Some(marker) = code.find(MARKER) else {
-        return false;
+        assert!(
+            code.contains("apply _Arity"),
+            "no body and no stand-in:\n{code}"
+        );
+        return Lowering::Applied;
     };
     let start = code[..marker]
         .rfind("let T = 0 in")
         .unwrap_or_else(|| panic!("no `t := 0` before the block body:\n{code}"));
-    !code[start..marker].contains("fun (")
+    if code[start..marker].contains("fun (") {
+        Lowering::Closure
+    } else {
+        Lowering::Inlined
+    }
+}
+
+/// The analyser's counterpart of each [`Lowering`] for the send `src`: a
+/// `BlockValue` construct, a block literal of another arity, or neither (a
+/// block value).
+fn analyser_view(src: &str) -> Lowering {
+    let expr = parse_send(src);
+    if local_threading_construct(&expr)
+        .is_some_and(|construct| construct.family == LocalThreadingFamily::BlockValue)
+    {
+        return Lowering::Inlined;
+    }
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = &expr
+    else {
+        panic!("{src}: not a send");
+    };
+    if block_literal_of_other_arity(receiver, selector, arguments.len()).is_some() {
+        Lowering::Applied
+    } else {
+        Lowering::Closure
+    }
 }
 
 fn is_block_value_selector(selector: &str) -> bool {
     WellKnownSelector::from_name(selector).is_some_and(WellKnownSelector::is_block_value)
 }
 
+/// The analyser's errors in `src` in `categories`.
+fn errors_in(src: &str, categories: &[DiagnosticCategory]) -> Vec<String> {
+    let (module, parse_diags) = parse(lex_with_eof(src));
+    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+    analyse_full(&module, AnalysisContext::default())
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.severity == Severity::Error && d.category.is_some_and(|c| categories.contains(&c))
+        })
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
 #[test]
-fn analyser_block_value_classification_agrees_with_codegen_inlining() {
+fn analyser_view_of_a_block_literal_send_agrees_with_codegen_lowering() {
     for &(selector, args) in SELECTORS {
         for arity in 0..=PARAMS.len() {
             let src = send(selector, args, arity);
-            let classified = analyser_block_value(&src);
-            assert_eq!(
-                classified,
-                is_block_value_selector(selector) && args == Some(arity),
-                "{src}: the analyser's BlockValue classification"
-            );
+            let view = analyser_view(&src);
+            let expected = match (is_block_value_selector(selector), args == Some(arity)) {
+                (true, true) => Lowering::Inlined,
+                (true, false) => Lowering::Applied,
+                (false, _) => Lowering::Closure,
+            };
+            assert_eq!(view, expected, "{src}: the analyser's view");
             for &(kind, header) in KINDS {
-                let code = codegen(&format!("{header}    t := 0\n    {src}\n    t\n"));
+                let method = format!("{header}    t := 0\n    {src}\n    t\n");
+                let code = codegen(&method);
                 assert_eq!(
-                    codegen_inlines(&code),
-                    classified,
-                    "{kind}: {src}: codegen inlines the block iff the analyser \
-                     classifies the send as BlockValue\n{code}"
+                    lowering(&code),
+                    view,
+                    "{kind}: {src}: codegen's lowering is the analyser's view\n{code}"
                 );
-                // A `value`-family send of another arity is applied to a
-                // stand-in fun, so it raises `arity_mismatch`.
-                if is_block_value_selector(selector) && !classified {
-                    assert!(
-                        code.contains("apply _Arity") && !code.contains(MARKER),
-                        "{kind}: {src}: applied, body never compiled\n{code}"
-                    );
-                }
+                // The escape-check arm: the block is reported as escaping
+                // exactly when codegen compiles it as a closure, never when it
+                // is inlined or applied.
+                let escapes = errors_in(&method, &[DiagnosticCategory::Tier2BlockNoReturnChannel]);
+                assert_eq!(
+                    !escapes.is_empty(),
+                    view == Lowering::Closure,
+                    "{kind}: {src}: escaping-block errors {escapes:?}"
+                );
             }
         }
     }
@@ -149,24 +204,14 @@ const POSITIONS: &[&str] = &[
 /// Phase 0 check, the ADR 0133 escaping-block check and the value-position
 /// assignment check.
 fn write_errors(src: &str) -> Vec<String> {
-    let (module, parse_diags) = parse(lex_with_eof(src));
-    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
-    analyse_full(&module, AnalysisContext::default())
-        .diagnostics
-        .iter()
-        .filter(|d| {
-            d.severity == Severity::Error
-                && matches!(
-                    d.category,
-                    Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
-                            | DiagnosticCategory::Tier2BlockNoReturnChannel
-                            | DiagnosticCategory::ValuePositionLocalAssignment
-                    )
-                )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
+    errors_in(
+        src,
+        &[
+            DiagnosticCategory::UnmigratedLocalThreading,
+            DiagnosticCategory::Tier2BlockNoReturnChannel,
+            DiagnosticCategory::ValuePositionLocalAssignment,
+        ],
+    )
 }
 
 #[test]
