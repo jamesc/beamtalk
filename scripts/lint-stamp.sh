@@ -14,9 +14,26 @@
 # `write` on success and the hook `check`s before running one, so a lint that
 # `just lint` or `just ci-changed` just ran is not run a second time by
 # `git push`. Stamps live at <repo root>/.lint-<lang>-stamp (gitignored).
-set -euo pipefail
+#
+# The fingerprint must not depend on the caller's cwd or git environment
+# (BT-3926). Git exports GIT_DIR (and friends) to the hooks it runs, and they
+# override both `-C` and repository discovery: with GIT_DIR set and no
+# GIT_WORK_TREE the work tree is the *cwd*, so from the `lint-js` recipe (which
+# runs in `editors/vscode`) `ls-files` listed repo-root-relative paths that
+# `hash-object` then failed to open relative to `editors/vscode`. So the script
+# drops every repository-local GIT_* variable (the list git itself reports) and
+# locates the repository from its own path, not the cwd. Pathname expansion is
+# off too: the pathspecs are word-split unquoted below, and with globbing on
+# `*.ts` expanded against the cwd (`vitest.config.ts` in `editors/vscode`), so
+# the js fingerprint written there hashed a different file set.
+# scripts/ci/test-lint-stamp.sh pins both.
+set -euo pipefail -o noglob
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck disable=SC2046  # the variable names contain no whitespace
+unset $(git rev-parse --local-env-vars)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 patterns() {
   case "$1" in
@@ -30,7 +47,7 @@ patterns() {
 }
 
 fingerprint() {
-  # shellcheck disable=SC2046  # the pathspecs contain no whitespace
+  # shellcheck disable=SC2046  # no whitespace in the pathspecs; noglob is set
   set -- $(patterns "$1")
   git -C "$REPO_ROOT" ls-files -- "$@" \
     | git -C "$REPO_ROOT" hash-object --stdin-paths \

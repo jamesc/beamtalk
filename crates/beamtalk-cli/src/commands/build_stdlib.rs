@@ -20,10 +20,6 @@ use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
-use beamtalk_core::semantic_analysis::tier2_callee::{
-    COLLECTION_SPAWN_SELECTORS, PARALLEL_SPAWN_SELECTORS, TIMER_SPAWN_SELECTORS, ThreadingIndex,
-    stdlib_spawns_block,
-};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -83,22 +79,25 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 
     info!(count = source_files.len(), "Found stdlib source files");
 
-    // Create ebin directory
-    fs::create_dir_all(&ebin_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
+    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
+    // unless the corpus `.core` diff harness asks to keep them — see
+    // `util::core_output_dir`'s doc. Resolved before `ebin/` is touched so
+    // its snapshot-only mode (BT-3887, below) leaves `ebin/` alone entirely.
+    let (temp_path, core_output_dir_guard) = crate::commands::util::core_output_dir()?;
 
-    // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
-    clean_ebin_dir(&ebin_dir)?;
+    if !core_output_dir_guard.snapshot_only() {
+        // Create ebin directory
+        fs::create_dir_all(&ebin_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
+
+        // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
+        clean_ebin_dir(&ebin_dir)?;
+    }
 
     if !quiet {
         println!("Compiling {} stdlib module(s)...", source_files.len());
     }
-
-    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
-    // unless the corpus `.core` diff harness asks to keep them — see
-    // `util::core_output_dir`'s doc.
-    let (temp_path, _core_output_dir_guard) = crate::commands::util::core_output_dir()?;
 
     // Compiler options: stdlib mode enabled
     let options = stdlib_compiler_options(warnings_as_errors);
@@ -147,6 +146,21 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &compile_ctx,
     )?;
 
+    // BT-3887: the corpus `.core` diff harness's snapshot-only mode wants
+    // nothing past this point — every `.core` is on disk now, and the
+    // `.beam`, `.app`/`.app.src`, `builtins.rs` and `.hrl` outputs below
+    // are exactly what it must *not* produce (it runs inside checkouts it
+    // doesn't own, and `ebin/` was left untouched above for the same
+    // reason). See `util::CoreOutputDir::snapshot_only`.
+    if core_output_dir_guard.snapshot_only() {
+        println!(
+            "Snapshotted {} stdlib module(s) to .core only (BEAMTALK_CORE_SNAPSHOT_ONLY=1); \
+             skipped .beam/.app/generated-source output",
+            source_files.len()
+        );
+        return Ok(());
+    }
+
     // Batch compile .core → .beam into ebin directory
     info!("Compiling Core Erlang to BEAM");
     let compiler = BeamCompiler::new(ebin_dir.clone());
@@ -154,22 +168,45 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
+    write_stdlib_generated_outputs(
+        &ebin_dir,
+        &source_files,
+        &class_metadata,
+        &protocol_modules,
+        alias_sources,
+    )?;
+
+    println!("Built {} stdlib modules", source_files.len());
+
+    Ok(())
+}
+
+/// Everything `build_stdlib` writes *after* the `.beam` compile: the
+/// `.app`/`.app.src` metadata and the generated Rust/Erlang builtin tables.
+/// None of it is produced in snapshot-only mode (BT-3887).
+fn write_stdlib_generated_outputs(
+    ebin_dir: &Utf8Path,
+    source_files: &[Utf8PathBuf],
+    class_metadata: &[ClassMeta],
+    protocol_modules: &[String],
+    alias_sources: Vec<AliasSource>,
+) -> Result<()> {
     // `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
     // same `build_alias_metadata` extraction the ordinary `beamtalk build`
     // pipeline already uses (`build.rs`'s `ClassIndexResult::all_alias_infos`
     // call site), independently re-parsing `source_files` for doc
     // comments/display expansions `AliasSource`/`ClassHierarchyContext`
-    // above don't carry. This is what lets `beamtalk_repl_state:new/3` (the
-    // REPL/workspace session's alias-seeding path) and `browse-type-aliases`
-    // read stdlib's own aliases back via `application:get_env(beamtalk_stdlib,
-    // type_aliases)`.
-    let alias_metadata = build_alias_metadata(&source_files);
+    // in `build_stdlib` don't carry. This is what lets
+    // `beamtalk_repl_state:new/3` (the REPL/workspace session's
+    // alias-seeding path) and `browse-type-aliases` read stdlib's own
+    // aliases back via `application:get_env(beamtalk_stdlib, type_aliases)`.
+    let alias_metadata = build_alias_metadata(source_files);
 
     generate_app_file(
-        &ebin_dir,
-        &source_files,
-        &class_metadata,
-        &protocol_modules,
+        ebin_dir,
+        source_files,
+        class_metadata,
+        protocol_modules,
         &alias_metadata,
     )?;
     // Also update .app.src so rebar3 picks up the classes env
@@ -177,26 +214,22 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     if app_src_dir.exists() {
         generate_app_src_file(
             &app_src_dir,
-            &class_metadata,
-            &protocol_modules,
+            class_metadata,
+            protocol_modules,
             &alias_metadata,
         )?;
     }
 
     // Generate Rust builtins file from parsed class metadata and aliases.
     generate_builtins_rs(
-        &class_metadata,
+        class_metadata,
         &alias_source_texts_sorted_by_name(alias_sources),
     )?;
 
     // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
-    generate_erlang_builtins_hrl(&class_metadata)?;
-    generate_class_vars_keys_hrl()?;
-
-    println!("Built {} stdlib modules", source_files.len());
-
-    Ok(())
+    generate_erlang_builtins_hrl(class_metadata)?;
+    generate_class_vars_keys_hrl()
 }
 
 /// Compiles every stdlib source file to Core Erlang, collecting class
@@ -711,10 +744,6 @@ struct MethodMeta {
     is_internal: bool,
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
-    /// ADR 0132 §1: argument positions this method threads a Tier 2 block
-    /// through (`MethodInfo::threading_params`), computed by
-    /// `ThreadingIndex` (never for a `spawns_block` method).
-    threading_params: Vec<usize>,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<DeclaredType>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
@@ -746,21 +775,14 @@ impl MethodKindMeta {
 }
 
 /// Convert an AST method definition to `MethodMeta`.
-fn method_def_to_meta(
-    m: &beamtalk_core::ast::MethodDefinition,
-    class_name: &str,
-    class_side: bool,
-    threading: &ThreadingIndex,
-) -> MethodMeta {
-    let selector = m.selector.name();
+fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
     MethodMeta {
-        selector: selector.to_string(),
+        selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
         kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
-        threading_params: threading.params(class_name, class_side, &selector),
         return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
@@ -808,7 +830,6 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                threading_params: Vec::new(),
                 return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                 param_types: vec![],
                 doc: Some(getter_doc),
@@ -829,7 +850,6 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple(class_name)),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
@@ -869,7 +889,6 @@ fn synthesize_value_auto_methods(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple(class_name)),
             param_types,
             doc: Some(ctor_doc),
@@ -904,6 +923,14 @@ fn mark_spawns_for_selectors(
     }
     Ok(())
 }
+
+/// `Timer` class methods that run their block in another process.
+const TIMER_SPAWN_SELECTORS: &[&str] = &["after:do:", "every:do:"];
+/// `Parallel` class methods that run their blocks in other processes.
+const PARALLEL_SPAWN_SELECTORS: &[&str] = &["all:", "all:timeout:", "any:"];
+/// `Collection` instance methods that delegate to `Parallel all:`.
+const COLLECTION_SPAWN_SELECTORS: &[&str] =
+    &["parallelCollect:", "parallelCollect:maxConcurrency:"];
 
 /// Mark Timer class methods that spawn their block argument in a separate BEAM process.
 ///
@@ -1255,18 +1282,9 @@ fn extract_class_metadata(
         );
     }
 
-    let threading = ThreadingIndex::build(&module.classes, &stdlib_spawns_block);
-    let class_name_str = class.name.name.as_str();
-    let mut methods: Vec<MethodMeta> = class
-        .methods
-        .iter()
-        .map(|m| method_def_to_meta(m, class_name_str, false, &threading))
-        .collect();
-    let mut class_methods: Vec<MethodMeta> = class
-        .class_methods
-        .iter()
-        .map(|m| method_def_to_meta(m, class_name_str, true, &threading))
-        .collect();
+    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
+    let mut class_methods: Vec<MethodMeta> =
+        class.class_methods.iter().map(method_def_to_meta).collect();
 
     let state = class
         .state
@@ -2155,18 +2173,11 @@ fn generate_method_list(
             Some(doc) => format!("Some({}.into())", rust_str_lit(doc)),
             None => "None".to_string(),
         };
-        let threading_params_expr = if m.threading_params.is_empty() {
-            "vec![]".to_string()
-        } else {
-            let parts: Vec<_> = m.threading_params.iter().map(usize::to_string).collect();
-            format!("vec![{}]", parts.join(", "))
-        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
-             threading_params: {threading_params_expr}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None }},",
             arity = m.arity,
@@ -2993,7 +3004,6 @@ mod tests {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    threading_params: Vec::new(),
                     return_type: None,
                     param_types: vec![],
                     doc: None,
@@ -3005,7 +3015,6 @@ mod tests {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("Counter")),
                     param_types: vec![Some(DeclaredType::simple("Integer"))],
                     doc: None,
@@ -3018,7 +3027,6 @@ mod tests {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                threading_params: Vec::new(),
                 return_type: Some(DeclaredType::simple("Counter")),
                 param_types: vec![],
                 doc: None,
@@ -3242,7 +3250,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Counter")),
             param_types: vec![Some(DeclaredType::simple("Integer"))],
             doc: None,
@@ -3268,7 +3275,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -3294,7 +3300,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: true,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![Some(DeclaredType::simple("Integer")), None],
             doc: None,
@@ -3319,7 +3324,6 @@ mod tests {
             is_sealed: false,
             is_internal: true,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: Some(DeclaredType::simple("Dictionary")),
             param_types: vec![Some(DeclaredType::simple("Symbol"))],
             doc: None,
@@ -3800,7 +3804,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: None,
@@ -4363,7 +4366,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![],
             doc: Some("Line one\nLine \"two\"\tend\r".to_string()),

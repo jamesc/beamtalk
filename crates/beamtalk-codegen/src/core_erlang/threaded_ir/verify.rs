@@ -15,10 +15,9 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
-    LOCAL_STATE_KEY_PREFIX, MethodBodyKind, NlrThrowShape, OnDoCatchVars, RebindFrame,
-    RebindFrameKind, RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt,
-    ThreadingMode, ValueRef, VersionPrefix, VersionedVar, canonical_families,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, NlrThrowShape,
+    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
+    StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -336,122 +335,11 @@ pub(in crate::core_erlang) enum VerifyError {
     /// frame threads out, and the write is silently lost (`erlc`-clean).
     HeldRebindNotIdentity { local: String, at: Span },
 
-    /// ADR 0132 §2, "`Acc` is a trailing family, never the scratch map": an
-    /// `Acc` version — the opaque map a threaded entry's caller handed over —
-    /// is used as a scratch map: a non-`Acc` version is stepped from it (or it
-    /// from one), a `maps:put` writes into it, a `maps:get` unpacks out of it,
-    /// a `MapPut`/`MapHeld` rebind names it as its frame's map, or a threaded
-    /// `MethodBody` threads locals (whose only frame map would be `Acc`). `Acc`
-    /// is read and written only by `call_threaded/3` and by forwards, whose
-    /// steps are `Direct` `Acc`-to-`Acc` binds. Seeding a `StateAcc` plan from
-    /// it would let a caller's and a callee's same-named locals read each
-    /// other's values silently and carry the BT-2717 stray-key hazard into
-    /// another frame (ADR 0132 § Alternatives, "`Acc` as the body's scratch
-    /// `StateAcc` map"). See [`AccSeedDefect`].
-    AccAsScratchSeed { defect: AccSeedDefect, at: Span },
-
-    /// ADR 0132 §2, "no key of the body's ever enters `Acc`": a `maps:put` (or
-    /// `maps:get` unpack) of a `'__local__'` key ([`super::ir::LOCAL_STATE_KEY_PREFIX`])
-    /// whose map is an `Acc` version. The body's own locals live under their
-    /// own keys in their own frame's scratch map; one written into `Acc`
-    /// reaches the caller, whose same-named local then reads the callee's
-    /// value.
-    OwnLocalKeyInAcc {
-        key: String,
-        acc: VersionedVar,
-        at: Span,
-    },
-
-    /// ADR 0132 §2, the per-scope-kind table's NLR row (ADR 0041 §State-Carrying
-    /// NLR): an [`ThreadedStmt::NlrThrow`] or [`ThreadedStmt::NlrCatch`] inside
-    /// a threaded `MethodBody` whose state slot is not the body's family tuple
-    /// with `Acc` last (`Acc` for a class body, `{SelfN, AccN}` for a
-    /// value-type body, `{StateN, AccN}` for an actor body). The entry's catch
-    /// unpacks that one shape to answer `{Val, AccAtThrow}`; a throw of another
-    /// shape loses the caller's writes made before the `^`, or the catch reads
-    /// the wrong element.
-    NlrSlotShapeMismatch {
-        expected: Vec<VersionPrefix>,
-        found: Vec<VersionPrefix>,
-        at: Span,
-    },
-
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
-    /// family tuple inside a threaded body, [`Self::NlrSlotShapeMismatch`]; the
-    /// scope's own single state elsewhere). Reported separately from the shape
-    /// check because the shape is only constrained inside a threaded `MethodBody`.
+    /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
-
-    /// ADR 0132 §2, the NLR row, as Phase 1c ships it (BT-3871 review): an
-    /// [`ThreadedStmt::NlrThrow`] or [`ThreadedStmt::NlrCatch`] inside a
-    /// threaded `MethodBody` at all. A `^` throws the `Acc` version current
-    /// where its block is *lowered*, but a threaded callee can run the block
-    /// after a later `Acc` step (an argument of the use, a stored block, a block
-    /// a callee keeps), so its catch would answer a stale `Acc` and drop the
-    /// caller's writes. The threading index gives any method whose body holds a
-    /// `^` block no threaded entry (`facts::body_has_block_nlr`); a threaded
-    /// body that holds one anyway is this error. Carrying the live `Acc` to the
-    /// throw is ADR 0132 Phase 3.
-    NlrInThreadedBody { at: Span },
-
-    /// ADR 0132 §3, "Actor instance method": a block compiled for a threaded
-    /// entry ([`ScopeKind::ThreadedBlock`] with an actor caller) reads or
-    /// writes the actor `State` family. Such a block is compiled locals-only:
-    /// the callee may run it in another process with a map the actor's fields
-    /// are not in. Reported for a `State` version stepped at method level
-    /// (outside the block's own frame), and for a `maps:put`/`maps:get` of a
-    /// non-`'__local__'` key (a field) on a `State` version anywhere in it.
-    /// A self-send's `State` adoption inside the block's frame is a `Direct`
-    /// step indistinguishable from a nested construct's adoption of the
-    /// block's own map, so the producer's compile error (the §6 diagnostic)
-    /// is what rejects it; this check sees the field keys.
-    ActorStateInThreadedBlock {
-        var: VersionedVar,
-        field: Option<String>,
-        at: Span,
-    },
-}
-
-/// What is wrong with an `Acc` use ([`VerifyError::AccAsScratchSeed`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::core_erlang) enum AccSeedDefect {
-    /// A version of one family stepped from a version of another where one
-    /// side is `Acc` (`State1 ← Acc0`: the caller's map seeds a scratch map).
-    CrossFamilyStep {
-        from: VersionedVar,
-        to: VersionedVar,
-    },
-    /// A `Put` whose stored `value` is an `Acc` version (`into` is the map
-    /// version the put produces): the caller's map is written under a key of
-    /// another map instead of being threaded.
-    StoredAsValue {
-        acc: VersionedVar,
-        into: VersionedVar,
-    },
-    /// A `maps:put` of a non-`'__local__'` key into an `Acc` version.
-    PutInto { acc: VersionedVar, key: String },
-    /// A `maps:get` of a non-`'__local__'` key out of an `Acc` version.
-    UnpackFrom { acc: VersionedVar, key: String },
-    /// A `MapPut`/`MapHeld` [`ThreadedStmt::LocalRebind`] whose map (or its
-    /// `state_first` read) is an `Acc` version.
-    RebindMap { local: String, acc: VersionedVar },
-    /// A threaded `MethodBody` that lists `threads`.
-    ThreadedBodyThreadsLocals { threads: Vec<String> },
-}
-
-/// ADR 0132 §2: the kind of method a threaded entry's body (or a block bound
-/// for one, [`ScopeKind::ThreadedBlock`]) belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum ThreadedBodyKind {
-    /// A class method: `eligible_families` answers `[Acc]`.
-    Class,
-    /// A value-type instance method: `[SelfVt, Acc]` (`SelfVt` when it writes
-    /// a field).
-    ValueType,
-    /// An actor instance method: `[State, Acc]`.
-    Actor,
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -466,16 +354,6 @@ pub(in crate::core_erlang) enum ThreadedBodyKind {
 /// | `ClassMethod` | forbidden            | forbidden            | forbidden                      |
 /// | `ValueType`   | forbidden            | not constrained here | not constrained here           |
 /// | `Instance`    | not constrained here | not constrained here | not constrained here           |
-///
-/// ADR 0132 §2: a threaded entry's body ([`Self::Threaded`]) and a block
-/// compiled for one ([`Self::ThreadedBlock`]) follow the row of their
-/// [`ThreadedBodyKind`] (`Class` → `ClassMethod`, `ValueType` → `ValueType`,
-/// `Actor` → `Instance`). The `Acc` family is never constrained by this table
-/// (`ActorStateInClassMethod` never fires for it); its own invariants are
-/// [`VerifyError::AccAsScratchSeed`], [`VerifyError::OwnLocalKeyInAcc`] and
-/// [`VerifyError::NlrSlotShapeMismatch`], checked in every scope.
-/// [`Self::ThreadedBlock`] with an `Actor` caller additionally forbids the
-/// actor `State` family ([`VerifyError::ActorStateInThreadedBlock`]).
 ///
 /// **What enforces it:** exactly the entry points that take a `ScopeKind` —
 /// [`verify_in_scope`], `verify_body_with_opaque_version_gaps` and
@@ -498,29 +376,6 @@ pub(in crate::core_erlang) enum ScopeKind {
     ValueType,
     /// Any other scope.
     Instance,
-    /// ADR 0132 §2: a threaded entry's body, one `MethodBody` frame over the
-    /// trailing `Acc` family (`CoreErlangGenerator::threaded_body_kind`).
-    Threaded { kind: ThreadedBodyKind },
-    /// ADR 0132 §3: a block literal compiled for a threaded entry, in a
-    /// `caller` method. No production caller yet: the `callee_threaded_send`
-    /// producer (ADR 0132 Phase 1e) is the first.
-    #[allow(dead_code)]
-    ThreadedBlock { caller: ThreadedBodyKind },
-}
-
-impl ScopeKind {
-    /// The [`ThreadedBodyKind`] whose `ActorStateInClassMethod` row this scope
-    /// follows: `ClassMethod` and `ValueType` their own, `Instance` the
-    /// unconstrained `Actor` row.
-    fn method_kind(self) -> ThreadedBodyKind {
-        match self {
-            Self::ClassMethod => ThreadedBodyKind::Class,
-            Self::ValueType => ThreadedBodyKind::ValueType,
-            Self::Instance => ThreadedBodyKind::Actor,
-            Self::Threaded { kind } => kind,
-            Self::ThreadedBlock { caller } => caller,
-        }
-    }
 }
 
 /// What is wrong with a class-method scope
@@ -620,7 +475,6 @@ pub(in crate::core_erlang) fn verify_in_scope(
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
         rebind_frames: Vec::new(),
-        threaded_slots: Vec::new(),
         scope,
         errors: &mut errors,
     };
@@ -786,21 +640,6 @@ fn collect_producer_consumer_counts(
     }
 }
 
-/// Whether `key` is a threaded outer local's `StateAcc` map key.
-fn is_local_key(key: &str) -> bool {
-    key.starts_with(LOCAL_STATE_KEY_PREFIX)
-}
-
-/// The state-slot tuple every NLR throw and catch inside a threaded
-/// `MethodBody` with `families` must carry (ADR 0132 §2): the body's families
-/// in `FAMILY_SLOT_ORDER`, with `Acc` always present and last — whatever order
-/// (or omission) the node itself records.
-fn threaded_nlr_slot(families: &[VersionPrefix]) -> Vec<VersionPrefix> {
-    let mut with_acc = families.to_vec();
-    with_acc.push(VersionPrefix::Acc);
-    canonical_families(&with_acc)
-}
-
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
 /// [`VerifyError::UnboundVersion`] and [`VerifyError::ThreadingModeUnpackMismatch`]
 /// (`NonLinearVersion` is fully determined by the first pass's counts and
@@ -814,10 +653,6 @@ struct VerifyWalk<'a> {
     /// `ConditionalLoop`), innermost last. Empty means the implicit non-REPL
     /// method root ([`RebindFrame::implicit_root`]).
     rebind_frames: Vec<RebindFrame>,
-    /// ADR 0132 §2: for each threaded `MethodBody` enclosing the current
-    /// statement, innermost last, the NLR state-slot tuple its throws and
-    /// catches must carry ([`threaded_nlr_slot`]).
-    threaded_slots: Vec<Vec<VersionPrefix>>,
     scope: ScopeKind,
     errors: &'a mut Vec<VerifyError>,
 }
@@ -926,7 +761,7 @@ impl VerifyWalk<'_> {
                     }),
                 },
                 // A family extraction reads the carrier ahead of the rebinds:
-                // a `Direct` step of the `State`/`SelfVt`/`Acc` family
+                // a `Direct` step of the `State`/`SelfVt` family
                 // (`extract_family_slots`). Its value is an opaque `Doc`, so
                 // which carrier it reads is not checked.
                 ThreadedStmt::Bind {
@@ -934,10 +769,7 @@ impl VerifyWalk<'_> {
                     op: BindOp::Direct(_),
                     ..
                 } if open.is_some()
-                    && matches!(
-                        target.prefix,
-                        VersionPrefix::State | VersionPrefix::SelfVt | VersionPrefix::Acc
-                    ) =>
+                    && matches!(target.prefix, VersionPrefix::State | VersionPrefix::SelfVt) =>
                 {
                     if let Some(o) = open.as_mut() {
                         o.pending_families.retain(|f| *f != target.prefix);
@@ -1079,19 +911,14 @@ impl VerifyWalk<'_> {
     ///
     /// In a [`ScopeKind::ValueType`] scope only the method-level `State`
     /// family is flagged: `SelfVt` is the value type's own family.
-    ///
-    /// A threaded body or a block bound for one follows its kind's row
-    /// ([`ScopeKind::method_kind`]). `Acc` is never flagged: it is a threaded
-    /// body's own trailing family in every kind (ADR 0132 §2).
     fn check_class_method_family(&mut self, var: &VersionedVar, at: Span) {
-        let kind = self.scope.method_kind();
-        if kind == ThreadedBodyKind::Actor || var.version == 0 {
+        if self.scope == ScopeKind::Instance || var.version == 0 {
             return;
         }
         let is_family = match var.prefix {
             VersionPrefix::State => self.mode_stack.is_empty(),
-            VersionPrefix::SelfVt => kind == ThreadedBodyKind::Class,
-            VersionPrefix::Acc | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
+            VersionPrefix::SelfVt => self.scope == ScopeKind::ClassMethod,
+            VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
         };
         if is_family {
             self.errors.push(VerifyError::ActorStateInClassMethod {
@@ -1104,7 +931,7 @@ impl VerifyWalk<'_> {
     /// [`VerifyError::ActorStateInClassMethod`]: a loop/fold node whose mode is
     /// a locals-less `StateAcc` in a [`ScopeKind::ClassMethod`] scope.
     fn check_class_method_mode(&mut self, mode: &ThreadingMode, at: Span) {
-        if self.scope.method_kind() == ThreadedBodyKind::Class
+        if self.scope == ScopeKind::ClassMethod
             && matches!(
                 mode,
                 ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals)
@@ -1114,184 +941,6 @@ impl VerifyWalk<'_> {
                 defect: ClassMethodDefect::StateAccLoopWithoutLocals,
                 at,
             });
-        }
-    }
-
-    /// [`VerifyError::AccAsScratchSeed`] and [`VerifyError::OwnLocalKeyInAcc`]
-    /// for one `Bind` (ADR 0132 §2): the only legal step touching `Acc` is a
-    /// `Direct` `Acc`-to-`Acc` step (`call_threaded/3`, a forward, a family
-    /// extraction). Checked in every scope.
-    fn check_acc_bind(
-        &mut self,
-        target: &VersionedVar,
-        source: &VersionedVar,
-        op: &BindOp,
-        at: Span,
-    ) {
-        let is_acc = |v: &VersionedVar| v.prefix == VersionPrefix::Acc;
-        // A keyed access into an `Acc` map: a `'__local__'` key is the body's
-        // own local leaking into the caller's map; any other key is `Acc`
-        // used as a scratch map.
-        let keyed = match op {
-            BindOp::Put { field, .. } => [target, source]
-                .into_iter()
-                .find(|v| is_acc(v))
-                .map(|acc| (acc, field, true)),
-            BindOp::Unpack { field } => is_acc(source).then_some((source, field, false)),
-            BindOp::Direct(_) => None,
-        };
-        if let Some((acc, key, is_put)) = keyed {
-            let error = if is_local_key(key) {
-                VerifyError::OwnLocalKeyInAcc {
-                    key: key.clone(),
-                    acc: acc.clone(),
-                    at,
-                }
-            } else {
-                let (acc, key) = (acc.clone(), key.clone());
-                VerifyError::AccAsScratchSeed {
-                    defect: if is_put {
-                        AccSeedDefect::PutInto { acc, key }
-                    } else {
-                        AccSeedDefect::UnpackFrom { acc, key }
-                    },
-                    at,
-                }
-            };
-            self.errors.push(error);
-        }
-        // An `Acc` version stored as a value: a `Put` writes the caller's map
-        // into another map's key, where it would outlive the call and alias.
-        // A `Put` into an `Acc` map is already reported above (`PutInto` /
-        // `OwnLocalKeyInAcc`), so it is not reported a second time here.
-        if keyed.is_none()
-            && let BindOp::Put {
-                value: ValueRef::Version(stored),
-                ..
-            } = op
-            && is_acc(stored)
-        {
-            self.errors.push(VerifyError::AccAsScratchSeed {
-                defect: AccSeedDefect::StoredAsValue {
-                    acc: stored.clone(),
-                    into: target.clone(),
-                },
-                at,
-            });
-        }
-        // A whole-value step between `Acc` and another family, for every op:
-        // a `Direct` rebind's value, or the `Bind`'s source and target whatever
-        // the op (an `Unpack` into an `Acc` target from a scratch map reads a
-        // key of one family into the other). A keyed access already reported
-        // above names its `Acc` side, so it is not reported twice.
-        let from = match op {
-            BindOp::Direct(ValueRef::Version(v)) if is_acc(v) != is_acc(target) => Some(v),
-            _ if keyed.is_none() && is_acc(source) != is_acc(target) => Some(source),
-            _ => None,
-        };
-        if let Some(from) = from {
-            self.errors.push(VerifyError::AccAsScratchSeed {
-                defect: AccSeedDefect::CrossFamilyStep {
-                    from: from.clone(),
-                    to: target.clone(),
-                },
-                at,
-            });
-        }
-    }
-
-    /// [`VerifyError::AccAsScratchSeed`] (`RebindMap`) for one rebind: a
-    /// `MapPut`/`MapHeld` lowering never names an `Acc` version as its frame's
-    /// map, nor reads through one (`RebindShape::for_frame`'s "`Acc` is never a
-    /// rebind target").
-    fn check_acc_rebind(
-        &mut self,
-        local: &str,
-        state_first: Option<&VersionedVar>,
-        lowering: &RebindLowering,
-        at: Span,
-    ) {
-        let maps: Vec<&VersionedVar> = match lowering {
-            RebindLowering::Let | RebindLowering::LoopParam { .. } => Vec::new(),
-            RebindLowering::MapPut { source, target, .. } => vec![source, target],
-            RebindLowering::MapHeld { map, .. } => vec![map],
-        };
-        let acc = maps
-            .into_iter()
-            .chain(state_first)
-            .find(|v| v.prefix == VersionPrefix::Acc);
-        if let Some(acc) = acc {
-            self.errors.push(VerifyError::AccAsScratchSeed {
-                defect: AccSeedDefect::RebindMap {
-                    local: local.to_string(),
-                    acc: acc.clone(),
-                },
-                at,
-            });
-        }
-    }
-
-    /// [`VerifyError::NlrSlotShapeMismatch`]: inside a threaded `MethodBody`,
-    /// an NLR throw's or catch's state slot (`found`) must be that body's
-    /// family tuple with `Acc` last. Outside one there is no constraint here.
-    fn check_nlr_slot(&mut self, found: Vec<VersionPrefix>, at: Span) {
-        if !self.threaded_slots.is_empty() {
-            self.errors.push(VerifyError::NlrInThreadedBody { at });
-        }
-        if let Some(expected) = self.threaded_slots.last()
-            && *expected != found
-        {
-            self.errors.push(VerifyError::NlrSlotShapeMismatch {
-                expected: expected.clone(),
-                found,
-                at,
-            });
-        }
-    }
-
-    /// [`VerifyError::ActorStateInThreadedBlock`]: in a block compiled for a
-    /// threaded entry from an actor method, a `State` version stepped at
-    /// method level, or a field key put into / read out of a `State` version.
-    fn check_threaded_block_state(
-        &mut self,
-        target: &VersionedVar,
-        source: &VersionedVar,
-        op: &BindOp,
-        at: Span,
-    ) {
-        if self.scope
-            != (ScopeKind::ThreadedBlock {
-                caller: ThreadedBodyKind::Actor,
-            })
-        {
-            return;
-        }
-        let is_state = |v: &VersionedVar| v.prefix == VersionPrefix::State;
-        // A field key on a `State` map: a `Put` writes into its target, an
-        // `Unpack` reads out of its source.
-        let field_access = match op {
-            BindOp::Put { field, .. } if is_state(target) => Some((target, field)),
-            BindOp::Unpack { field } if is_state(source) => Some((source, field)),
-            _ => None,
-        }
-        .filter(|(_, field)| !is_local_key(field));
-        let error = match field_access {
-            Some((var, field)) => Some(VerifyError::ActorStateInThreadedBlock {
-                var: var.clone(),
-                field: Some(field.clone()),
-                at,
-            }),
-            None if is_state(target) && self.mode_stack.is_empty() => {
-                Some(VerifyError::ActorStateInThreadedBlock {
-                    var: target.clone(),
-                    field: None,
-                    at,
-                })
-            }
-            None => None,
-        };
-        if let Some(error) = error {
-            self.errors.push(error);
         }
     }
 
@@ -1306,8 +955,6 @@ impl VerifyWalk<'_> {
             } => {
                 self.check_use(source, *span);
                 self.check_class_method_family(target, *span);
-                self.check_acc_bind(target, source, op, *span);
-                self.check_threaded_block_state(target, source, op, *span);
                 let enclosing = self.frame_stack.last().copied().unwrap_or(FrameId::ROOT);
                 if let Some(error) = bind_frame_mismatch(target, enclosing, *span) {
                     self.errors.push(error);
@@ -1397,13 +1044,13 @@ impl VerifyWalk<'_> {
             // BT-3863: a `FoldAccumulator` is checked against its fold frame
             // by `verify_fold_locals_carried`, which runs on the fold body
             // before `carry_fold_families` can wrap it.
-            ThreadedStmt::Statement(..)
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
-            ThreadedStmt::NlrCatch { slot, span, .. } => self.check_nlr_slot(slot.clone(), *span),
-            // ADR 0132 §2: a `^` throw reads its slot versions and value like
-            // a `Return` reads its own, and carries the body's family tuple.
+            // ADR 0041 §State-Carrying NLR: a `^` throw reads its slot
+            // versions and value like a `Return` reads its own.
             ThreadedStmt::NlrThrow {
                 value, slot, span, ..
             } => {
@@ -1417,7 +1064,6 @@ impl VerifyWalk<'_> {
                 if let ValueRef::Version(v) = value {
                     self.check_use(v, *span);
                 }
-                self.check_nlr_slot(slot.iter().map(|v| v.prefix.clone()).collect(), *span);
             }
             // ADR 0131 §2/§4: a rebind's version step is checked exactly like
             // the `Bind` it renders as, and its frame and shape against the
@@ -1437,42 +1083,15 @@ impl VerifyWalk<'_> {
                     self.check_use(source, *span);
                     self.check_class_method_family(target, *span);
                 }
-                self.check_acc_rebind(local, state_first.as_ref(), lowering, *span);
                 self.check_rebind_lowering(local, *frame, lowering.shape(), *span);
             }
             // The method's root frame: method level, so no mode is pushed (a
             // `State` version here is the actor family, exactly as for the
             // top-level slice).
-            //
-            // ADR 0132 §2: a threaded body threads no local (its only frame
-            // map would be `Acc`), and pushes the NLR slot tuple its throws
-            // and catches must carry.
-            ThreadedStmt::MethodBody {
-                kind,
-                frame,
-                threads,
-                families,
-                body,
-                span,
-            } => {
-                let threaded = *kind == MethodBodyKind::Threaded;
-                if threaded {
-                    if !threads.is_empty() {
-                        self.errors.push(VerifyError::AccAsScratchSeed {
-                            defect: AccSeedDefect::ThreadedBodyThreadsLocals {
-                                threads: threads.clone(),
-                            },
-                            at: *span,
-                        });
-                    }
-                    self.threaded_slots.push(threaded_nlr_slot(families));
-                }
+            ThreadedStmt::MethodBody { frame, body, .. } => {
                 self.frame_stack.push(*frame);
                 self.in_frame(stmt, |this| this.walk(body));
                 self.frame_stack.pop();
-                if threaded {
-                    self.threaded_slots.pop();
-                }
             }
             // A branch arm threads through its seeded `StateAcc` — the same
             // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
@@ -1655,15 +1274,8 @@ pub(in crate::core_erlang) fn verify_sibling_reads(
 impl CoreErlangGenerator {
     /// The [`ScopeKind`] the generator is currently lowering — the one place
     /// that maps generator state to the verifier's scope (BT-3725).
-    ///
-    /// Inside a threaded entry's body (ADR 0132 §2,
-    /// [`Self::threaded_body_kind`]) the scope is [`ScopeKind::Threaded`];
-    /// no production lowering enters one yet, so every method's scope is
-    /// unchanged.
     pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {
-        if let Some(kind) = self.threaded_body_kind() {
-            ScopeKind::Threaded { kind }
-        } else if self.in_class_method() {
+        if self.in_class_method() {
             ScopeKind::ClassMethod
         } else if self.context == CodeGenContext::ValueType {
             ScopeKind::ValueType

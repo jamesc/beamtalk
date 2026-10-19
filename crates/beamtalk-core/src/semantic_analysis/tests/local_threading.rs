@@ -465,8 +465,8 @@ fn section6_actor_self_send_to_a_former_threading_callee_is_an_error() {
 /// write back. Two are conservative rather than probed wrong: a callee that
 /// passes the block on to another same-class callee (BT-3755) is rejected
 /// only because the target does not thread it, and an overridable callee, which is
-/// only wrong when a subclass overrides it. Widening the exemption
-/// (`tier2_callee::callee_threads_block_param`) fails this test.
+/// only wrong when a subclass overrides it. Since ADR 0133 (BT-3902) the §6
+/// check rejects every such send whatever the callee does.
 #[test]
 fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {
     for (modifiers, callee) in [

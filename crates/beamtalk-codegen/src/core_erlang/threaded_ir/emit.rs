@@ -82,10 +82,9 @@ impl<'g> RenderCtx<'g> {
                 self.generator.in_loop_body,
                 var.version,
             ),
-            VersionPrefix::SelfVt
-            | VersionPrefix::Acc
-            | VersionPrefix::Local(_)
-            | VersionPrefix::Gensym(_) => var.render_name(),
+            VersionPrefix::SelfVt | VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => {
+                var.render_name()
+            }
         }
     }
 
@@ -191,9 +190,6 @@ pub(in crate::core_erlang) fn render(
                 threads: _,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
-            // `NlrCatch::slot` is deliberately ignored: only the removed
-            // class-method threaded entry (BT-3904) built a non-empty one; the
-            // field goes with the `Acc` family (BT-3905).
             ThreadedStmt::NlrCatch {
                 boundary, token, ..
             } => {
@@ -290,8 +286,7 @@ pub(in crate::core_erlang) fn render(
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
 /// 'erlang':'throw'({'$bt_nlr', Tok, Val, Slot}) in`, where `Slot` is the one
-/// slot version bare, or every slot version as a tuple in order (ADR 0132 §2:
-/// `{SelfN, AccN}`, `{StateN, AccN}`).
+/// slot version bare, or every slot version as a tuple in order.
 fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
     let ThreadedStmt::NlrThrow {
         token,

@@ -8,9 +8,8 @@ TestCase subclass: Ch18FileIO
   field: nl = ""
 
   setUp =>
-    updated := self withNl: (String fromCodePoint: 10)
-    File mkdirAll: updated tmpDir
-    updated
+    File mkdirAll: self.tmpDir
+    self withNl: (String fromCodePoint: 10)
 
   tearDown =>
     File deleteAll: self.tmpDir

@@ -34,12 +34,23 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 just test-rust           # fast tier: cargo-nextest over every test binary (minus the corpus tier) + doctests
 just test-benches-smoke  # criterion benches in test mode, one pass each (~5 min serial); nightly only, not in `ci` (BT-3886)
-just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~13 min); `ci-changed` and CI run it only when compiler crates change
+just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~10 min); `ci-changed` and CI run it only when compiler crates change
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)
 just test-parity         # Cross-surface parity tests (BT-2077, ~30s)
 just test-repl-protocol  # REPL TCP-protocol tests (slower, ~50s)
 ```
+
+The corpus tier runs under cargo-nextest, one process per test, so its wall
+time is floored by its longest test, not by its total. A corpus proof that
+enumerates a shared list (frames, shapes, constructs, contexts) is split into
+one `#[test]` per *family* of that list with `beamtalk_core::per_family_tests!`
+(`crates/beamtalk-core/src/test_helpers/corpus_families.rs`, BT-3888): each
+per-family test runs the same check over its slice, and the macro also emits a
+partition test that fails when the families skip an entry, overlap, or lack a
+test, so the split is a partition of the former loop, never a reduction of it.
+Keep each per-family test well under a minute on 4 cores (nextest prints `SLOW`
+at 60 s): split a family further rather than trimming its product.
 
 ### Code Coverage
 
@@ -592,8 +603,9 @@ graph; this catches a *well-formed* graph that renders to different text,
 which is the failure mode ADR 0122's migration series (BT-3508) exists to
 guard against.
 
-**Location:** `Justfile` (`core-diff-snapshot`, `core-diff` recipes),
-`crates/beamtalk-cli/src/commands/util.rs` (`core_output_dir`).
+**Location:** `Justfile` (`core-diff-snapshot`, `core-diff-base-snapshot`,
+`core-diff` recipes), `crates/beamtalk-cli/src/commands/util.rs`
+(`core_output_dir`, `CoreOutputDir::snapshot_only`).
 
 **Corpus:** `stdlib/src/*.bt` (via `build-stdlib`), `stdlib/test/*.bt` +
 `stdlib/test/fixtures/*.bt` (via the `test` command), and
@@ -609,6 +621,36 @@ just core-diff-snapshot target/core-diff/head
 # worktree so neither checkout is disturbed. Non-zero exit on any diff:
 just core-diff
 just core-diff some-other-branch-or-tag
+
+# Build only the base side of that comparison (what CI caches, below):
+just core-diff-base-snapshot origin/main target/core-diff/base
+
+# Diff HEAD against a base snapshot you already have, skipping the base
+# worktree build. Opt-in by design: `core-diff` never reuses a base
+# snapshot it wasn't explicitly handed, so a stale one from an earlier
+# run can't be compared against by accident.
+just core-diff origin/main target/core-diff/base
+```
+
+**Snapshot-only mode (BT-3887):** the harness only ever reads `.core`, so
+`core-diff-snapshot`'s default `MODE=snapshot-only` sets
+`BEAMTALK_CORE_SNAPSHOT_ONLY=1` and each of `build-stdlib`, `test-stdlib`
+and `test` returns as soon as its last `.core` is written — no `.beam`
+compile, no `.app`/`builtins.rs`/`.hrl` generation, and none of the
+bootstrap-test or BUnit test bodies run (those are `test-beam`'s job).
+`core_output_dir` reads the flag alongside the directory (and rejects it
+without one) and exposes it as `CoreOutputDir::snapshot_only`, which each
+command checks at exactly one point: after its last `.core` write, before
+its first `.beam`/test-execution step. That placement is the invariant the
+mode depends on — a snapshot-only run must leave the *same* set of `.core`
+files a full run does. `MODE=full` runs the three commands to completion as
+before so the invariant can be re-verified whenever a command's pipeline
+changes:
+
+```bash
+just core-diff-snapshot target/core-diff/a snapshot-only
+just core-diff-snapshot target/core-diff/b full
+diff -r target/core-diff/a target/core-diff/b   # must print nothing
 ```
 
 **How it stays deterministic:** `build-stdlib`/`test`/`test-stdlib` normally
@@ -640,6 +682,25 @@ but not for a branch diffed against a pre-BT-3509 `main`.
 `core-diff` job) on PRs touching `crates/beamtalk-codegen/`, reporting any
 diff to the job summary without failing the build. Add the
 `core-diff:enforce` label to a PR to make a real diff fail that job instead.
+
+The job diffs against the PR's base SHA (`github.event.pull_request.base.sha`)
+rather than a freshly fetched `origin/main`, because the base side is
+cached (BT-3887): `core-diff-base-snapshot` builds it from a worktree of
+that commit alone, so it's a pure function of the SHA. Cache entries saved
+from a PR branch are visible only to that branch (and the job only runs on
+pull requests), so in practice the base is built once per PR per base SHA:
+every later push to the same PR reuses it, while a second PR on the same
+base builds its own. The `actions/cache` key is
+`core-diff-base-<os>-<base sha>-<hash of Justfile + .tool-versions>` — the
+Justfile hash covers the `core-diff*` recipes that drive and normalise the
+snapshot, `.tool-versions` the OTP that compiles it — and there are no
+`restore-keys`, since a near-miss is the wrong base, not a usable one. On a
+hit, `target/core-diff/base` is restored and handed to `just core-diff
+<sha> target/core-diff/base`, skipping the base worktree build entirely; on
+a miss, the job runs `core-diff-base-snapshot` first and saves the result
+(only after that build succeeds, but regardless of whether the diff then
+finds differences). The job summary says which happened. `just core-diff`
+with no cache is unchanged: it builds the base side itself.
 
 ---
 
@@ -931,6 +992,10 @@ fn test_directory_change() {
 4. **Keep locks focused** - Don't overload a lock name; create specific locks for specific conflicts
 
 See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation details of the named lock system.
+
+### Registry Cache Isolation
+
+A `beamtalk-cli` unit test that resolves against a git-backed registry (usually a throwaway `file://` repo) must create a `registry::test_support::IsolatedRegistryCache` first. It points the registry cache at a per-test temp directory, removed on drop, instead of the real `~/.beamtalk/registry/`, where each temp registry URL would otherwise leave a cache directory behind for good. `ensure_index` panics under `cfg(test)` when a test reaches a git registry without one, so a missing guard fails the test. The override is thread-local, so these tests need no `#[serial(env_var)]`; a test that resolves on threads it spawns calls `cache.enter()` on each of them. Subprocess tests built on `cli_common::beamtalk()` get the same isolation through `BEAMTALK_REGISTRY_CACHE_DIR` ([BT-3900](https://linear.app/beamtalk/issue/BT-3900)).
 
 ### Test Fixtures
 

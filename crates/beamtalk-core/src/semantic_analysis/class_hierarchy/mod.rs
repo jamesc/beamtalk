@@ -14,7 +14,6 @@
 use crate::ast::{ClassDefinition, MethodKind, Module};
 use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
-use crate::semantic_analysis::tier2_callee::{ThreadingIndex, stdlib_spawns_block};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -209,7 +208,6 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
@@ -226,7 +224,6 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    threading_params: Vec::new(),
                     return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
@@ -574,13 +571,10 @@ impl ClassHierarchy {
     /// for cross-file hierarchy resolution in Pass 2.
     #[must_use]
     pub fn extract_class_infos(module: &Module) -> Vec<ClassInfo> {
-        // A project unit (build Pass 1, lint): `spawns_block` is only ever set
-        // for stdlib methods, so nothing spawns here.
-        let threading = ThreadingIndex::build(&module.classes, &|_, _, _| false);
         module
             .classes
             .iter()
-            .map(|c| ClassInfo::from_class_definition(c, &threading))
+            .map(ClassInfo::from_class_definition)
             .collect()
     }
     /// Set the `package` field on every entry in `class_infos` that doesn't
@@ -656,7 +650,6 @@ impl ClassHierarchy {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                threading_params: Vec::new(),
                 // `ExtensionTypeInfo` stores flattened strings (compilation-layer
                 // metadata, outside `DeclaredType`'s scope) — parse back into
                 // structure rather than carrying the string through as an
@@ -838,14 +831,6 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        // The same predicate `build_stdlib` uses for `generated_builtins.rs`, so
-        // compiling the stdlib sources and the generated index cannot disagree
-        // (`stdlib_threading_params_agree_with_the_stdlib_compile` enforces it).
-        let threading = if stdlib_mode {
-            ThreadingIndex::build(&module.classes, &stdlib_spawns_block)
-        } else {
-            ThreadingIndex::build(&module.classes, &|_, _, _| false)
-        };
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.
@@ -863,7 +848,7 @@ impl ClassHierarchy {
                 true,
                 &mut diagnostics,
             );
-            let class_info = ClassInfo::from_class_definition(class, &threading);
+            let class_info = ClassInfo::from_class_definition(class);
             self.classes.insert(class.name.name.clone(), class_info);
         }
         // Pass 1.5: Propagate ClassKind through the hierarchy.

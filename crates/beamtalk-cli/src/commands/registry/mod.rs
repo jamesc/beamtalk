@@ -80,6 +80,7 @@ pub fn run_site(index: &str, output_dir: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::deps::registry::test_support::IsolatedRegistryCache;
     use camino::Utf8PathBuf;
     use std::fs;
     use tempfile::TempDir;
@@ -172,6 +173,9 @@ tag = "release-0.2.1"
 
     #[test]
     fn test_run_site_missing_index_errors_without_partial_output() {
+        // A path that isn't an existing directory is treated as a git URL,
+        // so `ensure_index` locks a registry cache before the clone fails.
+        let _cache = IsolatedRegistryCache::new();
         let out_dir = TempDir::new().unwrap();
         let out_root = utf8(&out_dir);
         let missing = out_root.join("does-not-exist-as-a-registry");

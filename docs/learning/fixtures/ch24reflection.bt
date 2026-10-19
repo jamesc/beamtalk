@@ -53,8 +53,8 @@ TestCase subclass: Ch24Reflection
     self deny: meta isClass
 
   testMetaclassName =>
-    name := Point class name
-    self assert: (name includesSubstring: "class")
+    // `name` answers a Symbol
+    self assert: Point class name equals: #'Point class'
 
   testSelfGrounding =>
     m1 := Point class class

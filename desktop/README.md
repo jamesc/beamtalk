@@ -142,12 +142,15 @@ on every platform.
   closes that: the spawned process tree is assigned to a job object that
   kills every process in it — including everything spawned after
   assignment — the moment the job handle closes, whether that's an explicit
-  detach or this broker process itself dying uncleanly. What remains
-  unverified is only the *mechanism's* real-world behavior (a small
-  assign-after-spawn race — see `spawn.rs`'s and `winjob.rs`'s module doc
-  comments) and whether `AssignProcessToJobObject`/`SetInformationJobObject`
-  behave as documented against a real `mix release` boot; `reap`'s PID-file
-  sweep remains the fallback net for whatever this mechanism still misses.
+  detach or this broker process itself dying uncleanly. The child is
+  spawned `CREATE_SUSPENDED` and released only once it is inside the job
+  (BT-3880 — see `winjob.rs`'s module doc comment), so `cmd.exe` cannot
+  launch `erl.exe` before the assignment that covers it. What remains
+  unverified is only whether
+  `AssignProcessToJobObject`/`SetInformationJobObject` behave as documented
+  against a real `mix release` boot (the crate's Windows CI test exercises
+  them against a `.bat` that launches `ping.exe`); `reap`'s PID-file sweep
+  remains the fallback net for whatever this mechanism still misses.
 - **No code signing.** See the Packaging section above — the `.msi`/NSIS
   `.exe` this lane produces are unsigned.
 - **CI build lane is unverified.** `desktop-release.yml`'s Windows leg (WiX/

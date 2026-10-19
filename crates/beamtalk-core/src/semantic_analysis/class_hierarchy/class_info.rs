@@ -11,7 +11,6 @@ use ecow::EcoString;
 use std::collections::{BTreeSet, HashMap};
 
 use super::{ClassHierarchy, DeclaredType};
-use crate::semantic_analysis::tier2_callee::ThreadingIndex;
 
 /// Information about a class variable (`classState:` declaration, ADR 0067).
 ///
@@ -69,15 +68,6 @@ pub struct MethodInfo {
     /// because they execute in a different process and cannot re-enter the
     /// actor's own call-stack (`calling_self` dispatch does not apply).
     pub spawns_block: bool,
-    /// The argument positions (0-based) this method threads a Tier 2 block
-    /// through, i.e. the positions its threaded entry accepts a stateful block
-    /// at (ADR 0132 §1). Empty when the method has no threaded entry.
-    ///
-    /// The cross-file record of whether a known class's method threads (the
-    /// precedent is `spawns_block`). Codegen no longer reads it: ADR 0133
-    /// Phase 2 removed the threaded entries and their `tier2_*` metadata
-    /// (BT-3904), and BT-3906 removes this field.
-    pub threading_params: Vec<usize>,
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).
     pub return_type: Option<DeclaredType>,
@@ -357,10 +347,7 @@ impl ClassInfo {
     /// Shared by `extract_class_infos` and `add_module_classes` to avoid
     /// duplicating the field-mapping logic.
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to struct fields
-    pub(super) fn from_class_definition(
-        class: &ClassDefinition,
-        threading: &ThreadingIndex,
-    ) -> Self {
+    pub(super) fn from_class_definition(class: &ClassDefinition) -> Self {
         let mut instance_methods: Vec<MethodInfo> = class
             .methods
             .iter()
@@ -372,7 +359,6 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                threading_params: threading.params(&class.name.name, false, &m.selector.name()),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters
@@ -398,7 +384,6 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                threading_params: threading.params(&class.name.name, true, &m.selector.name()),
                 return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters

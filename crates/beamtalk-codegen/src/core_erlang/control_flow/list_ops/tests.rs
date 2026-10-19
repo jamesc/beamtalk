@@ -1440,12 +1440,7 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     // accumulator would reference an unbound variable. Must keep emitting
     // the pre-existing plain-value wrapper, exactly like the ValueType
     // sibling case just below.
-    //
-    // The method answers the block itself here, so `block` would not have
-    // been an ADR 0132 threading parameter either (its threaded entries were
-    // removed by ADR 0133 Phase 2, BT-3904); the callable keeps the plain
-    // wrapper.
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block.\n    block\n";
+    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foreach'"),
@@ -1634,9 +1629,8 @@ fn test_class_method_collect_non_literal_callable_does_not_fold() {
     // A class method forwarding a non-literal callable to `collect:` must NOT use the
     // ADR 0128 fold rewrite — class methods have no `State`/`StateAcc` parameter.
     // Mirrors `test_class_method_do_non_literal_callable_does_not_fold` for the
-    // "map" operation path. (The method answers `block`, so it is not a
-    // threading parameter: ADR 0132 Phase 1c.)
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block.\n    block\n";
+    // "map" operation path.
+    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'map'"),
