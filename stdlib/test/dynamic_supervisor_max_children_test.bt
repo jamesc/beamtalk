@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3964: DynamicSupervisor class maxChildren limit.
+//
+// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_capped.bt,
+//           stdlib/test/fixtures/test_dynamic_supervisor_bad_cap.bt
+
+TestCase subclass: DynamicSupervisorMaxChildrenTest
+
+  // Each fixture supervise/stop registers a single node-wide,
+  // name-registered process — run serially (same as
+  // DynamicSupervisorDefaultsTest, BT-3379).
+  class serial -> Boolean => true
+
+  testMaxChildrenDefaultsToInfinity =>
+    self assert: DynamicSupervisor maxChildren equals: #infinity
+
+  testSubclassOverridesMaxChildren =>
+    self assert: TestDynamicSupervisorCapped maxChildren equals: 2
+
+  testStartChildFailsAtLimitAndRecoversAfterTerminate =>
+    pool := (TestDynamicSupervisorCapped supervise) unwrap
+    first := pool startChild unwrap
+    pool startChild unwrap
+    self assert: pool count equals: 2
+    third := pool startChild
+    self assert: third isError equals: true
+    self assert: third error kind equals: #max_children
+    self assert: (third error message includesSubstring: "2") equals: true
+    self assert: pool count equals: 2
+    (pool terminateChild: first) unwrap
+    self assert: pool count equals: 1
+    self assert: pool startChild isOk equals: true
+    self assert: pool count equals: 2
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildWithArgsFailsAtLimit =>
+    pool := (TestDynamicSupervisorCapped supervise) unwrap
+    (pool startChild: #{#value => 1}) unwrap
+    (pool startChild: #{#value => 2}) unwrap
+    result := pool startChild: #{#value => 3}
+    self assert: result isError equals: true
+    self assert: result error kind equals: #max_children
+    [pool stop] on: Error do: [:e | nil]
+
+  testStartChildWithNameFailsAtLimit =>
+    pool := (TestDynamicSupervisorCapped supervise) unwrap
+    (pool startChild: #{#value => 1} name: #dsMaxChildrenTestA) unwrap
+    (pool startChild: #{#value => 2} name: #dsMaxChildrenTestB) unwrap
+    result := pool startChild: #{#value => 3} name: #dsMaxChildrenTestC
+    self assert: result isError equals: true
+    self assert: result error kind equals: #max_children
+    // The refused child was never started, so its name is not registered.
+    self assert: (Counter named: #dsMaxChildrenTestC) isError equals: true
+    [pool stop] on: Error do: [:e | nil]
+
+  testInvalidMaxChildrenFailsSupervise =>
+    result := TestDynamicSupervisorBadCap supervise
+    self assert: result isError equals: true
+    self assert: result error kind equals: #supervisor_start_failed

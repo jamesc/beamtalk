@@ -3559,6 +3559,23 @@ pool stop
 WorkerPool current                  // => nil
 ```
 
+**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once `count` reaches the limit, `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. The value must be a non-negative Integer or `#infinity` (anything else makes `supervise` fail) and is read once when the supervisor starts.
+
+```beamtalk
+DynamicSupervisor(Worker) subclass: ConnectionPool
+  class childClass => Worker
+  class maxChildren -> Integer => 2
+
+pool := (ConnectionPool supervise) unwrap
+w := pool startChild unwrap        // => Actor(Worker, _)
+pool startChild unwrap             // => Actor(Worker, _)
+pool startChild error kind         // => #max_children
+(pool terminateChild: w) unwrap    // => nil
+pool startChild isOk               // => true
+```
+
+The limit is checked by the calling process just before the start, so it is exact when a single process starts children (e.g. one acceptor per pool) — concurrent starters racing past the check can briefly overshoot it by up to the number of racers.
+
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
 
 **Named dynamic children — identity that survives restart.** `startChild:` alone gives you a pid, and a `simple_one_for_one`-restarted child comes back as a *different*, unlabelled pid — there is no `which:`/`children` method on `DynamicSupervisor` to rediscover it (see below). `startChild: args name: aSymbol` closes that gap by combining args-replay with [named actor registration](ADR/0079-named-actor-registration.md): the child starts under `{local, aSymbol}` registration, and because OTP replays each dynamic child's own start args (including the name) on automatic restart, a crashed named child re-registers under the same name every time.
@@ -3608,8 +3625,8 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#name_registered`, `#reserved_name`, `#stale_handle` |
+| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#stale_handle` |
+| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#name_registered`, `#reserved_name`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.

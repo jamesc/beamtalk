@@ -33,6 +33,27 @@ abstract Object subclass: DynamicSupervisor(C)
   /// Time window in seconds for the `maxRestarts` rate limit.
   class restartWindow -> Integer => 60
 
+  /// Maximum number of live children, or `#infinity` (the default) for no limit.
+  ///
+  /// Once `count` reaches this limit, `startChild`, `startChild:` and
+  /// `startChild:name:` return `Result error:` with kind `#max_children`
+  /// (the error's details carry the limit) instead of starting a child.
+  /// Callers can back off and retry; terminating a child frees a slot.
+  /// Must be a non-negative Integer or `#infinity` — any other value makes
+  /// `supervise` fail. Read once when the supervisor starts.
+  ///
+  /// The check is made by the caller just before the start, so it is exact
+  /// when one process starts children (e.g. a single acceptor); concurrent
+  /// starters can briefly overshoot the limit by up to the number racing.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor(Worker) subclass: ConnectionPool
+  ///   class childClass => Worker
+  ///   class maxChildren -> Integer => 16384
+  /// ```
+  class maxChildren -> Integer | Symbol => #infinity
+
   /// Whether this class is a supervisor (always true for DynamicSupervisor subclasses).
   ///
   /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
@@ -92,7 +113,9 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`
   /// when failure should propagate as an exception, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
-  /// `Result error: #beamtalk_error{kind = child_start_failed}`.
+  /// `Result error: #beamtalk_error{kind = child_start_failed}`, or
+  /// `#beamtalk_error{kind = max_children}` when the pool is at its
+  /// `maxChildren` limit.
   startChild -> Result(C, Error) =>
     (Erlang beamtalk_supervisor) startChild: self
 
@@ -105,7 +128,9 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`
   /// when failure should propagate as an exception, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
-  /// `Result error: #beamtalk_error{kind = child_start_failed}`.
+  /// `Result error: #beamtalk_error{kind = child_start_failed}`, or
+  /// `#beamtalk_error{kind = max_children}` when the pool is at its
+  /// `maxChildren` limit.
   ///
   /// ## Automatic restart replays this call's args (BT-3365)
   ///
@@ -150,8 +175,10 @@ abstract Object subclass: DynamicSupervisor(C)
   ///
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Failures
   /// surface as `Result error: #beamtalk_error{kind = name_registered}`
-  /// (name already taken), `#beamtalk_error{kind = reserved_name}`, or
-  /// `#beamtalk_error{kind = child_start_failed}` for other start failures.
+  /// (name already taken), `#beamtalk_error{kind = reserved_name}`,
+  /// `#beamtalk_error{kind = max_children}` (pool at its `maxChildren`
+  /// limit), or `#beamtalk_error{kind = child_start_failed}` for other start
+  /// failures.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -178,6 +205,9 @@ abstract Object subclass: DynamicSupervisor(C)
     (Erlang beamtalk_supervisor) terminateChild: self child: child
 
   /// Return the count of currently-running children.
+  ///
+  /// This is the figure the `maxChildren` limit is checked against, so a
+  /// caller refused with `#max_children` can poll it to decide when to retry.
   ///
   /// BT-1997 / ADR 0080 Phase 1: `countChildren/1` returns a Result-shaped
   /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
