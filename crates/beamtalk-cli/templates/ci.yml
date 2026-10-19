@@ -18,7 +18,7 @@ jobs:
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
+          otp-version: "{{otp_major}}"
 
       - name: Install Beamtalk
         run: |
