@@ -3363,32 +3363,6 @@ impl CoreErlangGenerator {
             return false;
         }
 
-        // ADR 0128 / BT-3583 / BT-3615: a collection HOM (`do:`/`collect:`/
-        // `select:`/`inject:into:`/`detect:`/`detect:ifNone:`/`count:`/
-        // `anySatisfy:`/`allSatisfy:`) forwarding a non-literal (opaque)
-        // callable — its tier is unknown until runtime, so conservatively
-        // require StateAcc threading; the operator's codegen folds with a
-        // runtime-discriminated accumulator (`list_ops/opaque_fold.rs`).
-        // Scoped to exactly the selectors `opaque_fold_callable_arg` lists —
-        // not widened to other ControlFlow selectors (`ifTrue:`/
-        // `whileTrue:`/`on:do:`/`reject:`/…), which have their own
-        // literal-block-only analysis and are out of this ADR's scope.
-        //
-        // Decided by `opaque_callable_fold_needs_threading` — the SAME
-        // predicate the ADR 0118 expression-position producer uses, built on
-        // the SAME table and `routes_through_opaque_callable_fold` gate every
-        // covered operator's codegen call site uses to decide whether it
-        // actually builds the `{Result, NewState}`-tuple fold, so this
-        // classifier and that codegen decision cannot drift apart (the
-        // class-method crash fixed on PR #4030 arose from exactly two
-        // hand-duplicated copies of this condition going out of sync).
-        // `false` outside an Actor instance method (`ValueType`, REPL, class
-        // methods — none compiles the fold) and for a `self`/`super`
-        // receiver (dispatched as a send, never through the list intrinsic).
-        if self.opaque_callable_fold_needs_threading(expr) {
-            return true;
-        }
-
         // Standard check: analyse argument blocks for mutations.
         // Check ALL block arguments, not just the last one.
         // For selectors like `detect:ifNone:`, the mutation-bearing block is the

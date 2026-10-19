@@ -8,7 +8,6 @@ use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::family_slots::FoldFamilySlots;
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
-use super::OpaqueFoldOp;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -36,18 +35,11 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_count_with_mutations(receiver, body_block);
         }
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(body) {
-            return self.generate_opaque_callable_fold(receiver, body, OpaqueFoldOp::Count);
-        }
-
         // No mutations: use lists:filter + erlang:length
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "count:", 1)?;
         let filtered_var = self.fresh_temp_var("temp");
 
         Ok(docvec![
@@ -256,7 +248,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "flatMap:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -475,17 +467,6 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_inject_with_mutations(receiver, initial, body_block);
         }
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(body) {
-            return self.generate_opaque_callable_fold(
-                receiver,
-                body,
-                OpaqueFoldOp::Inject { initial },
-            );
-        }
-
         // Pure-block fast path — emit inline lists:foldl instead of
         // calling beamtalk_collection:inject_into at runtime.
         // This eliminates: (1) the runtime function call overhead, (2) the to_list
@@ -544,7 +525,7 @@ impl CoreErlangGenerator {
         } else {
             // Non-literal callable: wrap to swap args at runtime.
             let body_var = self.fresh_temp_var("temp");
-            let body_code = self.expression_doc(body)?;
+            let body_code = self.non_literal_callable_doc(body, "inject:into:", 2)?;
             docvec![
                 "let ",
                 leaf::var(body_var.clone()),
@@ -811,7 +792,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "takeWhile:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -1039,7 +1020,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "dropWhile:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -1263,7 +1244,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "partition:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -1525,7 +1506,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "groupBy:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -1749,7 +1730,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "sort:", 2)?;
 
         Ok(docvec![
             "let ",

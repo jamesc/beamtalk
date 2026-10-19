@@ -65,16 +65,6 @@ pub(in crate::core_erlang) enum StateAccFallbackReason {
     NotLetrec,
     /// Destructure assignment as last expression (incompatible with tuple-acc).
     DestructureAsLastExpr,
-    /// ADR 0128 / BT-3583 / BT-3615: a collection HOM (`do:`/`collect:`/
-    /// `select:`/`inject:into:`/`detect:`/`detect:ifNone:`/`count:`/
-    /// `anySatisfy:`/`allSatisfy:`) forwarding a non-literal (opaque)
-    /// callable — its tier is unknown until runtime, so the fold's
-    /// accumulator carries the `State` map itself, discriminated once per
-    /// element inside the fold body (`list_ops/opaque_fold.rs`'s
-    /// `generate_opaque_callable_fold`) rather than the block's own declared
-    /// locals. Diagnostic/debugging attribution only — data-only, no
-    /// verifier behavior change.
-    NonLiteralCallable,
 }
 
 impl std::fmt::Display for StateAccFallbackReason {
@@ -100,9 +90,6 @@ impl std::fmt::Display for StateAccFallbackReason {
             Self::NotLetrec => write!(f, "not a letrec loop"),
             Self::DestructureAsLastExpr => {
                 write!(f, "destructure assignment as last expression")
-            }
-            Self::NonLiteralCallable => {
-                write!(f, "non-literal callable forwarded to a collection HOM")
             }
         }
     }

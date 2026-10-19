@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3867 (ADR 0132 Phase 0b, I5) made a stored Tier 2 block sent `value` in
-// a value-type method an inline producer over a fresh map. ADR 0133 Phase 1
+// a value-type method an inline producer over a fresh map (deleted by ADR 0133
+// Phase 2, BT-3908). ADR 0133 Phase 1
 // (BT-3902): a block stored in a local may read captured variables but not
 // assign them, so each `st*` method is now an escaping-block compile error
 // ("`t` is assigned in a block stored in `b`"). Inert: the runner discovers

@@ -68,7 +68,6 @@ use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
-use beamtalk_core::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use beamtalk_core::semantic_analysis::{
     extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
 };
@@ -180,19 +179,7 @@ fn check_method(method: &MethodDefinition, out: &mut Out<'_>) {
     for param in &method.parameters {
         scope.define(param.name.name.as_str());
     }
-    // ADR 0132 Phase 0b (BT-3867): a stored block sent `value` in the method
-    // body is evaluated in place (`inline_stored_tier2_values`, the rule the
-    // §6 check and codegen read for class and value-type methods), so the lint
-    // sees the evaluated literal. Those two skip actor instance methods; the
-    // rewrite is applied here to every method this pass checks, and `check`
-    // already skips Actor classes, so the lint and §6 agree.
-    let params: Vec<_> = method
-        .parameters
-        .iter()
-        .map(|p| p.name.name.clone())
-        .collect();
-    let inlined = inline_stored_tier2_values(&method.body, &params);
-    walk_expr_seq(inlined.as_deref().unwrap_or(&method.body), &mut scope, out);
+    walk_expr_seq(&method.body, &mut scope, out);
     scope.pop();
 }
 

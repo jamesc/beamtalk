@@ -42,7 +42,6 @@ pub mod protocol_source;
 pub mod receiver_knowledge;
 pub mod return_type_writeback;
 pub(crate) mod scope;
-pub mod stored_block_inline;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
 pub mod trait_expansion;
