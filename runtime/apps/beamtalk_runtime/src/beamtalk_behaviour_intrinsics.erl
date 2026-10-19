@@ -848,12 +848,14 @@ classRemoveFromSystemByName(ClassName) ->
                                 soft_purge_before_delete,
                                 code:soft_purge(Module)
                             ),
-                            ok = ensure_code_step(
-                                ClassName,
-                                Module,
-                                delete,
-                                code:delete(Module)
-                            ),
+                            %% BT-3895: a programmatic ClassBuilder class has no
+                            %% BEAM module behind it (`moduleName` defaults to the
+                            %% class name, but nothing is ever loaded under it), so
+                            %% `code:delete/1` answers `false` ("no current code").
+                            %% That is not a failed unload — there is nothing to
+                            %% delete. Only a module that is actually loaded must
+                            %% be deleted successfully.
+                            ok = delete_module_code(ClassName, Module),
                             ok = ensure_code_step(
                                 ClassName,
                                 Module,
@@ -3474,6 +3476,14 @@ publish_class_removed(ClassName, Module) ->
             _:_ -> []
         end,
     lists:foreach(fun(Pid) -> Pid ! {class_removed, ClassName, Module} end, Shells).
+
+-doc "Delete a module's current code if it is loaded; a never-loaded module (ClassBuilder class, BT-3895) is a no-op.".
+-spec delete_module_code(atom(), atom()) -> ok.
+delete_module_code(ClassName, Module) ->
+    case erlang:module_loaded(Module) of
+        true -> ensure_code_step(ClassName, Module, delete, code:delete(Module));
+        false -> ok
+    end.
 
 -doc """
 Assert that a code-server step succeeded; raise a structured error if not.

@@ -673,6 +673,33 @@ fn adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block() {
 }
 
 #[test]
+fn bt3935_class_side_self_send_of_a_collection_message_is_an_escaping_block() {
+    // `self do: [...]` in a class method is a dispatched send to the class's
+    // own class-side `do:`, not the inlined collection construct.
+    for body in [
+        "self do: [:x | t := t + x]\nt",
+        "self inject: 0 into: [:a :x | t := a + x]\nt",
+        "super collect: [:x | t := x]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_class(body));
+        let found = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(found.len(), 1, "{body}: {diags:?}");
+        assert!(
+            found[0].message.contains("class's own"),
+            "{body}: {diags:?}"
+        );
+    }
+    // A non-writing block and a non-self receiver stay clean.
+    for body in ["self do: [:x | x]\nt", "#(1, 2) do: [:x | t := t + x]\nt"] {
+        let diags = adr0131_diagnostics(&in_class(body));
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+            "{body}: {diags:?}"
+        );
+    }
+}
+
+#[test]
 fn section6_class_side_self_send_has_no_return_channel() {
     let diags = adr0131_diagnostics(&in_class("self ap: [t := t + 1]\nt"));
     assert_eq!(
