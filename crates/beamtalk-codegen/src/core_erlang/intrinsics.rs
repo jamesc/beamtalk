@@ -22,7 +22,6 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::control_flow::ScratchStart;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -1961,7 +1960,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 Some(block),
                                 None,
-                                ScratchStart::Continue,
+                                self.conditional_scratch(self.current_frame()),
                                 false,
                             )?;
                             return Ok(Some(tuple_doc));
@@ -2014,7 +2013,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 None,
                                 Some(block),
-                                ScratchStart::Continue,
+                                self.conditional_scratch(self.current_frame()),
                                 false,
                             )?;
                             return Ok(Some(doc));
@@ -2066,7 +2065,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 Some(nil_block),
                                 Some(not_nil_block),
-                                ScratchStart::Continue,
+                                self.conditional_scratch(self.current_frame()),
                                 false,
                             )?;
                             return Ok(Some(tuple_doc));
@@ -2127,7 +2126,7 @@ impl CoreErlangGenerator {
                                 receiver,
                                 Some(nil_block),
                                 Some(not_nil_block),
-                                ScratchStart::Continue,
+                                self.conditional_scratch(self.current_frame()),
                                 false,
                             )?;
                             return Ok(Some(tuple_doc));
@@ -2899,14 +2898,14 @@ impl CoreErlangGenerator {
                                 self.generate_and_with_mutations_tuple(
                                     receiver,
                                     block,
-                                    ScratchStart::Continue,
+                                    self.conditional_scratch(self.current_frame()),
                                     false,
                                 )?
                             } else {
                                 self.generate_or_with_mutations_tuple(
                                     receiver,
                                     block,
-                                    ScratchStart::Continue,
+                                    self.conditional_scratch(self.current_frame()),
                                     false,
                                 )?
                             };
@@ -2945,7 +2944,7 @@ impl CoreErlangGenerator {
                         let doc = self.generate_if_true_with_mutations_tuple(
                             receiver,
                             block,
-                            ScratchStart::Continue,
+                            self.conditional_scratch(self.current_frame()),
                             false,
                         )?;
                         return Ok(Some(doc));
@@ -2966,7 +2965,7 @@ impl CoreErlangGenerator {
                         let doc = self.generate_if_false_with_mutations_tuple(
                             receiver,
                             block,
-                            ScratchStart::Continue,
+                            self.conditional_scratch(self.current_frame()),
                             false,
                         )?;
                         return Ok(Some(doc));
@@ -2991,7 +2990,7 @@ impl CoreErlangGenerator {
                             receiver,
                             true_block,
                             false_block,
-                            ScratchStart::Continue,
+                            self.conditional_scratch(self.current_frame()),
                             false,
                         )?;
                         return Ok(Some(doc));

@@ -27,6 +27,7 @@ fn bind_detect_found_or_raise_doc(
     fold_result: &str,
     recv_var: &str,
     class_var: &str,
+    no_match_var: String,
 ) -> Document<'static> {
     docvec![
         "let ",
@@ -41,7 +42,12 @@ fn bind_detect_found_or_raise_doc(
         leaf::var(recv_var.to_owned()),
         ") in call 'beamtalk_collection':'raiseDetectNotFound'(",
         leaf::var(class_var.to_owned()),
-        ") end in ",
+        ")",
+        // An explicit fallback: a `case` without one inside a `try` body (a
+        // protected body, a handler) trips OTP's `beam_validator`
+        // (`ambiguous_catch_try_state`, see `case_clause_fallback`).
+        CoreErlangGenerator::case_clause_fallback_doc(no_match_var),
+        " end in ",
     ]
 }
 
@@ -656,6 +662,10 @@ impl CoreErlangGenerator {
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
             let if_none_arm = self.generate_if_none_branch_tuple(if_none, &stateacc)?;
+            // An explicit fallback: a `case` without one inside a `try` body
+            // (a protected body, a handler) trips OTP's `beam_validator`
+            // (`ambiguous_catch_try_state`, see `case_clause_fallback`).
+            let no_match_fallback = self.case_clause_fallback("DetectNoMatch");
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -684,6 +694,7 @@ impl CoreErlangGenerator {
                 leaf::var(stateacc.clone()),
                 "} <'false'> when 'true' -> ",
                 if_none_arm,
+                no_match_fallback,
                 " end",
             ]);
             return Ok(Document::Vec(docs));
@@ -767,6 +778,7 @@ impl CoreErlangGenerator {
 
         // Case on FoundFlag to decide result.
         let if_none_arm = self.generate_if_none_branch_tuple(if_none, &state_out)?;
+        let no_match_fallback = self.case_clause_fallback("DetectNoMatch");
         docs.push(docvec![
             "case ",
             leaf::var(found_flag),
@@ -776,6 +788,7 @@ impl CoreErlangGenerator {
             leaf::var(state_out.clone()),
             "} <'false'> when 'true' -> ",
             if_none_arm,
+            no_match_fallback,
             " end",
         ]);
 
@@ -857,6 +870,7 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let found_result = self.fresh_temp_var("FoundResult");
             let class_var = self.fresh_temp_var("DetectRecvClass");
+            let no_match_var = self.fresh_temp_var("DetectNoMatch");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
@@ -870,7 +884,13 @@ impl CoreErlangGenerator {
                 ", ",
                 leaf::var(safe_list_var),
                 ") in ",
-                bind_detect_found_or_raise_doc(&found_result, &fold_result, &list_var, &class_var),
+                bind_detect_found_or_raise_doc(
+                    &found_result,
+                    &fold_result,
+                    &list_var,
+                    &class_var,
+                    no_match_var,
+                ),
                 extract_doc,
                 repack_doc,
                 "{",
@@ -933,6 +953,7 @@ impl CoreErlangGenerator {
         let fold_result = self.fresh_temp_var("FoldResult");
         let found_result = self.fresh_temp_var("FoundResult");
         let class_var = self.fresh_temp_var("DetectRecvClass");
+        let no_match_var = self.fresh_temp_var("DetectNoMatch");
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
@@ -942,7 +963,13 @@ impl CoreErlangGenerator {
                 &safe_list_var,
                 &fold_result
             ),
-            bind_detect_found_or_raise_doc(&found_result, &fold_result, &list_var, &class_var),
+            bind_detect_found_or_raise_doc(
+                &found_result,
+                &fold_result,
+                &list_var,
+                &class_var,
+                no_match_var,
+            ),
             "let ",
             leaf::var(state_out.clone()),
             " = call 'erlang':'element'(3, ",

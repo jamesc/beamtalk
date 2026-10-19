@@ -33,6 +33,7 @@
 
 use super::CoreErlangGenerator;
 use super::field_types::trusted_param_types;
+use super::generator::body_state::BodyState;
 use beamtalk_core::ast::MethodDefinition;
 
 /// Which version counter [`MethodFrame::enter`] resets on entry — the one
@@ -64,6 +65,11 @@ pub(in crate::core_erlang) struct MethodFrame<'a> {
     /// flattened provision's protocol source (ADR 0127 §3); `None` when the
     /// method is the class's own and nothing was swapped.
     prev_source: Option<(Option<String>, Option<String>)>,
+    /// ADR 0133 Phase 3 (BT-3911): the enclosing body's per-body generator
+    /// state ([`BodyState`]), parked here for the method's body, which starts
+    /// from the default (a body lowered inside another one, a `ClassBuilder`
+    /// fun's cascade in a loop body, inherits nothing). `None` once restored.
+    outer_body: Option<BodyState>,
 }
 
 impl<'a> MethodFrame<'a> {
@@ -86,6 +92,7 @@ impl<'a> MethodFrame<'a> {
         method: &MethodDefinition,
         boundary: MethodBoundary,
     ) -> (Self, Vec<String>) {
+        let outer_body = generator.park_body_state();
         match boundary {
             MethodBoundary::Actor => generator.reset_state_version(),
             MethodBoundary::ValueType => generator.reset_self_version(),
@@ -144,6 +151,7 @@ impl<'a> MethodFrame<'a> {
                 prev_selector,
                 boundary,
                 prev_source,
+                outer_body: Some(outer_body),
             },
             param_vars,
         )
@@ -180,6 +188,9 @@ impl Drop for MethodFrame<'_> {
         if let Some((text, path)) = self.prev_source.take() {
             self.generator.source_text = text;
             self.generator.source_path = path;
+        }
+        if let Some(outer) = self.outer_body.take() {
+            self.generator.unpark_body_state(outer);
         }
     }
 }

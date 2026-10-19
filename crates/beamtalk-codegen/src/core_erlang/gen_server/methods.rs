@@ -2422,22 +2422,30 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         block: &Block,
     ) -> Result<Document<'static>> {
+        // The fun body executes at runtime as a class method's own top frame,
+        // even when the builder cascade lexically sits inside a block or a
+        // loop body: it inherits nothing of the enclosing body's per-body
+        // state (ADR 0133 Phase 3, BT-3911: the block depth, the class-variable
+        // capture of ADR 0130 §5, the loop and branch context, the producer
+        // sites and frames), and the enclosing body gets it back on every
+        // exit path.
+        let mut scope = self.enter_body_scope();
+        scope.generate_class_method_fun_in_body_scope(selector, block)
+    }
+
+    /// [`Self::generate_class_method_fun_from_block`] once the nested body's
+    /// [`BodyScope`](crate::core_erlang::generator::body_state::BodyScope) is
+    /// entered.
+    fn generate_class_method_fun_in_body_scope(
+        &mut self,
+        selector: &MessageSelector,
+        block: &Block,
+    ) -> Result<Document<'static>> {
         self.push_scope();
         self.current_method_params.clear();
         // Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
         self.reset_state_version();
-        // The fun body executes at runtime as a class method's own top frame,
-        // even when the builder cascade lexically sits inside a block
-        // (`block_depth > 0` at the cascade's position). Reset `block_depth`
-        // so the body is generated as a top frame, as a compiled class
-        // method's is; restored on every exit path below.
-        let saved_block_depth = self.block_depth;
-        self.block_depth = 0;
-        // Likewise the fun is a method's own top frame (home by construction),
-        // not a block literal: it takes no enclosing block's class-variable
-        // capture (ADR 0130 §5).
-        let saved_class_var_capture = self.class_var_capture.take();
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -2481,8 +2489,6 @@ impl CoreErlangGenerator {
             match self.class_method_body_doc(&method, nlr_token_var.as_deref()) {
                 Ok(doc) => doc,
                 Err(e) => {
-                    self.block_depth = saved_block_depth;
-                    self.class_var_capture = saved_class_var_capture;
                     self.pop_scope();
                     return Err(e);
                 }
@@ -2495,8 +2501,6 @@ impl CoreErlangGenerator {
             nest(INDENT, docvec![line(), body_doc]),
         ];
 
-        self.block_depth = saved_block_depth;
-        self.class_var_capture = saved_class_var_capture;
         self.pop_scope();
         Ok(doc)
     }

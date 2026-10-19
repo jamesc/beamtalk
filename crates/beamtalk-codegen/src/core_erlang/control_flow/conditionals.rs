@@ -531,7 +531,7 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, usize)> {
         match arm {
             Some(arm) => self.generate_conditional_arm(block, arm),
-            None => self.generate_repl_arm_inline(block),
+            None => self.generate_conditional_branch_inline(block),
         }
     }
 
@@ -1835,18 +1835,7 @@ impl CoreErlangGenerator {
         if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
-            let source_version = self.state_version();
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Put {
-                    field: state_key,
-                    value: ValueRef::Var(field_val_var.clone()),
-                },
-                span,
-            });
+            self.push_local_slot_put(stmts, frame, &id.name, state_key, &field_val_var, span);
             self.bind_var(&id.name, &field_val_var);
             return Ok(field_val_var);
         }
@@ -1893,17 +1882,15 @@ impl CoreErlangGenerator {
                 ])),
                 span,
             });
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: gensym_state,
-                op: BindOp::Put {
-                    field: state_key,
-                    value: ValueRef::Var(val_var.clone()),
-                },
+            self.push_local_slot_put_from(
+                stmts,
+                frame,
+                &id.name,
+                state_key,
+                &val_var,
+                gensym_state,
                 span,
-            });
+            );
             self.bind_var(&id.name, &val_var);
             return Ok(val_var);
         }
@@ -1959,17 +1946,15 @@ impl CoreErlangGenerator {
                 ])),
                 span,
             });
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: gensym_state,
-                op: BindOp::Put {
-                    field: state_key,
-                    value: ValueRef::Var(val_var.clone()),
-                },
+            self.push_local_slot_put_from(
+                stmts,
+                frame,
+                &id.name,
+                state_key,
+                &val_var,
+                gensym_state,
                 span,
-            });
+            );
             self.bind_var(&id.name, &val_var);
             self.push_control_flow_threaded_var_rereads(value, span, stmts);
             return Ok(val_var);
@@ -1992,7 +1977,6 @@ impl CoreErlangGenerator {
         self.finish_precompiled_scope(thread_scope)?;
 
         // C2 — the common case (plain / REPL-mode key).
-        let source_version = self.state_version();
         stmts.push(ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -2003,19 +1987,88 @@ impl CoreErlangGenerator {
             ],
             span,
         ));
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        stmts.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-            op: BindOp::Put {
-                field: state_key,
-                value: ValueRef::Var(val_var.clone()),
-            },
-            span,
-        });
+        self.push_local_slot_put(stmts, frame, &id.name, state_key, &val_var, span);
         self.bind_var(&id.name, &val_var);
         Ok(val_var)
+    }
+
+    /// Whether an assignment to `local` in `frame` writes the local's slot in
+    /// the frame's scratch map (its `__local__` key, or the binding in the
+    /// REPL). ADR 0133 Phase 3 (BT-3911): in an arm frame ([`RebindFrameKind::BranchArm`])
+    /// only a local the frame carries (`threads`) has a slot: the construct's
+    /// result tuple hands back exactly those, and a local bound in the arm is
+    /// a plain `let`. Every other frame keeps its slot write.
+    fn local_has_scratch_slot(&self, frame: FrameId, local: &str) -> bool {
+        if self.is_repl_mode() {
+            return true;
+        }
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::PutUncarriedLocal)
+        {
+            return true;
+        }
+        match self.rebind_frames.get(&frame) {
+            Some(rebind) if rebind.kind == RebindFrameKind::BranchArm => {
+                rebind.threads_local(local)
+            }
+            _ => true,
+        }
+    }
+
+    /// The `Put` of `val_var` into `local`'s scratch slot that follows an
+    /// assignment of it ([`Self::local_has_scratch_slot`]), stepping the
+    /// frame's current `State` version; nothing for a local the frame does not
+    /// carry.
+    fn push_local_slot_put(
+        &mut self,
+        stmts: &mut Vec<ThreadedStmt>,
+        frame: FrameId,
+        local: &str,
+        state_key: String,
+        val_var: &str,
+        span: Span,
+    ) {
+        if !self.local_has_scratch_slot(frame, local) {
+            return;
+        }
+        let source = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
+        self.push_local_slot_put_from(stmts, frame, local, state_key, val_var, source, span);
+    }
+
+    /// [`Self::push_local_slot_put`] stepping from `source`: the `State`
+    /// version a Tier 2 call's or construct's closed-over tuple handed back
+    /// (a `Gensym` identity), which the frame's `State` chain must continue
+    /// from whether or not `local` has a slot to write it into.
+    #[allow(clippy::too_many_arguments)] // one argument per fact of the write
+    fn push_local_slot_put_from(
+        &mut self,
+        stmts: &mut Vec<ThreadedStmt>,
+        frame: FrameId,
+        local: &str,
+        state_key: String,
+        val_var: &str,
+        source: VersionedVar,
+        span: Span,
+    ) {
+        let slot = self.local_has_scratch_slot(frame, local);
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        let target = VersionedVar::new(VersionPrefix::State, target_version, frame);
+        let op = if slot {
+            BindOp::Put {
+                field: state_key,
+                value: ValueRef::Var(val_var.to_string()),
+            }
+        } else {
+            BindOp::Direct(ValueRef::Version(source.clone()))
+        };
+        stmts.push(ThreadedStmt::Bind {
+            target,
+            source,
+            op,
+            span,
+        });
     }
 
     /// Generates an inline block body for a conditional branch with field mutation threading.
@@ -2043,7 +2096,36 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<(Document<'static>, usize)> {
-        self.generate_conditional_arm_statements(block, None)
+        if self.is_repl_mode() {
+            return self.generate_repl_arm_inline(block);
+        }
+        self.generate_plain_arm(block)
+    }
+
+    /// ADR 0133 Phase 3 (BT-3911): an arm of a construct that is not a
+    /// local-threading producer (a conditional, a `detect:ifNone:` handler, a
+    /// `match:` arm or a Tier 2 block inlined over the enclosing scratch map)
+    /// is a `BranchArm` frame too, so the frame it runs in is always a
+    /// registered one: the scratch map its statements write is the frame's,
+    /// and a local the frame does not carry (one bound in the arm) is never
+    /// written into it. It carries the locals the arm's block threads
+    /// ([`Self::branch_threaded_locals`]: none for an arm that writes only
+    /// locals of its own) and registers no producer sites, so a loop or fold
+    /// in it unpacks its own tuple as before.
+    ///
+    /// Must be called inside [`Self::with_branch_context`].
+    fn generate_plain_arm(&mut self, block: &Block) -> Result<(Document<'static>, usize)> {
+        let arm = ArmFrame {
+            threads: self.branch_threaded_locals(&[block]),
+        };
+        let rebind = RebindFrame {
+            frame: self.current_branch_frame(),
+            kind: RebindFrameKind::BranchArm,
+            threads: arm.threads.clone(),
+        };
+        self.with_rebind_frame(rebind, |this| {
+            this.generate_conditional_arm_statements(block, Some(&arm))
+        })
     }
 
     /// BT-3823: [`Self::generate_conditional_branch_inline`] for a *REPL arm*
@@ -3311,13 +3393,15 @@ mod tests {
     fn test_local_var_in_if_true_block_reads_back_correctly() {
         // Local var assigned inside ifTrue: block must be readable in subsequent
         // expressions of the same block without a {badkey,VarName} runtime crash.
-        // The write uses '__local__y' key; reads must resolve to the temp var, not 'y'.
+        // `y` is a local of the arm, which the arm's frame does not carry
+        // (ADR 0133 Phase 3, BT-3911): it is a plain `let`, never written into
+        // the scratch map under a `__local__y` key; reads resolve to the temp
+        // var, not 'y'.
         let src = "Actor subclass: BrokenActor\n  state: x = 5\n\n  myMethod: cond =>\n    cond ifTrue: [\n      y := self.x + 1.\n      self.x := y\n    ].\n    self.x\n";
         let code = codegen(src);
-        // The local var 'y' should be stored with __local__ prefix
         assert!(
-            code.contains("__local__y"),
-            "Local var 'y' should use __local__ prefix in maps:put. Got:\n{code}"
+            !code.contains("__local__y"),
+            "An arm-local 'y' must not be written into the scratch map. Got:\n{code}"
         );
         // The field assignment self.x := y should NOT use maps:get('y', ...) — that would
         // be the buggy read (key mismatch). Instead, it should reference the temp var directly.
@@ -3333,8 +3417,8 @@ mod tests {
         let src = "Actor subclass: TestActor\n  state: x = 10\n\n  myMethod: cond =>\n    cond ifFalse: [\n      y := self.x - 1.\n      self.x := y\n    ].\n    self.x\n";
         let code = codegen(src);
         assert!(
-            code.contains("__local__y"),
-            "Local var 'y' should use __local__ prefix in maps:put. Got:\n{code}"
+            !code.contains("__local__y"),
+            "An arm-local 'y' must not be written into the scratch map. Got:\n{code}"
         );
         assert!(
             !code.contains("maps':'get'('y'"),

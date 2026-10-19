@@ -15,9 +15,10 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
+    LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
+    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -275,6 +276,18 @@ pub(in crate::core_erlang) enum VerifyError {
         carrier: String,
         at: Span,
     },
+
+    /// ADR 0133 Phase 3 (BT-3911), [`Self::ConstructFamilyDropped`] extended
+    /// to the `Local` family: a [`ThreadedStmt::BranchArm`]'s body writes the
+    /// scratch-map slot of a local (a `Put` of its `__local__` key) that the
+    /// arm's frame does not carry (`local` is not in the arm's `threads`).
+    /// The write cannot reach the construct's result tuple, so it is dead at
+    /// best; at worst it is the sign that the arm was lowered against a
+    /// scratch map its frame does not have (a conditional nested in a
+    /// `whileTrue:` condition closure wrote its block-local into an unbound
+    /// `StateAcc`, BT-3891). A local the arm does not carry is a plain `let`.
+    /// Applies to every arm of every frame.
+    ArmLocalPutNotCarried { local: String, at: Span },
 
     /// BT-3830: a child an enclosing sequencing pass compiled ahead
     /// (`precompiled_subexprs`) was read back `reads` (> 1) times by its
@@ -794,6 +807,30 @@ impl VerifyWalk<'_> {
         self.errors.extend(dropped);
     }
 
+    /// [`VerifyError::ArmLocalPutNotCarried`] over the straight-line statements
+    /// of one arm: no `Put` of a `__local__` key whose local the arm's
+    /// `threads` does not list.
+    fn check_arm_local_puts(&mut self, threads: &[String], body: &[ThreadedStmt]) {
+        for stmt in body {
+            let ThreadedStmt::Bind {
+                op: BindOp::Put { field, .. },
+                span,
+                ..
+            } = stmt
+            else {
+                continue;
+            };
+            if let Some(local) = field.strip_prefix(LOCAL_STATE_KEY_PREFIX)
+                && !threads.iter().any(|t| t == local)
+            {
+                self.errors.push(VerifyError::ArmLocalPutNotCarried {
+                    local: local.to_string(),
+                    at: *span,
+                });
+            }
+        }
+    }
+
     /// [`VerifyError::HeldRebindNotIdentity`] over one statement list: each
     /// `MapHeld` rebind must read its own `key` through `state_first ==
     /// map`, `map` must be a bound `State` version of the enclosing frame
@@ -1096,7 +1133,12 @@ impl VerifyWalk<'_> {
             // A branch arm threads through its seeded `StateAcc` — the same
             // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
             // records for an arm today.
-            ThreadedStmt::BranchArm { frame, body, .. } => {
+            ThreadedStmt::BranchArm {
+                frame,
+                threads,
+                body,
+            } => {
+                self.check_arm_local_puts(threads, body);
                 self.frame_stack.push(*frame);
                 self.mode_stack
                     .push(ThreadingMode::StateAcc(StateAccFallbackReason::None));

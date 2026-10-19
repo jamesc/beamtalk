@@ -10,12 +10,17 @@
 //! constructor; its methods are spread across sibling modules by kind:
 //! - [`context`] — the `ReplContext`/`ClassContext`/`ValueTypeContext`/
 //!   `SavedClassMethodCtx`/`DirectCallClassInfo` context structs
+//! - [`body_state`] — [`BodyState`](body_state::BodyState), the per-body
+//!   generator state a method frame (or any nested body) owns, and the
+//!   [`BodyScope`](body_state::BodyScope) that parks the enclosing body's
+//!   state while a nested body is lowered
 //! - [`branch_guard`] — [`BranchContextGuard`](branch_guard::BranchContextGuard)
 //!   and the `with_branch_context`/`enter_branch_context` pair
 //! - [`accessors`] — small field getters/setters and context-default wrappers
 //! - [`version`] — `State{N}`/`Self{N}` version-counter helpers
 
 pub(in crate::core_erlang) mod accessors;
+pub(in crate::core_erlang) mod body_state;
 pub(in crate::core_erlang) mod branch_guard;
 pub(in crate::core_erlang) mod context;
 pub(in crate::core_erlang) mod version;

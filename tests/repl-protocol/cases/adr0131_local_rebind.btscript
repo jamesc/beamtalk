@@ -828,12 +828,12 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3911 (closes BT-3875): makes `match:` arms producers. Correct
+// PIN-BUG BT-3947 (closes BT-3875): makes `match:` arms producers. Correct
 // answer: 9.
 r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
 // => ERROR: a `match:` arm writes outer local `t`, but `match:` cannot return the write
 
-// PIN-BUG BT-3911: correct answer 9.
+// PIN-BUG BT-3947: correct answer 9.
 t
 // => 0
 

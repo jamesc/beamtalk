@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3911 (ADR 0133 Phase 3): arm-bearing constructs as frames. Fixtures:
+// fixtures/bt3911arm_frames_{class,value,actor}.bt.
+
+TestCase subclass: Bt3911ArmFramesTest
+
+  // BT-3891: a local bound in a conditional arm of a `whileTrue:` /
+  // `whileFalse:` condition.
+  testClassConditionAnd =>
+    self assert: (Bt3911ArmFramesClass condAnd: 3) equals: 3
+    self assert: (Bt3911ArmFramesClass condAnd: 9) equals: 5
+
+  testClassConditionIfTrue =>
+    self assert: (Bt3911ArmFramesClass condIfTrue: 2) equals: 4
+
+  testClassConditionIfNil =>
+    self assert: (Bt3911ArmFramesClass condIfNil: 3) equals: 3
+
+  testClassConditionOrWhileFalse =>
+    self assert: (Bt3911ArmFramesClass condOrWhileFalse: 3) equals: 3
+
+  testClassConditionNested =>
+    self assert: (Bt3911ArmFramesClass condNested: 9) equals: 3
+
+  testValueConditionAnd =>
+    self assert: (Bt3911ArmFramesValue new condAnd: 3) equals: 3
+    self assert: (Bt3911ArmFramesValue new condAnd: 9) equals: 5
+
+  testValueConditionIfTrue =>
+    self assert: (Bt3911ArmFramesValue new condIfTrue: 2) equals: 4
+
+  testValueConditionIfNil =>
+    self assert: (Bt3911ArmFramesValue new condIfNil: 3) equals: 3
+
+  testValueConditionOrWhileFalse =>
+    self assert: (Bt3911ArmFramesValue new condOrWhileFalse: 3) equals: 3
+
+  testValueConditionNested =>
+    self assert: (Bt3911ArmFramesValue new condNested: 9) equals: 3
+
+  testActorConditionAnd =>
+    self assert: (Bt3911ArmFramesActor spawn condAnd: 3) equals: 3
+    self assert: (Bt3911ArmFramesActor spawn condAnd: 9) equals: 5
+
+  testActorConditionIfTrue =>
+    self assert: (Bt3911ArmFramesActor spawn condIfTrue: 2) equals: 4
+
+  testActorConditionIfNil =>
+    self assert: (Bt3911ArmFramesActor spawn condIfNil: 3) equals: 3
+
+  testActorConditionOrWhileFalse =>
+    self assert: (Bt3911ArmFramesActor spawn condOrWhileFalse: 3) equals: 3
+
+  testActorConditionNested =>
+    self assert: (Bt3911ArmFramesActor spawn condNested: 9) equals: 3
+
+  testClassConditionDoBody =>
+    self assert: (Bt3911ArmFramesClass condDoBody: 3) equals: 3
+
+  testClassConditionClosure =>
+    self assert: (Bt3911ArmFramesClass condClosure: 3) equals: 3
+
+  testClassConditionBoundBefore =>
+    self assert: (Bt3911ArmFramesClass condBoundBefore: 3) equals: 3
+
+  testValueConditionDoBody =>
+    self assert: (Bt3911ArmFramesValue new condDoBody: 3) equals: 3
+
+  testValueConditionClosure =>
+    self assert: (Bt3911ArmFramesValue new condClosure: 3) equals: 3
+
+  testValueConditionBoundBefore =>
+    self assert: (Bt3911ArmFramesValue new condBoundBefore: 3) equals: 3
+
+  testActorConditionDoBody =>
+    self assert: (Bt3911ArmFramesActor spawn condDoBody: 3) equals: 3
+
+  testActorConditionBoundBefore =>
+    self assert: (Bt3911ArmFramesActor spawn condBoundBefore: 3) equals: 3
+
+  testActorConditionFieldBody =>
+    self assert: (Bt3911ArmFramesActor spawn condAndFieldBody: 9) equals: #[5, 5]
+
+  testActorConditionFieldRead =>
+    self assert: Bt3911ArmFramesActor spawn condAndFieldRead equals: 3
+
+  // BT-3878 / BT-3861: an actor `detect:ifNone:` / `detect:` in a protected
+  // body, a handler and a loop body.
+  testActorDetectHandlerInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInProtectedBody equals: 1
+
+  testActorDetectHandlerInHandler =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInHandler equals: 1
+
+  testActorDetectHandlerInLoopBody =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInLoopBody equals: 2
+
+  testActorDetectHandlerInDoLoopArm =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInDoLoopArm equals: 9
+
+  testActorDetectLocalInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectLocalInProtectedBody equals: 2
+
+  testActorDetectLocalInHandler =>
+    self assert: Bt3911ArmFramesActor spawn detectLocalInHandler equals: 2
+
+  testActorDetectPlainInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectPlainInProtectedBody equals: 1
+
+  // ADR 0133 Phase 3: a nested body (the `ClassBuilder` fun) owns its generator
+  // state, and the loop body around it gets its own back.
+  testActorClassBuilderFunInLoopBody =>
+    self assert: Bt3911ArmFramesActor spawn builderInLoopBody equals: 2
+    self assert: Bt3911BuiltInLoop answer equals: 41
+
+  testClassBuilderFunKeepsTheEnclosingNonLocalReturn =>
+    self assert: (Bt3911ArmFramesClass firstOver: 2 in: #(1, 2, 3, 4)) equals: 3
+    self assert: (Bt3911ArmFramesClass firstOver: 9 in: #(1, 2)) equals: 0

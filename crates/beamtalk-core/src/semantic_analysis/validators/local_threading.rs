@@ -630,33 +630,6 @@ const fn deny(
     }
 }
 
-/// The `detect:`/`detect:ifNone:` kinds (search block, handler).
-const DETECT_KINDS: &[ConstructKind] = &[DetectIfNoneSearch, DetectIfNone];
-
-/// A [`DENY_SET`] row for a construct that writes only a local of its own
-/// innermost enclosing block (`crosses: false`, BT-3776), nested in a block
-/// whose outermost role is `container` and innermost role `inner` (`None`
-/// matches any), `deep` as in [`deny`].
-const fn deny_block_local(
-    container: Container,
-    inner: Option<Container>,
-    deep: Option<bool>,
-    contexts: &'static [MethodContext],
-    kinds: &'static [ConstructKind],
-) -> Denied {
-    Denied {
-        kinds,
-        container: Some(container),
-        inner,
-        crosses: Some(false),
-        last: None,
-        deep,
-        stateful: None,
-        direct: None,
-        contexts,
-    }
-}
-
 /// ADR 0131 Phase 0 (BT-3753): the statement positions that do *not* thread
 /// outer-local writes today. A construct in statement position is accepted
 /// unless a row here lists it; every other position is accepted only if
@@ -688,18 +661,18 @@ const DENY_SET: &[Denied] = &[
     deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
     deny(None, None, None, None, None, None, &[ValueType], &[Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
     deny(Some(Arm), Some(true), Some(false), None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), Some(true), Some(true), None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[CountedLoop, Do, ListOp, Satisfy, Exception]),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, Satisfy, Enumeration, BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(true), &[Actor], &[BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
@@ -725,13 +698,13 @@ const DENY_SET: &[Denied] = &[
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
-    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Do, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[DetectIfNoneSearch, DetectIfNone, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[BlockValue]),
     deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
@@ -744,52 +717,6 @@ const DENY_SET: &[Denied] = &[
     // A self-send or field write in the outermost block (`stateful`).
     deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, CountedLoop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
-    // BT-3776: an actor `detect:`/`detect:ifNone:` whose search block or
-    // handler writes a local of its own enclosing block loses it in a
-    // protected body (erlc), in a handler or `ensure:` block, and directly in
-    // a loop body (the fold answers `{Value, State}` with the local packed into
-    // the state the body discards, so the block reads it unchanged). In an arm,
-    // a `do:`/`collect:` body or an evaluated block it answers right, an arm in
-    // a `whileTrue:` body too (`armLoop`). The innermost block a protected body
-    // or a handler is rejected under every outer role: only the arm one is
-    // measured (`protArm`, erlc), the others share its lowering. PIN-BUG
-    // BT-3878: lowering the actor detect folds as producers in those frames
-    // deletes these rows.
-    deny_block_local(ProtectedBody, None, None, &[Actor], DETECT_KINDS),
-    deny_block_local(Handler, None, None, &[Actor], DETECT_KINDS),
-    // (Directly in a `whileTrue:` body is the `LoopBody`/`LoopBody` row below:
-    // at depth one the innermost block is the outermost, so that row covers it.)
-    // A counted-loop body as the outermost block, around every innermost
-    // role. A `do:`/`collect:` body or an evaluated block in it answers right
-    // (`iterTimes`, `collTimes`, `valTimes`, over-rejected, see the pin test's
-    // `KNOWN_OVER_REJECTED`), but `DoBody`/`ListOpBody` also name the keyed,
-    // enumeration, fold, select and satisfy blocks, which are unmeasured
-    // there, so the row stays whole until BT-3878.
-    deny_block_local(CountedLoopBody, None, None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(Handler), None, &[Actor], DETECT_KINDS),
-    // A loop as the innermost block (BT-3776 review): measured wrong under an
-    // arm, a `do:` body and another loop (`loopArm`, `timesArm`, `loopIter`,
-    // `timesIter`, `loopLoop`, `timesLoop`, every one of the 36 cells); the
-    // list-op and evaluated-block outer roles are inferred.
-    deny_block_local(Arm, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
 ];
 
 /// A statement shape (a construct kind at a [`Position::Statement`] or
@@ -1029,12 +956,6 @@ pub(crate) enum Residual {
     /// the raw tuple is the value, or the REPL raises. Class and value-type
     /// methods answer the map.
     GroupByValue,
-    /// BT-3891: an assignment inside an arm of a conditional (`ifTrue:`,
-    /// `ifNil:`, `and:`/`or:` families) nested anywhere in the condition
-    /// block of a `whileTrue:`/`whileFalse:` loop, to a local not bound
-    /// outside the loop, emits an unbound `StateAcc` (`erlc` rejects the
-    /// module). A local bound outside the loop is the Phase 0 check's.
-    LoopConditionArmWrite,
     /// BT-3875: a `match:` arm (body or guard) that writes an outer local
     /// drops the write. BT-3817 made it this error in methods; the REPL
     /// answered the stale value until BT-3864 rejected the arm's assignment
@@ -1068,12 +989,6 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         issue: "BT-3897",
         fixed_by: "BT-3912",
     },
-    ResidualDenied {
-        shape: Residual::LoopConditionArmWrite,
-        contexts: &[Class, ValueType, Actor],
-        issue: "BT-3891",
-        fixed_by: "BT-3911",
-    },
     // Class, value-type and actor methods since BT-3817; the REPL since
     // BT-3909 (maintainer-approved REPL output change: the same input drew
     // the BT-3864 value-position error before).
@@ -1081,7 +996,7 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
-        fixed_by: "BT-3911",
+        fixed_by: "BT-3947",
     },
 ];
 
@@ -2608,11 +2523,9 @@ impl<'d> Walker<'d> {
 
     /// The [`RESIDUAL_DENY_SET`] checks of a send: an actor `groupBy:` whose
     /// fold result is not unpacked at `position`
-    /// ([`Residual::GroupByValue`]), and a loop condition that assigns a local
-    /// inside a conditional arm ([`Residual::LoopConditionArmWrite`]).
+    /// ([`Residual::GroupByValue`]).
     fn check_residuals(&mut self, expr: &Expression, position: Position) {
         let Expression::MessageSend {
-            receiver,
             selector,
             arguments,
             ..
@@ -2620,22 +2533,10 @@ impl<'d> Walker<'d> {
         else {
             return;
         };
-        match (
-            selector.name().as_str(),
-            receiver.as_ref(),
-            arguments.first(),
-        ) {
-            ("groupBy:", _, Some(Expression::Block(block))) => {
-                self.check_group_by_value(expr, block, position);
-            }
-            (
-                "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse",
-                Expression::Block(cond),
-                _,
-            ) => {
-                self.check_loop_condition_arm_writes(&selector.name(), cond);
-            }
-            _ => {}
+        if let ("groupBy:", Some(Expression::Block(block))) =
+            (selector.name().as_str(), arguments.first())
+        {
+            self.check_group_by_value(expr, block, position);
         }
     }
 
@@ -2684,65 +2585,6 @@ impl<'d> Walker<'d> {
                 "assign the `groupBy:` result to a local in a statement of its own \
                  (`groups := items groupBy: [...]`) and use the local here",
             )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
-    }
-
-    /// [`Residual::LoopConditionArmWrite`] (BT-3891): the first assignment in
-    /// the condition block `cond` of a `selector` loop that sits inside an arm
-    /// of a conditional ([`conditional_arm_blocks`]), at any depth and through
-    /// any nested block, to a local not bound outside the loop (a local bound
-    /// outside is the Phase 0 check's: it writes an outer local from a loop).
-    fn check_loop_condition_arm_writes(&mut self, selector: &str, cond: &Block) {
-        let Some(row) = residual_denied(Residual::LoopConditionArmWrite, self.context) else {
-            return;
-        };
-        let mut arm_spans: Vec<Span> = Vec::new();
-        let mut assignments: Vec<(EcoString, Span)> = Vec::new();
-        for stmt in &cond.body {
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Some(arms) = conditional_arm_blocks(e) {
-                    arm_spans.extend(arms.iter().map(|b| b.span));
-                }
-                match e {
-                    Expression::Assignment { target, .. } => {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            assignments.push((id.name.clone(), e.span()));
-                        }
-                    }
-                    Expression::DestructureAssignment { pattern, .. } => {
-                        let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
-                        assignments.extend(ids.into_iter().map(|id| (id.name, e.span())));
-                    }
-                    _ => {}
-                }
-            });
-        }
-        let Some((name, span)) = assignments.into_iter().find(|(name, span)| {
-            !self.is_bound(name)
-                && arm_spans
-                    .iter()
-                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
-        }) else {
-            return;
-        };
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "the `{selector}` condition assigns `{name}` inside a conditional arm, but \
-                     in {context} the assignment is not threaded out of the condition yet \
-                     ({issue}, until {fixed_by})",
-                    context = self.context,
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
-                ),
-                span,
-            )
-            .with_hint(format!(
-                "compute the condition without assigning inside a conditional arm: assign \
-                 `{name}` in a statement of the condition block or the loop body, and test \
-                 its value in the arm"
-            ))
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
     }
