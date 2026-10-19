@@ -52,6 +52,11 @@ should_raise_raw_atom_error_test() ->
     Block = fun() -> error(badarith) end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, badarith)).
 
+should_raise_raw_badkey_uses_on_do_kind_test() ->
+    %% BT-3930: same normalisation as on:do: ({badkey, K} -> key_error)
+    Block = fun() -> error({badkey, missing}) end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, key_error)).
+
 should_raise_no_error_test() ->
     Block = fun() -> ok end,
     ?assertError(
