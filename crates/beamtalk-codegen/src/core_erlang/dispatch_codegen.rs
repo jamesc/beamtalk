@@ -2715,10 +2715,10 @@ impl CoreErlangGenerator {
         self.tier2_method_info.clear();
 
         // BT-3755: a captured-local write promotes the callee's parameter
-        // only when the callee threads it; the same predicate the §6
-        // diagnostic reads (`semantic_analysis::tier2_callee`).
+        // only when the callee threads it (`block_facts::callee_threads_block_param`;
+        // since ADR 0133, BT-3902, the §6 diagnostic rejects every such send).
         let threads = |selector: &str, index: usize| {
-            beamtalk_core::semantic_analysis::tier2_callee::callee_threads_block_param(
+            beamtalk_core::semantic_analysis::block_facts::callee_threads_block_param(
                 class, selector, index,
             )
         };
@@ -2736,7 +2736,7 @@ impl CoreErlangGenerator {
             .collect();
         for (selector, index) in recorded {
             for (target, position) in
-                beamtalk_core::semantic_analysis::tier2_callee::passed_on_targets(
+                beamtalk_core::semantic_analysis::block_facts::passed_on_targets(
                     class, &selector, index,
                 )
             {

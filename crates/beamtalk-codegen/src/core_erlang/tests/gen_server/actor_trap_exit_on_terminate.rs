@@ -100,7 +100,6 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            threading_params: Vec::new(),
             return_type: None,
             param_types: vec![None],
             doc: None,
