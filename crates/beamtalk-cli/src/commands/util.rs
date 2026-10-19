@@ -309,13 +309,71 @@ pub(crate) fn write_atomic(
 /// this one resolver rather than each of the three call sites growing its
 /// own copy of the "check the env var, else make a tempdir" branch
 /// (CLAUDE.md's no-duplicate-implementations rule).
+///
+/// The same harness can also ask for *snapshot-only* mode via
+/// `BEAMTALK_CORE_SNAPSHOT_ONLY=1` (BT-3887): it only ever reads the
+/// `.core` files, so once every one of them is written the command returns
+/// early instead of going on to compile `.beam`, write `.app`/generated
+/// sources, and run the compiled tests — see [`CoreOutputDir::snapshot_only`].
 pub(crate) enum CoreOutputDir {
     /// Deleted when dropped. Never read — held only for its `Drop` impl, so
     /// every caller binds it (`let (dir, _guard) = ...`) rather than letting
     /// it drop immediately.
     Temp(#[allow(dead_code)] tempfile::TempDir),
     /// Left on disk for the harness to read after this process exits.
-    Persistent,
+    Persistent {
+        /// `BEAMTALK_CORE_SNAPSHOT_ONLY=1` was set alongside the directory.
+        snapshot_only: bool,
+    },
+}
+
+impl CoreOutputDir {
+    /// Whether the caller should stop as soon as every `.core` file is
+    /// written (`BEAMTALK_CORE_SNAPSHOT_ONLY=1`, BT-3887).
+    ///
+    /// Each corpus-compiling command checks this right after its last
+    /// `.core` write and before its first `.beam`/test-execution step, so
+    /// the set of `.core` files a snapshot-only run leaves behind is
+    /// identical to a full run's (the `core-diff-snapshot` recipe's `MODE`
+    /// parameter exists to re-verify that). Only ever `true` for
+    /// [`CoreOutputDir::Persistent`]: the resolver rejects the flag without
+    /// a snapshot directory, since there'd be nothing to keep.
+    pub(crate) fn snapshot_only(&self) -> bool {
+        match self {
+            Self::Temp(_) => false,
+            Self::Persistent { snapshot_only } => *snapshot_only,
+        }
+    }
+}
+
+/// Name of the snapshot-only opt-in env var, read by [`core_output_dir`].
+const CORE_SNAPSHOT_ONLY_VAR: &str = "BEAMTALK_CORE_SNAPSHOT_ONLY";
+
+/// Parses `BEAMTALK_CORE_SNAPSHOT_ONLY`'s raw value (`None` = unset).
+///
+/// Only `1` opts in; unset, empty and `0` opt out; anything else is an error
+/// rather than a silent "off", and so is opting in without
+/// `BEAMTALK_CORE_SNAPSHOT_DIR` (`have_snapshot_dir`) — a snapshot-only run
+/// whose `.core` files then land in an auto-deleted tempdir would be a
+/// no-op that *looks* like it worked. Pure (takes the value rather than
+/// reading the environment) so it can be unit-tested without mutating
+/// process-wide env state under a parallel test runner.
+fn parse_snapshot_only(value: Option<&std::ffi::OsStr>, have_snapshot_dir: bool) -> Result<bool> {
+    let snapshot_only = match value.map(std::ffi::OsStr::to_str) {
+        None | Some(Some("" | "0")) => false,
+        Some(Some("1")) => true,
+        Some(other) => miette::bail!(
+            "{CORE_SNAPSHOT_ONLY_VAR} must be `1` (on) or `0`/unset (off), got {}",
+            other.map_or_else(|| "a non-UTF-8 value".to_owned(), |s| format!("`{s}`"))
+        ),
+    };
+    if snapshot_only && !have_snapshot_dir {
+        miette::bail!(
+            "{CORE_SNAPSHOT_ONLY_VAR}=1 requires BEAMTALK_CORE_SNAPSHOT_DIR: snapshot-only mode \
+             stops once the .core files are written, so they must be kept somewhere"
+        );
+    }
+    Ok(snapshot_only)
 }
 
 /// Resolves a [`CoreOutputDir`] and its path.
@@ -324,7 +382,12 @@ pub(crate) enum CoreOutputDir {
 /// (`let (dir, _guard) = core_output_dir()?;`) — dropping it early deletes a
 /// temp directory a caller is still writing into.
 pub(crate) fn core_output_dir() -> Result<(Utf8PathBuf, CoreOutputDir)> {
-    if let Some(dir) = std::env::var_os("BEAMTALK_CORE_SNAPSHOT_DIR") {
+    let snapshot_dir = std::env::var_os("BEAMTALK_CORE_SNAPSHOT_DIR");
+    let snapshot_only = parse_snapshot_only(
+        std::env::var_os(CORE_SNAPSHOT_ONLY_VAR).as_deref(),
+        snapshot_dir.is_some(),
+    )?;
+    if let Some(dir) = snapshot_dir {
         // `var_os`, checked for presence the same way `build_stdlib.rs`'s
         // `want_core_snapshot` does — and, unlike `env::var`, one that
         // fails loudly (not a silent fall-through to the temp-dir branch
@@ -339,7 +402,7 @@ pub(crate) fn core_output_dir() -> Result<(Utf8PathBuf, CoreOutputDir)> {
         fs::create_dir_all(&path)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create '{path}'"))?;
-        return Ok((path, CoreOutputDir::Persistent));
+        return Ok((path, CoreOutputDir::Persistent { snapshot_only }));
     }
 
     let temp_dir = tempfile::tempdir()
@@ -368,7 +431,52 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     use std::fs;
+
+    #[test]
+    fn snapshot_only_is_off_when_unset_empty_or_zero() {
+        for value in [None, Some(""), Some("0")] {
+            let value = value.map(OsStr::new);
+            assert!(!parse_snapshot_only(value, true).unwrap());
+            assert!(!parse_snapshot_only(value, false).unwrap());
+        }
+    }
+
+    #[test]
+    fn snapshot_only_is_on_for_one_with_a_snapshot_dir() {
+        assert!(parse_snapshot_only(Some(OsStr::new("1")), true).unwrap());
+    }
+
+    #[test]
+    fn snapshot_only_without_a_snapshot_dir_is_an_error() {
+        let err = parse_snapshot_only(Some(OsStr::new("1")), false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("requires BEAMTALK_CORE_SNAPSHOT_DIR"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn snapshot_only_rejects_any_other_value_rather_than_ignoring_it() {
+        for value in ["true", "yes", "2"] {
+            let err = parse_snapshot_only(Some(OsStr::new(value)), true).unwrap_err();
+            assert!(err.to_string().contains(value), "{err}");
+        }
+    }
+
+    #[test]
+    fn temp_core_output_dir_is_never_snapshot_only() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(!CoreOutputDir::Temp(temp).snapshot_only());
+        assert!(
+            CoreOutputDir::Persistent {
+                snapshot_only: true
+            }
+            .snapshot_only()
+        );
+    }
 
     #[test]
     fn protocol_hashes_hashes_a_protocol_used_by_many_files_once() {
