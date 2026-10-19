@@ -97,7 +97,7 @@ pub use definite_assignment::{
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use initialize_assigns::{analyze_initialize_assigns, has_dynamic_field_writer};
-pub use lowering::lower_module_for_codegen;
+pub use lowering::{lower_analysed_module_for_codegen, lower_module_for_codegen};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
@@ -216,7 +216,8 @@ pub struct AnalysisResult {
     /// packages — that this analysis's Phase -1 flattening resolved a
     /// cross-file/cross-package `uses:` line against. A driver handing this
     /// `AnalysisResult` to [`lowering::lower_module_for_codegen`] must pass
-    /// this same map back to it, so that function's own re-flattening of the
+    /// this same map back to it (as [`lowering::lower_analysed_module_for_codegen`]
+    /// does, with [`Self::trait_package`]), so that function's own re-flattening of the
     /// driver's real module reproduces byte-for-byte the same flattened
     /// methods this analysis already produced (see that function's module
     /// doc, "Closing the flattening/codegen boundary") — a driver that
@@ -230,6 +231,15 @@ pub struct AnalysisResult {
     /// classes' provisions through the stdlib file; analysis stamps their
     /// provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
     pub stdlib_protocol_uses: trait_expansion::StdlibUses,
+
+    /// The package this analysis's Phase -1 flattening resolved `uses:` lines
+    /// as ([`trait_expansion::known_package`] of the analysed
+    /// `current_package`). [`lowering::lower_analysed_module_for_codegen`]
+    /// re-flattens with it, so codegen resolves every `uses:` exactly as
+    /// analysis did — a dependency's own `Comparable` stays its own, and the
+    /// stdlib's own build never falls back to the compiler-baked snapshot
+    /// (BT-3915).
+    pub trait_package: Option<EcoString>,
 }
 
 impl AnalysisResult {
@@ -248,6 +258,7 @@ impl AnalysisResult {
             type_map: TypeMap::new(),
             external_protocols: HashMap::new(),
             stdlib_protocol_uses: HashSet::new(),
+            trait_package: None,
         }
     }
 }
@@ -694,6 +705,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
     // language service's placeholder package is not one.
     let trait_package = trait_expansion::known_package(current_package);
+    result.trait_package = trait_package.map(EcoString::from);
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {

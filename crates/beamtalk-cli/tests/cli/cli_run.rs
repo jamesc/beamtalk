@@ -334,3 +334,83 @@ fn run_service_mode_status_lines_go_to_stderr_not_stdout() {
         .stderr(contains("Started cli_subprocess_fixture"))
         .stderr(contains("REPL port"));
 }
+
+/// BT-3915: a path dependency whose `Rank` does `uses: Comparable` of the
+/// dependency's *own* `Comparable` (providing `foo`) is compiled as its own
+/// package, so its own protocol shadows the stdlib's in the generated code
+/// too — not only in the exported `ClassInfo`s. The dependency's `.core`
+/// defines `foo` and none of the stdlib `Comparable`'s provisions, and a
+/// consumer's `Rank new foo` runs (no `does_not_understand` at runtime).
+#[test]
+fn dependency_own_stdlib_named_protocol_is_compiled_and_runs_bt_3915() {
+    let root = tempfile::tempdir().unwrap();
+    let dep = root.path().join("producer");
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("src/comparable.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Comparable\n\
+         \x20\x20< other -> Boolean\n\
+         \n\
+         \x20\x20foo -> Integer => 42\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("src/rank.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: Rank\n\
+         \x20\x20uses: Comparable\n\
+         \x20\x20field: level :: Integer = 0\n\
+         \n\
+         \x20\x20< other :: Rank -> Boolean => self.level < other level\n",
+    )
+    .unwrap();
+
+    let consumer = root.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nproducer = { path = \"../producer\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("src/main.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Main\n\
+         \n\
+         \x20\x20class run => Program exit: Rank new foo\n",
+    )
+    .unwrap();
+
+    // `run` builds first; `Program exit:` makes the provided `foo`'s answer
+    // the exit status.
+    cli_common::beamtalk()
+        .current_dir(&consumer)
+        .args(["run", "Main", "run"])
+        .assert()
+        .code(42);
+
+    let core =
+        std::fs::read_to_string(consumer.join("_build/deps/producer/ebin/bt@producer@rank.core"))
+            .expect("the dependency's generated .core");
+    assert!(
+        core.contains("'foo'/1"),
+        "Rank must define its own Comparable's `foo`"
+    );
+    assert!(
+        !core.contains("'between:and:'"),
+        "Rank must not gain the stdlib Comparable's provisions"
+    );
+}

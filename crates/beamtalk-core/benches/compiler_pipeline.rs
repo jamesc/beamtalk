@@ -13,7 +13,7 @@ use std::hint::black_box;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::semantic_analysis::{analyse, lower_module_for_codegen};
+use beamtalk_core::semantic_analysis::{analyse, lower_analysed_module_for_codegen};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
@@ -117,12 +117,7 @@ fn compile_module_full(module_name: &str, source: &str) -> String {
     let analysis = analyse(&module);
     // Drivers prepare the AST (writeback trio) at this boundary,
     // before codegen — matches the fixed pipeline's actual call sequence.
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let opts = CodegenOptions::new(module_name)
         .with_source(source)
         .with_analysis(analysis);

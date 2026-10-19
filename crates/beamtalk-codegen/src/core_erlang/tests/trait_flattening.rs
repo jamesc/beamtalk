@@ -21,7 +21,9 @@
 //! never saw them.
 
 use super::*;
-use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full, lower_module_for_codegen};
+use beamtalk_core::semantic_analysis::{
+    AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
+};
 
 fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -161,12 +163,7 @@ fn generate_cross_file(
         errors.is_empty(),
         "a cross-file `uses:` is legal — no analysis errors expected: {errors:?}"
     );
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let mut options = CodegenOptions::new("report")
         .with_source(user_src)
         .with_source_path_opt(Some("report.bt"))
@@ -206,12 +203,7 @@ fn handed_off_analysis_pipeline_emits_a_flattened_cross_file_provision() {
         "unexpected analysis diagnostics: {:?}",
         analysis.diagnostics
     );
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     assert!(
         module.classes[0]
             .methods
@@ -301,12 +293,7 @@ fn stdlib_resolved_provision_maps_through_the_stdlib_file() {
         "{:?}",
         analysis.stdlib_protocol_uses
     );
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = generate_module(
         &module,
         CodegenOptions::new("rank")
@@ -374,12 +361,7 @@ fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_name
             .with_pre_loaded_protocol_defs(vec![protocol])
             .with_protocol_sources(sources.clone()),
     );
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = generate_module(
         &module,
         CodegenOptions::new("job")

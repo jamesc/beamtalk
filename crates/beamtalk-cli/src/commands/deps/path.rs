@@ -389,6 +389,15 @@ fn compile_dependency_with_context(
     prior_deps: &[ResolvedDependency],
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
     let ebin_path = BuildLayout::new(project_root).dep_ebin_dir(dep_name);
+    // Compile the dependency as its own package, not the root's (BT-3915):
+    // its classes, aliases and protocols are stamped `dep_name`, so its own
+    // `Comparable` is the current package's (shadowing the stdlib's for a bare
+    // `uses: Comparable`, as its exported `ClassInfo`s say) and its own
+    // `internal` classes/aliases are same-package for E0401/E0402.
+    let options = &beamtalk_core::CompilerOptions {
+        current_package: Some(dep_name.to_owned()),
+        ..options.clone()
+    };
 
     // Create the ebin directory
     std::fs::create_dir_all(&ebin_path)

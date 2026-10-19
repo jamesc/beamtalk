@@ -25,7 +25,9 @@
 use beamtalk_core::semantic_analysis::class_hierarchy::BUILD_CALL_COUNT;
 use beamtalk_core::semantic_analysis::facts::COMPUTE_SEMANTIC_FACTS_CALL_COUNT;
 use beamtalk_core::semantic_analysis::type_checker::{CHECK_MODULE_CALL_COUNT, InferredType};
-use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full, lower_module_for_codegen};
+use beamtalk_core::semantic_analysis::{
+    AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
+};
 
 fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -245,12 +247,7 @@ fn with_analysis_trusts_driver_prepared_module() {
     let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
 
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
 
     let code = crate::core_erlang::generate_module(
         &module,
@@ -323,12 +320,7 @@ fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
         .insert(key, InferredType::known("String"));
 
     // A real driver's own `lower_module_for_codegen` call, using the now-stale map.
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     assert!(
         matches!(
             &module.classes[0].methods[0].return_type,
@@ -370,12 +362,7 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
     let mut module =
         parse_fixture("Object subclass: Foo\n  find => Beamtalk classNamed: #Integer.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = crate::core_erlang::generate_module(
         &module,
         crate::core_erlang::CodegenOptions::new("foo").with_analysis(analysis),

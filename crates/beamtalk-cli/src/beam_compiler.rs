@@ -1132,11 +1132,9 @@ pub(crate) fn compile_source_with_bindings(
     // the "guaranteed no-op" reasoning in the `with_analysis` comment below).
     // Codegen no longer schedules this writeback itself for a handed-off,
     // still-trustworthy analysis — see `generate_module_with_warnings`.
-    beamtalk_core::semantic_analysis::lower_module_for_codegen(
+    beamtalk_core::semantic_analysis::lower_analysed_module_for_codegen(
         &mut module,
-        &analysis_result.class_hierarchy,
-        &analysis_result.method_return_types,
-        &analysis_result.external_protocols,
+        &analysis_result,
     );
     let verifier_diagnostics = write_core_erlang_with_bindings(
         &module,
