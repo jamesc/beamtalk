@@ -353,6 +353,17 @@ pub struct CoreErlangGenerator {
     /// class methods as sorted `(raw selector, safe fn name)` pairs — a view of
     /// `direct_call_eligible`, baked into `__beamtalk_meta/0`.
     pub(in crate::core_erlang) own_direct_class_methods: Vec<(String, String)>,
+    /// BT-3916: the class being compiled's instance-side methods that are
+    /// provisions of a *stdlib* protocol (`uses: Enumerable`), sorted, baked
+    /// into `__beamtalk_meta/0` as `stdlib_trait_methods`. `uses:` flattens a
+    /// provision into the using class's own module, so the module alone cannot
+    /// tell the runtime "the stdlib's method" from "this class's own".
+    pub(in crate::core_erlang) own_stdlib_trait_methods: Vec<String>,
+    /// BT-3916: whether the class being compiled defines, outside the stdlib, a
+    /// collection message the stdlib's own collection methods run through
+    /// (`state_threading_selectors::overridable_collection_selectors`). Baked
+    /// into `__beamtalk_meta/0` as `overrides_collection_selector`.
+    pub(in crate::core_erlang) own_overrides_collection_selector: bool,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -463,6 +474,8 @@ impl CoreErlangGenerator {
             is_server_subclass: false,
             direct_call_eligible: std::collections::HashMap::new(),
             own_direct_class_methods: Vec::new(),
+            own_stdlib_trait_methods: Vec::new(),
+            own_overrides_collection_selector: false,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),

@@ -504,3 +504,162 @@ fn self_sufficient_codegen_infers_return_type_and_origin_for_flattened_provision
         "expected an inferred return type for `answer`, got:\n{code}"
     );
 }
+
+/// BT-3916: a class that `uses:` a stdlib protocol records, in
+/// `__beamtalk_meta/0`, which of its methods are that protocol's provisions
+/// (`stdlib_trait_methods`), so the runtime's list-op receiver guard classifies
+/// them by origin: `uses:` flattens them into the class's own module. A method
+/// the class defines itself is not listed, even when the protocol provides one
+/// of the same name.
+#[test]
+fn stdlib_protocol_provisions_are_recorded_in_the_class_meta() {
+    const BAG: &str = concat!(
+        "Value subclass: Bag\n",
+        "  uses: Enumerable(Integer)\n",
+        "  field: items :: List(Integer) = #()\n",
+        "  elements -> List(Integer) => self.items\n",
+        "  isEmpty -> Boolean => true\n",
+    );
+    let mut module = parse_fixture(BAG);
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    lower_analysed_module_for_codegen(&mut module, &analysis);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bag")
+            .with_source(BAG)
+            .with_source_path_opt(Some("bag.bt"))
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    let entry = code
+        .split("'stdlib_trait_methods' => ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("expected a stdlib_trait_methods meta key, got:\n{code}"));
+    let list = &entry[..entry.find(']').expect("an atom list")];
+    for provided in ["'inject:into:'", "'collect:'", "'select:'", "'do:'"] {
+        assert!(list.contains(provided), "{provided} missing from {list}");
+    }
+    for own in ["'elements'", "'isEmpty'"] {
+        assert!(
+            !list.contains(own),
+            "the class's own {own} must not be listed: {list}"
+        );
+    }
+}
+
+/// BT-3916: a *package-local* protocol that shares a stdlib protocol's name is
+/// not the stdlib's, and a class with no `uses:` has nothing to record: the key
+/// is omitted in both.
+#[test]
+fn package_local_protocol_provisions_are_not_recorded_as_stdlib() {
+    const USER_COMPARABLE: &str = concat!(
+        "Protocol define: Comparable\n",
+        "  < other -> Boolean\n",
+        "  describe -> String => \"user comparable\"\n",
+    );
+    const RANK: &str = concat!(
+        "Value subclass: Rank\n",
+        "  uses: Comparable\n",
+        "  < other => true\n",
+    );
+    let code = generate_cross_file(RANK, USER_COMPARABLE, "unused.bt", false);
+    assert!(code.contains("describe"), "{code}");
+    assert!(
+        !code.contains("stdlib_trait_methods"),
+        "a carried package-local protocol's provisions are not the stdlib's, got:\n{code}"
+    );
+    let plain = generate_module(
+        &parse_fixture("Value subclass: Plain\n  size -> Integer => 0\n"),
+        CodegenOptions::new("plain"),
+    )
+    .expect("codegen should succeed");
+    assert!(!plain.contains("stdlib_trait_methods"), "{plain}");
+}
+
+/// BT-3916: the class meta says whether the class defines, outside the stdlib, a
+/// collection message the stdlib's own collection methods run through. The set
+/// comes from `overridable_collection_selectors`, the compiler's one list, so
+/// the proof is over every selector in it rather than over a copy.
+#[test]
+fn defining_any_overridable_collection_selector_sets_the_override_flag() {
+    let mut checked = 0;
+    for selector in beamtalk_core::state_threading_selectors::overridable_collection_selectors() {
+        let signature = selector
+            .split_inclusive(':')
+            .enumerate()
+            .map(|(i, part)| format!("{part} arg{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let src = format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {signature} => nil\n");
+        let mut module = parse_fixture(&src);
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        lower_analysed_module_for_codegen(&mut module, &analysis);
+        let code = generate_module(
+            &module,
+            CodegenOptions::new("bag")
+                .with_source(&src)
+                .with_source_path_opt(Some("bag.bt"))
+                .with_analysis(analysis),
+        )
+        .expect("codegen should succeed");
+        assert!(
+            code.contains("'overrides_collection_selector' => 'true'"),
+            "a class defining {selector} must set the flag, got:\n{code}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 15, "only {checked} selectors checked");
+}
+
+/// BT-3916: `do:`, ordinary methods and the provisions of a stdlib protocol do
+/// not set the flag, so a `uses: Enumerable` class with no override of its own
+/// keeps folding.
+#[test]
+fn do_other_methods_and_stdlib_provisions_do_not_set_the_override_flag() {
+    for src in [
+        "Value subclass: Bag\n  field: n :: Integer = 0\n  do: block => nil\n  size => 0\n",
+        concat!(
+            "Value subclass: Bag\n",
+            "  uses: Enumerable(Integer)\n",
+            "  field: items :: List(Integer) = #()\n",
+            "  elements -> List(Integer) => self.items\n",
+        ),
+    ] {
+        let mut module = parse_fixture(src);
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        lower_analysed_module_for_codegen(&mut module, &analysis);
+        let code = generate_module(
+            &module,
+            CodegenOptions::new("bag")
+                .with_source(src)
+                .with_source_path_opt(Some("bag.bt"))
+                .with_analysis(analysis),
+        )
+        .expect("codegen should succeed");
+        assert!(
+            !code.contains("overrides_collection_selector"),
+            "no flag expected for:\n{src}\ngot:\n{code}"
+        );
+    }
+}
+
+/// BT-3916: a provision of a *package-local* protocol that defines a collection
+/// message sets the flag, even when its name matches a stdlib protocol.
+#[test]
+fn package_local_protocol_provision_of_a_collection_selector_sets_the_override_flag() {
+    const USER_ENUMERABLE: &str = concat!(
+        "Protocol define: Enumerable\n",
+        "  elements -> List\n",
+        "  collect: block => block\n",
+    );
+    const BAG: &str = concat!(
+        "Value subclass: Bag\n",
+        "  uses: Enumerable\n",
+        "  elements => #()\n",
+    );
+    let code = generate_cross_file(BAG, USER_ENUMERABLE, "unused.bt", false);
+    assert!(
+        code.contains("'overrides_collection_selector' => 'true'"),
+        "got:\n{code}"
+    );
+}

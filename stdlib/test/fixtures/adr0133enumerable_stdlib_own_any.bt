@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): a user class that `uses:` the stdlib's `Enumerable` but
+// defines its own `anySatisfy:` (the class wins over the provision, ADR 0127
+// §3) with different semantics: it looks only at the first element. The
+// stdlib provisions still thread a writing block; the class's own method is
+// refused. Driven by adr0133enumerable_user_test.bt.
+
+Value subclass: Adr0133EnumerableStdlibOwnAny
+  uses: Enumerable(Integer)
+  field: items :: List(Integer) = #()
+
+  elements -> List(Integer) => self.items
+
+  anySatisfy: block =>
+    self.items isEmpty ifTrue: [^false]
+    block value: self.items first
