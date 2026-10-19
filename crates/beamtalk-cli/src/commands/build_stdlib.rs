@@ -83,22 +83,25 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 
     info!(count = source_files.len(), "Found stdlib source files");
 
-    // Create ebin directory
-    fs::create_dir_all(&ebin_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
+    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
+    // unless the corpus `.core` diff harness asks to keep them — see
+    // `util::core_output_dir`'s doc. Resolved before `ebin/` is touched so
+    // its snapshot-only mode (BT-3887, below) leaves `ebin/` alone entirely.
+    let (temp_path, core_output_dir_guard) = crate::commands::util::core_output_dir()?;
 
-    // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
-    clean_ebin_dir(&ebin_dir)?;
+    if !core_output_dir_guard.snapshot_only() {
+        // Create ebin directory
+        fs::create_dir_all(&ebin_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
+
+        // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
+        clean_ebin_dir(&ebin_dir)?;
+    }
 
     if !quiet {
         println!("Compiling {} stdlib module(s)...", source_files.len());
     }
-
-    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
-    // unless the corpus `.core` diff harness asks to keep them — see
-    // `util::core_output_dir`'s doc.
-    let (temp_path, _core_output_dir_guard) = crate::commands::util::core_output_dir()?;
 
     // Compiler options: stdlib mode enabled
     let options = stdlib_compiler_options(warnings_as_errors);
@@ -147,6 +150,21 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &compile_ctx,
     )?;
 
+    // BT-3887: the corpus `.core` diff harness's snapshot-only mode wants
+    // nothing past this point — every `.core` is on disk now, and the
+    // `.beam`, `.app`/`.app.src`, `builtins.rs` and `.hrl` outputs below
+    // are exactly what it must *not* produce (it runs inside checkouts it
+    // doesn't own, and `ebin/` was left untouched above for the same
+    // reason). See `util::CoreOutputDir::snapshot_only`.
+    if core_output_dir_guard.snapshot_only() {
+        println!(
+            "Snapshotted {} stdlib module(s) to .core only (BEAMTALK_CORE_SNAPSHOT_ONLY=1); \
+             skipped .beam/.app/generated-source output",
+            source_files.len()
+        );
+        return Ok(());
+    }
+
     // Batch compile .core → .beam into ebin directory
     info!("Compiling Core Erlang to BEAM");
     let compiler = BeamCompiler::new(ebin_dir.clone());
@@ -154,22 +172,45 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
+    write_stdlib_generated_outputs(
+        &ebin_dir,
+        &source_files,
+        &class_metadata,
+        &protocol_modules,
+        alias_sources,
+    )?;
+
+    println!("Built {} stdlib modules", source_files.len());
+
+    Ok(())
+}
+
+/// Everything `build_stdlib` writes *after* the `.beam` compile: the
+/// `.app`/`.app.src` metadata and the generated Rust/Erlang builtin tables.
+/// None of it is produced in snapshot-only mode (BT-3887).
+fn write_stdlib_generated_outputs(
+    ebin_dir: &Utf8Path,
+    source_files: &[Utf8PathBuf],
+    class_metadata: &[ClassMeta],
+    protocol_modules: &[String],
+    alias_sources: Vec<AliasSource>,
+) -> Result<()> {
     // `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
     // same `build_alias_metadata` extraction the ordinary `beamtalk build`
     // pipeline already uses (`build.rs`'s `ClassIndexResult::all_alias_infos`
     // call site), independently re-parsing `source_files` for doc
     // comments/display expansions `AliasSource`/`ClassHierarchyContext`
-    // above don't carry. This is what lets `beamtalk_repl_state:new/3` (the
-    // REPL/workspace session's alias-seeding path) and `browse-type-aliases`
-    // read stdlib's own aliases back via `application:get_env(beamtalk_stdlib,
-    // type_aliases)`.
-    let alias_metadata = build_alias_metadata(&source_files);
+    // in `build_stdlib` don't carry. This is what lets
+    // `beamtalk_repl_state:new/3` (the REPL/workspace session's
+    // alias-seeding path) and `browse-type-aliases` read stdlib's own
+    // aliases back via `application:get_env(beamtalk_stdlib, type_aliases)`.
+    let alias_metadata = build_alias_metadata(source_files);
 
     generate_app_file(
-        &ebin_dir,
-        &source_files,
-        &class_metadata,
-        &protocol_modules,
+        ebin_dir,
+        source_files,
+        class_metadata,
+        protocol_modules,
         &alias_metadata,
     )?;
     // Also update .app.src so rebar3 picks up the classes env
@@ -177,26 +218,22 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     if app_src_dir.exists() {
         generate_app_src_file(
             &app_src_dir,
-            &class_metadata,
-            &protocol_modules,
+            class_metadata,
+            protocol_modules,
             &alias_metadata,
         )?;
     }
 
     // Generate Rust builtins file from parsed class metadata and aliases.
     generate_builtins_rs(
-        &class_metadata,
+        class_metadata,
         &alias_source_texts_sorted_by_name(alias_sources),
     )?;
 
     // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
-    generate_erlang_builtins_hrl(&class_metadata)?;
-    generate_class_vars_keys_hrl()?;
-
-    println!("Built {} stdlib modules", source_files.len());
-
-    Ok(())
+    generate_erlang_builtins_hrl(class_metadata)?;
+    generate_class_vars_keys_hrl()
 }
 
 /// Compiles every stdlib source file to Core Erlang, collecting class
