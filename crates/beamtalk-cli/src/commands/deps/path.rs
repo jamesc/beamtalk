@@ -740,11 +740,16 @@ fn extract_dep_protocol_alias_metadata(
                 },
             );
         }
-        protocol_infos.extend(
+        // Stamped with this dependency so the registry applies the `uses:`
+        // shadowing rule to a bare type annotation too (BT-3941).
+        let mut infos =
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 module,
-            ),
-        );
+            );
+        for info in &mut infos {
+            info.package = Some(dep_name.into());
+        }
+        protocol_infos.extend(infos);
         // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
         // with this dependency so `uses: dep@Name` resolves to them (BT-3684).

@@ -856,9 +856,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             .into_iter()
             .filter(|p| !current_names.contains(&p.name))
             .collect();
-        let collision_diags = result
-            .protocol_registry
-            .add_pre_loaded(cross_file_protocols, &result.class_hierarchy);
+        let collision_diags = result.protocol_registry.add_pre_loaded(
+            cross_file_protocols,
+            &result.class_hierarchy,
+            trait_package,
+        );
         result.diagnostics.extend(collision_diags);
     }
     if !module.protocols.is_empty() {

@@ -848,6 +848,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             param_types: vec![],
         }],
         class_methods: vec![],
+        package: None,
         span: span(),
 
         provided_selectors: vec![],
