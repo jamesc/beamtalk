@@ -1329,7 +1329,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-179",
+      "id": "docs-beamtalk-language-features-block-18",
+      "title": "Message Sends (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-180",
       "title": "Rest Patterns in Destructuring (BT-1251) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1344,17 +1354,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-18",
-      "title": "Message Sends (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-181",
+      "id": "docs-beamtalk-language-features-block-182",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1390,7 +1390,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-183",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1411,7 +1411,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-186",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "External-edit conflict — patch, edit on disk, flush (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1439,7 +1439,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1457,7 +1457,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1476,7 +1476,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1489,7 +1489,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-198",
+      "id": "docs-beamtalk-language-features-block-199",
       "title": "Live Re-Checking on Reload (ADR 0105) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1499,32 +1499,6 @@
         "to_string"
       ],
       "source": "(Counter precheckCompile: #getCount source: \"getCount -> String => self.value printString\")\n// => a Dictionary shaped like the reload_check report — findings without installing\n\nWorkspace recheckImage\n// => _  (checked/stale summary across the whole live image)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-199",
-      "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Cart",
-        "actor",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "process",
-        "property",
-        "subclassing"
-      ],
-      "source": "Actor subclass: Cart\n  shapeVersion: 2\n  state: items :: List = #()\n  state: total :: Integer = 0",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1560,13 +1534,39 @@
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "Actor",
+        "Cart",
+        "actor",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "process",
+        "property",
+        "subclassing"
+      ],
+      "source": "Actor subclass: Cart\n  shapeVersion: 2\n  state: items :: List = #()\n  state: total :: Integer = 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features"
       ],
       "source": "Cart shapeVersion\n// => 2\n\nCounter shapeVersion    // no shapeVersion: clause declared\n// => 1",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1593,7 +1593,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1620,7 +1620,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1642,7 +1642,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1665,7 +1665,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1695,7 +1695,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-207",
+      "id": "docs-beamtalk-language-features-block-208",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1734,7 +1734,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-210",
+      "id": "docs-beamtalk-language-features-block-211",
       "title": "Suspend on failure, not resume-on-old-state or kill (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1751,7 +1751,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-212",
       "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1765,7 +1765,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-212",
+      "id": "docs-beamtalk-language-features-block-213",
       "title": "Type annotations on extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1786,7 +1786,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Cross-file extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1803,7 +1803,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Beamtalk — System reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1813,7 +1813,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "Workspace — Project operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1828,7 +1828,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1838,7 +1838,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1859,7 +1859,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-219",
       "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1872,7 +1872,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1882,7 +1882,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1895,7 +1895,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1905,7 +1905,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1928,7 +1928,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-228",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1946,7 +1946,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-230",
+      "id": "docs-beamtalk-language-features-block-231",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1956,7 +1956,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1980,7 +1980,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1990,7 +1990,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-234",
+      "id": "docs-beamtalk-language-features-block-235",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2005,7 +2005,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2023,7 +2023,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2038,7 +2038,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-237",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2053,7 +2053,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2063,7 +2063,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2083,7 +2083,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2112,7 +2112,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-241",
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2143,7 +2143,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-244",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2162,7 +2162,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-244",
+      "id": "docs-beamtalk-language-features-block-245",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2190,7 +2190,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-245",
+      "id": "docs-beamtalk-language-features-block-246",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2211,7 +2211,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-247",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2221,7 +2221,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-248",
+      "id": "docs-beamtalk-language-features-block-249",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2233,21 +2233,6 @@
         "process"
       ],
       "source": "AnnouncementNavigation default subscribersOf: ActorSpawned\nAnnouncementNavigation default announcedClasses    // => distinct event types in use\nAnnouncementNavigation of: anAnnouncer             // scope to one announcer",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-249",
-      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2265,6 +2250,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-250",
+      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-251",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2279,7 +2279,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-251",
+      "id": "docs-beamtalk-language-features-block-252",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2299,7 +2299,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-252",
+      "id": "docs-beamtalk-language-features-block-253",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2314,7 +2314,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-257",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2335,7 +2335,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2374,7 +2374,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2395,7 +2395,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2413,32 +2413,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-266",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-269",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "for each",
-        "for-each",
-        "forEach",
-        "instantiate",
-        "iterate",
-        "iteration",
-        "loop"
-      ],
-      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2479,13 +2460,32 @@
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-271",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features"
       ],
       "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-272",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2495,7 +2495,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-274",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2508,7 +2508,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-275",
+      "id": "docs-beamtalk-language-features-block-276",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2518,7 +2518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-276",
+      "id": "docs-beamtalk-language-features-block-277",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2534,7 +2534,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2558,7 +2558,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-278",
+      "id": "docs-beamtalk-language-features-block-279",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2574,27 +2574,6 @@
         "loop"
       ],
       "source": "// Infinite stream starting from a value, incrementing by 1\nStream from: 1                     // 1, 2, 3, 4, ...\n\n// Infinite stream with custom step function\nStream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...\n\n// Stream from a collection (List, String, Set)\nStream on: #(1, 2, 3)             // wraps collection lazily\n\n// Collection shorthand — List, String, and Set respond to `stream`\n#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)\n\"hello\" stream                     // Stream over characters\n(Set new add: 1) stream            // Stream over set elements\n\n// Dictionary iteration — use doWithKey: instead of stream\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n\n// File streaming — lazy, constant memory\nFile lines: \"data.csv\"            // Stream of lines\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10           // block-scoped handle\n]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-279",
-      "title": "Lazy Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform",
-        "where"
-      ],
-      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2629,6 +2608,27 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-280",
+      "title": "Lazy Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform",
+        "where"
+      ],
+      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-281",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2641,7 +2641,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-281",
+      "id": "docs-beamtalk-language-features-block-282",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2657,7 +2657,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-283",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2670,7 +2670,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-283",
+      "id": "docs-beamtalk-language-features-block-284",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2689,7 +2689,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-284",
+      "id": "docs-beamtalk-language-features-block-285",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2699,7 +2699,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-285",
+      "id": "docs-beamtalk-language-features-block-286",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2720,7 +2720,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-286",
+      "id": "docs-beamtalk-language-features-block-287",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2739,7 +2739,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-288",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2754,21 +2754,6 @@
         "transform"
       ],
       "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-289",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)\n\n@expect unresolved_ffi, type\n(Erlang some_module) someCall   // suppresses both categories on this one expression",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2791,13 +2776,28 @@
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)\n\n@expect unresolved_ffi, type\n(Erlang some_module) someCall   // suppresses both categories on this one expression",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-291",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-291",
+      "id": "docs-beamtalk-language-features-block-292",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2815,7 +2815,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-294",
+      "id": "docs-beamtalk-language-features-block-295",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2838,7 +2838,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-295",
+      "id": "docs-beamtalk-language-features-block-296",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2848,36 +2848,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-298",
+      "id": "docs-beamtalk-language-features-block-299",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "cache size                      // => number of entries\ncache isEmpty                   // => true if no entries\ncache isNotEmpty                // => true if at least one entry\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache removeAll                 // remove all entries, keep the table\ncache delete                    // destroy the table; frees all memory",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-299",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2910,7 +2887,30 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-301",
+      "id": "docs-beamtalk-language-features-block-300",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-302",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2925,7 +2925,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-302",
+      "id": "docs-beamtalk-language-features-block-303",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2935,7 +2935,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-304",
+      "id": "docs-beamtalk-language-features-block-305",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2948,7 +2948,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-305",
+      "id": "docs-beamtalk-language-features-block-306",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2971,7 +2971,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-306",
+      "id": "docs-beamtalk-language-features-block-307",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2999,7 +2999,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-307",
+      "id": "docs-beamtalk-language-features-block-308",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3047,7 +3047,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-310",
+      "id": "docs-beamtalk-language-features-block-311",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3078,7 +3078,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-311",
+      "id": "docs-beamtalk-language-features-block-312",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3106,7 +3106,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-312",
+      "id": "docs-beamtalk-language-features-block-313",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -6210,21 +6210,24 @@
         "TestCase",
         "assign",
         "assignment",
+        "exception",
         "extends",
         "inherit",
         "inheritance",
         "mutate",
         "mutation",
         "object",
+        "raise",
         "set",
         "subclassing",
         "testBasic",
         "testLiteralMismatchRaises",
         "testLiteralPatternInFirstSlot",
         "testTaggedTuple",
-        "testWildcard"
+        "testWildcard",
+        "throw"
       ],
-      "source": "TestCase subclass: Ch14TupleDestructuring\n\n  testBasic =>\n    {a, b} := Erlang erlang list_to_tuple: #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testTaggedTuple =>\n    // Common Erlang pattern: {ok, Value} or {error, Reason}\n    {status, value} := Tuple withAll: #(#ok, 42)\n    self assert: status equals: #ok\n    self assert: value equals: 42\n\n  testLiteralPatternInFirstSlot =>\n    // A literal in the pattern matches only that value:\n    {#ok, value} := Tuple withAll: #(#ok, 42)\n    self assert: value equals: 42\n\n  testLiteralMismatchRaises =>\n    // Mismatch raises an internal_error (badmatch):\n    self should: [\n      {#ok, _val} := Tuple withAll: #(#error, 42)\n    ] raise: #internal_error\n\n  testWildcard =>\n    {_, b} := Tuple withAll: #(#ignore, 99)\n    self assert: b equals: 99",
+      "source": "TestCase subclass: Ch14TupleDestructuring\n\n  testBasic =>\n    {a, b} := Erlang erlang list_to_tuple: #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testTaggedTuple =>\n    // Common Erlang pattern: {ok, Value} or {error, Reason}\n    {status, value} := Tuple withAll: #(#ok, 42)\n    self assert: status equals: #ok\n    self assert: value equals: 42\n\n  testLiteralPatternInFirstSlot =>\n    // A literal in the pattern matches only that value:\n    {#ok, value} := Tuple withAll: #(#ok, 42)\n    self assert: value equals: 42\n\n  testLiteralMismatchRaises =>\n    // A failed destructuring raises a #pattern_mismatch error:\n    self should: [\n      {#ok, _val} := Tuple withAll: #(#error, 42)\n    ] raise: #pattern_mismatch\n\n  testWildcard =>\n    {_, b} := Tuple withAll: #(#ignore, 99)\n    self assert: b equals: 99",
       "explanation": "Code example from docs/learning/14-pattern-matching.md"
     },
     {
@@ -20163,7 +20166,7 @@
         "transform",
         "where"
       ],
-      "source": "// Tests for destructuring assignment: tuple {a, b} := expr, array #[a, b] := expr, and list #(a, b) := expr\n\nTestCase subclass: DestructuringTest\n\n  // === Tuple destructuring ===\n  testTupleDestructuringBasic =>\n    {a, b} := Erlang erlang list_to_tuple: #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testTupleDestructuringThreeElements =>\n    {a, b, c} := Erlang erlang list_to_tuple: #(1, 2, 3)\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testTupleDestructuringWithTaggedSymbol =>\n    {status, val} := Tuple withAll: #(#ok, 42)\n    self assert: status equals: #ok\n    self assert: val equals: 42\n\n  testTupleDestructuringWithTaggedSymbolLiteral =>\n    // Literal pattern in first slot: {#ok, value} matches only when first element is #ok.\n    {#ok, value} := Tuple withAll: #(#ok, 42)\n    self assert: value equals: 42\n\n  testTupleDestructuringLiteralMismatchRaisesError =>\n    // When the literal slot does not match, a RuntimeError with badmatch details is raised.\n    result := [\n      {#ok, _val} := Tuple withAll: #(#error, 42)\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e message includesSubstring: \"badmatch\"]\n    self assert: result equals: true\n\n  testTupleDestructuringWithWildcard =>\n    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)\n    self assert: b equals: 99\n\n  // === Array destructuring ===\n  testArrayDestructuringBasic =>\n    #[a, b] := #[10, 20]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testArrayDestructuringThreeElements =>\n    #[a, b, c] := #[1, 2, 3]\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testArrayDestructuringWithWildcard =>\n    #[_, b] := #[99, 42]\n    self assert: b equals: 42\n\n  testArrayDestructuringExtraElements =>\n    // Array has more elements than pattern — that's fine, extras ignored\n    #[a, b] := #[10, 20, 30, 40]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testArrayDestructuringStrings =>\n    #[first, second] := #[\"hello\", \"world\"]\n    self assert: first equals: \"hello\"\n    self assert: second equals: \"world\"\n\n  testArrayDestructuringWithTaggedSymbolLiteral =>\n    // Literal pattern in first slot: #[#ok, value] matches only when first element is #ok.\n    #[#ok, value] := #[#ok, 42]\n    self assert: value equals: 42\n\n  testArrayDestructuringLiteralMismatchRaisesError =>\n    // When the literal slot does not match, a RuntimeError with badmatch details is raised.\n    result := [\n      #[#ok, _val] := #[#error, 42]\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e message includesSubstring: \"badmatch\"]\n    self assert: result equals: true\n\n  testArrayDestructuringIntegerLiteral =>\n    // Integer literal in a pattern position.\n    #[1, value] := #[1, 99]\n    self assert: value equals: 99\n\n  testArrayDestructuringMultipleLiterals =>\n    // Multiple literal positions with a variable in between.\n    #[#begin, middle, #done] := #[#begin, \"data\", #done]\n    self assert: middle equals: \"data\"\n\n  // === Last-expression destructuring (RHS must be evaluated) ===\n  testTupleDestructuringOnlyStatement =>\n    // Destructuring as the only (and therefore last) statement in a method.\n    // Verifies the method compiles and runs without error.\n    {_, _} := Tuple withAll: #(#ok, 42)\n\n  testArrayDestructuringOnlyStatement =>\n    // Same for array destructuring as the only statement.\n    #[_, _] := #[1, 2]\n\n  testTupleDestructuringVariablesUsedAfter =>\n    // Variables bound by destructuring are accessible in subsequent expressions.\n    {a, b} := Erlang erlang list_to_tuple: #(5, 10)\n    self assert: a equals: 5\n    self assert: b equals: 10\n\n  testArrayDestructuringVariablesUsedAfter =>\n    // Same for array destructuring.\n    #[x, y] := #[3, 7]\n    self assert: x equals: 3\n    self assert: y equals: 7\n\n  // === Sequential destructurings ===\n  testSequentialTupleDestructurings =>\n    // Multiple tuple destructurings in sequence all bind correctly.\n    {a, b} := Erlang erlang list_to_tuple: #(1, 2)\n    {c, d} := Erlang erlang list_to_tuple: #(3, 4)\n    self assert: a + b + c + d equals: 10\n\n  testSequentialArrayDestructurings =>\n    // Multiple array destructurings in sequence all bind correctly.\n    #[a, b] := #[1, 2]\n    #[c, d] := #[3, 4]\n    self assert: a + b + c + d equals: 10\n\n  testMixedDestructurings =>\n    // Mix of tuple and array destructuring in the same method.\n    {x, y} := Erlang erlang list_to_tuple: #(10, 20)\n    #[p, q] := #[100, 200]\n    self assert: x + y + p + q equals: 330\n\n  // === Destructuring inside block bodies ===\n  testArrayDestructuringNonLastInCollect =>\n    // Destructuring as non-last expression in a collect: block;\n    // the block binds pattern variables then returns a computed value.\n    result := #[#[1, 10], #[2, 20]]\n      collect: [:pair |\n        #[a, b] := pair\n        a + b\n      ]\n    self assert: result equals: #[11, 22]\n\n  testTupleDestructuringNonLastInCollect =>\n    // Tuple destructuring as non-last expression in a collect: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2]\n      collect: [:pair |\n        {a, b} := pair\n        a + b\n      ]\n    self assert: result equals: #[11, 22]\n\n  testArrayDestructuringNonLastInSelect =>\n    // Destructuring as non-last expression in a select: block;\n    // the last expression is the predicate that determines inclusion.\n    result := #[#[1, 10], #[15, 5], #[2, 20]]\n      select: [:pair |\n        #[a, b] := pair\n        a < b\n      ]\n    self assert: result equals: #[#[1, 10], #[2, 20]]\n\n  testTupleDestructuringNonLastInSelect =>\n    // Tuple destructuring as non-last expression in select: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(15, 5)\n    pair3 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2, pair3]\n      select: [:pair |\n        {a, b} := pair\n        a < b\n      ]\n    self assert: result equals: #[pair1, pair3]\n\n  testArrayDestructuringNonLastInInject =>\n    // Destructuring as non-last expression in inject:into: block;\n    // the last expression is the new accumulator value.\n    result := #[#[1, 10], #[2, 20]]\n      inject: 0\n      into: [:acc :pair |\n        #[a, b] := pair\n        acc + a + b\n      ]\n    self assert: result equals: 33\n\n  testTupleDestructuringNonLastInInject =>\n    // Tuple destructuring as non-last expression in inject:into: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2]\n      inject: 0\n      into: [:acc :pair |\n        {a, b} := pair\n        acc + a + b\n      ]\n    self assert: result equals: 33\n\n  testDestructuringVariablesAccessibleInSubsequentBlocks =>\n    // Variables bound by destructuring are visible to blocks that follow.\n    #[x, y] := #[5, 10]\n    doubled := #[x, y] collect: [:v | v * 2]\n    self assert: doubled equals: #[10, 20]\n\n  testNestedArrayDestructuringInCollect =>\n    // Destructuring that unpacks a pair and uses both parts in the result.\n    pairs := #[#[3, 4], #[5, 12], #[8, 15]]\n    sums := pairs\n      collect: [:pair |\n        #[a, b] := pair\n        a + b\n      ]\n    self assert: sums equals: #[7, 17, 23]\n\n  // === List destructuring (#(...) syntax, BT-1279) ===\n  testListDestructuringBasic =>\n    #(a, b) := #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testListDestructuringThreeElements =>\n    #(a, b, c) := #(1, 2, 3)\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testListDestructuringWithWildcard =>\n    #(_, b) := #(99, 42)\n    self assert: b equals: 42\n\n  testListDestructuringOnArray =>\n    // Duck-typed: #(...) destructuring calls at: on any collection — works on Array too\n    #(a, b) := #[10, 20]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testListDestructuringInBlock =>\n    result := #(#(1, 10), #(2, 20))\n      collect: [:pair |\n        #(a, b) := pair\n        a + b\n      ]\n    self assert: result equals: #(11, 22)\n\n  // === Map destructuring ===\n  testMapDestructuringSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMapDestructuringMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testMapDestructuringWithWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testMapDestructuringSubset =>\n    // Destructuring only some keys is allowed; extra keys are ignored.\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMapDestructuringMissingKeyRaisesError =>\n    // Accessing a missing key raises a RuntimeError (any kind) — here we only\n    // assert that it raises at all. The error kind is checked by\n    // testMapDestructuringMissingKeyIsKeyError (#key_error, classified by BT-2707).\n    result := [\n      #{#missing => _val} := #{#present => 42}\n      #did_not_raise\n    ] on: RuntimeError do: [:e | #raised]\n    self assert: result equals: #raised\n\n  testMapDestructuringMissingKeyIsKeyError =>\n    // The classified missing-key error carries the key_error kind.\n    result := [\n      #{#missing => _val} := #{#present => 42}\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e kind]\n    self assert: result equals: #key_error\n\n  testMapDestructuringOnlyStatement =>\n    // Map destructuring as the only statement in a method.\n    #{#x => _} := #{#x => 99}\n\n  testMapDestructuringVariablesUsedAfter =>\n    dict := #{#name => \"Bob\", #age => 30}\n    #{#name => name, #age => age} := dict\n    self assert: name equals: \"Bob\"\n    self assert: age equals: 30\n\n  testMapDestructuringSequential =>\n    d1 := #{#a => 1}\n    d2 := #{#b => 2}\n    #{#a => a} := d1\n    #{#b => b} := d2\n    self assert: a + b equals: 3\n\n  testMapDestructuringInCollectBlock =>\n    // Map destructuring inside a collect: block.\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts\n      collect: [:d |\n        #{#x => x, #y => y} := d\n        x + y\n      ]\n    self assert: sums equals: #[11, 22]\n\n  // === Array rest pattern (#[a, ...rest] := expr) ===\n  testArrayRestPatternBasic =>\n    #[first, ...rest] := #[1, 2, 3, 4, 5]\n    self assert: first equals: 1\n    self assert: rest equals: #[2, 3, 4, 5]\n\n  testArrayRestPatternTwoPositional =>\n    #[a, b, ...remaining] := #[10, 20, 30, 40]\n    self assert: a equals: 10\n    self assert: b equals: 20\n    self assert: remaining equals: #[30, 40]\n\n  testArrayRestPatternNoRemainder =>\n    // When array has exact number of positional elements, rest is empty\n    #[x, y, ...tail] := #[1, 2]\n    self assert: x equals: 1\n    self assert: y equals: 2\n    self assert: tail equals: #[]\n\n  testArrayRestPatternOnlyRest =>\n    // No positional elements, just rest — captures the whole array\n    #[...all] := #[10, 20, 30]\n    self assert: all equals: #[10, 20, 30]\n\n  testArrayRestPatternWithWildcardPositional =>\n    // Wildcard in a positional slot, rest captures remainder\n    #[_, ...rest] := #[99, 42, 7]\n    self assert: rest equals: #[42, 7]\n\n  testArrayRestPatternWithLiteralPositional =>\n    // Literal in a positional slot with rest\n    #[#ok, ...values] := #[#ok, 1, 2, 3]\n    self assert: values equals: #[1, 2, 3]\n\n  testArrayRestPatternWithWildcardRest =>\n    // ..._ discards the rest (no binding)\n    #[head, ..._] := #[1, 2, 3, 4, 5]\n    self assert: head equals: 1\n\n  testArrayRestPatternInBlock =>\n    // Rest pattern inside a collect: block\n    result := #[#[1, 2, 3], #[10, 20, 30]]\n      collect: [:arr |\n        #[_, ...rest] := arr\n        rest\n      ]\n    self assert: result equals: #[#[2, 3], #[20, 30]]\n\n  testArrayRestPatternSingleElement =>\n    // Array with one element, no positional, rest gets it all\n    #[...items] := #[42]\n    self assert: items equals: #[42]",
+      "source": "// Tests for destructuring assignment: tuple {a, b} := expr, array #[a, b] := expr, and list #(a, b) := expr\n\nTestCase subclass: DestructuringTest\n\n  // === Tuple destructuring ===\n  testTupleDestructuringBasic =>\n    {a, b} := Erlang erlang list_to_tuple: #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testTupleDestructuringThreeElements =>\n    {a, b, c} := Erlang erlang list_to_tuple: #(1, 2, 3)\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testTupleDestructuringWithTaggedSymbol =>\n    {status, val} := Tuple withAll: #(#ok, 42)\n    self assert: status equals: #ok\n    self assert: val equals: 42\n\n  testTupleDestructuringWithTaggedSymbolLiteral =>\n    // Literal pattern in first slot: {#ok, value} matches only when first element is #ok.\n    {#ok, value} := Tuple withAll: #(#ok, 42)\n    self assert: value equals: 42\n\n  testTupleDestructuringLiteralMismatchRaisesError =>\n    // When the literal slot does not match, a RuntimeError of kind #pattern_mismatch is raised.\n    result := [\n      {#ok, _val} := Tuple withAll: #(#error, 42)\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e kind == #pattern_mismatch]\n    self assert: result equals: true\n\n  testTupleDestructuringWithWildcard =>\n    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)\n    self assert: b equals: 99\n\n  // === Array destructuring ===\n  testArrayDestructuringBasic =>\n    #[a, b] := #[10, 20]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testArrayDestructuringThreeElements =>\n    #[a, b, c] := #[1, 2, 3]\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testArrayDestructuringWithWildcard =>\n    #[_, b] := #[99, 42]\n    self assert: b equals: 42\n\n  testArrayDestructuringExtraElements =>\n    // Array has more elements than pattern — that's fine, extras ignored\n    #[a, b] := #[10, 20, 30, 40]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testArrayDestructuringStrings =>\n    #[first, second] := #[\"hello\", \"world\"]\n    self assert: first equals: \"hello\"\n    self assert: second equals: \"world\"\n\n  testArrayDestructuringWithTaggedSymbolLiteral =>\n    // Literal pattern in first slot: #[#ok, value] matches only when first element is #ok.\n    #[#ok, value] := #[#ok, 42]\n    self assert: value equals: 42\n\n  testArrayDestructuringLiteralMismatchRaisesError =>\n    // When the literal slot does not match, a RuntimeError of kind #pattern_mismatch is raised.\n    result := [\n      #[#ok, _val] := #[#error, 42]\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e kind == #pattern_mismatch]\n    self assert: result equals: true\n\n  testArrayDestructuringIntegerLiteral =>\n    // Integer literal in a pattern position.\n    #[1, value] := #[1, 99]\n    self assert: value equals: 99\n\n  testArrayDestructuringMultipleLiterals =>\n    // Multiple literal positions with a variable in between.\n    #[#begin, middle, #done] := #[#begin, \"data\", #done]\n    self assert: middle equals: \"data\"\n\n  // === Last-expression destructuring (RHS must be evaluated) ===\n  testTupleDestructuringOnlyStatement =>\n    // Destructuring as the only (and therefore last) statement in a method.\n    // Verifies the method compiles and runs without error.\n    {_, _} := Tuple withAll: #(#ok, 42)\n\n  testArrayDestructuringOnlyStatement =>\n    // Same for array destructuring as the only statement.\n    #[_, _] := #[1, 2]\n\n  testTupleDestructuringVariablesUsedAfter =>\n    // Variables bound by destructuring are accessible in subsequent expressions.\n    {a, b} := Erlang erlang list_to_tuple: #(5, 10)\n    self assert: a equals: 5\n    self assert: b equals: 10\n\n  testArrayDestructuringVariablesUsedAfter =>\n    // Same for array destructuring.\n    #[x, y] := #[3, 7]\n    self assert: x equals: 3\n    self assert: y equals: 7\n\n  // === Sequential destructurings ===\n  testSequentialTupleDestructurings =>\n    // Multiple tuple destructurings in sequence all bind correctly.\n    {a, b} := Erlang erlang list_to_tuple: #(1, 2)\n    {c, d} := Erlang erlang list_to_tuple: #(3, 4)\n    self assert: a + b + c + d equals: 10\n\n  testSequentialArrayDestructurings =>\n    // Multiple array destructurings in sequence all bind correctly.\n    #[a, b] := #[1, 2]\n    #[c, d] := #[3, 4]\n    self assert: a + b + c + d equals: 10\n\n  testMixedDestructurings =>\n    // Mix of tuple and array destructuring in the same method.\n    {x, y} := Erlang erlang list_to_tuple: #(10, 20)\n    #[p, q] := #[100, 200]\n    self assert: x + y + p + q equals: 330\n\n  // === Destructuring inside block bodies ===\n  testArrayDestructuringNonLastInCollect =>\n    // Destructuring as non-last expression in a collect: block;\n    // the block binds pattern variables then returns a computed value.\n    result := #[#[1, 10], #[2, 20]]\n      collect: [:pair |\n        #[a, b] := pair\n        a + b\n      ]\n    self assert: result equals: #[11, 22]\n\n  testTupleDestructuringNonLastInCollect =>\n    // Tuple destructuring as non-last expression in a collect: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2]\n      collect: [:pair |\n        {a, b} := pair\n        a + b\n      ]\n    self assert: result equals: #[11, 22]\n\n  testArrayDestructuringNonLastInSelect =>\n    // Destructuring as non-last expression in a select: block;\n    // the last expression is the predicate that determines inclusion.\n    result := #[#[1, 10], #[15, 5], #[2, 20]]\n      select: [:pair |\n        #[a, b] := pair\n        a < b\n      ]\n    self assert: result equals: #[#[1, 10], #[2, 20]]\n\n  testTupleDestructuringNonLastInSelect =>\n    // Tuple destructuring as non-last expression in select: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(15, 5)\n    pair3 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2, pair3]\n      select: [:pair |\n        {a, b} := pair\n        a < b\n      ]\n    self assert: result equals: #[pair1, pair3]\n\n  testArrayDestructuringNonLastInInject =>\n    // Destructuring as non-last expression in inject:into: block;\n    // the last expression is the new accumulator value.\n    result := #[#[1, 10], #[2, 20]]\n      inject: 0\n      into: [:acc :pair |\n        #[a, b] := pair\n        acc + a + b\n      ]\n    self assert: result equals: 33\n\n  testTupleDestructuringNonLastInInject =>\n    // Tuple destructuring as non-last expression in inject:into: block.\n    pair1 := Erlang erlang list_to_tuple: #(1, 10)\n    pair2 := Erlang erlang list_to_tuple: #(2, 20)\n    result := #[pair1, pair2]\n      inject: 0\n      into: [:acc :pair |\n        {a, b} := pair\n        acc + a + b\n      ]\n    self assert: result equals: 33\n\n  testDestructuringVariablesAccessibleInSubsequentBlocks =>\n    // Variables bound by destructuring are visible to blocks that follow.\n    #[x, y] := #[5, 10]\n    doubled := #[x, y] collect: [:v | v * 2]\n    self assert: doubled equals: #[10, 20]\n\n  testNestedArrayDestructuringInCollect =>\n    // Destructuring that unpacks a pair and uses both parts in the result.\n    pairs := #[#[3, 4], #[5, 12], #[8, 15]]\n    sums := pairs\n      collect: [:pair |\n        #[a, b] := pair\n        a + b\n      ]\n    self assert: sums equals: #[7, 17, 23]\n\n  // === List destructuring (#(...) syntax, BT-1279) ===\n  testListDestructuringBasic =>\n    #(a, b) := #(10, 20)\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testListDestructuringThreeElements =>\n    #(a, b, c) := #(1, 2, 3)\n    self assert: a equals: 1\n    self assert: b equals: 2\n    self assert: c equals: 3\n\n  testListDestructuringWithWildcard =>\n    #(_, b) := #(99, 42)\n    self assert: b equals: 42\n\n  testListDestructuringOnArray =>\n    // Duck-typed: #(...) destructuring calls at: on any collection — works on Array too\n    #(a, b) := #[10, 20]\n    self assert: a equals: 10\n    self assert: b equals: 20\n\n  testListDestructuringInBlock =>\n    result := #(#(1, 10), #(2, 20))\n      collect: [:pair |\n        #(a, b) := pair\n        a + b\n      ]\n    self assert: result equals: #(11, 22)\n\n  // === Map destructuring ===\n  testMapDestructuringSingleKey =>\n    dict := #{#name => \"Alice\"}\n    #{#name => name} := dict\n    self assert: name equals: \"Alice\"\n\n  testMapDestructuringMultipleKeys =>\n    dict := #{#x => 10, #y => 20}\n    #{#x => x, #y => y} := dict\n    self assert: x equals: 10\n    self assert: y equals: 20\n\n  testMapDestructuringWithWildcard =>\n    dict := #{#sid => \"abc123\", #runner => \"runner1\"}\n    #{#sid => sid, #runner => _} := dict\n    self assert: sid equals: \"abc123\"\n\n  testMapDestructuringSubset =>\n    // Destructuring only some keys is allowed; extra keys are ignored.\n    dict := #{#a => 1, #b => 2, #c => 3}\n    #{#a => a, #c => c} := dict\n    self assert: a equals: 1\n    self assert: c equals: 3\n\n  testMapDestructuringMissingKeyRaisesError =>\n    // Accessing a missing key raises a RuntimeError (any kind) — here we only\n    // assert that it raises at all. The error kind is checked by\n    // testMapDestructuringMissingKeyIsKeyError (#key_error, classified by BT-2707).\n    result := [\n      #{#missing => _val} := #{#present => 42}\n      #did_not_raise\n    ] on: RuntimeError do: [:e | #raised]\n    self assert: result equals: #raised\n\n  testMapDestructuringMissingKeyIsKeyError =>\n    // The classified missing-key error carries the key_error kind.\n    result := [\n      #{#missing => _val} := #{#present => 42}\n      #did_not_raise\n    ] on: RuntimeError do: [:e | e kind]\n    self assert: result equals: #key_error\n\n  testMapDestructuringOnlyStatement =>\n    // Map destructuring as the only statement in a method.\n    #{#x => _} := #{#x => 99}\n\n  testMapDestructuringVariablesUsedAfter =>\n    dict := #{#name => \"Bob\", #age => 30}\n    #{#name => name, #age => age} := dict\n    self assert: name equals: \"Bob\"\n    self assert: age equals: 30\n\n  testMapDestructuringSequential =>\n    d1 := #{#a => 1}\n    d2 := #{#b => 2}\n    #{#a => a} := d1\n    #{#b => b} := d2\n    self assert: a + b equals: 3\n\n  testMapDestructuringInCollectBlock =>\n    // Map destructuring inside a collect: block.\n    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]\n    sums := dicts\n      collect: [:d |\n        #{#x => x, #y => y} := d\n        x + y\n      ]\n    self assert: sums equals: #[11, 22]\n\n  // === Array rest pattern (#[a, ...rest] := expr) ===\n  testArrayRestPatternBasic =>\n    #[first, ...rest] := #[1, 2, 3, 4, 5]\n    self assert: first equals: 1\n    self assert: rest equals: #[2, 3, 4, 5]\n\n  testArrayRestPatternTwoPositional =>\n    #[a, b, ...remaining] := #[10, 20, 30, 40]\n    self assert: a equals: 10\n    self assert: b equals: 20\n    self assert: remaining equals: #[30, 40]\n\n  testArrayRestPatternNoRemainder =>\n    // When array has exact number of positional elements, rest is empty\n    #[x, y, ...tail] := #[1, 2]\n    self assert: x equals: 1\n    self assert: y equals: 2\n    self assert: tail equals: #[]\n\n  testArrayRestPatternOnlyRest =>\n    // No positional elements, just rest — captures the whole array\n    #[...all] := #[10, 20, 30]\n    self assert: all equals: #[10, 20, 30]\n\n  testArrayRestPatternWithWildcardPositional =>\n    // Wildcard in a positional slot, rest captures remainder\n    #[_, ...rest] := #[99, 42, 7]\n    self assert: rest equals: #[42, 7]\n\n  testArrayRestPatternWithLiteralPositional =>\n    // Literal in a positional slot with rest\n    #[#ok, ...values] := #[#ok, 1, 2, 3]\n    self assert: values equals: #[1, 2, 3]\n\n  testArrayRestPatternWithWildcardRest =>\n    // ..._ discards the rest (no binding)\n    #[head, ..._] := #[1, 2, 3, 4, 5]\n    self assert: head equals: 1\n\n  testArrayRestPatternInBlock =>\n    // Rest pattern inside a collect: block\n    result := #[#[1, 2, 3], #[10, 20, 30]]\n      collect: [:arr |\n        #[_, ...rest] := arr\n        rest\n      ]\n    self assert: result equals: #[#[2, 3], #[20, 30]]\n\n  testArrayRestPatternSingleElement =>\n    // Array with one element, no positional, rest gets it all\n    #[...items] := #[42]\n    self assert: items equals: #[42]",
       "explanation": "Tests for destructuring assignment: tuple {a, b} := expr, array #[a, b] := expr, and list #(a, b) := expr"
     },
     {
@@ -44041,6 +44044,43 @@
       ],
       "source": "// BT-406: Tests the match: expression — literal arms (integer, symbol, string),\n// wildcard arms, variable capture, guards (when:), and multi-arm dispatch\n\nTestCase subclass: PatternMatchingTest\n\n  testPatternMatchingWithGuards =>\n    self assert: (42 match: [_ -> \"matched\"]) equals: \"matched\"\n    // Match integer literal — first arm\n    self\n      assert: (1 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"one\"\n    // Match integer literal — second arm\n    self\n      assert: (2 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"two\"\n    // Match integer literal — fallthrough to wildcard\n    self\n      assert: (3 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n    // Match symbol literal\n    self\n      assert: (#ok match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"success\"\n    // ═══════════════════════════════════════════════════════════════════════════\n    self\n      assert: (#error match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"failure\"\n    // Match string literal\n    self\n      assert: (\"hello\" match: [\n        \"hello\" -> \"greeting\";\n        _ -> \"other\"\n      ])\n      equals: \"greeting\"\n    // Variable captures the matched value\n    self assert: (42 match: [x -> x + 1]) equals: 43\n    // Match with guard — positive\n    self\n      assert: (10 match: [\n        x when: [x > 0] -> \"positive\";\n        _ -> \"non-positive\"\n      ])\n      equals: \"positive\"\n    // Match with guard — non-positive\n    self\n      assert: (-5 match: [\n        x when: [x > 0] -> \"positive\";\n        _ -> \"non-positive\"\n      ])\n      equals: \"non-positive\"\n    // Guard with arithmetic comparison\n    self\n      assert: (42 match: [\n        x when: [x > 100] -> \"big\";\n        x when: [x > 10] -> \"medium\";\n        _ -> \"small\"\n      ])\n      equals: \"medium\"\n    // Match on expression result\n    self\n      assert: ((3 + 4) match: [\n        7 -> \"correct\";\n        _ -> \"wrong\"\n      ])\n      equals: \"correct\"\n    // Match negative integer\n    self\n      assert: (-1 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"minus one\"\n    // ═══════════════════════════════════════════════════════════════════════════\n    self\n      assert: (0 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"zero\"\n\n  testArrayPatternInMatchArm =>\n    // BT-1296: Array pattern arms — basic 2-element match\n    arr := #[10, 20]\n    self\n      assert: (arr match: [\n        #[h, t] -> h + t;\n        _ -> 0\n      ])\n      equals: 30\n    // Array arm fallthrough: subject is not an array\n    self\n      assert: (42 match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Array arm fallthrough: subject is a dict (plain map — must not crash on missing key)\n    self\n      assert: (#{#x => 1} match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Array arm fallthrough: wrong size\n    self\n      assert: (#[1, 2, 3] match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Wildcard elements in array pattern\n    self\n      assert: (#[1, 2, 3] match: [\n        #[_, v, _] -> v;\n        _ -> 0\n      ])\n      equals: 2\n    // Multiple array arms with different sizes\n    self\n      assert: (#[1, 2, 3] match: [\n        #[x] -> \"one\";\n        #[x, y] -> \"two\";\n        #[x, y, z] -> \"three\";\n        _ -> \"other\"\n      ])\n      equals: \"three\"\n    // Array arm with guard — positive (exercises guard-success branch)\n    self\n      assert: (#[1, 2] match: [\n        #[x, y] when: [x < y] -> \"ascending\";\n        _ -> \"other\"\n      ])\n      equals: \"ascending\"\n    // Array arm with guard — negative (exercises guard-fail fallthrough)\n    self\n      assert: (#[2, 1] match: [\n        #[x, y] when: [x < y] -> \"ascending\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n\n  testMapPatternInMatchArm =>\n    // BT-1296: Map/Dict pattern arms\n    d := #{#event => \"click\", #x => 5}\n    self\n      assert: (d match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"click\"\n    // Dict arm fallthrough: key missing\n    self\n      assert: (#{#kind => \"x\"} match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // Dict arm fallthrough: subject is not a map\n    self\n      assert: (42 match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // Multiple key bindings\n    self\n      assert: (#{#a => 1, #b => 2} match: [\n        #{#a => x, #b => y} -> x + y;\n        _ -> 0\n      ])\n      equals: 3\n\n  testNestedArrayPatternInMatchArm =>\n    // BT-1296: Nested array pattern: #[#[a, b], c] -> ...\n    nested := #[#[1, 2], 3]\n    self\n      assert: (nested match: [\n        #[#[a, b], c] -> a + b + c;\n        _ -> 0\n      ])\n      equals: 6\n    // Nested array fallthrough: inner wrong size\n    self\n      assert: (#[#[1, 2, 3], 4] match: [\n        #[#[a, b], c] -> a + b + c;\n        _ -> 0\n      ])\n      equals: 0\n\n  testDuplicateVariableInArrayMatchArm =>\n    // BT-1315: Duplicate variable names act as equality constraints\n    // Adjacent duplicate — equal values\n    self\n      assert: (#[3, 3] match: [\n        #[x, x] -> \"equal\";\n        _ -> \"differ\"\n      ])\n      equals: \"equal\"\n    // Adjacent duplicate — unequal values\n    self\n      assert: (#[1, 2] match: [\n        #[x, x] -> \"equal\";\n        _ -> \"differ\"\n      ])\n      equals: \"differ\"\n    // Non-adjacent duplicate — equal values\n    self\n      assert: (#[5, 9, 5] match: [\n        #[x, y, x] -> \"match\";\n        _ -> \"no match\"\n      ])\n      equals: \"match\"\n    // Non-adjacent duplicate — unequal values\n    self\n      assert: (#[5, 9, 7] match: [\n        #[x, y, x] -> \"match\";\n        _ -> \"no match\"\n      ])\n      equals: \"no match\"\n    // Duplicate mixed with non-duplicate; body uses bound variable\n    self\n      assert: (#[4, 4, 10] match: [\n        #[x, x, z] -> z;\n        _ -> 0\n      ])\n      equals: 10\n\n  // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)\n  testConstructorPatternOkArm =>\n    // ok arm matched — variable captures the wrapped value\n    self\n      assert: ((Result ok: 42) match: [\n        Result ok: v -> v;\n        Result error: _ -> 0\n      ])\n      equals: 42\n\n  testConstructorPatternErrorArm =>\n    // error arm matched — variable captures the error reason\n    self\n      assert: ((Result error: #oops) match: [\n        Result ok: _ -> #none;\n        Result error: e -> e\n      ])\n      equals: #oops\n\n  testConstructorPatternWildcardBinding =>\n    // Wildcard in value position: arm matches but nothing is bound\n    self\n      assert: ((Result ok: 99) match: [\n        Result ok: _ -> \"any ok\";\n        Result error: _ -> \"any error\"\n      ])\n      equals: \"any ok\"\n\n  testConstructorPatternLiteralBinding =>\n    // Literal in binding position: arm only matches when value equals literal\n    self\n      assert: ((Result ok: 0) match: [\n        Result ok: 0 -> \"zero\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"zero\"\n    self\n      assert: ((Result ok: 1) match: [\n        Result ok: 0 -> \"zero\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"other\"\n\n  testConstructorPatternWithGuard =>\n    // when: guard must not be consumed as a constructor keyword (BT-1297 bug fix)\n    self\n      assert: ((Result ok: 5) match: [\n        Result ok: v when: [v > 3] -> \"big\";\n        Result ok: _ -> \"small\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"big\"\n    self\n      assert: ((Result ok: 1) match: [\n        Result ok: v when: [v > 3] -> \"big\";\n        Result ok: _ -> \"small\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"small\"\n\n  testConstructorPatternNegativeLiteral =>\n    // Negative numeric literal in binding position (BT-1297 bug fix)\n    self\n      assert: ((Result ok: -1) match: [\n        Result ok: -1 -> \"neg one\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"neg one\"\n\n  testConstructorPatternNilBinding =>\n    // BT-2884: `nil` in binding position tests the wrapped value is nil,\n    // rather than binding a variable named `nil` that matches unconditionally\n    self\n      assert: ((Result ok: nil) match: [\n        Result ok: nil -> \"explicit nil\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"explicit nil\"\n    self\n      assert: ((Result ok: 1) match: [\n        Result ok: nil -> \"explicit nil\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"other\"\n\n  testStringKeyDictPattern =>\n    // BT-1295: String keys in dict patterns — capture variable\n    d := #{\"event\" => \"click\", \"x\" => 5}\n    self\n      assert: (d match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"click\"\n    // String-key dict arm fallthrough: key missing\n    self\n      assert: (#{\"kind\" => \"x\"} match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // String-key dict arm fallthrough: subject is not a map\n    self\n      assert: (42 match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // String-key value equality check\n    self\n      assert: (d match: [\n        #{\"event\" => \"click\"} -> \"got click\";\n        #{\"event\" => _} -> \"other event\";\n        _ -> \"no event\"\n      ])\n      equals: \"got click\"\n    // Mixed symbol and string keys in one pattern\n    mixed := #{#id => 42, \"name\" => \"alice\"}\n    self\n      assert: (mixed match: [\n        #{#id => id, \"name\" => name} -> name;\n        _ -> \"no match\"\n      ])\n      equals: \"alice\"\n    // Multiple string-key bindings\n    resp := #{\"status\" => \"ok\", \"data\" => 99}\n    self\n      assert: (resp match: [\n        #{\"status\" => status, \"data\" => data} -> data;\n        _ -> 0\n      ])\n      equals: 99\n    // Negative integer literal value equality check\n    neg := #{\"score\" => -1}\n    self\n      assert: (neg match: [\n        #{\"score\" => -1} -> \"neg one\";\n        #{\"score\" => _} -> \"other\";\n        _ -> \"no score\"\n      ])\n      equals: \"neg one\"\n\n  testTuplePatternInMatchArm =>\n    // Tuple pattern arms — basic tagged tuple match\n    t := Tuple withAll: #(#ok, 42)\n    self\n      assert: (t match: [\n        {#ok, v} -> v;\n        {#error, _} -> 0;\n        _ -> -1\n      ])\n      equals: 42\n    // Tuple arm fallthrough: tag doesn't match\n    t2 := Tuple withAll: #(#error, \"oops\")\n    self\n      assert: (t2 match: [\n        {#ok, v} -> v;\n        {#error, msg} -> msg;\n        _ -> \"unknown\"\n      ])\n      equals: \"oops\"\n    // Tuple arm fallthrough: subject is not a tuple\n    self\n      assert: (42 match: [\n        {a, b} -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Tuple arm with variable binding\n    t3 := Erlang erlang list_to_tuple: #(10, 20)\n    self\n      assert: (t3 match: [\n        {a, b} -> a + b;\n        _ -> 0\n      ])\n      equals: 30",
       "explanation": "BT-406: Tests the match: expression — literal arms (integer, symbol, string), wildcard arms, variable capture, guards (when:), and multi-arm dispatch"
+    },
+    {
+      "id": "stdlib-test-pattern-mismatch-test",
+      "title": "PatternMismatchTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "PatternMismatchTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "object",
+        "pattern_mismatch_test",
+        "set",
+        "subclassing",
+        "testArrayLiteralMismatchKind",
+        "testArrayLiteralMismatchRaises",
+        "testMapMissingKeyStaysKeyError",
+        "testMatchNoArmKind",
+        "testMatchNoArmRaises",
+        "testTupleLiteralSlotMismatchKind",
+        "testTupleLiteralSlotMismatchRaises",
+        "testTupleSizeMismatchKind",
+        "testTupleSizeMismatchRaises"
+      ],
+      "source": "// BT-3943: user pattern failures (destructuring, match: with no arm) raise a\n// structured #pattern_mismatch, not an #internal_error.\n\nTestCase subclass: PatternMismatchTest\n\n  testTupleSizeMismatchKind =>\n    result := [\n      {_a, _b} := Tuple withAll: #(1, 2, 3)\n      #did_not_raise\n    ] on: Error do: [:e | e kind]\n    self assert: result equals: #pattern_mismatch\n\n  testTupleSizeMismatchRaises =>\n    self should: [\n      {_a, _b} := Tuple withAll: #(1, 2, 3)\n    ] raise: #pattern_mismatch\n\n  testTupleLiteralSlotMismatchKind =>\n    result := [\n      {#ok, _v} := Tuple withAll: #(#error, 42)\n      #did_not_raise\n    ] on: Error do: [:e | e kind]\n    self assert: result equals: #pattern_mismatch\n\n  testTupleLiteralSlotMismatchRaises =>\n    self should: [\n      {#ok, _v} := Tuple withAll: #(#error, 42)\n    ] raise: #pattern_mismatch\n\n  testArrayLiteralMismatchKind =>\n    result := [\n      #[#ok, _v] := #[#error, 42]\n      #did_not_raise\n    ] on: Error do: [:e | e kind]\n    self assert: result equals: #pattern_mismatch\n\n  testArrayLiteralMismatchRaises =>\n    self should: [#[#ok, _v] := #[#error, 42]] raise: #pattern_mismatch\n\n  testMatchNoArmKind =>\n    result := [\n      5 match: [\n        1 -> \"one\";\n        2 -> \"two\"\n      ]\n    ] on: Error do: [:e | e kind]\n    self assert: result equals: #pattern_mismatch\n\n  testMatchNoArmRaises =>\n    self\n      should: [\n        5 match: [\n          1 -> \"one\";\n          2 -> \"two\"\n        ]\n      ]\n      raise: #pattern_mismatch\n\n  testMapMissingKeyStaysKeyError =>\n    self should: [#{#missing => _v} := #{#present => 1}] raise: #key_error",
+      "explanation": "BT-3943: user pattern failures (destructuring, match: with no arm) raise a structured #pattern_mismatch, not an #internal_error."
     },
     {
       "id": "stdlib-test-perform-locally-test",

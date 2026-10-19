@@ -412,8 +412,8 @@ fn destructure_array_literal_element_emits_guard_check() {
         "should guard-check against the literal. Got: {out}"
     );
     assert!(
-        out.contains("'badmatch'"),
-        "mismatch should raise badmatch. Got: {out}"
+        out.contains("'pattern_mismatch'") && !out.contains("'badmatch'"),
+        "mismatch should raise pattern_mismatch. Got: {out}"
     );
 }
 
@@ -457,8 +457,8 @@ fn destructure_tuple_literal_element_emits_guard_check() {
         "should guard-check against the literal. Got: {out}"
     );
     assert!(
-        out.contains("'badmatch'"),
-        "mismatch should raise badmatch. Got: {out}"
+        out.contains("'pattern_mismatch'") && !out.contains("'badmatch'"),
+        "mismatch should raise pattern_mismatch. Got: {out}"
     );
 }
 

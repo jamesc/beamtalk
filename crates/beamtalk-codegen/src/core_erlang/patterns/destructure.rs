@@ -183,7 +183,7 @@ impl CoreErlangGenerator {
                         }
                         Pattern::Literal(lit, _span) => {
                             // Guard-check: extract the element and assert it equals the literal.
-                            // If it doesn't match, raise `{badmatch, Array}` mirroring tuple
+                            // If it doesn't match, raise `#pattern_mismatch` mirroring tuple
                             // literal destructuring.
                             let elem_var = self.fresh_temp_var("Elem");
                             let guard_ok_var = self.fresh_temp_var("GuardOk");
@@ -199,6 +199,11 @@ impl CoreErlangGenerator {
                                 "])",
                                 terminator,
                             ]);
+                            let mismatch_raise = self.pattern_mismatch_raise_doc(
+                                rhs_var,
+                                "destructure",
+                                "value does not match the destructuring pattern",
+                            );
                             docs.push(docvec![
                                 indent,
                                 leaf::var(guard_ok_var),
@@ -208,9 +213,9 @@ impl CoreErlangGenerator {
                                 lit_doc,
                                 "> when 'true' -> 'ok' <",
                                 leaf::var(mismatch_var),
-                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                                leaf::var(rhs_var.to_string()),
-                                "}) end",
+                                "> when 'true' -> ",
+                                mismatch_raise,
+                                " end",
                                 terminator,
                             ]);
                         }
@@ -249,6 +254,11 @@ impl CoreErlangGenerator {
                 let expected_arity = index_lit(elements.len());
                 let size_ok_var = self.fresh_temp_var("SizeOk");
                 let bad_arity_var = self.fresh_temp_var("BadArity");
+                let arity_raise = self.pattern_mismatch_raise_doc(
+                    rhs_var,
+                    "destructure",
+                    "value does not match the destructuring pattern",
+                );
                 docs.push(docvec![
                     indent,
                     leaf::var(size_ok_var),
@@ -258,9 +268,9 @@ impl CoreErlangGenerator {
                     expected_arity,
                     "> when 'true' -> 'ok' <",
                     leaf::var(bad_arity_var),
-                    "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                    leaf::var(rhs_var.to_string()),
-                    "}) end",
+                    "> when 'true' -> ",
+                    arity_raise,
+                    " end",
                     terminator,
                 ]);
                 for (idx, elem) in elements.iter().enumerate() {
@@ -283,8 +293,8 @@ impl CoreErlangGenerator {
                         }
                         Pattern::Literal(lit, _span) => {
                             // Guard-check: extract the element and assert it equals the literal.
-                            // If it doesn't match, raise `{badmatch, Tuple}` to mirror the arity
-                            // check error format above.
+                            // If it doesn't match, raise `#pattern_mismatch` like the arity
+                            // check above.
                             let elem_var = self.fresh_temp_var("Elem");
                             let guard_ok_var = self.fresh_temp_var("GuardOk");
                             let mismatch_var = self.fresh_temp_var("Mismatch");
@@ -299,6 +309,11 @@ impl CoreErlangGenerator {
                                 ")",
                                 terminator,
                             ]);
+                            let mismatch_raise = self.pattern_mismatch_raise_doc(
+                                rhs_var,
+                                "destructure",
+                                "value does not match the destructuring pattern",
+                            );
                             docs.push(docvec![
                                 indent,
                                 leaf::var(guard_ok_var),
@@ -308,9 +323,9 @@ impl CoreErlangGenerator {
                                 lit_doc,
                                 "> when 'true' -> 'ok' <",
                                 leaf::var(mismatch_var),
-                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                                leaf::var(rhs_var.to_string()),
-                                "}) end",
+                                "> when 'true' -> ",
+                                mismatch_raise,
+                                " end",
                                 terminator,
                             ]);
                         }

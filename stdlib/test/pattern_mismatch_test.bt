@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3943: user pattern failures (destructuring, match: with no arm) raise a
+// structured #pattern_mismatch, not an #internal_error.
+
+TestCase subclass: PatternMismatchTest
+
+  testTupleSizeMismatchKind =>
+    result := [
+      {_a, _b} := Tuple withAll: #(1, 2, 3)
+      #did_not_raise
+    ] on: Error do: [:e | e kind]
+    self assert: result equals: #pattern_mismatch
+
+  testTupleSizeMismatchRaises =>
+    self should: [
+      {_a, _b} := Tuple withAll: #(1, 2, 3)
+    ] raise: #pattern_mismatch
+
+  testTupleLiteralSlotMismatchKind =>
+    result := [
+      {#ok, _v} := Tuple withAll: #(#error, 42)
+      #did_not_raise
+    ] on: Error do: [:e | e kind]
+    self assert: result equals: #pattern_mismatch
+
+  testTupleLiteralSlotMismatchRaises =>
+    self should: [
+      {#ok, _v} := Tuple withAll: #(#error, 42)
+    ] raise: #pattern_mismatch
+
+  testArrayLiteralMismatchKind =>
+    result := [
+      #[#ok, _v] := #[#error, 42]
+      #did_not_raise
+    ] on: Error do: [:e | e kind]
+    self assert: result equals: #pattern_mismatch
+
+  testArrayLiteralMismatchRaises =>
+    self should: [#[#ok, _v] := #[#error, 42]] raise: #pattern_mismatch
+
+  testMatchNoArmKind =>
+    result := [
+      5 match: [
+        1 -> "one";
+        2 -> "two"
+      ]
+    ] on: Error do: [:e | e kind]
+    self assert: result equals: #pattern_mismatch
+
+  testMatchNoArmRaises =>
+    self
+      should: [
+        5 match: [
+          1 -> "one";
+          2 -> "two"
+        ]
+      ]
+      raise: #pattern_mismatch
+
+  testMapMissingKeyStaysKeyError =>
+    self should: [#{#missing => _v} := #{#present => 1}] raise: #key_error

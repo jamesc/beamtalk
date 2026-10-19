@@ -28,11 +28,11 @@ TestCase subclass: DestructuringTest
     self assert: value equals: 42
 
   testTupleDestructuringLiteralMismatchRaisesError =>
-    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
+    // When the literal slot does not match, a RuntimeError of kind #pattern_mismatch is raised.
     result := [
       {#ok, _val} := Tuple withAll: #(#error, 42)
       #did_not_raise
-    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    ] on: RuntimeError do: [:e | e kind == #pattern_mismatch]
     self assert: result equals: true
 
   testTupleDestructuringWithWildcard =>
@@ -72,11 +72,11 @@ TestCase subclass: DestructuringTest
     self assert: value equals: 42
 
   testArrayDestructuringLiteralMismatchRaisesError =>
-    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
+    // When the literal slot does not match, a RuntimeError of kind #pattern_mismatch is raised.
     result := [
       #[#ok, _val] := #[#error, 42]
       #did_not_raise
-    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    ] on: RuntimeError do: [:e | e kind == #pattern_mismatch]
     self assert: result equals: true
 
   testArrayDestructuringIntegerLiteral =>

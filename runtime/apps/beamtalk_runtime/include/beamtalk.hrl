@@ -80,7 +80,7 @@
 %%     no_superclass | class_already_exists | internal_error | dispatch_error |
 %%     callback_failed | assertion_failed | runtime_error | erlang_exit |
 %%     erlang_throw | missing_parameter | stdlib_shadowing |
-%%     stateful_block_dispatch |
+%%     stateful_block_dispatch | pattern_mismatch |
 %%     node_down | remote_code_mismatch | not_serialisable |
 %%     shape_version_ahead | shape_migration_failed |
 %%     wire_version_unsupported | invalid_node_name | insecure_distribution
