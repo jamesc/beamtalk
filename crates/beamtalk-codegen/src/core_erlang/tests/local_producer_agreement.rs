@@ -582,15 +582,43 @@ fn core_body_producers_in(
     }
 }
 
+/// The families of [`FRAMES`], as index ranges, one test each below
+/// (`per_family_tests!`, BT-3888), one to three frames apiece so no test
+/// runs long: the single loops and folds; a letrec loop in a fold and a fold
+/// in a letrec loop; an arm in a fold; the keyed iterations and satisfy
+/// tests, alone and nested; a closure in a fold; a loop or fold under an arm
+/// or closure of each fold and loop; a loop under a protected body or
+/// handler.
+const FRAME_FAMILIES: &[std::ops::Range<usize>] = &[
+    0..2,
+    2..4,
+    4..6,
+    6..8,
+    8..10,
+    10..11,
+    11..13,
+    13..15,
+    15..17,
+    17..19,
+    19..21,
+    21..23,
+    23..25,
+    25..27,
+    27..29,
+    29..30,
+    30..32,
+    32..34,
+];
+
 /// The producer half of ADR 0131 §6 for loop-body sites, both ways: a site
 /// the core rule (`loop_body_producer_sites` + `operand_producer_writes`)
 /// names is lowered by codegen's producer threading exactly its names, and
 /// codegen lowers no producer at a site the rule does not name. A program
-/// the Phase 0 checks reject is skipped.
-#[test]
-fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// the Phase 0 checks reject is skipped. Over one family of [`FRAMES`]: the
+/// whole proof is the per-family tests below.
+fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = 0;
-    for frame in FRAMES {
+    for frame in frames {
         for construct in CONSTRUCTS {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
@@ -605,7 +633,37 @@ fn every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer() {
             }
         }
     }
-    assert!(checked > 100, "only {checked} loop-body sites compared");
+    // Not vacuous, family by family: every family compares producer sites
+    // (the whole corpus once asserted more than 100 over its 34 frames).
+    assert!(
+        checked > 10,
+        "only {checked} loop-body sites compared in {frames:?}"
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = FRAMES,
+    families = FRAME_FAMILIES,
+    check = every_loop_body_site_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_loop_body_site_tests_cover_every_frame,
+    every_loop_body_site_in_a_counted_loop_or_a_do_is_lowered_by_the_producer => 0,
+    every_loop_body_site_in_a_times_repeat_or_a_while_loop_is_lowered_by_the_producer => 1,
+    every_loop_body_site_in_a_collect_or_an_inject_is_lowered_by_the_producer => 2,
+    every_loop_body_site_in_a_letrec_loop_in_a_fold_is_lowered_by_the_producer => 3,
+    every_loop_body_site_in_a_fold_in_a_letrec_loop_is_lowered_by_the_producer => 4,
+    every_loop_body_site_in_an_arm_of_a_do_is_lowered_by_the_producer => 5,
+    every_loop_body_site_in_a_keyed_iteration_is_lowered_by_the_producer => 6,
+    every_loop_body_site_in_a_satisfy_test_is_lowered_by_the_producer => 7,
+    every_loop_body_site_in_a_satisfy_test_or_keyed_iteration_in_a_do_is_lowered_by_the_producer => 8,
+    every_loop_body_site_in_a_loop_or_an_arm_in_a_keyed_iteration_is_lowered_by_the_producer => 9,
+    every_loop_body_site_in_a_keyed_iteration_in_a_loop_or_a_closure_in_a_do_is_lowered_by_the_producer => 10,
+    every_loop_body_site_in_a_loop_under_an_arm_or_closure_of_a_do_is_lowered_by_the_producer => 11,
+    every_loop_body_site_in_a_loop_under_an_arm_or_closure_of_a_collect_is_lowered_by_the_producer => 12,
+    every_loop_body_site_in_a_loop_under_an_arm_or_closure_of_an_inject_is_lowered_by_the_producer => 13,
+    every_loop_body_site_in_a_do_under_an_arm_or_closure_of_a_times_repeat_is_lowered_by_the_producer => 14,
+    every_loop_body_site_in_an_inject_under_an_arm_of_a_do_is_lowered_by_the_producer => 15,
+    every_loop_body_site_in_a_loop_under_a_protected_body_of_a_do_is_lowered_by_the_producer => 16,
+    every_loop_body_site_in_a_loop_under_a_handler_of_a_do_or_a_protected_body_of_an_inject_is_lowered_by_the_producer => 17,
 }
 
 /// Why [`loop_body_agreement`] failed for one program.

@@ -241,13 +241,22 @@ const HYBRID_LOOP_METHODS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Not covered by this corpus: class methods (a class-variable write is an in-place `put`,
-/// ADR 0130 §2, which threads nothing) and the REPL (no `self` field to write). Value types
-/// are covered by [`value_type_field_assignment_value_position_corpus`] below; the only
-/// exclusion there is a plain `Value subclass:`, which reports the immutability error.
+// Not covered by this corpus: class methods (a class-variable write is an in-place `put`,
+// ADR 0130 §2, which threads nothing) and the REPL (no `self` field to write). Value types
+// are covered by [`value_type_field_assignment_value_position_corpus`] below; the only
+// exclusion there is a plain `Value subclass:`, which reports the immutability error.
 
-#[test]
-fn field_assignment_value_position_corpus() {
+/// The families of [`SHAPES`], as index ranges, one test each below
+/// (`per_family_tests!`, BT-3888; each shape is one `erlc` run): the
+/// statement-level and conditional shapes; a loop, `do:` or exception body;
+/// the other fold, block and boolean bodies; the iteration and nil-testing
+/// bodies.
+const SHAPE_FAMILIES: &[std::ops::Range<usize>] = &[0..5, 5..11, 11..20, 20..30];
+
+/// Every position of [`POSITIONS`] in one family of [`SHAPES`]: the whole
+/// proof is the per-family tests below (and the hybrid loops,
+/// [`field_assignment_value_position_corpus_hybrid_loops`]).
+fn field_assignment_value_position_corpus(shapes: &[(&str, &str)]) {
     let passes = |src: &str| {
         catch_unwind(AssertUnwindSafe(|| {
             assert_compiles_through_erlc("test", &codegen(src));
@@ -255,7 +264,7 @@ fn field_assignment_value_position_corpus() {
         .is_ok()
     };
     let mut failures: Vec<String> = Vec::new();
-    for (shape_name, shape) in SHAPES {
+    for (shape_name, shape) in shapes {
         let cases: Vec<(&str, String)> = POSITIONS
             .iter()
             .enumerate()
@@ -280,6 +289,36 @@ fn field_assignment_value_position_corpus() {
             }
         }
     }
+    assert!(
+        failures.is_empty(),
+        "{} field-assignment case(s) fail verified codegen:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = SHAPES,
+    families = SHAPE_FAMILIES,
+    check = field_assignment_value_position_corpus,
+    partition = the_field_assignment_value_position_corpus_tests_cover_every_shape,
+    field_assignment_value_position_corpus_statement_and_conditional_shapes => 0,
+    field_assignment_value_position_corpus_loop_do_and_exception_shapes => 1,
+    field_assignment_value_position_corpus_fold_block_and_boolean_shapes => 2,
+    field_assignment_value_position_corpus_iteration_and_nil_shapes => 3,
+}
+
+/// The mixed-family hybrid loops of [`HYBRID_LOOP_METHODS`], each a whole
+/// method: the rest of the actor corpus above.
+#[test]
+fn field_assignment_value_position_corpus_hybrid_loops() {
+    let passes = |src: &str| {
+        catch_unwind(AssertUnwindSafe(|| {
+            assert_compiles_through_erlc("test", &codegen(src));
+        }))
+        .is_ok()
+    };
+    let mut failures: Vec<String> = Vec::new();
     for (name, body) in HYBRID_LOOP_METHODS {
         let src = format!("{HEADER}\n  probe =>\n{body}");
         if !passes(&src) {
@@ -288,7 +327,7 @@ fn field_assignment_value_position_corpus() {
     }
     assert!(
         failures.is_empty(),
-        "{} field-assignment case(s) fail verified codegen:\n\n{}",
+        "{} hybrid-loop field-assignment case(s) fail verified codegen:\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );
@@ -678,16 +717,75 @@ fn written_fields_survive(src: &str, index: usize, code: &str) -> Result<(), Str
 /// fails until the fixed entries are removed). BT-3816 flipped all of its pins; empty.
 const VT_PINNED_FAILURES: &[&str] = &[];
 
+/// One family per shape of [`VT_SHAPES`] (`per_family_tests!`, BT-3888): each shape is one
+/// `erlc` run per position, so one shape x one position family is the unit nextest spreads over
+/// cores.
+const VT_SHAPE_FAMILIES: &[std::ops::Range<usize>] =
+    &[0..1, 1..2, 2..3, 3..4, 4..5, 5..6, 6..7, 7..8, 8..9, 9..10];
+
+/// The families of [`VT_POSITIONS`], as index ranges (BT-3888): the plain value positions; the
+/// conditionals whose receiver or arms write; the loops and folds (and a conditional in a
+/// field's value). Every shape family runs once per position family
+/// (`VT_SHAPE_FAMILIES` x `VT_POSITION_FAMILIES`), so a statement-level shape, whose every
+/// position is an `erlc` run, is three tests rather than one long one.
+const VT_POSITION_FAMILIES: &[std::ops::Range<usize>] = &[0..13, 13..29, 29..48];
+
+/// The position families partition [`VT_POSITIONS`] (one `per_family_tests!` invocation each
+/// below, so every shape family x position family pair has exactly one test).
 #[test]
-fn value_type_field_assignment_value_position_corpus() {
+fn the_value_type_position_families_cover_every_position() {
+    beamtalk_core::test_helpers::corpus_families::assert_families_partition_the_list(
+        VT_POSITION_FAMILIES,
+        VT_POSITIONS.len(),
+        &[0, 1, 2],
+    );
+}
+
+/// The pins of [`VT_PINNED_FAILURES`] whose `shape / position` names a shape of `shapes` and a
+/// position of `positions`.
+fn vt_pins_for(shapes: &[(&str, &str, bool)], positions: &[(&str, &str)]) -> Vec<String> {
+    VT_PINNED_FAILURES
+        .iter()
+        .filter(|pin| {
+            let (shape_name, position_name) = pin.split_once(" / ").expect("`shape / position`");
+            shapes.iter().any(|(name, _, _)| *name == shape_name)
+                && positions.iter().any(|(name, _)| *name == position_name)
+        })
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+/// Every pin of [`VT_PINNED_FAILURES`] names a shape of [`VT_SHAPES`] and a position of
+/// [`VT_POSITIONS`]: a pin for a case no family holds would never be checked, so it could
+/// neither fail nor flip.
+#[test]
+fn every_value_type_field_assignment_corpus_pin_names_a_corpus_shape() {
+    let pinned = vt_pins_for(VT_SHAPES, VT_POSITIONS);
+    assert_eq!(
+        pinned.len(),
+        VT_PINNED_FAILURES.len(),
+        "pin(s) naming no shape of VT_SHAPES or position of VT_POSITIONS: {:?}",
+        VT_PINNED_FAILURES
+            .iter()
+            .filter(|p| !pinned.iter().any(|q| q == *p))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The value-type corpus over one family of [`VT_SHAPES`] x one family of [`VT_POSITIONS`]:
+/// the whole proof is the per-family tests below.
+fn value_type_field_assignment_value_position_corpus(
+    shapes: &[(&str, &str, bool)],
+    positions: &[(&str, &str)],
+) {
     let mut failing: Vec<String> = Vec::new();
     let mut details: Vec<String> = Vec::new();
     let mut compiled = 0usize;
     // Statement-level shapes cannot be rejected: every unpinned case of one must compile.
     let mut must_compile = 0usize;
     let mut must_compile_compiled = 0usize;
-    for (shape_name, shape, shape_may_reject) in VT_SHAPES {
-        for (i, (position_name, position)) in VT_POSITIONS.iter().enumerate() {
+    for (shape_name, shape, shape_may_reject) in shapes {
+        for (i, (position_name, position)) in positions.iter().enumerate() {
             let stmt = position.replace("EXPR", "(self.n := 5)");
             let src = format!(
                 "{VT_HEADER}\n  probe{i} =>\n{}",
@@ -734,10 +832,7 @@ fn value_type_field_assignment_value_position_corpus() {
             }
         }
     }
-    let pinned: Vec<String> = VT_PINNED_FAILURES
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    let pinned = vt_pins_for(shapes, positions);
     let unexpected: Vec<&String> = failing.iter().filter(|f| !pinned.contains(f)).collect();
     assert!(
         unexpected.is_empty(),
@@ -755,15 +850,95 @@ fn value_type_field_assignment_value_position_corpus() {
     }
     // The floor is derived, not a magic number: a shape that cannot be rejected must compile
     // every unpinned case, so a regression to blanket rejection cannot hide behind the
-    // `RejectedCleanly` allowance, and at least one case must compile at all.
+    // `RejectedCleanly` allowance, and at least one case of such a shape must compile at all.
+    // A family of shapes that may be rejected may compile none: today every case of
+    // `conditional_arm`, `local_threading_conditional_arm`, `loop_body`, `do_block_body` and
+    // `on_do_protected` is a structured rejection.
     assert_eq!(
         must_compile_compiled, must_compile,
         "{must_compile_compiled} of {must_compile} unpinned statement-level value-type cases compiled; they cannot be rejected"
     );
+    let holds_a_statement_level_shape = shapes.iter().any(|(_, _, may_reject)| !may_reject);
     assert!(
-        compiled >= must_compile && compiled > 0,
-        "only {compiled} value-type cases compiled"
+        compiled >= must_compile && (compiled > 0 || !holds_a_statement_level_shape),
+        "only {compiled} value-type cases compiled in {:?}",
+        shapes.iter().map(|(name, _, _)| name).collect::<Vec<_>>()
     );
+}
+
+/// [`value_type_field_assignment_value_position_corpus`] over the plain value positions.
+fn vt_corpus_in_plain_positions(shapes: &[(&str, &str, bool)]) {
+    value_type_field_assignment_value_position_corpus(
+        shapes,
+        &VT_POSITIONS[VT_POSITION_FAMILIES[0].clone()],
+    );
+}
+
+/// [`value_type_field_assignment_value_position_corpus`] over the conditional positions.
+fn vt_corpus_in_conditional_positions(shapes: &[(&str, &str, bool)]) {
+    value_type_field_assignment_value_position_corpus(
+        shapes,
+        &VT_POSITIONS[VT_POSITION_FAMILIES[1].clone()],
+    );
+}
+
+/// [`value_type_field_assignment_value_position_corpus`] over the loop and fold positions.
+fn vt_corpus_in_loop_and_fold_positions(shapes: &[(&str, &str, bool)]) {
+    value_type_field_assignment_value_position_corpus(
+        shapes,
+        &VT_POSITIONS[VT_POSITION_FAMILIES[2].clone()],
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = VT_SHAPES,
+    families = VT_SHAPE_FAMILIES,
+    check = vt_corpus_in_plain_positions,
+    partition = the_value_type_field_assignment_value_position_corpus_tests_cover_every_shape_in_plain_positions,
+    value_type_field_assignment_value_position_corpus_then_read_in_plain_positions => 0,
+    value_type_field_assignment_value_position_corpus_last_statement_in_plain_positions => 1,
+    value_type_field_assignment_value_position_corpus_between_field_writes_in_plain_positions => 2,
+    value_type_field_assignment_value_position_corpus_conditional_arm_in_plain_positions => 3,
+    value_type_field_assignment_value_position_corpus_local_threading_conditional_arm_in_plain_positions => 4,
+    value_type_field_assignment_value_position_corpus_conditional_condition_in_plain_positions => 5,
+    value_type_field_assignment_value_position_corpus_loop_body_in_plain_positions => 6,
+    value_type_field_assignment_value_position_corpus_do_block_body_in_plain_positions => 7,
+    value_type_field_assignment_value_position_corpus_on_do_protected_in_plain_positions => 8,
+    value_type_field_assignment_value_position_corpus_block_value_in_plain_positions => 9,
+}
+
+beamtalk_core::per_family_tests! {
+    list = VT_SHAPES,
+    families = VT_SHAPE_FAMILIES,
+    check = vt_corpus_in_conditional_positions,
+    partition = the_value_type_field_assignment_value_position_corpus_tests_cover_every_shape_in_conditional_positions,
+    value_type_field_assignment_value_position_corpus_then_read_in_conditional_positions => 0,
+    value_type_field_assignment_value_position_corpus_last_statement_in_conditional_positions => 1,
+    value_type_field_assignment_value_position_corpus_between_field_writes_in_conditional_positions => 2,
+    value_type_field_assignment_value_position_corpus_conditional_arm_in_conditional_positions => 3,
+    value_type_field_assignment_value_position_corpus_local_threading_conditional_arm_in_conditional_positions => 4,
+    value_type_field_assignment_value_position_corpus_conditional_condition_in_conditional_positions => 5,
+    value_type_field_assignment_value_position_corpus_loop_body_in_conditional_positions => 6,
+    value_type_field_assignment_value_position_corpus_do_block_body_in_conditional_positions => 7,
+    value_type_field_assignment_value_position_corpus_on_do_protected_in_conditional_positions => 8,
+    value_type_field_assignment_value_position_corpus_block_value_in_conditional_positions => 9,
+}
+
+beamtalk_core::per_family_tests! {
+    list = VT_SHAPES,
+    families = VT_SHAPE_FAMILIES,
+    check = vt_corpus_in_loop_and_fold_positions,
+    partition = the_value_type_field_assignment_value_position_corpus_tests_cover_every_shape_in_loop_and_fold_positions,
+    value_type_field_assignment_value_position_corpus_then_read_in_loop_and_fold_positions => 0,
+    value_type_field_assignment_value_position_corpus_last_statement_in_loop_and_fold_positions => 1,
+    value_type_field_assignment_value_position_corpus_between_field_writes_in_loop_and_fold_positions => 2,
+    value_type_field_assignment_value_position_corpus_conditional_arm_in_loop_and_fold_positions => 3,
+    value_type_field_assignment_value_position_corpus_local_threading_conditional_arm_in_loop_and_fold_positions => 4,
+    value_type_field_assignment_value_position_corpus_conditional_condition_in_loop_and_fold_positions => 5,
+    value_type_field_assignment_value_position_corpus_loop_body_in_loop_and_fold_positions => 6,
+    value_type_field_assignment_value_position_corpus_do_block_body_in_loop_and_fold_positions => 7,
+    value_type_field_assignment_value_position_corpus_on_do_protected_in_loop_and_fold_positions => 8,
+    value_type_field_assignment_value_position_corpus_block_value_in_loop_and_fold_positions => 9,
 }
 
 /// BT-3827 (flips the former `field_writing_fold_bodies_stay_a_structured_rejection` pin): a

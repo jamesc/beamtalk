@@ -172,8 +172,15 @@ const BODIES: &[(&str, &str)] = &[
     ),
 ];
 
-#[test]
-fn loop_body_self_send_operands_thread_state() {
+/// The families of [`BODIES`], as index ranges, one test each below
+/// (`per_family_tests!`, BT-3888): the `do:` bodies; `collect:` and
+/// `inject:into:`; the filter and search folds; the other folds and a
+/// conditional arm in a `do:`; the Letrec bodies (the control group).
+const BODY_FAMILIES: &[std::ops::Range<usize>] = &[0..5, 5..9, 9..15, 15..21, 21..24];
+
+/// Every self-send operand shape in one family of [`BODIES`]: the whole proof
+/// is the per-family tests below.
+fn loop_body_self_send_operands_thread_state(bodies: &[(&str, &str)]) {
     let passes = |src: &str| {
         catch_unwind(AssertUnwindSafe(|| {
             assert_compiles_through_erlc("test", &codegen(src));
@@ -181,7 +188,7 @@ fn loop_body_self_send_operands_thread_state() {
         .is_ok()
     };
     let mut failures: Vec<String> = Vec::new();
-    for (body_name, body) in BODIES {
+    for (body_name, body) in bodies {
         let cases: Vec<(&str, String)> = SELF_SENDS
             .iter()
             .enumerate()
@@ -211,6 +218,18 @@ fn loop_body_self_send_operands_thread_state() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+beamtalk_core::per_family_tests! {
+    list = BODIES,
+    families = BODY_FAMILIES,
+    check = loop_body_self_send_operands_thread_state,
+    partition = the_loop_body_self_send_tests_cover_every_body,
+    loop_body_self_send_operands_thread_state_in_do_bodies => 0,
+    loop_body_self_send_operands_thread_state_in_collect_and_inject_bodies => 1,
+    loop_body_self_send_operands_thread_state_in_filter_and_search_bodies => 2,
+    loop_body_self_send_operands_thread_state_in_the_other_fold_bodies => 3,
+    loop_body_self_send_operands_thread_state_in_letrec_bodies => 4,
 }
 
 /// BT-3814: positions that do not lower a self-send *statement* through

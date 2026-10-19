@@ -37,6 +37,12 @@ pub mod class_var_program;
 #[cfg(any(test, feature = "test"))]
 pub mod statement_probes;
 
+// BT-3888: one `#[test]` per family of a shared corpus list
+// (`per_family_tests!`), shared by the `beamtalk-codegen` and `beamtalk-repl`
+// corpus proofs.
+#[cfg(any(test, feature = "test"))]
+pub mod corpus_families;
+
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
 /// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary
