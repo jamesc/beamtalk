@@ -89,6 +89,30 @@ fn every_construct_at_every_position_that_rebinds_a_body_local_is_an_error() {
     );
 }
 
+// PIN-BUG BT-3947: the one source path to a Tier 2 body that survives BT-3922
+// (found empirically): a block passed to an Erlang FFI call that writes a
+// captured local goes through `generate_erlang_interop_wrapper` and answered
+// `#(0)` for this program, silently, with the validator on.
+#[test]
+fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_is_an_error() {
+    let src = "Actor subclass: G
+  state: hits = 0
+  ffi =>
+    t := 0
+    ys := #(1, 2)
+    (Erlang lists)
+      map: [:x |
+        t := t + 1
+        n := 0
+        ys do: [:y | n := n + y]
+        n
+      ]
+      with: #(1)
+";
+    let e = compile(src).expect_err("must not answer #(0) silently");
+    assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}");
+}
+
 #[test]
 fn a_construct_that_rebinds_a_captured_local_is_not_this_error() {
     // `c` is captured-mutated by the block (seeded into `StateAcc` by the
