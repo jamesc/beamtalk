@@ -1616,7 +1616,9 @@ core-diff-modes OUT_DIR="target/core-diff-modes":
     just core-diff-snapshot "$OUT/snapshot-only" snapshot-only
     just core-diff-snapshot "$OUT/full" full
     for d in snapshot-only full; do
-        if ! find "$OUT/$d" -name '*.core' | grep -q .; then
+        # `-print -quit`, not `| grep -q .`: under pipefail, grep exiting on
+        # the first match SIGPIPEs find and fails the pipeline.
+        if [[ -z "$(find "$OUT/$d" -name '*.core' -print -quit)" ]]; then
             echo "❌ core-diff-modes: $d snapshot holds no .core files" >&2
             exit 1
         fi
