@@ -12,7 +12,7 @@ use super::*;
 const APPLY_PENDING_STOP: &str = "call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)";
 const CLEAR_PENDING_STOP: &str = "call 'beamtalk_actor':'clear_pending_stop'()";
 
-/// Every gen_server callback the actor codegen can emit.
+/// Every `gen_server` callback the actor codegen can emit.
 const CALLBACK_HEADERS: [&str; 4] = [
     "'handle_continue'/2 = fun",
     "'handle_cast'/2 = fun",
