@@ -47,9 +47,9 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, conditional_arm_blocks, conditional_producer_writes,
-    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
-    group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
+    RootMethodKind, block_literal_of_other_arity, conditional_arm_blocks,
+    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
+    exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
     operand_producer_writes, outer_local_writes, producer_body_block,
@@ -2522,6 +2522,16 @@ impl<'d> Walker<'d> {
                 {
                     self.report_literal(block, &Escape::Condition(sel.clone()));
                 }
+                // BT-3884: a block literal sent a `value`-family selector of
+                // another arity (`[t := t + 1] value: 1`) is applied, never
+                // inlined ([`block_literal_of_other_arity`]): the send raises
+                // `arity_mismatch` and the body never runs, so the block
+                // neither threads its writes nor escapes with them. (A
+                // parenthesized block is a block value, below, whatever its
+                // arity: it is compiled as a closure.)
+                Expression::Block(_)
+                    if block_literal_of_other_arity(receiver, selector, arguments.len())
+                        .is_some() => {}
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }

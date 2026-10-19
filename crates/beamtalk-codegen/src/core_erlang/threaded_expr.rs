@@ -1457,25 +1457,6 @@ impl CoreErlangGenerator {
         out
     }
 
-    /// BT-3881: whether `receiver`, sent a `value`-family selector with
-    /// `arity` arguments, is a block literal of another arity
-    /// (`beamtalk_core`'s `block_literal_arity_matches`). Such a send is never
-    /// inlined, in the REPL (root or arm) or in a class, value-type or actor
-    /// method: it lowers through `generate_block_arity_mismatch`, a stand-in
-    /// fun of the block's own arity whose application raises `badarity` (the
-    /// structured `arity_mismatch` error) at run time, and the block body is
-    /// never compiled. The same rule keeps the send out of the REPL producer
-    /// rule (`repl_evaluated_block`), the method producer rule
-    /// (`literal_block_value_arm`) and every Tier 2 statement lowering
-    /// (`is_tier2_value_call`, `inline_block_captured_mutations`).
-    pub(in crate::core_erlang) fn applies_block_of_other_arity(
-        receiver: &Expression,
-        arity: usize,
-    ) -> bool {
-        matches!(receiver, Expression::Block(block)
-            if !beamtalk_core::semantic_analysis::block_facts::block_literal_arity_matches(block, arity))
-    }
-
     /// Whether `expr` is a local-threading producer
     /// ([`Self::local_producer_locals`]) or has one at a sequenced operand
     /// site — the question a loop-body statement lowering asks to leave the
