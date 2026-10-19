@@ -287,25 +287,35 @@ watch_peer_connection(Peer, PeerNode) ->
 watch_peer_connection_loop(MRef, PeerNode) ->
     receive
         {nodedown, PeerNode, Info} ->
-            Reason = proplists:get_value(nodedown_reason, Info, undefined),
-            case lists:member(Reason, ?EXPECTED_NODEDOWN_REASONS) of
-                true ->
-                    ok;
-                false ->
-                    ?LOG_ERROR("Distribution connection to a test peer was lost unexpectedly", #{
-                        node => PeerNode,
-                        nodedown_reason => Reason,
-                        hint =>
-                            "'killed' means the emulator tore the connection down itself "
-                            "(BT-3929); rerun with logger_level warning to see why",
-                        domain => [beamtalk, runtime]
-                    })
-            end,
+            report_nodedown(PeerNode, Info),
             watch_peer_connection_loop(MRef, PeerNode);
         {'DOWN', MRef, process, _Peer, _Reason} ->
-            ok;
+            %% The control process is gone (stop_peer/1, or it crashed). A
+            %% `nodedown` for the same event can already be queued behind
+            %% this `DOWN` — report it before leaving rather than lose it.
+            receive
+                {nodedown, PeerNode, Info} -> report_nodedown(PeerNode, Info)
+            after 0 -> ok
+            end;
         _Other ->
             watch_peer_connection_loop(MRef, PeerNode)
+    end.
+
+-spec report_nodedown(node(), [{atom(), term()}]) -> ok.
+report_nodedown(PeerNode, Info) ->
+    Reason = proplists:get_value(nodedown_reason, Info, undefined),
+    case lists:member(Reason, ?EXPECTED_NODEDOWN_REASONS) of
+        true ->
+            ok;
+        false ->
+            ?LOG_ERROR("Distribution connection to a test peer was lost unexpectedly", #{
+                node => PeerNode,
+                nodedown_reason => Reason,
+                hint =>
+                    "'killed' means the emulator tore the connection down itself "
+                    "(BT-3929); rerun with logger_level warning to see why",
+                domain => [beamtalk, runtime]
+            })
     end.
 
 -doc """
