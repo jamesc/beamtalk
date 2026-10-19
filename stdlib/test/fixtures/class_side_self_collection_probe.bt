@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3935: a class that defines `do:` class-side and sends `self do: [...]`
+// from another class method. The send is dispatched to the class's own
+// process, so it cannot run in place.
+
+Value subclass: ClassSideSelfCollectionProbe
+
+  class do: aBlock => #(1, 2, 3) do: aBlock
+
+  class countViaSelfDo => self do: [:x | x]

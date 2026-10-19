@@ -123,3 +123,16 @@ TestCase subclass: TestCaseAssertionTest
     self should: [
       TestCase new assertError: (Result error: #wrong_error) equals: #not_found
     ] raise: #assertion_failed
+
+  testShouldRaiseAgreesWithOnDoKind =>
+    // BT-3930: should:raise: uses the same normalisation as on:do:
+    self should: [#{#missing => _v} := #{#present => 1}] raise: #key_error
+    self assert: ([
+      #{#missing => _v} := #{#present => 1}
+    ] on: Error do: [:e | e kind]) equals: #key_error
+    self should: [1 / 0] raise: #type_error
+    self assert: ([1 / 0] on: Error do: [:e | e kind]) equals: #type_error
+    self should: [[:x | x] value] raise: #arity_mismatch
+    self assert: ([
+      [:x | x] value
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch

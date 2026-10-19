@@ -1574,32 +1574,29 @@ class_remove_from_system_has_subclasses_test_() ->
         ]
     end}.
 
-%%% --- classRemoveFromSystem/1 — dynamic class hits code:delete failure ---
-%%% Dynamic classes (class_builder) can't be code:delete'd, so removal raises
-%%% a runtime_error at the delete step. This test verifies the error path.
+%%% --- classRemoveFromSystem/1 — dynamic (ClassBuilder) class, no BEAM module ---
+%%% BT-3895: a dynamic class has no loaded module behind it, so code:delete
+%%% answers false. That is not an unload failure; removal must succeed and
+%%% leave the registry empty.
 
-class_remove_from_system_code_delete_fails_test_() ->
+class_remove_from_system_dynamic_class_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1959RemoveCodeDel', #{}, #{}),
                 try
-                    %% Verify class exists before removal attempt
                     ?assertNotEqual(
                         undefined,
                         beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
                     ),
-                    %% Dynamic class removal fails at code:delete — raises runtime_error
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = runtime_error}
-                        },
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystem(ClassObj)
+                    ?assertEqual(
+                        nil, beamtalk_behaviour_intrinsics:classRemoveFromSystem(ClassObj)
+                    ),
+                    ?assertEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
                     )
                 after
-                    %% Class gen_server was stopped by removeFromSystem before error;
-                    %% stop is a no-op if already dead
                     try
                         gen_server:stop(Pid, normal, 5000)
                     catch
@@ -1610,9 +1607,7 @@ class_remove_from_system_code_delete_fails_test_() ->
         ]
     end}.
 
-%%% --- classRemoveFromSystemByName/1 — dynamic class hits code:delete failure ---
-
-class_remove_from_system_by_name_code_delete_fails_test_() ->
+class_remove_from_system_by_name_dynamic_class_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
@@ -1622,14 +1617,15 @@ class_remove_from_system_by_name_code_delete_fails_test_() ->
                         undefined,
                         beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
                     ),
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = runtime_error}
-                        },
+                    ?assertEqual(
+                        nil,
                         beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
                             'BT1959RemoveByNameFail'
                         )
+                    ),
+                    ?assertEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
                     )
                 after
                     try

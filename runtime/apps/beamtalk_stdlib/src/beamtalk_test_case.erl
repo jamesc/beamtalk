@@ -80,12 +80,20 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
             }),
             beamtalk_error:raise(NoRaiseErr3)
     catch
-        _:Exception ->
-            ActualKind = extract_error_kind(Exception),
-            case ActualKind of
-                ExpectedKind ->
+        Class:Exception:Stack ->
+            %% BT-3930: classify with the same normalisation `on:do:` uses
+            %% (beamtalk_exception_handler:ensure_wrapped/3), so a raw Erlang
+            %% error such as {badkey, K} reports the same kind (key_error) here
+            %% as `e kind` does inside `on:do:`.
+            ActualKind = wrapped_error_kind(Class, Exception, Stack),
+            %% extract_error_kind/1 is kept only as a legacy alias so existing
+            %% `should: [...] raise: #badarith` (raw atom) assertions still pass.
+            case
+                ExpectedKind =:= ActualKind orelse ExpectedKind =:= extract_error_kind(Exception)
+            of
+                true ->
                     nil;
-                _ ->
+                false ->
                     MismatchErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
                     MismatchErr1 = beamtalk_error:with_selector(MismatchErr0, 'should:raise:'),
                     MismatchMsg = iolist_to_binary(
@@ -671,7 +679,25 @@ inject_test_context(FailMsg, Context) ->
     <<FailMsg/binary, Context/binary>>.
 
 -doc """
-Extract the error kind from an exception.
+Kind of an exception after the `on:do:` normalisation (ADR 0015).
+
+Futures rejected by actor errors and actor gen_server exits are unwrapped first
+(`ensure_wrapped/3` only unwraps these for `throw`), then the term is wrapped by
+`beamtalk_exception_handler:ensure_wrapped/3`, the canonical classifier.
+""".
+-spec wrapped_error_kind(atom(), term(), list()) -> atom().
+wrapped_error_kind(Class, {future_rejected, Reason}, Stack) ->
+    wrapped_error_kind(Class, Reason, Stack);
+wrapped_error_kind(Class, {error, Wrapped}, Stack) when is_map(Wrapped) ->
+    wrapped_error_kind(Class, Wrapped, Stack);
+wrapped_error_kind(Class, Exception, Stack) ->
+    case beamtalk_exception_handler:ensure_wrapped(Class, Exception, Stack) of
+        #{error := #beamtalk_error{kind = Kind}} -> Kind;
+        _ -> error
+    end.
+
+-doc """
+Legacy error-kind extraction (pre BT-3930), kept as an alias for raw atoms.
 
 Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
 and raw Erlang atom errors (e.g., badarith, badarg).

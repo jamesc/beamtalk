@@ -1399,7 +1399,7 @@ enum Escape {
     /// An argument of this collection message sent to `self` or `super` in
     /// an actor instance method: a dispatched self-send, so the actor's own
     /// method runs the block, not the inlined collection loop (BT-3908).
-    ActorSelfSend(&'static str, EcoString),
+    ActorSelfSend(&'static str, &'static str, EcoString),
     /// A handler of this `Dictionary` lookup where the compiler does not lower
     /// it in place (BT-3798: its receiver is statically not a `Dictionary`,
     /// or the lookup is not in a producer position).
@@ -1434,8 +1434,8 @@ impl Escape {
             Self::Passed(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
             ),
-            Self::ActorSelfSend(receiver, selector) => format!(
-                "passed to `{receiver} {selector}`, which runs the actor's own `{selector}` method \
+            Self::ActorSelfSend(receiver, owner, selector) => format!(
+                "passed to `{receiver} {selector}`, which runs the {owner} own `{selector}` method \
                  rather than the collection loop the compiler threads it through"
             ),
             Self::Lookup(selector) => format!(
@@ -1472,7 +1472,11 @@ impl Escape {
                  the new value from the block and assign it where the block is called"
                 )
             }
-            Self::ActorSelfSend(_, selector) => format!(
+            Self::ActorSelfSend(_, "class's", selector) => format!(
+                "send `{selector}` to the collection itself rather than to `self`, \
+                 or return the new value from the block and assign it where it is called"
+            ),
+            Self::ActorSelfSend(_, _, selector) => format!(
                 "send `{selector}` to the collection itself (`self.items {selector} [...]`), \
                  or return the new value from the block and assign it where it is called"
             ),
@@ -2444,7 +2448,9 @@ impl<'d> Walker<'d> {
 
     /// Whether `expr` is a collection-message send (a `Fold`-family
     /// [`local_threading_construct`]: `do:`, `collect:`, `inject:into:`, ...)
-    /// to `self` or `super` in an actor instance method. Codegen never lowers
+    /// to `self` or `super` in an actor instance method or a class-side method
+    /// (BT-3935: `self` is the class, whose own class-side `do:` runs in the
+    /// class process and is reached only by a dispatched send). Codegen never lowers
     /// it in place: it is a dispatched self-send, so its block literal is
     /// passed to the actor's own method and escapes. Its writes were carried
     /// only by the callee's ADR 0128 opaque-callable fold, which ADR 0133
@@ -2453,7 +2459,7 @@ impl<'d> Walker<'d> {
         let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() else {
             return false;
         };
-        self.context == Actor
+        matches!(self.context, Actor | Class)
             && (matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
                 || matches!(receiver.unwrap_parens(), Expression::Super(_)))
             && local_threading_construct(expr)
@@ -2554,7 +2560,12 @@ impl<'d> Walker<'d> {
             } else {
                 "self"
             };
-            Escape::ActorSelfSend(word, sel.clone())
+            let owner = if self.context == Class {
+                "class's"
+            } else {
+                "actor's"
+            };
+            Escape::ActorSelfSend(word, owner, sel.clone())
         } else if inlined {
             self.passed_escape(receiver, &sel)
         } else {
