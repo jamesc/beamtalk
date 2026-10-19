@@ -636,24 +636,31 @@ fn dependency_protocol_never_shadows_the_stdlib_one_bt_3915() {
         )
         .unwrap();
     };
-    let lint = || {
+    // `build` (not `lint`) renders hints; each `write_rank` changes the
+    // source, so every build recompiles `Rank.bt`.
+    let build = || {
         let output = cli_common::beamtalk()
             .current_dir(&consumer)
-            .arg("lint")
+            .arg("build")
             .output()
             .unwrap();
-        String::from_utf8_lossy(&output.stderr).into_owned()
+        assert!(output.status.success(), "{output:?}");
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
     };
 
     write_rank("Comparable");
-    let stderr = lint();
+    let stderr = build();
     assert!(
         !stderr.contains("unknown protocol") && !stderr.contains("provides no methods"),
         "a bare `uses: Comparable` must resolve to the stdlib's, got:\n{stderr}"
     );
 
     write_rank("producer@Comparable");
-    let stderr = lint();
+    let stderr = build();
     assert!(
         !stderr.contains("unknown protocol") && stderr.contains("provides no methods"),
         "`uses: producer@Comparable` must resolve to the dependency's, got:\n{stderr}"
