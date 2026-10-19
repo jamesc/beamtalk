@@ -19,6 +19,12 @@ Covers the four scenarios BT-3578's acceptance criteria call out:
 3. A sync send to a dead remote pid on a live node raises `actor_dead`.
 4. Announcements still deliver to remote subscribers (regression check
    for BT-2530).
+
+Plus one for the harness itself (BT-3929):
+
+5. A dropped distribution connection leaves the peer alive and the next
+   call auto-connects — the `standard_io` control channel
+   `beamtalk_dist_test_helper:start_peer/2` now defaults to.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -235,6 +241,39 @@ node_down_on_killed_peer_test_() ->
             after
                 %% Already down by now in the normal case; stop_peer/1 is
                 %% safe to call again (idempotent — see its doc).
+                beamtalk_dist_test_helper:stop_peer(Peer)
+            end
+        end)}.
+
+%%====================================================================
+%% 5. A dropped distribution connection does not take the peer with it
+%%    (BT-3929 — beamtalk_dist_test_helper:start_peer/2's `standard_io`
+%%    default)
+%%====================================================================
+
+peer_survives_dropped_connection_test_() ->
+    {timeout, 30,
+        ?_test(begin
+            {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt3929_dropped"),
+            try
+                ok = net_kernel:monitor_nodes(true),
+                ?assert(lists:member(PeerNode, nodes())),
+                %% Sever ordinary distribution — what a connection the
+                %% emulator tears down looks like from here. With `peer`'s
+                %% distribution-based control channel this halted the peer,
+                %% so every later call in the fixture raised node_down.
+                true = erlang:disconnect_node(PeerNode),
+                receive
+                    {nodedown, PeerNode} -> ok
+                after 5000 -> erlang:error({no_nodedown, PeerNode})
+                end,
+                ?assertNot(lists:member(PeerNode, nodes())),
+                %% The next call auto-connects, and the peer is still there
+                %% to answer it.
+                ?assertEqual(PeerNode, rpc:call(PeerNode, erlang, node, [])),
+                ?assert(lists:member(PeerNode, nodes()))
+            after
+                net_kernel:monitor_nodes(false),
                 beamtalk_dist_test_helper:stop_peer(Peer)
             end
         end)}.
