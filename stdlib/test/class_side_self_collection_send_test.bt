@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3935: `self do: [...]` in a class method, where the class defines `do:`
+// class-side, re-enters the class's own process. It must raise a structured
+// `dispatch_error`, not a raw `calling_self` exit. (A block that assigns a
+// captured local there is a compile-time escaping-block error.)
+
+TestCase subclass: ClassSideSelfCollectionSendTest
+
+  testSelfDoInClassMethodRaisesStructuredError =>
+    self should: [
+      ClassSideSelfCollectionProbe countViaSelfDo
+    ] raise: #dispatch_error

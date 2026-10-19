@@ -3360,6 +3360,24 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     );
 }
 
+#[test]
+fn test_value_type_long_class_method_selector_exports_hashed_atom() {
+    // BT-3894: a Value-type module must export the same hashed `class_kw_<hex>`
+    // name it defines for an over-long class-method selector, not the raw atom.
+    let long_sel = "a".repeat(250);
+    let src = format!("Value subclass: LongVal\n  class {long_sel} => 42\n");
+    let code = codegen_source(&src);
+    assert!(
+        !code.contains(&format!("class_{long_sel}")),
+        "oversized 'class_<selector>' atom must not appear. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_kw_"),
+        "hashed export missing. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
 /// BT-3666: in an open class a class-side self-send to a selector the class
 /// itself defines is a guarded direct call: the fast branch is only taken when
 /// the receiver is this very class and nothing shadows the compiled method;
