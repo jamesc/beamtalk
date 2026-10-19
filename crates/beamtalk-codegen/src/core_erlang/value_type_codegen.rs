@@ -304,6 +304,7 @@ impl CoreErlangGenerator {
 
         // Collect all function exports for the module header.
         let exports = Self::build_value_type_exports(
+            module,
             class,
             auto_methods.as_ref(),
             has_explicit_new,
@@ -418,6 +419,7 @@ impl CoreErlangGenerator {
     /// Includes constructors (`new/0`, `new/1`), instance methods, auto-generated
     /// slot methods (`dispatch/3`, `has_method/1`, `superclass/0`, `register_class/0`), and class methods.
     fn build_value_type_exports(
+        module: &Module,
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
         has_explicit_new: bool,
@@ -476,17 +478,11 @@ impl CoreErlangGenerator {
         // Static reflection metadata for zero-process queries
         parts.push(Document::Str("'__beamtalk_meta'/0"));
 
-        // Class method exports
-        for method in &class.class_methods {
-            if method.kind == MethodKind::Primary {
-                let arity = method.parameters.len() + 1; // +1 for ClassSelf
-                let mut class_fn_name = String::from("class_");
-                class_fn_name.push_str(&method.selector.name());
-                parts.push(leaf::fname(class_fn_name, arity));
-            }
-        }
-
-        join(parts, &Document::Str(", "))
+        // Class method exports: the one shared builder (hashes over-long selectors)
+        docvec![
+            join(parts, &Document::Str(", ")),
+            Self::build_class_method_export_doc(module)
+        ]
     }
 
     /// Builds the Core Erlang `module 'Name' [...] attributes [...]` header document.
