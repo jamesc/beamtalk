@@ -23,6 +23,7 @@
 use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::trait_expansion;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -73,6 +74,12 @@ pub struct ProtocolInfo {
     /// answering only `methods`, unaffected. Class-side provisions are
     /// post-v1 (§9), so there is no `class_provided_selectors` counterpart.
     pub provided_selectors: Vec<EcoString>,
+    /// The dependency package this protocol was carried in from, or `None`
+    /// for the package being compiled (and for a REPL/fixture entry). Stamped
+    /// by the loader that carries a dependency's protocols, like
+    /// [`ProtocolDefinition::package`]; [`ProtocolRegistry::add_pre_loaded`]
+    /// reads it to apply the `uses:` shadowing rule (BT-3941).
+    pub package: Option<EcoString>,
     /// Source span of the protocol definition (for diagnostics).
     pub span: Span,
 }
@@ -114,6 +121,7 @@ impl ProtocolInfo {
                 .iter()
                 .map(|m| m.selector.name())
                 .collect(),
+            package: def.package.clone(),
             span: def.span,
         }
     }
@@ -324,13 +332,32 @@ impl ProtocolRegistry {
     /// names that match a class in the current hierarchy. Colliding entries
     /// are skipped so resolution cannot pick them up (classes win over
     /// cross-file protocols that shadow them).
+    ///
+    /// A bare name follows the `uses:` precedence (BT-3941): an entry that
+    /// would let a dependency's protocol shadow a stdlib protocol of the same
+    /// name (`trait_expansion::is_dependency_shadow`) is replaced by the
+    /// stdlib's own protocol, exactly as `uses: Name` resolves. `current_package`
+    /// is the package being compiled (`None` when unknown).
     pub fn add_pre_loaded(
         &mut self,
         protocols: Vec<ProtocolInfo>,
         hierarchy: &ClassHierarchy,
+        current_package: Option<&str>,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for info in protocols {
+            let info = if trait_expansion::is_dependency_shadow(
+                &info.name,
+                info.package.as_deref(),
+                current_package,
+            ) {
+                match trait_expansion::resolve_stdlib_protocol(&info.name, current_package) {
+                    Some(stdlib) => ProtocolInfo::from_definition(stdlib),
+                    None => continue,
+                }
+            } else {
+                info
+            };
             if hierarchy.has_class(&info.name) {
                 // Skip collision when the existing "class" is a synthetic
                 // protocol class entry (superclass is Protocol) — this is just the
@@ -1607,6 +1634,7 @@ Value subclass: Version
                 return_type: None,
                 param_types: vec![],
             }],
+            package: None,
             span: span(),
 
             provided_selectors: vec![],
@@ -1626,6 +1654,7 @@ Value subclass: Version
                 return_type: None,
                 param_types: vec![None],
             }],
+            package: None,
             span: span(),
 
             provided_selectors: vec![],
@@ -1653,12 +1682,13 @@ Value subclass: Version
             extending: None,
             methods: vec![],
             class_methods: vec![],
+            package: None,
             span: span(),
 
             provided_selectors: vec![],
         };
 
-        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
         assert!(diags.is_empty());
         assert!(registry.has_protocol("Tickable"));
     }
@@ -1677,12 +1707,13 @@ Value subclass: Version
             extending: None,
             methods: vec![],
             class_methods: vec![],
+            package: None,
             span: span(),
 
             provided_selectors: vec![],
         };
 
-        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("collides with class"));
         assert!(!registry.has_protocol("Integer"));
@@ -1805,12 +1836,13 @@ Value subclass: Version
             extending: None,
             methods: vec![],
             class_methods: vec![],
+            package: None,
             span: span(),
 
             provided_selectors: vec![],
         };
 
-        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
+        let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
         assert!(
             diags.is_empty(),
             "Pre-loaded protocol should not collide with synthetic protocol class, got: {diags:?}"

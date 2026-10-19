@@ -655,7 +655,7 @@ fn qualifies_the_stdlib(key: &str, current_package: Option<&str>) -> bool {
 /// ([`stdlib_protocols`](crate::semantic_analysis::stdlib_protocols)) — a bare
 /// `Enumerable` or a qualified `stdlib@Enumerable`. Off while compiling the
 /// stdlib itself, which carries its own protocols live.
-fn resolve_stdlib_protocol(
+pub(crate) fn resolve_stdlib_protocol(
     key: &str,
     current_package: Option<&str>,
 ) -> Option<&'static ProtocolDefinition> {
@@ -743,7 +743,7 @@ fn resolve_use_key<'m, 'a, T>(
         definition(p).package.is_none()
     })
     .map(&definition)
-    .filter(|p| !is_dependency_shadow(key, p, current_package))
+    .filter(|p| !is_dependency_shadow(key, p.package.as_deref(), current_package))
     .or_else(|| resolve_stdlib_protocol(key, current_package))
 }
 
@@ -752,18 +752,20 @@ fn resolve_use_key<'m, 'a, T>(
 /// unqualified, names a stdlib protocol, and `protocol` is stamped with a
 /// package other than the one being compiled. Never while compiling the
 /// stdlib itself, which has no stdlib tier to fall back to.
-fn is_dependency_shadow(
+///
+/// `protocol_package` is the protocol's stamped package
+/// ([`ProtocolDefinition::package`] / `ProtocolInfo::package`). Shared with
+/// `ProtocolRegistry`, so a type annotation resolves a bare name as `uses:` does
+/// (BT-3941).
+pub(crate) fn is_dependency_shadow(
     key: &str,
-    protocol: &ProtocolDefinition,
+    protocol_package: Option<&str>,
     current_package: Option<&str>,
 ) -> bool {
     !key.contains('@')
         && !stdlib_protocols::is_stdlib_package(current_package)
         && stdlib_protocols::is_stdlib_protocol_name(key)
-        && protocol
-            .package
-            .as_deref()
-            .is_some_and(|package| Some(package) != current_package)
+        && protocol_package.is_some_and(|package| Some(package) != current_package)
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s

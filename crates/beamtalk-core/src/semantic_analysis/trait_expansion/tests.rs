@@ -2070,3 +2070,78 @@ fn qualifier_resolves_any_unstamped_protocol_when_the_package_is_unknown() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
 }
+
+/// BT-3941: a type annotation's bare name (`ProtocolRegistry`) resolves exactly
+/// as a bare `uses:` does -- to the stdlib's protocol, never a dependency's
+/// namesake -- on every surface (known package or not).
+#[test]
+fn registry_resolves_a_bare_stdlib_name_as_uses_does() {
+    use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut infos = ProtocolRegistry::extract_protocol_infos(&dep_file);
+        for info in &mut infos {
+            info.package = Some("dep".into());
+        }
+        let mut registry = ProtocolRegistry::new();
+        let hierarchy = ClassHierarchy::with_builtins();
+        let diags = registry.add_pre_loaded(infos, &hierarchy, package);
+        assert!(diags.is_empty(), "{package:?}: {diags:?}");
+
+        let uses = resolve_protocol_key(&external, "Comparable", package).expect("uses resolves");
+        let annotation = registry.get("Comparable").expect("annotation resolves");
+        let provided: Vec<String> = uses
+            .provided_methods
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
+        assert!(!provided.contains(&"depOnly".to_string()), "{package:?}");
+        assert_eq!(
+            annotation
+                .provided_selectors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            provided,
+            "annotation and uses: agree on the protocol ({package:?})"
+        );
+        assert_eq!(annotation.package.as_deref(), uses.package.as_deref());
+    }
+}
+
+/// BT-3941: the package's own (unstamped) namesake still wins the bare name in
+/// a type annotation, like `uses:`; a dependency's non-stdlib name is untouched.
+#[test]
+fn registry_keeps_own_and_non_stdlib_protocols_by_bare_name() {
+    use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let own = parse_source("Protocol define: Comparable\n  ownOnly -> Boolean");
+    let dep = parse_source(
+        "Protocol define: Comparable\n  depOnly -> Boolean\n\nProtocol define: Gadget\n  spin -> Boolean",
+    );
+    let mut infos = ProtocolRegistry::extract_protocol_infos(&own);
+    let mut dep_infos = ProtocolRegistry::extract_protocol_infos(&dep);
+    for info in &mut dep_infos {
+        info.package = Some("dep".into());
+    }
+    infos.extend(dep_infos);
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.add_pre_loaded(infos, &ClassHierarchy::with_builtins(), Some("my_app"));
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(
+        registry.get("Comparable").unwrap().methods[0].selector,
+        "ownOnly"
+    );
+    assert_eq!(
+        registry.get("Gadget").unwrap().package.as_deref(),
+        Some("dep")
+    );
+}
