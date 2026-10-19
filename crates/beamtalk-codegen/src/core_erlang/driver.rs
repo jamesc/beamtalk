@@ -154,8 +154,7 @@ pub fn generate_module_with_warnings(
             // branch only runs when `analyse_full` never ran, so there is no
             // other pipeline to surface an unknown-protocol / provision-
             // conflict error (BT-3626). They are returned as warnings.
-            let (flattened, origins, diags) =
-                flatten_uses_self_sufficient(module, options.stdlib_mode, &mut generator);
+            let (flattened, origins, diags) = flatten_uses_self_sufficient(module, &mut generator);
             generator.codegen_warnings.extend(diags);
             self_flattened_origins = origins;
             let flattened_module: &Module = match flattened {
@@ -335,11 +334,10 @@ pub fn generate_module_with_warnings(
 /// Also records on `generator` which `uses:` lines resolved to the stdlib's
 /// own protocols (BT-3915), from the same flattening — what `analyse_full`
 /// hands off as `AnalysisResult::stdlib_protocol_uses` on the driver path.
-/// In `stdlib_mode` the module is compiled as the stdlib package, which has
-/// no compiler-baked stdlib tier to fall back to.
+/// In stdlib mode (`generator.stdlib_mode()`) the module is compiled as the
+/// stdlib package, which has no compiler-baked stdlib tier to fall back to.
 fn flatten_uses_self_sufficient(
     module: &Module,
-    stdlib_mode: bool,
     generator: &mut CoreErlangGenerator,
 ) -> (
     Option<Module>,
@@ -354,7 +352,8 @@ fn flatten_uses_self_sufficient(
         beamtalk_core::semantic_analysis::trait_expansion::expand_module_with_stdlib_uses(
             &mut owned,
             &std::collections::HashMap::new(),
-            stdlib_mode
+            generator
+                .stdlib_mode()
                 .then_some(beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE),
         );
     generator.set_stdlib_protocol_uses(stdlib_uses);
