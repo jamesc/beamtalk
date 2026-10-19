@@ -97,7 +97,9 @@ pub use definite_assignment::{
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use initialize_assigns::{analyze_initialize_assigns, has_dynamic_field_writer};
-pub use lowering::{lower_analysed_module_for_codegen, lower_module_for_codegen};
+pub use lowering::{
+    apply_codegen_writebacks, lower_analysed_module_for_codegen, lower_module_for_codegen,
+};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};

@@ -377,3 +377,50 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
         "Beamtalk classNamed: must not go through class_send; got:\n{code}"
     );
 }
+
+/// BT-3915: on the stale-hand-off path (codegen's own cross-file enrichment
+/// invalidates the handed-off analysis), codegen re-infers over the driver's
+/// already-flattened module but must not flatten it again — its `uses:` lines
+/// are still there, and re-resolved without the analysis's carried protocols a
+/// bare `uses: Comparable` of the package's own cross-file `Comparable` would
+/// fall back to the stdlib's and splice in `between:and:` and friends.
+#[test]
+fn stale_hand_off_never_reflattens_against_the_stdlib() {
+    use beamtalk_core::semantic_analysis::trait_expansion::{
+        carried_protocols, first_wins_protocol_map,
+    };
+    // The package's own `Comparable`, declared in another file.
+    let other_file =
+        parse_fixture("Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 42\n");
+    let mut module = parse_fixture(
+        "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  \
+         < other => self.level < other level\n",
+    );
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_pre_loaded_protocol_defs(carried_protocols(&other_file, None)),
+    );
+    assert!(
+        first_wins_protocol_map(carried_protocols(&other_file, None)).contains_key("Comparable"),
+        "test setup: the package's own Comparable is carried"
+    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
+
+    // A class stub analysis never saw — invalidates the hand-off.
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("rank")
+            .with_class_hierarchy(vec![base_class_info("Unrelated", "Object")])
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("'foo'/1"),
+        "Rank must keep its own Comparable's `foo`; got:\n{code}"
+    );
+    assert!(
+        !code.contains("'between:and:'"),
+        "the stale-hand-off path must not splice in the stdlib Comparable; got:\n{code}"
+    );
+}

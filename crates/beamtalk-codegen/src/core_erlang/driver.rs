@@ -229,10 +229,15 @@ pub fn generate_module_with_warnings(
             driver_method_return_types.take().unwrap_or_default();
         module
     } else {
-        // On the self-sufficient path start from the already-flattened clone
-        // so `infer_types_and_returns` below sees flattened provisions
-        // (BT-3626); `lower_module_for_codegen`'s own re-flatten is then an
-        // idempotent no-op (class-body selectors win over provisions).
+        // Either way `module_owned` is already flattened: on the
+        // self-sufficient path it starts from the flattened clone, so
+        // `infer_types_and_returns` below sees flattened provisions
+        // (BT-3626); a stale hand-off's module was flattened by the driver's
+        // `lower_analysed_module_for_codegen`. So only the writebacks run
+        // below — flattening it again here, without the analysis's carried
+        // protocols and package, would re-resolve its still-present `uses:`
+        // lines differently (a package's own `Comparable` falling back to the
+        // stdlib's) and splice in provisions analysis never saw (BT-3915).
         module_owned = self_flattened.take().unwrap_or_else(|| module.clone());
         // A driver that handed off `AnalysisResult` already wrote its
         // (narrower-hierarchy) inference into `module_owned` before we got
@@ -267,11 +272,10 @@ pub fn generate_module_with_warnings(
                 options.native_type_registry.as_deref(),
             );
         generator.type_map = type_map;
-        lower_self_sufficient(
+        beamtalk_core::semantic_analysis::apply_codegen_writebacks(
             &mut module_owned,
             &hierarchy,
             &method_return_types,
-            &generator,
         );
         // Record which methods *this* (re-)inference wrote a
         // return type into, for `extract_method_source` to strip before
@@ -360,29 +364,6 @@ fn self_sufficient_package(generator: &CoreErlangGenerator) -> Option<&'static s
     generator
         .stdlib_mode()
         .then_some(beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE)
-}
-
-/// [`lower_module_for_codegen`](beamtalk_core::semantic_analysis::lower_module_for_codegen)
-/// with no analysis to hand: no cross-file/cross-package `external_protocols`
-/// map survives into this path (self-sufficient codegen, or a stale hand-off
-/// being re-inferred) — same limitation as [`flatten_uses_self_sufficient`] —
-/// and the package is [`self_sufficient_package`].
-fn lower_self_sufficient(
-    module: &mut Module,
-    hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
-    method_return_types: &std::collections::HashMap<
-        beamtalk_core::semantic_analysis::type_checker::MethodReturnKey,
-        beamtalk_core::semantic_analysis::type_checker::InferredType,
-    >,
-    generator: &CoreErlangGenerator,
-) {
-    beamtalk_core::semantic_analysis::lower_module_for_codegen(
-        module,
-        hierarchy,
-        method_return_types,
-        &std::collections::HashMap::new(),
-        self_sufficient_package(generator),
-    );
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.
