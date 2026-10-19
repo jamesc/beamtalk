@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3922 (ADR 0133): a block whose only class-variable access is a direct
+// write, returned from the class, is a compile error. Loaded with
+// `@load-error` by class_var_single_home.btscript.
+
+Object subclass: CvshEscapingWrite
+  classState: total = 0
+
+  class makeWriter => [self.total := 5]

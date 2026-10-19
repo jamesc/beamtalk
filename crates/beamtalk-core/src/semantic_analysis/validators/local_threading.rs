@@ -47,7 +47,7 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, block_literal_of_other_arity, conditional_arm_blocks,
+    RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
@@ -1630,13 +1630,7 @@ impl<'d> Walker<'d> {
             if self.context == Repl {
                 return None;
             }
-            outer_state_writes(block)
-                .into_iter()
-                .next()
-                .map(|w| OuterLocalWrite {
-                    name: format!("self.{}", w.name).into(),
-                    span: w.span,
-                })
+            outer_state_writes(block).into_iter().next()
         })
     }
 
@@ -2094,6 +2088,15 @@ impl<'d> Walker<'d> {
         };
         let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
+        // BT-3922: a lookup handler that writes object state (`self.field :=`)
+        // and no outer local is lowered in place like one that writes a local,
+        // so the §6 check must not take it for an escaping block.
+        let state_only_lookup = is_lookup
+            && writes.is_empty()
+            && construct
+                .blocks
+                .iter()
+                .any(|block| !outer_state_writes(block).is_empty());
         let selector = construct.selector;
         // BT-3841: a keyed iteration on a statically non-`Dictionary` receiver
         // keeps the permanent §6 error whether its block writes an outer local
@@ -2123,6 +2126,9 @@ impl<'d> Walker<'d> {
             return;
         }
         let Some(first) = writes.first().cloned() else {
+            if state_only_lookup && !self.receiver_is_not_dictionary(expr) {
+                self.lookup_producers.insert(expr.unwrap_parens().span());
+            }
             return;
         };
         // ADR 0131 Phase 2d (BT-3798 review): a lookup whose receiver is
@@ -2729,11 +2735,16 @@ impl<'d> Walker<'d> {
         if !self.reported_blocks.insert(block.span) {
             return;
         }
-        let name = &write.name;
-        // A `self.field` write (BT-3922) has its own fix: the field is object
-        // state, which a block that has left this scope cannot hand back.
+        // A `self.field` write (BT-3922) is named as written and has its own
+        // fix: the field is object state, which a block that has left this
+        // scope cannot hand back.
+        let written: EcoString = match write.kind {
+            WriteKind::Local => write.name.clone(),
+            WriteKind::ObjectState => format!("self.{}", write.name).into(),
+        };
+        let name = &written;
         let hint = hint.or_else(|| {
-            name.starts_with("self.").then(|| {
+            (write.kind == WriteKind::ObjectState).then(|| {
                 format!(
                     "`{name}` is object state: once the block has left this scope no later call \
                      of it can hand the write back. Return the new value from the block and \

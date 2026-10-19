@@ -1134,11 +1134,23 @@ fn propagate_inline_block_writes(
     }
 }
 
-/// One outer-local write found by [`outer_local_writes`]: the local's name and
-/// the span of the assignment that writes it.
+/// What an [`OuterLocalWrite`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteKind {
+    /// A local of an enclosing scope ([`outer_local_writes`]).
+    Local,
+    /// Object state: `self.field :=`, an instance field or, in a class-side
+    /// method, a class variable ([`outer_state_writes`], BT-3922).
+    ObjectState,
+}
+
+/// One outer write found by [`outer_local_writes`] or [`outer_state_writes`]:
+/// the name written and the span of the assignment that writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OuterLocalWrite {
-    /// The outer local written.
+    /// What is written: a captured local, or object state.
+    pub kind: WriteKind,
+    /// The outer local, or the field, written.
     pub name: ecow::EcoString,
     /// The assignment (or destructuring pattern) that writes it.
     pub span: Span,
@@ -1268,6 +1280,7 @@ impl OuterWriteWalker<'_> {
         if (self.bound_outside)(name) {
             if !self.writes.iter().any(|w| &w.name == name) {
                 self.writes.push(OuterLocalWrite {
+                    kind: WriteKind::Local,
                     name: name.clone(),
                     span,
                 });
@@ -1305,6 +1318,7 @@ impl OuterWriteWalker<'_> {
     fn state_write(&mut self, field: &ecow::EcoString, span: Span) {
         if !self.state_writes.iter().any(|w| &w.name == field) {
             self.state_writes.push(OuterLocalWrite {
+                kind: WriteKind::ObjectState,
                 name: field.clone(),
                 span,
             });
