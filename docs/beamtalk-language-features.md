@@ -4149,6 +4149,13 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 // => 42
 ```
 
+**Pattern failures (BT-3943):** a destructuring assignment whose tuple size, literal slot or array shape does not match, and a `match:` with no matching arm, raise a structured `#pattern_mismatch` error (class `RuntimeError`, the offending value in the error details). A map destructure with a missing key raises `#key_error` instead.
+
+```beamtalk
+[{#ok, _v} := Tuple withAll: #(#error, 42)] on: Error do: [:e | e kind]
+// => #pattern_mismatch
+```
+
 ### Rest Patterns in Destructuring (BT-1251)
 
 The `...identifier` syntax in array destructuring captures remaining elements:

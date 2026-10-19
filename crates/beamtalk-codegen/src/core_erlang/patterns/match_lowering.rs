@@ -55,6 +55,7 @@ impl CoreErlangGenerator {
     /// chain of conditional case expressions instead of a single native case, because
     /// Beamtalk arrays are opaque tagged maps that cannot be matched structurally in
     /// Core Erlang patterns. See [`Self::generate_match_chain`].
+    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_match(
         &mut self,
         value: &Expression,
@@ -195,6 +196,28 @@ impl CoreErlangGenerator {
                 let body_doc = self.generate_match_arm_body(&arm.body, base_state.as_deref())?;
                 parts.push(body_doc);
                 self.pop_scope();
+            }
+            // BT-3943: no arm may match — raise a structured `#pattern_mismatch`
+            // rather than the compiler's implicit raw `case_clause`
+            // (`internal_error`). Skipped when an unguarded wildcard/variable
+            // arm already makes the `case` exhaustive (the clause would be dead).
+            let exhaustive = arms.iter().any(|arm| {
+                arm.guard.is_none()
+                    && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+            });
+            if !exhaustive {
+                let no_match_var = self.fresh_temp_var("NoMatch");
+                let raise = self.pattern_mismatch_raise_doc(
+                    &match_var,
+                    "match:",
+                    "no match: arm matches the value",
+                );
+                parts.push(docvec![
+                    " <",
+                    leaf::var(no_match_var),
+                    "> when 'true' -> ",
+                    raise
+                ]);
             }
             parts.push(Document::Str(" end"));
             Document::Vec(parts)
@@ -526,11 +549,13 @@ impl CoreErlangGenerator {
         base_state: Option<&str>,
     ) -> Result<Document<'static>> {
         if arms.is_empty() {
-            return Ok(docvec![
-                "call 'erlang':'error'({'case_clause', ",
-                leaf::var(match_var.to_string()),
-                "})"
-            ]);
+            // BT-3943: user-visible no-arm failure is a structured
+            // `#pattern_mismatch`, not a raw `case_clause` (`internal_error`).
+            return Ok(self.pattern_mismatch_raise_doc(
+                match_var,
+                "match:",
+                "no match: arm matches the value",
+            ));
         }
 
         let arm = &arms[0];

@@ -147,10 +147,10 @@ TestCase subclass: Ch14TupleDestructuring
     self assert: value equals: 42
 
   testLiteralMismatchRaises =>
-    // Mismatch raises an internal_error (badmatch):
+    // A failed destructuring raises a #pattern_mismatch error:
     self should: [
       {#ok, _val} := Tuple withAll: #(#error, 42)
-    ] raise: #internal_error
+    ] raise: #pattern_mismatch
 
   testWildcard =>
     {_, b} := Tuple withAll: #(#ignore, 99)

@@ -111,6 +111,7 @@ kind_to_class(internal_error) -> 'RuntimeError';
 %% No dedicated stdlib class exists for these yet, so they live under RuntimeError
 %% for catchability (a future KeyError/ResourceError hierarchy can refine this).
 kind_to_class(key_error) -> 'RuntimeError';
+kind_to_class(pattern_mismatch) -> 'RuntimeError';
 kind_to_class(argument_error) -> 'RuntimeError';
 kind_to_class(resource_error) -> 'RuntimeError';
 kind_to_class(process_not_found) -> 'RuntimeError';

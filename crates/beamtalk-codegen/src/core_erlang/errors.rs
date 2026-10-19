@@ -19,6 +19,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
+use super::CoreErlangGenerator;
+
 /// Builds the `let Err0 = call 'beamtalk_error':'new'(Kind, Class) in <sep>
 /// let Err1 = call 'beamtalk_error':'with_selector'(Err0, Selector) in <sep>
 /// let Err2 = call 'beamtalk_error':'with_hint'(Err1, Hint) in <sep>` chain
@@ -77,6 +79,51 @@ pub(super) fn beamtalk_error_doc(
         ") in",
         sep,
     ]
+}
+
+impl CoreErlangGenerator {
+    /// BT-3943: the structured `#pattern_mismatch` raise for a failed user
+    /// pattern (tuple/array destructure, `match:` with no matching arm).
+    ///
+    /// Built through [`beamtalk_error_doc`]; `with_details/2` carries the
+    /// offending value (`#{value => Value}`) and `beamtalk_error:raise/1`
+    /// throws it. Evaluates to a Core Erlang expression that never returns,
+    /// so it is usable as a `case` clause body. A raw `badmatch` /
+    /// `case_clause` still means `internal_error`; this kind is `RuntimeError`.
+    pub(super) fn pattern_mismatch_raise_doc(
+        &mut self,
+        value_var: &str,
+        selector: &'static str,
+        hint: &'static str,
+    ) -> Document<'static> {
+        let err0 = self.fresh_temp_var("PmErr");
+        let err1 = self.fresh_temp_var("PmErr");
+        let err2 = self.fresh_temp_var("PmErr");
+        let err3 = self.fresh_temp_var("PmErr");
+        docvec![
+            beamtalk_error_doc(
+                leaf::var(err0.clone()),
+                leaf::var(err0),
+                leaf::var(err1.clone()),
+                leaf::var(err1),
+                leaf::var(err2.clone()),
+                "pattern_mismatch",
+                leaf::atom("Object"),
+                leaf::atom(selector),
+                leaf::binary_lit(hint),
+                Document::Str(" "),
+            ),
+            "let ",
+            leaf::var(err3.clone()),
+            " = call 'beamtalk_error':'with_details'(",
+            leaf::var(err2),
+            ", ~{'value'=>",
+            leaf::var(value_var.to_string()),
+            "}~) in call 'beamtalk_error':'raise'(",
+            leaf::var(err3),
+            ")",
+        ]
+    }
 }
 
 #[cfg(test)]
