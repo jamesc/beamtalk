@@ -80,8 +80,9 @@ TestCase subclass: ActorSelfSendHomTest
 
   // PIN-BUG (BT-3936): the same block where `do:`'s parameter is not
   // promoted (case A): the block is a plain closure, so the self-send's
-  // change is dropped silently and the answer is 0, not 6 (as on main
-  // before BT-3908). A fix for BT-3936 flips this to `equals: 6`.
+  // change is dropped silently. It answers 0 on main too, before and
+  // after BT-3908 (pre-existing, not introduced by BT-3908); the expected
+  // answer is 6. A fix for BT-3936 flips this to `equals: 6`.
   testSelfSendStateChangeThroughPlainSelfSendDoPinBug =>
     pool := SelfSendHomPlainPool spawn
     self assert: pool recordAll equals: 0
