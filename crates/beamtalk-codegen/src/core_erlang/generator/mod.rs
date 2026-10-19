@@ -363,7 +363,8 @@ pub struct CoreErlangGenerator {
     /// `do:separatedBy:` is lowered through a synthetic `inject:into:` fold
     /// (`enumeration_ops.rs`). The fold's receiver guard checks this instead of
     /// the synthetic `inject:into:`. Taken (cleared) by the first fold that
-    /// reads it, and cleared again by the lowering that set it.
+    /// reads it, and cleared again by the lowering that set it. Per-body state: parked and
+    /// restored by `BodyState` (`body_state.rs`).
     pub(in crate::core_erlang) guard_selector_override: Option<&'static str>,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,

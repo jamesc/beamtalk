@@ -58,6 +58,10 @@ pub(in crate::core_erlang) struct BodyState {
     /// clears its own, and the enclosing body's `^` in a later block must
     /// still throw to its own catch.
     nlr_token: Option<String>,
+    /// BT-3916: the user's selector while `eachWithIndex:` / `do:separatedBy:`
+    /// is lowered through a synthetic `inject:into:` fold, for that fold's
+    /// receiver guard. A nested body must not read the enclosing send's.
+    guard_selector_override: Option<&'static str>,
 }
 
 impl CoreErlangGenerator {
@@ -81,6 +85,7 @@ impl CoreErlangGenerator {
             rebind_frames: std::mem::take(&mut self.rebind_frames),
             block_depth: std::mem::take(&mut self.block_depth),
             class_var_capture: self.class_var_capture.take(),
+            guard_selector_override: self.guard_selector_override.take(),
             nlr_token: {
                 let token = self.current_nlr_token().cloned();
                 self.set_current_nlr_token(None);
@@ -106,6 +111,7 @@ impl CoreErlangGenerator {
             block_depth,
             class_var_capture,
             nlr_token,
+            guard_selector_override,
         } = state;
         self.set_state_version(state_version);
         self.set_self_version(self_version);
@@ -120,6 +126,7 @@ impl CoreErlangGenerator {
         self.block_depth = block_depth;
         self.class_var_capture = class_var_capture;
         self.set_current_nlr_token(nlr_token);
+        self.guard_selector_override = guard_selector_override;
     }
 
     /// Enters a nested body: the enclosing body's [`BodyState`] is parked in
@@ -194,6 +201,7 @@ mod tests {
         generator.block_depth = 2;
         generator.class_var_capture = Some("CVCap".to_string());
         generator.set_current_nlr_token(Some("NlrTok".to_string()));
+        generator.guard_selector_override = Some("eachWithIndex:");
     }
 
     #[test]
@@ -214,7 +222,9 @@ mod tests {
             assert_eq!(scope.block_depth, 0);
             assert!(scope.class_var_capture.is_none());
             assert!(scope.current_nlr_token().is_none());
+            assert!(scope.guard_selector_override.is_none());
         }
+        assert_eq!(generator.guard_selector_override, Some("eachWithIndex:"));
         assert_eq!(generator.state_version(), 4);
         assert_eq!(generator.self_version(), 5);
         assert!(generator.in_loop_body);
@@ -247,6 +257,7 @@ mod tests {
         assert_eq!(generator.block_depth, 0);
         assert!(generator.class_var_capture.is_none());
         assert!(generator.current_nlr_token().is_none());
+        assert!(generator.guard_selector_override.is_none());
     }
 
     #[test]
