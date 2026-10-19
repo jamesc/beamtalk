@@ -29,6 +29,7 @@ TestResult is a tagged map:
     run_file/1,
     run_class/1,
     run_class_by_name/1,
+    run_class_for_eunit/2,
     run_method/2,
     discover_tests/0,
     %% TestResult instance primitives
@@ -519,13 +520,18 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
                 Base0
         end,
     case Test of
-        #{error := Error} when is_binary(Error) ->
-            Base#{<<"error">> => ensure_utf8(Error)};
         #{error := Error} ->
-            Base#{<<"error">> => ensure_utf8(beamtalk_primitive:print_string(Error))};
+            Base#{<<"error">> => error_text(Error)};
         _ ->
             Base
     end.
+
+-doc "A failed test's error as UTF-8 text (a binary as-is, anything else printed).".
+-spec error_text(term()) -> binary().
+error_text(Error) when is_binary(Error) ->
+    ensure_utf8(Error);
+error_text(Error) ->
+    ensure_utf8(beamtalk_primitive:print_string(Error)).
 
 -doc """
 Coerce a message binary to valid UTF-8 so `json:encode/1` can never reject it.
@@ -544,6 +550,32 @@ ensure_utf8(Bin) when is_binary(Bin) ->
 %%====================================================================
 %% Internal: test execution (uses class registry, not module_info)
 %%====================================================================
+
+-doc """
+Run one TestCase class from an EUnit wrapper and report it in the structured
+`FAIL`/`RESULTS:` format of `beamtalk_stdlib_test:report_results/2`.
+
+`beamtalk test-docs` generates one such wrapper (named `EunitModule`) per
+TestCase class in a markdown `<!-- btfixture: -->` file (BT-3927), so the
+fixture's test methods run in the same EUnit batch as the chapter's `// =>`
+assertions. Raises (failing the EUnit test) when any test method fails.
+""".
+-spec run_class_for_eunit(atom(), atom()) -> ok | no_return().
+run_class_for_eunit(EunitModule, ClassName) ->
+    #{tests := Tests} = run_class_by_name(ClassName),
+    beamtalk_stdlib_test:report_results(EunitModule, [eunit_result(T) || T <- Tests]).
+
+-doc "Map one BUnit test entry to a `beamtalk_stdlib_test:report_results/2` result.".
+-spec eunit_result(map()) -> tuple().
+eunit_result(#{name := Name, class := ClassName, status := Status} = Test) ->
+    Location = iolist_to_binary([
+        atom_to_binary(ClassName, utf8), <<">>">>, atom_to_binary(Name, utf8)
+    ]),
+    case Status of
+        pass -> {pass, Location};
+        skip -> {skip, Location};
+        fail -> {test_failure, Location, error_text(maps:get(error, Test, <<"failed">>))}
+    end.
 
 -doc """
 Run all tests in a named class.

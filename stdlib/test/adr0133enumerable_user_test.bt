@@ -151,13 +151,9 @@ TestCase subclass: Adr0133EnumerableUserTest
       self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
     ] ensure: [a stop]
 
-  testActorSelfDoWritePinBug =>
-    // PIN-BUG (BT-3918): inside the actor's own method, `self do:` with a
-    // writing block silently drops the write and answers 0, not 6. A fix
-    // flips this to `equals: 6` (or the shape becomes a compile error and
-    // this test and `selfDoSum` go).
-    a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}
-    [self assert: a selfDoSum equals: 0] ensure: [a stop]
+  // BT-3918: inside the actor's own method, `self do:` with a writing block
+  // is an escaping-block compile error since BT-3908
+  // (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
 
   // --- BT-3843: the class's own `anySatisfy:` ---
   testOwnAnySatisfyPure =>

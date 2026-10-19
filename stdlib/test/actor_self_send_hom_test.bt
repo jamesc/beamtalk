@@ -12,9 +12,9 @@
 // Value-class twin.
 //
 // The `^` half is fixed (below). The captured-local-write half (`size`,
-// via `inject:into:`) is not — BT-3583 tracks it; it needs a different
-// state-threading mechanism than the existing Tier 2 machinery provides
-// for a block that crosses an opaque actor self-send boundary.
+// via `inject:into:`) was threaded by the ADR 0128 fold (BT-3583); since ADR
+// 0133 (BT-3908) a block that assigns a captured local and is passed to an
+// actor self-send of `do:` is an escaping-block compile error instead.
 //
 // testDoInvokedCrossProcessRelaysNlr covers a second, distinct gap the
 // self-send fix alone didn't close: `^` inside a block passed to
@@ -50,10 +50,6 @@ TestCase subclass: ActorSelfSendHomTest
     pool do: [:x | x > 2 ifTrue: [^x]]
     0
 
-  testSizeThreadsCapturedLocalWriteThroughSelfSendHom =>
-    pool := SelfSendHomPool spawn
-    self assert: pool size equals: 4
-
   // ADR 0128 / BT-3583 Constraints regression (a): a pure (Tier 1) opaque
   // callable forwarded to `collect:`/`select:` — `pool` is a different
   // actor process (no self-send), so the block is a genuine, non-mutating
@@ -64,13 +60,32 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool collect: [:x | x * 2]) equals: #(2, 4, 6, 8)
     self assert: (pool select: [:x | x > 2]) equals: #(3, 4)
 
-  // ADR 0128 / BT-3583 Constraints regression (b): an opaque callable
-  // forwarded through a self-send to `do:` that mutates ONLY `self.field`
-  // (no local accumulator, no NLR) — the case the pre-fix generic wrapper
-  // already served correctly. Must keep behaving identically.
+  // PIN-BUG (BT-3922): a block that mutates ONLY `self.field`, passed
+  // through a self-send to `do:`, which forwards it to `self.items do:`. The
+  // ADR 0128 fold threaded the write; since ADR 0133 removed it (BT-3908) the
+  // write cannot be kept, so it raises rather than drop it. BT-3922 makes
+  // the shape a compile error, and this test and `accumulateTotal` go.
   testFieldOnlyMutationOpaqueCallableThroughSelfSendDo =>
     pool := SelfSendHomPool spawn
-    self assert: pool accumulateTotal equals: 10
+    self should: [pool accumulateTotal] raise: #stateful_block_dispatch
+
+  // PIN-BUG (BT-3936, BT-3922): a block that assigns nothing, but whose
+  // self-send (`record:`) changes a field, passed through `self do:` to a
+  // `do:` whose parameter is a promoted Tier 2 position (case B). The ADR
+  // 0128 fold kept the change (answer 10); since BT-3908 it raises rather
+  // than drop it. A fix for BT-3936 flips this to `equals: 10`.
+  testSelfSendStateChangeThroughSelfSendDo =>
+    pool := SelfSendHomPool spawn
+    self should: [pool recordAll] raise: #stateful_block_dispatch
+
+  // PIN-BUG (BT-3936): the same block where `do:`'s parameter is not
+  // promoted (case A): the block is a plain closure, so the self-send's
+  // change is dropped silently. It answers 0 on main too, before and
+  // after BT-3908 (pre-existing, not introduced by BT-3908); the expected
+  // answer is 6. A fix for BT-3936 flips this to `equals: 6`.
+  testSelfSendStateChangeThroughPlainSelfSendDoPinBug =>
+    pool := SelfSendHomPlainPool spawn
+    self assert: pool recordAll equals: 0
 
   // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a class
   // method (no `State`/`StateAcc` parameter — see
@@ -119,6 +134,95 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool setCollect: [:x | x * 2]) class equals: Set
     self assert: (pool setSelect: [:x | x > 2]) class equals: Set
     self assert: (pool arrCollect: [:x | x * 2]) class equals: Array
+
+  // BT-3908: a block passed through a self-send from inside the actor, to
+  // HOMs whose block position another caller's field-writing block promoted
+  // to Tier 2. A block that changes no state answers as it did before the
+  // ADR 0128 fold was removed (these are not pins).
+  testPromotedPureBlockThroughSelfSendHom =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: pool pureInject equals: 10
+    self assert: pool pureDetect equals: 3
+    self assert: pool pureDetectIfNone equals: 7
+    self assert: pool pureCount equals: 2
+    self assert: pool pureAnySatisfy equals: true
+    self assert: pool pureAllSatisfy equals: true
+    self assert: pool pureArrCollect equals: #[2, 4, 6, 8]
+    self assert: pool pureReject equals: #(1, 2)
+    self assert: pool pureFlatMap equals: #(1, 1, 1, 1)
+    self assert: pool pureTakeWhile equals: #(1, 2)
+    self assert: pool pureDropWhile equals: #(3, 4)
+    self assert: pool purePartitionSize equals: 2
+    self assert: pool pureGroupBySize equals: 2
+    self assert: pool pureSort equals: #(4, 3, 2, 1)
+    self assert: pool pureIfNone equals: 7
+    // The `ifNone:` handler reads the state the predicate's fold left.
+    self assert: pool pureIfNoneAfterFold equals: 4
+
+  // PIN-BUG (BT-3922): the same HOMs with a block that writes `self.total`.
+  // The ADR 0128 fold kept the write; since BT-3908 it raises rather than
+  // drop it (before this fix these raised raw `badarity` /
+  // `function_clause` / `type_error`). BT-3922 makes the shape a compile
+  // error.
+  testFieldWritingBlockThroughSelfSendHomRaises =>
+    pool := SelfSendHomFoldPool spawn
+    self should: [pool tallyInject] raise: #stateful_block_dispatch
+    self should: [pool tallyDetect] raise: #stateful_block_dispatch
+    self should: [pool tallyDetectIfNone] raise: #stateful_block_dispatch
+    self should: [pool tallyCount] raise: #stateful_block_dispatch
+    self should: [pool tallyAnySatisfy] raise: #stateful_block_dispatch
+    self should: [pool tallyAllSatisfy] raise: #stateful_block_dispatch
+    self should: [pool tallyArrCollect] raise: #stateful_block_dispatch
+    self should: [pool tallyReject] raise: #stateful_block_dispatch
+    self should: [pool tallyFlatMap] raise: #stateful_block_dispatch
+    self should: [pool tallyTakeWhile] raise: #stateful_block_dispatch
+    self should: [pool tallyDropWhile] raise: #stateful_block_dispatch
+    self should: [pool tallyPartitionSize] raise: #stateful_block_dispatch
+    self should: [pool tallyGroupBySize] raise: #stateful_block_dispatch
+    self should: [pool tallySort] raise: #stateful_block_dispatch
+    self should: [pool tallyIfNone] raise: #stateful_block_dispatch
+    self should: [pool tallyIfNoneAfterFold] raise: #stateful_block_dispatch
+
+  // The error names the self-send selector the block was passed to, and its
+  // hint the collection message it was forwarded to.
+  testFieldWritingBlockErrorNamesTheForwardingSelector =>
+    pool := SelfSendHomFoldPool spawn
+    hint := [pool tallyCount] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "`fwdCount:`") equals: true
+    self assert: (hint includesSubstring: "`count:`") equals: true
+    selector := [pool tallyCount] on: Error do: [:e | e selector]
+    self assert: selector equals: #fwdCount:
+
+  // PIN-BUG (BT-3939): a promoted block that rebinds a block-local inside
+  // an inner loop returns the pre-loop value with a `__local__` key leaked
+  // into its state, so the wrapper's state guard raises. On main (and
+  // without the guard) it answers #(0, 0) silently; the fix for BT-3939
+  // flips this to `equals: #(30, 30)`.
+  testPromotedBlockWithInnerLoopLocalPinBug =>
+    pool := SelfSendHomFoldPool spawn
+    self should: [pool groupWeights] raise: #stateful_block_dispatch
+
+  // A Tier 1 block of the wrong arity is not misread as a Tier 2 block: its
+  // reply is not `{Result, Map}`, so it raises the structured error.
+  testWrongArityCallableRaisesStructuredError =>
+    pool := SelfSendHomFoldPool spawn
+    self should: [pool wrongArityIfNone] raise: #stateful_block_dispatch
+
+  // A wrong-arity block (one argument too many for `sort:`) sent from this
+  // process to a non-promoted position: it is called with an empty map, not
+  // the actor's private state, and its reply raises the structured error.
+  testWrongArityBlockFromOutsideSeesNoActorState =>
+    pool := SelfSendHomPlainPool spawn
+    spy := self threeArgSpy
+    self should: [pool sortWith: spy] raise: #stateful_block_dispatch
+
+  // A `sort:` block of one argument too many, which raises if the argument
+  // it is handed is not empty.
+  threeArgSpy =>
+    [:a :b :st |
+      st isEmpty ifFalse: [Error signal: "saw actor state"]
+      true
+    ]
 
   testOpaqueDetectRaisesNotFound =>
     pool := SelfSendHomFoldPool spawn

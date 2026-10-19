@@ -10,14 +10,16 @@
 
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
-    ParameterDefinition,
+    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodDefinition,
+    MethodKind, ParameterDefinition,
 };
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
 };
 use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::Span;
+use crate::state_threading_selectors::{is_opaque_callable_hom_send, opaque_fold_callable_arg};
+use ecow::EcoString;
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -46,17 +48,6 @@ pub struct BlockMutationAnalysis {
     /// potential mutation source, since the field may hold a Tier 2 (state-mutating)
     /// block that would otherwise silently skip state threading.
     pub has_field_value_call: bool,
-    /// ADR 0128 (BT-3615): whether the block contains a collection-HOM send
-    /// (`items do: block`, `items inject: 0 into: block`, …) forwarding an
-    /// OPAQUE (non-literal) callable —
-    /// [`crate::state_threading_selectors::is_opaque_callable_hom_send`].
-    /// Like `has_field_value_call`, conservative: the callable may be a
-    /// Tier 2 block whose captured-local writes ride the actor `State` map,
-    /// so in an Actor instance method the send threads `State` (codegen's
-    /// opaque-callable fold) and an enclosing conditional/loop must thread
-    /// it too rather than discard the send's updated `State`. Propagated
-    /// out of nested blocks the same way.
-    pub has_opaque_callable_hom_send: bool,
 }
 
 impl BlockMutationAnalysis {
@@ -71,14 +62,49 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns true if the block has any state-affecting operations.
-    /// This includes field writes, self-sends, `self.field value(:...)` calls,
-    /// and collection HOMs forwarding an opaque callable (which may all
-    /// mutate actor state).
+    /// This includes field writes, self-sends and `self.field value(:...)`
+    /// calls (which may all mutate actor state).
     pub fn has_state_effects(&self) -> bool {
-        !self.field_writes.is_empty()
-            || self.has_self_sends
-            || self.has_field_value_call
-            || self.has_opaque_callable_hom_send
+        !self.field_writes.is_empty() || self.has_self_sends || self.has_field_value_call
+    }
+
+    /// Whether a loop or fold over this block is lowered with mutation
+    /// threading, in a method of kind `root` (`None`: a top-level expression,
+    /// the REPL or a script). The one per-context rule: codegen's
+    /// `needs_mutation_threading` and the ADR 0133 `groupBy:` residual check
+    /// (BT-3909, `validators/local_threading.rs`) both call it.
+    ///
+    /// - REPL: any local or field write (the bindings map carries both).
+    /// - Class method: no `State`, so field writes and self-sends never
+    ///   thread; a captured local both read and written does, through a
+    ///   fresh local map.
+    /// - Actor instance method: field writes, self-sends and other state
+    ///   effects ([`Self::has_state_effects`]) when `State` is an eligible
+    ///   family (`actor_state_eligible`, always true in an actor instance
+    ///   method, ADR 0122), or any local write.
+    /// - Value-type method: a field write, or a captured local both read and
+    ///   written.
+    #[must_use]
+    pub fn needs_mutation_threading(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+    ) -> bool {
+        let captured_local_mutation = || {
+            self.captured_reads
+                .iter()
+                .any(|v| self.local_writes.contains(v))
+        };
+        match root {
+            None => self.has_mutations(),
+            Some(RootMethodKind::Class) => captured_local_mutation(),
+            Some(RootMethodKind::Actor) => {
+                (actor_state_eligible && self.has_state_effects()) || !self.local_writes.is_empty()
+            }
+            Some(RootMethodKind::ValueType) => {
+                !self.field_writes.is_empty() || captured_local_mutation()
+            }
+        }
     }
 
     /// Returns all variables that need threading (read AND written).
@@ -98,6 +124,27 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
         ctx.local_bindings.insert(param.name.to_string());
     }
     analyze_statements(&block.body, &mut ctx)
+}
+
+/// ADR 0133 Phase 3 (BT-3909): whether a `groupBy:` with the literal block
+/// `block`, which writes no local bound outside it, is lowered as the threaded
+/// fold (`{GroupMap, ...}` accumulator) in a method of kind `root` (`None`:
+/// the REPL). Codegen's fold gate for such a block:
+/// [`BlockMutationAnalysis::needs_mutation_threading`] (`State` always
+/// eligible in an actor instance method) and, at the REPL, a binding written
+/// anywhere through nested constructs; the gate's other disjuncts are
+/// outer-local writes, which the Phase 0 check judges. Read by the
+/// `GroupByValue` residual check; `group_by_fold_gate_agreement` in
+/// `beamtalk-codegen` compiles a corpus of blocks and asserts codegen takes
+/// the fold exactly when this says so.
+#[must_use]
+pub fn group_by_fold_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
+    analyze_block(block).needs_mutation_threading(root, true)
+        // The REPL also threads a block that writes a binding anywhere, a
+        // nested construct's block included (codegen's
+        // `repl_blocks_write_bindings`, BT-3823): every name is a binding
+        // there.
+        || (root.is_none() && !threaded_block_writes(&[block], &|_| true).is_empty())
 }
 
 /// Analyzes a method body (top-level statements, not wrapped in a
@@ -654,9 +701,6 @@ fn analyze_expression(
             ..
         } => {
             record_send_target(receiver, selector, analysis);
-            if crate::state_threading_selectors::is_opaque_callable_hom_send(expr) {
-                analysis.has_opaque_callable_hom_send = true;
-            }
             // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
@@ -727,9 +771,6 @@ fn analyze_expression(
             // is itself a potential mutation source visible to the outer analysis.
             if nested_analysis.has_field_value_call {
                 analysis.has_field_value_call = true;
-            }
-            if nested_analysis.has_opaque_callable_hom_send {
-                analysis.has_opaque_callable_hom_send = true;
             }
             // Propagate self-sends the same way — a self-send inside a
             // block passed to select:/collect:/do:/etc. (this is exactly that
@@ -1090,9 +1131,6 @@ fn propagate_inline_block_writes(
         .extend(nested.self_send_selectors.iter().cloned());
     if nested.has_field_value_call {
         analysis.has_field_value_call = true;
-    }
-    if nested.has_opaque_callable_hom_send {
-        analysis.has_opaque_callable_hom_send = true;
     }
 }
 
@@ -2804,17 +2842,11 @@ fn walk_construct_blocks(
 // ---------------------------------------------------------------------------
 
 /// The outer locals a block literal both reads and writes (`local_writes` ∩
-/// `captured_reads` of [`analyze_block`]), sorted: the set codegen's Tier 2
+/// `captured_reads` of its [`analyze_block`] analysis), sorted: the set codegen's Tier 2
 /// block protocol threads back (`captured_mutations_for_block`). A block whose
 /// outer-local write is not in this set (a write-only write, or one this
 /// analysis does not propagate out of a nested block) is not promoted, and
 /// the write is lost.
-#[must_use]
-pub fn captured_local_mutations(block: &Block) -> Vec<String> {
-    captured_local_mutations_from_analysis(&analyze_block(block))
-}
-
-/// [`captured_local_mutations`] from an already-computed analysis.
 #[must_use]
 pub fn captured_local_mutations_from_analysis(analysis: &BlockMutationAnalysis) -> Vec<String> {
     analysis
@@ -3034,6 +3066,423 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
             })
             .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
     }
+}
+
+// --- ADR 0131 §6 actor channel (BT-3755): which actor self-send callees thread a Tier 2 block ---
+//
+// Moved here from the deleted `tier2_callee` module (ADR 0133 Phase 2,
+// BT-3906) with its one surviving caller, codegen's class pre-scan
+// (`scan_class_for_tier2_blocks`), which asks [`callee_threads_block_param`]
+// and [`passed_on_targets`]. Since ADR 0133 (BT-3902) the §6 diagnostic no
+// longer reads this predicate: it rejects every escaping writing block, so a
+// captured-local write reaches the promotion only from codegen tests; a
+// field-writing block (BT-3922, not yet rejected) still reaches it through
+// [`passed_on_targets`].
+//
+// `self ap: [t := t + 1]` in an actor instance method is compiled by codegen's
+// `detect_tier2_self_send`: the block becomes a Tier 2 closure
+// (`fun(Args, StateAcc) -> {Result, StateAcc}`), its writes are packed into
+// the actor state around the dispatch, and the callee `ap:` is compiled with
+// the matching parameter as a Tier 2 block parameter. That only answers right
+// when the callee actually hands the `StateAcc` of the block back.
+//
+// A callee threads parameter `i` of selector `sel` in class `C` when:
+//
+// 1. `C` itself defines `sel` as an instance method (a callee inherited from
+//    another class is compiled with its parameter as a plain Tier 1 block and
+//    raises on a Tier 2 closure);
+// 2. no subclass can replace it: `C` or the method is `sealed` (an actor
+//    self-send late-binds through the receiver's own class module, and an
+//    override is compiled without a call site, so its parameter is Tier 1);
+// 3. every use of the parameter in the method body is one of the shapes
+//    codegen unpacks, and no other use exists (a use inside another block, a
+//    conditional or loop outside these shapes, an operand, a store, a return
+//    of the block itself, or an argument of anything else drops the write or
+//    raises):
+//    - a **direct invocation** (`b value`, `b value: x`, a `value`-family
+//      cascade) written as a method-body statement, the right-hand side of a
+//      body-level `x := ...` or the value of a body-level `^...`;
+//    - the same direct invocation as the right-hand side of `x := ...` in the
+//      body of a statement-level `do:` loop, where `x` is a local bound
+//      before the loop;
+//    - the **callable argument of a collection HOM**
+//      ([`is_opaque_callable_hom_send`]; codegen lowered it through the
+//      ADR 0128 opaque-callable fold until ADR 0133 removed that fold,
+//      BT-3908), in operand position of a
+//      method-body statement or inside the branches of a conditional, the
+//      body of `to:do:` or the condition of `whileTrue:`/`whileFalse:`;
+//    - passed as a bare argument of a method-body self-send to another
+//      callee of the same class that itself threads that parameter.
+//
+// A cycle of such forwards (self-recursion, mutual recursion) does not thread
+// (BT-3922 makes these field-writing self-send shapes a compile error).
+
+/// The instance method of `class` that a self-send of `selector` resolves to,
+/// when `class` itself defines it.
+fn same_class_callee<'a>(
+    class: &'a ClassDefinition,
+    selector: &str,
+) -> Option<&'a MethodDefinition> {
+    class
+        .methods
+        .iter()
+        .find(|m| !m.is_class_method && m.selector.name() == selector)
+}
+
+/// Whether `class`'s instance method `selector` threads the `StateAcc` of the
+/// Tier 2 block passed as its parameter number `index` (see the section docs).
+#[must_use]
+pub fn callee_threads_block_param(class: &ClassDefinition, selector: &str, index: usize) -> bool {
+    threads(class, selector, index, &mut Vec::new())
+}
+
+/// The `(selector, parameter index)` pairs of `class` that the Tier 2 block
+/// passed as parameter `index` of `selector` is passed on to as a bare
+/// argument of a method-body self-send. Codegen compiles each of them with a
+/// Tier 2 block parameter too (BT-3755). Empty if `selector` is not a
+/// threading callee.
+#[must_use]
+pub fn passed_on_targets(
+    class: &ClassDefinition,
+    selector: &str,
+    index: usize,
+) -> Vec<(EcoString, usize)> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+    collect_targets(class, selector, index, &mut seen, &mut targets);
+    targets
+}
+
+fn collect_targets(
+    class: &ClassDefinition,
+    selector: &str,
+    index: usize,
+    seen: &mut HashSet<(EcoString, usize)>,
+    targets: &mut Vec<(EcoString, usize)>,
+) {
+    if !callee_threads_block_param(class, selector, index) || !seen.insert((selector.into(), index))
+    {
+        return;
+    }
+    let Some(method) = same_class_callee(class, selector) else {
+        return;
+    };
+    let Some(param) = method.parameters.get(index) else {
+        return;
+    };
+    for stmt in &method.body {
+        if let Some((target, position)) =
+            pass_on(peel(&stmt.expression, &param.name.name), &param.name.name)
+        {
+            targets.push((target.clone(), position));
+            collect_targets(class, &target, position, seen, targets);
+        }
+    }
+}
+
+fn threads(
+    class: &ClassDefinition,
+    selector: &str,
+    index: usize,
+    visiting: &mut Vec<(EcoString, usize)>,
+) -> bool {
+    let Some(method) = same_class_callee(class, selector) else {
+        return false;
+    };
+    if !(class.is_sealed || method.is_sealed) {
+        return false;
+    }
+    let Some(param) = method.parameters.get(index) else {
+        return false;
+    };
+    let key = (EcoString::from(selector), index);
+    if visiting.contains(&key) {
+        return false;
+    }
+    visiting.push(key);
+    let ctx = Ctx {
+        class,
+        method,
+        name: param.name.name.as_str(),
+    };
+    let ok = method
+        .body
+        .iter()
+        .enumerate()
+        .all(|(i, stmt)| ctx.statement_ok(i, &stmt.expression, visiting));
+    visiting.pop();
+    ok
+}
+
+struct Ctx<'a> {
+    class: &'a ClassDefinition,
+    method: &'a MethodDefinition,
+    name: &'a str,
+}
+
+impl Ctx<'_> {
+    fn mentions(&self, expr: &Expression) -> bool {
+        stored_block_var_uses(expr, self.name) != (false, false)
+    }
+
+    /// Whether method-body statement number `index` uses the parameter only
+    /// in a shape the section docs list (or not at all).
+    fn statement_ok(
+        &self,
+        index: usize,
+        statement: &Expression,
+        visiting: &mut Vec<(EcoString, usize)>,
+    ) -> bool {
+        if !self.mentions(statement) {
+            return true;
+        }
+        let inner = peel(statement, self.name);
+        if self.is_direct_invocation(inner) {
+            return true;
+        }
+        if let Some((target, position)) = pass_on(inner, self.name) {
+            return threads(self.class, &target, position, visiting);
+        }
+        if self.is_stateful_do_loop(index, statement) {
+            return true;
+        }
+        self.opaque_ok(statement)
+    }
+
+    /// `name value...` or a `value`-family cascade on `name`, whose arguments
+    /// do not mention `name`.
+    fn is_direct_invocation(&self, expr: &Expression) -> bool {
+        direct_invocation(expr, self.name)
+    }
+
+    /// `items do: [:e | ... x := name value: e ...]` as a method-body
+    /// statement, where `x` is bound before the loop. Each loop-body statement
+    /// that mentions `name` must be such an `x := name value: ...` assignment
+    /// (`x` neither `name` nor a loop parameter); statements that do not
+    /// mention `name` are unconstrained. The caller ([`Self::statement_ok`])
+    /// checks the method's other statements separately.
+    fn is_stateful_do_loop(&self, index: usize, statement: &Expression) -> bool {
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast: false,
+            ..
+        } = statement
+        else {
+            return false;
+        };
+        let [Expression::Block(body)] = arguments.as_slice() else {
+            return false;
+        };
+        if selector.name() != "do:"
+            || self.mentions(receiver)
+            || !is_threaded_frame_body(statement, body)
+            || body.parameters.iter().any(|p| p.name.as_str() == self.name)
+        {
+            return false;
+        }
+        let bound_before = |x: &str| {
+            self.method.parameters.iter().any(|p| p.name.name == x)
+                || self.method.body[..index].iter().any(|s| {
+                    matches!(&s.expression, Expression::Assignment { target, .. }
+                        if matches!(target.as_ref(), Expression::Identifier(id) if id.name == x))
+                })
+        };
+        body.body.iter().all(|stmt| {
+            if !self.mentions(&stmt.expression) {
+                return true;
+            }
+            let Expression::Assignment { target, value, .. } = &stmt.expression else {
+                return false;
+            };
+            let Expression::Identifier(x) = target.as_ref() else {
+                return false;
+            };
+            x.name != self.name
+                && !body.parameters.iter().any(|p| p.name == x.name)
+                && bound_before(&x.name)
+                && self.is_direct_invocation(value)
+        })
+    }
+
+    /// Whether every mention of the parameter in `expr` is the callable
+    /// argument of an opaque-callable collection HOM ([`is_opaque_callable_hom_send`])
+    /// reached through the positions the section docs list.
+    fn opaque_ok(&self, expr: &Expression) -> bool {
+        if !self.mentions(expr) {
+            return true;
+        }
+        match expr {
+            Expression::Parenthesized { expression, .. } => self.opaque_ok(expression),
+            Expression::Return { value, .. } => self.opaque_ok(value),
+            Expression::Assignment { target, value, .. } => {
+                !self.mentions(target) && self.opaque_ok(value)
+            }
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                is_cast: false,
+                ..
+            } => {
+                let sel = selector.name();
+                if let Some(ok) = callable_hom_use(expr, self.name) {
+                    return ok;
+                }
+                match (sel.as_str(), receiver.as_ref()) {
+                    ("ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifFalse:ifTrue:", _) => {
+                        self.opaque_ok(receiver) && arguments.iter().all(|a| self.branch_ok(a))
+                    }
+                    ("to:do:", _) => {
+                        !self.mentions(receiver)
+                            && match arguments.as_slice() {
+                                [limit, body] => !self.mentions(limit) && self.branch_ok(body),
+                                _ => false,
+                            }
+                    }
+                    ("whileTrue:" | "whileFalse:", Expression::Block(condition)) => {
+                        self.block_ok(condition) && arguments.iter().all(|a| !self.mentions(a))
+                    }
+                    _ => {
+                        self.opaque_ok(receiver)
+                            && arguments
+                                .iter()
+                                .all(|a| !matches!(a, Expression::Block(_)) && self.opaque_ok(a))
+                    }
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn branch_ok(&self, arg: &Expression) -> bool {
+        match arg {
+            Expression::Block(block) => self.block_ok(block),
+            other => !self.mentions(other),
+        }
+    }
+
+    fn block_ok(&self, block: &Block) -> bool {
+        !block
+            .parameters
+            .iter()
+            .any(|p| p.name.as_str() == self.name)
+            && block
+                .body
+                .iter()
+                .all(|s: &ExpressionStatement| self.opaque_ok(&s.expression))
+    }
+}
+
+/// `name <invocation>...` or a cascade of `value`-family invocations on
+/// `name` ([`is_safe_value_family_selector`]), where no argument mentions
+/// `name`.
+fn direct_invocation(expr: &Expression, name: &str) -> bool {
+    let accepts = is_safe_value_family_selector;
+    let mentions = |e: &Expression| stored_block_var_uses(e, name) != (false, false);
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => is_name(receiver, name) && accepts(selector) && !arguments.iter().any(mentions),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            let (underlying, all) = normalize_cascade(receiver, messages);
+            is_name(underlying, name)
+                && !all.is_empty()
+                && all
+                    .iter()
+                    .all(|(sel, args)| accepts(sel) && !args.iter().any(mentions))
+        }
+        _ => false,
+    }
+}
+
+/// `Some(ok)` when `expr` is a collection-HOM send ([`is_opaque_callable_hom_send`])
+/// whose callable argument is exactly the identifier `name`; `ok` is whether
+/// that is the parameter's only mention (neither the receiver nor any other
+/// argument, a seed included, mentions it). `None` for any other expression.
+/// The callable argument is excluded by identity, not by name, so
+/// `items inject: b into: b` is not accepted.
+fn callable_hom_use(expr: &Expression, name: &str) -> Option<bool> {
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return None;
+    };
+    if !is_opaque_callable_hom_send(expr) {
+        return None;
+    }
+    let callable = opaque_fold_callable_arg(&selector.name(), arguments)?;
+    if !is_name(callable, name) {
+        return None;
+    }
+    let mentions = |e: &Expression| stored_block_var_uses(e, name) != (false, false);
+    Some(
+        !mentions(receiver)
+            && arguments
+                .iter()
+                .filter(|a| !std::ptr::eq(*a, callable))
+                .all(|a| !mentions(a)),
+    )
+}
+
+fn is_name(expr: &Expression, name: &str) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == name)
+}
+
+/// `expr` without a body-level `x := ...` (for an `x` other than `name`) or
+/// `^...` wrapper.
+fn peel<'a>(expr: &'a Expression, name: &str) -> &'a Expression {
+    match expr {
+        Expression::Assignment { target, value, .. } if matches!(target.as_ref(), Expression::Identifier(id) if id.name != name) => {
+            value.as_ref()
+        }
+        Expression::Return { value, .. } => value.as_ref(),
+        other => other,
+    }
+}
+
+/// `self target: ... name ...` where `name` is a bare argument (at position
+/// `j`) and no other argument mentions it.
+fn pass_on(expr: &Expression, name: &str) -> Option<(EcoString, usize)> {
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: false,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if !is_name(receiver, "self") {
+        return None;
+    }
+    let mut positions = arguments
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| is_name(a, name))
+        .map(|(i, _)| i);
+    let position = positions.next()?;
+    if positions.next().is_some()
+        || arguments
+            .iter()
+            .enumerate()
+            .any(|(i, a)| i != position && stored_block_var_uses(a, name) != (false, false))
+    {
+        return None;
+    }
+    Some((selector.name(), position))
 }
 
 /// Checks if a block is a literal block (not a variable reference).
@@ -3478,42 +3927,6 @@ mod tests {
             analysis.self_send_selectors,
             ["log".to_string(), "bump:".to_string()].into()
         );
-    }
-
-    #[test]
-    fn test_opaque_callable_hom_send_is_a_state_effect() {
-        // ADR 0128 / BT-3615: a collection HOM forwarding an opaque callable
-        // may thread actor `State` (the callable can be a Tier 2 block), so
-        // an enclosing conditional/loop block must see it as a state effect —
-        // at the block's own top level and propagated out of a nested block
-        // or an inline conditional arm.
-        for src in [
-            "[items do: blk]",
-            "[:x | x inject: 0 into: blk]",
-            "[flag ifTrue: [items count: blk]]",
-            "[items do: [:x | x collect: blk]]",
-        ] {
-            let analysis = analyze_block(&parse_block(src));
-            assert!(
-                analysis.has_opaque_callable_hom_send,
-                "{src}: should set has_opaque_callable_hom_send"
-            );
-            assert!(
-                analysis.has_state_effects(),
-                "{src}: should be a state effect"
-            );
-        }
-        for src in [
-            "[items do: [:x | x]]",
-            "[self do: blk]",
-            "[items reject: blk]",
-        ] {
-            let analysis = analyze_block(&parse_block(src));
-            assert!(
-                !analysis.has_opaque_callable_hom_send,
-                "{src}: should NOT set has_opaque_callable_hom_send"
-            );
-        }
     }
 
     #[test]
@@ -4490,5 +4903,24 @@ mod tests {
             .collect();
         assert_eq!(found, vec!["b", "e"]);
         assert!(value_locals(&parse_first_expr("b value")).is_empty());
+    }
+
+    #[test]
+    fn actor_channel_rejects_the_callable_also_used_as_a_seed() {
+        let module = crate::semantic_analysis::test_helpers::parse_module(
+            "Actor subclass: Ac\n  sealed fold: b => ^self items inject: b into: b\n  \
+             sealed ok: b => ^self items inject: 0 into: b\n",
+        );
+        let class = &module.classes[0];
+        assert!(!callee_threads_block_param(class, "fold:", 0));
+        assert!(callee_threads_block_param(class, "ok:", 0));
+    }
+
+    #[test]
+    fn actor_channel_predicate_rejects_a_cycle() {
+        let module = crate::semantic_analysis::test_helpers::parse_module(
+            "Actor subclass: Ac\n  sealed loop: b => self loop: b\n",
+        );
+        assert!(!callee_threads_block_param(&module.classes[0], "loop:", 0));
     }
 }

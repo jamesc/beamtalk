@@ -465,8 +465,8 @@ fn section6_actor_self_send_to_a_former_threading_callee_is_an_error() {
 /// write back. Two are conservative rather than probed wrong: a callee that
 /// passes the block on to another same-class callee (BT-3755) is rejected
 /// only because the target does not thread it, and an overridable callee, which is
-/// only wrong when a subclass overrides it. Widening the exemption
-/// (`tier2_callee::callee_threads_block_param`) fails this test.
+/// only wrong when a subclass overrides it. Since ADR 0133 (BT-3902) the §6
+/// check rejects every such send whatever the callee does.
 #[test]
 fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {
     for (modifiers, callee) in [
@@ -632,6 +632,44 @@ fn section6_actor_non_self_send_is_still_an_error() {
         1,
         "{diags:?}"
     );
+}
+
+#[test]
+fn adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block() {
+    // BT-3908: `self do: [...]` in an actor is a dispatched self-send to the
+    // actor's own `do:`, not the inlined collection construct, so its block
+    // escapes. Its write rode only the callee's ADR 0128 fold, now removed.
+    for body in [
+        "self do: [:x | t := t + x]\nt",
+        "self inject: 0 into: [:a :x | t := a + x]\nt",
+        "super collect: [:x | t := x]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        let found = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(found.len(), 1, "{body}: {diags:?}");
+        assert!(
+            (found[0]
+                .message
+                .contains("is assigned in a block passed to `self ")
+                || found[0]
+                    .message
+                    .contains("is assigned in a block passed to `super "))
+                && found[0].message.contains("actor's own"),
+            "{body}: {diags:?}"
+        );
+    }
+    // Any other receiver is the inlined construct; a value type's `self do:`
+    // is lowered in place too.
+    for src in [
+        in_actor("#(1, 2) do: [:x | t := t + x]\nt"),
+        in_value("self do: [:x | t := t + x]\nt"),
+    ] {
+        let diags = adr0131_diagnostics(&src);
+        assert!(
+            of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty(),
+            "{src}: {diags:?}"
+        );
+    }
 }
 
 #[test]
@@ -3466,4 +3504,238 @@ fn section6_last_statement_assignment_escape_is_the_same_in_every_context() {
         assert_eq!(reports[0], reports[1], "{name}: class vs value");
         assert_eq!(reports[0], reports[2], "{name}: class vs actor");
     }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0133 Phase 3: the residuals made loud before the IR consolidation
+// (BT-3909, `RESIDUAL_DENY_SET`)
+// ---------------------------------------------------------------------------
+
+/// The messages of the ADR 0131 errors `src` draws (as a module-level
+/// expression list when `repl_vars` is `Some`, with those REPL bindings).
+fn residual_messages(src: &str, repl_vars: Option<&[&str]>) -> Vec<String> {
+    let diags = match repl_vars {
+        Some(vars) => adr0131_diagnostics_with(src, vars),
+        None => adr0131_diagnostics(src),
+    };
+    diags.into_iter().map(|d| d.message.to_string()).collect()
+}
+
+/// PIN-BUG BT-3911 (closes BT-3891): an assignment inside a conditional arm
+/// nested in a `whileTrue:`/`whileFalse:` condition block emitted an unbound
+/// `StateAcc` (`erlc` rejected the module) in class, value-type and actor
+/// methods; BT-3909 makes it a compile error. BT-3911 lowers the condition
+/// block as a frame, deletes the `LoopConditionArmWrite` row and flips these
+/// to accepted. The REPL answers right and is not rejected.
+#[test]
+fn residual_loop_condition_arm_write_is_an_error_in_methods() {
+    // The BT-3891 repro, verbatim.
+    let repro = "Object subclass: Repro\n  class f: n :: Integer -> Integer =>\n    i := 0\n    [i < n and: [x := i. x < 5]] whileTrue: [i := i + 1]\n    i\n";
+    let messages = residual_messages(repro, None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("the `whileTrue:` condition assigns `x` inside a conditional arm")
+            && messages[0].contains("BT-3891, until BT-3911"),
+        "{messages:?}"
+    );
+    // The BT-3891 shape matrix rows that failed, plus the measured nestings:
+    // through a `do:` body or a closure in the condition, and a local bound
+    // in the condition before the arm.
+    for body in [
+        "i := 0\n[i < 3 and: [x := i. x < 5]] whileTrue: [i := i + 1]\ni",
+        "i := 0\n[i >= 3 or: [x := i. x >= 5]] whileFalse: [i := i + 1]\ni",
+        "i := 0\n[i < 3 ifTrue: [x := i. x < 5] ifFalse: [false]] whileTrue: [i := i + 1]\ni",
+        "i := 0\n[nil ifNil: [x := 1]. i < 3] whileTrue: [i := i + 1]\ni",
+        "i := 0\n[#(1) do: [:e | true ifTrue: [x := e]]. i < 3] whileTrue: [i := i + 1]\ni",
+        "i := 0\n[[:k | true ifTrue: [x := k]] value: 1. i < 3] whileTrue: [i := i + 1]\ni",
+        "i := 0\n[x := 0. true ifTrue: [x := 1]. i < 3] whileTrue: [i := i + 1]\ni",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let messages = residual_messages(&src, None);
+            assert!(
+                messages.iter().any(|m| m.contains("BT-3891")),
+                "{src}: {messages:?}"
+            );
+        }
+    }
+    // Controls that compile and answer right: a direct write in the
+    // condition, the same `and:` outside a loop, an arm write in the loop
+    // body, and the REPL.
+    for body in [
+        "i := 0\n[x := i. x < 3] whileTrue: [i := i + 1]\ni",
+        "i := 3\ni < 5 and: [x := i. x < 5]\ni",
+        "i := 0\n[i < 3] whileTrue: [true ifTrue: [x := i]. i := i + 1]\ni",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert!(residual_messages(&src, None).is_empty(), "{src}");
+        }
+    }
+    let repl = "i := 0\n[i < 3 and: [x := i. x < 5]] whileTrue: [i := i + 1]\n";
+    assert!(residual_messages(repl, Some(&[])).is_empty());
+}
+
+/// PIN-BUG BT-3912 (closes BT-3897): an actor or REPL `groupBy:` whose block
+/// binds a local (or, in an actor, writes a field or sends to `self`)
+/// answered the raw `{Map, StateAcc}` carrier wherever its value is used
+/// outside the positions that unpack it; BT-3909 makes those positions a
+/// compile error. BT-3912 lowers the fold body as a frame, deletes the
+/// `GroupByValue` row and flips these to accepted. Class and value-type
+/// methods answer the map and are not rejected.
+#[test]
+fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
+    // The BT-3897 repro, verbatim.
+    let repro = "Actor subclass: ZzGbProbe\n  letk =>\n    (#(1, 3) groupBy: [:x |\n      k := x > 2\n      k\n    ]) at: true\n";
+    let messages = residual_messages(repro, None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("`groupBy:` binds a local")
+            && messages[0].contains("as the receiver of a message in an actor method")
+            && messages[0].contains("BT-3897, until BT-3912"),
+        "{messages:?}"
+    );
+    // The leaking positions measured on a BEAM, and the destructuring last
+    // statement BT-3897 records.
+    for body in [
+        "(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true",
+        "(#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) size",
+        "(#(1, 3) groupBy: [:x | self.n := self.n + 1. x > 2]) at: true",
+        "#[(#(1, 3) groupBy: [:x | k := x > 2. k])] size",
+        "#(1) collect: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]]",
+        "#(1) do: [:z | ^#(1, 3) groupBy: [:x | k := x > 2. k]]\nnil",
+        "b := [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. r]\nb value: 1",
+        "#(1) do: [:z | self.n := (#(1, 3) groupBy: [:x | k := x > 2. k]) size]\nnil",
+        // An assignment directly in a loop or counted-loop body answered the
+        // carrier (measured, PR #4383 review).
+        "r := nil\n[r isNil] whileTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n1 to: 1 do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n1 timesRepeat: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // Every block not in `GROUP_BY_ASSIGN_BLOCKS` (no BUnit cell proves
+        // it unpacks) stays rejected, keyed on the exact construct block.
+        // anySatisfy:
+        "r := nil\n#(1) anySatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // allSatisfy:
+        "r := nil\n#(1) allSatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // detect: search
+        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // detect:ifNone: search
+        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true] ifNone: [0]\nr",
+        // select:
+        "r := nil\n#(1) select: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // ifNil:
+        "r := nil\nnil ifNil: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // ifTrue:ifFalse:
+        "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]] ifFalse: [nil]\nr",
+        // and:
+        "r := nil\ntrue and: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // or:
+        "r := nil\nfalse or: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
+        // at:ifAbsent:
+        "r := nil\n#{#a => 1} at: #k ifAbsent: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // tryDo:
+        "r := nil\nResult tryDo: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // on:do: handler
+        "r := nil\n[Error signal: \"x\"] on: Error do: [:e | r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        // keysAndValuesDo:
+        "r := nil\n#{#a => 1} keysAndValuesDo: [:kk :v | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // eachWithIndex:
+        "r := nil\n#(1) eachWithIndex: [:z :j | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        // [...] value
+        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]] value\nr",
+        // Listed blocks nested in each other: single level only, nesting is
+        // unmeasured.
+        "r := nil\ntrue ifTrue: [#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
+        "r := nil\n[#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]. 0] on: Error do: [:e | 0]\nr",
+        // Measured right, but keyed on every enclosing role: an arm in a
+        // loop body stays rejected (loud, not silent).
+        "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
+    ] {
+        let src = in_actor(body);
+        let messages = residual_messages(&src, None);
+        assert!(
+            messages.iter().any(|m| m.contains("BT-3897")),
+            "{src}: {messages:?}"
+        );
+    }
+    // The positions that unpack it (measured right) and a pure block.
+    for body in [
+        "#(1, 3) groupBy: [:x | k := x > 2. k]\nnil",
+        // The method's last statement, its reply (`lastStatement` in
+        // adr0133residuals_test.bt answers the map).
+        "#(1, 3) groupBy: [:x | k := x > 2. k]",
+        "r := #(1, 3) groupBy: [:x | k := x > 2. k]\nr at: true",
+        "^#(1, 3) groupBy: [:x | k := x > 2. k]",
+        "r := nil\n#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
+        "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
+        "#(1) do: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
+        // Assignments in the other blocks measured to unpack the fold
+        // (`adr0133residuals_test.bt`), and a discarded statement in a loop.
+        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0] on: Error do: [:e | 0]\nr",
+        "r := nil\n[nil] ensure: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
+        "r := nil\n#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]\nr",
+        "r := nil\n#(1) inject: 0 into: [:a :z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. a]\nr",
+        "r := nil\n#(1) detect: [:z | false] ifNone: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
+        "1 timesRepeat: [#(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
+        "(#(1, 3) groupBy: [:x | x > 2]) at: true",
+    ] {
+        let src = in_actor(body);
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+    let field = "Actor subclass: Ac\n  state: m = nil\n  probe =>\n    self.m := #(1, 3) groupBy: [:x | k := x > 2. k]\n    self.m\n";
+    assert!(residual_messages(field, None).is_empty());
+    for src in [
+        in_class("(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true"),
+        in_value("(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true"),
+    ] {
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+    // The REPL: only a top-level statement or assignment unpacks it.
+    for input in [
+        "(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true\n",
+        "#(1) do: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]\n",
+        "r := nil. #(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\n",
+    ] {
+        let messages = residual_messages(input, Some(&[]));
+        assert!(
+            messages.iter().any(|m| m.contains("BT-3897")),
+            "{input}: {messages:?}"
+        );
+    }
+    for input in [
+        "#(1, 3) groupBy: [:x | k := x > 2. k]\n",
+        "r := #(1, 3) groupBy: [:x | k := x > 2. k]\n",
+    ] {
+        assert!(residual_messages(input, Some(&[])).is_empty(), "{input}");
+    }
+    // At the REPL only a local or field write threads the fold (the shared
+    // `needs_mutation_threading` rule): a block that forwards an opaque
+    // callable to a HOM is the plain `groupBy:` and answers the map
+    // anywhere (PR #4383 review).
+    let input = "(#(1, 3) groupBy: [:x | #(3) anySatisfy: f]) at: true\n";
+    assert!(residual_messages(input, Some(&["f"])).is_empty(), "{input}");
+}
+
+/// PIN-BUG BT-3911 (closes BT-3875): a REPL `match:` arm that writes an
+/// outer local draws the same `match:` arm error as a method (BT-3817), not
+/// the value-position error it drew before BT-3909 (maintainer-approved REPL
+/// output change), and only that one. BT-3911 lowers `match:` arms as frames,
+/// deletes the `MatchArmWrite` row and flips this to accepted.
+#[test]
+fn residual_repl_match_arm_write_is_the_match_arm_error() {
+    let input = "r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n";
+    let messages = residual_messages(input, Some(&["t"]));
+    assert_eq!(
+        messages,
+        vec![
+            "a `match:` arm writes outer local `t`, but `match:` cannot return the write"
+                .to_string();
+            2
+        ]
+    );
+    // An arm binding a local of its own is not an outer write; it is still
+    // the value-position error.
+    let messages = residual_messages("r := 3 match: [_ -> (z := 5)]\n", Some(&[]));
+    assert!(
+        messages.iter().all(|m| !m.contains("`match:` arm")),
+        "{messages:?}"
+    );
 }

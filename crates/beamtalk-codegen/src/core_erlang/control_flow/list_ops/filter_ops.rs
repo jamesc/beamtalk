@@ -59,7 +59,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "reject:", 1)?;
         let wrapper_var = self.fresh_temp_var("temp");
 
         Ok(docvec![

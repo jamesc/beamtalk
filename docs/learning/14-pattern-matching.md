@@ -114,9 +114,10 @@ TestCase subclass: Ch14MapDestructuring
     self assert: c equals: 3
 
   testMissingKeyRaises =>
-    self should: [
+    kind := [
       #{#missing => _val} := #{#present => 42}
-    ] raise: RuntimeError
+    ] on: Error do: [:e | e kind]
+    self assert: kind equals: #key_error
 
   testInCollectBlock =>
     dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]

@@ -149,8 +149,8 @@ TestCase subclass: Ch24Metaclass
     self deny: meta isClass
 
   testMetaclassName =>
-    name := Point class name
-    self assert: (name includesSubstring: "class")
+    // `name` answers a Symbol
+    self assert: Point class name equals: #'Point class'
 
   testSelfGrounding =>
     // The metaclass of a metaclass is itself — the hierarchy is self-grounding
@@ -202,7 +202,7 @@ MyClass respondsTo: #sel     → Boolean (class-side method)
 MyClass class         → metaclass
 metaclass isMeta      → true
 metaclass isClass     → false
-metaclass name        → "MyClass class"
+metaclass name        → #'MyClass class'
 metaclass thisClass   → MyClass
 ```
 

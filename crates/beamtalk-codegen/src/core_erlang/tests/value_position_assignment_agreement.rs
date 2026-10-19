@@ -22,7 +22,6 @@ use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::semantic_analysis::block_facts::{
     RootMethodKind, value_position_local_assignments,
 };
-use beamtalk_core::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
 use std::collections::HashSet;
@@ -58,24 +57,10 @@ fn predicate(module: &Module) -> HashSet<Span> {
             .iter()
             .map(|m| (m, RootMethodKind::Class));
         for (method, kind) in methods.chain(class_methods) {
-            // ADR 0132 Phase 0b (BT-3867): the check and the pre-codegen
-            // lowering see a class or value-type body with each promotable
-            // stored block inlined at its sends, so the predicate does too.
-            let params: Vec<_> = method
-                .parameters
-                .iter()
-                .map(|p| p.name.name.clone())
-                .collect();
-            let inlined = (kind != RootMethodKind::Actor)
-                .then(|| inline_stored_tier2_values(&method.body, &params))
-                .flatten();
             out.extend(
-                value_position_local_assignments(
-                    inlined.as_deref().unwrap_or(&method.body),
-                    Some(kind),
-                )
-                .into_iter()
-                .map(|found| found.span),
+                value_position_local_assignments(&method.body, Some(kind))
+                    .into_iter()
+                    .map(|found| found.span),
             );
         }
     }
@@ -113,14 +98,28 @@ fn dropped(module: &Module) -> Option<HashSet<Span>> {
     compiled.then(|| spans.into_iter().filter(|s| !dead.contains(s)).collect())
 }
 
-#[test]
-fn the_rejection_names_exactly_the_local_assignments_codegen_drops() {
+/// The method contexts of [`sources`], in its order: one test each below
+/// (`per_family_tests!`, BT-3888).
+const CONTEXTS: &[&str] = &["class", "value type", "actor"];
+
+/// The families of [`CONTEXTS`]: one context each.
+const CONTEXT_FAMILIES: &[std::ops::Range<usize>] = &[0..1, 1..2, 2..3];
+
+/// Both ways over the whole corpus in the method contexts named: the whole
+/// proof is the per-context tests below.
+fn the_rejection_names_exactly_the_local_assignments_codegen_drops(contexts: &[&str]) {
+    assert_eq!(sources("").len(), CONTEXTS.len(), "one source per context");
     let mut named = 0;
     let mut accepted = 0;
     let mut failures = Vec::new();
     for body in corpus() {
-        for src in sources(&body) {
-            let (module, parse_diags) = parse(lex_with_eof(&src));
+        let all = sources(&body);
+        for context in contexts {
+            let src = &all[CONTEXTS
+                .iter()
+                .position(|c| c == context)
+                .expect("a context of CONTEXTS")];
+            let (module, parse_diags) = parse(lex_with_eof(src));
             assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
             let expected = predicate(&module);
             let analysis = analyse_full(&module, AnalysisContext::default());
@@ -177,7 +176,25 @@ fn the_rejection_names_exactly_the_local_assignments_codegen_drops() {
         failures.len(),
         failures.join("\n---\n")
     );
-    // Not vacuous: both directions compare many compiled programs.
-    assert!(named > 300, "only {named} rejected programs compared");
-    assert!(accepted > 100, "only {accepted} accepted programs compared");
+    // Not vacuous: both directions compare many compiled programs in every
+    // context (the whole corpus once asserted more than 300 and 100 over its
+    // three contexts).
+    assert!(
+        named > 100,
+        "only {named} rejected programs compared in {contexts:?}"
+    );
+    assert!(
+        accepted > 30,
+        "only {accepted} accepted programs compared in {contexts:?}"
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = CONTEXTS,
+    families = CONTEXT_FAMILIES,
+    check = the_rejection_names_exactly_the_local_assignments_codegen_drops,
+    partition = the_value_position_assignment_agreement_tests_cover_every_context,
+    the_rejection_names_exactly_the_local_assignments_codegen_drops_in_class_methods => 0,
+    the_rejection_names_exactly_the_local_assignments_codegen_drops_in_value_type_methods => 1,
+    the_rejection_names_exactly_the_local_assignments_codegen_drops_in_actor_methods => 2,
 }

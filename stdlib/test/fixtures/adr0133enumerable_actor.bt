@@ -4,16 +4,12 @@
 // BT-3903 (ADR 0133 Phase 1): an actor collection with only `do:`, sent the
 // collection messages with a writing block from outside (another process).
 // It does not use adr0133enumerable_walkable.bt: inside an actor's own
-// method, `self do:` with a writing block drops the write today (BT-3918,
-// pinned by `selfDoSum`), which is why the stdlib's `Enumerable` is built on
-// `elements` instead (BT-3580). Driven by adr0133enumerable_user.bt.
+// method, `self do:` with a writing block is an escaping-block compile error
+// (BT-3918, BT-3908: the self-send is dispatched to this class's own `do:`),
+// which is why the stdlib's `Enumerable` is built on `elements` instead
+// (BT-3580). Driven by adr0133enumerable_user.bt.
 
 Actor subclass: Adr0133EnumerableActor
   state: items = #()
 
   do: block => self.items do: block
-
-  selfDoSum =>
-    t := 0
-    self do: [:x | t := t + x]
-    t

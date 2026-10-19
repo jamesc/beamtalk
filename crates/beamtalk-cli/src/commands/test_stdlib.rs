@@ -588,7 +588,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
     // unless the corpus `.core` diff harness asks to keep them — see
     // `util::core_output_dir`'s doc.
-    let (build_dir, _core_output_dir_guard) = util::core_output_dir()?;
+    let (build_dir, core_output_dir_guard) = util::core_output_dir()?;
 
     // BT-3563: `test-stdlib` has no manifest/package concept at all — unlike
     // `beamtalk test`'s `TestPipeline`, every fixture here compiles fully
@@ -641,6 +641,18 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     // Deduplicate fixture modules
     all_fixture_modules.sort();
     all_fixture_modules.dedup();
+
+    // BT-3887: every `.core` is on disk after Phase 1; the corpus `.core`
+    // diff harness's snapshot-only mode stops here rather than compiling
+    // `.beam` and running the suite. See `util::CoreOutputDir::snapshot_only`.
+    if core_output_dir_guard.snapshot_only() {
+        println!(
+            "Snapshotted {} test file(s) to .core only (BEAMTALK_CORE_SNAPSHOT_ONLY=1); \
+             skipped .beam compilation and test execution",
+            test_files.len()
+        );
+        return Ok(());
+    }
 
     // Phase 2: Batch compile all .core → .beam
     if !all_core_files.is_empty() {

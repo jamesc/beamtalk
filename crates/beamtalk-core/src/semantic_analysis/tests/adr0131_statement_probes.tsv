@@ -6288,3 +6288,47 @@ value	valTimes	dlocal	dinH	ok
 value	valTimes	dlocal	dinS	ok
 value	valTimes	dlocal	any	ok
 value	valTimes	dlocal	det	ok
+# ADR 0133 Phase 3 residuals (BT-3909), measured on a BEAM: a `fresh` local
+# bound in a conditional arm in a `whileTrue:` condition (BT-3891: `erlc`
+# fails in every method context; the REPL answers right), a `groupBy:` whose
+# block binds a local, as a receiver (BT-3897: the actor and the REPL answer
+# the raw carrier tuple), and a REPL `match:` arm writing an outer local
+# (BT-3875: the value-position error before BT-3909, now the `match:` arm error).
+actor	cond	fresh	and	bad
+actor	cond	fresh	ifNil	bad
+actor	cond	fresh	ifTrue	bad
+class	cond	fresh	and	bad
+class	cond	fresh	ifNil	bad
+class	cond	fresh	ifTrue	bad
+value	cond	fresh	and	bad
+value	cond	fresh	ifNil	bad
+value	cond	fresh	ifTrue	bad
+actor	top	fresh	groupBy	bad
+class	top	fresh	groupBy	ok
+value	top	fresh	groupBy	ok
+repl	cond	fresh	and	ok
+repl	cond	fresh	ifNil	ok
+repl	cond	fresh	ifTrue	ok
+repl	top	fresh	groupBy	bad
+repl	top	outer	match	bad
+# BT-3909 review: the `cond` role with a local bound outside the loop
+# (`outer`, `direct`) fails `erlc` in every method context too; the Phase 0
+# and section 6 checks reject it.
+actor	cond	direct	and	bad
+actor	cond	direct	ifNil	bad
+actor	cond	direct	ifTrue	bad
+actor	cond	outer	and	bad
+actor	cond	outer	ifNil	bad
+actor	cond	outer	ifTrue	bad
+class	cond	direct	and	bad
+class	cond	direct	ifNil	bad
+class	cond	direct	ifTrue	bad
+class	cond	outer	and	bad
+class	cond	outer	ifNil	bad
+class	cond	outer	ifTrue	bad
+value	cond	direct	and	bad
+value	cond	direct	ifNil	bad
+value	cond	direct	ifTrue	bad
+value	cond	outer	and	bad
+value	cond	outer	ifNil	bad
+value	cond	outer	ifTrue	bad

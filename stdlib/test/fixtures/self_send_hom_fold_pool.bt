@@ -1,22 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3615 (ADR 0128 scope extension): `self_send_hom_pool.bt`'s shape —
-// an Actor whose user-defined HOM forwards an OPAQUE (non-literal) block
-// across a self-send straight to a stdlib collection primitive — for the
-// operators BT-3583 did not cover (`inject:into:`, `detect:`,
-// `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:`) and for
-// `Array`/`Set` receivers. Before the fix every one of the six operators
-// CRASHED when the forwarded block was a Tier 2 (captured-local-mutating)
-// block — `badarity` for `inject:into:`, `function_clause` inside
-// `lists:any/all/filter`, a type error inside `beamtalk_list:detect` — and
-// a `Set` `collect:`/`select:` answered a `List`.
+// An Actor whose user-defined HOMs forward an OPAQUE (non-literal) block
+// across a self-send straight to a stdlib collection primitive, for the
+// operators beyond `do:`/`collect:`/`select:` (`inject:into:`, `detect:`,
+// `detect:ifNone:` and its `ifNone:` handler, `count:`, `anySatisfy:`,
+// `allSatisfy:`, `reject:`, `flatMap:`, `takeWhile:`, `dropWhile:`,
+// `partition:`, `groupBy:`, `sort:`) and for `Array`/`Set` receivers
+// (BT-3615, BT-3908).
+//
+// Since ADR 0133 removed the ADR 0128 fold (BT-3908), every forwarded
+// callable goes through the one arity-normalizing wrapper
+// (`non_literal_callable_doc`). The `pure*` callers below pass blocks that
+// change no state; the `tally*` callers' field writes make
+// `detect_tier2_self_send` promote each HOM's block position to Tier 2, so
+// the pure blocks are
+// promoted too and must still answer correctly. The `tally*` blocks write
+// `self.total`, which the wrapper cannot keep, so they raise
+// `stateful_block_dispatch` (BT-3922 makes them a compile error).
 
 Actor subclass: SelfSendHomFoldPool
   state: items = #(1, 2, 3, 4)
   state: arr = #[1, 2, 3, 4]
   state: set = #(1, 2, 3, 4) asSet
   state: total = 0
+  state: groups = #(#(1, 2), #(3))
 
   // ── forwarding HOMs: opaque `block` straight to the primitive ─────────────
   sealed fwdInject: initial into: block =>
@@ -72,7 +80,209 @@ Actor subclass: SelfSendHomFoldPool
     [(self.items count: block) > i] whileTrue: [i := i + 1]
     i
 
-// BT-3615's callers, a Tier 2 block (one that assigns a captured local, or a
-// captured local and `self.total`) through each forwarding HOM, are ADR 0133
-// escaping-block compile errors since BT-3902; actor_self_send_hom_test.bt
-// sends the HOMs pure blocks.
+  sealed fwdReject: block => self.items reject: block
+
+  sealed fwdFlatMap: block => self.items flatMap: block
+
+  sealed fwdTakeWhile: block => self.items takeWhile: block
+
+  sealed fwdDropWhile: block => self.items dropWhile: block
+
+  sealed fwdPartitionSize: block => (self.items partition: block) size
+
+  sealed fwdGroupBySize: block => (self.items groupBy: block) size
+
+  sealed fwdSort: block => self.items sort: block
+
+  sealed fwdIfNone: noneBlock =>
+    self.items detect: [:x | x > 20] ifNone: noneBlock
+
+  // The predicate writes a field, so this `detect:ifNone:` takes the
+  // mutation-threading fold and its `ifNone:` handler runs on the fold's
+  // final state.
+  sealed fwdIfNoneAfterFold: noneBlock =>
+    self.items
+      detect: [:x |
+        self.total := self.total + 1
+        x > 20
+      ]
+      ifNone: noneBlock
+
+  // ── callers inside the actor (BT-3908) ──────────────────────────────────
+  pureInject => self fwdInject: 0 into: [:a :x | a + x]
+
+  pureDetect => self fwdDetect: [:x | x > 2]
+
+  pureDetectIfNone => self fwdDetect: [:x | x > 20] ifNone: [7]
+
+  pureCount => self fwdCount: [:x | x > 2]
+
+  pureAnySatisfy => self fwdAnySatisfy: [:x | x > 3]
+
+  pureAllSatisfy => self fwdAllSatisfy: [:x | x > 0]
+
+  pureArrCollect => self arrCollect: [:x | x * 2]
+
+  tallyInject =>
+    self
+      fwdInject: 0
+      into: [:a :x |
+        self.total := self.total + 1
+        a + x
+      ]
+
+  tallyDetect =>
+    self
+      fwdDetect: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyDetectIfNone =>
+    self
+      fwdDetect: [:x |
+        self.total := self.total + 1
+        x > 20
+      ]
+      ifNone: [7]
+
+  tallyCount =>
+    self
+      fwdCount: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyAnySatisfy =>
+    self
+      fwdAnySatisfy: [:x |
+        self.total := self.total + 1
+        x > 3
+      ]
+
+  tallyAllSatisfy =>
+    self
+      fwdAllSatisfy: [:x |
+        self.total := self.total + 1
+        x > 0
+      ]
+
+  tallyArrCollect =>
+    self
+      arrCollect: [:x |
+        self.total := self.total + 1
+        x * 2
+      ]
+
+  pureReject => self fwdReject: [:x | x > 2]
+
+  pureFlatMap => self fwdFlatMap: [:x | #(1)]
+
+  pureTakeWhile => self fwdTakeWhile: [:x | x < 3]
+
+  pureDropWhile => self fwdDropWhile: [:x | x < 3]
+
+  purePartitionSize => self fwdPartitionSize: [:x | x > 2]
+
+  pureGroupBySize => self fwdGroupBySize: [:x | x isEven]
+
+  pureSort => self fwdSort: [:a :b | a > b]
+
+  pureIfNone => self fwdIfNone: [7]
+
+  pureIfNoneAfterFold =>
+    self.total := 0
+    self fwdIfNoneAfterFold: [self.total]
+
+  tallyReject =>
+    self
+      fwdReject: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyFlatMap =>
+    self
+      fwdFlatMap: [:x |
+        self.total := self.total + 1
+        #(1)
+      ]
+
+  tallyTakeWhile =>
+    self
+      fwdTakeWhile: [:x |
+        self.total := self.total + 1
+        x < 3
+      ]
+
+  tallyDropWhile =>
+    self
+      fwdDropWhile: [:x |
+        self.total := self.total + 1
+        x < 3
+      ]
+
+  tallyPartitionSize =>
+    self
+      fwdPartitionSize: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyGroupBySize =>
+    self
+      fwdGroupBySize: [:x |
+        self.total := self.total + 1
+        x isEven
+      ]
+
+  tallySort =>
+    self
+      fwdSort: [:a :b |
+        self.total := self.total + 1
+        a > b
+      ]
+
+  tallyIfNone =>
+    self
+      fwdIfNone: [
+        self.total := self.total + 1
+        7
+      ]
+
+  tallyIfNoneAfterFold =>
+    self
+      fwdIfNoneAfterFold: [
+        self.total := self.total + 1
+        7
+      ]
+
+  // A promoted block that rebinds a block-local inside an inner loop
+  // (BT-3939): `tallyGroups` promotes `fwdGroupsCollect:`'s position.
+  weight: y => y * 10
+
+  sealed fwdGroupsCollect: block => self.groups collect: block
+
+  tallyGroups =>
+    self
+      fwdGroupsCollect: [:xs |
+        self.total := self.total + 1
+        xs
+      ]
+
+  groupWeights =>
+    self
+      fwdGroupsCollect: [:xs |
+        n := 0
+        xs do: [:y | n := n + (self weight: y)]
+        n
+      ]
+
+  // A Tier 1 block of one argument too many for its position (an `ifNone:`
+  // handler takes none).
+  oneArgBlock => [:x | 7]
+
+  wrongArityIfNone => self.items detect: [:x | x > 20] ifNone: self oneArgBlock
+
+// BT-3615's other callers, a block that assigns a captured local through each
+// forwarding HOM, are ADR 0133 escaping-block compile errors since BT-3902.

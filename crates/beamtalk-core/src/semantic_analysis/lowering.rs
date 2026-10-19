@@ -74,7 +74,6 @@ use crate::ast::Module;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback;
 use crate::semantic_analysis::return_type_writeback::apply_return_type_writeback_from_map;
-use crate::semantic_analysis::stored_block_inline::inline_stored_tier2_values;
 use crate::semantic_analysis::supervisor_kind_writeback::apply_supervisor_kind_writeback;
 use crate::semantic_analysis::trait_expansion;
 use crate::semantic_analysis::type_checker::{InferredType, MethodReturnKey};
@@ -136,39 +135,6 @@ pub fn lower_module_for_codegen(
     // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
     // so codegen generates auto-slot methods (withX: setters).
     apply_class_kind_writeback(module, hierarchy);
-    // ADR 0132 Phase 0b (BT-3867): a stored Tier 2 block sent `value` in a
-    // class or value-type method is evaluated in place, the same rule the
-    // ADR 0131 §6 check applied (`check_local_threading`).
-    inline_stored_blocks(module, hierarchy);
-}
-
-/// Applies [`inline_stored_tier2_values`] to every class-side method and every
-/// instance method of a non-actor class (including standalone extensions).
-fn inline_stored_blocks(module: &mut Module, hierarchy: &ClassHierarchy) {
-    fn inline_method(method: &mut crate::ast::MethodDefinition) {
-        let params: Vec<ecow::EcoString> = method
-            .parameters
-            .iter()
-            .map(|p| p.name.name.clone())
-            .collect();
-        if let Some(body) = inline_stored_tier2_values(&method.body, &params) {
-            method.body = body;
-        }
-    }
-    for class in &mut module.classes {
-        let actor = hierarchy.is_actor_subclass(class.name.name.as_str());
-        if !actor {
-            class.methods.iter_mut().for_each(inline_method);
-        }
-        class.class_methods.iter_mut().for_each(inline_method);
-    }
-    for standalone in &mut module.method_definitions {
-        if standalone.is_class_method
-            || !hierarchy.is_actor_subclass(standalone.class_name.name.as_str())
-        {
-            inline_method(&mut standalone.method);
-        }
-    }
 }
 
 #[cfg(test)]

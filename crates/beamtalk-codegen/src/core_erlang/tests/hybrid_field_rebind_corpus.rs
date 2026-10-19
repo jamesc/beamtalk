@@ -88,11 +88,23 @@ const WRITES: &[(&str, &str)] = &[
     ),
 ];
 
-#[test]
-fn hybrid_field_rebind_is_verified_in_every_loop_and_container() {
+/// The `loop / container` cases that must reach the hybrid field rebind (see
+/// [`hybrid_field_rebind_is_verified_in_every_loop_and_container`]).
+const REACHES_THE_REBIND: &[&str] = &[
+    "while_true / bare",
+    "while_false / bare",
+    "while_true / block_value_body",
+];
+
+/// One family per loop of [`LOOPS`] (`per_family_tests!`, BT-3888).
+const LOOP_FAMILIES: &[std::ops::Range<usize>] = &[0..1, 1..2, 2..3, 3..4, 4..5];
+
+/// The hybrid field rebind proof over one family of [`LOOPS`] x every
+/// container x every write: the whole proof is the per-loop tests below.
+fn hybrid_field_rebind_is_verified_in_every_loop_and_container(loops: &[(&str, &str)]) {
     let mut failures: Vec<String> = Vec::new();
     let mut not_reached: Vec<String> = Vec::new();
-    for (loop_name, lp) in LOOPS {
+    for (loop_name, lp) in loops {
         for (container_name, container) in CONTAINERS {
             let methods: Vec<(&str, String)> = WRITES
                 .iter()
@@ -145,14 +157,39 @@ fn hybrid_field_rebind_is_verified_in_every_loop_and_container() {
     // handler forces the `StateAcc` fallback (mutually exclusive with hybrid mode), so only
     // the hybrid loop's own body statements and plain block bodies render the `Field`
     // parameter; pin that those do, so a change that stops reaching it fails here.
-    for expected in [
-        "while_true / bare",
-        "while_false / bare",
-        "while_true / block_value_body",
-    ] {
+    for expected in REACHES_THE_REBIND {
+        let (loop_name, _) = expected.split_once(" / ").expect("`loop / container`");
+        if !loops.iter().any(|(name, _)| *name == loop_name) {
+            continue;
+        }
         assert!(
             !not_reached.iter().any(|name| name == expected),
             "{expected} no longer reaches the hybrid field rebind (not reached: {not_reached:?})"
+        );
+    }
+}
+
+beamtalk_core::per_family_tests! {
+    list = LOOPS,
+    families = LOOP_FAMILIES,
+    check = hybrid_field_rebind_is_verified_in_every_loop_and_container,
+    partition = the_hybrid_field_rebind_tests_cover_every_loop,
+    hybrid_field_rebind_is_verified_in_every_while_true_container => 0,
+    hybrid_field_rebind_is_verified_in_every_while_false_container => 1,
+    hybrid_field_rebind_is_verified_in_every_to_do_container => 2,
+    hybrid_field_rebind_is_verified_in_every_do_container => 3,
+    hybrid_field_rebind_is_verified_in_every_inject_into_container => 4,
+}
+
+/// Every pin of [`REACHES_THE_REBIND`] names a loop of [`LOOPS`]: a pin for a
+/// loop no family holds would never be checked.
+#[test]
+fn every_reaches_the_rebind_pin_names_a_corpus_loop() {
+    for expected in REACHES_THE_REBIND {
+        let (loop_name, _) = expected.split_once(" / ").expect("`loop / container`");
+        assert!(
+            LOOPS.iter().any(|(name, _)| *name == loop_name),
+            "{expected} names no loop of LOOPS"
         );
     }
 }

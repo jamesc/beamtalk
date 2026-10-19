@@ -18,27 +18,34 @@
 //! - [`transform_ops`] — `inject:into:`, `flatMap:`, `count:`, `takeWhile:`,
 //!   `dropWhile:`, `partition:`, `groupBy:`, `sort:` codegen
 //! - [`enumeration_ops`] — `eachWithIndex:`, `do:separatedBy:` desugar codegen
-//! - [`opaque_fold`] — ADR 0128 opaque-callable (non-literal block) fold
-//!   threading shared by `do:`/`collect:`/`select:`/`inject:into:`/`detect:`/
-//!   `detect:ifNone:`/`count:`/`anySatisfy:`/`allSatisfy:`
 
 mod basic_ops;
 mod enumeration_ops;
 mod filter_ops;
-mod opaque_fold;
 mod search_ops;
 mod transform_ops;
 
 #[cfg(test)]
 mod tests;
 
-pub(in crate::core_erlang) use opaque_fold::OpaqueFoldOp;
-
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
+
+/// The Beamtalk selector of a simple list op, from the `lists` function it
+/// lowers to (`foreach` → `do:`, `map` → `collect:`, `filter` → `select:`);
+/// any other name is already the selector. The one table the plain footer's
+/// fallback send and the non-literal-callable wrapper's error both read.
+fn list_op_selector(operation: &str) -> &str {
+    match operation {
+        "foreach" => "do:",
+        "map" => "collect:",
+        "filter" => "select:",
+        other => other,
+    }
+}
 
 // ─── BodyKind ─────────────────────────────────────────────────────────────────
 
@@ -194,78 +201,14 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Whether a non-literal (opaque) callable forwarded to a collection HOM
-    /// (`beamtalk-core`'s `opaque_fold_callable_arg`) should route through the
-    /// ADR 0128 `lists:foldl` state-fold rewrite
-    /// (`generate_opaque_callable_fold`) rather
-    /// than the pre-existing plain-value wrapper
-    /// (`generate_non_literal_callable_erlang_wrapper`).
-    ///
-    /// The single source of truth for this decision — shared by the codegen
-    /// call sites (via `routes_through_opaque_callable_fold`, used by every
-    /// covered operator's codegen) and the classifier call site (`control_flow_has_mutations`,
-    /// `gen_server/methods.rs`) that decides whether a caller should expect
-    /// a `{Result, NewState}` tuple back. These two decisions must never
-    /// diverge — the class-method crash fixed on PR #4030 (an unbound
-    /// `State` reference inside `class_<selector>`) arose from exactly this
-    /// class of hand-duplicated condition drifting apart; extracting one
-    /// predicate makes that impossible instead of merely documented.
-    ///
-    /// `true` only in an Actor INSTANCE method
-    /// (`in_actor_instance_context`). `false` for `CodeGenContext::ValueType`
-    /// (no `State` map to thread) and for a class method
-    /// (`class_<selector>(ClassSelf, Args...)` has no `State`/`StateAcc`
-    /// parameter either). BT-3615: also `false` for
-    /// `CodeGenContext::Repl` — the REPL eval module unpacks a
-    /// `{Result, State}` tuple only when a builder flags
-    /// `repl_loop_mutated`, and does not splice ADR 0118 expression
-    /// preludes, so the fold's tuple leaked into the displayed value
-    /// (`#(1, 2, 3) collect: blk` answered `{#(2, 4, 6), #{...}}`) and an
-    /// expression-position fold referenced an unbound `State1`. The REPL
-    /// keeps the plain-value wrapper, as before BT-3583.
-    pub(in crate::core_erlang) fn opaque_callable_list_op_needs_state_fold(&self) -> bool {
-        self.in_actor_instance_context()
-    }
-
     pub(in crate::core_erlang) fn generate_simple_list_op(
         &mut self,
         receiver: &Expression,
         body: &Expression,
         operation: &str,
     ) -> Result<Document<'static>> {
-        // The Actor-instance non-literal (opaque) callable path (below) does not
-        // use the shared footer at all — it has its own receiver/temp-var
-        // allocation. Only compute `list_var`/`recv_code` here, ahead of
-        // compiling the body, for the two paths that DO share the footer
-        // (literal-block, and ValueType/REPL/class-method non-literal) —
-        // preserving the exact gensym allocation order snapshot tests pin
-        // (`list_var` before the body compiles), unchanged from before this
-        // function was split.
-        //
-        // See `opaque_callable_list_op_needs_state_fold`'s doc comment for
-        // why `ValueType` and `in_class_method()` are excluded — the SAME
-        // predicate the classifier (`control_flow_has_mutations`,
-        // `gen_server/methods.rs`) uses to decide whether a caller expects
-        // a `{Result, NewState}` tuple back, so the two decisions cannot
-        // drift apart (review-flagged on PR #4030).
-        if self.routes_through_opaque_callable_fold(body) {
-            // Actor instance: fold-based rewrite (ADR 0128 / BT-3583). The
-            // callable's tier is unknown until runtime, so the fold's own
-            // accumulator IS the actor `State` map itself — folding it
-            // through `lists:foldl` genuinely threads it across every
-            // element (unlike the old frozen-`State` wrapper this
-            // replaces), and the fold lambda discriminates Tier 1 vs Tier 2
-            // once PER ELEMENT rather than once at wrap time. See the
-            // ADR's "Concrete lowering sketch" for the full annotated
-            // Before/After.
-            let op = match operation {
-                "foreach" => OpaqueFoldOp::Do,
-                "map" => OpaqueFoldOp::Collect,
-                _ => OpaqueFoldOp::Select,
-            };
-            return self.generate_opaque_callable_fold(receiver, body, op);
-        }
-
+        // `list_var` is allocated before the body compiles, preserving the
+        // gensym order the snapshot tests pin.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -285,26 +228,13 @@ impl CoreErlangGenerator {
             }
             wrapped_doc
         } else {
-            // Non-literal (opaque) callable in `CodeGenContext::ValueType`
-            // or `Repl`, OR in a class method (any context) — see
-            // `opaque_callable_list_op_needs_state_fold`'s doc comment for
-            // why each is excluded from the fold path.
-            //
-            // ADR 0128 / BT-3583: `ValueType` has no `State` map in scope,
-            // and value-type method-body classification never routes a
-            // non-literal do:/collect:/select: call through the
-            // tuple-threading machinery this ADR adds for Actor
-            // (`is_foldl_list_op_with_vt_local_threading`/
-            // `foldl_list_op_body_block` only recognize a LITERAL block
-            // argument) — so a `ValueType` method keeps emitting exactly
-            // the pre-existing plain-value wrapper below, seeded with a
-            // fresh empty map per BT-909's Tier-2 arity-check convention. A
-            // stateful callable's mutations are still dropped here exactly
-            // as before; this ADR does not claim to fix that (`ValueType`
-            // has no channel to return them through at this call site) —
-            // only that this shared function must keep producing the same,
-            // already-correct plain value `ValueType` callers expect.
-            self.generate_non_literal_callable_erlang_wrapper(body, operation)?
+            // Non-literal (opaque) callable: the shared lowering
+            // (`non_literal_callable_doc`), in every context.
+            self.warn_non_literal_callable_at_erlang_boundary(
+                &format!("'lists':'{operation}'"),
+                body.span(),
+            );
+            self.non_literal_callable_doc(body, list_op_selector(operation), 1)?
         };
 
         Ok(Self::generate_simple_list_op_footer(
@@ -312,56 +242,244 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Non-literal-callable wrapper used by `ValueType` context (and, before
-    /// ADR 0128, uniformly by every context) — a runtime arity check that
-    /// wraps a Tier-2 (arity 2) block to satisfy the arity-1 contract
-    /// expected by `lists:foreach`/`lists:map`/`lists:filter`. Mutations
-    /// inside a Tier-2 callable are dropped here: the wrapper's own
-    /// `SeedState` (a fresh empty map — `ValueType` has no `State` in
-    /// scope) is frozen at wrap time and never threaded back out.
+    /// The selector and hint of the `stateful_block_dispatch` error
+    /// [`Self::non_literal_callable_doc`] raises in an actor: the self-send
+    /// selector the block was passed to (the method being compiled), and the
+    /// list op it forwarded the block to.
+    fn forwarded_state_change_error(&self, list_selector: &str) -> (String, String) {
+        match self.current_method_selector.clone() {
+            Some(method) => {
+                let hint = format!(
+                    "The block passed to `{method}` changed actor state (a field write, or \
+                     a self-send that changed state) when `{method}` forwarded it to \
+                     `{list_selector}`; the change cannot be kept. Change the state in \
+                     the method that owns the loop, and pass a block that returns the \
+                     value instead."
+                );
+                (method, hint)
+            }
+            None => (
+                list_selector.to_string(),
+                format!(
+                    "A block whose run changed actor state (a field write, or a self-send \
+                     that changed state) was passed on to `{list_selector}`; the change \
+                     cannot be kept. Change the state in the method that owns the loop, \
+                     and pass a block that returns the value instead."
+                ),
+            ),
+        }
+    }
+
+    /// Whether `callable` is a parameter the method being compiled receives
+    /// as a promoted Tier 2 block (`tier2_block_params`, from the self-send
+    /// pre-scan).
+    fn is_promoted_tier2_param(&self, callable: &Expression) -> bool {
+        matches!(
+            callable.unwrap_parens(),
+            Expression::Identifier(id) if self.tier2_block_params.contains(id.name.as_str())
+        )
+    }
+
+    /// The callable argument of a list op that calls it with `arity`
+    /// arguments: a literal block compiles as itself (the caller has already
+    /// sent a mutating one down its `_with_mutations` path); anything else
+    /// goes through [`Self::non_literal_callable_doc`].
+    pub(in crate::core_erlang) fn list_op_callable_doc(
+        &mut self,
+        callable: &Expression,
+        list_selector: &str,
+        arity: usize,
+    ) -> Result<Document<'static>> {
+        if Self::extract_block_literal(callable).is_some() {
+            self.expression_doc(callable)
+        } else {
+            self.non_literal_callable_doc(callable, list_selector, arity)
+        }
+    }
+
+    /// The one lowering of a non-literal (opaque) callable handed to a list
+    /// op: every callable argument of every list op in this module (`do:`,
+    /// `collect:`, `select:`, `reject:`, `inject:into:`, `detect:`,
+    /// `detect:ifNone:` and its `ifNone:` handler, `count:`, `anySatisfy:`,
+    /// `allSatisfy:`, `flatMap:`, `takeWhile:`, `dropWhile:`, `partition:`,
+    /// `groupBy:`, `sort:`), used in every context since ADR 0133 removed the
+    /// ADR 0128 actor fold (BT-3908). `arity` is the number of arguments the
+    /// list op calls it with (`inject:into:` and `sort:` 2, the `ifNone:`
+    /// handler 0, the rest 1); `list_selector` names the list op for the
+    /// error.
     ///
-    /// Generated pattern (uses `is_function/2` to avoid badarg on non-funs):
+    /// A runtime arity check: a callable of `arity` arguments (a Tier 1
+    /// block) and anything that is not a fun pass through unchanged. A
+    /// Tier 2 block (`arity + 1` arguments, the trailing `StateAcc`) is
+    /// wrapped to `arity` arguments. Outside an actor instance method there
+    /// is no `State`: its seed is a fresh empty map and the returned map is
+    /// dropped. In an actor instance method a Tier 2 block here is one
+    /// `detect_tier2_self_send` promoted for a self-send to the current
+    /// method: because it writes a field (BT-1140, which BT-3922 makes a
+    /// compile error) or as a passthrough at a position another call site
+    /// promoted (BT-3936). Its seed is the live `State`, so it reads fields
+    /// and may `^`; a block whose run changed actor state (a field write, or
+    /// a self-send that changed state) returns a different map, and with the
+    /// fold gone that change has no way back, so it raises
+    /// `stateful_block_dispatch` rather than drop it. A block that writes a
+    /// captured local never gets here (the ADR 0133 escaping-block
+    /// diagnostic).
+    ///
+    /// Arity alone cannot tell a Tier 2 block from a Tier 1 block of one
+    /// argument too many (an `ifNone:` handler `[:x | ...]`, a 3-argument
+    /// `sort:` block): both are funs of `arity + 1` arguments, and Tier 2
+    /// funs carry no mark. So the Tier 2 arm also checks the reply shape: a
+    /// reply that is not `{Result, Map}` raises `stateful_block_dispatch`
+    /// (the wrong-arity error) rather than being misread. The remaining
+    /// limitation: a wrong-arity Tier 1 block that happens to answer a
+    /// two-tuple whose second element is a map is still read as a Tier 2
+    /// reply.
+    ///
+    /// In an actor, only a callable that is a promoted Tier 2 parameter of
+    /// the method being compiled (`tier2_block_params`) is seeded with the
+    /// live `State`; every other one gets a fresh empty map, so a
+    /// wrong-arity block from outside never sees the actor's state. The
+    /// remaining exposure: a wrong-arity block passed at a *promoted*
+    /// parameter position is applied to the live `State` before the guard
+    /// raises. That lasts until BT-3922 removes the promotion.
+    ///
+    /// Generated pattern (`is_function/2` avoids badarg on non-funs), for
+    /// `arity` 1 outside an actor:
     /// ```text
     ///   let _Callable = <expr> in
     ///   case call 'erlang':'is_function'(_Callable, 1) of
-    ///     <'true'> when 'true' -> _Callable           -- arity-1, pass through
+    ///     <'true'> when 'true' -> _Callable           -- Tier 1, pass through
     ///     <'false'> when 'true' ->
     ///       case call 'erlang':'is_function'(_Callable, 2) of
-    ///         <'true'> when 'true' -> fun (_WArg) ->  -- Tier-2, wrap it
-    ///           let _T = apply _Callable (_WArg, ~{}~) in
-    ///           let _WRes = call 'erlang':'element'(1, _T) in _WRes
+    ///         <'true'> when 'true' -> fun (_WArg) ->  -- Tier 2, wrap it
+    ///           let _EmptyState = ~{}~ in
+    ///           let _T = apply _Callable (_WArg, _EmptyState) in
+    ///           case _T of
+    ///             <{_WRes, _WSt}> when call 'erlang':'is_map'(_WSt) -> _WRes
+    ///             <_> when 'true' -> <raise stateful_block_dispatch>
+    ///           end
     ///         <'false'> when 'true' -> _Callable      -- not a fun, pass through
     ///       end
     ///   end
     /// ```
     ///
     /// NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun
-    /// body (erlc rejects tuple patterns in let). Use element/2 calls instead.
+    /// body (erlc rejects tuple patterns in let); a `case` clause pattern is
+    /// how the reply is destructured.
     /// NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
     /// terminate the fun — the Body expression ends the fun. Two `end`s close
     /// the two nested `case` expressions.
-    fn generate_non_literal_callable_erlang_wrapper(
+    pub(in crate::core_erlang) fn non_literal_callable_doc(
         &mut self,
-        body: &Expression,
-        operation: &str,
+        callable: &Expression,
+        list_selector: &str,
+        arity: usize,
     ) -> Result<Document<'static>> {
-        self.warn_non_literal_callable_at_erlang_boundary(
-            &format!("'lists':'{operation}'"),
-            body.span(),
-        );
+        self.non_literal_callable_doc_seeded(callable, list_selector, arity, None)
+    }
+
+    /// [`Self::non_literal_callable_doc`] with the actor state the Tier 2
+    /// arm is seeded from (and compared against) named by the caller: the
+    /// `ifNone:` handler after a `detect:ifNone:` fold runs on the fold's
+    /// final state, not the state before the fold. `None` is the current
+    /// field-read state.
+    pub(in crate::core_erlang) fn non_literal_callable_doc_seeded(
+        &mut self,
+        callable: &Expression,
+        list_selector: &str,
+        arity: usize,
+        seed_state: Option<&str>,
+    ) -> Result<Document<'static>> {
         let callable_var = self.fresh_temp_var("Callable");
-        let raw_code = self.expression_doc(body)?;
-        let wrap_arg = self.fresh_temp_var("WArg");
+        let raw_code = self.expression_doc(callable)?;
+        let wrap_args: Vec<String> = (0..arity).map(|_| self.fresh_temp_var("WArg")).collect();
         let wrap_tuple = self.fresh_temp_var("T");
         let wrap_res = self.fresh_temp_var("WRes");
-
-        // Seed StateAcc: ValueType has no State variable in scope.
-        // Bind ~{}~ to a fresh variable (mirroring generate_erlang_interop_wrapper)
-        // so ~{}~ is not used as a literal in an apply argument position.
-        let sv = self.fresh_temp_var("EmptyState");
-        let state_preamble = docvec!["let ", leaf::var(sv.clone()), " = ~{}~ in "];
-
-        // Use is_function/2 instead of fun_info to avoid exception on non-functions
+        let wrap_state = self.fresh_temp_var("WSt");
+        let actor = self.in_actor_instance_context();
+        // Only a promoted Tier 2 parameter is seeded with the live actor
+        // `State`; any other fun of `arity + 1` arguments (a wrong-arity block
+        // from another process, say) gets a fresh empty map, so it never sees
+        // the actor's private state, and the guard below still raises.
+        let (seed, seed_preamble) = if actor && self.is_promoted_tier2_param(callable) {
+            let seed =
+                seed_state.map_or_else(|| self.current_field_read_state_var(), str::to_string);
+            (seed, Document::Str(""))
+        } else {
+            let seed = self.fresh_temp_var("EmptyState");
+            let preamble = docvec!["let ", leaf::var(seed.clone()), " = ~{}~ in "];
+            (seed, preamble)
+        };
+        // What a Tier 2 reply `{WRes, WSt}` answers. In an actor, a state
+        // change raises; elsewhere the map is dropped. The comparison keeps
+        // the codegen-internal `__local__` keys on purpose: a promoted block
+        // that rebinds a block-local in an inner loop returns a stale value
+        // with that key leaked into its map (BT-3939, the same on main), and
+        // comparing with `beamtalk_actor:strip_local_temps` would turn that
+        // loud error into the stale value.
+        let on_reply = if actor {
+            let (error_selector, hint) = self.forwarded_state_change_error(list_selector);
+            let raise =
+                self.generate_stateful_block_dispatch_error(&error_selector, "Block", &hint);
+            docvec![
+                "case call 'erlang':'=:='(",
+                leaf::var(wrap_state.clone()),
+                ", ",
+                leaf::var(seed.clone()),
+                ") of <'true'> when 'true' -> ",
+                leaf::var(wrap_res.clone()),
+                " <'false'> when 'true' -> ",
+                raise,
+                " end",
+            ]
+        } else {
+            leaf::var(wrap_res.clone())
+        };
+        // A fun of `arity + 1` arguments that does not reply `{Result, Map}`
+        // is a Tier 1 block of the wrong arity, not a Tier 2 one: raise the
+        // same structured error as a wrong-arity block reached by `perform:`
+        // rather than misread its value.
+        let wrong_arity = self.generate_stateful_block_dispatch_error(
+            list_selector,
+            "Block",
+            super::super::intrinsics::STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        let params = beamtalk_cerl_doc::join(
+            wrap_args
+                .iter()
+                .map(|a| leaf::var(a.clone()))
+                .collect::<Vec<_>>(),
+            &Document::Str(", "),
+        );
+        let mut apply_args: Vec<Document<'static>> =
+            wrap_args.iter().map(|a| leaf::var(a.clone())).collect();
+        apply_args.push(leaf::var(seed));
+        let tier2_arm = docvec![
+            "fun (",
+            params,
+            ") -> ",
+            seed_preamble,
+            "let ",
+            leaf::var(wrap_tuple.clone()),
+            " = apply ",
+            leaf::var(callable_var.clone()),
+            " (",
+            beamtalk_cerl_doc::join(apply_args, &Document::Str(", ")),
+            ") in case ",
+            leaf::var(wrap_tuple),
+            " of <{",
+            leaf::var(wrap_res),
+            ", ",
+            leaf::var(wrap_state.clone()),
+            "}> when call 'erlang':'is_map'(",
+            leaf::var(wrap_state),
+            ") -> ",
+            on_reply,
+            " <_> when 'true' -> ",
+            wrong_arity,
+            " end",
+        ];
+        let tier1_arity = i64::try_from(arity).unwrap_or(i64::MAX);
         Ok(docvec![
             "let ",
             leaf::var(callable_var.clone()),
@@ -369,29 +487,17 @@ impl CoreErlangGenerator {
             raw_code,
             " in case call 'erlang':'is_function'(",
             leaf::var(callable_var.clone()),
-            ", 1) of <'true'> when 'true' -> ",
+            ", ",
+            leaf::int_lit(tier1_arity),
+            ") of <'true'> when 'true' -> ",
             leaf::var(callable_var.clone()),
             " <'false'> when 'true' -> ",
             "case call 'erlang':'is_function'(",
             leaf::var(callable_var.clone()),
-            ", 2) of <'true'> when 'true' -> fun (",
-            leaf::var(wrap_arg.clone()),
-            ") -> ",
-            state_preamble,
-            "let ",
-            leaf::var(wrap_tuple.clone()),
-            " = apply ",
-            leaf::var(callable_var.clone()),
-            " (",
-            leaf::var(wrap_arg),
             ", ",
-            leaf::var(sv),
-            ") in let ",
-            leaf::var(wrap_res.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(wrap_tuple),
-            ") in ",
-            leaf::var(wrap_res),
+            leaf::int_lit(tier1_arity.saturating_add(1)),
+            ") of <'true'> when 'true' -> ",
+            tier2_arm,
             " <'false'> when 'true' -> ",
             leaf::var(callable_var),
             " end end",
@@ -410,12 +516,7 @@ impl CoreErlangGenerator {
         body_code: Document<'static>,
         operation: &str,
     ) -> Document<'static> {
-        let selector = match operation {
-            "foreach" => "do:",
-            "map" => "collect:",
-            "filter" => "select:",
-            _ => operation,
-        };
+        let selector = list_op_selector(operation);
 
         docvec![
             "let ",

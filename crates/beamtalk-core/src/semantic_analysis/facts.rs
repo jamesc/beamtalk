@@ -264,9 +264,7 @@ impl SemanticFacts {
 
 /// Whether a method body holds a non-local return: a `^` inside a block, or
 /// inside a `match:` arm (arms compile to case arms that need the NLR catch).
-/// The one recognizer: codegen's NLR wrapper (`methods_with_block_nlr`) and
-/// ADR 0132's threading index (a method with one has no threading parameters,
-/// `tier2_callee`) both ask it, so they cannot disagree.
+/// The one recognizer codegen's NLR wrapper (`methods_with_block_nlr`) asks.
 #[must_use]
 pub fn body_has_block_nlr(body: &[ExpressionStatement]) -> bool {
     body.iter()

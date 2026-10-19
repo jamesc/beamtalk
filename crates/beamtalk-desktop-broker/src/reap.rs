@@ -77,8 +77,9 @@
 //! be rare in the crash scenario it exists for: `JobHandle`'s kill-on-close
 //! already tears down the entire `cmd.exe`/`erl.exe` tree the moment a live
 //! broker dies, before any future broker's sweep would ever run. This
-//! module is the fallback net for what that misses — see `crate::winjob`'s
-//! doc comment for its own residual (assign-after-spawn) race.
+//! module is the fallback net for what that misses (e.g. a broker that dies
+//! between `spawn()` and the job assignment) — see `crate::winjob`'s doc
+//! comment.
 //!
 //! **DDD Context:** Desktop Shell
 

@@ -712,14 +712,10 @@ reports the same message at the same span. No operation is surface-specific.
   on every surface (CLI, REPL load of a class definition, LSP, MCP). REPL
   expressions (the REPL root) are not affected, and the REPL display is
   unchanged. Tracked for lowering in BT-3878.
-- An actor instance self-send of a block that writes an outer local is
-  accepted only for a callee of the same class that threads the block
-  (`semantic_analysis::tier2_callee`, BT-3755); it is the same error on every
-  surface. A callee defined by a superclass or in another file is never seen,
-  so the self-send is an error in the REPL and LSP as well. A self-send made
-  from a standalone `Ac >> method` is always an error, even when the callee is
-  `sealed` in the same module: codegen's class pre-scan reads only the methods
-  in the class body.
+- An actor instance self-send of a block that writes an outer local is an
+  error whatever the callee (ADR 0133, BT-3902: an escaping writing block;
+  the same-class threading exemption of BT-3755 is gone, and its threading
+  index with it, BT-3906); it is the same error on every surface.
 - All three are errors with no `[diagnostics]` key and no `@expect` category.
 - **`do:` as a producer (ADR 0131 Phase 2c, BT-3796).** `do:` joined the
   loop-and-fold producer table (`producer_body_arg_index`), so a `do:` whose
@@ -794,8 +790,9 @@ reports the same message at the same span. No operation is surface-specific.
   the analyser's, so CLI/LSP/MCP diagnostics for the same top-level
   expressions change together. Still errors: a construct in a REPL loop or fold
   body (BT-3876), and an outer-local write in a `match:` arm (the
-  value-position error of BT-3864 in the REPL, the BT-3817 error in class,
-  value-type and actor methods; BT-3875 makes `match:` arms producers).
+  value-position error of BT-3864 in the REPL until BT-3909, the BT-3817
+  error in class, value-type and actor methods; BT-3875 makes `match:` arms
+  producers).
 - **A block literal of another arity is never inlined (BT-3881).** A
   `value`-family send to a block literal whose arity is not the block's own
   (`[t := t + 1] value: 1`, `[:k | t := t + k] value`) is applied, never
@@ -809,6 +806,21 @@ reports the same message at the same span. No operation is surface-specific.
   read from the workspace binding of the same name) and keep its write; it
   now raises and leaves the bindings unchanged. It is a run-time error, not a
   compile error: no new compile error, and the display format is unchanged.
+- **Residuals made loud (ADR 0133 Phase 3, BT-3909).** Three shapes that
+  crashed or answered wrong without a diagnostic are compile errors
+  (`UnmigratedLocalThreading`, `RESIDUAL_DENY_SET` in `local_threading.rs`) in
+  every context where they were measured wrong, with the same message on
+  every surface: an actor or REPL `groupBy:` whose block binds a local (or,
+  in an actor, writes a field or sends to `self`) anywhere its result is not
+  unpacked (BT-3897: it answered the raw `{Map, StateAcc}` tuple; at the REPL
+  only a top-level statement or assignment unpacks it); an assignment inside
+  a conditional arm in a `whileTrue:`/`whileFalse:` condition block in a
+  class, value-type or actor method (BT-3891: `erlc` failed with an unbound
+  `StateAcc`; the REPL answers right and is unchanged); and a REPL `match:`
+  arm that writes an outer local, which now draws the BT-3817 `match:` arm
+  error methods draw instead of the BT-3864 value-position error
+  (maintainer-approved REPL output change; it was already rejected). BT-3911
+  and BT-3912 lower the shapes and delete the rows.
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
   hand a later one a writing block to send `value`.

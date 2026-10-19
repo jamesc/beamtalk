@@ -43,10 +43,8 @@ pub mod receiver_knowledge;
 pub mod return_type_writeback;
 pub(crate) mod scope;
 pub mod stdlib_protocols;
-pub mod stored_block_inline;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
-pub mod tier2_callee;
 pub mod trait_expansion;
 pub mod type_checker;
 // `pub`, not `pub(crate)`: `check_effect_free_statements` is used by the

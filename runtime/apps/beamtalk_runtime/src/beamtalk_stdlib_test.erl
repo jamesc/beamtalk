@@ -28,6 +28,7 @@ Where:
 
 -export([
     run_and_assert/2,
+    report_results/2,
     format_result/1,
     matches_pattern/2
 ]).
@@ -59,9 +60,37 @@ run_and_assert(TestModule, Assertions) ->
         {#{}, []},
         Assertions
     ),
-    RevResults = lists:reverse(Results),
-    Passed = length([ok || {pass, _} <- RevResults]),
-    Failed = length(RevResults) - Passed,
+    report_results(TestModule, lists:reverse(Results)).
+
+-doc """
+Print per-result failure blocks and the summary line, then signal EUnit
+pass/fail.
+
+This is the one producer of the structured output the Rust result parser
+reads (`parse_eunit_output` in `crates/beamtalk-cli/src/commands/test_stdlib.rs`):
+`FAIL location` blocks with indented detail lines, then
+`RESULTS:module:passed:failed`. Shared by `run_and_assert/2` and by the
+BUnit fixture wrappers of `beamtalk test-docs`
+(`beamtalk_test_runner:run_class_for_eunit/2`).
+
+Result shapes:
+  {pass, Location}
+  {skip, Location}                              - neither passed nor failed
+  {fail, Location, Expected, Actual}
+  {crash, Location, Class, Reason, Stack}
+  {test_failure, Location, Message}             - a failed BUnit test method
+""".
+-spec report_results(atom(), [tuple()]) -> ok | no_return().
+report_results(TestModule, Results) ->
+    Passed = length([ok || {pass, _} <- Results]),
+    Skipped = length([ok || {skip, _} <- Results]),
+    Failed = length(Results) - Passed - Skipped,
+    %% EUnit shows a failed test's output as `output:<<"...`, which would glue
+    %% the first FAIL line onto that prefix and hide it from the parser.
+    case Failed of
+        0 -> ok;
+        _ -> io:format("~n")
+    end,
     %% Print individual failures first (before summary)
     lists:foreach(
         fun
@@ -72,10 +101,17 @@ run_and_assert(TestModule, Assertions) ->
                 );
             ({crash, Location, Class, Reason, _Stack}) ->
                 io:format("FAIL ~s~n  crashed:  ~p:~p~n", [Location, Class, Reason]);
+            ({test_failure, Location, Message}) ->
+                %% Indent every line so the parser keeps a multi-line
+                %% message inside this FAIL block.
+                Indented = string:replace(Message, "\n", "\n  ", all),
+                io:format("FAIL ~ts~n  ~ts~n", [Location, Indented]);
             ({pass, _}) ->
+                ok;
+            ({skip, _}) ->
                 ok
         end,
-        RevResults
+        Results
     ),
     %% Print structured results line
     io:format("RESULTS:~s:~p:~p~n", [TestModule, Passed, Failed]),

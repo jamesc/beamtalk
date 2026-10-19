@@ -47,6 +47,8 @@ reported as *cancelled* with `{timeout, #{stacktrace => ...}}` pointing
 into `peer:start_it/2` — the stacktrace only says where it was parked.
 """.
 
+-include_lib("kernel/include/logger.hrl").
+
 -export([
     ensure_distribution/0,
     start_peer/0,
@@ -60,6 +62,13 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 
 %% Host part of every node name this harness creates — see unique_node_name/1.
 -define(PEER_HOST, "localhost").
+
+%% `peer`'s control channel unless a caller picks one — see start_peer/2's doc.
+-define(PEER_CONNECTION_DEFAULT, standard_io).
+
+%% `nodedown_reason`s for a peer that are the expected outcome of something
+%% this side or the peer did on purpose — see watch_peer_connection/2.
+-define(EXPECTED_NODEDOWN_REASONS, [disconnect, connection_closed]).
 
 -doc """
 Make this (test) node distributed if it isn't already. Starts epmd first
@@ -118,10 +127,59 @@ start_peer(NamePrefix) ->
 start_peer/1 with options:
 
 - `extra_args` — extra `erl` arguments for the peer (e.g. `["-hidden"]`).
-- `connection` — `peer`'s control-channel option. The default (a
-  distribution-based channel) halts the peer as soon as this node
-  disconnects from it, so a test that disconnects on purpose and expects
-  the peer to survive (e.g. to reconnect) passes `standard_io`.
+- `connection` — `peer`'s control channel: `standard_io` (the default,
+  see below) or `distribution` (`peer:start/1`'s own default: no
+  alternative channel, the control link rides on the distribution
+  connection itself).
+
+## Why `standard_io` is the default (BT-3929)
+
+With the distribution-based channel the peer halts itself the moment its
+connection to this node drops, for *any* reason — `peer`'s own origin link
+is a process monitor across that connection, and `noconnection` is a
+halt. That turns one lost connection into a dead peer for the rest of the
+fixture: every later test in the group fails with `node_down` /
+`{badrpc, nodedown}`.
+
+BT-3929 was exactly that: in a full `just test-runtime` run, the connection
+owner for a freshly booted peer died with reason `killed` (so
+`nodedown_reason = killed` on this side, `noconnection` on the peer's)
+with no `erlang:disconnect_node/1`, `net_kernel:disconnect/1` or
+`exit(_, kill)` call behind it on either node. That is the signature of
+the emulator itself tearing the connection down
+(`erts_kill_dist_connection`, which sends the kill from the `init`
+process) after it rejected an incoming distribution message, and it hit
+at the same point every time — the first *error* reply a compiled actor
+sent back over the wire — on every OTP 27 CI run and roughly one full
+local run in three under load. The emulator only reports that at
+`warning` level, below the `error` floor `test/sys.config` sets, so the
+run showed nothing but the six downstream `node_down` failures.
+
+Whatever rejects that one message, the harness must not amplify it. Over
+`standard_io` the control channel is the peer's stdin/stdout, so a
+dropped distribution connection is just that: the peer stays up, the
+next `rpc:call/4` / `gen_server:call` auto-connects again, and the test
+that was mid-call is the only one affected. The peer still can never
+outlive this node — its stdin reaching EOF halts it (`peer`'s own
+`io_server` does that), which is the same "no orphaned nodes" guarantee
+the distribution channel gave. The peer's `user` I/O (its logger's
+default handler) also travels over the pipe rather than the distribution
+connection, so a chatty peer no longer interleaves with wire traffic.
+
+Pass `distribution` to get `peer`'s native channel back, e.g. for a test
+of that halt-on-disconnect behaviour itself.
+
+## Unexpected disconnects are logged
+
+Each peer gets a watcher (`watch_peer_connection/2`) that subscribes to
+`net_kernel:monitor_nodes/2` for the peer's lifetime and logs, at
+`error` level (so it clears the test `sys.config` floor), any
+`nodedown` whose reason is neither `disconnect` (this side disconnected
+on purpose — `beamtalk_dist_shape_skew_tests`, `beamtalk_node_tests`) nor
+`connection_closed` (the peer halted or was stopped). A `killed` there
+is the BT-3929 signature above; look for the emulator's "corrupted
+external term" / "corrupted distribution header" warning with
+`logger_level` lowered to `warning` if it recurs.
 
 `peer:start/1`'s own `wait_boot` defaults to 15 seconds
 (`peer:?WAIT_BOOT_TIMEOUT`) and raises a hard `exit(timeout)` if the peer's
@@ -139,7 +197,9 @@ boot, or the control process dying — is caught and returned as
 and the boot-time budget, so a CI log shows *how long* the boot ran and
 against what limit.
 """.
--spec start_peer(string(), #{extra_args => [string()], connection => standard_io}) ->
+-spec start_peer(string(), #{
+    extra_args => [string()], connection => standard_io | distribution
+}) ->
     {ok, peer:server_ref(), node()} | {error, term()}.
 start_peer(NamePrefix, Opts) ->
     ensure_distribution(),
@@ -155,9 +215,9 @@ start_peer(NamePrefix, Opts) ->
         wait_boot => ?PEER_WAIT_BOOT_MS
     },
     PeerOpts =
-        case Opts of
-            #{connection := Connection} -> PeerOpts0#{connection => Connection};
-            #{} -> PeerOpts0
+        case maps:get(connection, Opts, ?PEER_CONNECTION_DEFAULT) of
+            standard_io -> PeerOpts0#{connection => standard_io};
+            distribution -> PeerOpts0
         end,
     case boot_peer(PeerOpts) of
         {ok, Peer, PeerNode} ->
@@ -173,6 +233,7 @@ start_peer(NamePrefix, Opts) ->
                         )
                     of
                         {ok, _Started} ->
+                            _ = spawn(fun() -> watch_peer_connection(Peer, PeerNode) end),
                             {ok, Peer, PeerNode};
                         {error, Reason} ->
                             peer:stop(Peer),
@@ -191,11 +252,15 @@ start_peer(NamePrefix, Opts) ->
 
 -doc """
 Tear down a peer started by start_peer/0,1. Idempotent-ish: `peer:stop/1`
-on an already-stopped peer raises `noproc`, which this catches and treats
-as success (matching the harness's "tear everything down reliably"
-requirement — a test's cleanup should never itself fail because the node
-under test already died, which is exactly what some of these tests do to
-it on purpose).
+on an already-stopped peer raises `noproc`, and on a peer whose control
+process is already exiting (a concurrent `stop_peer/1`, e.g. a test that
+kills the peer mid-call from a spawned process and then tears it down
+again in `after`) `sys:terminate` fails with that process's own `normal`
+or `shutdown` exit reason. Both are caught and treated as success
+(matching the harness's "tear everything down reliably" requirement — a
+test's cleanup should never itself fail because the node under test
+already died, which is exactly what some of these tests do to it on
+purpose).
 """.
 -spec stop_peer(peer:server_ref()) -> ok.
 stop_peer(Peer) ->
@@ -203,11 +268,61 @@ stop_peer(Peer) ->
         peer:stop(Peer)
     catch
         exit:noproc -> ok;
-        exit:{noproc, _} -> ok
+        exit:{noproc, _} -> ok;
+        exit:{normal, {sys, terminate, _}} -> ok;
+        exit:{shutdown, {sys, terminate, _}} -> ok
     end,
     ok.
 
 %%% Internal
+
+-doc """
+Log, at `error` level, every `nodedown` for `PeerNode` whose reason is not
+one a test or `stop_peer/1` produces on purpose (`?EXPECTED_NODEDOWN_REASONS`)
+— see start_peer/2's doc. Runs in its own process for the lifetime of the
+peer's control process `Peer` (it exits on that process's `DOWN`), so a
+caller never has to clean it up.
+""".
+-spec watch_peer_connection(peer:server_ref(), node()) -> ok.
+watch_peer_connection(Peer, PeerNode) ->
+    ok = net_kernel:monitor_nodes(true, [nodedown_reason]),
+    MRef = erlang:monitor(process, Peer),
+    watch_peer_connection_loop(MRef, PeerNode).
+
+-spec watch_peer_connection_loop(reference(), node()) -> ok.
+watch_peer_connection_loop(MRef, PeerNode) ->
+    receive
+        {nodedown, PeerNode, Info} ->
+            report_nodedown(PeerNode, Info),
+            watch_peer_connection_loop(MRef, PeerNode);
+        {'DOWN', MRef, process, _Peer, _Reason} ->
+            %% The control process is gone (stop_peer/1, or it crashed). A
+            %% `nodedown` for the same event can already be queued behind
+            %% this `DOWN` — report it before leaving rather than lose it.
+            receive
+                {nodedown, PeerNode, Info} -> report_nodedown(PeerNode, Info)
+            after 0 -> ok
+            end;
+        _Other ->
+            watch_peer_connection_loop(MRef, PeerNode)
+    end.
+
+-spec report_nodedown(node(), [{atom(), term()}]) -> ok.
+report_nodedown(PeerNode, Info) ->
+    Reason = proplists:get_value(nodedown_reason, Info, undefined),
+    case lists:member(Reason, ?EXPECTED_NODEDOWN_REASONS) of
+        true ->
+            ok;
+        false ->
+            ?LOG_ERROR("Distribution connection to a test peer was lost unexpectedly", #{
+                node => PeerNode,
+                nodedown_reason => Reason,
+                hint =>
+                    "'killed' means the emulator tore the connection down itself "
+                    "(BT-3929); rerun with logger_level warning to see why",
+                domain => [beamtalk, runtime]
+            })
+    end.
 
 -doc """
 `peer:start/1`, with a boot failure turned into a descriptive `{error, _}`

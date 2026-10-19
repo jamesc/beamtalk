@@ -303,18 +303,8 @@ no atom to attach to the record's `selector` field) may pass a binary
 instead — both format identically via `~s`. This keeps the
 canonical `does_not_understand` wording (quoted selector) reachable from
 call sites that can't safely mint a new atom.
-
-`{threaded, Selector}` selects the precise `stateful_block_dispatch` form
-`beamtalk_dispatch:send_threaded/4` raises (ADR 0132 §4: the callee has no
-threaded entry); `{plain_entry, Selector}` the refusal
-`beamtalk_dispatch:call_threaded/3` raises when a Tier 2 block reaches the
-plain entry of class method `Selector` (BT-3885); a plain selector keeps the
-arity-ambiguous wording of the structural fallback.
 """.
--spec generate_message(
-    atom(), atom(), atom() | binary() | {threaded, atom()} | {plain_entry, atom()} | undefined
-) ->
-    binary().
+-spec generate_message(atom(), atom(), atom() | binary() | undefined) -> binary().
 generate_message(does_not_understand, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s does not understand message", [Class]));
 generate_message(does_not_understand, Class, Selector) ->
@@ -326,24 +316,6 @@ generate_message(immutable_value, Class, Selector) ->
 generate_message(stateful_block_dispatch, Class, undefined) ->
     iolist_to_binary(
         io_lib:format("~s cannot be invoked via perform: with these arguments", [Class])
-    );
-generate_message(stateful_block_dispatch, Class, {threaded, Selector}) ->
-    %% ADR 0132 §4: a threaded send whose resolved callee advertises no
-    %% threaded entry. The lookup is by metadata, not by fun arity, so unlike
-    %% the structural fallback below there is exactly one cause to name.
-    iolist_to_binary(
-        io_lib:format("'~s' on ~s does not thread its block", [Selector, Class])
-    );
-generate_message(stateful_block_dispatch, Class, {plain_entry, Selector}) ->
-    %% ADR 0132 §2 / BT-3885: a Tier 2 block (recognised by its mark, not by
-    %% arity) reached the plain entry of a threaded class method, which has no
-    %% caller map to thread its writes into. It was refused, never run.
-    iolist_to_binary(
-        io_lib:format(
-            "'~s' on ~s cannot thread a block that assigns captured variables "
-            "through this send; the block was not run",
-            [Selector, Class]
-        )
     );
 generate_message(stateful_block_dispatch, Class, Selector) ->
     %% The underlying check (erlang:is_function/2 arity

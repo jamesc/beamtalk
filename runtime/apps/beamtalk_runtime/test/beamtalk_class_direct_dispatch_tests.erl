@@ -112,5 +112,25 @@ direct_dispatch_test_() ->
             after
                 stop_class(Pid)
             end
+        end},
+        {"meta from a pre-ADR-0133 module (tier2 keys) loads; the keys are ignored", fun() ->
+            %% ADR 0132 codegen advertised threaded entries under these two
+            %% keys; ADR 0133 Phase 2 (BT-3907) removed the runtime that read
+            %% them. A module compiled before that still registers and reloads.
+            Legacy = #{
+                direct_class_methods => #{testSelf => class_testSelf},
+                tier2_methods => #{'twice:' => {'__t2_twice:', [0]}},
+                tier2_class_methods => #{testSelf => {'__t2_class_testSelf', []}}
+            },
+            Pid = start_class('BT3907Legacy', Legacy),
+            try
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, testSelf, [])),
+                {ok, _} = beamtalk_object_class:update_class('BT3907Legacy', #{
+                    module => ?HELPER, meta => Legacy
+                }),
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, testSelf, []))
+            after
+                stop_class(Pid)
+            end
         end}
     ]}.
