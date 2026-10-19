@@ -131,8 +131,7 @@ pub struct ProjectIndex {
     /// which file — the protocol-namespace counterpart to
     /// `file_classes`/`file_aliases`, feeding
     /// [`Self::cross_file_protocol_infos_for`]. Unlike `file_aliases`, there
-    /// is no merged registry to rebuild: `ProtocolInfo` carries no `package`
-    /// field and protocols have no `internal` modifier at the AST level (see
+    /// is no merged registry to rebuild: protocols have no `internal` modifier at the AST level (see
     /// `beamtalk-cli`'s `collect_project_protocol_and_alias_infos` doc), so
     /// every declared protocol is exported project-wide with no
     /// collision/visibility bookkeeping needed here.
@@ -425,7 +424,15 @@ impl ProjectIndex {
     /// expensive step for the no-op-early-return below to actually save;
     /// it exists purely so this method's shape mirrors
     /// [`Self::update_file_aliases`]'s for a reader comparing the two.
-    pub fn update_file_protocols(&mut self, file: Utf8PathBuf, protocols: Vec<ProtocolInfo>) {
+    pub fn update_file_protocols(&mut self, file: Utf8PathBuf, mut protocols: Vec<ProtocolInfo>) {
+        // A dependency's protocols are stamped with its package so
+        // `ProtocolRegistry::add_pre_loaded` applies the BT-3915 shadow rule
+        // to type annotations, as the CLI does (BT-3946); a project file's
+        // stay unstamped (the current package's).
+        let dependency = dependency_package_for_path(&file);
+        for info in &mut protocols {
+            info.package.clone_from(&dependency);
+        }
         let had_protocols = self.file_protocols.contains_key(&file);
         if protocols.is_empty() {
             if !had_protocols {
@@ -1392,6 +1399,47 @@ mod tests {
             !index.alias_registry().has_alias("Foo"),
             "stale alias from the previous version of the file must be dropped"
         );
+    }
+
+    /// BT-3946: `update_file_protocols` stamps `ProtocolInfo.package` from the
+    /// file's path (shared with aliases/defs), so a dependency's `Comparable`
+    /// loses to the stdlib's for a bare type annotation -- the same result
+    /// `beamtalk lint` gives -- while the project's own namesake still wins.
+    #[test]
+    fn update_file_protocols_stamps_package_and_applies_shadow_rule() {
+        use beamtalk_core::semantic_analysis::ClassHierarchy;
+
+        let src = "Protocol define: Comparable\n  depOnly -> Boolean\n";
+        let infos = || {
+            let (module, _) = parse(lex_with_eof(src));
+            ProtocolRegistry::extract_protocol_infos(&module)
+        };
+        let mut index = ProjectIndex::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Cmp.bt");
+        let project_file = Utf8PathBuf::from("src/Own.bt");
+        index.update_file_protocols(dep_file.clone(), infos());
+
+        let other = Utf8PathBuf::from("src/Other.bt");
+        let from_dep = index.cross_file_protocol_infos_for(&other);
+        assert_eq!(from_dep.len(), 1);
+        assert_eq!(from_dep[0].package, Some(EcoString::from("http")));
+
+        let current = index.alias_package_for_file(&other).to_string();
+        let mut registry = ProtocolRegistry::new();
+        let diags =
+            registry.add_pre_loaded(from_dep, &ClassHierarchy::with_builtins(), Some(&current));
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(
+            registry
+                .get("Comparable")
+                .is_some_and(|p| p.methods.iter().all(|m| m.selector != "depOnly")),
+            "a dependency's Comparable must not win a bare annotation over the stdlib's"
+        );
+
+        index.remove_file(&dep_file);
+        index.update_file_protocols(project_file, infos());
+        let own = index.cross_file_protocol_infos_for(&other);
+        assert_eq!(own[0].package, None, "own-package protocols stay unstamped");
     }
 
     /// `update_file_aliases` must stamp `AliasInfo.package` from the
