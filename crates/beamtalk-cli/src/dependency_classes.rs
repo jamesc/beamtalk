@@ -232,11 +232,10 @@ pub fn resolve_dependency_class_infos_with_sources(
             .trait_users
             .flatten(&mut infos, prior_protocol_defs.iter().cloned(), None);
         class_infos.extend(infos);
-        for (name, source) in dep.scan.trait_users.protocol_sources() {
-            protocol_sources
-                .entry(name.clone())
-                .or_insert_with(|| source.clone());
-        }
+        beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
+            &mut protocol_sources,
+            dep.scan.trait_users.protocol_sources().clone(),
+        );
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
         prior_protocol_defs.extend(own_protocol_defs.iter().cloned());

@@ -735,10 +735,11 @@ pub struct ProvisionOrigin {
     /// The classes the provision was flattened into when the diagnostic
     /// arose (sorted, unique).
     pub users: Vec<EcoString>,
-    /// The package `protocol` resolved in, when analysis knows it — today
-    /// only `Some("stdlib")` for a `uses:` that resolved to the stdlib's own
-    /// protocol (BT-3915), so a reporter renders it against the stdlib file
-    /// rather than against a same-named protocol of the user's.
+    /// The package `protocol` resolved in, when analysis knows it — `Some`
+    /// for a `uses:` that resolved to the stdlib's own protocol (BT-3915) or
+    /// to a dependency's (BT-3944); `None` for the package being compiled. A
+    /// reporter renders it against that package's file rather than against a
+    /// same-named protocol of another package.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")

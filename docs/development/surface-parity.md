@@ -530,6 +530,12 @@ file, so it is only meaningful there.
   provision diagnostic exists depends on which users were analysed.
   The LSP, REPL and test-fixture compile paths do not apply protocol-file
   `@expect` yet (only `build` and `lint` do).
+- Which protocol's file (BT-3944): the `ProtocolSourceMap` is keyed by bare name
+  and by `qualified_protocol_key` (`package@Name`), filled and merged only through
+  `insert_protocol_source` / `merge_protocol_sources`, and analysis stamps
+  `ProvisionOrigin::package` for every `uses:` resolved to another package's
+  protocol. So `uses: dep@Name` reports in `dep`'s file and line even when the
+  package declares its own `Name`, identically on CLI `build`/`lint` and MCP `lint`.
 - `beamtalk lint <subset>` caveat: a provision diagnostic is published against
   the protocol's file even when that file was not itself a lint target (the
   using file was), and against a `<protocol Name>` placeholder (`file` in

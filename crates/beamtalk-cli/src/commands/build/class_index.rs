@@ -194,11 +194,10 @@ pub(crate) fn build_class_index(
         dep_class_infos.extend(dep.class_infos.clone());
         dep_protocol_infos.extend(dep.protocol_infos.clone());
         dep_protocol_defs.extend(dep.protocol_defs.clone());
-        for (name, src) in &dep.protocol_sources {
-            dep_protocol_sources
-                .entry(name.clone())
-                .or_insert_with(|| src.clone());
-        }
+        beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
+            &mut dep_protocol_sources,
+            dep.protocol_sources.clone(),
+        );
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
@@ -890,15 +889,17 @@ fn collect_project_protocol_and_alias_infos(
             // Source identity for flattened-method line mapping (ADR 0127
             // §3; BT-3625): the file the provisions' spans are offsets into.
             // First definition wins, like the defs pushed below.
-            protocol_sources
-                .entry(protocol.name.name.clone())
-                .or_insert(beamtalk_core::semantic_analysis::ProtocolSource {
+            beamtalk_core::semantic_analysis::protocol_source::insert_protocol_source(
+                &mut protocol_sources,
+                &protocol.name.name,
+                beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: source.as_str().into(),
                     // `""` when the caller only wants the protocol half (see
                     // this function's `pkg_name` doc).
                     package: (!pkg_name.is_empty()).then(|| pkg_name.into()),
-                });
+                },
+            );
             all_protocol_defs.push(protocol.clone());
         }
 

@@ -234,6 +234,12 @@ pub struct AnalysisResult {
     /// provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
     pub stdlib_protocol_uses: trait_expansion::StdlibUses,
 
+    /// `(class, protocol)` → package for every `uses:` line that resolved to a
+    /// protocol declared in another package, the stdlib's or a dependency's
+    /// (BT-3944) — a superset of [`Self::stdlib_protocol_uses`]. Analysis
+    /// stamps it on provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
+    pub protocol_use_packages: trait_expansion::ResolvedUses,
+
     /// The package this analysis's Phase -1 flattening resolved `uses:` lines
     /// as ([`trait_expansion::known_package`] of the analysed
     /// `current_package`). [`lowering::lower_analysed_module_for_codegen`]
@@ -260,6 +266,7 @@ impl AnalysisResult {
             type_map: TypeMap::new(),
             external_protocols: HashMap::new(),
             stdlib_protocol_uses: HashSet::new(),
+            protocol_use_packages: HashMap::new(),
             trait_package: None,
         }
     }
@@ -712,13 +719,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins, stdlib_uses) =
-            trait_expansion::expand_module_with_stdlib_uses(
+        let (expansion_diags, origins, resolved_uses) =
+            trait_expansion::expand_module_with_resolved_uses(
                 &mut owned,
                 &external_protocols,
                 trait_package,
             );
-        result.stdlib_protocol_uses = stdlib_uses;
+        result.stdlib_protocol_uses = trait_expansion::stdlib_uses_of(&resolved_uses);
+        result.protocol_use_packages = resolved_uses;
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;
@@ -1293,9 +1301,9 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         );
     }
 
-    stdlib_protocols::stamp_stdlib_provisions(
+    stdlib_protocols::stamp_provision_packages(
         &mut result.diagnostics,
-        &result.stdlib_protocol_uses,
+        &result.protocol_use_packages,
     );
 
     result

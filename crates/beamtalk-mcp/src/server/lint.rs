@@ -500,7 +500,10 @@ fn merge_dependency_class_infos(
         );
     all_class_infos.extend(dep_class_infos);
     all_protocol_defs.extend(dep_protocol_defs);
-    protocol_sources.extend(dep_protocol_sources);
+    beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
+        protocol_sources,
+        dep_protocol_sources,
+    );
     has_package_dependencies
 }
 
@@ -585,9 +588,10 @@ fn package_then_dependency_protocol_sources(
     dependency_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) -> beamtalk_core::semantic_analysis::ProtocolSourceMap {
     let mut sources = trait_users.protocol_sources().clone();
-    for (name, source) in dependency_protocol_sources {
-        sources.entry(name).or_insert(source);
-    }
+    beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
+        &mut sources,
+        dependency_protocol_sources,
+    );
     sources
 }
 

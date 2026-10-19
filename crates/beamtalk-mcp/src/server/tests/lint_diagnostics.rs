@@ -849,3 +849,62 @@ fn run_lint_structured_reports_dependency_provision_diagnostics_in_its_file_bt_3
         provision[0]
     );
 }
+
+/// BT-3944: `uses: http@Tagged` where the package defines its own `Tagged` too —
+/// a diagnostic in the flattened provision of http's `Tagged` is reported
+/// against http's file and line, never against the package's `tagged.bt`
+/// (the bare name belongs to the package's protocol).
+#[test]
+fn run_lint_structured_qualified_dependency_provision_diagnostic_lands_in_dependency_file_bt_3944()
+{
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+    )
+    .unwrap();
+    let dep_src = temp.path().join("_build/deps/http/src");
+    std::fs::create_dir_all(&dep_src).unwrap();
+    std::fs::write(
+        dep_src.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> Integer => self name\n",
+    )
+    .unwrap();
+    // The package's own `Tagged`, with a different shape so a bare-name lookup
+    // would compute the wrong file and line.
+    std::fs::write(
+        src.join("tagged.bt"),
+        "// own\n// own\n// own\n// own\n// own\nProtocol define: Tagged\n  name -> String\n\n  \
+         label -> String => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("alpha.bt"),
+        "Object subclass: Alpha\n  uses: http@Tagged\n  name -> String => \"a\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(src.to_str().unwrap());
+    let provision: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("declares return type Integer"))
+        .collect();
+    assert_eq!(provision.len(), 1, "{result:?}");
+    assert!(
+        // Compare path components, not a `/`-joined string: on Windows the
+        // file is a verbatim `\\?\C:\...\deps\http\src\tagged.bt` path.
+        std::path::Path::new(&provision[0].file).ends_with(
+            std::path::Path::new("deps")
+                .join("http")
+                .join("src")
+                .join("tagged.bt")
+        ) && provision[0].line == Some(4),
+        "reported against http's file and line: {:?}",
+        provision[0]
+    );
+}

@@ -717,3 +717,83 @@ fn consumer_of_dependency_with_cross_file_trait_compiles_bt_3673() {
         );
     }
 }
+
+/// BT-3944: `uses: producer@Tagged` where the consumer defines its own `Tagged`
+/// too — a diagnostic in the flattened provision of the dependency's `Tagged`
+/// is reported against the dependency's file and line, not the consumer's
+/// `src/tagged.bt` (which the bare name resolves to).
+#[test]
+fn qualified_dependency_provision_diagnostic_lands_in_dependency_file_bt_3944() {
+    let root = tempfile::tempdir().unwrap();
+    let dep = root.path().join("producer");
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("src/tagged.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Tagged\n\
+         \x20\x20name -> String\n\
+         \n\
+         \x20\x20tag -> Integer => self name\n",
+    )
+    .unwrap();
+
+    let consumer = root.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nproducer = { path = \"../producer\" }\n",
+    )
+    .unwrap();
+    // The consumer's own `Tagged`, shaped differently from the dependency's.
+    std::fs::write(
+        consumer.join("src/tagged.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         // own\n// own\n// own\n// own\n\
+         Protocol define: Tagged\n\
+         \x20\x20name -> String\n\
+         \n\
+         \x20\x20label -> String => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("src/alpha.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Alpha\n\
+         \x20\x20uses: producer@Tagged\n\
+         \x20\x20name -> String => \"a\"\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(&consumer)
+        .arg("lint")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let provision_line = stderr
+        .lines()
+        .position(|l| l.contains("declares return type Integer"))
+        .unwrap_or_else(|| panic!("provision diagnostic expected, got:\n{stderr}"));
+    // The location line follows the message (`--> file:line:col`).
+    let location = stderr
+        .lines()
+        .skip(provision_line)
+        .find(|l| l.contains("tagged.bt"))
+        .unwrap_or_else(|| panic!("no file location after the diagnostic:\n{stderr}"));
+    assert!(
+        location.contains("producer") && location.contains("tagged.bt:7"),
+        "reported against the dependency's file and line, got: {location}\n{stderr}"
+    );
+}

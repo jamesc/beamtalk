@@ -731,8 +731,9 @@ fn extract_dep_protocol_alias_metadata(
             .iter()
             .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
-            protocol_sources.insert(
-                protocol.name.name.clone(),
+            beamtalk_core::semantic_analysis::protocol_source::insert_protocol_source(
+                &mut protocol_sources,
+                &protocol.name.name,
                 beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: cached_asts[file].source.as_str().into(),
@@ -1433,7 +1434,12 @@ dep_utils = { path = "dep_utils" }"#,
             build_dep_class_index(&dep_root, "dep_traits", &[]).unwrap();
 
         assert_eq!(protocol_defs.len(), 1);
-        assert_eq!(protocol_sources.len(), 1, "{protocol_sources:?}");
+        // Bare name and `dep_traits@Retryable` (BT-3944).
+        assert_eq!(protocol_sources.len(), 2, "{protocol_sources:?}");
+        assert_eq!(
+            protocol_sources["dep_traits@Retryable"],
+            protocol_sources["Retryable"]
+        );
         let source = &protocol_sources["Retryable"];
         assert!(
             source
