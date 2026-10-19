@@ -2553,16 +2553,68 @@ fn section6_escaping_blocks_that_write_no_outer_local_are_accepted() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
-    // BT-3806 item 4: §6 accepts these, and codegen rejects every one
-    // (`FieldAssignmentInUnsupportedBlock`, pinned by
-    // `test_escaping_field_writing_actor_block_is_compile_error_in_every_shape`),
-    // so none compiles to a block that loses its field write.
+}
+
+/// BT-3922 (ADR 0133, the rule's other half): a block that assigns `self.field`
+/// (an actor or value-type field, or a class variable in a class method) and
+/// escapes gets the same diagnostic as one that assigns a captured local,
+/// reported at the assignment. This flips BT-3806 item 4, where §6 accepted
+/// these and codegen rejected only some shapes.
+#[test]
+fn section6_escaping_block_that_writes_a_field_is_an_error() {
     for body in [
         "^[self.n := self.n + 1]",
         "b := [self.n := self.n + 1]\n^b",
         "#[[self.n := self.n + 1]]",
+        "self.items foo: [self.n := self.n + 1]\nnil",
+        "self foo: [self.n := self.n + 1]\nnil",
+        "^[:x | #(1) do: [:y | self.n := y]]",
     ] {
-        assert_eq!(section6_errors(&in_actor(body)), 0, "{body}");
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let d = diags
+                .iter()
+                .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+                .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+            assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+            assert!(
+                d.message.contains("`self.n` is assigned in a block"),
+                "{d:?}"
+            );
+            assert!(
+                src[d.span.start() as usize..].starts_with("self.n :="),
+                "reported at the assignment: {src}"
+            );
+        }
+    }
+}
+
+/// BT-3922: a block literal stored straight into a field that assigns a field
+/// (not a captured local, which is the block analyzer's BT-2809 error) is
+/// reported here, in every context.
+#[test]
+fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
+    let body = "self.h := [:x | self.n := self.n + x]\nnil";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        assert_eq!(section6_errors(&src), 1, "{src}");
+    }
+}
+
+/// A field write in a block that the compiler lowers in place, or that never
+/// leaves the method, is not an escape.
+#[test]
+fn section6_in_place_field_writes_are_not_escapes() {
+    for body in [
+        "#(1, 2) do: [:x | self.n := self.n + x]\nnil",
+        "true ifTrue: [self.n := 1] ifFalse: [self.n := 2]\nnil",
+        "[self.n := 1] value\nnil",
+        "^[:x | x + self.n]",
+        // A class-builder method body takes `self` as a parameter.
+        "^#{#bump => [:self | self.n := self.n + 1]}",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(section6_errors(&src), 0, "{src}");
+        }
     }
 }
 

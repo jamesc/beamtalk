@@ -52,7 +52,7 @@ use crate::semantic_analysis::block_facts::{
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, producer_body_block,
+    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
     value_blocks, value_position_local_assignments,
@@ -1619,6 +1619,27 @@ impl<'d> Walker<'d> {
         outer_local_writes(block, &|name| self.is_bound(name))
     }
 
+    /// The first write of `block` that makes it a state-carrying block when it
+    /// escapes (ADR 0133): a captured local, else a `self.field` assignment
+    /// (an instance field, or a class variable in a class method, BT-3922),
+    /// named `self.field`.
+    fn escape_write_of(&self, block: &Block) -> Option<OuterLocalWrite> {
+        self.writes_of(block).into_iter().next().or_else(|| {
+            // A module-level expression has no `self`: "self can only be used
+            // inside a method body" is already the error there.
+            if self.context == Repl {
+                return None;
+            }
+            outer_state_writes(block)
+                .into_iter()
+                .next()
+                .map(|w| OuterLocalWrite {
+                    name: format!("self.{}", w.name).into(),
+                    span: w.span,
+                })
+        })
+    }
+
     fn body(&mut self, body: &[ExpressionStatement]) {
         self.last_statements.push(false);
         for (i, stmt) in body.iter().enumerate() {
@@ -1669,7 +1690,7 @@ impl<'d> Walker<'d> {
             self.report_escaping_literal(block, shape);
         }
         if self.value_operands.contains(&block.span) {
-            if let Some(write) = self.writes_of(block).into_iter().next() {
+            if let Some(write) = self.escape_write_of(block) {
                 self.value_block_writes.insert(block.span, write);
             }
         }
@@ -1954,7 +1975,7 @@ impl<'d> Walker<'d> {
                 .value_block_writes
                 .get(&block.span)
                 .cloned()
-                .or_else(|| self.writes_of(block).into_iter().next());
+                .or_else(|| self.escape_write_of(block));
             if let Some(write) = write {
                 self.report_escape(block, &write, &Escape::Stored(name.clone()), None);
             }
@@ -2688,7 +2709,7 @@ impl<'d> Walker<'d> {
 
     /// Reports `block` as escaping (`escape`) if it assigns a captured local.
     fn report_literal(&mut self, block: &Block, escape: &Escape) {
-        let Some(write) = self.writes_of(block).into_iter().next() else {
+        let Some(write) = self.escape_write_of(block) else {
             return;
         };
         self.report_escape(block, &write, escape, None);
@@ -2709,6 +2730,18 @@ impl<'d> Walker<'d> {
             return;
         }
         let name = &write.name;
+        // A `self.field` write (BT-3922) has its own fix: the field is object
+        // state, which a block that has left this scope cannot hand back.
+        let hint = hint.or_else(|| {
+            name.starts_with("self.").then(|| {
+                format!(
+                    "`{name}` is object state: once the block has left this scope no later call \
+                     of it can hand the write back. Return the new value from the block and \
+                     assign it where the block is called (`{name} := f value`), or move the \
+                     write into a method that runs it directly"
+                )
+            })
+        });
         let diagnostic = Diagnostic::error(
             format!(
                 "`{name}` is assigned in a block {}",
@@ -2779,7 +2812,14 @@ impl<'d> Walker<'d> {
         }
         let escape = match shape {
             EscapeShape::StoredLocal => return,
-            EscapeShape::StoredClassVar if self.context != Class => return,
+            // A literal that assigns a captured local is the block analyzer's
+            // (BT-2809); one that only assigns `self.field` (BT-3922) is
+            // reported here.
+            EscapeShape::StoredClassVar
+                if self.context != Class && !self.writes_of(block).is_empty() =>
+            {
+                return;
+            }
             EscapeShape::StoredClassVar => Escape::StoredState,
             EscapeShape::Returned => Escape::Returned,
             EscapeShape::StoredInLiteral => Escape::InLiteral,

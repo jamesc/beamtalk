@@ -1167,11 +1167,30 @@ pub fn outer_local_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested: NestedBlocks::All,
     };
     walker.block(block);
     walker.writes
+}
+
+/// ADR 0133 (BT-3922): the `self.field` assignments `block` makes anywhere in
+/// its body, nested blocks included, first write of each field. The
+/// object-state half of the escaping-block rule: in an instance method these
+/// are instance fields, in a class-side method class variables (ADR 0130).
+/// Computed by the same walk as [`outer_local_writes`].
+pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside: &|_| false,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 0,
+        nested: NestedBlocks::All,
+    };
+    walker.block(block);
+    walker.state_writes
 }
 
 /// The names `stmt` itself binds by assignment or destructuring: those not
@@ -1188,6 +1207,7 @@ pub(crate) fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet
         bound_outside: &|_| false,
         frames: vec![HashSet::new()],
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 1,
         nested: NestedBlocks::None,
     };
@@ -1201,6 +1221,9 @@ struct OuterWriteWalker<'a> {
     /// Names bound inside the block being analysed, innermost last.
     frames: Vec<HashSet<ecow::EcoString>>,
     writes: Vec<OuterLocalWrite>,
+    /// Assignments to `self.field` (an instance field, or a class variable in a
+    /// class-side method) inside the walked block, first write of each field.
+    state_writes: Vec<OuterLocalWrite>,
     /// Which nested blocks the walk descends into.
     nested: NestedBlocks,
     /// How many walked blocks enclose the current expression.
@@ -1254,6 +1277,40 @@ impl OuterWriteWalker<'_> {
         }
     }
 
+    /// Whether an assignment to a field of `receiver` is a write to the state
+    /// of a captured `self`: `self.field :=` inside a walked block. A block
+    /// that takes `self` as a parameter (`[:self | self.n := ...]`, a
+    /// class-builder method body) writes its own receiver's state instead.
+    fn is_captured_self_field_write(&self, receiver: &Expression) -> bool {
+        self.blocks_entered > 0
+            && !self.bound_inside("self")
+            && matches!(receiver.unwrap_parens(), Expression::Identifier(r) if r.name == "self")
+    }
+
+    /// The target of an assignment at `span`: a local, a captured `self`'s
+    /// field, or an expression walked for what it contains.
+    fn assignment_target(&mut self, target: &Expression, span: Span) {
+        match target {
+            Expression::Identifier(id) => self.assign(&id.name, span),
+            Expression::FieldAccess {
+                receiver, field, ..
+            } if self.is_captured_self_field_write(receiver) => {
+                self.state_write(&field.name, span);
+            }
+            other => self.expr(other),
+        }
+    }
+
+    /// Records the first `self.field :=` write of each field.
+    fn state_write(&mut self, field: &ecow::EcoString, span: Span) {
+        if !self.state_writes.iter().any(|w| &w.name == field) {
+            self.state_writes.push(OuterLocalWrite {
+                name: field.clone(),
+                span,
+            });
+        }
+    }
+
     fn block(&mut self, block: &Block) {
         self.frames
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
@@ -1298,10 +1355,7 @@ impl OuterWriteWalker<'_> {
                 ..
             } => {
                 self.expr(value);
-                match target.as_ref() {
-                    Expression::Identifier(id) => self.assign(&id.name, *span),
-                    other => self.expr(other),
-                }
+                self.assignment_target(target, *span);
             }
             Expression::DestructureAssignment {
                 pattern,
@@ -1641,6 +1695,7 @@ pub fn expression_threaded_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested: NestedBlocks::Producers,
     };
@@ -2848,6 +2903,7 @@ fn walk_construct_blocks(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested,
     };

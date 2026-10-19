@@ -12,12 +12,9 @@
 // Since ADR 0133 removed the ADR 0128 fold (BT-3908), every forwarded
 // callable goes through the one arity-normalizing wrapper
 // (`non_literal_callable_doc`). The `pure*` callers below pass blocks that
-// change no state; the `tally*` callers' field writes make
-// `detect_tier2_self_send` promote each HOM's block position to Tier 2, so
-// the pure blocks are
-// promoted too and must still answer correctly. The `tally*` blocks write
-// `self.total`, which the wrapper cannot keep, so they raise
-// `stateful_block_dispatch` (BT-3922 makes them a compile error).
+// change no state. (Callers whose blocks wrote `self.total` used to promote
+// each HOM's block position to Tier 2 and raise `stateful_block_dispatch`; since
+// BT-3922 they are an ADR 0133 compile error, so they are no longer fixtures.)
 
 Actor subclass: SelfSendHomFoldPool
   state: items = #(1, 2, 3, 4)
@@ -97,17 +94,6 @@ Actor subclass: SelfSendHomFoldPool
   sealed fwdIfNone: noneBlock =>
     self.items detect: [:x | x > 20] ifNone: noneBlock
 
-  // The predicate writes a field, so this `detect:ifNone:` takes the
-  // mutation-threading fold and its `ifNone:` handler runs on the fold's
-  // final state.
-  sealed fwdIfNoneAfterFold: noneBlock =>
-    self.items
-      detect: [:x |
-        self.total := self.total + 1
-        x > 20
-      ]
-      ifNone: noneBlock
-
   // ── callers inside the actor (BT-3908) ──────────────────────────────────
   pureInject => self fwdInject: 0 into: [:a :x | a + x]
 
@@ -122,57 +108,6 @@ Actor subclass: SelfSendHomFoldPool
   pureAllSatisfy => self fwdAllSatisfy: [:x | x > 0]
 
   pureArrCollect => self arrCollect: [:x | x * 2]
-
-  tallyInject =>
-    self
-      fwdInject: 0
-      into: [:a :x |
-        self.total := self.total + 1
-        a + x
-      ]
-
-  tallyDetect =>
-    self
-      fwdDetect: [:x |
-        self.total := self.total + 1
-        x > 2
-      ]
-
-  tallyDetectIfNone =>
-    self
-      fwdDetect: [:x |
-        self.total := self.total + 1
-        x > 20
-      ]
-      ifNone: [7]
-
-  tallyCount =>
-    self
-      fwdCount: [:x |
-        self.total := self.total + 1
-        x > 2
-      ]
-
-  tallyAnySatisfy =>
-    self
-      fwdAnySatisfy: [:x |
-        self.total := self.total + 1
-        x > 3
-      ]
-
-  tallyAllSatisfy =>
-    self
-      fwdAllSatisfy: [:x |
-        self.total := self.total + 1
-        x > 0
-      ]
-
-  tallyArrCollect =>
-    self
-      arrCollect: [:x |
-        self.total := self.total + 1
-        x * 2
-      ]
 
   pureReject => self fwdReject: [:x | x > 2]
 
@@ -190,85 +125,10 @@ Actor subclass: SelfSendHomFoldPool
 
   pureIfNone => self fwdIfNone: [7]
 
-  pureIfNoneAfterFold =>
-    self.total := 0
-    self fwdIfNoneAfterFold: [self.total]
-
-  tallyReject =>
-    self
-      fwdReject: [:x |
-        self.total := self.total + 1
-        x > 2
-      ]
-
-  tallyFlatMap =>
-    self
-      fwdFlatMap: [:x |
-        self.total := self.total + 1
-        #(1)
-      ]
-
-  tallyTakeWhile =>
-    self
-      fwdTakeWhile: [:x |
-        self.total := self.total + 1
-        x < 3
-      ]
-
-  tallyDropWhile =>
-    self
-      fwdDropWhile: [:x |
-        self.total := self.total + 1
-        x < 3
-      ]
-
-  tallyPartitionSize =>
-    self
-      fwdPartitionSize: [:x |
-        self.total := self.total + 1
-        x > 2
-      ]
-
-  tallyGroupBySize =>
-    self
-      fwdGroupBySize: [:x |
-        self.total := self.total + 1
-        x isEven
-      ]
-
-  tallySort =>
-    self
-      fwdSort: [:a :b |
-        self.total := self.total + 1
-        a > b
-      ]
-
-  tallyIfNone =>
-    self
-      fwdIfNone: [
-        self.total := self.total + 1
-        7
-      ]
-
-  tallyIfNoneAfterFold =>
-    self
-      fwdIfNoneAfterFold: [
-        self.total := self.total + 1
-        7
-      ]
-
-  // A promoted block that rebinds a block-local inside an inner loop
-  // (BT-3939): `tallyGroups` promotes `fwdGroupsCollect:`'s position.
+  // A block that rebinds a block-local inside an inner loop (BT-3939).
   weight: y => y * 10
 
   sealed fwdGroupsCollect: block => self.groups collect: block
-
-  tallyGroups =>
-    self
-      fwdGroupsCollect: [:xs |
-        self.total := self.total + 1
-        xs
-      ]
 
   groupWeights =>
     self

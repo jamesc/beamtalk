@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3756 (ADR 0131 §6): a block that writes no local of the enclosing method
-// still works when it escapes the method (returned, stored in a field, placed
-// in a collection literal). Only a block that writes an outer local is a
+// still works when it escapes the method (returned, placed in a collection
+// literal). A block that writes an outer local, or (BT-3922) a field, is a
 // compile error there (Rust tests, `ESCAPE_SHAPES`).
 
 TestCase subclass: Adr0131Section6EscapeTest
@@ -16,13 +16,6 @@ TestCase subclass: Adr0131Section6EscapeTest
 
   testActorReadOnly =>
     self assert: (Adr0131Section6EscapeActor spawn returnedReadOnly value: 1) equals: 11
-
-  testActorStoredFieldWriter =>
-    a := Adr0131Section6EscapeActor spawn
-    a storedFieldWriter
-    a runStored
-    a runStored
-    self assert: a count equals: 2
 
   testClassPure =>
     self assert: (Adr0131Section6EscapeClass returnedPure value: 1) equals: 2
