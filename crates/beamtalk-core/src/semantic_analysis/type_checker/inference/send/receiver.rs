@@ -277,12 +277,10 @@ impl TypeChecker {
             {
                 // A symbol-literal receiver is typed as the singleton `#name`;
                 // its operators resolve on `Symbol` (BT-3928).
-                let resolve_ty = if recv_ty.starts_with('#') {
-                    "Symbol"
-                } else {
-                    recv_ty.as_str()
-                };
-                if hierarchy.resolves_selector(resolve_ty, &selector_name) {
+                if hierarchy.resolves_selector(
+                    super::super::method_resolution_class(recv_ty),
+                    &selector_name,
+                ) {
                     // Collect origin info for the argument expression
                     let arg_origin = arguments.first().and_then(|arg_expr| {
                         if let Expression::Identifier(ident) = arg_expr {
@@ -609,14 +607,12 @@ impl TypeChecker {
             // (`#west =:= unionVar`) must fall through to the
             // statically-decidable-comparison hint below rather than
             // short-circuiting on `Symbol`'s `=:=`.
-            let resolve_class: EcoString = if class_name.starts_with('#')
-                && !class_name.contains('|')
-                && !matches!(selector, MessageSelector::Binary(_))
-            {
-                EcoString::from("Symbol")
-            } else {
-                class_name.clone()
-            };
+            let resolve_class: EcoString =
+                if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+                    EcoString::from(super::super::method_resolution_class(class_name))
+                } else {
+                    class_name.clone()
+                };
             // Skip argument type check for binary messages only when
             // `check_binary_operand_types` already ran above (the Known/Known
             // case) — it provides more specific warnings for
@@ -1059,11 +1055,7 @@ impl TypeChecker {
             // `Boolean`) and downgrades genuine non-responder warnings to hints.
             // The original `member_name` (`#foo`) is still used for the
             // user-facing missing-selector message and for `Self`-typed returns.
-            let resolve_name: &str = if member_name.starts_with('#') {
-                "Symbol"
-            } else {
-                member_name.as_str()
-            };
+            let resolve_name: &str = super::super::method_resolution_class(member_name);
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
