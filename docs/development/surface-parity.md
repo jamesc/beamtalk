@@ -919,8 +919,15 @@ flattening implementation):
   package's own *requirements-only* `Comparable` in another file is carried
   and shadows the stdlib's (resolving to it, with a "provides no methods"
   hint) instead of silently falling through to the stdlib's provisions.
-  MCP `lint`/`diagnostic_summary` carry the package's own protocols ahead of
-  the dependencies' into each file's analysis, as `beamtalk lint` does.
+  MCP `lint`/`diagnostic_summary` carry the package's own protocols (and
+  their sources, `TraitUserCollector::add_source_file`) ahead of the
+  dependencies' into each file's analysis, as `beamtalk lint` does, and report
+  a diagnostic raised in a flattened provision once, against the protocol's
+  file and line, through the same shared helpers as `beamtalk lint`
+  (`protocol_source::dedupe_provision_diagnostics` /
+  `provision_report_target`). A dependency compiles, and codegen re-flattens
+  (`lower_analysed_module_for_codegen`, `AnalysisResult::trait_package`), as
+  the package analysis resolved its `uses:` lines as.
   Only the package being compiled may shadow a stdlib protocol name
   (Option A): a *dependency's* `Comparable` never wins a bare
   `uses: Comparable` (`trait_expansion::resolve_use_key` /

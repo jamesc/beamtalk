@@ -714,7 +714,6 @@ fn parse_and_extract_class_infos(
     // `extending:` diagnostics could disagree between `build` and `lint`.
     let mut all_protocol_infos = Vec::new();
     let mut all_protocol_defs = Vec::new();
-    let mut all_protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
     // Trait users (BT-3673): flattened by the caller once the dependencies'
@@ -752,7 +751,10 @@ fn parse_and_extract_class_infos(
             );
         }
         all_class_infos.extend(class_infos);
-        trait_users.add(&module);
+        // Also records each carried protocol's source identity (ADR 0127 §3),
+        // first definition wins — the file a diagnostic in a flattened
+        // provision is reported against.
+        trait_users.add_source_file(&module, file.as_str(), &source);
 
         // Collect standalone extensions package-wide so cross-file
         // `ClassName >> selector` definitions resolve during lint the same
@@ -779,16 +781,6 @@ fn parse_and_extract_class_infos(
             .iter()
             .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
-            // Source identity (ADR 0127 §3), first definition wins — the
-            // file the provisions' spans are offsets into, so a diagnostic
-            // in a flattened provision is reported against it.
-            all_protocol_sources
-                .entry(protocol.name.name.clone())
-                .or_insert_with(|| beamtalk_core::semantic_analysis::ProtocolSource {
-                    path: Some(file.as_str().into()),
-                    text: source.as_str().into(),
-                    package: current_package.map(Into::into),
-                });
             all_protocol_defs.push(protocol.clone());
         }
         let mut alias_infos =
@@ -807,6 +799,7 @@ fn parse_and_extract_class_infos(
         }
     }
 
+    let all_protocol_sources = trait_users.protocol_sources().clone();
     Ok((
         all_class_infos,
         extension_index,

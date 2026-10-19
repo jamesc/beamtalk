@@ -13,7 +13,8 @@
 //! build-stdlib` generates `generated_stdlib_protocol_files()` (in
 //! `class_hierarchy/generated_builtins.rs`), which `include_str!`s each stdlib
 //! file declaring a provision-bearing protocol — the stdlib source itself, not
-//! a copy — and this module parses those files once.
+//! a copy — and this module parses those files once. (`include_str!` ties
+//! `beamtalk-core` to this repository's layout; the crate is not published.)
 //!
 //! They are the *last* tier of `uses:` resolution: the current module's own
 //! protocols win, then every protocol carried in from elsewhere

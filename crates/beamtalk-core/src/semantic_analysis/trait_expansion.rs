@@ -365,6 +365,9 @@ pub struct TraitUserCollector {
     /// The package the collected protocols are stamped as declared in; `None`
     /// for the package being compiled ([`ProtocolDefinition::package`]).
     package: Option<EcoString>,
+    /// Source identity (ADR 0127 §3) of each collected protocol, first
+    /// definition wins — recorded by [`Self::add_source_file`].
+    protocol_sources: ProtocolSourceMap,
 }
 
 impl TraitUserCollector {
@@ -392,6 +395,30 @@ impl TraitUserCollector {
         });
         self.protocol_defs
             .extend(carried_protocols(module, self.package.as_deref()));
+    }
+
+    /// [`Self::add`], also recording each carried protocol's source identity
+    /// — `path` and `text`, the file its provisions' spans are offsets into —
+    /// first definition wins ([`Self::protocol_sources`]), so a diagnostic
+    /// raised in a flattened provision is reported against the protocol's file.
+    pub fn add_source_file(&mut self, module: &Module, path: &str, text: &str) {
+        self.add(module);
+        for protocol in module.protocols.iter().filter(|p| is_carried_protocol(p)) {
+            self.protocol_sources
+                .entry(protocol.name.name.clone())
+                .or_insert_with(|| crate::semantic_analysis::ProtocolSource {
+                    path: Some(path.into()),
+                    text: text.into(),
+                    package: self.package.clone(),
+                });
+        }
+    }
+
+    /// The source identity of every protocol recorded by
+    /// [`Self::add_source_file`], keyed by bare name.
+    #[must_use]
+    pub fn protocol_sources(&self) -> &ProtocolSourceMap {
+        &self.protocol_sources
     }
 
     /// The carried protocol ASTs ([`is_carried_protocol`]) collected so far, in `add` order.

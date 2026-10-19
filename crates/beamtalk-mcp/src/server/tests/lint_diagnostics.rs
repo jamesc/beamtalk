@@ -180,6 +180,7 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         initial_diags,
         false,
         None,
@@ -218,6 +219,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         parse_diags,
         false,
         None,
@@ -244,6 +246,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         parse_diags,
         false,
         None,
@@ -375,6 +378,7 @@ fn run_module_analysis_reports_native_declaration_location_error() {
         source,
         &[],
         Vec::new(),
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         Vec::new(),
         false,
         None,
@@ -751,4 +755,54 @@ fn run_lint_structured_package_comparable_shadows_the_stdlib_one_bt_3915() {
             .any(|m| m.contains("does not understand 'between:and:'")),
         "Rank must not gain the stdlib Comparable's provisions, got: {messages:?}"
     );
+}
+
+/// BT-3915 / BT-3665: a diagnostic raised inside a flattened provision of a
+/// same-package trait is reported against the *protocol's* file and line, as
+/// `beamtalk lint` reports it — never at an offset into each using file — and
+/// once per diagnostic, not once per file analysed.
+#[test]
+fn run_lint_structured_reports_provision_diagnostics_in_the_protocol_file_bt_3915() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> Integer => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("alpha.bt"),
+        "Object subclass: Alpha\n  uses: Tagged\n  name -> String => \"a\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("beta.bt"),
+        "Object subclass: Beta\n  uses: Tagged\n  name -> String => \"b\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(src.to_str().unwrap());
+    let provision: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("declares return type Integer"))
+        .collect();
+    assert_eq!(
+        provision.len(),
+        2,
+        "one per using class (Alpha, Beta), each once: {provision:?}"
+    );
+    for diag in &provision {
+        assert!(
+            diag.file.ends_with("tagged.bt") && diag.line == Some(4),
+            "reported against the protocol's file and line: {diag:?}"
+        );
+    }
 }

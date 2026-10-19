@@ -160,48 +160,11 @@ pub fn print_provision_diagnostics(
     }
 }
 
-/// Collapses the per-user copies of a shared flattened-provision diagnostic to
-/// one, exactly as [`print_provision_diagnostics`] does when printing, so a
-/// trailing summary counts each provision diagnostic once rather than once per
-/// using class. Untagged diagnostics keep their order and come first.
-pub(crate) fn dedupe_provision_diagnostics(
-    diagnostics: Vec<CoreDiagnostic>,
-) -> Vec<CoreDiagnostic> {
-    let (tagged, mut rest): (Vec<_>, Vec<_>) =
-        diagnostics.into_iter().partition(|d| d.provision.is_some());
-    rest.extend(beamtalk_core::source_analysis::merge_provision_diagnostics(
-        tagged,
-    ));
-    rest
-}
-
-/// The file a provision diagnostic is reported against: its protocol's path,
-/// or `<protocol Name>` when the protocol's source identity is not carried.
-pub(crate) fn provision_report_target<'a>(
-    diagnostic: &CoreDiagnostic,
-    protocol_sources: &'a beamtalk_core::semantic_analysis::ProtocolSourceMap,
-) -> Option<(String, &'a str)> {
-    let origin = diagnostic.provision.as_ref()?;
-    // A provision flattened from the stdlib's own protocol (BT-3915, stamped
-    // by analysis) is reported against the stdlib file, never against a
-    // same-named carried protocol; any other against its carried source.
-    let found = if beamtalk_core::semantic_analysis::stdlib_protocols::is_stdlib_package(
-        origin.package.as_deref(),
-    ) {
-        beamtalk_core::semantic_analysis::stdlib_protocols::stdlib_protocol_source(&origin.protocol)
-    } else {
-        protocol_sources.get(&origin.protocol)
-    };
-    Some(match found {
-        Some(src) => (
-            src.path
-                .as_deref()
-                .map_or_else(|| format!("<protocol {}>", origin.protocol), str::to_string),
-            src.text.as_str(),
-        ),
-        None => (format!("<protocol {}>", origin.protocol), ""),
-    })
-}
+// `dedupe_provision_diagnostics` and `provision_report_target` live in
+// `beamtalk_core::semantic_analysis::protocol_source`, shared with MCP lint.
+pub(crate) use beamtalk_core::semantic_analysis::protocol_source::{
+    dedupe_provision_diagnostics, provision_report_target,
+};
 
 /// The reports [`print_provision_diagnostics`] prints, separated out so the
 /// merge-and-attribute step is testable.
@@ -426,42 +389,6 @@ mod tests {
             "{}",
             rendered[0].message
         );
-    }
-
-    /// BT-3915: a provision diagnostic renders against the stdlib file only
-    /// when analysis stamped it as resolved to the stdlib's protocol — a
-    /// user's own `Comparable` with no carried source never borrows the
-    /// stdlib's file, and a stdlib one never borrows a carried same-named one.
-    #[test]
-    fn provision_diagnostic_uses_the_stdlib_file_only_when_stamped_stdlib() {
-        use beamtalk_core::semantic_analysis::{ProtocolSource, ProtocolSourceMap};
-
-        let diag = || {
-            CoreDiagnostic::error("in a provision", Span::new(0, 1))
-                .with_provision_origin("Comparable", "Rank")
-        };
-        let mut stamped = diag();
-        if let Some(origin) = stamped.provision.as_mut() {
-            origin.package = Some("stdlib".into());
-        }
-        let carried: ProtocolSourceMap = [(
-            "Comparable".into(),
-            ProtocolSource {
-                path: Some("src/comparable.bt".into()),
-                text: "Protocol define: Comparable\n".into(),
-                package: None,
-            },
-        )]
-        .into_iter()
-        .collect();
-
-        let (path, _) = provision_report_target(&diag(), &ProtocolSourceMap::new()).unwrap();
-        assert_eq!(path, "<protocol Comparable>");
-        let (path, _) = provision_report_target(&diag(), &carried).unwrap();
-        assert_eq!(path, "src/comparable.bt");
-        let (path, text) = provision_report_target(&stamped, &carried).unwrap();
-        assert_eq!(path, "stdlib/src/comparable.bt");
-        assert!(text.contains("Protocol define: Comparable"));
     }
 
     #[test]
