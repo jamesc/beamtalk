@@ -63,6 +63,11 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 %% Host part of every node name this harness creates — see unique_node_name/1.
 -define(PEER_HOST, "localhost").
 
+%% Readiness wait for the first distribution connection to a booted peer
+%% (BT-3933): up to PING_ATTEMPTS pings, PING_INTERVAL_MS apart.
+-define(PING_ATTEMPTS, 50).
+-define(PING_INTERVAL_MS, 100).
+
 %% `peer`'s control channel unless a caller picks one — see start_peer/2's doc.
 -define(PEER_CONNECTION_DEFAULT, standard_io).
 
@@ -221,7 +226,7 @@ start_peer(NamePrefix, Opts) ->
         end,
     case boot_peer(PeerOpts) of
         {ok, Peer, PeerNode} ->
-            case net_adm:ping(PeerNode) of
+            case await_ping(PeerNode, ?PING_ATTEMPTS) of
                 pong ->
                     %% Bounded, not rpc:call/4's implicit infinity: a peer
                     %% that hangs during beamtalk_runtime startup (e.g. a
@@ -248,6 +253,19 @@ start_peer(NamePrefix, Opts) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+-doc "Ping `Node` until it answers `pong` or `Attempts` are used up (BT-3933).".
+-spec await_ping(node(), non_neg_integer()) -> pong | pang.
+await_ping(Node, Attempts) ->
+    case net_adm:ping(Node) of
+        pong ->
+            pong;
+        pang when Attempts =< 1 ->
+            pang;
+        pang ->
+            timer:sleep(?PING_INTERVAL_MS),
+            await_ping(Node, Attempts - 1)
     end.
 
 -doc """
@@ -373,11 +391,10 @@ ensure_epmd() ->
 
 -doc """
 A short node name intended to avoid collisions across repeated test runs
-on the same host: `Prefix_<unique integer>@localhost`. `unique_integer/1`
-is only unique within this BEAM instance's lifetime, so two independently
-started VMs (e.g. two parallel CI jobs on the same runner) have no
-cross-process coordination and could in principle pick overlapping names;
-a collision fails/flakes the affected test rather than corrupting state.
+on the same host: `Prefix_<os pid>_<unique integer>@localhost`.
+`unique_integer/1` is only unique within this BEAM instance's lifetime, so
+the OS pid is what keeps two independently started VMs (parallel CI jobs or
+agents on one host) from picking the same name (BT-3933).
 
 The host part is always `localhost` (?PEER_HOST), never
 `inet:gethostname/0` (BT-3609). ensure_epmd/0 binds epmd to 127.0.0.1
@@ -402,4 +419,7 @@ option and joins them itself).
 -spec unique_short_name(string()) -> atom().
 unique_short_name(Prefix) ->
     Unique = erlang:unique_integer([positive, monotonic]),
-    list_to_atom(Prefix ++ "_" ++ integer_to_list(Unique)).
+    %% The OS pid makes the name unique across concurrent VMs on one host
+    %% (BT-3933): `unique_integer/1` alone restarts at 1 in every VM, so two
+    %% parallel runs both picked `<Prefix>_1@localhost` and collided in epmd.
+    list_to_atom(Prefix ++ "_" ++ os:getpid() ++ "_" ++ integer_to_list(Unique)).
