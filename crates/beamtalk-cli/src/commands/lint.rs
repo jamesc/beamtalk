@@ -754,7 +754,7 @@ fn parse_and_extract_class_infos(
         // Also records each carried protocol's source identity (ADR 0127 §3),
         // first definition wins — the file a diagnostic in a flattened
         // provision is reported against.
-        trait_users.add_source_file(&module, file.as_str(), &source);
+        trait_users.add_source_file(&module, file.as_str(), &source, current_package);
 
         // Collect standalone extensions package-wide so cross-file
         // `ClassName >> selector` definitions resolve during lint the same

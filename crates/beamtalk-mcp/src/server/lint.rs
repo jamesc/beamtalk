@@ -243,7 +243,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
         all_class_infos.extend(class_infos);
         // Records each carried protocol's source too, for provision routing.
-        trait_users.add_source_file(&module, &file_str, &source);
+        trait_users.add_source_file(&module, &file_str, &source, current_package.as_deref());
 
         let canonical = beamtalk_project::package::try_canonicalize(file);
         if target_set.contains(&canonical) {
@@ -656,7 +656,12 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         }
         all_class_infos.extend(class_infos);
         // Records each carried protocol's source too, for provision routing.
-        trait_users.add_source_file(&module, &file.to_string_lossy(), &source);
+        trait_users.add_source_file(
+            &module,
+            &file.to_string_lossy(),
+            &source,
+            current_package.as_deref(),
+        );
 
         let canonical = beamtalk_project::package::try_canonicalize(file);
         if target_set.contains(&canonical) {

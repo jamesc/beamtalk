@@ -401,7 +401,15 @@ impl TraitUserCollector {
     /// — `path` and `text`, the file its provisions' spans are offsets into —
     /// first definition wins ([`Self::protocol_sources`]), so a diagnostic
     /// raised in a flattened provision is reported against the protocol's file.
-    pub fn add_source_file(&mut self, module: &Module, path: &str, text: &str) {
+    /// `package` is the package the file belongs to, stamped as each source's
+    /// [`ProtocolSource::package`](crate::semantic_analysis::ProtocolSource::package).
+    pub fn add_source_file(
+        &mut self,
+        module: &Module,
+        path: &str,
+        text: &str,
+        package: Option<&str>,
+    ) {
         self.add(module);
         for protocol in module.protocols.iter().filter(|p| is_carried_protocol(p)) {
             self.protocol_sources
@@ -409,7 +417,7 @@ impl TraitUserCollector {
                 .or_insert_with(|| crate::semantic_analysis::ProtocolSource {
                     path: Some(path.into()),
                     text: text.into(),
-                    package: self.package.clone(),
+                    package: package.map(EcoString::from),
                 });
         }
     }
