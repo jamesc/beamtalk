@@ -171,26 +171,59 @@ pub fn expand_module_in_package(
 /// protocols (BT-3915) — see [`expand_module_with_stdlib_uses`].
 pub type StdlibUses = HashSet<(EcoString, EcoString)>;
 
+/// `(class, protocol)` → the package the protocol's stamp names, for every
+/// `uses:` line that resolved to a protocol declared in a package other than
+/// the one being compiled (a dependency's, or the stdlib's) — see
+/// [`expand_module_with_resolved_uses`]. A protocol of the package being
+/// compiled carries no stamp and has no entry.
+pub type ResolvedUses = HashMap<(EcoString, EcoString), EcoString>;
+
 /// [`expand_module_in_package`], also answering which `(class, protocol)`
 /// `uses:` lines resolved to one of the stdlib's own protocols (BT-3915) —
 /// from the same lookup the flattening used, so the two cannot disagree.
 ///
 /// `MethodInfo::origin` names a provision's protocol by bare name only, so a
 /// stdlib `Comparable` and a user's carried `Comparable` look alike there;
-/// this set is what tells codegen's source mapping and provision-diagnostic
-/// rendering that a given class's provisions come from the stdlib file.
+/// this set is what tells codegen's source mapping that a given class's
+/// provisions come from the stdlib file.
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn expand_module_with_stdlib_uses(
     module: &mut Module,
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
     current_package: Option<&str>,
 ) -> (Vec<Diagnostic>, OriginMap, StdlibUses) {
+    let (diagnostics, origins, resolved) =
+        expand_module_with_resolved_uses(module, external_protocols, current_package);
+    (diagnostics, origins, stdlib_uses_of(&resolved))
+}
+
+/// The [`StdlibUses`] subset of `resolved`.
+#[must_use]
+pub fn stdlib_uses_of(resolved: &ResolvedUses) -> StdlibUses {
+    resolved
+        .iter()
+        .filter(|(_, package)| stdlib_protocols::is_stdlib_package(Some(package.as_str())))
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
+/// [`expand_module_in_package`], also answering the package each `uses:` line
+/// resolved into ([`ResolvedUses`], BT-3944) — from the same lookup the
+/// flattening used. Provision diagnostics are stamped with it so a reporter
+/// finds the file of the protocol that was actually flattened, not of a
+/// same-named one in another package.
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn expand_module_with_resolved_uses(
+    module: &mut Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Vec<Diagnostic>, OriginMap, ResolvedUses) {
     let mut diagnostics = Vec::new();
     let mut origins = OriginMap::new();
-    let mut stdlib_uses = StdlibUses::new();
+    let mut resolved_uses = ResolvedUses::new();
 
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
-        return (diagnostics, origins, stdlib_uses);
+        return (diagnostics, origins, resolved_uses);
     }
 
     // Look up protocols once, before mutating any class — a protocol's
@@ -205,15 +238,18 @@ pub fn expand_module_with_stdlib_uses(
         }
         for use_ in &class.uses {
             if let Some(protocol) = protocols.resolve(use_) {
-                if stdlib_protocols::is_stdlib_package(protocol.package.as_deref()) {
-                    stdlib_uses.insert((class.name.name.clone(), protocol.name.name.clone()));
+                if let Some(package) = &protocol.package {
+                    resolved_uses.insert(
+                        (class.name.name.clone(), protocol.name.name.clone()),
+                        package.clone(),
+                    );
                 }
             }
         }
         expand_class(class, &protocols, &mut diagnostics, &mut origins);
     }
 
-    (diagnostics, origins, stdlib_uses)
+    (diagnostics, origins, resolved_uses)
 }
 
 /// Extracts `ClassInfo` for every class of `module` with its `uses:` lines
@@ -412,18 +448,21 @@ impl TraitUserCollector {
     ) {
         self.add(module);
         for protocol in module.protocols.iter().filter(|p| is_carried_protocol(p)) {
-            self.protocol_sources
-                .entry(protocol.name.name.clone())
-                .or_insert_with(|| crate::semantic_analysis::ProtocolSource {
+            crate::semantic_analysis::protocol_source::insert_protocol_source(
+                &mut self.protocol_sources,
+                &protocol.name.name,
+                crate::semantic_analysis::ProtocolSource {
                     path: Some(path.into()),
                     text: text.into(),
                     package: package.map(EcoString::from),
-                });
+                },
+            );
         }
     }
 
     /// The source identity of every protocol recorded by
-    /// [`Self::add_source_file`], keyed by bare name.
+    /// [`Self::add_source_file`], keyed as
+    /// [`insert_protocol_source`](crate::semantic_analysis::protocol_source::insert_protocol_source) keys it.
     #[must_use]
     pub fn protocol_sources(&self) -> &ProtocolSourceMap {
         &self.protocol_sources

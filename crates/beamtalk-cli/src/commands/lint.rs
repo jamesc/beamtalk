@@ -860,11 +860,10 @@ fn merge_dependency_infos(
                 all_protocol_infos.extend(dep.protocol_infos.clone());
                 all_protocol_defs.extend(dep.protocol_defs.clone());
                 // First definition wins (project, then dependencies).
-                for (name, src) in &dep.protocol_sources {
-                    all_protocol_sources
-                        .entry(name.clone())
-                        .or_insert_with(|| src.clone());
-                }
+                beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
+                    all_protocol_sources,
+                    dep.protocol_sources.clone(),
+                );
                 all_alias_infos.extend(dep.alias_infos.clone());
             }
             resolved_deps

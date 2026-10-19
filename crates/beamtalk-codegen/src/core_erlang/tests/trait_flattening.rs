@@ -302,6 +302,9 @@ fn stdlib_resolved_provision_maps_through_the_stdlib_file() {
             .with_analysis(analysis),
     )
     .expect("codegen should succeed");
+    // Intentional (BT-3944): codegen annotations carry the real source path, which
+    // stack traces and tooling need, while provision *diagnostics* label the stdlib's
+    // file `<stdlib Name>` because a user package has no `stdlib/src/` to open.
     assert!(
         code.contains("{'file', \"stdlib/src/comparable.bt\"}"),
         "expected stdlib provisions annotated with the stdlib file, got:\n{code}"

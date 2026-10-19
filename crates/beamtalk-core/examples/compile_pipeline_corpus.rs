@@ -32,7 +32,7 @@
 //! ```
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::semantic_analysis::analyse;
+use beamtalk_core::semantic_analysis::{analyse, lower_analysed_module_for_codegen};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use std::collections::HashMap;
 use std::fs;
@@ -93,8 +93,9 @@ fn main() {
             };
 
             let tokens = lex_with_eof(&source);
-            let (module, _diagnostics) = parse(tokens);
+            let (mut module, _diagnostics) = parse(tokens);
             let analysis = analyse(&module);
+            lower_analysed_module_for_codegen(&mut module, &analysis);
             let options = CodegenOptions::new(&module_name).with_analysis(analysis);
 
             match generate_module(&module, options) {

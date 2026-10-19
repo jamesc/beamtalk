@@ -27,7 +27,7 @@
 //! its own protocols live from `stdlib/src/` rather than from the snapshot
 //! baked into the compiler that is building it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use ecow::EcoString;
@@ -117,16 +117,17 @@ pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {
     stdlib_protocols().sources.get(name)
 }
 
-/// Stamps [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package) as the stdlib on every provision
-/// diagnostic raised in a class whose `uses:` of that protocol resolved to the
-/// stdlib's own (`uses`, from
-/// [`trait_expansion::expand_module_with_stdlib_uses`](crate::semantic_analysis::trait_expansion::expand_module_with_stdlib_uses)),
-/// so a reporter renders it against the stdlib file and never against a
-/// same-named protocol of the user's.
-#[allow(clippy::implicit_hasher)] // concrete HashSet, as `AnalysisResult::stdlib_protocol_uses` holds it
-pub fn stamp_stdlib_provisions(
+/// Stamps [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package)
+/// on every provision diagnostic raised in a class whose `uses:` of that
+/// protocol resolved to a protocol declared in another package — the stdlib's
+/// own, or a dependency's (`uses`, from
+/// [`trait_expansion::expand_module_with_resolved_uses`](crate::semantic_analysis::trait_expansion::expand_module_with_resolved_uses)),
+/// so a reporter renders it against the file of the protocol that was
+/// flattened and never against a same-named protocol of another package
+/// (BT-3915, BT-3944).
+pub fn stamp_provision_packages(
     diagnostics: &mut [Diagnostic],
-    uses: &HashSet<(EcoString, EcoString)>,
+    uses: &crate::semantic_analysis::trait_expansion::ResolvedUses,
 ) {
     if uses.is_empty() {
         return;
@@ -135,12 +136,12 @@ pub fn stamp_stdlib_provisions(
         let Some(origin) = diagnostic.provision.as_mut() else {
             continue;
         };
-        if origin
+        let package = origin
             .users
             .iter()
-            .any(|user| uses.contains(&(user.clone(), origin.protocol.clone())))
-        {
-            origin.package = Some(STDLIB_PACKAGE.into());
+            .find_map(|user| uses.get(&(user.clone(), origin.protocol.clone())));
+        if let Some(package) = package {
+            origin.package = Some(package.clone());
         }
     }
 }
@@ -228,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn stamps_only_provisions_of_stdlib_resolved_uses() {
+    fn stamps_only_provisions_of_resolved_uses() {
         let span = crate::source_analysis::Span::default();
         let mut diagnostics = vec![
             Diagnostic::warning("in stdlib provision", span)
@@ -236,9 +237,10 @@ mod tests {
             Diagnostic::warning("in user provision", span)
                 .with_provision_origin("Comparable", "Other"),
         ];
-        let uses: HashSet<(EcoString, EcoString)> =
-            [("Rank".into(), "Comparable".into())].into_iter().collect();
-        stamp_stdlib_provisions(&mut diagnostics, &uses);
+        let uses = [(("Rank".into(), "Comparable".into()), STDLIB_PACKAGE.into())]
+            .into_iter()
+            .collect();
+        stamp_provision_packages(&mut diagnostics, &uses);
         assert_eq!(
             diagnostics[0]
                 .provision
