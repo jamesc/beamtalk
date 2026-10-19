@@ -392,7 +392,7 @@ selectorProviderFromName(ClassName, Selector) ->
                 {ok, _Fun} ->
                     {halt, user};
                 not_found ->
-                    case beamtalk_object_class:has_method_local(CPid, Selector) of
+                    case defines_selector_locally(CN, CPid, Selector) of
                         true ->
                             Module = beamtalk_object_class:module_name_safe(CPid),
                             case
@@ -409,6 +409,18 @@ selectorProviderFromName(ClassName, Selector) ->
         end,
         none
     ).
+
+%% Does this exact class (not an ancestor) define `Selector`? The published
+%% local selector list answers it. A compiled value class's `has_method/1`
+%% delegates to its superclass's module, and `has_method_local/2` falls back to
+%% that probe for a module without `has_method_local/1` (every value class), so
+%% it would credit an inherited stdlib method to the user's subclass.
+-spec defines_selector_locally(atom(), pid(), atom()) -> boolean().
+defines_selector_locally(ClassName, ClassPid, Selector) ->
+    case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
+        {ok, Selectors} -> lists:member(Selector, Selectors);
+        not_found -> beamtalk_object_class:has_method_local(ClassPid, Selector)
+    end.
 
 %% A provision of a stdlib protocol (`uses: Enumerable`) is flattened into the
 %% using class's own module (ADR 0127), so the module is a package's, but the

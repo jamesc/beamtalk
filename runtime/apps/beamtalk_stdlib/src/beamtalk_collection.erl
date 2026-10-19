@@ -293,13 +293,11 @@ own `anySatisfy:`, a trait-provided `inject:into:`) would have run that method
 with a closure that cannot return the write, and folding over its `do:` instead
 would answer something else, so it raises `stateful_block_dispatch`. A receiver
 that does not respond to `Selector` raises `does_not_understand`, as the pure
-path does. `do:` is the fold's own source and is never guarded.
+path does. Codegen never emits this for `do:`, the fold's own source.
 """.
 -spec to_list_for_threading(term(), atom()) -> list().
 to_list_for_threading(Recv, _Selector) when is_list(Recv) ->
     Recv;
-to_list_for_threading(Recv, 'do:') ->
-    to_list(Recv);
 to_list_for_threading(Recv, Selector) ->
     {Class, Provider} = selector_provider(Recv, Selector),
     case Provider of

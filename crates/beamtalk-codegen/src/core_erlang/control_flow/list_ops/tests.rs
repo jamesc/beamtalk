@@ -3048,6 +3048,16 @@ fn test_writing_fold_calls_receiver_guard_with_its_selector() {
         ("partition:", "items partition: [:x | n := n + 1. x > 0]"),
         ("groupBy:", "items groupBy: [:x | n := n + 1. x]"),
         ("sort:", "items sort: [:a :b | n := n + 1. a < b]"),
+        // Lowered through a synthetic `inject:into:` fold, but the guard asks
+        // about the selector the user sent.
+        (
+            "eachWithIndex:",
+            "items eachWithIndex: [:x :i | n := n + 1]",
+        ),
+        (
+            "do:separatedBy:",
+            "items do: [:x | n := n + 1] separatedBy: [n := n + 1]",
+        ),
     ];
     for (selector, expr) in cases {
         let src = format!(
@@ -3059,6 +3069,12 @@ fn test_writing_fold_calls_receiver_guard_with_its_selector() {
                 && code.contains(&format!(", '{selector}')")),
             "{selector}: a writing fold must call the receiver guard with its selector. Got:\n{code}"
         );
+        if matches!(*selector, "eachWithIndex:" | "do:separatedBy:") {
+            assert!(
+                !code.contains(", 'inject:into:')"),
+                "{selector}: the guard must not name the synthetic inject:into:. Got:\n{code}"
+            );
+        }
         assert!(
             !code.contains("'beamtalk_collection':'to_list'("),
             "{selector}: a writing fold must not use the unguarded to_list/1. Got:\n{code}"

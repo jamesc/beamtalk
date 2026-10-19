@@ -568,6 +568,12 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
+        // BT-3916: `eachWithIndex:` / `do:separatedBy:` reach this fold through a
+        // synthetic `inject:into:`; the guard checks the selector the user sent.
+        let guard_selector = self
+            .guard_selector_override
+            .take()
+            .unwrap_or("inject:into:");
         // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate)
             .with_value_self_slot(self, body)?;
@@ -595,7 +601,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
-                Some("inject:into:"),
+                Some(guard_selector),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -675,7 +681,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
-            Some("inject:into:"),
+            Some(guard_selector),
             list_var,
             safe_list_var.clone(),
         ));

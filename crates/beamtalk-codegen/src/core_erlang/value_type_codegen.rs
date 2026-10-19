@@ -2763,7 +2763,7 @@ impl CoreErlangGenerator {
             docvec![
                 super::control_flow::list_recv_to_safe_list_doc(
                     recv_code,
-                    Some("do:"),
+                    None,
                     list_var,
                     safe_list_var.clone(),
                 ),

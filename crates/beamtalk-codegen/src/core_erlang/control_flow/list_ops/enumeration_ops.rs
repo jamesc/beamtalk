@@ -198,6 +198,19 @@ impl CoreErlangGenerator {
         &mut self,
         original_send: &Expression,
         inject_send: &Expression,
+        user_selector: &'static str,
+    ) -> Result<Document<'static>> {
+        // BT-3916: the fold's receiver guard asks about what the user sent.
+        self.guard_selector_override = Some(user_selector);
+        let result = self.lower_enumeration_fold(original_send, inject_send);
+        self.guard_selector_override = None;
+        result
+    }
+
+    fn lower_enumeration_fold(
+        &mut self,
+        original_send: &Expression,
+        inject_send: &Expression,
     ) -> Result<Document<'static>> {
         // Both callers (`try_generate_each_with_index` / `try_generate_do_separated_by`)
         // build `inject_send` via `inject_into`, which always returns an
@@ -288,9 +301,11 @@ impl CoreErlangGenerator {
             span,
         );
         let original_send = enumeration_send(receiver, selector, arguments);
-        Ok(Some(
-            self.finalize_enumeration_fold(&original_send, &inject_send)?,
-        ))
+        Ok(Some(self.finalize_enumeration_fold(
+            &original_send,
+            &inject_send,
+            "eachWithIndex:",
+        )?))
     }
 
     /// Desugars `receiver do: [:elem | body] separatedBy: [sep]` into a
@@ -372,8 +387,10 @@ impl CoreErlangGenerator {
             ),
             span,
         );
-        Ok(Some(
-            self.finalize_enumeration_fold(&original_send, &inject_send)?,
-        ))
+        Ok(Some(self.finalize_enumeration_fold(
+            &original_send,
+            &inject_send,
+            "do:separatedBy:",
+        )?))
     }
 }

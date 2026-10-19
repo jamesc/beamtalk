@@ -359,6 +359,12 @@ pub struct CoreErlangGenerator {
     /// provision into the using class's own module, so the module alone cannot
     /// tell the runtime "the stdlib's method" from "this class's own".
     pub(in crate::core_erlang) own_stdlib_trait_methods: Vec<String>,
+    /// BT-3916: the selector the *user* sent, while `eachWithIndex:` /
+    /// `do:separatedBy:` is lowered through a synthetic `inject:into:` fold
+    /// (`enumeration_ops.rs`). The fold's receiver guard checks this instead of
+    /// the synthetic `inject:into:`. Taken (cleared) by the first fold that
+    /// reads it, and cleared again by the lowering that set it.
+    pub(in crate::core_erlang) guard_selector_override: Option<&'static str>,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -470,6 +476,7 @@ impl CoreErlangGenerator {
             direct_call_eligible: std::collections::HashMap::new(),
             own_direct_class_methods: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),
+            guard_selector_override: None,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),

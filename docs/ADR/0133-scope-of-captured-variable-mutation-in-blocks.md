@@ -469,7 +469,10 @@ code.
   > a package-local trait, would be bypassed by the fold, so the send
   > raises `stateful_block_dispatch`; an extension method counts as the
   > class's own. A receiver that does not respond to the selector at all
-  > raises `does_not_understand`, as the pure send does. Codegen records
+  > raises `does_not_understand`, as the pure send does. The selector checked
+  > is the one the user wrote: `eachWithIndex:` and `do:separatedBy:` are
+  > lowered through a synthetic `inject:into:` fold but guard under their own
+  > names. Codegen records
   > each class's stdlib-trait provisions in `__beamtalk_meta/0`
   > (`stdlib_trait_methods`, from `MethodInfo::origin` joined with the
   > `(class, protocol)` pairs that resolved to the stdlib, the same pair

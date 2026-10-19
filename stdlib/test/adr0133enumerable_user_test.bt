@@ -21,7 +21,7 @@
 // Erlang FFI is outside this decision, BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
-// object_own_any,actor_own_any,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
+// object_own_any,actor_own_any,own_each,own_inject,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
 // `uses: Enumerable(V)` class; `Adr0133EnumerableStdlib` is a user class that
 // `uses:` the same stdlib `Enumerable` (BT-3915), whose provisions forward to
 // `elements` rather than walking with `self do:`.
@@ -158,6 +158,27 @@ TestCase subclass: Adr0133EnumerableUserTest
       self assert: (Adr0133EnumerableUser detectNoneWrite: a) equals: #[#none, 3]
       self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
     ] ensure: [a stop]
+
+  // --- BT-3916: `eachWithIndex:` / `do:separatedBy:` ---
+  // They are lowered through a synthetic `inject:into:` fold, but the guard
+  // asks about the selector the user sent.
+  testOwnEachWithIndexRaises =>
+    c := Adr0133EnumerableOwnEach new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser eachWithIndexWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser separatedByWrite: c
+    ] raise: #stateful_block_dispatch
+
+  testOwnInjectDoesNotRefuseInheritedEachWithIndex =>
+    c := Adr0133EnumerableOwnInject new: #{#items => #(1, 2, 3)}
+    self assert: (Adr0133EnumerableUser eachWithIndexWrite: c) equals: 6
+    self assert: (Adr0133EnumerableUser separatedByWrite: c) equals: 206
+    // The class's own `inject:into:` is still refused when it is what was sent.
+    self should: [
+      Adr0133EnumerableUser injectWrite: c
+    ] raise: #stateful_block_dispatch
 
   // ... and the class's own method wins over the stdlib provision, so it is
   // refused while the provisions it left alone still fold.
