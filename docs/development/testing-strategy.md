@@ -644,13 +644,13 @@ command checks at exactly one point: after its last `.core` write, before
 its first `.beam`/test-execution step. That placement is the invariant the
 mode depends on — a snapshot-only run must leave the *same* set of `.core`
 files a full run does. `MODE=full` runs the three commands to completion as
-before so the invariant can be re-verified whenever a command's pipeline
-changes:
+before, and `just core-diff-modes` (BT-3934) snapshots the checkout once in
+each mode and fails if `diff -r` of the two output directories is non-empty.
+CI runs it as the `core-diff-modes` job whenever `build_stdlib.rs`, `test.rs`,
+`test_stdlib.rs`, `util.rs` or the `core-diff*` Justfile recipes change:
 
 ```bash
-just core-diff-snapshot target/core-diff/a snapshot-only
-just core-diff-snapshot target/core-diff/b full
-diff -r target/core-diff/a target/core-diff/b   # must print nothing
+just core-diff-modes   # Linux only; prints a success line when identical
 ```
 
 **How it stays deterministic:** `build-stdlib`/`test`/`test-stdlib` normally

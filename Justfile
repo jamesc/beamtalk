@@ -1443,8 +1443,7 @@ verify-threaded-ir: test-stdlib test-bunit
 # test execution (those are `test-beam`'s job). `full` runs the commands to
 # completion exactly as before and exists to re-verify the invariant the
 # early returns rely on: both modes must leave an identical set of `.core`
-# files. Check it by snapshotting the same checkout once in each mode and
-# `diff -r`-ing the two output directories.
+# files. `just core-diff-modes` enforces it (CI job `core-diff-modes`).
 #
 # Linux only, like `test-beam` above: `build-erlang`/`test`/`test-stdlib`
 # need the Erlang/OTP toolchain this recipe's dependency chain builds, and
@@ -1596,6 +1595,36 @@ core-diff BASE_REF="origin/main" BASE_SNAPSHOT="":
         echo "✅ core-diff: generated Core Erlang is byte-identical to {{BASE_REF}}"
     else
         echo "❌ core-diff: generated Core Erlang differs from {{BASE_REF}} (see diff above)"
+        exit 1
+    fi
+
+# BT-3934: enforce the invariant `core-diff-snapshot`'s snapshot-only mode
+# relies on — a snapshot-only run leaves exactly the same `.core` files as a
+# full run. Snapshots this checkout once in each mode and fails if `diff -r`
+# of the two output directories is non-empty (or either is empty). CI runs it
+# (the `core-diff-modes` job) only when the three commands' pipelines or the
+# `core-diff*` recipes change. ~3 min extra: a full run compiles `.beam`s and
+# executes the tests.
+#
+# Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
+[linux]
+core-diff-modes OUT_DIR="target/core-diff-modes":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{OUT_DIR}}"
+    OUT="$(cd "{{OUT_DIR}}" && pwd)"
+    just core-diff-snapshot "$OUT/snapshot-only" snapshot-only
+    just core-diff-snapshot "$OUT/full" full
+    for d in snapshot-only full; do
+        if ! find "$OUT/$d" -name '*.core' | grep -q .; then
+            echo "❌ core-diff-modes: $d snapshot holds no .core files" >&2
+            exit 1
+        fi
+    done
+    if diff -r "$OUT/snapshot-only" "$OUT/full"; then
+        echo "✅ core-diff-modes: snapshot-only and full leave identical .core files"
+    else
+        echo "❌ core-diff-modes: snapshot-only and full .core outputs differ (see diff above) — a .core write likely moved after a snapshot-only early return" >&2
         exit 1
     fi
 
