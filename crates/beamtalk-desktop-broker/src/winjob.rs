@@ -28,19 +28,25 @@
 //! with the broker instead of surviving until some future broker start
 //! happens to run a sweep.
 //!
-//! **Known residual race, not fully closable through `std::process::Command`**:
-//! [`JobHandle::assign`] must run after [`std::process::Command::spawn`]
-//! returns, so a child that spawns its own children in that brief window
-//! would have those grandchildren born outside the job. The fully race-free
-//! fix is `CREATE_SUSPENDED` + assign + `ResumeThread`, but
-//! `std::process::Child` exposes the process handle, not the initial
-//! thread — reaching `ResumeThread` would mean reimplementing
-//! `CreateProcessW` by hand instead of going through `Command`. Calling
-//! [`JobHandle::assign`] immediately after `spawn()` (as
-//! `crate::spawn::spawn_front` does) minimizes the window to essentially
-//! nothing in practice (a freshly-created `cmd.exe` has not yet parsed the
-//! `.bat` it was told to run), but this has not been verified against a real
-//! Windows boot — no Windows sandbox was available to test it in.
+//! **Assign before the child runs, so there is no pre-assignment window**
+//! (BT-3880): [`JobHandle::assign`] can only run after
+//! [`std::process::Command::spawn`] returns, and `AssignProcessToJobObject`
+//! covers the named process plus whatever it spawns *afterwards* — a
+//! grandchild the child had already launched by then is born outside the
+//! job and survives the kill-on-close. For a `.bat` front that window is
+//! real: `cmd.exe` parses the batch file and `CreateProcess`es `erl.exe`
+//! within milliseconds of starting, and a broker thread descheduled between
+//! `spawn()` and `assign()` on a loaded machine loses that race (observed
+//! on CI as a `ping.exe` grandchild surviving its `cmd.exe`'s job being
+//! closed). `crate::spawn::spawn_front` therefore spawns the child with
+//! [`CREATE_SUSPENDED`], assigns it while it has not yet executed a single
+//! instruction, and only then releases it via [`resume_initial_thread`] —
+//! so every descendant is created inside the job by construction, however
+//! the broker happens to be scheduled. `std::process::Child` exposes the
+//! process handle but not the initial thread's, so [`resume_initial_thread`]
+//! finds that thread again by owner PID through a Toolhelp thread snapshot
+//! rather than reimplementing `CreateProcessW` to keep the thread handle it
+//! returns.
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -48,13 +54,23 @@ use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::process::Child;
 
-use windows_sys::Win32::Foundation::CloseHandle;
-use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
     SetInformationJobObject,
 };
+use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+/// `CreateProcessW`'s `CREATE_SUSPENDED` creation flag: the new process's
+/// initial thread starts suspended and executes nothing until
+/// [`resume_initial_thread`] releases it. `crate::spawn` ORs this into the
+/// front's creation flags so [`JobHandle::assign`] can run before the child
+/// does — see this module's doc comment.
+pub const CREATE_SUSPENDED: u32 = windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
 /// RAII handle to an anonymous Windows Job Object configured with
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — see this module's doc comment for
@@ -114,8 +130,9 @@ impl JobHandle {
     }
 
     /// Assign `process` — and everything it spawns from this point on — to
-    /// this job. See this module's doc comment for the residual assign-race
-    /// this does not close.
+    /// this job. Only descendants created *after* this call are covered, so
+    /// `process` should still be suspended (spawned with
+    /// [`CREATE_SUSPENDED`]) when it runs — see this module's doc comment.
     ///
     /// # Errors
     ///
@@ -132,6 +149,125 @@ impl JobHandle {
         }
         Ok(())
     }
+
+    /// Whether `process` (an open process handle with at least
+    /// `PROCESS_QUERY_LIMITED_INFORMATION` access) is currently assigned to
+    /// this job. Test-only: `crate::spawn`'s process-tree-kill test uses it
+    /// to pick the grandchild that is actually a member of the front's job,
+    /// and to fail precisely if the assign-before-run guarantee in this
+    /// module's doc comment ever regresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns the OS error if `IsProcessInJob` fails (e.g. `process` lacks
+    /// the query access right).
+    #[cfg(test)]
+    pub(crate) fn contains_process(&self, process: HANDLE) -> io::Result<bool> {
+        use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+
+        let mut result = FALSE;
+        // SAFETY: `process` is a valid open handle per this function's
+        // contract; `self.0` is a valid job handle owned by `self`; `result`
+        // is a live out-pointer for the duration of the call.
+        let ok = unsafe { IsProcessInJob(process, self.0, &raw mut result) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(result != FALSE)
+    }
+}
+
+/// Release a process spawned with [`CREATE_SUSPENDED`], after
+/// [`JobHandle::assign`] has attached it to its job.
+///
+/// `std::process::Child` keeps the process handle `CreateProcessW` returned
+/// but closes the initial thread's, so that thread is located again here by
+/// owner PID through a `TH32CS_SNAPTHREAD` snapshot. A freshly created,
+/// still-suspended process has exactly one thread (nothing has run yet that
+/// could create another), so resuming every thread owned by `process.id()`
+/// is resuming the initial thread; the PID cannot have been recycled under
+/// us because `process` still holds the process handle open.
+///
+/// # Errors
+///
+/// Returns the OS error if the thread snapshot, `OpenThread` or
+/// `ResumeThread` fails, or an [`io::ErrorKind::NotFound`] error if the
+/// snapshot lists no thread for `process` at all (it was terminated out from
+/// under us before it ever ran). On any error the process is left suspended
+/// inside its job — the caller kills it (`crate::spawn::kill_orphaned_child`)
+/// rather than returning a front that will never boot.
+pub fn resume_initial_thread(process: &Child) -> io::Result<()> {
+    let pid = process.id();
+
+    // SAFETY: plain Win32 call; the `th32ProcessID` argument is ignored for
+    // thread snapshots (every thread on the system is listed — filtered by
+    // owner below, per the API contract), and the returned handle is
+    // checked before use.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let result = resume_threads_of(snapshot, pid);
+    // SAFETY: `snapshot` is a valid handle owned by this function, not used
+    // again after this point.
+    unsafe { CloseHandle(snapshot) };
+    result
+}
+
+/// [`resume_initial_thread`]'s walk over an already-open `TH32CS_SNAPTHREAD`
+/// `snapshot`, split out so the caller closes the snapshot after every exit
+/// path of this function with a single `CloseHandle`.
+fn resume_threads_of(snapshot: HANDLE, pid: u32) -> io::Result<()> {
+    let mut entry = THREADENTRY32 {
+        dwSize: u32::try_from(std::mem::size_of::<THREADENTRY32>())
+            .expect("struct size fits in u32"),
+        ..Default::default()
+    };
+    let mut resumed = 0u32;
+    // SAFETY: `snapshot` is a valid, open thread snapshot owned by the
+    // caller; `entry` is a validly-initialized, correctly-sized buffer for
+    // this call (`dwSize` set per the API's documented requirement).
+    if unsafe { Thread32First(snapshot, &raw mut entry) } != 0 {
+        loop {
+            if entry.th32OwnerProcessID == pid {
+                resume_thread(entry.th32ThreadID)?;
+                resumed += 1;
+            }
+            // SAFETY: same snapshot/entry as above, called in a loop until
+            // it reports no more entries.
+            if unsafe { Thread32Next(snapshot, &raw mut entry) } == 0 {
+                break;
+            }
+        }
+    }
+    if resumed == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no thread found for suspended process {pid}"),
+        ));
+    }
+    Ok(())
+}
+
+/// `OpenThread` + `ResumeThread` + `CloseHandle` for one thread id.
+fn resume_thread(thread_id: u32) -> io::Result<()> {
+    // SAFETY: plain Win32 call; a null return (failure) is handled below.
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread_id) };
+    if thread.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `thread` is the valid handle just opened above. `ResumeThread`
+    // returns the thread's previous suspend count, or `(DWORD)-1` on
+    // failure — only the latter is an error (a count of 0 would mean the
+    // thread was not suspended, which is harmless here).
+    let previous = unsafe { ResumeThread(thread) };
+    // SAFETY: `thread` is a valid handle owned by this function, not used
+    // again after this point.
+    unsafe { CloseHandle(thread) };
+    if previous == u32::MAX {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 impl Drop for JobHandle {

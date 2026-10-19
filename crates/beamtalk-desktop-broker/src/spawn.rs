@@ -98,15 +98,17 @@
 //! spawned after assignment — together, the moment the job handle closes
 //! (explicitly, or automatically when this broker process itself dies, no
 //! cooperation required). See [`crate::winjob`]'s module doc for the
-//! mechanism, its one residual (assign-after-spawn) race, and why that
-//! race can't be fully closed without bypassing `std::process::Command`.
-//! This has not been exercised against a real Windows boot — no Windows
-//! sandbox was available to develop or test it against — but unlike the
-//! rest of this paragraph's original framing, it is not a *guess* at what
-//! Windows does; the job-object mechanism works the same way regardless of
-//! how many hops sit between `cmd.exe` and `erl.exe`. [`crate::reap`]'s
-//! PID-file sweep remains the fallback net for any process this mechanism
-//! still misses (e.g. a crash in the narrow assign-after-spawn window).
+//! mechanism, and for why the child is spawned `CREATE_SUSPENDED` and only
+//! resumed once it is inside the job (so `erl.exe` can never be created
+//! before the assignment that would cover it — BT-3880). This has not been
+//! exercised against a real Windows boot — no Windows sandbox was available
+//! to develop or test it against — but unlike the rest of this paragraph's
+//! original framing, it is not a *guess* at what Windows does; the
+//! job-object mechanism works the same way regardless of how many hops sit
+//! between `cmd.exe` and `erl.exe`, and the `.bat`-grandchild test at the
+//! bottom of this module exercises it on CI. [`crate::reap`]'s PID-file
+//! sweep remains the fallback net for any process this mechanism still
+//! misses (e.g. a broker that dies between `spawn()` and the assignment).
 
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
@@ -254,14 +256,19 @@ impl std::ops::DerefMut for SpawnedFront {
 ///
 /// On Windows, additionally assigns the spawned process to a fresh
 /// [`crate::winjob::JobHandle`] before returning — see this module's doc
-/// comment for why plain `Child::kill()` cannot reach `erl.exe` there.
+/// comment for why plain `Child::kill()` cannot reach `erl.exe` there. The
+/// child is spawned `CREATE_SUSPENDED` and released only after that
+/// assignment ([`crate::winjob::resume_initial_thread`]), so it cannot have
+/// spawned `erl.exe` outside the job first (BT-3880); by the time this
+/// returns `Ok`, the child is running.
 ///
 /// # Errors
 ///
 /// Returns [`BrokerError::OidcConfigured`] or [`BrokerError::UnknownWorkspace`]
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
 /// process fails to spawn or (Windows only) if assigning it to the job
-/// object fails. [`build_launch_command`] can additionally return
+/// object or resuming it afterwards fails. [`build_launch_command`] can
+/// additionally return
 /// [`BrokerError::LauncherPlatformMismatch`] (`config.launcher`
 /// doesn't look like a real entry point for the current platform) before any
 /// process is spawned. On Windows, its workspace lookups and per-front
@@ -334,17 +341,24 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     #[cfg(windows)]
     {
-        // Best-effort-but-checked: assign right away (minimizes, per
-        // `crate::winjob`'s doc, the residual pre-assignment race) and
-        // surface a failure rather than silently returning a front this
-        // job object does not actually protect. `cmd.spawn()` above already
-        // succeeded, so a failure past this point must kill `child` itself
-        // before propagating — otherwise the job object we failed to attach
-        // never exists to reap it, and `crate::reap`'s PID-file sweep can't
-        // catch it either (a PID file is only written after `spawn_front`
-        // returns `Ok`), leaving a live, untracked `cmd.exe`/`erl.exe` tree
-        // behind.
-        if let Err(e) = job.assign(&child) {
+        // `child` is still suspended here (`detach` passed
+        // `CREATE_SUSPENDED`), so assigning it now covers every descendant
+        // it will ever create — there is no window in which `cmd.exe` could
+        // already have launched `erl.exe` outside the job (BT-3880; see
+        // `crate::winjob`'s doc). Only once it is inside the job is it
+        // released to run. Both steps are checked and surface a failure
+        // rather than silently returning a front this job object does not
+        // actually protect (or one that would sit suspended forever).
+        // `cmd.spawn()` above already succeeded, so a failure past this
+        // point must kill `child` itself before propagating — otherwise the
+        // job object we failed to attach never exists to reap it, and
+        // `crate::reap`'s PID-file sweep can't catch it either (a PID file
+        // is only written after `spawn_front` returns `Ok`), leaving a live,
+        // untracked `cmd.exe`/`erl.exe` tree behind.
+        if let Err(e) = job
+            .assign(&child)
+            .and_then(|()| crate::winjob::resume_initial_thread(&child))
+        {
             kill_orphaned_child(&mut child);
             // Best-effort (low
             // severity): `build_launch_command` above already created this
@@ -422,7 +436,10 @@ fn open_front_log(path: &Path) -> io::Result<(File, File)> {
 
 /// Kill and reap `child` after it was successfully spawned but
 /// [`crate::winjob::JobHandle::assign`] then failed to attach it to the
-/// job created before `spawn` — see the call site in [`spawn_front`].
+/// job created before `spawn`, or [`crate::winjob::resume_initial_thread`]
+/// failed to release it afterwards — see the call site in [`spawn_front`].
+/// `TerminateProcess` (what `Child::kill` is on Windows) works on a
+/// still-suspended process too, so both cases are handled the same way.
 /// Best-effort: swallows its own errors rather than shadowing the setup
 /// failure that's already being propagated, since there's no better recovery
 /// available for a failure to kill a process we're already trying to kill.
@@ -870,7 +887,16 @@ fn detach(cmd: &mut Command) {
     // doesn't attach a console either way — `PHX_SERVER=true` boot has
     // nothing to print to one).
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    // `CREATE_SUSPENDED` is not about detaching: it makes the child start
+    // frozen so `spawn_front` can assign it to its job object before it
+    // executes anything (and so before `cmd.exe` can launch `erl.exe`
+    // outside that job — BT-3880). `spawn_front` resumes it via
+    // `crate::winjob::resume_initial_thread` straight after the assignment.
+    // It lives here only because `creation_flags` replaces rather than
+    // ORs, so every flag the front needs must be set in one call.
+    cmd.creation_flags(
+        CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | crate::winjob::CREATE_SUSPENDED,
+    );
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1957,13 +1983,29 @@ mod tests {
     // turns into killing every process still assigned to the job), and
     // asserts the grandchild is actually gone — not just the immediate
     // `cmd.exe` child.
+    //
+    // BT-3880 (the test failed once on CI with `ping.exe` surviving the
+    // drop): the grandchild is selected by *job membership*
+    // (`JobHandle::contains_process`), not merely by parent PID, and the
+    // post-drop wait is a bounded `WaitForSingleObject` on the grandchild's
+    // own process handle rather than a fixed-interval poll. A `ping.exe`
+    // that is a child of `cmd.exe` but not in the job is exactly what the
+    // pre-`CREATE_SUSPENDED` assign race produced (`cmd.exe` ran the `.bat`
+    // before `AssignProcessToJobObject` covered it), so selecting by
+    // membership turns that regression into a precise "never joined the
+    // job" failure instead of a misleading "survived the kill" one — and
+    // also ignores any unrelated process whose recorded parent PID happens
+    // to be a recycled one.
 
-    /// Find a live process whose `th32ParentProcessID` is `parent_pid`, via
-    /// `CreateToolhelp32Snapshot` (no `wmic`/`PowerShell` dependency — a
+    /// Find every live process whose `th32ParentProcessID` is `parent_pid`,
+    /// via `CreateToolhelp32Snapshot` (no `wmic`/`PowerShell` dependency — a
     /// plain Win32 API call, consistent with how the rest of this crate
-    /// talks to Windows directly rather than shelling out).
+    /// talks to Windows directly rather than shelling out). Parent PIDs are
+    /// recorded, not live-tracked, so an entry here may belong to a process
+    /// whose real parent died and had its PID recycled — callers confirm
+    /// membership some other way (job membership, below).
     #[cfg(windows)]
-    fn find_child_pid(parent_pid: u32) -> Option<u32> {
+    fn find_child_pids(parent_pid: u32) -> Vec<u32> {
         use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
@@ -1975,7 +2017,7 @@ mod tests {
         // requested, and the returned handle is checked before further use.
         let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
         if snapshot == INVALID_HANDLE_VALUE {
-            return None;
+            return Vec::new();
         }
 
         let mut entry = PROCESSENTRY32W {
@@ -1983,15 +2025,14 @@ mod tests {
                 .expect("struct size fits in u32"),
             ..Default::default()
         };
-        let mut found = None;
+        let mut found = Vec::new();
         // SAFETY: `snapshot` is the just-created, still-owned handle above;
         // `entry` is a validly-initialized, correctly-sized buffer for this
         // call (`dwSize` set per the API's documented requirement).
         if unsafe { Process32FirstW(snapshot, &raw mut entry) } != 0 {
             loop {
                 if entry.th32ParentProcessID == parent_pid {
-                    found = Some(entry.th32ProcessID);
-                    break;
+                    found.push(entry.th32ProcessID);
                 }
                 // SAFETY: same snapshot/entry as above, called in a loop
                 // until it reports no more entries.
@@ -2006,10 +2047,21 @@ mod tests {
         found
     }
 
+    /// How long the process-tree-kill test below waits for `ping.exe` to
+    /// appear inside the job, and then for it to die after the drop.
+    /// Bounded, and generous for a loaded CI runner — but each wait is well
+    /// under the ~29s `ping -n 30` runs on its own, so a grandchild that
+    /// merely *finishes* can never pass as one that was *killed*. Spent only
+    /// on the failure path: the appear-poll returns as soon as `ping.exe`
+    /// is in the job, and the post-drop wait returns the instant it dies.
+    #[cfg(windows)]
+    const GRANDCHILD_DEADLINE: Duration = Duration::from_secs(10);
+
     /// Poll `condition` until it's true or `timeout` elapses, sleeping
     /// briefly between checks — used below in place of a single fixed sleep,
-    /// since both "`ping.exe` has started" and "the job-object kill has
-    /// propagated" are OS-scheduling-dependent, not deterministic delays.
+    /// since "`ping.exe` has started" is OS-scheduling-dependent, not a
+    /// deterministic delay. (The post-kill wait does not poll at all: it
+    /// blocks on the grandchild's process handle — [`ProcessHandle::wait_exited`].)
     #[cfg(windows)]
     fn poll_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
         let deadline = std::time::Instant::now() + timeout;
@@ -2024,11 +2076,12 @@ mod tests {
         }
     }
 
-    /// An open `SYNCHRONIZE` handle to a process, used to test liveness
-    /// without trusting a bare PID (BT-3698). While this handle is open the
-    /// kernel keeps the process object alive, so the PID cannot be reused
-    /// by an unrelated process; `has_exited` therefore answers for the
-    /// process we opened, not whatever later inherits its PID.
+    /// An open `SYNCHRONIZE | QUERY_LIMITED_INFORMATION` handle to a process,
+    /// used to test liveness (and job membership) without trusting a bare
+    /// PID (BT-3698). While this handle is open the kernel keeps the process
+    /// object alive, so the PID cannot be reused by an unrelated process;
+    /// `has_exited`/`wait_exited` therefore answer for the process we
+    /// opened, not whatever later inherits its PID.
     #[cfg(windows)]
     struct ProcessHandle(windows_sys::Win32::Foundation::HANDLE);
 
@@ -2036,10 +2089,18 @@ mod tests {
     impl ProcessHandle {
         fn open(pid: u32) -> Option<Self> {
             use windows_sys::Win32::Foundation::FALSE;
-            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+            use windows_sys::Win32::System::Threading::{
+                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            };
 
             // SAFETY: plain Win32 call; a null return (failure) is handled below.
-            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, FALSE, pid) };
+            let handle = unsafe {
+                OpenProcess(
+                    PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    FALSE,
+                    pid,
+                )
+            };
             if handle.is_null() {
                 None
             } else {
@@ -2047,13 +2108,28 @@ mod tests {
             }
         }
 
+        /// The raw handle, for `JobHandle::contains_process`. Valid only
+        /// while `self` lives.
+        fn raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
+            self.0
+        }
+
         /// True once the process has terminated (its handle is signalled).
         fn has_exited(&self) -> bool {
+            self.wait_exited(Duration::ZERO)
+        }
+
+        /// Block until the process has terminated or `timeout` elapses,
+        /// returning whether it terminated. A kernel wait on the process
+        /// object, so it returns the instant the kill lands rather than at
+        /// the next poll tick, and the timeout only bounds the failure case.
+        fn wait_exited(&self, timeout: Duration) -> bool {
             use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
             use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
+            let millis = u32::try_from(timeout.as_millis()).expect("timeout fits in u32 ms");
             // SAFETY: `self.0` is a valid handle owned by `self`, closed only in `Drop`.
-            unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
+            unsafe { WaitForSingleObject(self.0, millis) == WAIT_OBJECT_0 }
         }
     }
 
@@ -2083,25 +2159,41 @@ mod tests {
         let front = spawn_front(&config).expect("should spawn");
         let cmd_pid = front.id();
 
-        let ping_pid = {
-            let mut found = None;
-            poll_until(Duration::from_secs(5), || {
-                found = find_child_pid(cmd_pid);
-                found.is_some()
-            });
-            found.expect(
-                "ping.exe should appear as a child of the cmd.exe wrapper within 5s — \
-                 if this fails, either the .bat didn't launch ping in time, or Windows' \
-                 BatBadBut cmd.exe-wrapping behavior this module's doc comment describes \
-                 no longer holds",
+        // Find the grandchild by job membership, holding an open handle to
+        // it from the moment it's found: liveness is then judged through
+        // that handle, never by bare PID (once ping.exe exits, its PID can
+        // be reused by an unrelated process — BT-3698 — which a PID-based
+        // check would report as ping.exe "surviving").
+        let mut found: Option<(u32, ProcessHandle)> = None;
+        let mut saw_child_outside_job = false;
+        poll_until(GRANDCHILD_DEADLINE, || {
+            for pid in find_child_pids(cmd_pid) {
+                let Some(handle) = ProcessHandle::open(pid) else {
+                    continue;
+                };
+                match front.job.contains_process(handle.raw()) {
+                    Ok(true) => {
+                        found = Some((pid, handle));
+                        return true;
+                    }
+                    Ok(false) => saw_child_outside_job = true,
+                    Err(_) => {}
+                }
+            }
+            false
+        });
+        let (ping_pid, ping) = found.unwrap_or_else(|| {
+            panic!(
+                "ping.exe should appear as a child of the cmd.exe wrapper (pid {cmd_pid}) \
+                 *inside its job object* within {GRANDCHILD_DEADLINE:?} — \
+                 saw a child outside the job: {saw_child_outside_job}. If true, the \
+                 CREATE_SUSPENDED → JobHandle::assign → resume_initial_thread ordering in \
+                 spawn_front has regressed (BT-3880) and cmd.exe launched its child before \
+                 the job covered it; if false, either the .bat didn't launch ping in time, \
+                 or Windows' BatBadBut cmd.exe-wrapping behavior this module's doc comment \
+                 describes no longer holds"
             )
-        };
-        // Open a handle before the drop and judge liveness through it, never
-        // by bare PID: once ping.exe exits, its PID can be reused by an
-        // unrelated process (BT-3698), which `is_process_alive(pid)` would
-        // report as ping.exe "surviving".
-        let ping = ProcessHandle::open(ping_pid)
-            .expect("should be able to open a handle to the discovered ping.exe");
+        });
         assert!(
             !ping.has_exited(),
             "the discovered grandchild should be alive before the kill"
@@ -2109,13 +2201,14 @@ mod tests {
 
         drop(front);
 
-        let died = poll_until(Duration::from_secs(5), || ping.has_exited());
+        let died = ping.wait_exited(GRANDCHILD_DEADLINE);
         assert!(
             died,
             "dropping SpawnedFront should kill the whole process tree via \
              crate::winjob::JobHandle's JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE — \
-             ping.exe (pid {ping_pid}) survived cmd.exe (pid {cmd_pid}) being \
-             dropped, which would mean every front's erl.exe orphans on detach"
+             ping.exe (pid {ping_pid}), a confirmed member of the job, survived \
+             cmd.exe (pid {cmd_pid}) being dropped for {GRANDCHILD_DEADLINE:?}, \
+             which would mean every front's erl.exe orphans on detach"
         );
     }
 }
