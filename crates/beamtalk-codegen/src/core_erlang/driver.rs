@@ -267,16 +267,11 @@ pub fn generate_module_with_warnings(
                 options.native_type_registry.as_deref(),
             );
         generator.type_map = type_map;
-        // No cross-file/cross-package `external_protocols` map survives into
-        // this branch (self-sufficient codegen, or a stale hand-off being
-        // re-inferred from scratch) — same tracked limitation as this file's
-        // other self-sufficient `expand_module` call above.
-        beamtalk_core::semantic_analysis::lower_module_for_codegen(
+        lower_self_sufficient(
             &mut module_owned,
             &hierarchy,
             &method_return_types,
-            &std::collections::HashMap::new(),
-            self_sufficient_package(&generator),
+            &generator,
         );
         // Record which methods *this* (re-)inference wrote a
         // return type into, for `extract_method_source` to strip before
@@ -365,6 +360,29 @@ fn self_sufficient_package(generator: &CoreErlangGenerator) -> Option<&'static s
     generator
         .stdlib_mode()
         .then_some(beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE)
+}
+
+/// [`lower_module_for_codegen`](beamtalk_core::semantic_analysis::lower_module_for_codegen)
+/// with no analysis to hand: no cross-file/cross-package `external_protocols`
+/// map survives into this path (self-sufficient codegen, or a stale hand-off
+/// being re-inferred) — same limitation as [`flatten_uses_self_sufficient`] —
+/// and the package is [`self_sufficient_package`].
+fn lower_self_sufficient(
+    module: &mut Module,
+    hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+    method_return_types: &std::collections::HashMap<
+        beamtalk_core::semantic_analysis::type_checker::MethodReturnKey,
+        beamtalk_core::semantic_analysis::type_checker::InferredType,
+    >,
+    generator: &CoreErlangGenerator,
+) {
+    beamtalk_core::semantic_analysis::lower_module_for_codegen(
+        module,
+        hierarchy,
+        method_return_types,
+        &std::collections::HashMap::new(),
+        self_sufficient_package(generator),
+    );
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.
