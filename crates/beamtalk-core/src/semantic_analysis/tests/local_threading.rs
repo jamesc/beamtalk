@@ -648,7 +648,13 @@ fn adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block() {
         let found = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
         assert_eq!(found.len(), 1, "{body}: {diags:?}");
         assert!(
-            found[0].message.contains("is assigned in a block"),
+            (found[0]
+                .message
+                .contains("is assigned in a block passed to `self ")
+                || found[0]
+                    .message
+                    .contains("is assigned in a block passed to `super "))
+                && found[0].message.contains("actor's own"),
             "{body}: {diags:?}"
         );
     }

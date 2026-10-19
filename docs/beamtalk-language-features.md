@@ -2847,6 +2847,7 @@ processItems =>
 | `f := [t := t + 1]` | `` `t` is assigned in a block stored in `f` `` |
 | `^[t := t + 1]` | `` `t` is assigned in a block returned from `run` `` |
 | `self forEach: [:o \| t := t + o]` | `` `t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through `` |
+| `self do: [:x \| t := t + x]` (in an actor) | `` `t` is assigned in a block passed to `self do:`, which runs the actor's own `do:` method rather than the collection loop the compiler threads it through `` |
 | `Logger onEvent: [:e \| seen := seen + 1]` | `` `seen` is assigned in a block passed to a class method (`onEvent:`); it would run in another process `` |
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
 | `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |

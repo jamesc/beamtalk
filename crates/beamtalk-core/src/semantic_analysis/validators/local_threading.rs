@@ -1248,6 +1248,10 @@ enum Escape {
     /// An argument of an ordinary send of this selector: a user-defined method,
     /// or a stdlib method outside the known list.
     Passed(EcoString),
+    /// An argument of this collection message sent to `self` or `super` in
+    /// an actor instance method: a dispatched self-send, so the actor's own
+    /// method runs the block, not the inlined collection loop (BT-3908).
+    ActorSelfSend(&'static str, EcoString),
     /// A handler of this `Dictionary` lookup where the compiler does not lower
     /// it in place (BT-3798: its receiver is statically not a `Dictionary`,
     /// or the lookup is not in a producer position).
@@ -1281,6 +1285,10 @@ impl Escape {
             Self::CollectionResult => "answered by the block of a collection operation".to_string(),
             Self::Passed(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
+            ),
+            Self::ActorSelfSend(receiver, selector) => format!(
+                "passed to `{receiver} {selector}`, which runs the actor's own `{selector}` method \
+                 rather than the collection loop the compiler threads it through"
             ),
             Self::Lookup(selector) => format!(
                 "passed to `{selector}` where the compiler does not thread it (the receiver is \
@@ -1316,6 +1324,10 @@ impl Escape {
                  the new value from the block and assign it where the block is called"
                 )
             }
+            Self::ActorSelfSend(_, selector) => format!(
+                "send `{selector}` to the collection itself (`self.items {selector} [...]`), \
+                 or return the new value from the block and assign it where it is called"
+            ),
             Self::Passed(selector)
             | Self::Lookup(selector)
             | Self::ClassMethod(selector)
@@ -2349,7 +2361,14 @@ impl<'d> Walker<'d> {
         // evaluates to a block literal ([`value_blocks`]: the literal itself,
         // parenthesized, or answered by a conditional arm, an evaluated block or
         // a protected body) is a block value passed to `sel`, in every send.
-        let escape = if inlined {
+        let escape = if dispatched {
+            let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                "super"
+            } else {
+                "self"
+            };
+            Escape::ActorSelfSend(word, sel.clone())
+        } else if inlined {
             self.passed_escape(receiver, &sel)
         } else {
             Escape::Cascade(sel.clone())
