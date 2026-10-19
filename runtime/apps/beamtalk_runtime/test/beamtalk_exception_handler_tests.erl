@@ -437,6 +437,15 @@ dispatch_reason_wrapped_exception_is_nil_test() ->
     Ex = beamtalk_exception_handler:wrap(Error),
     ?assertEqual(nil, beamtalk_exception_handler:dispatch('reason', [], Ex)).
 
+dispatch_reason_value_object_is_kept_test() ->
+    %% A non-exception Beamtalk object raised as a raw term is still returned.
+    Obj = #{'$beamtalk_class' => 'Point', x => 1, y => 2},
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'ErlangModule', foo), #{reason => Obj}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(Obj, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
 dispatch_reason_exit_test() ->
     Ex = beamtalk_exception_handler:ensure_wrapped(exit, shutdown, []),
     ?assertEqual(shutdown, beamtalk_exception_handler:dispatch('reason', [], Ex)).

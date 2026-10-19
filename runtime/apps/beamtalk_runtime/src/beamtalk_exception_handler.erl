@@ -701,7 +701,7 @@ raw_reason_from(_Details, []) ->
 raw_reason_from(Details, [Key | Rest]) ->
     case Details of
         #{Key := #beamtalk_error{}} -> nil;
-        #{Key := #{'$beamtalk_class' := _}} -> nil;
+        #{Key := #{'$beamtalk_class' := _, error := #beamtalk_error{}}} -> nil;
         #{Key := Reason} -> Reason;
         _ -> raw_reason_from(Details, Rest)
     end.
