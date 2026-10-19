@@ -3584,6 +3584,17 @@ pub fn value_position_local_assignments(
     body: &[ExpressionStatement],
     root: Option<RootMethodKind>,
 ) -> Vec<ValuePositionAssignment> {
+    let exprs: Vec<&Expression> = body.iter().map(|stmt| &stmt.expression).collect();
+    value_position_assignments_in(&exprs, root)
+}
+
+/// [`value_position_local_assignments`] over a body given as its statements'
+/// expressions, so a caller holding `&Expression`s need not clone them into
+/// `ExpressionStatement`s.
+fn value_position_assignments_in(
+    body: &[&Expression],
+    root: Option<RootMethodKind>,
+) -> Vec<ValuePositionAssignment> {
     let mut finder = ValuePositionAssignments::default();
     let unwraps_parens = matches!(
         root,
@@ -3606,12 +3617,8 @@ pub fn value_position_assignment_spans<'a>(
     body: impl IntoIterator<Item = &'a Expression>,
     root: Option<RootMethodKind>,
 ) -> HashSet<Span> {
-    let statements: Vec<ExpressionStatement> = body
-        .into_iter()
-        .cloned()
-        .map(ExpressionStatement::bare)
-        .collect();
-    value_position_local_assignments(&statements, root)
+    let exprs: Vec<&Expression> = body.into_iter().collect();
+    value_position_assignments_in(&exprs, root)
         .into_iter()
         .map(|found| found.span)
         .collect()
@@ -3672,14 +3679,24 @@ impl ValuePositionAssignments {
     /// a parenthesised assignment there writes nothing observable and is
     /// judged like a bare one (the REPL's last statement is not: its
     /// bindings persist).
-    fn body(&mut self, body: &[ExpressionStatement], unwraps_parens: bool, method_root: bool) {
+    fn statements(
+        &mut self,
+        body: &[ExpressionStatement],
+        unwraps_parens: bool,
+        method_root: bool,
+    ) {
+        let exprs: Vec<&Expression> = body.iter().map(|stmt| &stmt.expression).collect();
+        self.body(&exprs, unwraps_parens, method_root);
+    }
+
+    fn body(&mut self, body: &[&Expression], unwraps_parens: bool, method_root: bool) {
         use crate::ast::visitor::Visitor;
-        for (i, stmt) in body.iter().enumerate() {
+        for (i, stmt_expr) in body.iter().enumerate() {
             let last = i + 1 == body.len();
             let expr = if (unwraps_parens && !last) || (method_root && last) {
-                stmt.expression.unwrap_parens()
+                stmt_expr.unwrap_parens()
             } else {
-                &stmt.expression
+                *stmt_expr
             };
             match expr {
                 // Binds its local: only its value is judged.
@@ -3739,7 +3756,7 @@ impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
                     Expression::Block(block)
                         if arms.iter().any(|arm| std::ptr::eq(*arm, block)) =>
                     {
-                        self.body(&block.body, true, false);
+                        self.statements(&block.body, true, false);
                     }
                     other => self.visit_expr(other),
                 }
@@ -3750,7 +3767,7 @@ impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
     }
 
     fn visit_block(&mut self, block: &'ast Block) {
-        self.body(&block.body, false, false);
+        self.statements(&block.body, false, false);
     }
 }
 
