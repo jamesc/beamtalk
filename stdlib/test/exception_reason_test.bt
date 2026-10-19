@@ -39,6 +39,27 @@ TestCase subclass: ExceptionReasonTest
     result := [(Erlang erlang) error: term] on: Exception do: [:e | e reason]
     self assert: result equals: term
 
+  testFfiBadargReason =>
+    // The proxy's specific badarg clause records the term as erlang_error.
+    result := [
+      (Erlang erlang) abs: #notanumber
+    ] on: TypeError do: [:e | e reason]
+    self assert: result equals: #badarg
+
+  testFfiRaisedBadargReason =>
+    result := [(Erlang erlang) error: #badarg] on: Exception do: [:e | e reason]
+    self assert: result equals: #badarg
+
+  testErlangExitReason =>
+    result := [
+      (Erlang erlang) exit: #shutdown
+    ] on: ExitError do: [:e | e reason]
+    self assert: result equals: #shutdown
+
+  testErlangThrowReason =>
+    result := [(Erlang erlang) throw: #oops] on: ThrowError do: [:e | e reason]
+    self assert: result equals: #oops
+
   testClassifiedRawErrorKeepsReason =>
     // Bucket-A classification still records the original term.
     result := [#(1, "x") sum] on: TypeError do: [:e | e reason]

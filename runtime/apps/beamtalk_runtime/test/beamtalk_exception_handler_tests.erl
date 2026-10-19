@@ -403,6 +403,40 @@ dispatch_reason_badkey_test() ->
     Ex = beamtalk_exception_handler:ensure_wrapped({badkey, k}),
     ?assertEqual({badkey, k}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
 
+dispatch_reason_original_reason_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'Foo', bar),
+        #{original_class => error, original_reason => {badmatch, 1}}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual({badmatch, 1}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_erlang_error_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(type_error, 'ErlangModule', abs),
+        #{erlang_error => badarg, erlang_stacktrace => []}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(badarg, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_prefers_reason_key_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(key_error, 'ErlangModule', get),
+        #{reason => {badkey, k}, erlang_error => {badkey, k}, original_reason => other}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual({badkey, k}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_wrapped_exception_is_nil_test() ->
+    %% A Beamtalk exception recorded as original_reason is not a raw term.
+    Inner = beamtalk_exception_handler:wrap(beamtalk_error:new(signal, 'Error')),
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'Foo', bar),
+        #{original_class => error, original_reason => Inner}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(nil, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
 dispatch_reason_exit_test() ->
     Ex = beamtalk_exception_handler:ensure_wrapped(exit, shutdown, []),
     ?assertEqual(shutdown, beamtalk_exception_handler:dispatch('reason', [], Ex)).

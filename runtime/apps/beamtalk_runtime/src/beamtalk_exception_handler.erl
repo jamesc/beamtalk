@@ -652,11 +652,8 @@ dispatch('selector', [], #{error := Error}) ->
     end;
 dispatch('errorClass', [], #{error := Error}) ->
     Error#beamtalk_error.class;
-dispatch('reason', [], #{error := #beamtalk_error{details = #{reason := Reason}}}) ->
-    %% BT-3954: the raw Erlang term this exception wraps (a raw error:/exit:/
-    %% throw: reason, or the R of an FFI {error, R}). Beamtalk-raised
-    %% exceptions carry no details.reason and answer nil.
-    Reason;
+dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
+    raw_reason(Details);
 dispatch('reason', [], _) ->
     nil;
 dispatch('printString', [], #{error := Error}) ->
@@ -676,6 +673,40 @@ dispatch('signal', [], #{'$beamtalk_class' := ClassName}) ->
 dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
+
+-doc """
+The raw Erlang term an exception wraps, for `Exception>>reason` (BT-3954).
+
+Producers record it under different `details` keys, checked in order:
+
+* `reason` — `wrap_raw/2` (raw `error:` via `on:do:`, the `R` of an FFI
+  `{error, R}`) and `ensure_wrapped/3` (`exit:`/`throw:`/`undef`);
+* `erlang_error` — the FFI proxy's specific `badarg`/`badarith`/
+  `function_clause` clauses (`beamtalk_erlang_proxy:raise_wrapped_error/7`);
+* `original_reason` — raw errors escaping a runtime-defined actor method or
+  DNU handler (`beamtalk_actor`).
+
+A recorded value that is itself a Beamtalk exception (a `#beamtalk_error{}` or
+its wrapped map, e.g. `Error signal:` inside a runtime-defined actor method) is
+not a raw Erlang term, so it answers `nil`, as does an exception with no
+recorded term.
+""".
+-spec raw_reason(term()) -> term().
+raw_reason(Details) when is_map(Details) ->
+    raw_reason_from(Details, [reason, erlang_error, original_reason]);
+raw_reason(_) ->
+    nil.
+
+-spec raw_reason_from(map(), [atom()]) -> term().
+raw_reason_from(_Details, []) ->
+    nil;
+raw_reason_from(Details, [Key | Rest]) ->
+    case Details of
+        #{Key := #beamtalk_error{}} -> nil;
+        #{Key := #{'$beamtalk_class' := _}} -> nil;
+        #{Key := Reason} -> Reason;
+        _ -> raw_reason_from(Details, Rest)
+    end.
 
 -doc "Check if Exception responds to a selector.".
 -spec has_method(atom()) -> boolean().
