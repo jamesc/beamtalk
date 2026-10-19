@@ -252,11 +252,15 @@ start_peer(NamePrefix, Opts) ->
 
 -doc """
 Tear down a peer started by start_peer/0,1. Idempotent-ish: `peer:stop/1`
-on an already-stopped peer raises `noproc`, which this catches and treats
-as success (matching the harness's "tear everything down reliably"
-requirement — a test's cleanup should never itself fail because the node
-under test already died, which is exactly what some of these tests do to
-it on purpose).
+on an already-stopped peer raises `noproc`, and on a peer whose control
+process is already exiting (a concurrent `stop_peer/1`, e.g. a test that
+kills the peer mid-call from a spawned process and then tears it down
+again in `after`) `sys:terminate` fails with that process's own `normal`
+or `shutdown` exit reason. Both are caught and treated as success
+(matching the harness's "tear everything down reliably" requirement — a
+test's cleanup should never itself fail because the node under test
+already died, which is exactly what some of these tests do to it on
+purpose).
 """.
 -spec stop_peer(peer:server_ref()) -> ok.
 stop_peer(Peer) ->
@@ -264,7 +268,9 @@ stop_peer(Peer) ->
         peer:stop(Peer)
     catch
         exit:noproc -> ok;
-        exit:{noproc, _} -> ok
+        exit:{noproc, _} -> ok;
+        exit:{normal, {sys, terminate, _}} -> ok;
+        exit:{shutdown, {sys, terminate, _}} -> ok
     end,
     ok.
 
