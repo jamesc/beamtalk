@@ -51,3 +51,15 @@ Actor subclass: SelfSendHomPool
     self.total := 0
     self do: [:each | self.total := self.total + each]
     self.total
+
+  // A block that assigns nothing but sends `record:`, which changes a field.
+  // `accumulateTotal` makes `do:`'s parameter a Tier 2 position, so this
+  // block is promoted too and its self-send's state change rides the
+  // returned `StateAcc` (case B of BT-3936, pinned in
+  // actor_self_send_hom_test.bt; `SelfSendHomPlainPool` is case A).
+  record: each => self.total := self.total + each
+
+  recordAll =>
+    self.total := 0
+    self do: [:each | self record: each]
+    self.total

@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3936 case A: like `SelfSendHomPool`, but no method passes `do:` a
+// field-writing block, so `do:`'s parameter is not a promoted Tier 2
+// position and the block in `recordAll` is a plain closure. Its self-send
+// (`record:`) changes `total`, and that change is dropped (pinned in
+// actor_self_send_hom_test.bt).
+
+Actor subclass: SelfSendHomPlainPool
+  state: items = #(1, 2, 3)
+  state: total = 0
+
+  do: block => self.items do: block
+
+  record: each => self.total := self.total + each
+
+  recordAll =>
+    self.total := 0
+    self do: [:each | self record: each]
+    self.total

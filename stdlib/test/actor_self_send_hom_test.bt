@@ -69,6 +69,23 @@ TestCase subclass: ActorSelfSendHomTest
     pool := SelfSendHomPool spawn
     self should: [pool accumulateTotal] raise: #stateful_block_dispatch
 
+  // PIN-BUG (BT-3936, BT-3922): a block that assigns nothing, but whose
+  // self-send (`record:`) changes a field, passed through `self do:` to a
+  // `do:` whose parameter is a promoted Tier 2 position (case B). The ADR
+  // 0128 fold kept the change (answer 10); since BT-3908 it raises rather
+  // than drop it. A fix for BT-3936 flips this to `equals: 10`.
+  testSelfSendStateChangeThroughSelfSendDo =>
+    pool := SelfSendHomPool spawn
+    self should: [pool recordAll] raise: #stateful_block_dispatch
+
+  // PIN-BUG (BT-3936): the same block where `do:`'s parameter is not
+  // promoted (case A): the block is a plain closure, so the self-send's
+  // change is dropped silently and the answer is 0, not 6 (as on main
+  // before BT-3908). A fix for BT-3936 flips this to `equals: 6`.
+  testSelfSendStateChangeThroughPlainSelfSendDoPinBug =>
+    pool := SelfSendHomPlainPool spawn
+    self assert: pool recordAll equals: 0
+
   // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a class
   // method (no `State`/`StateAcc` parameter — see
   // `SelfSendHomPool>>classCollect:`'s doc comment) forwarding an opaque

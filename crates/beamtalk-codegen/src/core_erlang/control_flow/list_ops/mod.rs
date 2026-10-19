@@ -233,10 +233,10 @@ impl CoreErlangGenerator {
     /// expected by `lists:foreach`/`lists:map`/`lists:filter`. Mutations
     /// inside a Tier-2 callable are dropped here: the wrapper's own seed state
     /// (a fresh empty map) is frozen at wrap time and never threaded back
-    /// out. In an actor instance method the seed is the live `State` and a
-    /// changed map raises `stateful_block_dispatch` (see the body). A block that writes
-    /// a captured local cannot reach this wrapper at all (the ADR 0133
-    /// escaping-block diagnostic).
+    /// out. In an actor instance method the seed is the live `State`, and a
+    /// returned map that differs from it raises `stateful_block_dispatch`
+    /// (see the body). A block that writes a captured local cannot reach
+    /// this wrapper at all (the ADR 0133 escaping-block diagnostic).
     ///
     /// Generated pattern (uses `is_function/2` to avoid badarg on non-funs):
     /// ```text
@@ -274,10 +274,15 @@ impl CoreErlangGenerator {
         // map, bound to a variable (mirroring generate_erlang_interop_wrapper)
         // so ~{}~ is not used as a literal in an apply argument position, and
         // the returned map is dropped. In an actor instance method the seed is
-        // the live `State` (a Tier 2 block passed through a self-send, BT-1140,
-        // reads fields and may `^`), and a returned map that differs from it
-        // raises `stateful_block_dispatch` instead of dropping the write: only
-        // a field-writing block gets here, which BT-3922 makes a compile error.
+        // the live `State`: a Tier 2 block here is one promoted for a
+        // self-send (`detect_tier2_self_send`), either because it writes a
+        // field (BT-1140, which BT-3922 makes a compile error) or as a
+        // passthrough at a position another call site promoted. It reads
+        // fields and may `^`. If its run changed actor state (a field write,
+        // or a self-send inside it that changed a field) the returned map
+        // differs from the seed; with the ADR 0128 fold gone that change has
+        // no way back, so it raises `stateful_block_dispatch` rather than
+        // drop it.
         let wrap_arg = self.fresh_temp_var("WArg");
         let wrap_tuple = self.fresh_temp_var("T");
         let wrap_res = self.fresh_temp_var("WRes");
@@ -293,9 +298,10 @@ impl CoreErlangGenerator {
             let raise = self.generate_stateful_block_dispatch_error(
                 selector,
                 "Block",
-                "A block that assigns a field was passed on to a collection message; \
-                 its write cannot be kept. Assign the field in the method that owns \
-                 the loop, and pass a block that returns the value instead.",
+                "A block whose run changed actor state (a field write, or a self-send \
+                 that changed state) was passed on to a collection message; the change \
+                 cannot be kept. Change the state in the method that owns the loop, \
+                 and pass a block that returns the value instead.",
             );
             let result = docvec![
                 "let ",
