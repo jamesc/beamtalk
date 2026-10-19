@@ -37,6 +37,10 @@ exercise) — covered by the BUnit suite `ActorGlobalScopeTest`
 
 setup() ->
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt3603_global"),
+    %% `global` learns about a freshly connected node asynchronously; names
+    %% registered before that exchange completes are not yet visible on the
+    %% peer. Settle it before any test registers a name (BT-3938).
+    ok = global:sync(),
     {Peer, PeerNode}.
 
 cleanup({Peer, _PeerNode}) ->
@@ -216,13 +220,13 @@ setup_conflict() ->
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer(
         "bt3603_global_conflict", #{connection => standard_io}
     ),
-    %% The announcements bus: reuse a supervised instance or stand one up
-    %% (mirrors beamtalk_system_announcements_tests:setup/0) — this test
-    %% observes the loser's ActorStopped announcement.
-    case whereis(beamtalk_announcements) of
-        undefined -> {ok, _} = beamtalk_announcements:start_link();
-        _ -> ok
-    end,
+    %% The announcements bus (this test observes the loser's ActorStopped
+    %% announcement) comes from the full runtime application (idempotent,
+    %% never stopped). Starting it standalone via
+    %% `beamtalk_announcements:start_link/0` made a later suite's
+    %% `ensure_all_started(beamtalk_runtime)` fail with `already_started`
+    %% when the dist suites run in isolation (BT-3938).
+    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
     {Peer, PeerNode}.
 
 cleanup_conflict({Peer, _PeerNode}) ->

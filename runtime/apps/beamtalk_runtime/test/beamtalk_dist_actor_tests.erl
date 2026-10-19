@@ -43,14 +43,12 @@ Plus one for the harness itself (BT-3929):
 
 setup() ->
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt3578_shared"),
-    %% Test 4 needs the announcements bus; use an already-running supervised
-    %% one when there is one (the runtime app starts it under the
-    %% supervisor), otherwise stand a fresh one up — mirrors
-    %% beamtalk_announcements_tests:setup/0.
-    case whereis(beamtalk_announcements) of
-        undefined -> {ok, _} = beamtalk_announcements:start_link();
-        _ -> ok
-    end,
+    %% Test 4 needs the announcements bus, which comes from the full runtime
+    %% application (idempotent, never stopped). Starting it standalone via
+    %% `beamtalk_announcements:start_link/0` made a later suite's
+    %% `ensure_all_started(beamtalk_runtime)` fail with `already_started`
+    %% when the dist suites run in isolation (BT-3938).
+    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
     {Peer, PeerNode}.
 
 cleanup({Peer, _PeerNode}) ->
