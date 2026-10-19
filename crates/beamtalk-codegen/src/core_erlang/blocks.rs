@@ -529,6 +529,34 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
+    /// The names `expr` assigns (`x := ...`), not entering a block literal (a
+    /// closure's assignments are its own business). Source order, once each.
+    fn assigned_outside_closures(expr: &Expression) -> Vec<String> {
+        let mut block_spans = Vec::new();
+        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
+            if let Expression::Block(b) = e {
+                block_spans.push(b.span);
+            }
+        });
+        let mut names: Vec<String> = Vec::new();
+        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
+            let Expression::Assignment { target, .. } = e else {
+                return;
+            };
+            let Expression::Identifier(id) = target.as_ref() else {
+                return;
+            };
+            let at = e.span();
+            let in_block = block_spans
+                .iter()
+                .any(|b| b.start() <= at.start() && at.end() <= b.end());
+            if !in_block && !names.iter().any(|n| n == id.name.as_str()) {
+                names.push(id.name.to_string());
+            }
+        });
+        names
+    }
+
     /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
     /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
     /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
@@ -560,15 +588,29 @@ impl CoreErlangGenerator {
             other => other,
         };
         let is_param = |n: &str| block.parameters.iter().any(|p| p.name == n);
-        let Some(local) = self
-            .reachable_threaded_locals(subject)
-            .into_iter()
-            .find(|n| {
-                self.bound_since(n, scope_depth)
-                    && !is_param(n)
-                    && !captured_vars.iter().any(|c| c == n)
-            })
-        else {
+        // A local assigned by this same statement before the construct runs
+        // (`r := (n := 0) + (xs inject: 0 into: [... n := n + y ...])`, an
+        // earlier keyword argument or cascade message) is not in scope yet
+        // when the statement is lowered, so the scope sees neither the local
+        // nor the construct's write to it. Conservatively, every name assigned
+        // anywhere in the statement outside a closure counts as bound by the
+        // body, and the one threaded-writes walker is asked with that scope.
+        let assigned = Self::assigned_outside_closures(subject);
+        let mut names = self.reachable_threaded_locals(subject);
+        for write in beamtalk_core::semantic_analysis::block_facts::expression_threaded_writes(
+            subject,
+            &|name| self.binds_threadable_local(name) || assigned.iter().any(|a| a == name),
+        ) {
+            let name = write.name.to_string();
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        let Some(local) = names.into_iter().find(|n| {
+            (self.bound_since(n, scope_depth) || assigned.contains(n))
+                && !is_param(n)
+                && !captured_vars.iter().any(|c| c == n)
+        }) else {
             return Ok(());
         };
         Err(CodeGenError::UnsupportedFeature {

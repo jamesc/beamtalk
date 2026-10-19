@@ -46,6 +46,7 @@ fn hosts(body: &str) -> [String; 2] {
   sealed fwd: block => self.groups collect: block
   promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
   note: x => x
+  note: x with: z => x
   go: flag => self fwd: [:xs | {body}]
 "
         ),
@@ -53,6 +54,7 @@ fn hosts(body: &str) -> [String; 2] {
             "Actor subclass: G
   state: hits = 0
   note: x => x
+  note: x with: z => x
   go: flag =>
     c := 0
     blk := [:xs | c := c + 1. {body}]
@@ -86,6 +88,41 @@ fn every_construct_at_every_position_that_rebinds_a_body_local_is_an_error() {
     assert_eq!(
         checked,
         BINDINGS.len() * POSITIONS.len() * CONSTRUCTS.len() * 2
+    );
+}
+
+/// The binding is part of the same statement as the construct, before it runs:
+/// `n` is not in scope when the statement is lowered, so the scope alone sees
+/// neither the local nor the construct's write to it.
+const SAME_STATEMENT_POSITIONS: &[&str] = &[
+    "r := (n := 0) + ({c}). n",
+    "r := #[(n := 0), ({c})]. n",
+    "self note: (n := 0) with: ({c}). n",
+    "self note: (n := 0); note: ({c}). n",
+    "r := (n := 0) max: ({c}). n",
+];
+
+// PIN-BUG BT-3947: answers the pre-construct `n` if it compiles.
+#[test]
+fn a_local_bound_earlier_in_the_same_statement_is_an_error() {
+    let mut checked = 0;
+    for position in SAME_STATEMENT_POSITIONS {
+        for construct in CONSTRUCTS {
+            let body = position.replace("{c}", construct);
+            for src in hosts(&body) {
+                match compile(&src) {
+                    Ok(_) => panic!("answers a stale value silently:\n{src}"),
+                    Err(e) => {
+                        assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}\n{src}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        checked,
+        SAME_STATEMENT_POSITIONS.len() * CONSTRUCTS.len() * 2
     );
 }
 
@@ -124,7 +161,5 @@ fn a_construct_that_rebinds_a_captured_local_is_not_this_error() {
     blk := [:xs | xs do: [:y | c := c + y]. c]
     blk value: #(1, 2)
 ";
-    if let Err(e) = compile(src) {
-        assert!(!e.contains("BT-3939"), "{e}");
-    }
+    compile(src).expect("a captured-mutated local rebound in a loop compiles");
 }
