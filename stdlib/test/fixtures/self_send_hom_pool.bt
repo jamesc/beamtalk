@@ -39,18 +39,14 @@ Actor subclass: SelfSendHomPool
     self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
-  inject: initial into: block =>
-    acc := initial
-    self do: [:each | acc := block value: acc value: each]
-    acc
+  // `inject:into:` written as `self do: [:each | acc := ...]` (and `size` on
+  // top of it) is an ADR 0133 escaping-block compile error since BT-3908: an
+  // actor self-send of `do:` is dispatched to this class's own `do:`, so the
+  // block escapes (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
 
-  size => self inject: 0 into: [:n :_each | n + 1]
-
-  // ADR 0128 / BT-3583 Constraints regression coverage (b): an opaque
-  // callable forwarded through a self-send to `do:` that mutates ONLY
-  // `self.field` (no local accumulator, no NLR) — the case the pre-fix
-  // generic wrapper already served correctly (threaded via the actor's
-  // `State` directly) and must keep working identically after the fix.
+  // A block that mutates ONLY `self.field`, passed through a self-send to
+  // `do:`: it raises `stateful_block_dispatch` since BT-3908 (pinned in
+  // actor_self_send_hom_test.bt; BT-3922 makes it a compile error).
   accumulateTotal =>
     self.total := 0
     self do: [:each | self.total := self.total + each]

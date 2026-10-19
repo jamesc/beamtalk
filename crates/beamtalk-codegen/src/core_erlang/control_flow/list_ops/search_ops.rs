@@ -6,7 +6,6 @@
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
-use super::OpaqueFoldOp;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -23,7 +22,7 @@ use beamtalk_core::ast::{Block, Expression};
 ///
 /// The class named in the error comes from the receiver, so a `Set` routed
 /// through the list-op path reports `Set` rather than `List`.
-pub(super) fn bind_detect_found_or_raise_doc(
+fn bind_detect_found_or_raise_doc(
     found_result: &str,
     fold_result: &str,
     recv_var: &str,
@@ -89,17 +88,6 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_bool_predicate_with_mutations(receiver, body_block, false);
         }
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(body) {
-            return self.generate_opaque_callable_fold(
-                receiver,
-                body,
-                OpaqueFoldOp::Satisfy { is_all: false },
-            );
-        }
-
         // No mutations: fall through to simple BIF call (lists:any/2)
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -146,17 +134,6 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_bool_predicate_with_mutations(receiver, body_block, true);
         }
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(body) {
-            return self.generate_opaque_callable_fold(
-                receiver,
-                body,
-                OpaqueFoldOp::Satisfy { is_all: true },
-            );
-        }
-
         // No mutations: fall through to simple BIF call (lists:all/2)
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -385,13 +362,6 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_detect_with_mutations(receiver, body_block);
         }
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(body) {
-            return self.generate_opaque_callable_fold(receiver, body, OpaqueFoldOp::Detect);
-        }
-
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -525,17 +495,6 @@ impl CoreErlangGenerator {
                 return self
                     .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
             }
-        }
-
-        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
-        // instance method folds with the `State` map threaded through a
-        // per-element tier check — see `opaque_fold.rs`.
-        if self.routes_through_opaque_callable_fold(predicate) {
-            return self.generate_opaque_callable_fold(
-                receiver,
-                predicate,
-                OpaqueFoldOp::DetectIfNone { if_none },
-            );
         }
 
         // No mutations: fall through to runtime dispatch

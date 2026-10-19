@@ -12,9 +12,9 @@
 // Value-class twin.
 //
 // The `^` half is fixed (below). The captured-local-write half (`size`,
-// via `inject:into:`) is not — BT-3583 tracks it; it needs a different
-// state-threading mechanism than the existing Tier 2 machinery provides
-// for a block that crosses an opaque actor self-send boundary.
+// via `inject:into:`) was threaded by the ADR 0128 fold (BT-3583); since ADR
+// 0133 (BT-3908) a block that assigns a captured local and is passed to an
+// actor self-send of `do:` is an escaping-block compile error instead.
 //
 // testDoInvokedCrossProcessRelaysNlr covers a second, distinct gap the
 // self-send fix alone didn't close: `^` inside a block passed to
@@ -50,10 +50,6 @@ TestCase subclass: ActorSelfSendHomTest
     pool do: [:x | x > 2 ifTrue: [^x]]
     0
 
-  testSizeThreadsCapturedLocalWriteThroughSelfSendHom =>
-    pool := SelfSendHomPool spawn
-    self assert: pool size equals: 4
-
   // ADR 0128 / BT-3583 Constraints regression (a): a pure (Tier 1) opaque
   // callable forwarded to `collect:`/`select:` — `pool` is a different
   // actor process (no self-send), so the block is a genuine, non-mutating
@@ -64,13 +60,14 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool collect: [:x | x * 2]) equals: #(2, 4, 6, 8)
     self assert: (pool select: [:x | x > 2]) equals: #(3, 4)
 
-  // ADR 0128 / BT-3583 Constraints regression (b): an opaque callable
-  // forwarded through a self-send to `do:` that mutates ONLY `self.field`
-  // (no local accumulator, no NLR) — the case the pre-fix generic wrapper
-  // already served correctly. Must keep behaving identically.
+  // PIN-BUG (BT-3922): a block that mutates ONLY `self.field`, passed
+  // through a self-send to `do:`, which forwards it to `self.items do:`. The
+  // ADR 0128 fold threaded the write; since ADR 0133 removed it (BT-3908) the
+  // write cannot be kept, so it raises rather than drop it. BT-3922 makes
+  // the shape a compile error, and this test and `accumulateTotal` go.
   testFieldOnlyMutationOpaqueCallableThroughSelfSendDo =>
     pool := SelfSendHomPool spawn
-    self assert: pool accumulateTotal equals: 10
+    self should: [pool accumulateTotal] raise: #stateful_block_dispatch
 
   // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a class
   // method (no `State`/`StateAcc` parameter — see

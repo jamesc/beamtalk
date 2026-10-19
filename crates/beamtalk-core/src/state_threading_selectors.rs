@@ -305,16 +305,16 @@ pub fn is_state_threaded_block_receiver(selector: &str) -> bool {
         || matches!(selector, "on:do:" | "ensure:")
 }
 
-/// ADR 0128 (BT-3583, BT-3615): the single "which collection HOM, which
-/// argument position" table for the opaque-callable fold — returns the
-/// callable argument of a `do:`/`collect:`/`select:`/`inject:into:`/
-/// `detect:`/`detect:ifNone:`/`count:`/`anySatisfy:`/`allSatisfy:` send, or
-/// `None` for any other selector (or the wrong argument count).
+/// The single "which collection HOM, which argument position" table —
+/// returns the callable argument of a `do:`/`collect:`/`select:`/
+/// `inject:into:`/`detect:`/`detect:ifNone:`/`count:`/`anySatisfy:`/
+/// `allSatisfy:` send, or `None` for any other selector (or the wrong
+/// argument count).
 ///
-/// Consumed by `beamtalk-codegen`'s `control_flow_has_mutations` classifier
-/// and opaque-fold lowering (`list_ops/opaque_fold.rs`), and by
-/// [`is_opaque_callable_hom_send`] below (the block-analysis fact), so the
-/// three can never disagree about which sends are covered.
+/// Introduced for the ADR 0128 opaque-callable fold, which ADR 0133 removed
+/// (BT-3908). Its remaining readers are [`is_opaque_callable_hom_send`] and
+/// `semantic_analysis::block_facts`'s `callee_threads_block_param` (the
+/// field-writing self-send callee rule, BT-3922).
 #[must_use]
 pub fn opaque_fold_callable_arg<'a>(
     selector: &str,
@@ -331,19 +331,17 @@ pub fn opaque_fold_callable_arg<'a>(
     }
 }
 
-/// ADR 0128 (BT-3615): `true` if `expr` (paren-unwrapped) is a collection-HOM
-/// send ([`opaque_fold_callable_arg`]) whose callable argument is NOT a
-/// block literal — an opaque callable (a parameter, a local, any other
-/// expression) whose Tier 1/Tier 2 nature is only known at runtime, so the
-/// send may thread actor state.
+/// `true` if `expr` (paren-unwrapped) is a collection-HOM send
+/// ([`opaque_fold_callable_arg`]) whose callable argument is NOT a block
+/// literal — an opaque callable (a parameter, a local, any other
+/// expression).
 ///
-/// Purely syntactic; whether the current codegen context actually threads a
-/// `State` map through it (Actor/REPL instance code, not a `Value` method or
-/// a class method) is `beamtalk-codegen`'s decision on top of this. A
-/// bare-`self` receiver is excluded — semantic analysis classifies it as a
-/// `SelfSend` (dispatched through the actor's own method table), never as
-/// this list-op fold — as are a `super` receiver (compiled as a super send)
-/// and a cast (`!`) send.
+/// Purely syntactic. Codegen no longer reads it: since ADR 0133 (BT-3908)
+/// such a send compiles to the plain list op in every context. Its only
+/// reader is `semantic_analysis::block_facts`'s `callee_threads_block_param`
+/// (the field-writing self-send callee rule, which BT-3922 replaces with the
+/// escaping-block diagnostic). A bare-`self` receiver is excluded (a
+/// `SelfSend`), as are a `super` receiver and a cast (`!`) send.
 #[must_use]
 pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
     let Expression::MessageSend {

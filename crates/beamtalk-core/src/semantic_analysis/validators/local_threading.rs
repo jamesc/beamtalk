@@ -1673,7 +1673,15 @@ impl<'d> Walker<'d> {
             } => {
                 self.check_construct(expr, position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
-                self.check_send(receiver, selector, arguments, true, lookup_producer);
+                let dispatched = self.is_actor_self_send_fold(expr);
+                self.check_send(
+                    receiver,
+                    selector,
+                    arguments,
+                    true,
+                    lookup_producer,
+                    dispatched,
+                );
                 // The role of each block literal the construct inlines (the
                 // same recognizer as `check_construct`); any other block is a
                 // block value.
@@ -1754,9 +1762,9 @@ impl<'d> Walker<'d> {
                     if let Expression::Block(block) = shared.unwrap_parens() {
                         self.report_literal(block, &Escape::Cascade(selector.name()));
                     }
-                    self.check_send(shared, selector, arguments, false, false);
+                    self.check_send(shared, selector, arguments, false, false, false);
                     for msg in messages {
-                        self.check_send(shared, &msg.selector, &msg.arguments, false, false);
+                        self.check_send(shared, &msg.selector, &msg.arguments, false, false, false);
                     }
                     self.operand(shared, Position::Cascade);
                     for arg in arguments {
@@ -2248,9 +2256,28 @@ impl<'d> Walker<'d> {
         }
     }
 
+    /// Whether `expr` is a collection-message send (a `Fold`-family
+    /// [`local_threading_construct`]: `do:`, `collect:`, `inject:into:`, ...)
+    /// to `self` or `super` in an actor instance method. Codegen never lowers
+    /// it in place: it is a dispatched self-send, so its block literal is
+    /// passed to the actor's own method and escapes. Its writes were carried
+    /// only by the callee's ADR 0128 opaque-callable fold, which ADR 0133
+    /// removed (BT-3908).
+    fn is_actor_self_send_fold(&self, expr: &Expression) -> bool {
+        let Expression::MessageSend { receiver, .. } = expr.unwrap_parens() else {
+            return false;
+        };
+        self.context == Actor
+            && (matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+                || matches!(receiver.unwrap_parens(), Expression::Super(_)))
+            && local_threading_construct(expr)
+                .is_some_and(|c| c.family == LocalThreadingFamily::Fold)
+    }
+
     /// The ADR 0133 check for one send: its literal block arguments and
     /// receiver. `inlined` is false for a cascade message, which codegen never
-    /// inlines. A block passed to any other method escapes, an actor self-send
+    /// inlines; `dispatched` is true for an actor self-send of a collection
+    /// message ([`Self::is_actor_self_send_fold`]), whose block escapes. A block passed to any other method escapes, an actor self-send
     /// to a `sealed` method of the same class included (ADR 0133 retires the
     /// BT-912/BT-3755 exemption).
     fn check_send(
@@ -2260,6 +2287,7 @@ impl<'d> Walker<'d> {
         arguments: &[Expression],
         inlined: bool,
         lookup_producer: bool,
+        dispatched: bool,
     ) {
         let sel = selector.name();
         if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
@@ -2270,7 +2298,10 @@ impl<'d> Walker<'d> {
         // send of a §1 selector (`local_threading_construct`).
         // (`tryDo:` is a §1 construct only sent to the `Result` class: any other
         // receiver takes the ordinary path.)
+        // Not for an actor self-send of a collection message, which is
+        // dispatched (`is_actor_self_send_fold`).
         let construct_send = inlined
+            && !dispatched
             && (is_section1_selector(&sel)
                 || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
         // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup

@@ -438,8 +438,9 @@ code.
   > from these messages, and neither `trait_expansion.rs` nor the protocol
   > sources carry a gate of their own (a provision written as `self do:
   > [... acc := ...]` is the same in-place fold in a value or plain class;
-  > not yet in an `Actor`'s own method, where it drops the write today,
-  > BT-3918, the reason `Enumerable` is built on `elements`). An actor
+  > not in an `Actor`'s own method, where the self-send is dispatched and
+  > the block escapes, a compile error since BT-3908 (BT-3918); the reason
+  > `Enumerable` is built on `elements`). An actor
   > with `do:` honours writing blocks sent from another process. With a
   > writing block,
   > these messages *mean* the fold over `do:`: a class that overrides one

@@ -1335,111 +1335,72 @@ fn test_list_select_pure_generates_lists_filter() {
 }
 
 // ── non-literal callable in simple list ops ───────────────────
+//
+// ADR 0133 (BT-3908) removed the ADR 0128 opaque-callable fold: a block that
+// writes a captured local cannot be passed (BT-3902 makes it a compile
+// error), so a non-literal callable compiles to the plain list op in every
+// context, actor instance methods included.
 
 #[test]
-fn test_list_do_non_literal_callable_emits_threaded_fold() {
-    // ADR 0128 / BT-3583: do: with a non-literal callable (method
-    // parameter), in Actor context, now folds via lists:foldl with the
-    // actor's own State map as the fold accumulator — discriminating the
-    // callable's tier PER ELEMENT (is_function/1) instead of once at wrap
-    // time — so a Tier-2 callable's captured-local/field mutations
-    // genuinely thread across every element instead of being dropped.
-    let src =
-        "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
+fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
+    // Golden: `each: items do: b => items do: b` in an actor is the plain
+    // `is_list` guard, `lists:foreach` over the arity-normalized callable,
+    // and the `do:` send for a non-list receiver; no State fold.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  each: items do: b =>\n    items do: b\n";
     let code = codegen(src);
+    for needle in [
+        "case call 'erlang':'is_list'(",
+        ") of <'true'> when 'true' -> call 'lists':'foreach'(",
+        "<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
+        ", 'do:', [",
+    ] {
+        assert!(
+            code.contains(needle),
+            "Actor do: with a non-literal callable should emit `{needle}`. Got:\n{code}"
+        );
+    }
     assert!(
-        code.contains("'lists':'foldl'"),
-        "Non-literal callable do: (Actor) should fold via lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foreach'"),
-        "Non-literal callable do: (Actor) should NOT use lists:foreach any more. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal callable do: should emit an is_function/1 per-element tier check. Got:\n{code}"
-    );
-    assert!(
-        code.contains(", 1) of"),
-        "Non-literal callable do: should gate on arity 1 (Tier 1) per element. Got:\n{code}"
-    );
-    // Raw tuple result: {'nil', FinalState} — unpacked by the caller's
-    // generic ControlFlowWithMutations machinery.
-    assert!(
-        code.contains("{'nil', "),
-        "Non-literal callable do: (Actor) should return a raw {{'nil', State}} tuple. Got:\n{code}"
+        !code.contains("'lists':'foldl'"),
+        "Actor do: with a non-literal callable must not fold State. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_list_collect_non_literal_callable_emits_threaded_fold() {
-    // ADR 0128 / BT-3583: collect: with a non-literal callable, in Actor
-    // context, folds a {ResultAcc, StateAcc} pair via lists:foldl instead
-    // of the old frozen-state lists:map wrapper.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "Non-literal callable collect: (Actor) should fold via lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'map'"),
-        "Non-literal callable collect: (Actor) should NOT use lists:map any more. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal callable collect: should emit an is_function/1 per-element tier check. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "Non-literal callable collect: should reverse the fold-built result list. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'"),
-        "Non-literal callable collect: should use from_list_like for string-aware result. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_select_non_literal_callable_emits_threaded_fold() {
-    // ADR 0128 / BT-3583: select: with a non-literal callable, in Actor
-    // context, also folds via lists:foldl — the predicate result gates
-    // whether the ELEMENT (not the block's return value) is consed onto
-    // the result accumulator.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "Non-literal callable select: (Actor) should fold via lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'filter'"),
-        "Non-literal callable select: (Actor) should NOT use lists:filter any more. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal callable select: should emit an is_function/1 per-element tier check. Got:\n{code}"
-    );
-    assert!(
-        code.contains("<'true'> when 'true' -> {["),
-        "Non-literal callable select: should cons the element when the predicate is true. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'"),
-        "Non-literal callable select: should use from_list_like for string-aware result. Got:\n{code}"
-    );
+fn test_actor_non_literal_callable_uses_the_plain_list_op() {
+    // Every collection message that took the ADR 0128 fold now reaches the
+    // same plain lowering as in a value-type method: the BIF or runtime
+    // call for the selector, and no per-element `State` fold.
+    for (body, plain) in [
+        ("items do: block", "'lists':'foreach'"),
+        ("items collect: block", "'lists':'map'"),
+        ("items select: block", "'lists':'filter'"),
+        ("items inject: 0 into: block", "fun (Elem, Acc) -> apply"),
+        ("items detect: block", "'beamtalk_list':'detect'"),
+        ("items detect: block ifNone: [0]", "'detect:ifNone:'"),
+        ("items count: block", "'erlang':'length'"),
+        ("items anySatisfy: block", "'lists':'any'"),
+        ("items allSatisfy: block", "'lists':'all'"),
+    ] {
+        for class in ["Actor", "Value"] {
+            let code = codegen(&format!(
+                "{class} subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
+            ));
+            assert!(
+                code.contains(plain),
+                "{class} `{body}` should use the plain lowering ({plain}). Got:\n{code}"
+            );
+            assert!(
+                body.starts_with("items inject:") || !code.contains("'lists':'foldl'"),
+                "{class} `{body}` must not fold. Got:\n{code}"
+            );
+        }
+    }
 }
 
 #[test]
 fn test_class_method_do_non_literal_callable_does_not_fold() {
-    // ADR 0128 / BT-3583 (review-flagged on PR #4030): a CLASS method
-    // forwarding a non-literal callable to `do:` must NOT route through the
-    // fold rewrite (`generate_simple_list_op_threaded_fold`) — a class
-    // method compiles to `class_<selector>(ClassSelf, Args...)`, which has
-    // no `State`/`StateAcc` parameter at all, so the fold's `State`-seeded
-    // accumulator would reference an unbound variable. Must keep emitting
-    // the pre-existing plain-value wrapper, exactly like the ValueType
-    // sibling case just below.
+    // A class method forwarding a non-literal callable to `do:` uses the
+    // plain-value wrapper, like every other context.
     let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert!(
@@ -1448,8 +1409,7 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     );
     assert!(
         !code.contains("'lists':'foldl'"),
-        "Non-literal callable do: in a class method must NOT fold — class methods have no \
-         State/StateAcc to seed the accumulator from. Got:\n{code}"
+        "Non-literal callable do: in a class method must NOT fold. Got:\n{code}"
     );
     assert!(
         code.contains("'erlang':'is_function'"),
@@ -1647,136 +1607,19 @@ fn test_class_method_collect_non_literal_callable_does_not_fold() {
     );
 }
 
-// ── ADR 0128 / BT-3615: opaque-callable fold for the remaining HOMs ────
-
-/// Every collection HOM covered by `beamtalk-core`'s `opaque_fold_callable_arg`
-/// table, as `(selector, Actor method body forwarding the opaque callable
-/// `block` in the table's argument position)`.
-const OPAQUE_FOLD_SHAPES: &[(&str, &str)] = &[
-    ("do:", "items do: block"),
-    ("collect:", "items collect: block"),
-    ("select:", "items select: block"),
-    ("inject:into:", "items inject: 0 into: block"),
-    ("detect:", "items detect: block"),
-    ("detect:ifNone:", "items detect: block ifNone: [0]"),
-    ("count:", "items count: block"),
-    ("anySatisfy:", "items anySatisfy: block"),
-    ("allSatisfy:", "items allSatisfy: block"),
-];
-
 #[test]
-fn test_opaque_fold_callable_arg_matches_codegen_call_sites() {
-    // The shared table (`opaque_fold_callable_arg`) is what the
-    // `control_flow_has_mutations` classifier consults; each operator's
-    // codegen call site independently passes ITS block argument to
-    // `routes_through_opaque_callable_fold`. Pin that every table entry's
-    // codegen actually folds (per-element `is_function` tier check,
-    // `lists:foldl`, `{Result, NewState}` unpacked into the reply) in Actor
-    // context — a table/codegen mismatch would either leave the plain
-    // `lists:*` BIF in place or leak an unpacked tuple.
-    for (selector, body) in OPAQUE_FOLD_SHAPES {
-        let src = format!(
-            "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
-        );
-        let code = codegen(&src);
-        assert!(
-            code.contains("'lists':'foldl'") && code.contains("'erlang':'is_function'"),
-            "{selector} with an opaque callable (Actor) should fold with a per-element \
-             tier check. Got:\n{code}"
-        );
-        for bif in [
-            "'lists':'foreach'",
-            "'lists':'map'",
-            "'lists':'filter'",
-            "'lists':'any'",
-            "'lists':'all'",
-            "'beamtalk_list':'detect'",
-        ] {
-            assert!(
-                !code.contains(bif),
-                "{selector} with an opaque callable (Actor) must not reach {bif}. Got:\n{code}"
-            );
-        }
-    }
-}
-
-#[test]
-fn test_opaque_fold_value_type_keeps_plain_value_paths() {
-    // `ValueType` has no `State` map — none of the opaque-callable shapes
-    // fold there; each keeps its pre-ADR-0128 plain-value path.
-    for (selector, body) in OPAQUE_FOLD_SHAPES {
-        let src = format!(
-            "Value subclass: V\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
-        );
-        let code = codegen(&src);
-        assert!(
-            !code.contains("'erlang':'element'(2, _Acc"),
-            "{selector} with an opaque callable (ValueType) must not thread a State fold. \
-             Got:\n{code}"
-        );
-    }
-}
-
-#[test]
-fn test_list_inject_into_non_literal_actor_passes_acc_then_elem() {
-    // inject:into:'s callable takes `(Acc, Each)`; the Tier 1 arm must test
-    // arity 2 and the Tier 2 arm pass the StAcc as a trailing third argument.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains(", 2) of <'true'> when 'true' -> let"),
-        "Opaque inject:into: should test is_function(Callable, 2) for Tier 1. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("fun (Elem, Acc) -> apply"),
-        "Opaque inject:into: (Actor) should not use the ValueType arg-swap wrapper. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_opaque_inject_evaluates_receiver_then_initial_then_callable() {
-    // Source (receiver-then-left-to-right-arguments) evaluation order, like
-    // the literal-block fast path — not callable-first.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  itemsSrc => #(1, 2)\n  seedSrc => 0\n  blockSrc => [:a :b | a + b]\n\n  run =>\n    self itemsSrc inject: self seedSrc into: self blockSrc\n";
-    let code = codegen(src);
-    let run_body = &code[code
-        .find("<'run'> when")
-        .unwrap_or_else(|| panic!("no run:\n{code}"))..];
-    let pos = |sel: &str| {
-        run_body
-            .find(&format!("'{sel}'"))
-            .unwrap_or_else(|| panic!("{sel} send not found. Got:\n{code}"))
-    };
-    assert!(
-        pos("itemsSrc") < pos("seedSrc") && pos("seedSrc") < pos("blockSrc"),
-        "Opaque inject:into: should evaluate receiver, then initial, then callable. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_opaque_detect_raises_not_found_via_shared_helper() {
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items detect: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_collection':'raiseDetectNotFound'"),
-        "Opaque detect: should raise not_found when nothing matched. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_opaque_fold_in_expression_position_does_not_leak_tuple() {
-    // `(items inject: 0 into: block) + 1` — the fold's `{Result, NewState}`
-    // tuple becomes a real `State` Bind prelude (ADR 0118
-    // `inline_control_flow_producer`), and the operand is its element 1.
+fn test_non_literal_callable_in_expression_position_is_a_plain_value() {
+    // `(items inject: 0 into: block) + 1` — with no fold there is no
+    // `{Result, NewState}` tuple to hoist: the operand is the plain value.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    (items inject: 0 into: block) + 1\n";
     let code = codegen(src);
     assert!(
-        code.contains("'lists':'foldl'"),
-        "Opaque inject:into: nested as an operand should still fold. Got:\n{code}"
+        code.contains("fun (Elem, Acc) -> apply"),
+        "Non-literal inject:into: should use the arg-swap wrapper. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'erlang':'element'(1, _CF"),
-        "The nested fold's value should be element 1 of its hoisted tuple. Got:\n{code}"
+        !code.contains("call 'erlang':'element'(1, _CF"),
+        "No control-flow tuple should be hoisted. Got:\n{code}"
     );
 }
 
