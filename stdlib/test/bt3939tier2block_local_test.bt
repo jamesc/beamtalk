@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3939: a promoted Tier 2 block body is an arm frame whose loops thread the
+// block-local they rebind and the state they hand back. Fixture:
+// fixtures/bt3939tier2block_local_actor.bt.
+
+TestCase subclass: Bt3939Tier2BlockLocalTest
+
+  testLocalRebindInInnerLoopAnswersPostLoopValue =>
+    actor := Bt3939Tier2BlockLocalActor spawn
+    self assert: actor sums equals: #(3, 3)

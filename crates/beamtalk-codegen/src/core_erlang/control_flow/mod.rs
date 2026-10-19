@@ -74,7 +74,7 @@ pub(super) use list_ops::BodyKind;
 // `generate_field_assignment_open`, both now thin wrappers around it —
 // `pub(super)`, matching `BodyKind`/`ThreadingPlan`'s own cross-module
 // visibility.
-pub(super) use conditionals::{Closure, FieldWriteSite};
+pub(super) use conditionals::{ArmFrame, Closure, FieldWriteSite};
 // `LoopMode` is a field on `CoreErlangGenerator` (`generator/mod.rs`) and is
 // read/written across the whole `core_erlang` tree (`dispatch_codegen.rs`,
 // `expressions.rs`, `threaded_ir/`, ...) — `pub(super)`, matching

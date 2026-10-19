@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3939: a block literal an actor self-send promotes to Tier 2 binds a
+// block-local and rebinds it in an inner loop. See
+// stdlib/test/bt3939tier2block_local_test.bt.
+
+Actor subclass: Bt3939Tier2BlockLocalActor
+  state: groups = #(#(1, 2), #(3))
+  state: hits = 0
+
+  sealed fwd: block => self.groups collect: block
+
+  // Promotes the `fwd:` argument position to Tier 2 (the block writes a field).
+  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
+
+  sums => self fwd: [:xs | n := 0. xs do: [:y | n := n + y]. n]

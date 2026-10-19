@@ -17,6 +17,7 @@
 //! [`super::patterns`]; other expression code generation stays in
 //! [`super::expressions`].
 
+use super::control_flow::ArmFrame;
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
@@ -253,7 +254,7 @@ impl CoreErlangGenerator {
     /// wrapped in one [`threaded_ir::ThreadedStmt::Threaded`] node (this
     /// single-arm `with_branch_context`'s own [`threaded_ir::FrameId`]),
     /// [`threaded_ir::verify`]d and [`threaded_ir::render`]ed via
-    /// `conditionals.rs`'s `verify_and_render_branch_arm`. `UnboundVersion`
+    /// `conditionals.rs`'s `render_branch_arm`. `UnboundVersion`
     /// is a live check against this arm's real IR (see the scalar-synthesis
     /// `check_branch_frame_linearity` scaffolding's own doc comment for why
     /// it could not check this before).
@@ -338,14 +339,44 @@ impl CoreErlangGenerator {
                 stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
             }
 
-            // Generate body expressions with state threading
-            this.generate_block_stateful_body(block, frame, &mut stmts)?;
+            // BT-3939: the body is an arm frame (ADR 0131 §2, `BranchArm`)
+            // that carries every local its `StateAcc` scratch map holds: the
+            // captured-mutated ones unpacked above and the block's own
+            // top-level assignments. A loop or fold statement of the body is
+            // then a local-threading producer whose `LocalRebind`s this frame
+            // lowers (a `Put` into the map for a carried local), spliced into
+            // the body's statement list — not scoped inside an opaque
+            // `let _ = ( ... )` that drops the post-loop local and state.
+            let body = super::util::collect_body_exprs(&block.body);
+            let arm = ArmFrame {
+                threads: Self::tier2_body_threads(captured_vars, &body),
+            };
+            let rebind = threaded_ir::RebindFrame {
+                frame,
+                kind: threaded_ir::RebindFrameKind::BranchArm,
+                threads: arm.threads.clone(),
+            };
+            this.with_rebind_frame(rebind, |this| {
+                // Test-only fault (`Tier2OpaqueProducers`): the producer sites
+                // BT-3939 registers, withheld.
+                #[cfg(test)]
+                if super::threaded_expr::fault::active()
+                    == Some(super::threaded_expr::fault::LocalRebindFault::Tier2OpaqueProducers)
+                {
+                    return this.generate_block_stateful_body(block, frame, &mut stmts);
+                }
+                this.with_body_producer_sites(&body, false, true, |this| {
+                    // Generate body expressions with state threading
+                    this.generate_block_stateful_body(block, frame, &mut stmts)
+                })
+            })?;
             let branch_final = this.state_version();
-            Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
+            Ok::<_, crate::core_erlang::CodeGenError>(this.render_branch_arm(
                 stmts,
                 frame,
                 branch_final,
                 block.span,
+                Some(&arm),
             ))
         });
         // Ensure block_depth and scope are restored even on error.
@@ -529,6 +560,27 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
+    /// The locals a Tier 2 block body's `StateAcc` scratch map carries (the
+    /// `threads` of its `BranchArm` frame): the captured-mutated locals the
+    /// caller seeded, then the block's own top-level assignment targets, each
+    /// once, in first-appearance order.
+    fn tier2_body_threads(captured_vars: &[String], body: &[&Expression]) -> Vec<String> {
+        let mut threads: Vec<String> = Vec::new();
+        let assigned = body.iter().filter_map(|stmt| match stmt {
+            Expression::Assignment { target, .. } => match target.as_ref() {
+                Expression::Identifier(id) => Some(id.name.to_string()),
+                _ => None,
+            },
+            _ => None,
+        });
+        for name in captured_vars.iter().cloned().chain(assigned) {
+            if !threads.contains(&name) {
+                threads.push(name);
+            }
+        }
+        threads
+    }
+
     /// Generates the body of a Tier 2 stateful block with state threading.
     ///
     /// ADR 0111 close-out (the last real production
@@ -555,10 +607,22 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let filtered_body = super::util::collect_body_exprs(&block.body);
+        // BT-3939: the producer sites this body threads a local through,
+        // read off the AST just before the statement that holds them is
+        // lowered (a local bound by an earlier statement is live), and checked
+        // against the lowered IR once the body is built.
+        let mut producer_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> =
+            Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
+            for site in self.body_producer_site_exprs(expr, false, true) {
+                let site = site.unwrap_parens();
+                if let Some(locals) = self.producer_locals_at_site(site) {
+                    producer_sites.push((site.span(), locals));
+                }
+            }
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
@@ -676,6 +740,12 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        let errors = threaded_ir::verify_producer_sites_threaded(stmts, &producer_sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "a Tier 2 block body's local-threading producer must be lowered as a producer",
+            block.span,
+        );
         Ok(())
     }
 

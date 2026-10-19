@@ -595,7 +595,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// node by [`RebindFrame::of`] for the lowering and the verifier
         /// alike. Empty for a frame that threads no outer local (and, until
         /// ADR 0131 Phase 3 replaces them with [`BranchArm`](Self::BranchArm),
-        /// for the branch-arm wrappers `verify_and_render_branch_arm` builds).
+        /// for the branch-arm wrappers `render_branch_arm` builds).
         /// Rendering ignores it.
         threads: Vec<String>,
         body: Vec<ThreadedStmt>,

@@ -384,7 +384,7 @@ now builds each arm's E1-E7 shapes (field assignment and local-var
 assignment reuse `conditionals.rs`'s `lower_field_assignment_bind`/
 `lower_local_var_assignment_bind` directly — the same `Bind` decomposition,
 same mint order) as real `ThreadedStmt`s, wraps them via `conditionals.rs`'s
-`verify_and_render_branch_arm`, `verify()`s, and `render()`s — one call per
+`render_branch_arm`, `verify()`s, and `render()`s — one call per
 `with_branch_context` arm (the try body; `on:do:`'s handler body;
 `ensure:`'s success-cleanup and error-cleanup bodies, the latter compiled
 twice). The one file-specific wrinkle: this body loop's legacy separator
