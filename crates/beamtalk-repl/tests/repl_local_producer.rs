@@ -23,6 +23,7 @@ use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// REPL inputs with producers, and statements around them: operand sites of
 /// a plain statement, of an assignment (single-statement inputs go through
@@ -101,7 +102,15 @@ fn carriers(code: &str) -> usize {
 
 /// Compiles `code` through `erlc +from_core`; skipped when `erlc` is absent.
 fn assert_compiles(name: &str, code: &str) {
-    let dir = std::env::temp_dir().join(format!("bt3795_{}_{}", std::process::id(), name));
+    // The directory is unique per call, not per `name`: the per-family tests
+    // (BT-3888) reuse a name across families, and under the `cargo test`
+    // fallback (no nextest) they share one process, so a name-keyed
+    // directory could be removed by one test under another's `erlc` run.
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let dir = beamtalk_core::test_helpers::unique_temp_dir(&format!(
+        "bt3795_{}_{name}",
+        CALLS.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("repl_producer.core");
     std::fs::write(&file, code).expect("write core");
