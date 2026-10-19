@@ -19843,6 +19843,30 @@
       "explanation": "BT-3644 (ADR 0129 §10): a class-side send to a class that does not exist raises `class_not_found` in batch-compiled code. The same source loaded into the REPL raises the same error (no `nil` fallback for workspace-loaded method bodies) — see tests/repl-protocol/cases/class_side_missing_class.btscript."
     },
     {
+      "id": "stdlib-test-class-side-self-collection-send-test",
+      "title": "ClassSideSelfCollectionSendTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ClassSideSelfCollectionSendTest",
+        "TestCase",
+        "class_side_self_collection_send_test",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "object",
+        "subclassing",
+        "testSelfDoInClassMethodRaisesStructuredError"
+      ],
+      "source": "// BT-3935: `self do: [...]` in a class method, where the class defines `do:`\n// class-side, re-enters the class's own process. It must raise a structured\n// `dispatch_error`, not a raw `calling_self` exit. (A block that assigns a\n// captured local there is a compile-time escaping-block error.)\n\nTestCase subclass: ClassSideSelfCollectionSendTest\n\n  testSelfDoInClassMethodRaisesStructuredError =>\n    self should: [\n      ClassSideSelfCollectionProbe countViaSelfDo\n    ] raise: #dispatch_error",
+      "explanation": "BT-3935: `self do: [...]` in a class method, where the class defines `do:` class-side, re-enters the class's own process. It must raise a structured `dispatch_error`, not a raw `calling_self` exit. (A block that assigns a captured local there is a compile-time escaping-block error.)"
+    },
+    {
       "id": "stdlib-test-class-state-supervisor-test",
       "title": "ClassStateSupervisorTest",
       "category": "stdlib-tests",
@@ -31821,6 +31845,31 @@
       ],
       "source": "// BT-773: Test fixture for class method self vs explicit class name dispatch\n// BT-1201: class method assigning result of self classMethod call to a local var\n\nValue subclass: ClassSelfDispatch\n  field: x = 0\n\n  class makeSelf: v => self new: #{#x => v}\n\n  class makeExplicit: v => ClassSelfDispatch new: #{#x => v}\n\n  // BT-1201: assigns result of self classMethod to local var, then returns it\n  class makeViaLocal: v =>\n    obj := self makeSelf: v\n    obj\n\n  // BT-1201: chains two class method calls via local var\n  class fortytwo =>\n    n := self rawValue\n    n\n\n  class rawValue => 42\n\n  x => self.x",
       "explanation": "BT-773: Test fixture for class method self vs explicit class name dispatch BT-1201: class method assigning result of self classMethod call to a local var"
+    },
+    {
+      "id": "stdlib-test-fixtures-class-side-self-collection-probe",
+      "title": "ClassSideSelfCollectionProbe",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ClassSideSelfCollectionProbe",
+        "Value",
+        "class_side_self_collection_probe",
+        "countViaSelfDo",
+        "do:",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3935: a class that defines `do:` class-side and sends `self do: [...]`\n// from another class method. The send is dispatched to the class's own\n// process, so it cannot run in place.\n\nValue subclass: ClassSideSelfCollectionProbe\n\n  class do: aBlock => #(1, 2, 3) do: aBlock\n\n  class countViaSelfDo => self do: [:x | x]",
+      "explanation": "BT-3935: a class that defines `do:` class-side and sends `self do: [...]` from another class method. The send is dispatched to the class's own process, so it cannot run in place."
     },
     {
       "id": "stdlib-test-fixtures-class-state-actor",
