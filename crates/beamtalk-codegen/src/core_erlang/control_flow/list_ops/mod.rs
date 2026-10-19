@@ -270,6 +270,16 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Whether `callable` is a parameter the method being compiled receives
+    /// as a promoted Tier 2 block (`tier2_block_params`, from the self-send
+    /// pre-scan).
+    fn is_promoted_tier2_param(&self, callable: &Expression) -> bool {
+        matches!(
+            callable.unwrap_parens(),
+            Expression::Identifier(id) if self.tier2_block_params.contains(id.name.as_str())
+        )
+    }
+
     /// The callable argument of a list op that calls it with `arity`
     /// arguments: a literal block compiles as itself (the caller has already
     /// sent a mutating one down its `_with_mutations` path); anything else
@@ -325,6 +335,14 @@ impl CoreErlangGenerator {
     /// two-tuple whose second element is a map is still read as a Tier 2
     /// reply.
     ///
+    /// In an actor, only a callable that is a promoted Tier 2 parameter of
+    /// the method being compiled (`tier2_block_params`) is seeded with the
+    /// live `State`; every other one gets a fresh empty map, so a
+    /// wrong-arity block from outside never sees the actor's state. The
+    /// remaining exposure: a wrong-arity block passed at a *promoted*
+    /// parameter position is applied to the live `State` before the guard
+    /// raises. That lasts until BT-3922 removes the promotion.
+    ///
     /// Generated pattern (`is_function/2` avoids badarg on non-funs), for
     /// `arity` 1 outside an actor:
     /// ```text
@@ -379,7 +397,11 @@ impl CoreErlangGenerator {
         let wrap_res = self.fresh_temp_var("WRes");
         let wrap_state = self.fresh_temp_var("WSt");
         let actor = self.in_actor_instance_context();
-        let (seed, seed_preamble) = if actor {
+        // Only a promoted Tier 2 parameter is seeded with the live actor
+        // `State`; any other fun of `arity + 1` arguments (a wrong-arity block
+        // from another process, say) gets a fresh empty map, so it never sees
+        // the actor's private state, and the guard below still raises.
+        let (seed, seed_preamble) = if actor && self.is_promoted_tier2_param(callable) {
             let seed =
                 seed_state.map_or_else(|| self.current_field_read_state_var(), str::to_string);
             (seed, Document::Str(""))

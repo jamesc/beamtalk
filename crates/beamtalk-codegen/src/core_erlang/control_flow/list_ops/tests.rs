@@ -1418,14 +1418,20 @@ fn test_every_list_op_callable_goes_through_the_shared_wrapper() {
                 arity + 1
             );
         }
-        if class == "Actor" {
-            // Each wrapper raises on a changed state and on a wrong-arity reply.
-            assert_eq!(
-                code.matches("'stateful_block_dispatch'").count(),
-                2 * expected_sites,
-                "{class}: every wrapper should guard actor state. Got:\n{code}"
-            );
-        }
+        // Each wrapper destructures a Tier 2 reply (anything else is the
+        // wrong-arity error), and in an actor compares the reply's map with
+        // its seed (the state guard): one of each per site.
+        assert_eq!(
+            code.matches("of <{_WRes").count(),
+            expected_sites,
+            "{class}: every wrapper should check the reply shape. Got:\n{code}"
+        );
+        let guards = code.matches("case call 'erlang':'=:='(_WSt").count();
+        let expected_guards = if class == "Actor" { expected_sites } else { 0 };
+        assert_eq!(
+            guards, expected_guards,
+            "{class}: every actor wrapper should guard actor state. Got:\n{code}"
+        );
     }
 }
 

@@ -19,3 +19,8 @@ Actor subclass: SelfSendHomPlainPool
     self.total := 0
     self do: [:each | self record: each]
     self.total
+
+  // Not a promoted Tier 2 position (no caller in the class passes a
+  // field-writing block), so a wrong-arity block sent from another process
+  // is seeded with an empty map, never the actor's state (BT-3908).
+  sortWith: block => self.items sort: block

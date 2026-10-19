@@ -208,6 +208,22 @@ TestCase subclass: ActorSelfSendHomTest
     pool := SelfSendHomFoldPool spawn
     self should: [pool wrongArityIfNone] raise: #stateful_block_dispatch
 
+  // A wrong-arity block (one argument too many for `sort:`) sent from this
+  // process to a non-promoted position: it is called with an empty map, not
+  // the actor's private state, and its reply raises the structured error.
+  testWrongArityBlockFromOutsideSeesNoActorState =>
+    pool := SelfSendHomPlainPool spawn
+    spy := self threeArgSpy
+    self should: [pool sortWith: spy] raise: #stateful_block_dispatch
+
+  // A `sort:` block of one argument too many, which raises if the argument
+  // it is handed is not empty.
+  threeArgSpy =>
+    [:a :b :st |
+      st isEmpty ifFalse: [Error signal: "saw actor state"]
+      true
+    ]
+
   testOpaqueDetectRaisesNotFound =>
     pool := SelfSendHomFoldPool spawn
     self should: [pool fwdDetect: [:x | x > 100]] raise: #not_found
