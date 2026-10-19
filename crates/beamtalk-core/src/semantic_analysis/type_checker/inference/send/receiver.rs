@@ -275,7 +275,14 @@ impl TypeChecker {
                 }),
             ) = (&receiver_ty, arg_types.first())
             {
-                if hierarchy.resolves_selector(recv_ty, &selector_name) {
+                // A symbol-literal receiver is typed as the singleton `#name`;
+                // its operators resolve on `Symbol` (BT-3928).
+                let resolve_ty = if recv_ty.starts_with('#') {
+                    "Symbol"
+                } else {
+                    recv_ty.as_str()
+                };
+                if hierarchy.resolves_selector(resolve_ty, &selector_name) {
                     // Collect origin info for the argument expression
                     let arg_origin = arguments.first().and_then(|arg_expr| {
                         if let Expression::Identifier(ident) = arg_expr {

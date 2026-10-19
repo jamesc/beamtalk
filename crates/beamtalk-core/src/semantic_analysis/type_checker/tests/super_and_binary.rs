@@ -382,3 +382,73 @@ fn test_binary_operand_warnings_are_warnings_not_errors() {
         }
     }
 }
+
+// --- BT-3928: comparison argument kind for Character/String/Symbol receivers ---
+
+fn comparison_kind_warnings(receiver: Expression, arg: Expression) -> Vec<String> {
+    let module = make_module(vec![msg_send(
+        receiver,
+        MessageSelector::Binary("<".into()),
+        vec![arg],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects a"))
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
+#[test]
+fn test_comparison_symbol_receiver_mismatched_arg_warns() {
+    let w = comparison_kind_warnings(symbol_lit("a"), int_lit(5));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("expects a Symbol argument"), "{w:?}");
+}
+
+#[test]
+fn test_comparison_symbol_receiver_same_kind_silent() {
+    assert!(comparison_kind_warnings(symbol_lit("a"), symbol_lit("b")).is_empty());
+}
+
+#[test]
+fn test_comparison_symbol_receiver_untyped_arg_silent() {
+    assert!(comparison_kind_warnings(symbol_lit("a"), var("x")).is_empty());
+}
+
+#[test]
+fn test_comparison_character_receiver_mismatched_arg_warns() {
+    let w = comparison_kind_warnings(char_lit('a'), int_lit(1));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("expects a Character argument"), "{w:?}");
+}
+
+#[test]
+fn test_comparison_character_receiver_same_kind_silent() {
+    assert!(comparison_kind_warnings(char_lit('a'), char_lit('b')).is_empty());
+}
+
+#[test]
+fn test_comparison_character_receiver_untyped_arg_silent() {
+    assert!(comparison_kind_warnings(char_lit('a'), var("x")).is_empty());
+}
+
+#[test]
+fn test_comparison_string_receiver_mismatched_arg_warns() {
+    let w = comparison_kind_warnings(str_lit("x"), int_lit(1));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("expects a String argument"), "{w:?}");
+}
+
+#[test]
+fn test_comparison_string_receiver_same_kind_silent() {
+    assert!(comparison_kind_warnings(str_lit("x"), str_lit("y")).is_empty());
+}
+
+#[test]
+fn test_comparison_string_receiver_untyped_arg_silent() {
+    assert!(comparison_kind_warnings(str_lit("x"), var("x")).is_empty());
+}
