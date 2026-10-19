@@ -628,29 +628,17 @@ reports the same message at the same span. No operation is surface-specific.
   local-threading construct whose blocks write an outer local sits in a
   position that does not thread the write back yet, including the statement
   positions that lose the write (BT-3753).
-- Category `ValuePositionLocalAssignment` (temporary stopgap, BT-3864;
-  BT-3860 removes it): a local assignment in value position (an operand, a
-  literal or interpolated element, another assignment's or `^`'s value, a
-  receiver, a `match:` arm), whose write codegen drops, is an error in class,
-  value-type and actor methods **and in the REPL**. Message: "assignment to
-  local `t` is used as a value in <context>, but it would not rebind `t`
-  (BT-3860)", with the hint to hoist the assignment into its own statement.
-  The rule is one predicate, `value_position_local_assignments` in
-  `beamtalk-core`'s `block_facts`, proved equal to the assignments codegen
-  drops by the `value_position_assignment_agreement` tests in
-  `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace). Like the
-  other two it is the analyser's verdict, so CLI, REPL eval and load, LSP and
-  MCP report the same message at the same span.
-  - **REPL behaviour change (approved by the maintainer, 2026-10-17).** REPL
-    input that was accepted before, and answered a silently wrong value
-    (`x := (t := t + 1) + 1` left `t` unchanged), is now a compile error, and
-    BT-3799's `#(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]` no longer
-    reaches the debug compiler's verifier panic (its hoisted form, a REPL
-    loop body whose statement is a conditional with a writing arm, still
-    does: BT-3877). The input is rejected before
-    it runs, so no binding changes. This is the only REPL change: every other
-    REPL display, prompt and output is unchanged
-    (`tests/repl-protocol/cases/adr0131_nested_assign.btscript`).
+- **A local assignment in value position is a producer (BT-3910; the BT-3864
+  `ValuePositionLocalAssignment` error is gone).** An operand, a literal or
+  interpolated element, another assignment's or `^`'s value or a receiver that is a local assignment rebinds the local in class,
+  value-type and actor methods **and in the REPL**, so REPL input the stopgap
+  rejected (`x := (t := t + 1) + 1`) is accepted again and answers right. The
+  rule is one predicate, `value_position_local_assignments` in
+  `beamtalk-core`'s `block_facts`, proved by the `value_position_assignment_agreement`
+  tests in `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace):
+  codegen drops no such assignment. `^t := e` is legal on every surface; the
+  `dead_returned_assignment` lint (`beamtalk lint`) warns when nothing reads `t`
+  after the return.
 - **Narrowing (BT-3841).** The statement-position half of the temporary
   check was measured on a BEAM (`just measure-adr0131-statements`, tables
   `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in
@@ -796,9 +784,8 @@ reports the same message at the same span. No operation is surface-specific.
   the analyser's, so CLI/LSP/MCP diagnostics for the same top-level
   expressions change together. Still errors: a construct in a REPL loop or fold
   body (BT-3876), and an outer-local write in a `match:` arm (the
-  value-position error of BT-3864 in the REPL until BT-3909, the BT-3817
-  error in class, value-type and actor methods; BT-3875 makes `match:` arms
-  producers).
+  BT-3817 error in class, value-type and actor methods and in the REPL;
+  BT-3875 makes `match:` arms producers).
 - **A block literal of another arity is never inlined (BT-3881).** A
   `value`-family send to a block literal whose arity is not the block's own
   (`[t := t + 1] value: 1`, `[:k | t := t + k] value`) is applied, never
@@ -840,8 +827,8 @@ reports the same message at the same span. No operation is surface-specific.
   class, value-type or actor method (BT-3891: `erlc` failed with an unbound
   `StateAcc`; the REPL answers right and is unchanged); and a REPL `match:`
   arm that writes an outer local, which now draws the BT-3817 `match:` arm
-  error methods draw instead of the BT-3864 value-position error
-  (maintainer-approved REPL output change; it was already rejected). BT-3947
+  error methods draw (maintainer-approved REPL output change; it was already
+  rejected). BT-3947
   and BT-3912 lower the shapes and delete the rows (BT-3911 lowered the loop-condition one).
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can

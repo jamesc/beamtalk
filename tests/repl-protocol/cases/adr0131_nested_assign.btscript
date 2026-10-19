@@ -1,17 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3799 / BT-3860 / BT-3864 (ADR 0131): a local assignment in value position
-// (an operand, a literal element, an assignment's value, a conditional's
-// receiver) never rebinds the binding (BT-3860). Until BT-3860 makes the shape
-// a producer, it is a compile error in the REPL as in the compiled contexts
-// (BT-3864, an approved exception to the rule that accepted REPL input stays
-// accepted; docs/development/surface-parity.md). The input is rejected before
-// anything runs, so the bindings keep their values.
-//
-// PIN-BUG BT-3860: each input below names its correct answer; the fix for
-// BT-3860 flips them all to it. The compiled contexts are
-// stdlib/test/adr0131nested_assign_test.bt.
+// BT-3799 / BT-3860 / BT-3910 (ADR 0131 §1): a local assignment in value
+// position (an operand, a literal element, an assignment's value, a
+// conditional's receiver) is a producer: it rebinds the binding before
+// anything after it reads it, at the REPL root and in every loop or fold body.
+// The compiled contexts are stdlib/test/adr0131nested_assign_value_position_test.bt.
 
 t := 0
 // => 0
@@ -19,58 +13,72 @@ t := 0
 u := 0
 // => 0
 
-// An assignment as an assignment's value operand. Correct answer: 2, then
-// `t` is 1.
+// An assignment as an assignment's value operand: 2, then `t` is 1.
 x := (t := t + 1) + 1
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => 2
 
 t
-// => 0
+// => 1
 
-// An assignment in a conditional's receiver, with a writing arm. Correct
-// answer: 9, then `t` is 1.
+// An assignment in a conditional's receiver, with a writing arm: 9, then `t`
+// is 2.
 (t := t + 1) > 0 ifTrue: [u := 9]
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => 9
 
 t
-// => 0
+// => 2
 
 u
+// => 9
+
+u := 0
 // => 0
 
-// An assignment as a literal element, read before and after. Correct answer:
-// #[0, 7, 7], then `t` is 7.
+// An assignment as a literal element, read before and after (the sibling
+// snapshot rule, ADR 0131 §1a): `t` is 7 afterwards.
 #[t, (t := 7), t]
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => #[2, 7, 7]
 
 t
+// => 7
+
+t := 0
 // => 0
 
-// An assignment in a loop body's operand. Correct answer: nil, then `t` is 2.
+// An assignment in a loop body's operand: `t` is 2.
 #(1, 2) do: [:k | (t := t + 1) > 0]
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => _
+
+t
+// => 2
+
+t := 0
+// => 0
 
 // BT-3799's shape: a loop body whose conditional's receiver assigns. It used
 // to trip the ThreadedIr verifier in a debug compiler (the compiler port
-// exited; crates/beamtalk-repl/tests/repl_nested_assign_pin.rs). Correct
-// answer: nil, then `t` is 2 and `u` is 9.
+// exited; crates/beamtalk-repl/tests/repl_nested_assign_pin.rs). `t` is 2 and
+// `u` is 9.
 #(1, 2) do: [:k | (t := t + 1) > 1 ifTrue: [u := 9]]
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => _
 
 t
-// => 0
+// => 2
 
-// The rewrite the error names: the assignment hoisted into its own statement.
+u
+// => 9
+
+// The hoisted form: the assignment in its own statement.
 // (The hoisted form of BT-3799's shape, a REPL loop body whose statement is a
 // conditional with a writing arm, still trips the debug verifier: BT-3877.)
 t := t + 1
-// => 1
+// => 3
 
 x := t + 1
-// => 2
+// => 4
 
 #(1, 2) do: [:k | t := t + 1]
 // => _
 
 #[t, u, x]
-// => #[3, 0, 2]
+// => #[5, 9, 4]

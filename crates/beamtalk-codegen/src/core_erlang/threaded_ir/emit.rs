@@ -361,6 +361,7 @@ fn render_carrier_read(
             ]
         }
         CarrierSlot::Pos(k) => element(*k),
+        CarrierSlot::Whole => leaf::var(carrier.to_string()),
     }
 }
 

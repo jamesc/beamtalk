@@ -592,7 +592,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// judged non-`Dictionary` only syntactically (`self`/`super`), so a typed one
 /// (`cache :: Ets`) is rejected by [`analyse_full`] alone.
 ///
-/// For `beamtalk-lint`'s `dead_assignment` pass, which must not warn about
+/// For `beamtalk-lint`'s `dead_block_assignment` pass, which must not warn about
 /// a write these errors already reject: it asks this function rather than
 /// keeping a second copy of their exemption rules.
 ///

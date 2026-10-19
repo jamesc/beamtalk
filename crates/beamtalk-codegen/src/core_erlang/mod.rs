@@ -274,15 +274,26 @@ impl CoreErlangGenerator {
                         span: Some(target.span()),
                     });
                 }
-                // For identifier assignments (e.g., local variables in REPL like `x := 1`),
-                // just return the value - REPL handles binding updates externally.
-                // In compiled code, local variable assignments should be handled by
-                // the block/method scope, but for now we generate just the value.
-                //
-                // ADR 0131 stopgap (BT-3864): reaching here drops the write
-                // (BT-3860). The Phase 0 check rejects every such shape
-                // (`value_position_local_assignments`); the agreement tests
-                // record these hits to prove it.
+                // An identifier assignment reaches here only as a statement the
+                // enclosing body lowering binds itself (the REPL's bindings,
+                // a block body's `let`), where only its value is compiled. A
+                // value-position one is a producer (BT-3910): it is lowered by
+                // `threaded_expression` as a `LocalRebind` of the enclosing
+                // frame, so reaching here with one drops the write — reported,
+                // never silent (ADR 0131 §4, `UnthreadedLocalAssignment`).
+                if let Expression::Identifier(id) = target.as_ref() {
+                    if self.value_assign_sites.contains(&expr.span()) {
+                        let errors = [threaded_ir::VerifyError::UnthreadedLocalAssignment {
+                            local: id.name.to_string(),
+                            span: expr.span(),
+                        }];
+                        self.report_threaded_ir_verify_errors(
+                            &errors,
+                            "a value-position local assignment must be lowered as a producer",
+                            expr.span(),
+                        );
+                    }
+                }
                 #[cfg(any(test, feature = "test"))]
                 dropped_assignment_probe::record(expr.span());
                 self.generate_expression(value)

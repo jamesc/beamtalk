@@ -55,7 +55,7 @@ use crate::semantic_analysis::block_facts::{
     operand_producer_writes, outer_local_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    value_blocks, value_position_local_assignments,
+    value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -1216,61 +1216,6 @@ fn check_body(
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
     walker.finish();
-    report_value_position_assignments(context, body, diagnostics);
-}
-
-/// ADR 0131 stopgap (BT-3864): a local assignment in value position
-/// ([`value_position_local_assignments`]) compiles to its value only and never
-/// rebinds the local (BT-3860), so it is an error in every context, the REPL
-/// included. An assignment a `match:`-arm error already reports
-/// ([`Walker::report_match_arm_writes`]) is not reported twice.
-fn report_value_position_assignments(
-    context: MethodContext,
-    body: &[ExpressionStatement],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for found in value_position_local_assignments(body, context.root_method_kind()) {
-        // One diagnostic per assignment: an assignment a `match:`-arm error or
-        // the ADR 0133 escaping-block error (reported at the assignment)
-        // already reports is not reported again.
-        let reported = diagnostics.iter().any(|d| {
-            d.span == found.span
-                && d.severity == crate::source_analysis::Severity::Error
-                && matches!(
-                    d.category,
-                    Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
-                            | DiagnosticCategory::Tier2BlockNoReturnChannel
-                    )
-                )
-        });
-        if reported {
-            continue;
-        }
-        let name = &found.name;
-        diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "assignment to local `{name}` is used as a value in {context}, \
-                     but it would not rebind `{name}` (BT-3860)"
-                ),
-                found.span,
-            )
-            .with_hint(if found.returned {
-                format!(
-                    "return the value directly: `^expr` instead of `^{name} := expr` \
-                     (or assign `{name}` in its own statement first if something still \
-                     reads it, e.g. an `ensure:` cleanup)"
-                )
-            } else {
-                format!(
-                    "move the assignment into its own statement before this one, \
-                     then use `{name}` here"
-                )
-            })
-            .with_category(DiagnosticCategory::ValuePositionLocalAssignment),
-        );
-    }
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense

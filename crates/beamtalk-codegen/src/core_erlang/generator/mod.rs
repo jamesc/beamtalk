@@ -247,6 +247,13 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-3910 (ADR 0131 §1): the spans of the module's value-position local
+    /// assignments (`beamtalk_core`'s `value_position_assignment_spans`), the
+    /// producers `threaded_expression` lowers as a `LocalRebind` of the
+    /// enclosing frame. Module-wide (spans are unique) and set once by the
+    /// driver; empty when nothing sets it.
+    pub(in crate::core_erlang) value_assign_sites:
+        std::collections::HashSet<beamtalk_core::source_analysis::Span>,
     /// BT-3827: the body-block span of the one fold a value-type consumer is
     /// compiling right now AND will unpack the `Self` slot of
     /// (`with_fold_self_slot_consumer`); `None` everywhere else. A fold that
@@ -446,6 +453,7 @@ impl CoreErlangGenerator {
             current_class_var_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
+            value_assign_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),

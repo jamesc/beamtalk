@@ -3552,10 +3552,10 @@ pub fn is_control_flow_construct(
     }
 }
 
-/// ADR 0131 stopgap (BT-3864): every local (identifier-target) assignment in
-/// `body` whose write codegen drops (BT-3860), because it sits in *value
-/// position*. `root` is the kind of method `body` is the body of, or `None`
-/// for a top-level expression list (a REPL input or a script).
+/// BT-3910 (ADR 0131 §1): every local (identifier-target) assignment in `body`
+/// that sits in *value position*: a producer, lowered as a `LocalRebind` of the
+/// enclosing frame. `root` is the kind of method `body` is the body of, or
+/// `None` for a top-level expression list (a REPL input or a script).
 ///
 /// A local assignment is in statement position when it is, bare, a statement
 /// of a body: a method body, a block body or a top-level expression list.
@@ -3563,23 +3563,22 @@ pub fn is_control_flow_construct(
 /// that is not the body's last are unwrapped only at the root of a value-type
 /// or actor method (BT-3830, BT-3838: `(t := t + 1)` followed by `t`) and in
 /// an inlined arm ([`conditional_arm_blocks`]: a conditional's arm, a lookup
-/// handler, a `[...] value` body); the class-method root, the REPL root, a
-/// last statement and every other block body (a loop or fold body, an
-/// exception body, a closure) compile a parenthesised statement as an
-/// expression. Anywhere else the assignment is
-/// in value position: an operand (`x := (t := t + 1) + 1`), a collection-literal
-/// element (`#[t, (t := 7), t]`), the value of another assignment (`x := t := 7`)
-/// or of `^`, a conditional's or a cascade's receiver
-/// (`(t := t + 1) > 0 ifTrue: [...]`), an interpolated segment, a `match:`
-/// subject or arm. There `generate_expression` compiles only the value, and the
-/// local keeps its old binding. A field assignment (`self.x := ...`) is never
-/// one: it threads `State` (BT-3803's producer).
+/// handler, a `[...] value` body); a method body's own last statement is
+/// unwrapped too (its value is the method's, and nothing reads a local after
+/// it). The class-method root, the REPL root, a last statement of a block and
+/// every other block body (a loop or fold body, an exception body, a closure)
+/// compile a parenthesised statement as an expression. Anywhere else the
+/// assignment is in value position: an operand (`x := (t := t + 1) + 1`), a
+/// collection-literal element (`#[t, (t := 7), t]`), the value of another
+/// assignment (`x := t := 7`) or of `^`, a conditional's or a cascade's
+/// receiver (`(t := t + 1) > 0 ifTrue: [...]`), an interpolated segment, a
+/// `match:` subject or arm. A field assignment (`self.x := ...`) is never one:
+/// it threads `State` (BT-3803's producer).
 ///
-/// The one rule the Phase 0 check reports and the agreement tests
+/// The one rule codegen's producer gates read (as
+/// [`value_position_assignment_spans`]) and the agreement tests
 /// (`beamtalk-codegen`'s and `beamtalk-repl`'s
-/// `value_position_assignment_agreement`) compare, both ways, with the
-/// assignments codegen drops. BT-3860 makes the shape a producer and deletes
-/// it.
+/// `value_position_assignment_agreement`) prove: codegen drops none of them.
 #[must_use]
 pub fn value_position_local_assignments(
     body: &[ExpressionStatement],
@@ -3590,8 +3589,99 @@ pub fn value_position_local_assignments(
         root,
         Some(RootMethodKind::ValueType | RootMethodKind::Actor)
     );
-    finder.body(body, unwraps_parens);
+    finder.body(body, unwraps_parens, root.is_some());
     finder.found
+}
+
+/// BT-3910 (ADR 0131 §1): the spans of every value-position local assignment
+/// ([`value_position_local_assignments`]) in the method bodies and top-level
+/// expressions of `module`, each body judged by the kind of method it is
+/// ([`RootMethodKind`]). `is_actor` says whether a class (by name) is an actor,
+/// so its instance methods are actor methods. Codegen's producer gates read
+/// this set: one rule decides which assignments are producers, so a gate
+/// cannot disagree with the lowering.
+#[must_use]
+pub fn value_position_assignment_spans(
+    module: &crate::ast::Module,
+    is_actor: &dyn Fn(&str) -> bool,
+) -> HashSet<Span> {
+    let instance_kind = |class_name: &str| {
+        if is_actor(class_name) {
+            RootMethodKind::Actor
+        } else {
+            RootMethodKind::ValueType
+        }
+    };
+    let mut out = HashSet::new();
+    let mut add = |body: &[ExpressionStatement], kind: Option<RootMethodKind>| {
+        out.extend(
+            value_position_local_assignments(body, kind)
+                .into_iter()
+                .map(|found| found.span),
+        );
+    };
+    for class in &module.classes {
+        let kind = instance_kind(class.name.name.as_str());
+        for method in &class.methods {
+            add(&method.body, Some(kind));
+        }
+        for method in &class.class_methods {
+            add(&method.body, Some(RootMethodKind::Class));
+        }
+    }
+    for standalone in &module.method_definitions {
+        let kind = if standalone.is_class_method {
+            RootMethodKind::Class
+        } else {
+            instance_kind(standalone.class_name.name.as_str())
+        };
+        add(&standalone.method.body, Some(kind));
+    }
+    add(&module.expressions, None);
+    out
+}
+
+/// [`value_position_assignment_spans`] for a top-level expression list (a REPL
+/// input): the value-position local assignments of `expressions`, judged as
+/// the statements of a module-level body.
+#[must_use]
+pub fn value_position_assignment_spans_of_input(expressions: &[Expression]) -> HashSet<Span> {
+    let body: Vec<ExpressionStatement> = expressions
+        .iter()
+        .cloned()
+        .map(ExpressionStatement::bare)
+        .collect();
+    value_position_local_assignments(&body, None)
+        .into_iter()
+        .map(|found| found.span)
+        .collect()
+}
+
+/// BT-3910: every identifier-target assignment inside `expr` (itself
+/// included) that is not inside a block literal, as its target and span, in
+/// source order. A block literal is a closure or an inlined arm whose
+/// statements are lowered by their own statement lowering, so its assignments
+/// are not `expr`'s. Codegen filters the result by
+/// [`value_position_assignment_spans`] to find the value-position assignments
+/// a sequencing pass or a snapshot rule must see in `expr`.
+#[must_use]
+pub fn assignments_outside_blocks(expr: &Expression) -> Vec<(EcoString, Span)> {
+    use crate::ast::visitor::Visitor;
+    #[derive(Default)]
+    struct Found(Vec<(EcoString, Span)>);
+    impl<'ast> Visitor<'ast> for Found {
+        fn visit_expr(&mut self, expr: &'ast Expression) {
+            if let Expression::Assignment { target, .. } = expr
+                && let Expression::Identifier(id) = target.as_ref()
+            {
+                self.0.push((id.name.clone(), expr.span()));
+            }
+            crate::ast::visitor::walk_expr(self, expr);
+        }
+    }
+    let mut found = Found::default();
+    found.visit_expr(expr);
+    found.0
 }
 
 /// One local assignment [`value_position_local_assignments`] names.
@@ -3616,10 +3706,17 @@ struct ValuePositionAssignments {
 impl ValuePositionAssignments {
     /// The statements of a body; `unwraps_parens` is whether its lowering
     /// binds a parenthesised local assignment that is not its last statement.
-    fn body(&mut self, body: &[ExpressionStatement], unwraps_parens: bool) {
+    ///
+    /// `method_root` is whether `body` is a method's own body: its last
+    /// statement is the method's value and nothing reads a local after it, so
+    /// a parenthesised assignment there writes nothing observable and is
+    /// judged like a bare one (the REPL's last statement is not: its
+    /// bindings persist).
+    fn body(&mut self, body: &[ExpressionStatement], unwraps_parens: bool, method_root: bool) {
         use crate::ast::visitor::Visitor;
         for (i, stmt) in body.iter().enumerate() {
-            let expr = if unwraps_parens && i + 1 < body.len() {
+            let last = i + 1 == body.len();
+            let expr = if (unwraps_parens && !last) || (method_root && last) {
                 stmt.expression.unwrap_parens()
             } else {
                 &stmt.expression
@@ -3682,7 +3779,7 @@ impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
                     Expression::Block(block)
                         if arms.iter().any(|arm| std::ptr::eq(*arm, block)) =>
                     {
-                        self.body(&block.body, true);
+                        self.body(&block.body, true, false);
                     }
                     other => self.visit_expr(other),
                 }
@@ -3693,7 +3790,7 @@ impl<'ast> crate::ast::visitor::Visitor<'ast> for ValuePositionAssignments {
     }
 
     fn visit_block(&mut self, block: &'ast Block) {
-        self.body(&block.body, false);
+        self.body(&block.body, false, false);
     }
 }
 

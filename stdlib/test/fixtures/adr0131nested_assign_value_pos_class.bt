@@ -6,42 +6,41 @@
 // at the method root and in loop and fold bodies. Its write must be visible to
 // everything after it. The receivers (class, value type, actor) must agree.
 //
-// Inert: every method is a `ValuePositionLocalAssignment` compile error until
-// BT-3860 (the BT-3864 stopgap; pinned by `adr0131_nested_assign_pins` in
-// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs). The
-// expected answers are in stdlib/test/adr0131nested_assign_pending_test.bt.pending;
-// BT-3860 drops the `.pending` suffixes. The hoisted forms that compile today
-// are in adr0131nested_assign_{class,value,actor}.bt.
+// A value-position local assignment is a producer (BT-3910, ADR 0131 §1): a
+// `LocalRebind` of the enclosing frame. The expected answers are in
+// stdlib/test/adr0131nested_assign_value_position_test.bt; the hoisted forms
+// (each assignment its own statement) are in
+// adr0131nested_assign_{class,value,actor}.bt.
 
-Value subclass: Adr0131NestedAssignPendingValue
+Object subclass: Adr0131NestedAssignValuePosClass
 
-  rootPlain =>
+  class rootPlain =>
     t := 0
     x := (t := t + 1) + 1
     #[t, x]
 
-  rootLiteral =>
+  class rootLiteral =>
     t := 0
     #[t, (t := 7), t]
 
-  doPlain =>
+  class doPlain =>
     t := 0
     #(1, 2) do: [:x | (t := t + 1) > 0]
     t
 
-  rootIf =>
+  class rootIf =>
     t := 0
     u := 0
     (t := t + 1) > 0 ifTrue: [u := 9]
     #[t, u]
 
-  doIf =>
+  class doIf =>
     t := 0
     u := 0
     #(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
     #[t, u]
 
-  doIfElse =>
+  class doIfElse =>
     t := 0
     u := 0
     #(1, 2) do: [:x |
@@ -49,7 +48,7 @@ Value subclass: Adr0131NestedAssignPendingValue
     ]
     #[t, u]
 
-  doAnd =>
+  class doAnd =>
     t := 0
     u := 0
     #(1, 2)
@@ -62,25 +61,25 @@ Value subclass: Adr0131NestedAssignPendingValue
       ]
     #[t, u]
 
-  doIfFalse =>
+  class doIfFalse =>
     t := 0
     u := 0
     #(1, 2) do: [:x | (t := t + 1) > 5 ifFalse: [u := u + 1]]
     #[t, u]
 
-  toDoIf =>
+  class toDoIf =>
     t := 0
     u := 0
     1 to: 2 do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
     #[t, u]
 
-  timesIf =>
+  class timesIf =>
     t := 0
     u := 0
     2 timesRepeat: [(t := t + 1) > 1 ifTrue: [u := 9]]
     #[t, u]
 
-  whileIf =>
+  class whileIf =>
     t := 0
     u := 0
     i := 0
@@ -91,7 +90,7 @@ Value subclass: Adr0131NestedAssignPendingValue
       ]
     #[t, u]
 
-  collectIf =>
+  class collectIf =>
     t := 0
     u := 0
     r := #(1, 2)
@@ -101,7 +100,7 @@ Value subclass: Adr0131NestedAssignPendingValue
       ]
     #[t, u, r]
 
-  injectIf =>
+  class injectIf =>
     t := 0
     u := 0
     r := #(1, 2)

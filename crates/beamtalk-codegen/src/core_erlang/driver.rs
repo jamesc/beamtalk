@@ -17,6 +17,7 @@ use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
 };
 use beamtalk_core::ast::{ClassKind, Module};
+use beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans;
 use ecow::EcoString;
 
 /// Generates Core Erlang code from a Beamtalk module.
@@ -306,6 +307,9 @@ pub fn generate_module_with_warnings(
     // are pure functions that don't mutate class state.
     generator.set_direct_call_eligible(&hierarchy, module);
 
+    // BT-3910: the value-position local assignments, producers by one rule.
+    generator.value_assign_sites = value_assign_sites(module, &hierarchy);
+
     // Stash the hierarchy for use by actor callback generation
     // (auto-chained initialize dispatch in handle_continue and inherited
     // typed-no-default field validation).
@@ -323,6 +327,18 @@ pub fn generate_module_with_warnings(
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,
+    })
+}
+
+/// BT-3910: the spans of `module`'s value-position local assignments, each
+/// method body judged by the kind of method it is (an instance method of an
+/// actor class is an actor method).
+fn value_assign_sites(
+    module: &Module,
+    hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+) -> std::collections::HashSet<beamtalk_core::source_analysis::Span> {
+    value_position_assignment_spans(module, &|class_name| {
+        hierarchy.is_actor_subclass(class_name)
     })
 }
 

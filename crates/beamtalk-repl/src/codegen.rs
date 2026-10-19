@@ -358,6 +358,17 @@ impl<'a> ReplAssembler<'a> {
         Self { generator }
     }
 
+    /// BT-3910 (ADR 0131 §1): marks the value-position local assignments of the
+    /// input `expressions` as producers, by the one rule
+    /// (`value_position_assignment_spans_of_input`).
+    fn set_value_assign_sites(&mut self, expressions: &[Expression]) {
+        self.generator.set_value_assign_sites(
+            beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans_of_input(
+                expressions,
+            ),
+        );
+    }
+
     /// Compiles `target`, an expression of the REPL input statement `stmt`
     /// (the statement itself, or an assignment's value), returning the
     /// producer prelude to emit before `let Result = <value> in` (ADR 0131
@@ -458,6 +469,7 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
+        self.set_value_assign_sites(std::slice::from_ref(expression));
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_eval_module_body(expression);
@@ -481,6 +493,7 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
+        self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
         let result = if expressions.len() == 1 {
@@ -755,6 +768,7 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
+        self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_repl_multi_module_body(expressions);

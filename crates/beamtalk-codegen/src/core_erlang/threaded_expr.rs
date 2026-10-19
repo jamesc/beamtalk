@@ -128,6 +128,10 @@ pub(super) mod fault {
         /// lowered with the scratch-map `Put` every assignment used to get,
         /// whatever the frame carries (`ArmLocalPutNotCarried`).
         PutUncarriedLocal,
+        /// BT-3910: the producer gate for a value-position local assignment
+        /// answers `false`, so the assignment reaches the value-only lowering
+        /// (`UnthreadedLocalAssignment`).
+        NotAProducer,
     }
 
     thread_local! {
@@ -1055,10 +1059,13 @@ impl CoreErlangGenerator {
     /// so the statement must be compiled through [`Self::threaded_expression`]
     /// and its prelude spliced into the method body.
     pub(super) fn statement_has_local_producer(&self, stmt: &Expression) -> bool {
-        !self.local_producer_sites.is_empty()
-            && beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
-                .into_iter()
-                .any(|site| self.local_producer_locals(site).is_some())
+        // BT-3910: a value-position local assignment inside the statement is
+        // a producer too.
+        !self.contained_local_assignment_targets(stmt).is_empty()
+            || !self.local_producer_sites.is_empty()
+                && beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
+                    .into_iter()
+                    .any(|site| self.local_producer_locals(site).is_some())
     }
 
     /// The producer lowering of an `on:do:`/`ensure:` in `frame`
@@ -1315,7 +1322,7 @@ impl CoreErlangGenerator {
         let tv = self.threaded_expression(target, FrameId::ROOT)?;
         let mutated = self.repl_loop_mutated();
         self.set_repl_loop_mutated(false);
-        let prelude = self.verified_root_prelude_doc(&tv.prelude, target.span());
+        let prelude = self.verified_repl_root_prelude_doc(tv.prelude, target.span());
         let value = self.threaded_value_doc(&tv.value);
         Ok(Some(ReplProducerDoc {
             prelude,
@@ -1326,9 +1333,11 @@ impl CoreErlangGenerator {
 
     /// Whether any `repl_operand_sites` site of `stmt` is a REPL producer.
     fn statement_has_repl_producer(&self, stmt: &Expression) -> bool {
-        beamtalk_core::semantic_analysis::block_facts::repl_operand_sites(stmt)
-            .into_iter()
-            .any(|site| self.local_producer_locals(site).is_some())
+        // BT-3910: a value-position local assignment in the statement.
+        !self.contained_local_assignment_targets(stmt).is_empty()
+            || beamtalk_core::semantic_analysis::block_facts::repl_operand_sites(stmt)
+                .into_iter()
+                .any(|site| self.local_producer_locals(site).is_some())
     }
 
     /// Runs `f` with the enclosing direct-params loop's list-op mode
@@ -1431,6 +1440,26 @@ impl CoreErlangGenerator {
         out
     }
 
+    /// BT-3910 (ADR 0131 §2): runs `f` (the lowering of a REPL arm, inlined over
+    /// the bindings map) with the arm registered as a rebind frame, so a
+    /// value-position assignment in it lowers by that frame. The arm's
+    /// `StateAcc` *is* the bindings map: the `StateAcc` loop row of §2's table,
+    /// every binding a member (`RebindFrame::with_repl_binding`). The frame is
+    /// the current branch frame. A no-op outside the REPL.
+    pub(super) fn with_repl_arm_rebind_frame<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        if !self.is_repl_mode() {
+            return f(self);
+        }
+        let rebind = RebindFrame {
+            frame: self.current_branch_frame(),
+            kind: RebindFrameKind::Loop(threaded_ir::ThreadingMode::StateAcc(
+                threaded_ir::StateAccFallbackReason::None,
+            )),
+            threads: Vec::new(),
+        };
+        self.with_rebind_frame(rebind, f)
+    }
+
     /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): runs `f` (the lowering
     /// of a REPL arm: a conditional arm, an `on:do:`/`ensure:` block or a
     /// `tryDo:` block, inlined over the bindings map) with the arm statements'
@@ -1467,10 +1496,98 @@ impl CoreErlangGenerator {
     /// statement to [`Self::threaded_expression`] (which splices the
     /// producer's prelude) instead of unpacking a construct tuple itself.
     pub(super) fn expr_has_local_producer(&self, expr: &Expression) -> bool {
-        self.local_producer_locals(expr).is_some()
+        // BT-3910: a value-position local assignment inside it is a producer.
+        !self.contained_local_assignment_targets(expr).is_empty()
+            || self.local_producer_locals(expr).is_some()
             || beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(expr)
                 .into_iter()
                 .any(|site| self.local_producer_locals(site).is_some())
+    }
+
+    /// BT-3910 (ADR 0131 §1): whether `expr` (paren-unwrapped) is a local
+    /// assignment in value position, a producer
+    /// ([`Self::lower_local_assignment_producer`]). One rule, decided once per
+    /// module by `beamtalk_core`'s `value_position_assignment_spans`: a
+    /// statement-position assignment is never in the set.
+    pub(super) fn is_local_assignment_producer(&self, expr: &Expression) -> bool {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::NotAProducer) {
+            return false;
+        }
+        let inner = expr.unwrap_parens();
+        matches!(
+            inner,
+            Expression::Assignment { target, .. }
+                if matches!(target.as_ref(), Expression::Identifier(_))
+        ) && self.value_assign_sites.contains(&inner.span())
+    }
+
+    /// BT-3910 (ADR 0131 §1, §2 `CarrierSlot::Whole`): lowers the
+    /// value-position local assignment `(t := V)` as `V`'s own prelude, then
+    /// the assigned value bound as the carrier (`ConstructTuple`), then one
+    /// `LocalRebind { local: t, carrier, slot: Whole }` lowered by the
+    /// enclosing `frame` (§2's table). Answers the carrier, the assigned value.
+    pub(super) fn lower_local_assignment_producer(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        let inner = expr.unwrap_parens();
+        let span = inner.span();
+        let Expression::Assignment { target, value, .. } = inner else {
+            return Err(CodeGenError::Internal(
+                "lower_local_assignment_producer on a non-assignment".to_string(),
+            ));
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Err(CodeGenError::Internal(
+                "lower_local_assignment_producer on a field assignment".to_string(),
+            ));
+        };
+        let local = id.name.to_string();
+        let inner_value = self.threaded_expression(value, frame)?;
+        let mut prelude = inner_value.prelude;
+        let value_doc = self.threaded_value_doc(&inner_value.value);
+        // In a REPL input the frame's map is the bindings map: the assigned
+        // binding is a member of it (`RebindFrame::with_repl_binding`), so it is
+        // `Put` there.
+        let repl_root = self.is_repl_mode() && frame == FrameId::ROOT;
+        let enclosing = if repl_root {
+            RebindFrame::implicit_root()
+        } else {
+            self.rebind_frame_of(frame)?
+        };
+        let enclosing = if self.is_repl_mode() {
+            enclosing.with_repl_binding(&local)
+        } else {
+            enclosing
+        };
+        let carrier = self.fresh_temp_var("Assigned");
+        let slot = ThreadedLocalSlot {
+            local: local.clone(),
+            slot: CarrierSlot::Whole,
+            value_var: self.fresh_temp_var(&local),
+        };
+        prelude.extend(threaded_ir::build_local_threading_prelude(
+            &enclosing,
+            &carrier,
+            value_doc,
+            std::slice::from_ref(&slot),
+            Vec::new(),
+            span,
+            |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
+        ));
+        // (At the REPL root a binding is read back from the bindings map, which
+        // the `Put` above stepped, so it is not bound to a variable.)
+        if !repl_root {
+            self.bind_var(&local, &slot.value_var);
+        }
+        #[cfg(test)]
+        let prelude = Self::inject_local_rebind_fault(prelude);
+        Ok(ThreadedValue {
+            prelude,
+            value: ValueRef::Var(carrier),
+        })
     }
 
     /// The `RebindLowering` ADR 0131 §2's table assigns the rebind of `slot`
@@ -1513,7 +1630,9 @@ impl CoreErlangGenerator {
                 let target_version = self.state_version();
                 let key = match &slot.slot {
                     CarrierSlot::Key(key) => key.clone(),
-                    CarrierSlot::Pos(_) => Self::local_state_key(&slot.local),
+                    // The REPL's bindings map is keyed by the bare name.
+                    CarrierSlot::Whole if self.is_repl_mode() => slot.local.clone(),
+                    CarrierSlot::Pos(_) | CarrierSlot::Whole => Self::local_state_key(&slot.local),
                 };
                 RebindLowering::MapPut {
                     key,
@@ -1702,6 +1821,50 @@ impl CoreErlangGenerator {
             _ => {}
         }
         prelude
+    }
+
+    /// BT-3910: [`Self::verified_root_prelude_doc`] for a REPL input
+    /// statement's prelude. A value-position assignment `Put`s into the
+    /// bindings map, the REPL root's threaded set (§2's `MethodBody (REPL)`
+    /// row), so a prelude holding `LocalRebind`s is verified and rendered as
+    /// that explicit frame node.
+    pub(super) fn verified_repl_root_prelude_doc(
+        &mut self,
+        prelude: Vec<ThreadedStmt>,
+        span: Span,
+    ) -> Document<'static> {
+        let threads: Vec<String> = prelude
+            .iter()
+            .filter_map(|stmt| match stmt {
+                ThreadedStmt::LocalRebind { local, .. } => Some(local.clone()),
+                _ => None,
+            })
+            .collect();
+        if threads.is_empty() {
+            return self.verified_root_prelude_doc(&prelude, span);
+        }
+        let backfilled = threaded_ir::backfill_opaque_version_gaps(
+            &prelude,
+            FrameId::ROOT,
+            &[VersionPrefix::State, VersionPrefix::SelfVt],
+        );
+        let checked = [threaded_ir::build_method_body(
+            FrameId::ROOT,
+            threads.clone(),
+            backfilled,
+        )];
+        let errors = self.verify_threaded_ir(&checked);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "REPL-root local-threading prelude must be well-formed",
+            span,
+        );
+        let root = [threaded_ir::build_method_body(
+            FrameId::ROOT,
+            threads,
+            prelude,
+        )];
+        self.threaded_prelude_doc(&root)
     }
 
     /// Renders a producer prelude a value-type method body splices as

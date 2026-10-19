@@ -1,20 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0131 stopgap (BT-3864): a recorder of the local assignments codegen
+//! BT-3910 (ADR 0131 §1, §4): a recorder of the local assignments codegen
 //! drops, and the corpus the agreement tests run it over.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! `generate_expression`'s `Expression::Assignment` arm emits only the value of
 //! a local (identifier-target) assignment: it never rebinds the local, so an
-//! assignment that reaches that arm loses its write (BT-3860). The Phase 0
-//! check rejects exactly those shapes (`beamtalk-core`'s
-//! `value_position_local_assignments`). The agreement tests (this crate's
+//! assignment that reaches that arm loses its write (BT-3860). A value-position
+//! local assignment is a producer (`threaded_expression`), so none should reach
+//! it, and the arm reports one that does as
+//! `VerifyError::UnthreadedLocalAssignment`. The agreement tests (this crate's
 //! `tests/value_position_assignment_agreement.rs` for class, value-type and
 //! actor methods, and `beamtalk-repl/tests/value_position_assignment_agreement.rs`
 //! for REPL inputs) record the arm's hits while compiling [`corpus`] and prove
-//! both sets are the same.
+//! there are none.
 //!
 //! Test-only: compiled for this crate's tests and for dependents that enable
 //! the `test` feature.
