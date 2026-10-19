@@ -2526,12 +2526,10 @@ impl<'d> Walker<'d> {
                 // another arity (`[t := t + 1] value: 1`) is applied, never
                 // inlined ([`block_literal_of_other_arity`]): the send raises
                 // `arity_mismatch` and the body never runs, so the block
-                // neither threads its writes nor escapes with them. (A
-                // parenthesized block is a block value, below, whatever its
-                // arity: it is compiled as a closure.)
-                Expression::Block(_)
-                    if block_literal_of_other_arity(receiver, selector, arguments.len())
-                        .is_some() => {}
+                // neither threads its writes nor escapes with them. A
+                // parenthesized literal is the same literal (BT-3942).
+                _ if block_literal_of_other_arity(receiver, selector, arguments.len())
+                    .is_some() => {}
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }
