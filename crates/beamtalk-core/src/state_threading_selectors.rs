@@ -93,6 +93,23 @@ const COLLECTION_KEYWORD_SELECTORS: &[&str] = &[
     "keysAndValuesDo:",
 ];
 
+/// The collection messages a class can override and the stdlib's own
+/// collection methods can reach through a self-send (BT-3916): every
+/// state-threading collection selector but `do:`, which is the fold's own
+/// source. The list-op receiver guard refuses a writing block sent any of them
+/// to a receiver whose class defines one of these outside the stdlib, because
+/// the stdlib's `collect:`/`select:`/`count:`/`eachWithIndex:`/
+/// `do:separatedBy:` run through `self inject:into:` and `reject:` through
+/// `self select:`. Codegen records the answer per class
+/// (`overrides_collection_selector` in `__beamtalk_meta/0`) from this list, so
+/// the runtime holds no copy.
+pub fn overridable_collection_selectors() -> impl Iterator<Item = &'static str> {
+    COLLECTION_KEYWORD_SELECTORS
+        .iter()
+        .copied()
+        .filter(|sel| *sel != "do:")
+}
+
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
 /// These selectors receive block arguments that are analysed for field mutations

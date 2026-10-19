@@ -458,31 +458,45 @@ code.
   > block, and silent wrong answers are ruled out by this ADR's goals. The
   > in-place fold now asks the receiver first
   > (`beamtalk_collection:to_list_for_threading(Recv, Selector)`, in place of
-  > `to_list/1`; `do:` is the fold's own source and is never guarded). For a
-  > writing block sent with a compiler-known collection message other than
-  > `do:`: the selector is classified by the **origin of the method**, not
-  > the module it lives in (`uses:` flattens a provision into the using
-  > class's own module, ADR 0127). A stdlib class's method, or a provision
-  > of a **stdlib** trait such as `Enumerable` (BT-3915), is the fold over
-  > `do:`, so the write threads (`Ets`, the stdlib collections, a user class
-  > that `uses: Enumerable`). The class's own method body, or a provision of
-  > a package-local trait, would be bypassed by the fold, so the send
-  > raises `stateful_block_dispatch`; an extension method counts as the
-  > class's own. A receiver that does not respond to the selector at all
-  > raises `does_not_understand`, as the pure send does. The selector checked
-  > is the one the user wrote: `eachWithIndex:` and `do:separatedBy:` are
-  > lowered through a synthetic `inject:into:` fold but guard under their own
-  > names. Codegen records
-  > each class's stdlib-trait provisions in `__beamtalk_meta/0`
-  > (`stdlib_trait_methods`, from `MethodInfo::origin` joined with the
-  > `(class, protocol)` pairs that resolved to the stdlib, the same pair
-  > source mapping uses), and the runtime guard reads it. The cost is
-  > accepted: a package-local trait's `inject:into:` refuses a writing
-  > block rather than answering, even when it is a faithful fold over
-  > `do:`; a class that wants the write to thread `uses:` the stdlib
-  > `Enumerable`, or computes the value without assigning from the block.
-  > `testOwnAnySatisfyWritePin` flipped to
-  > `testOwnAnySatisfyWriteRaises`.
+  > `to_list/1`; `do:` is the fold's own source and is never guarded). The
+  > selector checked is the one the user wrote: `eachWithIndex:` and
+  > `do:separatedBy:` are lowered through a synthetic `inject:into:` fold but
+  > guard under their own names. A writing block sent a compiler-known
+  > collection message other than `do:` folds over `do:` only when **no
+  > collection message is the class's own**:
+  >
+  > - The sent message must resolve to a stdlib method, judged by the
+  >   **origin of the method**, not the module it lives in (`uses:` flattens a
+  >   provision into the using class's own module, ADR 0127): a stdlib class's
+  >   method, or a provision of a **stdlib** trait such as `Enumerable`
+  >   (BT-3915). A message the class defines itself, or gets from a
+  >   package-local trait or an extension, raises `stateful_block_dispatch`.
+  > - And the class must define, outside the stdlib, **none** of the
+  >   compiler-known collection messages (every state-threading collection
+  >   selector but `do:`). The stdlib's own `collect:`, `select:`, `count:`,
+  >   `eachWithIndex:` and `do:separatedBy:` are `self inject:into:`, and
+  >   `reject:` is `self select:`; the pure send reaches an override of those,
+  >   the fold would skip it. So a class with its own `inject:into:` refuses a
+  >   writing `collect:` too, and one with its own `select:` refuses `reject:`.
+  >   The rule is deliberately the conservative one, so no table of which
+  >   message runs through which has to be kept in step with `collection.bt`.
+  >
+  > A receiver that does not respond to the message at all raises
+  > `does_not_understand`, as the pure send does. Codegen records, per class,
+  > its stdlib-trait provisions (`stdlib_trait_methods`, from
+  > `MethodInfo::origin` joined with the `(class, protocol)` pairs that
+  > resolved to the stdlib) and whether it defines a collection message
+  > outside the stdlib (`overrides_collection_selector`, from
+  > `state_threading_selectors::overridable_collection_selectors`, the
+  > compiler's one list) in `__beamtalk_meta/0`; the runtime guard reads both
+  > and holds no list of its own. The cost is accepted: a package-local
+  > trait's `inject:into:` refuses a writing block rather than answering, even
+  > when it is a faithful fold over `do:`; a class that wants the write to
+  > thread `uses:` the stdlib `Enumerable`, or computes the value without
+  > assigning from the block. `testOwnAnySatisfyWritePin` flipped to
+  > `testOwnAnySatisfyWriteRaises`. Known gap: an extension method (registered
+  > at run time) that overrides a collection message other than the one sent is
+  > not seen by the per-class flag.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.

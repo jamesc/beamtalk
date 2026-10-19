@@ -96,3 +96,21 @@ Object subclass: Adr0133EnumerableUser
     n := 0
     bag do: [:x | n := n + x] separatedBy: [n := n + 100]
     n
+
+  class countWrite: bag =>
+    n := 0
+    r := bag
+      count: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #[r, n]
+
+  class rejectWrite: bag =>
+    n := 0
+    r := bag
+      reject: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #[r, n]

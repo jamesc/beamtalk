@@ -285,15 +285,22 @@ to_list(Self) ->
 -doc """
 The receiver guard of an inlined list-op fold whose block writes (ADR 0133,
 BT-3916): `to_list/1` of the receiver, for the compiled fold to iterate in the
-caller's activation, once the receiver is known to answer `Selector` with the
-stdlib's own fold over `do:`.
+caller's activation, once the receiver is known to answer `Selector` the way
+the fold over `do:` does.
 
-A receiver whose class resolves `Selector` to a method outside the stdlib (its
-own `anySatisfy:`, a trait-provided `inject:into:`) would have run that method
-with a closure that cannot return the write, and folding over its `do:` instead
-would answer something else, so it raises `stateful_block_dispatch`. A receiver
-that does not respond to `Selector` raises `does_not_understand`, as the pure
-path does. Codegen never emits this for `do:`, the fold's own source.
+That holds only when nothing the stdlib's own method runs through is the
+class's own. A receiver whose class resolves `Selector` to a method outside the
+stdlib (its own `anySatisfy:`, a package-local trait's `inject:into:`) would
+have run that method with a closure that cannot return the write, and folding
+over its `do:` instead would answer something else. So does a class that
+defines, outside the stdlib, any other collection message (`overrides_collection_selector`
+in its class meta, set by codegen from the compiler's one list of them): the
+stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:`
+are `self inject:into:`, and `reject:` is `self select:`, so an override of
+those is reached by the pure send and skipped by the fold. Both raise
+`stateful_block_dispatch`. A receiver that does not respond to `Selector`
+raises `does_not_understand`, as the pure path does. Codegen never emits this
+for `do:`, the fold's own source.
 """.
 -spec to_list_for_threading(term(), atom()) -> list().
 to_list_for_threading(Recv, _Selector) when is_list(Recv) ->
@@ -302,31 +309,58 @@ to_list_for_threading(Recv, Selector) ->
     {Class, Provider} = selector_provider(Recv, Selector),
     case Provider of
         stdlib ->
-            to_list(Recv);
+            case beamtalk_behaviour_intrinsics:overridesCollectionSelectorFromName(Class) of
+                false ->
+                    to_list(Recv);
+                true ->
+                    refuse_writing_fold(
+                        Class,
+                        Selector,
+                        [
+                            <<
+                                " defines a collection message outside the stdlib, which the "
+                                "stdlib's '"
+                            >>,
+                            atom_to_binary(Selector, utf8),
+                            <<"' can run through">>
+                        ]
+                    )
+            end;
         none ->
             beamtalk_error:raise(beamtalk_error:new(does_not_understand, Class, Selector));
         user ->
-            Error0 = beamtalk_error:new(stateful_block_dispatch, Class, Selector),
-            Error1 = beamtalk_error:with_message(
-                Error0,
-                iolist_to_binary([
-                    <<"The block assigns a variable of the enclosing method, but ">>,
-                    atom_to_binary(Class, utf8),
-                    <<" defines its own '">>,
+            refuse_writing_fold(
+                Class,
+                Selector,
+                [
+                    <<" answers '">>,
                     atom_to_binary(Selector, utf8),
-                    <<"', which cannot return that write">>
-                ])
-            ),
-            beamtalk_error:raise(
-                beamtalk_error:with_hint(
-                    Error1,
-                    <<
-                        "Compute the value without assigning from the block, or send "
-                        "'do:' and accumulate there"
-                    >>
-                )
+                    <<"' with a method outside the stdlib">>
+                ]
             )
     end.
+
+-spec refuse_writing_fold(atom(), atom(), iodata()) -> no_return().
+refuse_writing_fold(Class, Selector, Reason) ->
+    Error0 = beamtalk_error:new(stateful_block_dispatch, Class, Selector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"The block assigns a variable of the enclosing method, but ">>,
+            atom_to_binary(Class, utf8),
+            Reason,
+            <<", which cannot return that write">>
+        ])
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error1,
+            <<
+                "Compute the value without assigning from the block, or send "
+                "'do:' and accumulate there"
+            >>
+        )
+    ).
 
 %% Who answers `Selector` for `Recv`, with the class name to report. A class
 %% object answers from its class side: whatever the class defines there is a

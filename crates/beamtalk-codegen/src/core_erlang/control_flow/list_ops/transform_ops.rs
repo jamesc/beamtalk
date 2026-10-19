@@ -458,6 +458,21 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        self.generate_list_inject_for(receiver, initial, body, "inject:into:")
+    }
+
+    /// [`Self::generate_list_inject`] for a fold that stands in for
+    /// `guard_selector` (BT-3916): `inject:into:` for the message itself, or
+    /// the user's `eachWithIndex:` / `do:separatedBy:` that
+    /// `enumeration_ops.rs` lowers through a synthetic `inject:into:`. The
+    /// receiver guard of a writing fold checks that selector.
+    pub(in crate::core_erlang) fn generate_list_inject_for(
+        &mut self,
+        receiver: &Expression,
+        initial: &Expression,
+        body: &Expression,
+        guard_selector: &str,
+    ) -> Result<Document<'static>> {
         // Validate body block arity (must be 2-arg: accumulator and element)
         validate_block_arity_exact(
             body,
@@ -469,7 +484,12 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
-            return self.generate_list_inject_with_mutations(receiver, initial, body_block);
+            return self.generate_list_inject_with_mutations(
+                receiver,
+                initial,
+                body_block,
+                guard_selector,
+            );
         }
         // Pure-block fast path — emit inline lists:foldl instead of
         // calling beamtalk_collection:inject_into at runtime.
@@ -567,13 +587,8 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         initial: &Expression,
         body: &Block,
+        guard_selector: &str,
     ) -> Result<Document<'static>> {
-        // BT-3916: `eachWithIndex:` / `do:separatedBy:` reach this fold through a
-        // synthetic `inject:into:`; the guard checks the selector the user sent.
-        let guard_selector = self
-            .guard_selector_override
-            .take()
-            .unwrap_or("inject:into:");
         // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate)
             .with_value_self_slot(self, body)?;

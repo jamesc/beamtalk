@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3916 (ADR 0133): a `Collection` with `do:` and its own `inject:into:`
-// (which ignores the elements) but the stdlib's `eachWithIndex:` and
-// `do:separatedBy:`. A writing block sent either of those is lowered through a
-// synthetic `inject:into:` fold, yet it must still thread: the receiver guard
-// checks the selector the user sent, which resolves to the stdlib. Driven by
+// (which ignores the elements). The stdlib's `collect:`, `select:`, `count:`,
+// `eachWithIndex:` and `do:separatedBy:` are `self inject:into:`, so the pure
+// send runs this override; a writing block folded over `do:` would skip it.
+// The receiver guard refuses every one of them. Driven by
 // adr0133enumerable_user_test.bt.
 
 Collection subclass: Adr0133EnumerableOwnInject

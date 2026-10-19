@@ -73,6 +73,7 @@ that the Behaviour/Class libraries can rely on.
     classIncludesSelector/2,
     classCanUnderstandFromName/2,
     selectorProviderFromName/2,
+    overridesCollectionSelectorFromName/1,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -435,6 +436,36 @@ is_stdlib_trait_provision(Module, Selector) ->
         not_available ->
             false
     end.
+
+-doc """
+Whether any non-stdlib class on the chain from ClassName defines, outside the
+stdlib, a collection message the stdlib's own collection methods run through
+(BT-3916).
+
+Reads the `overrides_collection_selector` key codegen bakes into each class's
+meta from the compiler's one list of those messages
+(`state_threading_selectors::overridable_collection_selectors`), so this holds
+no list of its own. A class without meta (dynamic, older build) counts as
+`false`.
+""".
+-spec overridesCollectionSelectorFromName(atom()) -> boolean().
+overridesCollectionSelectorFromName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, _Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            case is_stdlib_module_name(Module) of
+                true ->
+                    {cont, false};
+                false ->
+                    case meta_for_module(Module) of
+                        {ok, #{overrides_collection_selector := true}} -> {halt, true};
+                        _ -> {cont, false}
+                    end
+            end
+        end,
+        false
+    ).
 
 -doc """
 Return all field names including inherited, in slot order.

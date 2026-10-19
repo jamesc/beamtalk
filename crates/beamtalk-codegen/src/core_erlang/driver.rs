@@ -390,6 +390,8 @@ impl CoreErlangGenerator {
         if let Some(class) = module.classes.first() {
             self.own_direct_class_methods = self.own_direct_class_methods_for(&class.name.name);
             self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
+            self.own_overrides_collection_selector =
+                self.overrides_collection_selector_for(hierarchy, class);
         }
     }
 
@@ -422,6 +424,34 @@ impl CoreErlangGenerator {
         own.sort();
         own.dedup();
         own
+    }
+
+    /// Whether the class defines, outside the stdlib, a collection message the
+    /// stdlib's collection methods run through (BT-3916): an own method, or a
+    /// provision of a package-local trait, whose selector is one of
+    /// `overridable_collection_selectors`. A provision of a stdlib protocol
+    /// (`uses: Enumerable`) is the stdlib's own and does not count, and the
+    /// stdlib's own classes record nothing (the runtime ignores their modules).
+    fn overrides_collection_selector_for(
+        &self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        class: &beamtalk_core::ast::ClassDefinition,
+    ) -> bool {
+        if self.stdlib_mode() {
+            return false;
+        }
+        let Some(info) = hierarchy.get_class(class.name.name.as_str()) else {
+            return false;
+        };
+        info.methods.iter().any(|m| {
+            let stdlib_provision = m.origin.as_ref().is_some_and(|origin| {
+                self.stdlib_protocol_uses
+                    .contains(&(class.name.name.clone(), origin.clone()))
+            });
+            !stdlib_provision
+                && beamtalk_core::state_threading_selectors::overridable_collection_selectors()
+                    .any(|sel| sel == m.selector.as_str())
+        })
     }
 
     /// A class's direct-call-eligible class methods as sorted

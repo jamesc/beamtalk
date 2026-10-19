@@ -55,6 +55,10 @@ pub(crate) struct MetaProvenance<'a> {
     /// (`beamtalk_behaviour_intrinsics:selectorProviderFromName/2`) reads it to
     /// classify a flattened provision by its origin rather than its module.
     pub stdlib_trait_methods: &'a [String],
+    /// BT-3916: the class defines, outside the stdlib, a collection message the
+    /// stdlib's collection methods run through; emitted as
+    /// `'overrides_collection_selector' => 'true'` (omitted when `false`).
+    pub overrides_collection_selector: bool,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -400,6 +404,11 @@ impl CoreErlangGenerator {
             Self::meta_provenance_entries(provenance),
             Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
+            if provenance.overrides_collection_selector {
+                Document::Str(",\n      'overrides_collection_selector' => 'true'")
+            } else {
+                Document::Nil
+            },
             extra_entries,
             "\n    }~",
         ]

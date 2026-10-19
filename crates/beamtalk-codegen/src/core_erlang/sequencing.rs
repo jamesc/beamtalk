@@ -232,6 +232,24 @@ impl CoreErlangGenerator {
         !self.loop_mode.direct_params_do_open_chain
     }
 
+    /// Annotates a message send's `doc` with the source line of `span` for BEAM
+    /// stacktraces, when the expression is closed
+    /// ([`Self::can_annotate_closed_expression`]) and the line is known. The
+    /// one place the `MessageSend` arm of `generate_expression` and the
+    /// synthetic `inject:into:` of `eachWithIndex:` / `do:separatedBy:` share.
+    pub(super) fn annotate_send_with_line(
+        &self,
+        doc: Document<'static>,
+        span: Span,
+    ) -> Document<'static> {
+        if self.can_annotate_closed_expression() {
+            if let Some(line_num) = self.span_to_line(span) {
+                return self.annotate_with_line(doc, line_num);
+            }
+        }
+        doc
+    }
+
     /// Removes every entry `scope` registered, once the parent compile
     /// that was meant to consult them is done. An entry that was never
     /// consulted means that compile bypassed `generate_expression` for the
