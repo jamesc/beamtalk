@@ -1,7 +1,7 @@
 # ADR 0134: Errors in No-Reply Handlers Crash the Actor
 
 ## Status
-Proposed (2026-10-19). Amends ADR 0065 § "Error contract" for `handleInfo:`; decides cast error semantics, which ADR 0054 left undecided.
+Accepted (2026-10-19). Amends ADR 0065 § "Error contract" for `handleInfo:`; decides cast error semantics, which ADR 0054 left undecided.
 
 ## Context
 
