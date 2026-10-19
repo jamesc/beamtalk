@@ -72,6 +72,7 @@ that the Behaviour/Class libraries can rely on.
     classMethods/1,
     classIncludesSelector/2,
     classCanUnderstandFromName/2,
+    selectorProviderFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -368,6 +369,41 @@ classCanUnderstandFromName(ClassName, Selector) ->
             end
         end,
         false
+    ).
+
+-doc """
+Who answers `Selector` for instances of the class named ClassName (BT-3916).
+
+Walks the hierarchy exactly as `classCanUnderstandFromName/2` does and answers
+`stdlib` when the first class on the chain that defines the selector is a
+stdlib module, `user` when it is any other module or a registered extension
+method, and `none` when nothing on the chain defines it. The receiver guard of
+an inlined list-op fold (`beamtalk_collection:to_list_for_threading/2`) reads
+this to tell "the stdlib's own `inject:into:`, which is the fold over `do:`"
+from a class's own method the fold would otherwise bypass.
+""".
+-spec selectorProviderFromName(atom(), atom()) -> stdlib | user | none.
+selectorProviderFromName(ClassName, Selector) ->
+    walk_hierarchy(
+        ClassName,
+        fun(CN, CPid, _Acc) ->
+            case beamtalk_dispatch:check_extension(CN, Selector) of
+                {ok, _Fun} ->
+                    {halt, user};
+                not_found ->
+                    case beamtalk_object_class:has_method_local(CPid, Selector) of
+                        true ->
+                            Module = beamtalk_object_class:module_name_safe(CPid),
+                            case is_stdlib_module_name(Module) of
+                                true -> {halt, stdlib};
+                                false -> {halt, user}
+                            end;
+                        false ->
+                            {cont, none}
+                    end
+            end
+        end,
+        none
     ).
 
 -doc """

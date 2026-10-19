@@ -98,6 +98,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("count:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -164,6 +165,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("count:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -304,6 +306,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("flatMap:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -380,6 +383,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("flatMap:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -538,7 +542,7 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
-            super::list_recv_to_safe_list_doc(recv_code, list_var, safe_list_var.clone()),
+            super::list_recv_to_safe_list_doc(recv_code, None, list_var, safe_list_var.clone()),
             "let ",
             leaf::var(init_var.clone()),
             " = ",
@@ -591,6 +595,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("inject:into:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -670,6 +675,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("inject:into:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -846,6 +852,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("takeWhile:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -922,6 +929,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("takeWhile:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1072,6 +1080,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("dropWhile:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1147,6 +1156,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("dropWhile:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1298,6 +1308,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("partition:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1391,6 +1402,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("partition:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1559,6 +1571,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("groupBy:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1633,6 +1646,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("groupBy:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1808,6 +1822,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("sort:"),
             list_var,
             safe_list_var.clone(),
         ));

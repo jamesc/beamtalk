@@ -31,7 +31,8 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
     maximum/1,
     minimum/1,
     sum/1,
-    to_list/1
+    to_list/1,
+    to_list_for_threading/2
 ]).
 
 %% Explicit `(Erlang beamtalk_collection) raiseEmpty: ... selector: ...` FFI
@@ -279,6 +280,72 @@ to_list(Self) ->
         collect_posted(Ref, [])
     after
         discard_posted(Ref)
+    end.
+
+-doc """
+The receiver guard of an inlined list-op fold whose block writes (ADR 0133,
+BT-3916): `to_list/1` of the receiver, for the compiled fold to iterate in the
+caller's activation, once the receiver is known to answer `Selector` with the
+stdlib's own fold over `do:`.
+
+A receiver whose class resolves `Selector` to a method outside the stdlib (its
+own `anySatisfy:`, a trait-provided `inject:into:`) would have run that method
+with a closure that cannot return the write, and folding over its `do:` instead
+would answer something else, so it raises `stateful_block_dispatch`. A receiver
+that does not respond to `Selector` raises `does_not_understand`, as the pure
+path does. `do:` is the fold's own source and is never guarded.
+""".
+-spec to_list_for_threading(term(), atom()) -> list().
+to_list_for_threading(Recv, _Selector) when is_list(Recv) ->
+    Recv;
+to_list_for_threading(Recv, 'do:') ->
+    to_list(Recv);
+to_list_for_threading(Recv, Selector) ->
+    {Class, Provider} = selector_provider(Recv, Selector),
+    case Provider of
+        stdlib ->
+            to_list(Recv);
+        none ->
+            beamtalk_error:raise(beamtalk_error:new(does_not_understand, Class, Selector));
+        user ->
+            Error0 = beamtalk_error:new(stateful_block_dispatch, Class, Selector),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary([
+                    <<"The block assigns a variable of the enclosing method, but ">>,
+                    atom_to_binary(Class, utf8),
+                    <<" defines its own '">>,
+                    atom_to_binary(Selector, utf8),
+                    <<"', which cannot return that write">>
+                ])
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1,
+                    <<
+                        "Compute the value without assigning from the block, or send "
+                        "'do:' and accumulate there"
+                    >>
+                )
+            )
+    end.
+
+%% Who answers `Selector` for `Recv`, with the class name to report. A class
+%% object answers from its class side: whatever the class defines there is a
+%% method the fold would bypass, and the generic `Class` protocol does not
+%% define the collection selectors.
+-spec selector_provider(term(), atom()) -> {atom(), stdlib | user | none}.
+selector_provider(Recv, Selector) ->
+    case beamtalk_class_registry:is_class_object(Recv) of
+        true ->
+            Name = beamtalk_primitive:class_name_from_tag(element(2, Recv)),
+            case beamtalk_primitive:class_responds_to(Name, Selector) of
+                true -> {Name, user};
+                false -> {Name, none}
+            end;
+        false ->
+            Class = beamtalk_primitive:class_of(Recv),
+            {Class, beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, Selector)}
     end.
 
 %% Drain the elements posted by the iteration block, oldest first.

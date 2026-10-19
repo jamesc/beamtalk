@@ -66,7 +66,7 @@ use plan::ListOpKind;
 // `CoreErlangGenerator::generate_foldl_loop_body` directly (the deleted
 // `generate_list_do_body_with_threading` compat shim's inlined replacement)
 // — `pub(super)`, matching `ThreadingPlan`'s own cross-module visibility.
-pub(super) use list_ops::BodyKind;
+pub(super) use list_ops::{BodyKind, list_recv_to_safe_list_doc};
 // `FieldWriteSite`/`Closure` name the two axes
 // `CoreErlangGenerator::lower_field_write` unifies field-assignment lowering
 // behind; consumed outside `control_flow` by `expressions.rs`'s

@@ -3018,3 +3018,69 @@ fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() 
         "Outer loop should be direct-params (rebuild StateAcc at exit). Got:\n{code}"
     );
 }
+
+// ── BT-3916: receiver guard of the inlined writing fold ──────
+
+/// Every compiler-known collection selector other than `do:` lowers a writing
+/// block over `beamtalk_collection:to_list_for_threading(Recv, 'selector')`, so
+/// a class's own override of that selector is refused rather than bypassed.
+#[test]
+fn test_writing_fold_calls_receiver_guard_with_its_selector() {
+    let cases: &[(&str, &str)] = &[
+        ("collect:", "items collect: [:x | n := n + 1. x]"),
+        ("select:", "items select: [:x | n := n + 1. x > 0]"),
+        ("reject:", "items reject: [:x | n := n + 1. x > 0]"),
+        ("anySatisfy:", "items anySatisfy: [:x | n := n + 1. x > 0]"),
+        ("allSatisfy:", "items allSatisfy: [:x | n := n + 1. x > 0]"),
+        ("detect:", "items detect: [:x | n := n + 1. x > 0]"),
+        (
+            "detect:ifNone:",
+            "items detect: [:x | n := n + 1. x > 0] ifNone: [nil]",
+        ),
+        ("count:", "items count: [:x | n := n + 1. x > 0]"),
+        ("flatMap:", "items flatMap: [:x | n := n + 1. #(x)]"),
+        (
+            "inject:into:",
+            "items inject: 0 into: [:a :x | n := n + 1. a + x]",
+        ),
+        ("takeWhile:", "items takeWhile: [:x | n := n + 1. x > 0]"),
+        ("dropWhile:", "items dropWhile: [:x | n := n + 1. x > 0]"),
+        ("partition:", "items partition: [:x | n := n + 1. x > 0]"),
+        ("groupBy:", "items groupBy: [:x | n := n + 1. x]"),
+        ("sort:", "items sort: [:a :b | n := n + 1. a < b]"),
+    ];
+    for (selector, expr) in cases {
+        let src = format!(
+            "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    n := 0\n    {expr}\n    n\n"
+        );
+        let code = codegen(&src);
+        assert!(
+            code.contains("'beamtalk_collection':'to_list_for_threading'(")
+                && code.contains(&format!(", '{selector}')")),
+            "{selector}: a writing fold must call the receiver guard with its selector. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'beamtalk_collection':'to_list'("),
+            "{selector}: a writing fold must not use the unguarded to_list/1. Got:\n{code}"
+        );
+    }
+}
+
+/// `do:` is the fold's own source, and a pure `inject:into:` keeps the plain
+/// inline fold: neither goes through the guard.
+#[test]
+fn test_do_fold_and_pure_inject_do_not_use_receiver_guard() {
+    let do_src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    n := 0\n    items do: [:x | n := n + 1]\n    n\n";
+    let code = codegen(do_src);
+    assert!(
+        code.contains("'beamtalk_collection':'to_list'(")
+            && !code.contains("to_list_for_threading"),
+        "do: with a writing block folds over to_list/1 unguarded. Got:\n{code}"
+    );
+    let pure_src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:a :x | a + x]\n";
+    let code = codegen(pure_src);
+    assert!(
+        !code.contains("to_list_for_threading"),
+        "A pure inject:into: must not call the receiver guard. Got:\n{code}"
+    );
+}
