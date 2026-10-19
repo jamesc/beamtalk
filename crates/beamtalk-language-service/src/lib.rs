@@ -1691,11 +1691,10 @@ impl LanguageService for SimpleLanguageService {
         // for the LSP path, so hover needn't re-derive it.
         let (class_hierarchy_result, hierarchy_diags) =
             crate::project_index::build_hierarchy_with_trait_origins(&module, || {
-                self.project_index
-                    .cross_file_protocol_defs_for(&file)
-                    .into_iter()
-                    .map(|p| (p.name.name.clone(), p))
-                    .collect()
+                // First definition wins, as in analysis (BT-3915).
+                beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+                    self.project_index.cross_file_protocol_defs_for(&file),
+                )
             });
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
             // Register protocol definitions as synthetic class entries

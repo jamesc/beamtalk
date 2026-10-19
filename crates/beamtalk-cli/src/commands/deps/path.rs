@@ -739,7 +739,7 @@ fn extract_dep_protocol_alias_metadata(
         // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
         // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(
-            beamtalk_core::semantic_analysis::trait_expansion::provision_bearing_protocols(
+            beamtalk_core::semantic_analysis::trait_expansion::carried_protocols(
                 module,
                 Some(dep_name),
             ),

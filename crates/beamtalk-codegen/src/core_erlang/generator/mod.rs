@@ -174,7 +174,7 @@ pub struct CoreErlangGenerator {
         beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// `(class, protocol)` pairs whose `uses:` resolved to the stdlib's own
     /// protocol (BT-3915); those classes' provisions map through the stdlib
-    /// file rather than `protocol_sources`. See `set_protocol_sources`.
+    /// file rather than `protocol_sources`. See `set_stdlib_protocol_uses`.
     pub(in crate::core_erlang) stdlib_protocol_uses:
         std::collections::HashSet<(EcoString, EcoString)>,
     /// Primitive binding table from compiled stdlib (ADR 0007).

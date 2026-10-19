@@ -393,14 +393,14 @@ Value subclass: Rank
 #[test]
 fn carried_requirements_only_namesake_shadows_the_stdlib_protocol() {
     let other_file = parse_source("Protocol define: Comparable\n  < other -> Boolean");
-    let carried = provision_bearing_protocols(&other_file, None);
+    let carried = carried_protocols(&other_file, None);
     assert_eq!(
         carried.len(),
         1,
         "a stdlib-named protocol is always carried"
     );
     assert!(
-        provision_bearing_protocols(
+        carried_protocols(
             &parse_source("Protocol define: Sized\n  size -> Integer"),
             None
         )
@@ -1916,7 +1916,7 @@ fn mistyped_qualifier_does_not_resolve_the_current_packages_protocol() {
 #[test]
 fn qualifier_of_a_dependency_without_provisions_does_not_resolve_the_current_packages_protocol() {
     // `pkg_b` declares a requirement-only `Parser`, which is never carried
-    // (`provision_bearing_protocols` drops it); `my_app` has its own, provision-
+    // (`carried_protocols` drops it); `my_app` has its own, provision-
     // bearing one. `uses: pkg_b@Parser` names a different protocol.
     let (module, diagnostics) = expand_in_package("pkg_b@", &HashMap::new(), Some("my_app"));
 

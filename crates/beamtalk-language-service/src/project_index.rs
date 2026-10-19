@@ -873,11 +873,32 @@ impl ProjectIndex {
     /// doc).
     #[must_use]
     pub fn cross_file_protocol_infos_for(&self, file: &Utf8PathBuf) -> Vec<ProtocolInfo> {
-        self.file_protocols
+        self.files_in_precedence_order(&self.file_protocols, file, true)
+            .flat_map(|infos| infos.iter().cloned())
+            .collect()
+    }
+
+    /// The per-file entries of `map` other than `file`'s own, in the one
+    /// precedence order every "first definition wins" consumer relies on
+    /// (BT-3915): project and dependency files sorted by path, then — when
+    /// `include_stdlib` — the preloaded stdlib files, sorted by path. A
+    /// `HashMap` walk would make a same-named protocol's resolution depend on
+    /// hash order.
+    fn files_in_precedence_order<'a, T>(
+        &'a self,
+        map: &'a HashMap<Utf8PathBuf, T>,
+        file: &Utf8PathBuf,
+        include_stdlib: bool,
+    ) -> impl Iterator<Item = &'a T> {
+        let mut entries: Vec<(&Utf8PathBuf, &T)> = map
             .iter()
             .filter(|(path, _)| *path != file)
-            .flat_map(|(_, infos)| infos.iter().cloned())
-            .collect()
+            .filter(|(path, _)| include_stdlib || !self.is_stdlib_file(path))
+            .collect();
+        entries.sort_by(|(a, _), (b, _)| {
+            (self.is_stdlib_file(a), a.as_str()).cmp(&(self.is_stdlib_file(b), b.as_str()))
+        });
+        entries.into_iter().map(|(_, value)| value)
     }
 
     /// Returns cross-file *provision-bearing* protocol ASTs for diagnostic
@@ -891,10 +912,14 @@ impl ProjectIndex {
         &self,
         file: &Utf8PathBuf,
     ) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
-        self.file_protocol_defs
-            .iter()
-            .filter(|(path, _)| *path != file)
-            .flat_map(|(_, defs)| defs.iter().cloned())
+        // A preloaded stdlib file's protocols are served to a non-stdlib file
+        // by the compiler's baked stdlib tier (`stdlib_protocols`, BT-3915),
+        // as on every other surface — carrying them here too would put the
+        // stdlib's `Comparable` *ahead* of that tier, unstamped, competing
+        // with the project's own. Stdlib files still see each other's live.
+        let include_stdlib = self.is_stdlib_file(file);
+        self.files_in_precedence_order(&self.file_protocol_defs, file, include_stdlib)
+            .flat_map(|defs| defs.iter().cloned())
             .collect()
     }
 

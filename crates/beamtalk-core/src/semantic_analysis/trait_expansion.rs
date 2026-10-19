@@ -375,7 +375,7 @@ impl TraitUserCollector {
                 .then(|| module.clone()),
         });
         self.protocol_defs
-            .extend(provision_bearing_protocols(module, self.package.as_deref()));
+            .extend(carried_protocols(module, self.package.as_deref()));
     }
 
     /// The provision-bearing protocol ASTs collected so far, in `add` order.
@@ -469,10 +469,7 @@ pub fn is_carried_protocol(protocol: &ProtocolDefinition) -> bool {
 /// declared in `package` when it is not the package being compiled
 /// ([`ProtocolDefinition::package`]).
 #[must_use]
-pub fn provision_bearing_protocols(
-    module: &Module,
-    package: Option<&str>,
-) -> Vec<ProtocolDefinition> {
+pub fn carried_protocols(module: &Module, package: Option<&str>) -> Vec<ProtocolDefinition> {
     module
         .protocols
         .iter()

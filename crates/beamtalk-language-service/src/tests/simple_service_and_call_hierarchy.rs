@@ -372,6 +372,108 @@ fn project_requirements_only_protocol_shadows_the_stdlib_one() {
     );
 }
 
+/// The stdlib's `comparable.bt`, preloaded the way the running LSP preloads
+/// stdlib files (`mark_stdlib_file` then `update_file`, `server/core.rs`).
+fn preload_stdlib_comparable(service: &mut SimpleLanguageService) -> Utf8PathBuf {
+    let path = Utf8PathBuf::from("stdlib/src/comparable.bt");
+    service.mark_stdlib_file(path.clone());
+    service.update_file(
+        path.clone(),
+        include_str!("../../../../stdlib/src/comparable.bt").to_string(),
+    );
+    path
+}
+
+/// The `(class, protocol)` uses of `file` that resolve to the stdlib's own
+/// protocol against the defs the LSP carries for it — what diagnostics'
+/// `analyse_full` records as `stdlib_protocol_uses`.
+fn lsp_stdlib_uses(
+    service: &SimpleLanguageService,
+    file: &Utf8PathBuf,
+    source: &str,
+) -> beamtalk_core::semantic_analysis::trait_expansion::StdlibUses {
+    use beamtalk_core::semantic_analysis::trait_expansion;
+    let (mut module, _) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(source));
+    let carried = trait_expansion::first_wins_protocol_map(
+        service.project_index().cross_file_protocol_defs_for(file),
+    );
+    trait_expansion::expand_module_with_stdlib_uses(&mut module, &carried, None).2
+}
+
+/// BT-3915: with the stdlib preloaded as the running LSP does, a project's
+/// own requirements-only `Comparable` still wins over the stdlib's for
+/// `uses: Comparable` — deterministically, not by `HashMap` order — and the
+/// stdlib file's protocol is not carried to project files at all (the baked
+/// stdlib tier serves it, as on every other surface).
+#[test]
+fn preloaded_stdlib_comparable_never_beats_the_projects_own() {
+    let mut service = SimpleLanguageService::new();
+    let stdlib_file = preload_stdlib_comparable(&mut service);
+    service.update_file(
+        Utf8PathBuf::from("comparable_local.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n".to_string(),
+    );
+    let user_file = Utf8PathBuf::from("rank.bt");
+    let source = "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  < other => self.level < other level\n\nRank new between: Rank new and: Rank new\n";
+    service.update_file(user_file.clone(), source.to_string());
+
+    let carried = service
+        .project_index()
+        .cross_file_protocol_defs_for(&user_file);
+    assert_eq!(
+        carried.len(),
+        1,
+        "only the project's own Comparable: {carried:?}"
+    );
+    assert!(carried[0].provided_methods.is_empty());
+    assert!(service.project_index().is_stdlib_file(&stdlib_file));
+    assert!(lsp_stdlib_uses(&service, &user_file, source).is_empty());
+    let diagnostics = service.diagnostics(&user_file);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("provides no methods")),
+        "{diagnostics:?}"
+    );
+    let hover = service
+        .hover(&user_file, Position::new(6, 10))
+        .and_then(|h| h.documentation)
+        .unwrap_or_default();
+    assert!(!hover.contains("*provided by*"), "{hover}");
+}
+
+/// BT-3915: with the stdlib preloaded and no project `Comparable`, `uses:
+/// Comparable` gets the stdlib's provisions and the use is recorded as
+/// stdlib-resolved (so source mapping and provision diagnostics use the
+/// stdlib file).
+#[test]
+fn preloaded_stdlib_comparable_resolves_through_the_stdlib_tier() {
+    let mut service = SimpleLanguageService::new();
+    preload_stdlib_comparable(&mut service);
+    let user_file = Utf8PathBuf::from("rank.bt");
+    let source = "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  < other => self.level < other level\n\nRank new between: Rank new and: Rank new\n";
+    service.update_file(user_file.clone(), source.to_string());
+
+    assert!(
+        lsp_stdlib_uses(&service, &user_file, source)
+            .contains(&("Rank".into(), "Comparable".into()))
+    );
+    let diagnostics = service.diagnostics(&user_file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown protocol")
+                || d.message.contains("provides no methods")),
+        "{diagnostics:?}"
+    );
+    let hover = service
+        .hover(&user_file, Position::new(6, 10))
+        .and_then(|h| h.documentation)
+        .unwrap_or_default();
+    assert!(hover.contains("*provided by* `Comparable`"), "{hover}");
+}
+
 /// BT-3915: a `uses:` of the stdlib's own `Enumerable` — declared in no file
 /// the service knows — resolves in the LSP as in `beamtalk build`: no
 /// "unknown protocol", and hover shows the stdlib provision's provenance.
