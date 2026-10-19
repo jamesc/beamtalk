@@ -24,6 +24,7 @@ Actor subclass: SelfSendHomFoldPool
   state: arr = #[1, 2, 3, 4]
   state: set = #(1, 2, 3, 4) asSet
   state: total = 0
+  state: groups = #(#(1, 2), #(3))
 
   // ── forwarding HOMs: opaque `block` straight to the primitive ─────────────
   sealed fwdInject: initial into: block =>
@@ -255,6 +256,33 @@ Actor subclass: SelfSendHomFoldPool
         self.total := self.total + 1
         7
       ]
+
+  // A promoted block that rebinds a block-local inside an inner loop
+  // (BT-3939): `tallyGroups` promotes `fwdGroupsCollect:`'s position.
+  weight: y => y * 10
+
+  sealed fwdGroupsCollect: block => self.groups collect: block
+
+  tallyGroups =>
+    self
+      fwdGroupsCollect: [:xs |
+        self.total := self.total + 1
+        xs
+      ]
+
+  groupWeights =>
+    self
+      fwdGroupsCollect: [:xs |
+        n := 0
+        xs do: [:y | n := n + (self weight: y)]
+        n
+      ]
+
+  // A Tier 1 block of one argument too many for its position (an `ifNone:`
+  // handler takes none).
+  oneArgBlock => [:x | 7]
+
+  wrongArityIfNone => self.items detect: [:x | x > 20] ifNone: self oneArgBlock
 
 // BT-3615's other callers, a block that assigns a captured local through each
 // forwarding HOM, are ADR 0133 escaping-block compile errors since BT-3902.

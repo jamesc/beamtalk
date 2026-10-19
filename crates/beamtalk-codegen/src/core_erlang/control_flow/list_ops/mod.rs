@@ -315,6 +315,16 @@ impl CoreErlangGenerator {
     /// captured local never gets here (the ADR 0133 escaping-block
     /// diagnostic).
     ///
+    /// Arity alone cannot tell a Tier 2 block from a Tier 1 block of one
+    /// argument too many (an `ifNone:` handler `[:x | ...]`, a 3-argument
+    /// `sort:` block): both are funs of `arity + 1` arguments, and Tier 2
+    /// funs carry no mark. So the Tier 2 arm also checks the reply shape: a
+    /// reply that is not `{Result, Map}` raises `stateful_block_dispatch`
+    /// (the wrong-arity error) rather than being misread. The remaining
+    /// limitation: a wrong-arity Tier 1 block that happens to answer a
+    /// two-tuple whose second element is a map is still read as a Tier 2
+    /// reply.
+    ///
     /// Generated pattern (`is_function/2` avoids badarg on non-funs), for
     /// `arity` 1 outside an actor:
     /// ```text
@@ -326,14 +336,18 @@ impl CoreErlangGenerator {
     ///         <'true'> when 'true' -> fun (_WArg) ->  -- Tier 2, wrap it
     ///           let _EmptyState = ~{}~ in
     ///           let _T = apply _Callable (_WArg, _EmptyState) in
-    ///           let _WRes = call 'erlang':'element'(1, _T) in _WRes
+    ///           case _T of
+    ///             <{_WRes, _WSt}> when call 'erlang':'is_map'(_WSt) -> _WRes
+    ///             <_> when 'true' -> <raise stateful_block_dispatch>
+    ///           end
     ///         <'false'> when 'true' -> _Callable      -- not a fun, pass through
     ///       end
     ///   end
     /// ```
     ///
     /// NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun
-    /// body (erlc rejects tuple patterns in let). Use element/2 calls instead.
+    /// body (erlc rejects tuple patterns in let); a `case` clause pattern is
+    /// how the reply is destructured.
     /// NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
     /// terminate the fun — the Body expression ends the fun. Two `end`s close
     /// the two nested `case` expressions.
@@ -363,20 +377,31 @@ impl CoreErlangGenerator {
         let wrap_args: Vec<String> = (0..arity).map(|_| self.fresh_temp_var("WArg")).collect();
         let wrap_tuple = self.fresh_temp_var("T");
         let wrap_res = self.fresh_temp_var("WRes");
-        let (seed, seed_preamble, result) = if self.in_actor_instance_context() {
+        let wrap_state = self.fresh_temp_var("WSt");
+        let actor = self.in_actor_instance_context();
+        let (seed, seed_preamble) = if actor {
             let seed =
                 seed_state.map_or_else(|| self.current_field_read_state_var(), str::to_string);
-            let wrap_state = self.fresh_temp_var("WSt");
+            (seed, Document::Str(""))
+        } else {
+            let seed = self.fresh_temp_var("EmptyState");
+            let preamble = docvec!["let ", leaf::var(seed.clone()), " = ~{}~ in "];
+            (seed, preamble)
+        };
+        // What a Tier 2 reply `{WRes, WSt}` answers. In an actor, a state
+        // change raises; elsewhere the map is dropped. The comparison keeps
+        // the codegen-internal `__local__` keys on purpose: a promoted block
+        // that rebinds a block-local in an inner loop returns a stale value
+        // with that key leaked into its map (BT-3939, the same on main), and
+        // comparing with `beamtalk_actor:strip_local_temps` would turn that
+        // loud error into the stale value.
+        let on_reply = if actor {
             let (error_selector, hint) = self.forwarded_state_change_error(list_selector);
             let raise =
                 self.generate_stateful_block_dispatch_error(&error_selector, "Block", &hint);
-            let result = docvec![
-                "let ",
+            docvec![
+                "case call 'erlang':'=:='(",
                 leaf::var(wrap_state.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(wrap_tuple.clone()),
-                ") in case call 'erlang':'=:='(",
-                leaf::var(wrap_state),
                 ", ",
                 leaf::var(seed.clone()),
                 ") of <'true'> when 'true' -> ",
@@ -384,13 +409,19 @@ impl CoreErlangGenerator {
                 " <'false'> when 'true' -> ",
                 raise,
                 " end",
-            ];
-            (seed, Document::Str(""), result)
+            ]
         } else {
-            let seed = self.fresh_temp_var("EmptyState");
-            let preamble = docvec!["let ", leaf::var(seed.clone()), " = ~{}~ in "];
-            (seed, preamble, leaf::var(wrap_res.clone()))
+            leaf::var(wrap_res.clone())
         };
+        // A fun of `arity + 1` arguments that does not reply `{Result, Map}`
+        // is a Tier 1 block of the wrong arity, not a Tier 2 one: raise the
+        // same structured error as a wrong-arity block reached by `perform:`
+        // rather than misread its value.
+        let wrong_arity = self.generate_stateful_block_dispatch_error(
+            list_selector,
+            "Block",
+            super::super::intrinsics::STATEFUL_BLOCK_DISPATCH_HINT,
+        );
         let params = beamtalk_cerl_doc::join(
             wrap_args
                 .iter()
@@ -412,12 +443,19 @@ impl CoreErlangGenerator {
             leaf::var(callable_var.clone()),
             " (",
             beamtalk_cerl_doc::join(apply_args, &Document::Str(", ")),
-            ") in let ",
-            leaf::var(wrap_res),
-            " = call 'erlang':'element'(1, ",
+            ") in case ",
             leaf::var(wrap_tuple),
-            ") in ",
-            result,
+            " of <{",
+            leaf::var(wrap_res),
+            ", ",
+            leaf::var(wrap_state.clone()),
+            "}> when call 'erlang':'is_map'(",
+            leaf::var(wrap_state),
+            ") -> ",
+            on_reply,
+            " <_> when 'true' -> ",
+            wrong_arity,
+            " end",
         ];
         let tier1_arity = i64::try_from(arity).unwrap_or(i64::MAX);
         Ok(docvec![

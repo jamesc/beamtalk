@@ -1367,35 +1367,64 @@ fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
 
 #[test]
 fn test_every_list_op_callable_goes_through_the_shared_wrapper() {
-    // BT-3908: every callable argument of every list op, at the arity the op
-    // calls it with (the Tier 2 check is `arity + 1`), in actor and value
-    // contexts, plus the actor state guard.
-    for (body, tier2_arity) in [
-        ("items reject: block", 2),
-        ("items flatMap: block", 2),
-        ("items takeWhile: block", 2),
-        ("items dropWhile: block", 2),
-        ("items partition: block", 2),
-        ("items groupBy: block", 2),
-        ("items sort: block", 3),
-        ("items detect: [:x | x > 2] ifNone: block", 1),
-    ] {
-        for class in ["Actor", "Value"] {
-            let code = codegen(&format!(
-                "{class} subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
-            ));
-            assert!(
-                code.contains(&format!(
-                    ", {tier2_arity}) of <'true'> when 'true' -> fun ("
-                )),
-                "{class} `{body}` should wrap a Tier 2 callable. Got:\n{code}"
+    // BT-3908: every callable argument of every list op goes through the
+    // shared wrapper (`non_literal_callable_doc`) at the arity the op calls
+    // it with. One method sends every op, so each call site must contribute
+    // its own wrapper: the number of `_Callable` bindings, and of Tier 2
+    // checks per arity (`arity + 1`), must equal the number of sites.
+    let sites: &[(&str, usize)] = &[
+        ("items do: block", 1),
+        ("items collect: block", 1),
+        ("items select: block", 1),
+        ("items reject: block", 1),
+        ("items inject: 0 into: block", 2),
+        ("items detect: block", 1),
+        // Two sites: the predicate (1) and the `ifNone:` handler (0).
+        ("items detect: block ifNone: block", 1),
+        ("items count: block", 1),
+        ("items anySatisfy: block", 1),
+        ("items allSatisfy: block", 1),
+        ("items flatMap: block", 1),
+        ("items takeWhile: block", 1),
+        ("items dropWhile: block", 1),
+        ("items partition: block", 1),
+        ("items groupBy: block", 1),
+        ("items sort: block", 2),
+    ];
+    let body: Vec<String> = sites.iter().map(|(s, _)| format!("    {s}")).collect();
+    let mut expected_by_arity = [0usize; 3];
+    for (_, arity) in sites {
+        expected_by_arity[*arity] += 1;
+    }
+    expected_by_arity[0] += 1; // the `ifNone:` handler
+    let expected_sites: usize = expected_by_arity.iter().sum();
+    for class in ["Actor", "Value"] {
+        let code = codegen(&format!(
+            "{class} subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n{}\n",
+            body.join("\n")
+        ));
+        assert_eq!(
+            code.matches("let _Callable").count(),
+            expected_sites,
+            "{class}: every callable site should bind its own wrapper. Got:\n{code}"
+        );
+        for (arity, expected) in expected_by_arity.iter().enumerate() {
+            let tier2 = format!(", {}) of <'true'> when 'true' -> fun (", arity + 1);
+            assert_eq!(
+                code.matches(tier2.as_str()).count(),
+                *expected,
+                "{class}: {expected} site(s) should wrap a Tier 2 callable of arity {}. \
+                 Got:\n{code}",
+                arity + 1
             );
-            if class == "Actor" {
-                assert!(
-                    code.contains("'stateful_block_dispatch'"),
-                    "{class} `{body}` should guard actor state changes. Got:\n{code}"
-                );
-            }
+        }
+        if class == "Actor" {
+            // Each wrapper raises on a changed state and on a wrong-arity reply.
+            assert_eq!(
+                code.matches("'stateful_block_dispatch'").count(),
+                2 * expected_sites,
+                "{class}: every wrapper should guard actor state. Got:\n{code}"
+            );
         }
     }
 }
