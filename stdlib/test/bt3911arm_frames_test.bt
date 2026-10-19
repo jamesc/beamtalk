@@ -108,3 +108,9 @@ TestCase subclass: Bt3911ArmFramesTest
 
   testActorDetectPlainInProtectedBody =>
     self assert: Bt3911ArmFramesActor spawn detectPlainInProtectedBody equals: 1
+
+  // ADR 0133 Phase 3: a nested body (the `ClassBuilder` fun) owns its generator
+  // state, and the loop body around it gets its own back.
+  testActorClassBuilderFunInLoopBody =>
+    self assert: Bt3911ArmFramesActor spawn builderInLoopBody equals: 2
+    self assert: Bt3911BuiltInLoop answer equals: 41

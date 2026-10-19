@@ -97,3 +97,18 @@ Actor subclass: Bt3911ArmFramesActor
     t := 0
     [#(1, 2) detect: [:e | t := t + 1. e > 0]. 7] on: Error do: [:e | 0]
     t
+
+  // A `ClassBuilder` `classMethods:` fun is a method body of its own: lowered
+  // inside this loop body it inherits nothing of the loop's state, and the
+  // loop's `StateAcc` chain continues after it.
+  builderInLoopBody =>
+    #(1) do: [:i |
+      self.n := self.n + 1
+      Object classBuilder
+        name: #Bt3911BuiltInLoop;
+        superclass: Object;
+        classMethods: #{#answer => [:cls | 41]};
+        register
+      self.n := self.n + 1
+    ]
+    self.n
