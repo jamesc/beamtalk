@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3915 (ADR 0127 §9, §10a): a user package `uses:` the stdlib's own
+// provision-bearing protocols. The stdlib is not a resolved dependency of a
+// user package, so its `Comparable` and `Enumerable` are baked into the
+// compiler (`semantic_analysis::stdlib_protocols`) as the last tier of `uses:`
+// resolution. Each class below writes only the protocol's required method;
+// everything else it answers is the stdlib's provision.
+//
+// Fixtures: fixtures/adr0127stdlib_{rank,worker,worker_pool}.bt,
+// fixtures/adr0133enumerable_stdlib.bt.
+
+TestCase subclass: Adr0127StdlibTraitTest
+
+  rank: n => Adr0127StdlibRank new: #{#level => n}
+
+  bag => Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}
+
+  // --- `uses: Comparable` ---
+  testComparableDerivedOrdering =>
+    self assert: (self rank: 2) > (self rank: 1)
+    self deny: (self rank: 1) > (self rank: 2)
+    self assert: (self rank: 1) <= (self rank: 1)
+    self assert: (self rank: 2) >= (self rank: 1)
+
+  testComparableBetweenMinMax =>
+    self assert: ((self rank: 2) between: (self rank: 1) and: (self rank: 3))
+    self deny: ((self rank: 4) between: (self rank: 1) and: (self rank: 3))
+    self assert: ((self rank: 1) min: (self rank: 3)) level equals: 1
+    self assert: ((self rank: 1) max: (self rank: 3)) level equals: 3
+
+  // --- `uses: Enumerable(Integer)` on a Value ---
+  testEnumerableQueries =>
+    self assert: self bag size equals: 3
+    self deny: self bag isEmpty
+    self assert: self bag isNotEmpty
+    self assert: (Adr0133EnumerableStdlib new: #{#items => #()}) isEmpty
+
+  testEnumerableIteration =>
+    self assert: (self bag inject: 0 into: [:acc :x | acc + x]) equals: 6
+    self assert: (self bag collect: [:x | x * 10]) equals: #(10, 20, 30)
+    self assert: (self bag select: [:x | x > 1]) equals: #(2, 3)
+    self assert: (self bag detect: [:x | x > 1] ifNone: [nil]) equals: 2
+    self assert: (self bag anySatisfy: [:x | x > 2])
+    self assert: (self bag count: [:x | x isOdd]) equals: 2
+
+  // --- The docs' `WorkerPool`: a typed Actor `uses: Enumerable(Worker)` ---
+  testWorkerPoolEnumerable =>
+    idle := Adr0127StdlibWorker new
+    busy := Adr0127StdlibWorker new: #{#idle => false}
+    pool := Adr0127StdlibWorkerPool spawnWith: #{
+      #workers => #(idle, busy, idle)
+    }
+    [
+      self assert: pool size equals: 3
+      self assert: (pool count: [:w | w isIdle]) equals: 2
+      self assert: (pool select: [:w | w isIdle]) size equals: 2
+      self assert: (pool anySatisfy: [:w | w isIdle not])
+    ] ensure: [pool stop]

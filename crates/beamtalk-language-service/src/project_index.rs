@@ -35,13 +35,18 @@ use std::collections::{HashMap, HashSet};
 /// methods are present, then stamps `MethodInfo::origin` — the same sequence
 /// `analyse_full` runs, so hover and the other hierarchy-backed LSP queries
 /// see the same provenance as diagnostics (BT-3655). `external_protocols`
-/// carries provision-bearing protocols from other files/packages, keyed by
+/// carries carried protocols from other files/packages, keyed by
 /// bare name and is supplied lazily (`external_protocols`), so the (clone-heavy)
 /// cross-file collection only runs when some class has a `uses:` line.
+/// `current_package` is the file's package as diagnostics compile it
+/// ([`ProjectIndex::alias_package_for_file`]), so a bare `uses:` resolves to
+/// the same protocol here as there — e.g. never to a dependency's
+/// stdlib-named protocol (BT-3915).
 /// Expansion diagnostics are discarded: `diagnostics()` already
 /// reports them via the full analysis pipeline.
 pub(crate) fn build_hierarchy_with_trait_origins(
     module: &beamtalk_core::ast::Module,
+    current_package: Option<&str>,
     external_protocols: impl FnOnce() -> HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
 ) -> (Result<ClassHierarchy, SemanticError>, Vec<Diagnostic>) {
     use beamtalk_core::semantic_analysis::trait_expansion;
@@ -50,8 +55,11 @@ pub(crate) fn build_hierarchy_with_trait_origins(
         return ClassHierarchy::build(module);
     }
     let mut expanded = module.clone();
-    let (_expansion_diags, origins) =
-        trait_expansion::expand_module(&mut expanded, &external_protocols());
+    let (_expansion_diags, origins) = trait_expansion::expand_module_in_package(
+        &mut expanded,
+        &external_protocols(),
+        trait_expansion::known_package(current_package),
+    );
     let (result, diags) = ClassHierarchy::build(&expanded);
     let result = result.map(|mut hierarchy| {
         trait_expansion::apply_origins(&mut hierarchy, &origins);
@@ -70,8 +78,10 @@ use beamtalk_core::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER;
 /// build pipeline's convention (`build_stdlib.rs`'s `generate_app_file`,
 /// `class_hierarchy/builtins.rs`'s `ClassInfo.package` stamping) — stdlib is
 /// always its own package, distinct from both a project's own aliases and
-/// any fetched dependency's.
-pub const STDLIB_PACKAGE_MARKER: &str = "stdlib";
+/// any fetched dependency's. One definition, in `beamtalk-core`
+/// (`stdlib_protocols::STDLIB_PACKAGE`), shared with the compiler's stdlib
+/// protocol fallback (BT-3915).
+pub use beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE as STDLIB_PACKAGE_MARKER;
 
 /// Derives the dependency package name for `file` from its path.
 ///
@@ -127,7 +137,8 @@ pub struct ProjectIndex {
     /// every declared protocol is exported project-wide with no
     /// collision/visibility bookkeeping needed here.
     file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
-    /// Per-file full ASTs of *provision-bearing* protocols declared in that
+    /// Per-file full ASTs of carried protocols
+    /// (`trait_expansion::is_carried_protocol`) declared in that
     /// file — the trait-flattening counterpart to `file_protocols` (ADR 0127
     /// §10a; BT-3591). `ProtocolInfo` above carries name/signature metadata
     /// only, enough for `extending:`/conformance resolution; flattening a
@@ -213,12 +224,14 @@ impl ProjectIndex {
         let stdlib_protocols: HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition> = parsed
             .iter()
             .flat_map(|(_, module)| module.protocols.iter())
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing(p))
             .map(|p| (p.name.name.clone(), p.clone()))
             .collect();
         for (path, module) in parsed {
             let (file_hierarchy_result, hierarchy_diags) =
-                build_hierarchy_with_trait_origins(&module, || stdlib_protocols.clone());
+                build_hierarchy_with_trait_origins(&module, Some(STDLIB_PACKAGE_MARKER), || {
+                    stdlib_protocols.clone()
+                });
             all_diagnostics.extend(hierarchy_diags);
             let mut file_hierarchy = match file_hierarchy_result {
                 Ok(h) => h,
@@ -282,7 +295,9 @@ impl ProjectIndex {
             let protocol_defs: Vec<_> = module
                 .protocols
                 .iter()
-                .filter(|p| !p.provided_methods.is_empty())
+                .filter(|p| {
+                    beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing(p)
+                })
                 .cloned()
                 .collect();
             if !protocol_defs.is_empty() {
@@ -422,7 +437,7 @@ impl ProjectIndex {
         }
     }
 
-    /// Add or update a file's *provision-bearing* protocol ASTs (ADR 0127
+    /// Add or update a file's carried protocol ASTs (ADR 0127
     /// §10a; BT-3591) — the trait-flattening counterpart to
     /// [`Self::update_file_protocols`]. Call alongside it whenever a file is
     /// (re)indexed. An empty `protocol_defs` clears the file's prior entry.
@@ -871,15 +886,49 @@ impl ProjectIndex {
     /// doc).
     #[must_use]
     pub fn cross_file_protocol_infos_for(&self, file: &Utf8PathBuf) -> Vec<ProtocolInfo> {
-        self.file_protocols
-            .iter()
-            .filter(|(path, _)| *path != file)
-            .flat_map(|(_, infos)| infos.iter().cloned())
+        self.files_in_precedence_order(&self.file_protocols, file, true)
+            .flat_map(|infos| infos.iter().cloned())
             .collect()
     }
 
-    /// Returns cross-file *provision-bearing* protocol ASTs for diagnostic
-    /// computation (ADR 0127 §10a; BT-3591) — the trait-flattening
+    /// The per-file entries of `map` other than `file`'s own, in the one
+    /// precedence order every "first definition wins" consumer relies on
+    /// (BT-3915): project files, then dependency files, then — when
+    /// `include_stdlib` — the preloaded stdlib files, each sorted by path.
+    /// Project before dependencies is `beamtalk build`'s order (its Pass 1
+    /// concatenates the project's protocols ahead of the dependencies'); a
+    /// plain path sort would put `_build/deps/…` ahead of `src/…`. A `HashMap`
+    /// walk would make a same-named protocol's resolution depend on hash order.
+    /// A dependency's protocol named like a stdlib protocol still comes first
+    /// here but never wins a bare `uses:` over the stdlib's: the shared
+    /// resolver (`trait_expansion::resolve_protocol_key`) skips it, as on every
+    /// other surface (BT-3915, Option A).
+    fn files_in_precedence_order<'a, T>(
+        &'a self,
+        map: &'a HashMap<Utf8PathBuf, T>,
+        file: &Utf8PathBuf,
+        include_stdlib: bool,
+    ) -> impl Iterator<Item = &'a T> {
+        let mut entries: Vec<(&Utf8PathBuf, &T)> = map
+            .iter()
+            .filter(|(path, _)| *path != file)
+            .filter(|(path, _)| include_stdlib || !self.is_stdlib_file(path))
+            .collect();
+        // Project (0), then dependencies (1), then stdlib (2).
+        let tier = |path: &Utf8PathBuf| {
+            if self.is_stdlib_file(path) {
+                2
+            } else {
+                u8::from(dependency_package_for_path(path).is_some())
+            }
+        };
+        entries.sort_by(|(a, _), (b, _)| (tier(a), a.as_str()).cmp(&(tier(b), b.as_str())));
+        entries.into_iter().map(|(_, value)| value)
+    }
+
+    /// Returns the cross-file protocol ASTs a compile path carries
+    /// ([`is_carried_protocol`](beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol))
+    /// for diagnostic computation (ADR 0127 §10a; BT-3591) — the trait-flattening
     /// counterpart to [`Self::cross_file_protocol_infos_for`]. Feeds
     /// `ProjectDiagnosticContext::pre_loaded_protocol_defs` so a
     /// cross-file/cross-package `uses:` flattens in the LSP the same way
@@ -889,10 +938,14 @@ impl ProjectIndex {
         &self,
         file: &Utf8PathBuf,
     ) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
-        self.file_protocol_defs
-            .iter()
-            .filter(|(path, _)| *path != file)
-            .flat_map(|(_, defs)| defs.iter().cloned())
+        // A preloaded stdlib file's protocols are served to a non-stdlib file
+        // by the compiler's baked stdlib tier (`stdlib_protocols`, BT-3915),
+        // as on every other surface — carrying them here too would put the
+        // stdlib's `Comparable` *ahead* of that tier, unstamped, competing
+        // with the project's own. Stdlib files still see each other's live.
+        let include_stdlib = self.is_stdlib_file(file);
+        self.files_in_precedence_order(&self.file_protocol_defs, file, include_stdlib)
+            .flat_map(|defs| defs.iter().cloned())
             .collect()
     }
 
@@ -960,10 +1013,10 @@ mod tests {
             HashMap::new()
         };
         let (plain, _) = parse(lex_with_eof("Object subclass: Plain\n  foo => 1"));
-        let _ = build_hierarchy_with_trait_origins(&plain, supply);
+        let _ = build_hierarchy_with_trait_origins(&plain, None, supply);
         assert_eq!(calls.get(), 0, "no `uses:` => no cross-file collection");
         let (with_uses, _) = parse(lex_with_eof("Object subclass: Uses\n  uses: Comparable"));
-        let _ = build_hierarchy_with_trait_origins(&with_uses, supply);
+        let _ = build_hierarchy_with_trait_origins(&with_uses, None, supply);
         assert_eq!(calls.get(), 1, "`uses:` => collected exactly once");
     }
 

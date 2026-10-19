@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3915: a user collection that `uses:` the stdlib's own `Enumerable` —
+// not a package-local trait — so every iteration message is the stdlib's
+// provision over the required `elements` snapshot. Driven by
+// adr0133enumerable_user.bt (stdlib/test/adr0133enumerable_user_test.bt) and
+// stdlib/test/adr0127stdlib_trait_test.bt.
+
+Value subclass: Adr0133EnumerableStdlib
+  uses: Enumerable(Integer)
+  field: items :: List(Integer) = #()
+
+  elements -> List(Integer) => self.items

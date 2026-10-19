@@ -2116,7 +2116,7 @@ The full grammar of a `uses:` line:
 uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)]
 ```
 
-A bare `uses: ProtocolName` resolves by first-definition-wins across all dependencies. A qualified `uses: pkg@ProtocolName` resolves only against that package's protocols, so two dependencies that each export a same-named protocol can be composed without ambiguity.
+A bare `uses: ProtocolName` resolves by first-definition-wins: the current file, then the rest of the package, then its dependencies, and last the stdlib's own traits (`Comparable`, `Enumerable`) — so any package can `uses: Enumerable(E)` without declaring a dependency, and a package's own same-named protocol takes precedence. A qualified `uses: pkg@ProtocolName` resolves only against that package's protocols, so two dependencies that each export a same-named protocol can be composed without ambiguity.
 
 One trait per `uses:` line — several traits are several lines:
 

@@ -12,7 +12,8 @@
 //! `MethodDefinition.return_type` / `ClassDefinition.class_kind` /
 //! `ClassDefinition.supervisor_kind` / `ClassDefinition.methods`:
 //!
-//! - [`trait_expansion::expand_module`](crate::semantic_analysis::trait_expansion::expand_module)
+//! - [`trait_expansion::expand_module_in_package`](crate::semantic_analysis::trait_expansion::expand_module_in_package),
+//!   as the package the analysis flattened as (`AnalysisResult::trait_package`)
 //! - [`apply_return_type_writeback_from_map`](crate::semantic_analysis::return_type_writeback::apply_return_type_writeback_from_map)
 //! - [`apply_supervisor_kind_writeback`](crate::semantic_analysis::supervisor_kind_writeback::apply_supervisor_kind_writeback)
 //! - [`apply_class_kind_writeback`](crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback)
@@ -45,11 +46,14 @@
 //! signatures — which is exactly why `hierarchy`/`method_return_types`
 //! (both keyed structurally by `(class, selector)`, not by AST identity)
 //! still apply correctly to the methods this second run splices in.
-//! `expand_module` is also idempotent on an already-flattened class (every
-//! provided selector it would add is already present, so "class wins"
-//! drops it the second time) — safe for every caller in this module's own
-//! doc, including a caller that runs the writeback trio on an
-//! already-flattened module.
+//! Flattening is idempotent on an already-flattened class only when it
+//! resolves the same protocols (every provided selector it would add is
+//! already present, so "class wins" drops it the second time). With other
+//! inputs — no carried protocols, another package — its still-present
+//! `uses:` lines can resolve elsewhere (a package's own `Comparable` falling
+//! back to the stdlib's) and splice in provisions the first run never added
+//! (BT-3915). So a caller holding an already-flattened module runs only the
+//! writeback trio, [`apply_codegen_writebacks`], never this function again.
 //!
 //! Its diagnostics are discarded here — `analyse_full`'s own run over the
 //! (structurally identical) flattened clone already reported them to
@@ -115,12 +119,31 @@ pub fn lower_module_for_codegen(
     hierarchy: &ClassHierarchy,
     method_return_types: &HashMap<MethodReturnKey, InferredType>,
     external_protocols: &HashMap<ecow::EcoString, crate::ast::ProtocolDefinition>,
+    current_package: Option<&str>,
 ) {
     // Flatten `uses:` provisions into their classes' own bodies so codegen
     // (which reads `ClassDefinition.methods` directly, with no knowledge of
     // `uses:`) emits them. Diagnostics are discarded — see the module doc's
     // "Closing the flattening/codegen boundary" for why that's safe here.
-    let (_diagnostics, _origins) = trait_expansion::expand_module(module, external_protocols);
+    let (_diagnostics, _origins) =
+        trait_expansion::expand_module_in_package(module, external_protocols, current_package);
+    apply_codegen_writebacks(module, hierarchy, method_return_types);
+}
+
+/// The writeback trio of [`lower_module_for_codegen`] alone, for a module whose
+/// `uses:` lines are *already* flattened — codegen re-inferring return types
+/// over a fuller hierarchy than its handed-off analysis saw, or over its own
+/// self-flattened clone. Flattening such a module again is not a no-op: its
+/// `uses:` lines are still there, and resolved without the carried protocols
+/// and package the first flattening had, a bare `uses: Comparable` of the
+/// package's own `Comparable` would fall back to the stdlib's and splice in
+/// provisions analysis never saw (BT-3915).
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `lower_module_for_codegen`
+pub fn apply_codegen_writebacks(
+    module: &mut Module,
+    hierarchy: &ClassHierarchy,
+    method_return_types: &HashMap<MethodReturnKey, InferredType>,
+) {
     // Writeback inferred return types into the AST so unannotated
     // methods appear in the emitted `method_return_types` map. Runs after
     // flattening so a flattened provision's own `(class, selector)` key
@@ -135,6 +158,24 @@ pub fn lower_module_for_codegen(
     // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
     // so codegen generates auto-slot methods (withX: setters).
     apply_class_kind_writeback(module, hierarchy);
+}
+
+/// [`lower_module_for_codegen`] for a driver that ran
+/// [`analyse_full`](crate::semantic_analysis::analyse_full) on `module`: the
+/// hierarchy, return types, carried protocols *and* package all come from
+/// `analysis`, so the re-flattening resolves every `uses:` line exactly as the
+/// analysis did (BT-3915) — the "same flattening" this module's doc relies on.
+pub fn lower_analysed_module_for_codegen(
+    module: &mut Module,
+    analysis: &crate::semantic_analysis::AnalysisResult,
+) {
+    lower_module_for_codegen(
+        module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+        analysis.trait_package.as_deref(),
+    );
 }
 
 #[cfg(test)]
@@ -174,6 +215,7 @@ mod tests {
             &hierarchy,
             &method_return_types,
             &HashMap::new(),
+            None,
         );
 
         let web_app = &module.classes[0];
@@ -209,7 +251,13 @@ mod tests {
                        uses: Describable\n";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
+        lower_module_for_codegen(
+            &mut module,
+            &hierarchy,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
 
         let report = &module.classes[0];
         assert!(
@@ -228,13 +276,11 @@ mod tests {
         );
     }
 
-    /// Calling `lower_module_for_codegen` a second time on an
-    /// already-flattened module (mirroring `generate_module_with_warnings`'s
-    /// own re-derive path, which can call it again on a module this
-    /// function already flattened once) must not duplicate the provision —
-    /// `expand_module`'s "class wins" rule already makes it idempotent
-    /// (`trait_expansion`'s own module doc), this just pins that through
-    /// the driver-facing entry point.
+    /// Calling `lower_module_for_codegen` a second time, with the same inputs,
+    /// on an already-flattened module must not duplicate the provision —
+    /// `expand_module`'s "class wins" rule makes it idempotent with the same
+    /// inputs (`trait_expansion`'s own module doc), this just pins that
+    /// through the driver-facing entry point.
     #[test]
     fn flattening_uses_twice_does_not_duplicate_the_provision() {
         let src = "Protocol define: Describable\n  \
@@ -243,8 +289,20 @@ mod tests {
                        uses: Describable\n";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
+        lower_module_for_codegen(
+            &mut module,
+            &hierarchy,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        lower_module_for_codegen(
+            &mut module,
+            &hierarchy,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
 
         let report = &module.classes[0];
         let count = report
@@ -266,7 +324,13 @@ mod tests {
         let src = "Object subclass: Foo\n  bar => 42";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
+        lower_module_for_codegen(
+            &mut module,
+            &hierarchy,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
         assert!(
             module.classes[0].methods[0].return_type.is_none(),
             "Expected no writeback without a precomputed map entry"

@@ -1690,13 +1690,16 @@ impl LanguageService for SimpleLanguageService {
         // `MethodInfo::origin` here, at the source that builds `MethodInfo`
         // for the LSP path, so hover needn't re-derive it.
         let (class_hierarchy_result, hierarchy_diags) =
-            crate::project_index::build_hierarchy_with_trait_origins(&module, || {
-                self.project_index
-                    .cross_file_protocol_defs_for(&file)
-                    .into_iter()
-                    .map(|p| (p.name.name.clone(), p))
-                    .collect()
-            });
+            crate::project_index::build_hierarchy_with_trait_origins(
+                &module,
+                Some(self.project_index.alias_package_for_file(&file).as_str()),
+                || {
+                    // First definition wins, as in analysis (BT-3915).
+                    beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+                        self.project_index.cross_file_protocol_defs_for(&file),
+                    )
+                },
+            );
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
             // Register protocol definitions as synthetic class entries
             // so LSP features (completions, has_class) work with protocol names.
@@ -1746,7 +1749,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index
                 .update_file_protocols(file.clone(), protocol_infos);
 
-            // Track this file's provision-bearing protocols' full ASTs
+            // Track this file's carried protocols' full ASTs
             // (BT-3591) so a cross-file/cross-package `uses:` flattens
             // during LSP diagnostics the same way `beamtalk build` already
             // does, and record which protocols this file's own classes
@@ -1756,7 +1759,9 @@ impl LanguageService for SimpleLanguageService {
             let protocol_defs: Vec<_> = module
                 .protocols
                 .iter()
-                .filter(|p| !p.provided_methods.is_empty())
+                .filter(|p| {
+                    beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p)
+                })
                 .cloned()
                 .collect();
             self.project_index
@@ -1845,7 +1850,7 @@ impl LanguageService for SimpleLanguageService {
                 // "unknown protocol" — parity with the CLI's `build`/`lint`
                 // wiring, mirrors `cross_file_classes` above.
                 let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
-                // Cross-file/cross-package provision-bearing protocol ASTs
+                // Cross-file/cross-package carried protocol ASTs
                 // (BT-3591), so a cross-file `uses:` flattens during LSP
                 // diagnostics instead of reporting "unknown protocol" —
                 // parity with the CLI's `build`/`lint` wiring, mirrors

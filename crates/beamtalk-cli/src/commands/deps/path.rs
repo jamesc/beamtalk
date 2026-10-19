@@ -48,13 +48,14 @@ pub struct ResolvedDependency {
     /// modifier at the AST level, so every declared protocol is exported —
     /// unlike `alias_infos`, there is no seeding-boundary filter to apply.
     pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from this dependency's
+    /// Full ASTs of carried protocols
+    /// (`trait_expansion::is_carried_protocol`) from this dependency's
     /// source files (ADR 0127 §10a; BT-3591) — the trait-flattening
     /// counterpart to `protocol_infos` above. Lets a consumer's cross-package
     /// `uses: <this dep>@Name` flatten the protocol's provided methods,
     /// rather than reporting "no source available". Empty when this
     /// dependency's source is unavailable (compiled-only, not fetched) or
-    /// defines no provision-bearing protocol.
+    /// defines no carried protocol.
     pub protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Source identity of each protocol in `protocol_defs` — the dependency
     /// checkout file it was parsed from and this dependency's package name
@@ -388,6 +389,15 @@ fn compile_dependency_with_context(
     prior_deps: &[ResolvedDependency],
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
     let ebin_path = BuildLayout::new(project_root).dep_ebin_dir(dep_name);
+    // Compile the dependency as its own package, not the root's (BT-3915):
+    // its classes, aliases and protocols are stamped `dep_name`, so its own
+    // `Comparable` is the current package's (shadowing the stdlib's for a bare
+    // `uses: Comparable`, as its exported `ClassInfo`s say) and its own
+    // `internal` classes/aliases are same-package for E0401/E0402.
+    let options = &beamtalk_core::CompilerOptions {
+        current_package: Some(dep_name.to_owned()),
+        ..options.clone()
+    };
 
     // Create the ebin directory
     std::fs::create_dir_all(&ebin_path)
@@ -685,7 +695,7 @@ impl DepProtocolAliasMetadata {
     }
 }
 
-/// The provision-bearing protocol ASTs of `prior_deps`, in order — what a
+/// The carried protocol ASTs of `prior_deps`, in order — what a
 /// dependency compiled after them may `uses:` (BT-3678).
 fn prior_protocol_defs(
     prior_deps: &[ResolvedDependency],
@@ -719,7 +729,7 @@ fn extract_dep_protocol_alias_metadata(
         for protocol in module
             .protocols
             .iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
             protocol_sources.insert(
                 protocol.name.name.clone(),
@@ -735,11 +745,11 @@ fn extract_dep_protocol_alias_metadata(
                 module,
             ),
         );
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
         // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(
-            beamtalk_core::semantic_analysis::trait_expansion::provision_bearing_protocols(
+            beamtalk_core::semantic_analysis::trait_expansion::carried_protocols(
                 module,
                 Some(dep_name),
             ),
