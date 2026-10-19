@@ -211,7 +211,10 @@ start_peer(NamePrefix, Opts) ->
     Host = ?PEER_HOST,
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
-    CookieArgs = ["-setcookie", atom_to_list(erlang:get_cookie())],
+    %% Warning level so an ERTS dist-rejection warning on the peer shows (BT-3937).
+    CookieArgs = [
+        "-setcookie", atom_to_list(erlang:get_cookie()), "-kernel", "logger_level", "warning"
+    ],
     ExtraArgs = maps:get(extra_args, Opts, []),
     PeerOpts0 = #{
         name => PeerName,
@@ -337,7 +340,7 @@ report_nodedown(PeerNode, Info) ->
                 nodedown_reason => Reason,
                 hint =>
                     "'killed' means the emulator tore the connection down itself "
-                    "(BT-3929); rerun with logger_level warning to see why",
+                    "(BT-3929); see beamtalk_test_warnings.log (BT-3937) for the emulator warning",
                 domain => [beamtalk, runtime]
             })
     end.
