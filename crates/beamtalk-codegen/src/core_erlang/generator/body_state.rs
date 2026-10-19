@@ -246,6 +246,7 @@ mod tests {
         assert!(generator.rebind_frames.is_empty());
         assert_eq!(generator.block_depth, 0);
         assert!(generator.class_var_capture.is_none());
+        assert!(generator.current_nlr_token().is_none());
     }
 
     #[test]
