@@ -6,6 +6,7 @@
 // supervisor treats as a crash (restart) versus a clean stop (no restart).
 
 Actor subclass: StopWithTransientActor
+
   class supervisionPolicy -> #permanent | #transient | #temporary => #transient
 
   ping => #pong

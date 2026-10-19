@@ -1233,7 +1233,7 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-3967: wraps a gen_server callback body so its return value passes
+    /// BT-3967: wraps a `gen_server` callback body so its return value passes
     /// through `beamtalk_actor:apply_pending_stop/1`.
     ///
     /// `self stopWith: reason` inside a method cannot call

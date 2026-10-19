@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3967: every generated gen_server callback that runs a Beamtalk
+//! BT-3967: every generated `gen_server` callback that runs a Beamtalk
 //! dispatch passes its return value through
 //! `beamtalk_actor:apply_pending_stop/1`, so a `self stopWith: reason`
 //! issued during the dispatch takes effect once the callback returns —

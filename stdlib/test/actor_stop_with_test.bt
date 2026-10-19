@@ -114,10 +114,11 @@ TestCase subclass: ActorStopWithTest
     self assert: (child stopWith: #boom) equals: #ok
     self deny: child isAlive
     restarted := nil
-    50 timesRepeat: [
-      restarted := (sup which: StopWithTransientActor) unwrap
-      (restarted isNil or: [restarted =:= child]) ifTrue: [Timer sleep: 10]
-    ]
+    50
+      timesRepeat: [
+        restarted := (sup which: StopWithTransientActor) unwrap
+        (restarted isNil or: [restarted =:= child]) ifTrue: [Timer sleep: 10]
+      ]
     self deny: restarted isNil
     self deny: restarted =:= child
     sup stop

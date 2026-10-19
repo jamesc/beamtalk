@@ -1978,7 +1978,9 @@ with it. A return value that is already a `{stop, ...}` (e.g. a failed
 `initialize`) wins over the request. With no pending request the value is
 returned unchanged.
 """.
--spec apply_pending_stop(Result) -> Result | {stop, term(), map()} | {stop, term(), term(), map()} when
+-spec apply_pending_stop(Result) ->
+    Result | {stop, term(), map()} | {stop, term(), term(), map()}
+when
     Result :: term().
 apply_pending_stop(Result) ->
     case erase(?PENDING_STOP_KEY) of
