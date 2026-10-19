@@ -175,6 +175,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &class_metadata,
         &protocol_modules,
         alias_sources,
+        &protocol_file_names,
     )?;
 
     println!("Built {} stdlib modules", source_files.len());
@@ -191,6 +192,7 @@ fn write_stdlib_generated_outputs(
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
     alias_sources: Vec<AliasSource>,
+    protocol_file_names: &[String],
 ) -> Result<()> {
     // `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
     // same `build_alias_metadata` extraction the ordinary `beamtalk build`
@@ -225,7 +227,7 @@ fn write_stdlib_generated_outputs(
     generate_builtins_rs(
         class_metadata,
         &alias_source_texts_sorted_by_name(alias_sources),
-        &protocol_file_names,
+        protocol_file_names,
     )?;
 
     // Generate the Erlang-side twin of the same builtin-class list,
