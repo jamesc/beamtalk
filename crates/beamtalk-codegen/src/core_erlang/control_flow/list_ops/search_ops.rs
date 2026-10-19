@@ -964,12 +964,12 @@ impl CoreErlangGenerator {
                 &fold_result
             ),
             bind_detect_found_or_raise_doc(
-                    &found_result,
-                    &fold_result,
-                    &list_var,
-                    &class_var,
-                    no_match_var,
-                ),
+                &found_result,
+                &fold_result,
+                &list_var,
+                &class_var,
+                no_match_var,
+            ),
             "let ",
             leaf::var(state_out.clone()),
             " = call 'erlang':'element'(3, ",

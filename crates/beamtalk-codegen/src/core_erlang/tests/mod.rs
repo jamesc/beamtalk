@@ -230,5 +230,4 @@ mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;
 mod verifier_surfacing;
-mod scratch_bt3911;
 mod while_condition_class_method;

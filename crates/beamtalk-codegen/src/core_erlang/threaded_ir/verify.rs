@@ -16,9 +16,9 @@ use std::collections::HashMap;
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
-    LOCAL_STATE_KEY_PREFIX, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
+    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 

@@ -835,8 +835,8 @@ reports the same message at the same span. No operation is surface-specific.
   `StateAcc`; the REPL answers right and is unchanged); and a REPL `match:`
   arm that writes an outer local, which now draws the BT-3817 `match:` arm
   error methods draw instead of the BT-3864 value-position error
-  (maintainer-approved REPL output change; it was already rejected). BT-3911
-  and BT-3912 lower the shapes and delete the rows.
+  (maintainer-approved REPL output change; it was already rejected). BT-3947
+  and BT-3912 lower the shapes and delete the rows (BT-3911 lowered the loop-condition one).
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
   hand a later one a writing block to send `value`.

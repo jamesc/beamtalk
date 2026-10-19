@@ -996,7 +996,7 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
-        fixed_by: "BT-3911",
+        fixed_by: "BT-3947",
     },
 ];
 

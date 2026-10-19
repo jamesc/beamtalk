@@ -2946,7 +2946,7 @@ t                                             // => 0, the write inside the rais
 
 This is a deliberate departure from Pharo, where temporaries are shared cells and a write made before the raise survives. On BEAM the protected region's locals are a value that is returned only when the block completes. A block that does not raise keeps all its writes.
 
-**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. The REPL reports the same error. BT-3875 (lowered by BT-3911) makes `match:` arms producers everywhere.
+**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. The REPL reports the same error. BT-3875 (lowered by BT-3947) makes `match:` arms producers everywhere.
 
 **Position errors.** Some combinations of a construct, the position it sits in and the method kind are not yet lowered as producers and are rejected with a second, temporary error rather than being allowed to drop the write:
 

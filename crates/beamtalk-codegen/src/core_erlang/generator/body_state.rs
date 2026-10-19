@@ -172,15 +172,12 @@ mod tests {
         generator.in_loop_body = true;
         generator.active_branch_frame = 7;
         generator.loop_mode.in_direct_params_loop = true;
-        generator
-            .local_producer_sites
-            .insert(Span::new(1, 2));
+        generator.local_producer_sites.insert(Span::new(1, 2));
         generator.fold_self_slot_consumer = Some(Span::new(3, 4));
         generator.in_fold_frame = true;
-        generator.rebind_frames.insert(
-            FrameId::new(7),
-            RebindFrame::implicit_root(),
-        );
+        generator
+            .rebind_frames
+            .insert(FrameId::new(7), RebindFrame::implicit_root());
         generator.block_depth = 2;
         generator.class_var_capture = Some("CVCap".to_string());
     }

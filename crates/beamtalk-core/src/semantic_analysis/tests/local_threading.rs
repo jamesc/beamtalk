@@ -1638,7 +1638,9 @@ fn block_local_writes_are_accepted_in_every_frame() {
             "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]]\nt"
         ),
         format!("2 timesRepeat: [#(1, 2) do: [:z | u := 0. {detect}. t := u]]\nt"),
-        format!("i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"),
+        format!(
+            "i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"
+        ),
         format!("i := 0\n[i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]\nt"),
     ] {
         for src in [in_class(&body), in_value(&body), in_actor(&body)] {
@@ -3612,10 +3614,10 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
     assert!(residual_messages(input, Some(&["f"])).is_empty(), "{input}");
 }
 
-/// PIN-BUG BT-3911 (closes BT-3875): a REPL `match:` arm that writes an
+/// PIN-BUG BT-3947 (closes BT-3875): a REPL `match:` arm that writes an
 /// outer local draws the same `match:` arm error as a method (BT-3817), not
 /// the value-position error it drew before BT-3909 (maintainer-approved REPL
-/// output change), and only that one. BT-3911 lowers `match:` arms as frames,
+/// output change), and only that one. BT-3947 lowers `match:` arms as frames,
 /// deletes the `MatchArmWrite` row and flips this to accepted.
 #[test]
 fn residual_repl_match_arm_write_is_the_match_arm_error() {

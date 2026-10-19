@@ -41,7 +41,10 @@ const CONTEXTS: &[(&str, &str)] = &[
 const CONSTRUCTS: &[(&str, &str)] = &[
     ("ifTrue", "c ifTrue: [x := 1. x]"),
     ("ifFalse", "c ifFalse: [x := 1. x]"),
-    ("ifTrueIfFalse", "c ifTrue: [x := 1. x] ifFalse: [y := 2. y]"),
+    (
+        "ifTrueIfFalse",
+        "c ifTrue: [x := 1. x] ifFalse: [y := 2. y]",
+    ),
     ("ifNil", "c ifNil: [x := 1. x]"),
     ("and", "c and: [x := 1. x > 0]"),
     ("or", "c or: [x := 1. x > 0]"),
