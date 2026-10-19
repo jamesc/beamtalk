@@ -402,18 +402,25 @@ impl CoreErlangGenerator {
     /// (`apply <fun> ()`) that discards the mutation (or, once wrapped and
     /// handed to a generic runtime dispatch, crashes).
     ///
-    /// Falls back to the ordinary closure+apply shape — wrapped in the same
+    /// Falls back to applying the callable — wrapped in the same
     /// `{value, state_var}` tuple shape so callers don't need to
     /// distinguish — when `if_none` is not a literal block (e.g. a variable
     /// holding one): there is no block AST to inline, so state cannot
-    /// thread through an opaque callable value.
+    /// thread through an opaque callable value. The callable goes through
+    /// the shared `non_literal_callable_doc_seeded` wrapper at arity 0,
+    /// seeded from `state_var` (the fold's final state).
     pub(super) fn generate_if_none_branch_tuple(
         &mut self,
         if_none: &Expression,
         state_var: &str,
     ) -> Result<Document<'static>> {
         let Expression::Block(block) = if_none.unwrap_parens() else {
-            let none_code = self.expression_doc(if_none)?;
+            let none_code = self.non_literal_callable_doc_seeded(
+                if_none,
+                "detect:ifNone:",
+                0,
+                Some(state_var),
+            )?;
             let none_result = self.fresh_temp_var("NoneResult");
             return Ok(docvec![
                 "let ",
@@ -513,7 +520,7 @@ impl CoreErlangGenerator {
         let pred_var = self.fresh_temp_var("temp");
         let pred_code = self.list_op_callable_doc(predicate, "detect:ifNone:", 1)?;
         let none_var = self.fresh_temp_var("temp");
-        let none_code = self.expression_doc(if_none)?;
+        let none_code = self.list_op_callable_doc(if_none, "detect:ifNone:", 0)?;
 
         Ok(docvec![
             "let ",

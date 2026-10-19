@@ -148,6 +148,16 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: pool pureAnySatisfy equals: true
     self assert: pool pureAllSatisfy equals: true
     self assert: pool pureArrCollect equals: #[2, 4, 6, 8]
+    self assert: pool pureReject equals: #(1, 2)
+    self assert: pool pureFlatMap equals: #(1, 1, 1, 1)
+    self assert: pool pureTakeWhile equals: #(1, 2)
+    self assert: pool pureDropWhile equals: #(3, 4)
+    self assert: pool purePartitionSize equals: 2
+    self assert: pool pureGroupBySize equals: 2
+    self assert: pool pureSort equals: #(4, 3, 2, 1)
+    self assert: pool pureIfNone equals: 7
+    // The `ifNone:` handler reads the state the predicate's fold left.
+    self assert: pool pureIfNoneAfterFold equals: 4
 
   // PIN-BUG (BT-3922): the same HOMs with a block that writes `self.total`.
   // The ADR 0128 fold kept the write; since BT-3908 it raises rather than
@@ -163,6 +173,15 @@ TestCase subclass: ActorSelfSendHomTest
     self should: [pool tallyAnySatisfy] raise: #stateful_block_dispatch
     self should: [pool tallyAllSatisfy] raise: #stateful_block_dispatch
     self should: [pool tallyArrCollect] raise: #stateful_block_dispatch
+    self should: [pool tallyReject] raise: #stateful_block_dispatch
+    self should: [pool tallyFlatMap] raise: #stateful_block_dispatch
+    self should: [pool tallyTakeWhile] raise: #stateful_block_dispatch
+    self should: [pool tallyDropWhile] raise: #stateful_block_dispatch
+    self should: [pool tallyPartitionSize] raise: #stateful_block_dispatch
+    self should: [pool tallyGroupBySize] raise: #stateful_block_dispatch
+    self should: [pool tallySort] raise: #stateful_block_dispatch
+    self should: [pool tallyIfNone] raise: #stateful_block_dispatch
+    self should: [pool tallyIfNoneAfterFold] raise: #stateful_block_dispatch
 
   // The error names the self-send selector the block was passed to, and its
   // hint the collection message it was forwarded to.

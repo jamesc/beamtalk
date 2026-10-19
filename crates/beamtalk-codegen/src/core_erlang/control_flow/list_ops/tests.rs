@@ -1366,6 +1366,41 @@ fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
 }
 
 #[test]
+fn test_every_list_op_callable_goes_through_the_shared_wrapper() {
+    // BT-3908: every callable argument of every list op, at the arity the op
+    // calls it with (the Tier 2 check is `arity + 1`), in actor and value
+    // contexts, plus the actor state guard.
+    for (body, tier2_arity) in [
+        ("items reject: block", 2),
+        ("items flatMap: block", 2),
+        ("items takeWhile: block", 2),
+        ("items dropWhile: block", 2),
+        ("items partition: block", 2),
+        ("items groupBy: block", 2),
+        ("items sort: block", 3),
+        ("items detect: [:x | x > 2] ifNone: block", 1),
+    ] {
+        for class in ["Actor", "Value"] {
+            let code = codegen(&format!(
+                "{class} subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
+            ));
+            assert!(
+                code.contains(&format!(
+                    ", {tier2_arity}) of <'true'> when 'true' -> fun ("
+                )),
+                "{class} `{body}` should wrap a Tier 2 callable. Got:\n{code}"
+            );
+            if class == "Actor" {
+                assert!(
+                    code.contains("'stateful_block_dispatch'"),
+                    "{class} `{body}` should guard actor state changes. Got:\n{code}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn test_actor_non_literal_callable_uses_the_plain_list_op() {
     // Every collection message that took the ADR 0128 fold now reaches the
     // same plain lowering as in a value-type method: the BIF or runtime

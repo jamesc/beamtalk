@@ -34,6 +34,19 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
+/// The Beamtalk selector of a simple list op, from the `lists` function it
+/// lowers to (`foreach` → `do:`, `map` → `collect:`, `filter` → `select:`);
+/// any other name is already the selector. The one table the plain footer's
+/// fallback send and the non-literal-callable wrapper's error both read.
+fn list_op_selector(operation: &str) -> &str {
+    match operation {
+        "foreach" => "do:",
+        "map" => "collect:",
+        "filter" => "select:",
+        other => other,
+    }
+}
+
 // ─── BodyKind ─────────────────────────────────────────────────────────────────
 
 /// Controls how `generate_threaded_loop_body` handles the final expression.
@@ -221,12 +234,7 @@ impl CoreErlangGenerator {
                 &format!("'lists':'{operation}'"),
                 body.span(),
             );
-            let selector = match operation {
-                "foreach" => "do:",
-                "map" => "collect:",
-                _ => "select:",
-            };
-            self.non_literal_callable_doc(body, selector, 1)?
+            self.non_literal_callable_doc(body, list_op_selector(operation), 1)?
         };
 
         Ok(Self::generate_simple_list_op_footer(
@@ -262,13 +270,33 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// The callable argument of a list op that calls it with `arity`
+    /// arguments: a literal block compiles as itself (the caller has already
+    /// sent a mutating one down its `_with_mutations` path); anything else
+    /// goes through [`Self::non_literal_callable_doc`].
+    pub(in crate::core_erlang) fn list_op_callable_doc(
+        &mut self,
+        callable: &Expression,
+        list_selector: &str,
+        arity: usize,
+    ) -> Result<Document<'static>> {
+        if Self::extract_block_literal(callable).is_some() {
+            self.expression_doc(callable)
+        } else {
+            self.non_literal_callable_doc(callable, list_selector, arity)
+        }
+    }
+
     /// The one lowering of a non-literal (opaque) callable handed to a list
-    /// op (`do:`, `collect:`, `select:`, `inject:into:`, `detect:`,
-    /// `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:`), used in
-    /// every context since ADR 0133 removed the ADR 0128 actor fold (BT-3908).
-    /// `arity` is the number of arguments the list op calls it with
-    /// (`inject:into:` 2, the rest 1); `list_selector` names the list op for
-    /// the error.
+    /// op: every callable argument of every list op in this module (`do:`,
+    /// `collect:`, `select:`, `reject:`, `inject:into:`, `detect:`,
+    /// `detect:ifNone:` and its `ifNone:` handler, `count:`, `anySatisfy:`,
+    /// `allSatisfy:`, `flatMap:`, `takeWhile:`, `dropWhile:`, `partition:`,
+    /// `groupBy:`, `sort:`), used in every context since ADR 0133 removed the
+    /// ADR 0128 actor fold (BT-3908). `arity` is the number of arguments the
+    /// list op calls it with (`inject:into:` and `sort:` 2, the `ifNone:`
+    /// handler 0, the rest 1); `list_selector` names the list op for the
+    /// error.
     ///
     /// A runtime arity check: a callable of `arity` arguments (a Tier 1
     /// block) and anything that is not a fun pass through unchanged. A
@@ -309,28 +337,26 @@ impl CoreErlangGenerator {
     /// NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
     /// terminate the fun — the Body expression ends the fun. Two `end`s close
     /// the two nested `case` expressions.
-    /// The callable argument of a list op that calls it with `arity`
-    /// arguments: a literal block compiles as itself (the caller has already
-    /// sent a mutating one down its `_with_mutations` path); anything else
-    /// goes through [`Self::non_literal_callable_doc`].
-    pub(in crate::core_erlang) fn list_op_callable_doc(
-        &mut self,
-        callable: &Expression,
-        list_selector: &str,
-        arity: usize,
-    ) -> Result<Document<'static>> {
-        if Self::extract_block_literal(callable).is_some() {
-            self.expression_doc(callable)
-        } else {
-            self.non_literal_callable_doc(callable, list_selector, arity)
-        }
-    }
-
     pub(in crate::core_erlang) fn non_literal_callable_doc(
         &mut self,
         callable: &Expression,
         list_selector: &str,
         arity: usize,
+    ) -> Result<Document<'static>> {
+        self.non_literal_callable_doc_seeded(callable, list_selector, arity, None)
+    }
+
+    /// [`Self::non_literal_callable_doc`] with the actor state the Tier 2
+    /// arm is seeded from (and compared against) named by the caller: the
+    /// `ifNone:` handler after a `detect:ifNone:` fold runs on the fold's
+    /// final state, not the state before the fold. `None` is the current
+    /// field-read state.
+    pub(in crate::core_erlang) fn non_literal_callable_doc_seeded(
+        &mut self,
+        callable: &Expression,
+        list_selector: &str,
+        arity: usize,
+        seed_state: Option<&str>,
     ) -> Result<Document<'static>> {
         let callable_var = self.fresh_temp_var("Callable");
         let raw_code = self.expression_doc(callable)?;
@@ -338,7 +364,8 @@ impl CoreErlangGenerator {
         let wrap_tuple = self.fresh_temp_var("T");
         let wrap_res = self.fresh_temp_var("WRes");
         let (seed, seed_preamble, result) = if self.in_actor_instance_context() {
-            let seed = self.current_field_read_state_var();
+            let seed =
+                seed_state.map_or_else(|| self.current_field_read_state_var(), str::to_string);
             let wrap_state = self.fresh_temp_var("WSt");
             let (error_selector, hint) = self.forwarded_state_change_error(list_selector);
             let raise =
@@ -429,12 +456,7 @@ impl CoreErlangGenerator {
         body_code: Document<'static>,
         operation: &str,
     ) -> Document<'static> {
-        let selector = match operation {
-            "foreach" => "do:",
-            "map" => "collect:",
-            "filter" => "select:",
-            _ => operation,
-        };
+        let selector = list_op_selector(operation);
 
         docvec![
             "let ",

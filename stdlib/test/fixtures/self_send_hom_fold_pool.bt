@@ -4,8 +4,10 @@
 // An Actor whose user-defined HOMs forward an OPAQUE (non-literal) block
 // across a self-send straight to a stdlib collection primitive, for the
 // operators beyond `do:`/`collect:`/`select:` (`inject:into:`, `detect:`,
-// `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:`) and for
-// `Array`/`Set` receivers (BT-3615).
+// `detect:ifNone:` and its `ifNone:` handler, `count:`, `anySatisfy:`,
+// `allSatisfy:`, `reject:`, `flatMap:`, `takeWhile:`, `dropWhile:`,
+// `partition:`, `groupBy:`, `sort:`) and for `Array`/`Set` receivers
+// (BT-3615, BT-3908).
 //
 // Since ADR 0133 removed the ADR 0128 fold (BT-3908), every forwarded
 // callable goes through the one arity-normalizing wrapper
@@ -77,6 +79,34 @@ Actor subclass: SelfSendHomFoldPool
     [(self.items count: block) > i] whileTrue: [i := i + 1]
     i
 
+  sealed fwdReject: block => self.items reject: block
+
+  sealed fwdFlatMap: block => self.items flatMap: block
+
+  sealed fwdTakeWhile: block => self.items takeWhile: block
+
+  sealed fwdDropWhile: block => self.items dropWhile: block
+
+  sealed fwdPartitionSize: block => (self.items partition: block) size
+
+  sealed fwdGroupBySize: block => (self.items groupBy: block) size
+
+  sealed fwdSort: block => self.items sort: block
+
+  sealed fwdIfNone: noneBlock =>
+    self.items detect: [:x | x > 20] ifNone: noneBlock
+
+  // The predicate writes a field, so this `detect:ifNone:` takes the
+  // mutation-threading fold and its `ifNone:` handler runs on the fold's
+  // final state.
+  sealed fwdIfNoneAfterFold: noneBlock =>
+    self.items
+      detect: [:x |
+        self.total := self.total + 1
+        x > 20
+      ]
+      ifNone: noneBlock
+
   // ── callers inside the actor (BT-3908) ──────────────────────────────────
   pureInject => self fwdInject: 0 into: [:a :x | a + x]
 
@@ -141,6 +171,89 @@ Actor subclass: SelfSendHomFoldPool
       arrCollect: [:x |
         self.total := self.total + 1
         x * 2
+      ]
+
+  pureReject => self fwdReject: [:x | x > 2]
+
+  pureFlatMap => self fwdFlatMap: [:x | #(1)]
+
+  pureTakeWhile => self fwdTakeWhile: [:x | x < 3]
+
+  pureDropWhile => self fwdDropWhile: [:x | x < 3]
+
+  purePartitionSize => self fwdPartitionSize: [:x | x > 2]
+
+  pureGroupBySize => self fwdGroupBySize: [:x | x isEven]
+
+  pureSort => self fwdSort: [:a :b | a > b]
+
+  pureIfNone => self fwdIfNone: [7]
+
+  pureIfNoneAfterFold =>
+    self.total := 0
+    self fwdIfNoneAfterFold: [self.total]
+
+  tallyReject =>
+    self
+      fwdReject: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyFlatMap =>
+    self
+      fwdFlatMap: [:x |
+        self.total := self.total + 1
+        #(1)
+      ]
+
+  tallyTakeWhile =>
+    self
+      fwdTakeWhile: [:x |
+        self.total := self.total + 1
+        x < 3
+      ]
+
+  tallyDropWhile =>
+    self
+      fwdDropWhile: [:x |
+        self.total := self.total + 1
+        x < 3
+      ]
+
+  tallyPartitionSize =>
+    self
+      fwdPartitionSize: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyGroupBySize =>
+    self
+      fwdGroupBySize: [:x |
+        self.total := self.total + 1
+        x isEven
+      ]
+
+  tallySort =>
+    self
+      fwdSort: [:a :b |
+        self.total := self.total + 1
+        a > b
+      ]
+
+  tallyIfNone =>
+    self
+      fwdIfNone: [
+        self.total := self.total + 1
+        7
+      ]
+
+  tallyIfNoneAfterFold =>
+    self
+      fwdIfNoneAfterFold: [
+        self.total := self.total + 1
+        7
       ]
 
 // BT-3615's other callers, a block that assigns a captured local through each

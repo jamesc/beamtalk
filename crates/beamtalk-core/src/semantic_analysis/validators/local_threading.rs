@@ -2289,8 +2289,9 @@ impl<'d> Walker<'d> {
     /// The ADR 0133 check for one send: its literal block arguments and
     /// receiver. `inlined` is false for a cascade message, which codegen never
     /// inlines; `dispatched` is true for an actor self-send of a collection
-    /// message ([`Self::is_actor_self_send_fold`]), whose block escapes. A block passed to any other method escapes, an actor self-send
-    /// to a `sealed` method of the same class included (ADR 0133 retires the
+    /// message ([`Self::is_actor_self_send_fold`]), whose block escapes. A
+    /// block passed to any other method escapes, an actor self-send to a
+    /// `sealed` method of the same class included (ADR 0133 retires the
     /// BT-912/BT-3755 exemption).
     fn check_send(
         &mut self,
