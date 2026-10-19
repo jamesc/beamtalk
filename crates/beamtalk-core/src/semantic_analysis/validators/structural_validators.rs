@@ -823,6 +823,7 @@ mod tests {
             extending: None,
             methods: vec![],
             class_methods: vec![],
+            package: None,
             span: test_span(),
 
             provided_selectors: vec![],

@@ -19,6 +19,9 @@ use std::collections::HashMap;
 
 use ecow::EcoString;
 
+use crate::semantic_analysis::stdlib_protocols;
+use crate::source_analysis::Diagnostic;
+
 /// The source file a provision-bearing protocol was parsed from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtocolSource {
@@ -36,3 +39,94 @@ pub struct ProtocolSource {
 
 /// Protocol name → [`ProtocolSource`].
 pub type ProtocolSourceMap = HashMap<EcoString, ProtocolSource>;
+
+/// Collapses the per-user copies of a shared flattened-provision diagnostic
+/// (ADR 0127 §3, "Source locations") to one
+/// ([`merge_provision_diagnostics`](crate::source_analysis::merge_provision_diagnostics)),
+/// so a provision shared by A and B is reported once with a "while flattening
+/// into A, B" note. Untagged diagnostics keep their order and come first.
+/// Shared by every surface that reports diagnostics per file (CLI `build`/
+/// `lint`, MCP `lint`/`diagnostic_summary`).
+#[must_use]
+pub fn dedupe_provision_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let (tagged, mut rest): (Vec<_>, Vec<_>) =
+        diagnostics.into_iter().partition(|d| d.provision.is_some());
+    rest.extend(crate::source_analysis::merge_provision_diagnostics(tagged));
+    rest
+}
+
+/// The file a provision diagnostic is reported against — its spans are
+/// offsets into the protocol's file, not the using class's: the protocol's
+/// path and text, `<stdlib Name>` (with the stdlib's text) for the stdlib's
+/// own protocol, or `<protocol Name>` (no text) when the protocol's source
+/// identity is not carried. `None` for a diagnostic not raised in a provision.
+#[must_use]
+pub fn provision_report_target<'a>(
+    diagnostic: &Diagnostic,
+    protocol_sources: &'a ProtocolSourceMap,
+) -> Option<(String, &'a str)> {
+    let origin = diagnostic.provision.as_ref()?;
+    // A provision flattened from the stdlib's own protocol (BT-3915, stamped
+    // by analysis) is reported against the stdlib's text, never against a
+    // same-named carried protocol, and labelled as the stdlib's — its
+    // repository path (`stdlib/src/…`) names no file in a user's project.
+    if stdlib_protocols::is_stdlib_package(origin.package.as_deref()) {
+        let text = stdlib_protocols::stdlib_protocol_source(&origin.protocol)
+            .map_or("", |src| src.text.as_str());
+        return Some((format!("<stdlib {}>", origin.protocol), text));
+    }
+    let found = protocol_sources.get(&origin.protocol);
+    Some(match found {
+        Some(src) => (
+            src.path
+                .as_deref()
+                .map_or_else(|| format!("<protocol {}>", origin.protocol), str::to_string),
+            src.text.as_str(),
+        ),
+        None => (format!("<protocol {}>", origin.protocol), ""),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source_analysis::Span;
+
+    /// BT-3915: a provision diagnostic renders against the stdlib file only
+    /// when analysis stamped it as resolved to the stdlib's protocol — a
+    /// user's own `Comparable` with no carried source never borrows the
+    /// stdlib's file, and a stdlib one never borrows a carried same-named one.
+    #[test]
+    fn provision_diagnostic_uses_the_stdlib_file_only_when_stamped_stdlib() {
+        let diag = || {
+            Diagnostic::error("in a provision", Span::new(0, 1))
+                .with_provision_origin("Comparable", "Rank")
+        };
+        let mut stamped = diag();
+        if let Some(origin) = stamped.provision.as_mut() {
+            origin.package = Some("stdlib".into());
+        }
+        let carried: ProtocolSourceMap = [(
+            "Comparable".into(),
+            ProtocolSource {
+                path: Some("src/comparable.bt".into()),
+                text: "Protocol define: Comparable\n".into(),
+                package: None,
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let (path, _) = provision_report_target(&diag(), &ProtocolSourceMap::new()).unwrap();
+        assert_eq!(path, "<protocol Comparable>");
+        let (path, _) = provision_report_target(&diag(), &carried).unwrap();
+        assert_eq!(path, "src/comparable.bt");
+        let (path, text) = provision_report_target(&stamped, &carried).unwrap();
+        assert_eq!(path, "<stdlib Comparable>");
+        assert!(text.contains("Protocol define: Comparable"));
+        assert!(
+            provision_report_target(&Diagnostic::error("plain", Span::new(0, 1)), &carried)
+                .is_none()
+        );
+    }
+}

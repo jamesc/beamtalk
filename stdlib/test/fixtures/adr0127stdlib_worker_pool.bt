@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3915: docs/beamtalk-language-features.md § Traits' `WorkerPool` — a
+// typed actor that `uses: Enumerable(Worker)` from the stdlib — with the
+// fixture-prefixed class names. Driven by
+// stdlib/test/adr0127stdlib_trait_test.bt.
+
+typed Actor subclass: Adr0127StdlibWorkerPool
+  uses: Enumerable(Adr0127StdlibWorker)
+  state: workers :: List(Adr0127StdlibWorker) = #()
+
+  elements -> List(Adr0127StdlibWorker) => self.workers

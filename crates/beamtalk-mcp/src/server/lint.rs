@@ -11,6 +11,9 @@
 //! filesystem/offline — no REPL connection required, which is what lets both
 //! MCP tools work without a live workspace.
 
+use beamtalk_core::semantic_analysis::protocol_source::{
+    dedupe_provision_diagnostics, provision_report_target,
+};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
 /// A single lint diagnostic in structured form.
@@ -90,6 +93,7 @@ pub(crate) fn run_module_analysis(
     source: &str,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     has_package_dependencies: bool,
     native_type_registry: Option<
@@ -115,10 +119,10 @@ pub(crate) fn run_module_analysis(
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_options(&options)
         .with_pre_loaded_classes(cross_file_classes)
-        // Dependency-sourced provision-bearing protocol ASTs (ADR 0127
-        // §10a; BT-3591) — see `merge_dependency_class_infos`'s doc for why
-        // same-package cross-file protocols aren't included here.
+        // Carried protocol ASTs (ADR 0127 §10a; BT-3591): the package's own,
+        // then the dependencies' — see `package_then_dependency_protocol_defs`.
         .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
+        .with_protocol_sources(protocol_sources)
         .with_native_type_registry(native_type_registry)
         .with_is_stub_file(is_stub_file);
     let class_hierarchy =
@@ -238,7 +242,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
-        trait_users.add(&module);
+        // Records each carried protocol's source too, for provision routing.
+        trait_users.add_source_file(&module, &file_str, &source, current_package.as_deref());
 
         let canonical = beamtalk_project::package::try_canonicalize(file);
         if target_set.contains(&canonical) {
@@ -252,8 +257,14 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
     // §10a; BT-3591) so a cross-package `uses:` flattens too.
     let mut all_protocol_defs = Vec::new();
-    let has_package_dependencies =
-        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+    let mut dependency_protocol_sources =
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    let has_package_dependencies = merge_dependency_class_infos(
+        path,
+        &mut all_class_infos,
+        &mut all_protocol_defs,
+        &mut dependency_protocol_sources,
+    );
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
@@ -265,9 +276,14 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    let pre_loaded_protocol_defs =
+        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
+    let protocol_sources =
+        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
+    let mut all_provision_diags = Vec::new();
     let mut coverage = CoverageReport {
         classes: Vec::new(),
         dynamic_entries: Vec::new(),
@@ -292,7 +308,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             module,
             source,
             &all_class_infos,
-            all_protocol_defs.clone(),
+            pre_loaded_protocol_defs.clone(),
+            protocol_sources.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -303,6 +320,9 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
                 .and_then(std::ffi::OsStr::to_str),
         );
 
+        let (provision_diags, file_diags) =
+            split_provision_diagnostics(file_diags, &pre_loaded_protocol_defs);
+        all_provision_diags.extend(provision_diags);
         all_diags.extend(file_diags);
 
         // Type coverage.
@@ -310,6 +330,10 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
         coverage.merge(file_report);
     }
+
+    // Each flattened-provision diagnostic once (merged across its users),
+    // as `beamtalk lint` publishes it — not once per using file.
+    all_diags.extend(dedupe_provision_diagnostics(all_provision_diags));
 
     // Count only files that were actually read and analysed,
     // not all resolved files (some may have been unreadable).
@@ -446,12 +470,12 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// protocol defined in a dependency (ADR 0127 §10a; BT-3591), so a
 /// cross-package `uses:` can flatten in MCP `lint`/`diagnostic_summary` the
 /// same way `beamtalk build` already does — see
-/// `resolve_dependency_class_infos`'s doc. Same-package
-/// cross-file protocol resolution (a protocol declared in a sibling source
-/// file) is a pre-existing, separate gap in this pipeline — Pass 1 above
-/// extracts only `ClassInfo` from project source files, never protocol
-/// metadata of any kind, unlike CLI `beamtalk lint`'s
-/// `parse_and_extract_class_infos` — not widened here.
+/// `resolve_dependency_class_infos`'s doc. The package's own carried
+/// protocols (a sibling source file's) are collected by Pass 1's
+/// `TraitUserCollector` and put ahead of these
+/// ([`package_then_dependency_protocol_defs`]); same-package `ProtocolInfo`
+/// metadata (conformance/`extending:`) is still not collected here, unlike
+/// CLI `beamtalk lint`'s `parse_and_extract_class_infos`.
 ///
 /// Returns whether the project's manifest declares any dependencies, for use
 /// as `CompilerOptions::has_package_dependencies`.
@@ -459,6 +483,7 @@ fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
+    protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) -> bool {
     let Some(project_root) =
         beamtalk_project::package::find_package_root(std::path::Path::new(path))
@@ -469,11 +494,101 @@ fn merge_dependency_class_infos(
         return false;
     };
 
-    let (has_package_dependencies, dep_class_infos, dep_protocol_defs) =
-        beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&project_root);
+    let (has_package_dependencies, dep_class_infos, dep_protocol_defs, dep_protocol_sources) =
+        beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
+            &project_root,
+        );
     all_class_infos.extend(dep_class_infos);
     all_protocol_defs.extend(dep_protocol_defs);
+    protocol_sources.extend(dep_protocol_sources);
     has_package_dependencies
+}
+
+/// The protocol ASTs Pass 2 carries into each file's analysis: the package's
+/// own carried protocols (`trait_users`, every source file) first, then the
+/// dependencies' — the precedence `beamtalk lint`/`build` use, so a package's
+/// own `Comparable` in a sibling file shadows the stdlib's for a `uses:` in
+/// the file being analysed, as on every other surface (BT-3915).
+fn package_then_dependency_protocol_defs(
+    trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    dependency_protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
+) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
+    trait_users
+        .protocol_defs()
+        .iter()
+        .chain(dependency_protocol_defs)
+        .cloned()
+        .collect()
+}
+
+/// Separates the diagnostics raised inside a flattened trait provision from
+/// a file's own, after applying the `@expect` directives in the protocols'
+/// provided methods to them — as `beamtalk lint` does (ADR 0127 §3,
+/// BT-3665). The provision ones are reported once, against the protocol's
+/// file ([`provision_report_target`]), after every file is analysed.
+fn split_provision_diagnostics(
+    mut diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
+) -> (
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+) {
+    beamtalk_core::compilation::diagnostics_policy::apply_protocol_expect_directives(
+        protocol_defs,
+        &mut diagnostics,
+    );
+    diagnostics.into_iter().partition(|d| d.provision.is_some())
+}
+
+/// Appends `diag` to `errors` or `warnings` as a [`LintDiagnostic`] for
+/// `file`, its notes folded into the message for origin tracing.
+fn push_lint_diagnostic(
+    diag: &beamtalk_core::source_analysis::Diagnostic,
+    file: String,
+    line: Option<u32>,
+    warnings: &mut Vec<LintDiagnostic>,
+    errors: &mut Vec<LintDiagnostic>,
+) {
+    let severity = match diag.severity {
+        Severity::Error => "error",
+        Severity::Warning | Severity::Lint | Severity::Hint => "warning",
+    };
+    let message = if diag.notes.is_empty() {
+        diag.message.to_string()
+    } else {
+        use std::fmt::Write;
+        let mut msg = diag.message.to_string();
+        for note in &diag.notes {
+            let _ = write!(msg, " ({})", note.message);
+        }
+        msg
+    };
+    let entry = LintDiagnostic {
+        file,
+        line,
+        message,
+        severity,
+    };
+    if diag.severity == Severity::Error {
+        errors.push(entry);
+    } else {
+        warnings.push(entry);
+    }
+}
+
+/// The protocol sources Pass 2 carries, in the same precedence as
+/// [`package_then_dependency_protocol_defs`]: the package's own first, then
+/// the dependencies' — so a provision diagnostic of either is reported against
+/// its protocol's file and line.
+fn package_then_dependency_protocol_sources(
+    trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    dependency_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+) -> beamtalk_core::semantic_analysis::ProtocolSourceMap {
+    let mut sources = trait_users.protocol_sources().clone();
+    for (name, source) in dependency_protocol_sources {
+        sources.entry(name).or_insert(source);
+    }
+    sources
 }
 
 /// Run lint passes on `path` (file or directory) and return structured results.
@@ -567,7 +682,13 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
-        trait_users.add(&module);
+        // Records each carried protocol's source too, for provision routing.
+        trait_users.add_source_file(
+            &module,
+            &file.to_string_lossy(),
+            &source,
+            current_package.as_deref(),
+        );
 
         let canonical = beamtalk_project::package::try_canonicalize(file);
         if target_set.contains(&canonical) {
@@ -581,8 +702,14 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
     // §10a; BT-3591) so a cross-package `uses:` flattens too.
     let mut all_protocol_defs = Vec::new();
-    let has_package_dependencies =
-        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+    let mut dependency_protocol_sources =
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    let has_package_dependencies = merge_dependency_class_infos(
+        path,
+        &mut all_class_infos,
+        &mut all_protocol_defs,
+        &mut dependency_protocol_sources,
+    );
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
@@ -594,6 +721,12 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    let pre_loaded_protocol_defs =
+        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
+    let protocol_sources =
+        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
+
+    let mut all_provision_diags = Vec::new();
 
     // Pass 2: Analyse each target file with cross-file class context.
     for (file, source, module, parse_diags) in parsed_targets {
@@ -621,7 +754,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             &module,
             &source,
             &all_class_infos,
-            all_protocol_defs.clone(),
+            pre_loaded_protocol_defs.clone(),
+            protocol_sources.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -630,36 +764,32 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             file.file_stem().and_then(std::ffi::OsStr::to_str),
         );
 
+        let (provision_diags, lint_diags) =
+            split_provision_diagnostics(lint_diags, &pre_loaded_protocol_defs);
+        all_provision_diags.extend(provision_diags);
+
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
             let line = diag.span.line_number(&source);
-            let severity = match diag.severity {
-                Severity::Error => "error",
-                Severity::Warning | Severity::Lint | Severity::Hint => "warning",
-            };
-            // Include notes in the message for origin tracing
-            let message = if diag.notes.is_empty() {
-                diag.message.to_string()
-            } else {
-                use std::fmt::Write;
-                let mut msg = diag.message.to_string();
-                for note in &diag.notes {
-                    let _ = write!(msg, " ({})", note.message);
-                }
-                msg
-            };
-            let entry = LintDiagnostic {
-                file: file_name.clone(),
-                line: Some(line),
-                message,
-                severity,
-            };
-            if diag.severity == Severity::Error {
-                errors.push(entry);
-            } else {
-                warnings.push(entry);
-            }
+            push_lint_diagnostic(
+                diag,
+                file_name.clone(),
+                Some(line),
+                &mut warnings,
+                &mut errors,
+            );
         }
+    }
+
+    // Publish each flattened-provision diagnostic once, against its
+    // protocol's file (its spans are offsets into that file, not the using
+    // class's) — `beamtalk lint`'s routing (ADR 0127 §3, BT-3665).
+    for diag in dedupe_provision_diagnostics(all_provision_diags) {
+        let Some((path, text)) = provision_report_target(&diag, &protocol_sources) else {
+            continue;
+        };
+        let line = (!text.is_empty()).then(|| diag.span.line_number(text));
+        push_lint_diagnostic(&diag, path, line, &mut warnings, &mut errors);
     }
 
     let total = warnings.len() + errors.len();

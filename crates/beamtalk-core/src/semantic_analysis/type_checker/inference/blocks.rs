@@ -1061,11 +1061,7 @@ impl TypeChecker {
             };
             // A singleton member (`#foo`) resolves through `Symbol`,
             // mirroring `infer_union_message_send`'s member resolution.
-            let resolve_name: &str = if member_name.starts_with('#') {
-                "Symbol"
-            } else {
-                member_name.as_str()
-            };
+            let resolve_name: &str = super::method_resolution_class(member_name);
             // Nil is expected to be guarded by isNil/notNil checks;
             // it never contributes a block-param resolution here either.
             if WellKnownClass::from_str(resolve_name).is_some_and(WellKnownClass::is_nil_class) {

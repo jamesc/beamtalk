@@ -684,7 +684,7 @@ x < 5              // => ERROR: UndefinedObject does not understand '<'
 
 This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
 
-The **argument** is not checked: a number, character or string receiver compares against an argument of any other kind by the BEAM's term order, so `5 < nil` answers `true` rather than raising. Comparison operators have no number-on-the-left coercion (see above).
+The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `'x' < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 
@@ -2116,7 +2116,7 @@ The full grammar of a `uses:` line:
 uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)]
 ```
 
-A bare `uses: ProtocolName` resolves by first-definition-wins across all dependencies. A qualified `uses: pkg@ProtocolName` resolves only against that package's protocols, so two dependencies that each export a same-named protocol can be composed without ambiguity.
+A bare `uses: ProtocolName` resolves by first-definition-wins: the current file, then the rest of the package, then its dependencies, and last the stdlib's own traits (`Comparable`, `Enumerable`) — so any package can `uses: Enumerable(E)` without declaring a dependency, and a package's own same-named protocol takes precedence. A qualified `uses: pkg@ProtocolName` resolves only against that package's protocols, so two dependencies that each export a same-named protocol can be composed without ambiguity.
 
 One trait per `uses:` line — several traits are several lines:
 

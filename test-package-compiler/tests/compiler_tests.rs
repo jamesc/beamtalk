@@ -167,12 +167,7 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
         &module,
         semantic_analysis::AnalysisContext::default().with_pre_loaded_protocol_defs(protocol_defs),
     );
-    semantic_analysis::lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    semantic_analysis::lower_analysed_module_for_codegen(&mut module, &analysis);
     let core_erlang = generate_module(
         &module,
         options

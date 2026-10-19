@@ -25,7 +25,9 @@
 use beamtalk_core::semantic_analysis::class_hierarchy::BUILD_CALL_COUNT;
 use beamtalk_core::semantic_analysis::facts::COMPUTE_SEMANTIC_FACTS_CALL_COUNT;
 use beamtalk_core::semantic_analysis::type_checker::{CHECK_MODULE_CALL_COUNT, InferredType};
-use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full, lower_module_for_codegen};
+use beamtalk_core::semantic_analysis::{
+    AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
+};
 
 fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -245,12 +247,7 @@ fn with_analysis_trusts_driver_prepared_module() {
     let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
 
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
 
     let code = crate::core_erlang::generate_module(
         &module,
@@ -323,12 +320,7 @@ fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
         .insert(key, InferredType::known("String"));
 
     // A real driver's own `lower_module_for_codegen` call, using the now-stale map.
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     assert!(
         matches!(
             &module.classes[0].methods[0].return_type,
@@ -370,12 +362,7 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
     let mut module =
         parse_fixture("Object subclass: Foo\n  find => Beamtalk classNamed: #Integer.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
-    lower_module_for_codegen(
-        &mut module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
-    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = crate::core_erlang::generate_module(
         &module,
         crate::core_erlang::CodegenOptions::new("foo").with_analysis(analysis),
@@ -388,5 +375,52 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
     assert!(
         !code.contains("'class_send'"),
         "Beamtalk classNamed: must not go through class_send; got:\n{code}"
+    );
+}
+
+/// BT-3915: on the stale-hand-off path (codegen's own cross-file enrichment
+/// invalidates the handed-off analysis), codegen re-infers over the driver's
+/// already-flattened module but must not flatten it again — its `uses:` lines
+/// are still there, and re-resolved without the analysis's carried protocols a
+/// bare `uses: Comparable` of the package's own cross-file `Comparable` would
+/// fall back to the stdlib's and splice in `between:and:` and friends.
+#[test]
+fn stale_hand_off_never_reflattens_against_the_stdlib() {
+    use beamtalk_core::semantic_analysis::trait_expansion::{
+        carried_protocols, first_wins_protocol_map,
+    };
+    // The package's own `Comparable`, declared in another file.
+    let other_file =
+        parse_fixture("Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 42\n");
+    let mut module = parse_fixture(
+        "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  \
+         < other => self.level < other level\n",
+    );
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_pre_loaded_protocol_defs(carried_protocols(&other_file, None)),
+    );
+    assert!(
+        first_wins_protocol_map(carried_protocols(&other_file, None)).contains_key("Comparable"),
+        "test setup: the package's own Comparable is carried"
+    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
+
+    // A class stub analysis never saw — invalidates the hand-off.
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("rank")
+            .with_class_hierarchy(vec![base_class_info("Unrelated", "Object")])
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("'foo'/1"),
+        "Rank must keep its own Comparable's `foo`; got:\n{code}"
+    );
+    assert!(
+        !code.contains("'between:and:'"),
+        "the stale-hand-off path must not splice in the stdlib Comparable; got:\n{code}"
     );
 }

@@ -180,6 +180,7 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         initial_diags,
         false,
         None,
@@ -218,6 +219,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         parse_diags,
         false,
         None,
@@ -244,6 +246,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
         source,
         &[],
         vec![],
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         parse_diags,
         false,
         None,
@@ -273,7 +276,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
 /// return, which would otherwise silently drop them either way.
 #[test]
 fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
-    let protocol_source = "Protocol define: Comparable\n  \
+    let protocol_source = "Protocol define: Ranked\n  \
         < other :: Self -> Boolean\n\n  \
         max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n";
     let (protocol_module, protocol_parse_diags) = parse(lex_with_eof(protocol_source));
@@ -282,7 +285,7 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
     assert_eq!(protocol_defs.len(), 1);
 
     let source = "Value subclass: Version\n  \
-        uses: Comparable\n  \
+        uses: Ranked\n  \
         field: major :: Integer = 0\n\n  \
         < other :: Version -> Boolean => self.major < other major\n";
     let tokens = lex_with_eof(source);
@@ -305,7 +308,7 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
     assert!(
         has_unknown_protocol(Vec::new()),
         "expected the negative control (no pre_loaded_protocol_defs) to report \
-         `uses: Comparable` as unresolvable"
+         `uses: Ranked` as unresolvable"
     );
 }
 
@@ -375,6 +378,7 @@ fn run_module_analysis_reports_native_declaration_location_error() {
         source,
         &[],
         Vec::new(),
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         Vec::new(),
         false,
         None,
@@ -702,5 +706,146 @@ fn compute_diagnostic_summary_resolves_cross_file_trait_provided_method_bt_3673(
         result["totals_by_category"]["Dnu"]["total"].as_u64(),
         Some(1),
         "only the control `bogus` call may be a DNU, got: {result:?}"
+    );
+}
+
+/// BT-3915: a package's own requirements-only `Comparable` in a sibling file
+/// shadows the stdlib's for `uses: Comparable` in MCP `lint`, as in `beamtalk
+/// lint` (`package_requirements_only_protocol_shadows_the_stdlib_one_bt_3915`):
+/// `Rank` gains none of the stdlib's provisions, so its own
+/// `self between: ...` is a DNU, and no "unknown protocol" is reported.
+#[test]
+fn run_lint_structured_package_comparable_shadows_the_stdlib_one_bt_3915() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("comparable.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n",
+    )
+    .unwrap();
+    let rank = src.join("Rank.bt");
+    std::fs::write(
+        &rank,
+        "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  \
+         < other :: Rank -> Boolean => self.level < other level\n\n  \
+         inside -> Boolean => self between: self and: self\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(rank.to_str().unwrap());
+    let messages: Vec<&str> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        !messages.iter().any(|m| m.contains("unknown protocol")),
+        "the package's own Comparable must resolve, got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("does not understand 'between:and:'")),
+        "Rank must not gain the stdlib Comparable's provisions, got: {messages:?}"
+    );
+}
+
+/// BT-3915 / BT-3665: a diagnostic raised inside a flattened provision of a
+/// same-package trait is reported against the *protocol's* file and line, as
+/// `beamtalk lint` reports it — never at an offset into each using file — and
+/// once per diagnostic, not once per file analysed.
+#[test]
+fn run_lint_structured_reports_provision_diagnostics_in_the_protocol_file_bt_3915() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> Integer => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("alpha.bt"),
+        "Object subclass: Alpha\n  uses: Tagged\n  name -> String => \"a\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("beta.bt"),
+        "Object subclass: Beta\n  uses: Tagged\n  name -> String => \"b\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(src.to_str().unwrap());
+    let provision: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("declares return type Integer"))
+        .collect();
+    assert_eq!(
+        provision.len(),
+        2,
+        "one per using class (Alpha, Beta), each once: {provision:?}"
+    );
+    for diag in &provision {
+        assert!(
+            diag.file.ends_with("tagged.bt") && diag.line == Some(4),
+            "reported against the protocol's file and line: {diag:?}"
+        );
+    }
+}
+
+/// BT-3915: a diagnostic raised in a flattened provision of a *dependency's*
+/// trait is reported against that trait's file and line too — the offline
+/// dependency scan carries its protocol sources — not as `<protocol Name>`.
+#[test]
+fn run_lint_structured_reports_dependency_provision_diagnostics_in_its_file_bt_3915() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+    )
+    .unwrap();
+    // A prior `beamtalk build` having fetched the dependency.
+    let dep_src = temp.path().join("_build/deps/http/src");
+    std::fs::create_dir_all(&dep_src).unwrap();
+    std::fs::write(
+        dep_src.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> Integer => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("alpha.bt"),
+        "Object subclass: Alpha\n  uses: Tagged\n  name -> String => \"a\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(src.to_str().unwrap());
+    let provision: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("declares return type Integer"))
+        .collect();
+    assert_eq!(provision.len(), 1, "{result:?}");
+    assert!(
+        provision[0].file.ends_with("tagged.bt") && provision[0].line == Some(4),
+        "reported against the dependency trait's file and line: {:?}",
+        provision[0]
     );
 }

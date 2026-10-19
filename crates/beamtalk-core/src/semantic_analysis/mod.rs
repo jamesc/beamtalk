@@ -17,7 +17,7 @@
 use crate::ast::{Module, ProtocolDefinition};
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod alias_registry;
 mod block_analyzer;
@@ -42,6 +42,7 @@ pub mod protocol_source;
 pub mod receiver_knowledge;
 pub mod return_type_writeback;
 pub(crate) mod scope;
+pub mod stdlib_protocols;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
 pub mod trait_expansion;
@@ -96,7 +97,9 @@ pub use definite_assignment::{
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use initialize_assigns::{analyze_initialize_assigns, has_dynamic_field_writer};
-pub use lowering::lower_module_for_codegen;
+pub use lowering::{
+    apply_codegen_writebacks, lower_analysed_module_for_codegen, lower_module_for_codegen,
+};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
@@ -210,18 +213,35 @@ pub struct AnalysisResult {
     /// this field is plumbed through here rather than recomputed downstream.
     pub type_map: TypeMap,
 
-    /// Every provision-bearing protocol carried in from outside this module
+    /// Every carried protocol carried in from outside this module
     /// (ADR 0127 §10a, BT-3591) — same-package other files plus dependency
     /// packages — that this analysis's Phase -1 flattening resolved a
     /// cross-file/cross-package `uses:` line against. A driver handing this
     /// `AnalysisResult` to [`lowering::lower_module_for_codegen`] must pass
-    /// this same map back to it, so that function's own re-flattening of the
+    /// this same map back to it (as [`lowering::lower_analysed_module_for_codegen`]
+    /// does, with [`Self::trait_package`]), so that function's own re-flattening of the
     /// driver's real module reproduces byte-for-byte the same flattened
     /// methods this analysis already produced (see that function's module
     /// doc, "Closing the flattening/codegen boundary") — a driver that
     /// passes an empty map here instead would silently fail to flatten any
     /// cross-file/cross-package `uses:` line the original analysis resolved.
     pub external_protocols: HashMap<EcoString, ProtocolDefinition>,
+
+    /// `(class, protocol)` for every `uses:` line of the module that resolved
+    /// to the stdlib's own protocol (BT-3915) —
+    /// [`trait_expansion::expand_module_with_stdlib_uses`]. Codegen maps those
+    /// classes' provisions through the stdlib file; analysis stamps their
+    /// provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
+    pub stdlib_protocol_uses: trait_expansion::StdlibUses,
+
+    /// The package this analysis's Phase -1 flattening resolved `uses:` lines
+    /// as ([`trait_expansion::known_package`] of the analysed
+    /// `current_package`). [`lowering::lower_analysed_module_for_codegen`]
+    /// re-flattens with it, so codegen resolves every `uses:` exactly as
+    /// analysis did — a dependency's own `Comparable` stays its own, and the
+    /// stdlib's own build never falls back to the compiler-baked snapshot
+    /// (BT-3915).
+    pub trait_package: Option<EcoString>,
 }
 
 impl AnalysisResult {
@@ -239,6 +259,8 @@ impl AnalysisResult {
             referenced_aliases: Vec::new(),
             type_map: TypeMap::new(),
             external_protocols: HashMap::new(),
+            stdlib_protocol_uses: HashSet::new(),
+            trait_package: None,
         }
     }
 }
@@ -348,7 +370,7 @@ pub struct AnalysisContext<'a> {
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
     /// fixtures.
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// Full ASTs of carried protocols from outside this module —
     /// another file in the same package, or a dependency package (ADR 0127
     /// §10a; BT-3591). Unlike `pre_loaded_protocols` (name/signature metadata
     /// only, for conformance/`extending:` resolution), this carries the
@@ -450,7 +472,7 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
-    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// Full ASTs of carried protocols from outside this module —
     /// see the `pre_loaded_protocol_defs` field's own doc.
     #[must_use]
     pub fn with_pre_loaded_protocol_defs(
@@ -461,7 +483,7 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
-    /// Source identity of the provision-bearing protocols carried in
+    /// Source identity of the carried protocols carried in
     /// `pre_loaded_protocol_defs` — see the `protocol_sources` field's doc.
     #[must_use]
     pub fn with_protocol_sources(mut self, protocol_sources: ProtocolSourceMap) -> Self {
@@ -645,7 +667,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // not see this module yet") for the full boundary and BT-3590, which
     // owns wiring the flattened module through to codegen.
     // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
-    // provision-bearing protocol carried in from outside this module — used
+    // carried protocol carried in from outside this module — used
     // both by `expand_module` right below and by `check_after_hierarchy`
     // later (Phase 0.55), which needs the same protocol definitions to check
     // a cross-file/cross-package `uses:` line's requirements and
@@ -685,15 +707,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
     // language service's placeholder package is not one.
     let trait_package = trait_expansion::known_package(current_package);
+    result.trait_package = trait_package.map(EcoString::from);
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins) = trait_expansion::expand_module_in_package(
-            &mut owned,
-            &external_protocols,
-            trait_package,
-        );
+        let (expansion_diags, origins, stdlib_uses) =
+            trait_expansion::expand_module_with_stdlib_uses(
+                &mut owned,
+                &external_protocols,
+                trait_package,
+            );
+        result.stdlib_protocol_uses = stdlib_uses;
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;
@@ -831,9 +856,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             .into_iter()
             .filter(|p| !current_names.contains(&p.name))
             .collect();
-        let collision_diags = result
-            .protocol_registry
-            .add_pre_loaded(cross_file_protocols, &result.class_hierarchy);
+        let collision_diags = result.protocol_registry.add_pre_loaded(
+            cross_file_protocols,
+            &result.class_hierarchy,
+            trait_package,
+        );
         result.diagnostics.extend(collision_diags);
     }
     if !module.protocols.is_empty() {
@@ -1265,6 +1292,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &mut result.diagnostics,
         );
     }
+
+    stdlib_protocols::stamp_stdlib_provisions(
+        &mut result.diagnostics,
+        &result.stdlib_protocol_uses,
+    );
 
     result
 }

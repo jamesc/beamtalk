@@ -2425,7 +2425,9 @@ pub fn block_literal_of_other_arity<'a>(
     selector: &MessageSelector,
     arity: usize,
 ) -> Option<&'a Block> {
-    match receiver {
+    // BT-3942: a parenthesized literal (`([t := t + 1]) value: 1`) is the
+    // same literal, so it is applied and raises `arity_mismatch` alike.
+    match receiver.unwrap_parens() {
         Expression::Block(block)
             if is_safe_value_family_selector(selector)
                 && !block_literal_arity_matches(block, arity) =>

@@ -108,10 +108,29 @@ use tracing::warn;
 pub fn resolve_dependency_class_infos(
     project_root: &Utf8Path,
 ) -> (bool, Vec<ClassInfo>, Vec<ProtocolDefinition>) {
+    let (has_package_dependencies, class_infos, protocol_defs, _sources) =
+        resolve_dependency_class_infos_with_sources(project_root);
+    (has_package_dependencies, class_infos, protocol_defs)
+}
+
+/// [`resolve_dependency_class_infos`], also returning the source identity
+/// (path and text) of every carried dependency protocol, first definition
+/// wins — so a diagnostic raised in a flattened provision of a dependency's
+/// trait is reported against that trait's file and line (ADR 0127 §3).
+#[must_use]
+pub fn resolve_dependency_class_infos_with_sources(
+    project_root: &Utf8Path,
+) -> (
+    bool,
+    Vec<ClassInfo>,
+    Vec<ProtocolDefinition>,
+    beamtalk_core::semantic_analysis::ProtocolSourceMap,
+) {
+    let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let manifest_path = project_root.join("beamtalk.toml");
     match manifest_path.try_exists() {
         Ok(true) => {}
-        Ok(false) => return (false, Vec::new(), Vec::new()),
+        Ok(false) => return (false, Vec::new(), Vec::new(), protocol_sources),
         Err(e) => {
             warn!(
                 error = %e,
@@ -119,7 +138,7 @@ pub fn resolve_dependency_class_infos(
                 "Failed to check for beamtalk.toml for offline dependency class resolution; \
                  assuming no manifest"
             );
-            return (false, Vec::new(), Vec::new());
+            return (false, Vec::new(), Vec::new(), protocol_sources);
         }
     }
 
@@ -131,7 +150,7 @@ pub fn resolve_dependency_class_infos(
                 "Failed to parse beamtalk.toml for offline dependency class resolution; \
                  conservatively assuming dependencies are declared"
             );
-            return (true, Vec::new(), Vec::new());
+            return (true, Vec::new(), Vec::new(), protocol_sources);
         }
     };
 
@@ -213,12 +232,22 @@ pub fn resolve_dependency_class_infos(
             .trait_users
             .flatten(&mut infos, prior_protocol_defs.iter().cloned(), None);
         class_infos.extend(infos);
+        for (name, source) in dep.scan.trait_users.protocol_sources() {
+            protocol_sources
+                .entry(name.clone())
+                .or_insert_with(|| source.clone());
+        }
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
         prior_protocol_defs.extend(own_protocol_defs.iter().cloned());
     }
 
-    (has_package_dependencies, class_infos, protocol_defs)
+    (
+        has_package_dependencies,
+        class_infos,
+        protocol_defs,
+        protocol_sources,
+    )
 }
 
 /// A dependency found on disk by [`resolve_dependency_class_infos`]'s walk.
@@ -370,7 +399,7 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         let (module, _parse_diags) = parse(tokens);
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
-        trait_users.add(&module);
+        trait_users.add_source_file(&module, file.as_str(), &source, Some(dep_name));
     }
 
     let scanned = std::sync::Arc::new(ScannedDep {
@@ -493,6 +522,46 @@ mod tests {
                 .iter()
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// BT-3915: a dependency's `uses: Comparable` of its *own* `Comparable`
+    /// resolves to that protocol in the offline (MCP) export, as in the real
+    /// compile (`deps/path.rs`) — never to the stdlib's same-named one, which
+    /// only a *consumer's* bare `uses: Comparable` gets.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_own_stdlib_named_protocol_is_flattened_not_the_stdlibs() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nranks = { git = \"https://example.com/ranks.git\", tag = \"v1.0.0\" }\n",
+        );
+        let dep_src = tmp.path().join("_build/deps/ranks/src");
+        write(
+            dep_src.join("comparable.bt").as_path(),
+            "Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 1\n",
+        );
+        write(
+            dep_src.join("rank.bt").as_path(),
+            "Object subclass: Rank\n  uses: Comparable\n  < other => true\n",
+        );
+
+        let (_, infos, _) = resolve_dependency_class_infos(root);
+        let rank = infos
+            .iter()
+            .find(|c| c.name == "Rank")
+            .expect("Rank resolved from the dependency checkout");
+        let selectors: Vec<_> = rank.methods.iter().map(|m| &m.selector).collect();
+        assert!(
+            selectors.iter().any(|s| *s == "foo"),
+            "Rank must carry its own package's `foo`: {selectors:?}"
+        );
+        assert!(
+            !selectors.iter().any(|s| *s == "between:and:"),
+            "Rank must not carry the stdlib Comparable's provisions: {selectors:?}"
         );
     }
 

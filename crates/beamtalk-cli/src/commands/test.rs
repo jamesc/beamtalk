@@ -320,7 +320,7 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 ///    non-nilable class name to `requires_definite_assignment_for_declared_type`.
 ///    Mirrors `ClassInfo`/`ProtocolInfo` immediately above.
 ///
-/// 6. The full ASTs (and source files) of fixture-defined *provision-bearing*
+/// 6. The full ASTs (and source files) of fixture-defined carried
 ///    protocols (ADR 0127 §10a; BT-3625) — a `uses:` in one fixture (or test
 ///    file) flattens a trait declared in another fixture file, exactly as
 ///    `beamtalk build`'s Pass 1 carries `pre_loaded_protocol_defs`.
@@ -376,7 +376,7 @@ fn build_fixture_class_indexes(
         for protocol in module
             .protocols
             .iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
             protocol_defs.sources.insert(
                 protocol.name.name.clone(),
@@ -907,7 +907,7 @@ struct TestPipeline {
     /// Fixture-defined protocols so the unresolved-class validator
     /// and type checker recognise protocol names declared in `fixtures/*.bt`.
     fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full ASTs + source files of fixture-defined provision-bearing
+    /// Full ASTs + source files of fixture-defined carried
     /// protocols, so a fixture/test `uses:` flattens a trait declared in a
     /// different fixture file (ADR 0127 §10a; BT-3625).
     fixture_protocol_defs: FixtureProtocolDefs,

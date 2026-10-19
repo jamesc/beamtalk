@@ -267,6 +267,343 @@ fn uses_of_an_unknown_protocol_is_an_error() {
     assert!(diagnostics[0].message.contains("NoSuchProtocol"));
 }
 
+// ── Stdlib protocols as the last resolution tier (BT-3915) ───────────────
+
+#[test]
+fn uses_of_a_stdlib_protocol_flattens_with_nothing_carried() {
+    let mut module = parse_source(
+        "Value subclass: Bag2
+  uses: Enumerable(Integer)
+  field: items :: List(Integer) = #()
+
+  elements -> List(Integer) => self.items
+
+Value subclass: Rank
+  uses: stdlib@Comparable
+  field: level :: Integer = 0
+
+  < other :: Rank -> Boolean => self.level < other level",
+    );
+
+    let (diagnostics, origins) =
+        expand_module_in_package(&mut module, &HashMap::new(), Some("my_app"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let bag = find_class(&module, "Bag2");
+    for selector in ["size", "do:", "inject:into:", "select:", "detect:ifNone:"] {
+        assert!(
+            find_method(bag, selector).is_some(),
+            "Bag2 lacks {selector}"
+        );
+    }
+    assert_eq!(
+        origins.get(&("Bag2".into(), "size".into())),
+        Some(&EcoString::from("Enumerable"))
+    );
+    let rank = find_class(&module, "Rank");
+    for selector in [">", "<=", ">=", "between:and:", "min:", "max:"] {
+        assert!(
+            find_method(rank, selector).is_some(),
+            "Rank lacks {selector}"
+        );
+    }
+    assert!(
+        resolve_protocol_key(&HashMap::new(), "Enumerable", Some("my_app")).is_some(),
+        "the incremental-build hash resolves the same protocol"
+    );
+}
+
+#[test]
+fn a_carried_or_local_protocol_wins_over_the_stdlib_one() {
+    let mut module = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  max: other => #local
+
+Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    let (diagnostics, _origins) = expand_module(&mut module, &HashMap::new());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let rank = find_class(&module, "Rank");
+    assert!(find_method(rank, "max:").is_some());
+    assert!(
+        find_method(rank, "between:and:").is_none(),
+        "the module's own Comparable must shadow the stdlib's entirely"
+    );
+}
+
+/// `uses: stdlib@Comparable` beside a package-local `Comparable` is recorded
+/// as stdlib-resolved (so its provisions and their diagnostics are keyed to the
+/// stdlib file, BT-3915); a bare `uses: Comparable` there is the local one.
+#[test]
+fn qualified_stdlib_use_beside_a_local_namesake_is_recorded_as_stdlib() {
+    let module = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  max: other => #local
+
+Value subclass: Rank
+  uses: stdlib@Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    // Every surface agrees: a known package (`beamtalk build`) and an unknown
+    // one (`None` — REPL/workspace, self-sufficient codegen, the LSP's
+    // placeholder package) both resolve `stdlib@Comparable` to the stdlib's.
+    for package in [Some("my_app"), None] {
+        let uses = stdlib_resolved_uses(&module, &HashMap::new(), package);
+        assert!(
+            uses.contains(&("Rank".into(), "Comparable".into())),
+            "{package:?}: {uses:?}"
+        );
+        let carried = first_wins_protocol_map(module.protocols.iter().cloned());
+        let resolved = resolve_protocol_key(&carried, "stdlib@Comparable", package)
+            .expect("stdlib@Comparable resolves");
+        assert_eq!(resolved.package.as_deref(), Some("stdlib"), "{package:?}");
+    }
+    // Flattened with no package (the REPL's case), `Rank` gets the stdlib's
+    // `between:and:`, which the local `Comparable` does not provide.
+    let mut flattened = module.clone();
+    let (diagnostics, _) = expand_module(&mut flattened, &HashMap::new());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(find_method(find_class(&flattened, "Rank"), "between:and:").is_some());
+
+    let local = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  max: other => #local
+
+Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    assert!(stdlib_resolved_uses(&local, &HashMap::new(), Some("my_app")).is_empty());
+}
+
+/// A package's own requirements-only `Comparable` in *another* file is carried
+/// (`is_carried_protocol`) and shadows the stdlib's: `uses: Comparable`
+/// resolves to it (the "provides no methods" hint), never to the stdlib's
+/// provisions.
+#[test]
+fn carried_requirements_only_namesake_shadows_the_stdlib_protocol() {
+    let other_file = parse_source("Protocol define: Comparable\n  < other -> Boolean");
+    let carried = carried_protocols(&other_file, None);
+    assert_eq!(
+        carried.len(),
+        1,
+        "a stdlib-named protocol is always carried"
+    );
+    assert!(
+        carried_protocols(
+            &parse_source("Protocol define: Sized\n  size -> Integer"),
+            None
+        )
+        .is_empty(),
+        "other requirements-only protocols are still not carried"
+    );
+    let external = first_wins_protocol_map(carried);
+    let module = parse_source(
+        "Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    for package in [Some("my_app"), None] {
+        let mut flattened = module.clone();
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("provides no methods")),
+            "{package:?}: {diagnostics:?}"
+        );
+        assert!(find_method(find_class(&flattened, "Rank"), "between:and:").is_none());
+    }
+}
+
+#[test]
+fn the_stdlib_itself_never_falls_back_to_the_baked_protocols() {
+    let mut module = parse_source(
+        "Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    let (diagnostics, _origins) =
+        expand_module_in_package(&mut module, &HashMap::new(), Some("stdlib"));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("unknown protocol `Comparable`")
+    );
+}
+
+// ── Dependency shadowing of stdlib protocol names (BT-3915, Option A) ────
+
+/// A dependency `dep` declaring its own provision-bearing `Comparable`, as
+/// `beamtalk build` carries it: stamped with the dependency's package.
+fn dependency_comparable() -> HashMap<EcoString, ProtocolDefinition> {
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    first_wins_protocol_map(carried_protocols(&dep_file, Some("dep")))
+}
+
+fn rank_using(protocol: &str) -> Module {
+    parse_source(&format!(
+        "Value subclass: Rank
+  uses: {protocol}
+  field: level :: Integer = 0
+
+  < other => self.level < other level"
+    ))
+}
+
+/// A bare `uses: Comparable` never resolves to a dependency's stdlib-named
+/// protocol: it is the stdlib's, on every surface (known package or not).
+#[test]
+fn bare_stdlib_name_resolves_to_the_stdlib_over_a_dependency_namesake() {
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(
+            stdlib_uses.contains(&("Rank".into(), "Comparable".into())),
+            "{package:?}: {stdlib_uses:?}"
+        );
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "between:and:").is_some(), "{package:?}");
+        assert!(find_method(rank, "depOnly").is_none(), "{package:?}");
+        let resolved =
+            resolve_protocol_key(&external, "Comparable", package).expect("Comparable resolves");
+        assert_eq!(
+            resolved.package.as_deref(),
+            Some("stdlib"),
+            "the incremental-build hash agrees ({package:?})"
+        );
+    }
+}
+
+/// The dependency's `Comparable` stays reachable as `dep@Comparable`.
+#[test]
+fn qualified_dependency_use_resolves_to_the_dependency_namesake() {
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("dep@Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "depOnly").is_some(), "{package:?}");
+        assert!(find_method(rank, "between:and:").is_none(), "{package:?}");
+        let resolved = resolve_protocol_key(&external, "dep@Comparable", package)
+            .expect("dep@Comparable resolves");
+        assert_eq!(resolved.package.as_deref(), Some("dep"), "{package:?}");
+    }
+}
+
+/// The package's own `Comparable` (another file, carried unstamped) still
+/// shadows the stdlib's, and wins the bare name over the dependency's too.
+#[test]
+fn own_package_namesake_still_shadows_with_a_dependency_namesake_present() {
+    let own_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  ownOnly => #own",
+    );
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    // Project before dependencies, as every carrier orders them.
+    let external = first_wins_protocol_map(
+        carried_protocols(&own_file, None)
+            .into_iter()
+            .chain(carried_protocols(&dep_file, Some("dep"))),
+    );
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "ownOnly").is_some(), "{package:?}");
+        assert!(find_method(rank, "depOnly").is_none(), "{package:?}");
+        assert!(find_method(rank, "between:and:").is_none(), "{package:?}");
+    }
+}
+
+/// Compiled as the dependency itself, its own `Comparable` is the current
+/// package's and shadows the stdlib's, like any package's own.
+#[test]
+fn a_dependency_compiled_as_itself_keeps_its_own_namesake() {
+    let external = dependency_comparable();
+    let mut flattened = rank_using("Comparable");
+    let (diagnostics, _, stdlib_uses) =
+        expand_module_with_stdlib_uses(&mut flattened, &external, Some("dep"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(stdlib_uses.is_empty(), "{stdlib_uses:?}");
+    assert!(find_method(find_class(&flattened, "Rank"), "depOnly").is_some());
+}
+
+/// `docs/beamtalk-language-features.md` § Traits' `WorkerPool` example,
+/// verbatim, through the full analysis with nothing carried in.
+#[test]
+fn docs_worker_pool_example_analyses_cleanly() {
+    let source = "Value subclass: Worker
+  isIdle -> Boolean => true
+
+typed Actor subclass: WorkerPool
+  uses: Enumerable(Worker)
+  state: workers :: List(Worker) = #()
+
+  elements -> List(Worker) => self.workers
+
+Object subclass: Caller
+  class idle: pool :: WorkerPool -> Integer => pool count: [:w | w isIdle]";
+    let module = parse_source(source);
+    let result = crate::semantic_analysis::analyse_full(
+        &module,
+        crate::semantic_analysis::AnalysisContext::default(),
+    );
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        // One file holds all three classes here for brevity (ADR 0040).
+        .filter(|d| !d.message.contains("Multiple classes in one file"))
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let pool = result
+        .class_hierarchy
+        .get_class("WorkerPool")
+        .expect("WorkerPool");
+    let count = pool
+        .methods
+        .iter()
+        .find(|m| m.selector == "count:")
+        .expect("count: flattened from the stdlib Enumerable");
+    assert_eq!(count.origin.as_deref(), Some("Enumerable"));
+}
+
 // ── Cross-file / cross-package carrying (ADR 0127 §10a; BT-3591) ───────────
 
 /// Parses a standalone `Protocol define: ...` source snippet and returns its
@@ -1694,7 +2031,7 @@ fn mistyped_qualifier_does_not_resolve_the_current_packages_protocol() {
 #[test]
 fn qualifier_of_a_dependency_without_provisions_does_not_resolve_the_current_packages_protocol() {
     // `pkg_b` declares a requirement-only `Parser`, which is never carried
-    // (`provision_bearing_protocols` drops it); `my_app` has its own, provision-
+    // (`carried_protocols` drops it); `my_app` has its own, provision-
     // bearing one. `uses: pkg_b@Parser` names a different protocol.
     let (module, diagnostics) = expand_in_package("pkg_b@", &HashMap::new(), Some("my_app"));
 
@@ -1732,4 +2069,79 @@ fn qualifier_resolves_any_unstamped_protocol_when_the_package_is_unknown() {
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+/// BT-3941: a type annotation's bare name (`ProtocolRegistry`) resolves exactly
+/// as a bare `uses:` does -- to the stdlib's protocol, never a dependency's
+/// namesake -- on every surface (known package or not).
+#[test]
+fn registry_resolves_a_bare_stdlib_name_as_uses_does() {
+    use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut infos = ProtocolRegistry::extract_protocol_infos(&dep_file);
+        for info in &mut infos {
+            info.package = Some("dep".into());
+        }
+        let mut registry = ProtocolRegistry::new();
+        let hierarchy = ClassHierarchy::with_builtins();
+        let diags = registry.add_pre_loaded(infos, &hierarchy, package);
+        assert!(diags.is_empty(), "{package:?}: {diags:?}");
+
+        let uses = resolve_protocol_key(&external, "Comparable", package).expect("uses resolves");
+        let annotation = registry.get("Comparable").expect("annotation resolves");
+        let provided: Vec<String> = uses
+            .provided_methods
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
+        assert!(!provided.contains(&"depOnly".to_string()), "{package:?}");
+        assert_eq!(
+            annotation
+                .provided_selectors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            provided,
+            "annotation and uses: agree on the protocol ({package:?})"
+        );
+        assert_eq!(annotation.package.as_deref(), uses.package.as_deref());
+    }
+}
+
+/// BT-3941: the package's own (unstamped) namesake still wins the bare name in
+/// a type annotation, like `uses:`; a dependency's non-stdlib name is untouched.
+#[test]
+fn registry_keeps_own_and_non_stdlib_protocols_by_bare_name() {
+    use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let own = parse_source("Protocol define: Comparable\n  ownOnly -> Boolean");
+    let dep = parse_source(
+        "Protocol define: Comparable\n  depOnly -> Boolean\n\nProtocol define: Gadget\n  spin -> Boolean",
+    );
+    let mut infos = ProtocolRegistry::extract_protocol_infos(&own);
+    let mut dep_infos = ProtocolRegistry::extract_protocol_infos(&dep);
+    for info in &mut dep_infos {
+        info.package = Some("dep".into());
+    }
+    infos.extend(dep_infos);
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.add_pre_loaded(infos, &ClassHierarchy::with_builtins(), Some("my_app"));
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(
+        registry.get("Comparable").unwrap().methods[0].selector,
+        "ownOnly"
+    );
+    assert_eq!(
+        registry.get("Gadget").unwrap().package.as_deref(),
+        Some("dep")
+    );
 }

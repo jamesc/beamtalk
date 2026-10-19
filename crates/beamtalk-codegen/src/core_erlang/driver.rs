@@ -94,8 +94,8 @@ pub fn generate_module_with_warnings(
         CoreErlangGenerator::new(&options.module_name)
     };
     generator.source_text = options.source_text;
-    generator.protocol_sources = options.protocol_sources;
     generator.set_stdlib_mode(options.stdlib_mode);
+    generator.protocol_sources = options.protocol_sources;
     generator.set_class_module_index(options.class_module_index);
     generator.source_path = options.source_path;
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
@@ -118,6 +118,7 @@ pub fn generate_module_with_warnings(
     let self_flattened_origins;
     let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
         if let Some(analysis) = options.analysis {
+            generator.set_stdlib_protocol_uses(analysis.stdlib_protocol_uses);
             generator.semantic_facts = analysis.semantic_facts;
             // Carry the driver's already-computed `TypeMap` through
             // for `recv_type` projection. May be superseded below if this
@@ -153,8 +154,8 @@ pub fn generate_module_with_warnings(
             // branch only runs when `analyse_full` never ran, so there is no
             // other pipeline to surface an unknown-protocol / provision-
             // conflict error (BT-3626). They are returned as warnings.
-            let (flattened, origins, diagnostics) = flatten_uses_self_sufficient(module);
-            generator.codegen_warnings.extend(diagnostics);
+            let (flattened, origins, diags) = flatten_uses_self_sufficient(module, &mut generator);
+            generator.codegen_warnings.extend(diags);
             self_flattened_origins = origins;
             let flattened_module: &Module = match flattened {
                 Some(owned) => self_flattened.insert(owned),
@@ -228,10 +229,15 @@ pub fn generate_module_with_warnings(
             driver_method_return_types.take().unwrap_or_default();
         module
     } else {
-        // On the self-sufficient path start from the already-flattened clone
-        // so `infer_types_and_returns` below sees flattened provisions
-        // (BT-3626); `lower_module_for_codegen`'s own re-flatten is then an
-        // idempotent no-op (class-body selectors win over provisions).
+        // Either way `module_owned` is already flattened: on the
+        // self-sufficient path it starts from the flattened clone, so
+        // `infer_types_and_returns` below sees flattened provisions
+        // (BT-3626); a stale hand-off's module was flattened by the driver's
+        // `lower_analysed_module_for_codegen`. So only the writebacks run
+        // below — flattening it again here, without the analysis's carried
+        // protocols and package, would re-resolve its still-present `uses:`
+        // lines differently (a package's own `Comparable` falling back to the
+        // stdlib's) and splice in provisions analysis never saw (BT-3915).
         module_owned = self_flattened.take().unwrap_or_else(|| module.clone());
         // A driver that handed off `AnalysisResult` already wrote its
         // (narrower-hierarchy) inference into `module_owned` before we got
@@ -266,15 +272,10 @@ pub fn generate_module_with_warnings(
                 options.native_type_registry.as_deref(),
             );
         generator.type_map = type_map;
-        // No cross-file/cross-package `external_protocols` map survives into
-        // this branch (self-sufficient codegen, or a stale hand-off being
-        // re-inferred from scratch) — same tracked limitation as this file's
-        // other self-sufficient `expand_module` call above.
-        beamtalk_core::semantic_analysis::lower_module_for_codegen(
+        beamtalk_core::semantic_analysis::apply_codegen_writebacks(
             &mut module_owned,
             &hierarchy,
             &method_return_types,
-            &std::collections::HashMap::new(),
         );
         // Record which methods *this* (re-)inference wrote a
         // return type into, for `extract_method_source` to strip before
@@ -329,8 +330,14 @@ pub fn generate_module_with_warnings(
 /// (no `AnalysisResult` handed off), returning `None` for the clone when no
 /// class has a `uses:` line. Cross-file protocols are unavailable here, so
 /// `uses:` only resolves same-module.
+///
+/// Also records on `generator` which `uses:` lines resolved to the stdlib's
+/// own protocols (BT-3915), from the same flattening — what `analyse_full`
+/// hands off as `AnalysisResult::stdlib_protocol_uses` on the driver path.
+/// Resolves as [`self_sufficient_package`].
 fn flatten_uses_self_sufficient(
     module: &Module,
+    generator: &mut CoreErlangGenerator,
 ) -> (
     Option<Module>,
     beamtalk_core::semantic_analysis::trait_expansion::OriginMap,
@@ -340,11 +347,23 @@ fn flatten_uses_self_sufficient(
         return (None, std::collections::HashMap::new(), Vec::new());
     }
     let mut owned = module.clone();
-    let (diagnostics, origins) = beamtalk_core::semantic_analysis::trait_expansion::expand_module(
-        &mut owned,
-        &std::collections::HashMap::new(),
-    );
+    let (diagnostics, origins, stdlib_uses) =
+        beamtalk_core::semantic_analysis::trait_expansion::expand_module_with_stdlib_uses(
+            &mut owned,
+            &std::collections::HashMap::new(),
+            self_sufficient_package(generator),
+        );
+    generator.set_stdlib_protocol_uses(stdlib_uses);
     (Some(owned), origins, diagnostics)
+}
+
+/// The package codegen's own flattening resolves `uses:` as when no
+/// `AnalysisResult` supplies one: the stdlib in stdlib mode (which has no
+/// compiler-baked stdlib tier to fall back to), otherwise unknown.
+fn self_sufficient_package(generator: &CoreErlangGenerator) -> Option<&'static str> {
+    generator
+        .stdlib_mode()
+        .then_some(beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE)
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.

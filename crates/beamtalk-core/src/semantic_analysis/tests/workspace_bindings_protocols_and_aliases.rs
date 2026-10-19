@@ -60,6 +60,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         extending: None,
         methods: vec![],
         class_methods: vec![],
+        package: None,
         span: Span::default(),
 
         provided_selectors: vec![],

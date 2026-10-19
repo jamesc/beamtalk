@@ -58,7 +58,11 @@
 //! that section for the full per-entry-point breakdown) and hands it in
 //! here — `trait_expansion` itself does no file I/O and knows nothing about
 //! packages or dependency checkouts. A `uses:` whose protocol resolves in
-//! neither map reports [`Diagnostic::error`]: "unknown protocol" for a bare
+//! neither map falls back, last, to the stdlib's own provision-bearing
+//! protocols (`Comparable`, `Enumerable`; BT-3915) — baked into the compiler
+//! like the stdlib's classes, so no compile path has to carry them; see
+//! [`crate::semantic_analysis::stdlib_protocols`]. One resolving nowhere
+//! reports [`Diagnostic::error`]: "unknown protocol" for a bare
 //! name (a same-file/same-project typo, exactly as before), or a distinct
 //! "no source available" error for a package-qualified name — since the
 //! *only* way a cross-package protocol's `ProtocolDefinition` reaches
@@ -95,6 +99,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::protocol_source::ProtocolSourceMap;
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::stdlib_protocols;
 use crate::semantic_analysis::type_checker::{TypeChecker, is_generic_type_param};
 use crate::source_analysis::Diagnostic;
 
@@ -106,7 +111,7 @@ pub type OriginMap = HashMap<(EcoString, EcoString), EcoString>;
 /// Expand every `uses:` line in `module`'s classes in place (ADR 0127 §3
 /// steps 1–4, 6).
 ///
-/// `external_protocols` carries every provision-bearing protocol's full AST
+/// `external_protocols` carries every carried protocol's full AST
 /// from outside this module — another file in the same package, or a
 /// dependency package (ADR 0127 §10a; BT-3591) — keyed by bare protocol
 /// name. Pass an empty map for a caller with no cross-file/cross-package
@@ -157,11 +162,35 @@ pub fn expand_module_in_package(
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
     current_package: Option<&str>,
 ) -> (Vec<Diagnostic>, OriginMap) {
+    let (diagnostics, origins, _stdlib_uses) =
+        expand_module_with_stdlib_uses(module, external_protocols, current_package);
+    (diagnostics, origins)
+}
+
+/// `(class, protocol)` pairs whose `uses:` resolved to one of the stdlib's own
+/// protocols (BT-3915) — see [`expand_module_with_stdlib_uses`].
+pub type StdlibUses = HashSet<(EcoString, EcoString)>;
+
+/// [`expand_module_in_package`], also answering which `(class, protocol)`
+/// `uses:` lines resolved to one of the stdlib's own protocols (BT-3915) —
+/// from the same lookup the flattening used, so the two cannot disagree.
+///
+/// `MethodInfo::origin` names a provision's protocol by bare name only, so a
+/// stdlib `Comparable` and a user's carried `Comparable` look alike there;
+/// this set is what tells codegen's source mapping and provision-diagnostic
+/// rendering that a given class's provisions come from the stdlib file.
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn expand_module_with_stdlib_uses(
+    module: &mut Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Vec<Diagnostic>, OriginMap, StdlibUses) {
     let mut diagnostics = Vec::new();
     let mut origins = OriginMap::new();
+    let mut stdlib_uses = StdlibUses::new();
 
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
-        return (diagnostics, origins);
+        return (diagnostics, origins, stdlib_uses);
     }
 
     // Look up protocols once, before mutating any class — a protocol's
@@ -174,10 +203,17 @@ pub fn expand_module_in_package(
         if class.uses.is_empty() {
             continue;
         }
+        for use_ in &class.uses {
+            if let Some(protocol) = protocols.resolve(use_) {
+                if stdlib_protocols::is_stdlib_package(protocol.package.as_deref()) {
+                    stdlib_uses.insert((class.name.name.clone(), protocol.name.name.clone()));
+                }
+            }
+        }
         expand_class(class, &protocols, &mut diagnostics, &mut origins);
     }
 
-    (diagnostics, origins)
+    (diagnostics, origins, stdlib_uses)
 }
 
 /// Extracts `ClassInfo` for every class of `module` with its `uses:` lines
@@ -240,7 +276,7 @@ pub struct TraitUserModule<'a> {
 /// unflattened infos into ones carrying cross-file trait provisions, so a
 /// typed call to a provided method never reports "does not understand" on
 /// one surface while another accepts it. `protocol_defs` are the
-/// provision-bearing protocol ASTs in precedence order (first wins, see
+/// carried protocol ASTs in precedence order (first wins, see
 /// [`first_wins_protocol_map`]).
 ///
 /// Entries are matched by class name and `package` (the stamp
@@ -261,13 +297,29 @@ pub fn flatten_trait_user_class_infos<'a>(
     protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
     package: Option<&str>,
 ) -> Vec<EcoString> {
+    flatten_class_infos_as(all_class_infos, modules, protocol_defs, package, package)
+}
+
+/// [`flatten_trait_user_class_infos`] with the package the modules' `uses:`
+/// lines resolve as (`resolve_package`) apart from the `package` stamp their
+/// `ClassInfo` slots carry — a dependency scanned with unstamped slots still
+/// resolves as itself, so its own stdlib-named protocol is never mistaken for
+/// another package's shadow of the stdlib's (BT-3915).
+fn flatten_class_infos_as<'a>(
+    all_class_infos: &mut [ClassInfo],
+    modules: impl IntoIterator<Item = TraitUserModule<'a>>,
+    protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
+    package: Option<&str>,
+    resolve_package: Option<&str>,
+) -> Vec<EcoString> {
     let mut flattened_names = Vec::new();
     let external_protocols = first_wins_protocol_map(protocol_defs);
     for TraitUserModule { module, shadowed } in modules {
         if !module.classes.iter().any(|c| !c.uses.is_empty()) {
             continue;
         }
-        let mut flattened = extract_flattened_class_infos(module, &external_protocols, package);
+        let mut flattened =
+            extract_flattened_class_infos(module, &external_protocols, resolve_package);
         if let Some(pkg) = package {
             ClassHierarchy::stamp_package_on_infos(&mut flattened, pkg);
         }
@@ -300,7 +352,7 @@ struct CollectedModule {
 
 /// Collects, while a caller walks a package's source files once, what
 /// [`flatten_trait_user_class_infos`] needs: the modules with `uses:` lines
-/// and every provision-bearing protocol AST. Used by the lint surfaces, whose
+/// and every carried protocol AST ([`is_carried_protocol`]). Used by the lint surfaces, whose
 /// Pass 1 loops consume the parsed modules.
 ///
 /// `add` must be called for *every* module, in the order its classes were
@@ -313,6 +365,9 @@ pub struct TraitUserCollector {
     /// The package the collected protocols are stamped as declared in; `None`
     /// for the package being compiled ([`ProtocolDefinition::package`]).
     package: Option<EcoString>,
+    /// Source identity (ADR 0127 §3) of each collected protocol, first
+    /// definition wins — recorded by [`Self::add_source_file`].
+    protocol_sources: ProtocolSourceMap,
 }
 
 impl TraitUserCollector {
@@ -327,7 +382,7 @@ impl TraitUserCollector {
         }
     }
 
-    /// Records `module`'s declared classes and provision-bearing protocols
+    /// Records `module`'s declared classes and carried protocols ([`is_carried_protocol`])
     /// and, if any class has a `uses:` line, the module itself.
     pub fn add(&mut self, module: &Module) {
         self.modules.push(CollectedModule {
@@ -339,10 +394,42 @@ impl TraitUserCollector {
                 .then(|| module.clone()),
         });
         self.protocol_defs
-            .extend(provision_bearing_protocols(module, self.package.as_deref()));
+            .extend(carried_protocols(module, self.package.as_deref()));
     }
 
-    /// The provision-bearing protocol ASTs collected so far, in `add` order.
+    /// [`Self::add`], also recording each carried protocol's source identity
+    /// — `path` and `text`, the file its provisions' spans are offsets into —
+    /// first definition wins ([`Self::protocol_sources`]), so a diagnostic
+    /// raised in a flattened provision is reported against the protocol's file.
+    /// `package` is the package the file belongs to, stamped as each source's
+    /// [`ProtocolSource::package`](crate::semantic_analysis::ProtocolSource::package).
+    pub fn add_source_file(
+        &mut self,
+        module: &Module,
+        path: &str,
+        text: &str,
+        package: Option<&str>,
+    ) {
+        self.add(module);
+        for protocol in module.protocols.iter().filter(|p| is_carried_protocol(p)) {
+            self.protocol_sources
+                .entry(protocol.name.name.clone())
+                .or_insert_with(|| crate::semantic_analysis::ProtocolSource {
+                    path: Some(path.into()),
+                    text: text.into(),
+                    package: package.map(EcoString::from),
+                });
+        }
+    }
+
+    /// The source identity of every protocol recorded by
+    /// [`Self::add_source_file`], keyed by bare name.
+    #[must_use]
+    pub fn protocol_sources(&self) -> &ProtocolSourceMap {
+        &self.protocol_sources
+    }
+
+    /// The carried protocol ASTs ([`is_carried_protocol`]) collected so far, in `add` order.
     #[must_use]
     pub fn protocol_defs(&self) -> &[ProtocolDefinition] {
         &self.protocol_defs
@@ -351,6 +438,12 @@ impl TraitUserCollector {
     /// Flattens the collected trait users into `all_class_infos` with
     /// [`flatten_trait_user_class_infos`], resolving protocols from this
     /// collection first, then `extra_protocol_defs` (e.g. dependencies').
+    ///
+    /// `package` is the stamp on the `ClassInfo` slots to replace. A
+    /// [`Self::for_package`] collector resolves `uses:` as its own package
+    /// whatever that stamp, since its protocols are stamped with it: its own
+    /// `Comparable` is the current package's, not a dependency's shadow of
+    /// the stdlib's (BT-3915).
     pub fn flatten(
         &self,
         all_class_infos: &mut [ClassInfo],
@@ -372,7 +465,7 @@ impl TraitUserCollector {
             redeclared_later.extend(collected.declared.iter().cloned());
         }
         shadowed_sets.reverse();
-        flatten_trait_user_class_infos(
+        flatten_class_infos_as(
             all_class_infos,
             self.modules
                 .iter()
@@ -388,6 +481,7 @@ impl TraitUserCollector {
                 .cloned()
                 .chain(extra_protocol_defs),
             package,
+            self.package.as_deref().or(package),
         )
     }
 }
@@ -413,19 +507,38 @@ pub fn protocol_use_key(use_: &ProtocolUse) -> EcoString {
     }
 }
 
-/// The provision-bearing protocols of `module` (those with at least one
-/// provided method — the only ones flattening needs the AST of), stamped as
+/// Whether `protocol` is a trait: it provides at least one method (ADR 0127).
+/// The one rule for "provision-bearing" every carrier, the stdlib protocol
+/// table and codegen's protocol-source export apply.
+#[must_use]
+pub fn is_provision_bearing(protocol: &ProtocolDefinition) -> bool {
+    !protocol.provided_methods.is_empty()
+}
+
+/// Whether a compile path carries `protocol`'s full AST to other files' and
+/// packages' `uses:` resolution — the one rule every carrier applies.
+///
+/// Every provision-bearing protocol, plus any protocol named like one of the
+/// stdlib's traits (BT-3915). The stdlib's protocols are the resolver's last
+/// tier, so a package's own `Comparable` shadows the stdlib's only if it is
+/// carried — including a requirements-only one, which would otherwise not be,
+/// and a `uses: Comparable` would silently gain the stdlib's provisions while
+/// `ProtocolRegistry` still resolved the type `Comparable` to the package's.
+#[must_use]
+pub fn is_carried_protocol(protocol: &ProtocolDefinition) -> bool {
+    is_provision_bearing(protocol) || stdlib_protocols::is_stdlib_protocol_name(&protocol.name.name)
+}
+
+/// The protocols of `module` a compile path carries ([`is_carried_protocol`]:
+/// the provision-bearing ones, plus any named like a stdlib trait), stamped as
 /// declared in `package` when it is not the package being compiled
 /// ([`ProtocolDefinition::package`]).
 #[must_use]
-pub fn provision_bearing_protocols(
-    module: &Module,
-    package: Option<&str>,
-) -> Vec<ProtocolDefinition> {
+pub fn carried_protocols(module: &Module, package: Option<&str>) -> Vec<ProtocolDefinition> {
     module
         .protocols
         .iter()
-        .filter(|p| !p.provided_methods.is_empty())
+        .filter(|p| is_carried_protocol(p))
         .map(|p| {
             let mut def = p.clone();
             def.package = package.map(EcoString::from);
@@ -493,16 +606,68 @@ impl<'a> ProtocolLookup<'a> {
         }
     }
 
-    /// Resolves the protocol a `uses:` line names.
+    /// Resolves the protocol a `uses:` line names: the current module's and
+    /// the carried protocols first, then the stdlib's ([`resolve_stdlib_protocol`]).
     fn resolve(&self, use_: &ProtocolUse) -> Option<&'a ProtocolDefinition> {
-        resolve_protocol_entry(
+        resolve_use_key(
             &self.protocols,
             &protocol_use_key(use_),
             self.current_package,
-            |p| p.package.is_none(),
+            |p| *p,
         )
-        .copied()
     }
+}
+
+/// The [`StdlibUses`] of `module` without keeping its flattened form — a
+/// clone flattened by [`expand_module_with_stdlib_uses`]. Test-only.
+#[cfg(test)]
+#[must_use]
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub(crate) fn stdlib_resolved_uses(
+    module: &Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> StdlibUses {
+    if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+        return StdlibUses::new();
+    }
+    let mut flattened = module.clone();
+    expand_module_with_stdlib_uses(&mut flattened, external_protocols, current_package).2
+}
+
+/// Whether `key` is a `stdlib@Name` qualified use outside the stdlib's own
+/// build (BT-3915). Such a key names the stdlib's protocol and nothing else:
+/// it resolves against the stdlib tier only, so an unstamped (current-package)
+/// `Name` cannot capture it even where the package is unknown (`None` — REPL,
+/// self-sufficient codegen, the LSP's placeholder package), which
+/// [`resolve_protocol_entry`]'s "unknown package answers any qualifier" rule
+/// would otherwise allow. Every surface thus agrees with `beamtalk build`.
+fn qualifies_the_stdlib(key: &str, current_package: Option<&str>) -> bool {
+    !stdlib_protocols::is_stdlib_package(current_package)
+        && key
+            .split_once('@')
+            .is_some_and(|(qualifier, _)| qualifier == stdlib_protocols::STDLIB_PACKAGE)
+}
+
+/// The last tier of `uses:` resolution (BT-3915): a key that resolves in
+/// neither the current module nor the carried protocols resolves among the
+/// stdlib's provision-bearing protocols
+/// ([`stdlib_protocols`](crate::semantic_analysis::stdlib_protocols)) — a bare
+/// `Enumerable` or a qualified `stdlib@Enumerable`. Off while compiling the
+/// stdlib itself, which carries its own protocols live.
+pub(crate) fn resolve_stdlib_protocol(
+    key: &str,
+    current_package: Option<&str>,
+) -> Option<&'static ProtocolDefinition> {
+    if stdlib_protocols::is_stdlib_package(current_package) {
+        return None;
+    }
+    resolve_protocol_entry(
+        stdlib_protocols::stdlib_protocol_map(),
+        key,
+        current_package,
+        |p| p.package.is_none(),
+    )
 }
 
 /// The one rule by which a [`protocol_use_key`] finds its protocol in a map
@@ -522,7 +687,7 @@ fn resolve_protocol_entry<'a, T>(
     protocols: &'a HashMap<EcoString, T>,
     key: &str,
     current_package: Option<&str>,
-    is_current_package: impl Fn(&T) -> bool,
+    is_current_package: impl Fn(&'a T) -> bool,
 ) -> Option<&'a T> {
     let named = protocols.get(key);
     let Some((qualifier, name)) = key.split_once('@') else {
@@ -538,7 +703,8 @@ fn resolve_protocol_entry<'a, T>(
 
 /// Resolves a [`protocol_use_key`] in a [`first_wins_protocol_map`] for a
 /// package compiled as `current_package`; see [`resolve_protocol_entry`] for
-/// the rule.
+/// the rule. Falls back to the stdlib's protocols exactly as the flattener
+/// does, so the incremental-build hash covers a `uses: Enumerable` too.
 #[must_use]
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn resolve_protocol_key<'a>(
@@ -546,9 +712,60 @@ pub fn resolve_protocol_key<'a>(
     key: &str,
     current_package: Option<&str>,
 ) -> Option<&'a ProtocolDefinition> {
-    resolve_protocol_entry(external_protocols, key, current_package, |p| {
-        p.package.is_none()
+    resolve_use_key(external_protocols, key, current_package, |p| p)
+}
+
+/// The one `uses:` resolution rule every surface applies (BT-3915): the
+/// carried protocols in `protocols` (keyed as [`first_wins_protocol_map`] keys
+/// them, see [`resolve_protocol_entry`]) first, then the stdlib's
+/// ([`resolve_stdlib_protocol`]) — except that
+///
+/// - a `stdlib@Name` key resolves against the stdlib tier only
+///   ([`qualifies_the_stdlib`]), and
+/// - a bare `Name` naming a stdlib protocol never resolves to a *dependency's*
+///   same-named protocol ([`is_dependency_shadow`], Option A): only the
+///   package being compiled may shadow the stdlib's `Enumerable`. The
+///   dependency's protocol stays reachable as `dep@Enumerable`.
+///
+/// Shared by the flattener ([`ProtocolLookup`]) and the build's
+/// incremental-key hashing ([`resolve_protocol_key`]), so both follow the same
+/// protocol. `definition` reads an entry of `protocols` as its protocol.
+fn resolve_use_key<'m, 'a, T>(
+    protocols: &'m HashMap<EcoString, T>,
+    key: &str,
+    current_package: Option<&str>,
+    definition: impl Fn(&'m T) -> &'a ProtocolDefinition,
+) -> Option<&'a ProtocolDefinition> {
+    if qualifies_the_stdlib(key, current_package) {
+        return resolve_stdlib_protocol(key, current_package);
+    }
+    resolve_protocol_entry(protocols, key, current_package, |p| {
+        definition(p).package.is_none()
     })
+    .map(&definition)
+    .filter(|p| !is_dependency_shadow(key, p.package.as_deref(), current_package))
+    .or_else(|| resolve_stdlib_protocol(key, current_package))
+}
+
+/// Whether resolving the bare `key` to `protocol` would let a dependency's
+/// protocol shadow the stdlib's same-named one (BT-3915, Option A) — `key` is
+/// unqualified, names a stdlib protocol, and `protocol` is stamped with a
+/// package other than the one being compiled. Never while compiling the
+/// stdlib itself, which has no stdlib tier to fall back to.
+///
+/// `protocol_package` is the protocol's stamped package
+/// ([`ProtocolDefinition::package`] / `ProtocolInfo::package`). Shared with
+/// `ProtocolRegistry`, so a type annotation resolves a bare name as `uses:` does
+/// (BT-3941).
+pub(crate) fn is_dependency_shadow(
+    key: &str,
+    protocol_package: Option<&str>,
+    current_package: Option<&str>,
+) -> bool {
+    !key.contains('@')
+        && !stdlib_protocols::is_stdlib_package(current_package)
+        && stdlib_protocols::is_stdlib_protocol_name(key)
+        && protocol_package.is_some_and(|package| Some(package) != current_package)
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s
@@ -709,7 +926,7 @@ fn expand_class(
             continue;
         };
 
-        if protocol.provided_methods.is_empty() {
+        if !is_provision_bearing(protocol) {
             // ADR 0127 §1, §Status 6: a hint, not a warning, so a protocol
             // gaining or losing its last provision never flips a
             // `--warnings-as-errors` build.
@@ -1325,7 +1542,7 @@ fn check_protocol_provisions(
     protocol_registry: &ProtocolRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if protocol.provided_methods.is_empty() {
+    if !is_provision_bearing(protocol) {
         return;
     }
 

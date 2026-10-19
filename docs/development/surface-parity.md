@@ -913,6 +913,49 @@ flattening implementation):
   a `didOpen` racing the root-package load) counts as an unknown package
   (`trait_expansion::known_package`), so `uses: my_app@Parser` of the project's
   own protocol is accepted there exactly as `beamtalk build` accepts it.
+- **Stdlib protocols (BT-3915):** a user `uses: Enumerable(E)` /
+  `uses: Comparable` (or `stdlib@Enumerable`) flattens the stdlib's provisions
+  on every surface — CLI `build`/`test`/`lint`, REPL/workspace (compiler
+  port), LSP and MCP `lint`: **parity**. The stdlib is not a resolved
+  dependency, so no surface carries its protocol ASTs; instead the stdlib's
+  provision-bearing protocols are the *last* tier of the one resolver every
+  surface goes through (`trait_expansion`'s `ProtocolLookup::resolve` and
+  `resolve_protocol_key`), after the module's own and every carried protocol.
+  Their one source is `stdlib/src/*.bt` itself: `build-stdlib` generates
+  `generated_stdlib_protocol_files()` (in `generated_builtins.rs`), an
+  `include_str!` table of the files declaring provision-bearing protocols,
+  parsed once by `semantic_analysis::stdlib_protocols`. Which `(class,
+  protocol)` uses resolved to the stdlib is recorded per class
+  (`trait_expansion::expand_module_with_stdlib_uses`, `AnalysisResult::stdlib_protocol_uses`,
+  `ProvisionOrigin::package`), so codegen (`flattened_method_source`) and
+  provision-diagnostic rendering (`provision_report_target`) map only those
+  provisions through the stdlib file — never a user's same-named carried
+  protocol. Every carrier applies one rule, `trait_expansion::is_carried_protocol`:
+  provision-bearing protocols plus any named like a stdlib trait, so a
+  package's own *requirements-only* `Comparable` in another file is carried
+  and shadows the stdlib's (resolving to it, with a "provides no methods"
+  hint) instead of silently falling through to the stdlib's provisions.
+  MCP `lint`/`diagnostic_summary` carry the package's own protocols (and
+  their sources, `TraitUserCollector::add_source_file`) ahead of the
+  dependencies' into each file's analysis, as `beamtalk lint` does, and report
+  a diagnostic raised in a flattened provision once, against the protocol's
+  file and line (a dependency's too — the offline dependency scan carries
+  its protocol sources; a stdlib provision is labelled `<stdlib Name>`),
+  through the same shared helpers as `beamtalk lint`
+  (`protocol_source::dedupe_provision_diagnostics` /
+  `provision_report_target`). A dependency compiles, and codegen re-flattens
+  (`lower_analysed_module_for_codegen`, `AnalysisResult::trait_package`), as
+  the package analysis resolved its `uses:` lines as.
+  Only the package being compiled may shadow a stdlib protocol name
+  (Option A): a *dependency's* `Comparable` never wins a bare
+  `uses: Comparable` (`trait_expansion::resolve_use_key` /
+  `is_dependency_shadow`) and is reached as `dep@Comparable` instead, while
+  the dependency's own `uses: Comparable` resolves to its own protocol — also
+  in the offline dependency export MCP uses (`TraitUserCollector::for_package`
+  resolves as its package).
+  The fallback is off while compiling the stdlib itself
+  (`current_package == "stdlib"` / `stdlib_mode`), which carries its own
+  protocols live.
 - `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or
   re-scanned — into the package indexes in source order with the same
   `Pass1Index::add_file` a clean scan uses, and its cache entry keeps *every*

@@ -166,12 +166,7 @@ pub(crate) fn handle_inline_class_definition(
         // Prepare the AST at the driver boundary using the same
         // analysis handed off to codegen just below — codegen no longer
         // schedules this writeback itself for a trustworthy hand-off.
-        beamtalk_core::semantic_analysis::lower_module_for_codegen(
-            &mut module,
-            &analysis.class_hierarchy,
-            &analysis.method_return_types,
-            &analysis.external_protocols,
-        );
+        beamtalk_core::semantic_analysis::lower_analysed_module_for_codegen(&mut module, &analysis);
         codegen_options = codegen_options.with_analysis(analysis);
     }
     match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(

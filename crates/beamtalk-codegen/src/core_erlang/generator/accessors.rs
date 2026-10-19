@@ -19,6 +19,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use ecow::EcoString;
 
 impl CoreErlangGenerator {
     /// ADR 0098 Phase 3: the producing-toolchain identity to bake into
@@ -469,6 +470,21 @@ impl CoreErlangGenerator {
         self.class_context_mut().stdlib_mode = value;
     }
 
+    /// Records which `(class, protocol)` `uses:` lines resolved to the
+    /// stdlib's own protocols (BT-3915) — those classes' provisions map
+    /// through the stdlib file in [`Self::flattened_method_source`]. Taken
+    /// from the handed-off analysis or the self-sufficient flattening; the
+    /// stdlib's own build has no stdlib fallback, so it records nothing
+    /// (call after [`Self::set_stdlib_mode`]).
+    pub(in crate::core_erlang) fn set_stdlib_protocol_uses(
+        &mut self,
+        uses: beamtalk_core::semantic_analysis::trait_expansion::StdlibUses,
+    ) {
+        if !self.stdlib_mode() {
+            self.stdlib_protocol_uses = uses;
+        }
+    }
+
     /// Returns a mutable reference to the class context, creating it if absent.
     pub(in crate::core_erlang) fn class_context_mut(&mut self) -> &mut ClassContext {
         self.class_context.get_or_insert_with(ClassContext::new)
@@ -605,7 +621,8 @@ impl CoreErlangGenerator {
     /// The protocol source a `uses:`-flattened method must be mapped through
     /// (ADR 0127 §3, "Source locations"), or `None` when `selector` on the
     /// current class is not a flattened provision (or its protocol's source
-    /// was not supplied via `CodegenOptions::with_protocol_sources`).
+    /// is neither the stdlib's — for a `uses:` in `stdlib_protocol_uses`,
+    /// BT-3915 — nor supplied via `CodegenOptions::with_protocol_sources`).
     ///
     /// Provenance comes from `MethodInfo::origin`, stamped by
     /// `trait_expansion::apply_origins`. Provisions are instance-side only
@@ -615,7 +632,8 @@ impl CoreErlangGenerator {
         selector: &str,
         class_side: bool,
     ) -> Option<beamtalk_core::semantic_analysis::ProtocolSource> {
-        if class_side || self.protocol_sources.is_empty() {
+        if class_side || (self.protocol_sources.is_empty() && self.stdlib_protocol_uses.is_empty())
+        {
             return None;
         }
         let class_name = self.class_identity()?.class_name();
@@ -628,6 +646,17 @@ impl CoreErlangGenerator {
             .find(|m| m.selector.as_str() == selector)?
             .origin
             .as_ref()?;
+        // A provision from the stdlib's own protocol (BT-3915) maps through
+        // the stdlib file — never through a same-named carried protocol.
+        if self
+            .stdlib_protocol_uses
+            .contains(&(EcoString::from(class_name), origin.clone()))
+        {
+            return beamtalk_core::semantic_analysis::stdlib_protocols::stdlib_protocol_source(
+                origin,
+            )
+            .cloned();
+        }
         self.protocol_sources.get(origin).cloned()
     }
 

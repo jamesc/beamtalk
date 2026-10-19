@@ -628,6 +628,7 @@ fn dependency_protocol_and_alias_infos_merge_and_resolve() {
         extending: None,
         methods: vec![],
         class_methods: vec![],
+        package: None,
         span: beamtalk_core::source_analysis::Span::default(),
 
         provided_selectors: vec![],

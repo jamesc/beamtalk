@@ -251,11 +251,9 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // still-trustworthy analysis (computed on `merged_module` with no
     // mutation since) handed off to codegen just below — codegen no longer
     // schedules this writeback itself in that case.
-    beamtalk_core::semantic_analysis::lower_module_for_codegen(
+    beamtalk_core::semantic_analysis::lower_analysed_module_for_codegen(
         &mut merged_module,
-        &analysis.class_hierarchy,
-        &analysis.method_return_types,
-        &analysis.external_protocols,
+        &analysis,
     );
     let codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_source(&merged_class_source)

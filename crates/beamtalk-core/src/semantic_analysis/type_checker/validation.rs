@@ -2193,6 +2193,12 @@ impl TypeChecker {
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
         let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
 
+        // Comparison operators require an argument of the receiver's own kind:
+        // numeric for Integer/Float, otherwise Character, String or Symbol.
+        // Anything else falls back to Erlang term order at runtime (BT-3928),
+        // so the compiler is the only place the mismatch can be reported.
+        let comparison_expectation = Self::comparison_arg_expectation(receiver_ty, hierarchy);
+
         // Whether this call has bespoke logic for `operator` on
         // `receiver_ty` — computed from the same guards each branch below
         // uses, so it stays in lockstep with what's actually checked. If a
@@ -2201,7 +2207,7 @@ impl TypeChecker {
         // and skip the generic `check_argument_types` fallback.
         let handled = (is_arithmetic && is_numeric(receiver_ty))
             || is_concat
-            || (is_comparison && is_numeric(receiver_ty));
+            || (is_comparison && comparison_expectation.is_some());
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
@@ -2262,19 +2268,22 @@ impl TypeChecker {
             return handled;
         }
 
-        // Comparison operators on numeric types require numeric arguments
-        if is_comparison && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
+        // Comparison operators require an argument of the receiver's kind
+        if let Some(expected) =
+            comparison_expectation.filter(|e| is_comparison && !e.accepts(arg_ty, hierarchy))
+        {
+            let expected_label = expected.label();
             let mut diag = if is_generic {
                 Diagnostic::hint(
                     format!(
-                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
+                        "`{operator}` on {receiver_display} expects a {expected_label} argument, got {arg_display}"
                     ),
                     span,
                 )
             } else {
                 Diagnostic::warning(
                     format!(
-                        "`{operator}` on {receiver_display} expects a numeric argument, got {arg_display}"
+                        "`{operator}` on {receiver_display} expects a {expected_label} argument, got {arg_display}"
                     ),
                     span,
                 )
@@ -2288,6 +2297,28 @@ impl TypeChecker {
             self.diagnostics.push(diag);
         }
         handled
+    }
+
+    /// The argument kind a comparison (`<` `>` `<=` `>=`) expects for `receiver_ty`.
+    ///
+    /// `None` when the receiver is not a primitive kind with a defined ordering
+    /// (the generic argument check applies instead). `Character` is checked
+    /// before the numeric case because it inherits from `Integer`.
+    fn comparison_arg_expectation(
+        receiver_ty: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<ComparisonArgKind> {
+        if receiver_ty == "Character" {
+            Some(ComparisonArgKind::Character)
+        } else if hierarchy.is_numeric_type(receiver_ty) {
+            Some(ComparisonArgKind::Numeric)
+        } else if WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String) {
+            Some(ComparisonArgKind::String)
+        } else if receiver_ty == "Symbol" || receiver_ty.starts_with('#') {
+            Some(ComparisonArgKind::Symbol)
+        } else {
+            None
+        }
     }
 
     /// Check a field assignment `self.field := value` against the declared state type.
@@ -4085,5 +4116,34 @@ impl TypeChecker {
             .map(|s| format!("'{s}'"))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// The kind of argument a primitive receiver's comparison operator expects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComparisonArgKind {
+    Numeric,
+    Character,
+    String,
+    Symbol,
+}
+
+impl ComparisonArgKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Numeric => "numeric",
+            Self::Character => "Character",
+            Self::String => "String",
+            Self::Symbol => "Symbol",
+        }
+    }
+
+    fn accepts(self, arg_ty: &str, hierarchy: &ClassHierarchy) -> bool {
+        match self {
+            Self::Numeric => hierarchy.is_numeric_type(arg_ty),
+            Self::Character => arg_ty == "Character",
+            Self::String => WellKnownClass::from_str(arg_ty) == Some(WellKnownClass::String),
+            Self::Symbol => arg_ty == "Symbol" || arg_ty.starts_with('#'),
+        }
     }
 }

@@ -124,6 +124,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
     let (protocol_infos, protocol_defs, protocol_sources) =
         collect_stdlib_protocol_infos(&source_files);
+    let protocol_file_names = provision_bearing_protocol_file_names(&protocol_sources);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {
@@ -174,6 +175,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &class_metadata,
         &protocol_modules,
         alias_sources,
+        &protocol_file_names,
     )?;
 
     println!("Built {} stdlib modules", source_files.len());
@@ -190,6 +192,7 @@ fn write_stdlib_generated_outputs(
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
     alias_sources: Vec<AliasSource>,
+    protocol_file_names: &[String],
 ) -> Result<()> {
     // `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
     // same `build_alias_metadata` extraction the ordinary `beamtalk build`
@@ -224,6 +227,7 @@ fn write_stdlib_generated_outputs(
     generate_builtins_rs(
         class_metadata,
         &alias_source_texts_sorted_by_name(alias_sources),
+        protocol_file_names,
     )?;
 
     // Generate the Erlang-side twin of the same builtin-class list,
@@ -1061,9 +1065,11 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
 /// slicing/re-parse round trip and no `package` stamp: `ProtocolInfo` carries
 /// no `package` field (protocols have no `internal` modifier at the AST
 /// level — see `collect_project_protocol_and_alias_infos`'s doc in
-/// `build.rs`, which this mirrors), and nothing downstream persists stdlib's
-/// protocols into `generated_builtins.rs` the way aliases are for
-/// REPL/workspace consumption. `ProtocolRegistry::extract_protocol_infos`
+/// `build.rs`, which this mirrors). (User compilation gets the stdlib's
+/// provision-bearing protocols from `generated_builtins.rs`'s
+/// `generated_stdlib_protocol_files()` table instead — see
+/// [`generate_protocol_files_section`]; this live pre-pass is what the stdlib
+/// build itself uses.) `ProtocolRegistry::extract_protocol_infos`
 /// already returns owned, directly-usable `ProtocolInfo` values, so a single
 /// per-file lex/parse/extract pass is enough.
 ///
@@ -1113,7 +1119,7 @@ fn collect_stdlib_protocol_infos(
         for protocol in module
             .protocols
             .into_iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing)
         {
             all_sources.insert(
                 protocol.name.name.clone(),
@@ -1644,7 +1650,11 @@ fn write_generated_file_if_changed(dest: &Utf8Path, content: &str) -> Result<()>
 ///    very generator, just keeping the *whole* declaration instead of a bare
 ///    type name (a bare name isn't enough to reconstruct a union/generic
 ///    RHS).
-fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) -> Result<()> {
+fn generate_builtins_rs(
+    class_metadata: &[ClassMeta],
+    alias_sources: &[String],
+    protocol_file_names: &[String],
+) -> Result<()> {
     let mut code = String::new();
 
     code.push_str(
@@ -1723,6 +1733,10 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
     // Generate generated_stdlib_alias_sources() — see this
     // function's own doc for the source-text-persisted-and-reparsed design.
     generate_alias_sources_section(&mut code, alias_sources);
+
+    // Generate generated_stdlib_protocol_files() — the stdlib's
+    // provision-bearing protocols for user compilation (BT-3915).
+    generate_protocol_files_section(&mut code, protocol_file_names);
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_PATH);
     write_generated_file_if_changed(&dest, &code)
@@ -2017,6 +2031,55 @@ fn generate_alias_sources_section(code: &mut String, alias_sources: &[String]) {
 
     for text in alias_sources {
         let _ = writeln!(code, "        {},", rust_str_lit(text));
+    }
+    code.push_str("    ]\n}\n");
+}
+
+/// The file name (no directory) of every stdlib source file that declares a
+/// provision-bearing protocol, sorted and deduplicated — the files
+/// [`generate_protocol_files_section`] embeds.
+fn provision_bearing_protocol_file_names(
+    protocol_sources: &beamtalk_core::semantic_analysis::ProtocolSourceMap,
+) -> Vec<String> {
+    let mut names: Vec<String> = protocol_sources
+        .values()
+        .filter_map(|src| src.path.as_deref())
+        .filter_map(|path| Utf8Path::new(path).file_name().map(str::to_string))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Emit `generated_stdlib_protocol_files()`: `(path, text)` of every stdlib
+/// file declaring a provision-bearing protocol (BT-3915).
+///
+/// The text is `include_str!` of the stdlib source itself, not a copy, so the
+/// protocols a user package flattens through `uses: Enumerable` /
+/// `uses: Comparable` are exactly the ones in `stdlib/src/` — the generator
+/// only decides *which* files carry them. `semantic_analysis::stdlib_protocols`
+/// parses them (once) into the definitions and source map every compile path
+/// falls back to after its own carried protocols.
+fn generate_protocol_files_section(code: &mut String, file_names: &[String]) {
+    code.push_str(
+        "\n/// Returns `(path, source text)` for every stdlib file that declares a\n\
+         /// provision-bearing protocol (ADR 0127 §10a; BT-3915), sorted by path.\n\
+         ///\n\
+         /// Auto-generated by `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s\n\
+         /// `generate_protocol_files_section`. The text is the stdlib source itself\n\
+         /// (`include_str!`), not a copy.\n\
+         #[rustfmt::skip] // preserve compact generated layout\n\
+         pub(super) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static str)> {\n\
+         \x20   vec![\n",
+    );
+    for name in file_names {
+        let path = format!("{STDLIB_SOURCE_DIR}/{name}");
+        let _ = writeln!(
+            code,
+            "        ({}, include_str!({})),",
+            rust_str_lit(&path),
+            rust_str_lit(&format!("../../../../../{path}")),
+        );
     }
     code.push_str("    ]\n}\n");
 }

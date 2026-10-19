@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3903 (ADR 0133 Phase 1): the Smalltalk idiom "define `do:`, inherit the
-// rest" as a package-local trait. A user package cannot `uses:` the stdlib's
-// own `Enumerable` today (only the stdlib build carries stdlib protocol
-// definitions; BT-3915), and `Enumerable` requires `elements` rather than
-// `do:` anyway, so this trait is the shape ADR 0133 § Consequences describes:
+// rest" as a package-local trait. The stdlib's `Enumerable` requires
+// `elements` rather than `do:` (a user class `uses:` it in
+// adr0133enumerable_stdlib.bt, BT-3915), so this trait is the shape ADR 0133
+// § Consequences describes:
 // one required `do:`, and the iteration messages provided on top of it, each
 // a block literal sent with `self do:` that writes the provision's own local.
 // Users: adr0133enumerable_{forwarding,hand_walk,own_any}.bt.

@@ -170,6 +170,13 @@ pub(super) fn stdlib_aliases() -> Vec<AliasInfo> {
         .collect()
 }
 
+/// `(path, source text)` of every stdlib file declaring a provision-bearing
+/// protocol — `generated::generated_stdlib_protocol_files`, whose text is the
+/// stdlib source itself (`include_str!`).
+pub(super) fn stdlib_protocol_files() -> Vec<(&'static str, &'static str)> {
+    generated::generated_stdlib_protocol_files()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
