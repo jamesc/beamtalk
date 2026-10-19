@@ -108,7 +108,13 @@ pub fn overridable_collection_selectors() -> impl Iterator<Item = &'static str> 
         .iter()
         .copied()
         .filter(|sel| *sel != "do:")
+        .chain(COLLECTION_SELF_SENDS.iter().copied())
 }
+
+/// Unary messages the stdlib's collection methods self-send (BT-3951): `collect:`
+/// and `select:` build their answer with `self species withAll:`, so a class's
+/// own `species` changes the pure answer and the in-place fold would skip it.
+const COLLECTION_SELF_SENDS: &[&str] = &["species"];
 
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
@@ -578,6 +584,33 @@ pub fn is_try_do_selector(sel: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-3951: the runtime's list of overridable collection selectors
+    /// (`beamtalk_collection_selectors.erl`, read when a runtime extension is
+    /// checked) is the compiler's one list, in the same order. Edit the Erlang
+    /// module when this fails.
+    #[test]
+    fn runtime_overridable_selector_list_matches_the_compiler_list() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../runtime/apps/beamtalk_runtime/src/beamtalk_collection_selectors.erl"
+        );
+        let src = std::fs::read_to_string(path).expect("read beamtalk_collection_selectors.erl");
+        let body = src
+            .split("%% BEGIN SELECTORS")
+            .nth(1)
+            .and_then(|rest| rest.split("%% END SELECTORS").next())
+            .expect("selector markers");
+        let runtime: Vec<&str> = body
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim().trim_end_matches([',', ']']);
+                line.strip_prefix('\'')?.strip_suffix('\'')
+            })
+            .collect();
+        let compiler: Vec<&str> = overridable_collection_selectors().collect();
+        assert_eq!(runtime, compiler);
+    }
 
     fn parse_expr(src: &str) -> Expression {
         let tokens = crate::source_analysis::lex_with_eof(src);

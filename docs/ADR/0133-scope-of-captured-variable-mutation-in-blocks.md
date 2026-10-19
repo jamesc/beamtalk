@@ -494,9 +494,12 @@ code.
   > when it is a faithful fold over `do:`; a class that wants the write to
   > thread `uses:` the stdlib `Enumerable`, or computes the value without
   > assigning from the block. `testOwnAnySatisfyWritePin` flipped to
-  > `testOwnAnySatisfyWriteRaises`. Known gap: an extension method (registered
-  > at run time) that overrides a collection message other than the one sent is
-  > not seen by the per-class flag.
+  > `testOwnAnySatisfyWriteRaises`. A runtime extension method on a collection
+  > message (BT-3951), found by the guard in the extension registry for each
+  > class on the chain, and a `species` override, which the list includes
+  > because the stdlib's `collect:` and `select:` self-send it, refuse the same
+  > way. The runtime copy of the list (`beamtalk_collection_selectors`) is
+  > checked against the compiler's by a Rust test.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.

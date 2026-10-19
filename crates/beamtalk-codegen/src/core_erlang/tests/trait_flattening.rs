@@ -584,12 +584,16 @@ fn package_local_protocol_provisions_are_not_recorded_as_stdlib() {
 fn defining_any_overridable_collection_selector_sets_the_override_flag() {
     let mut checked = 0;
     for selector in beamtalk_core::state_threading_selectors::overridable_collection_selectors() {
-        let signature = selector
-            .split_inclusive(':')
-            .enumerate()
-            .map(|(i, part)| format!("{part} arg{i}"))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let signature = if selector.contains(':') {
+            selector
+                .split_inclusive(':')
+                .enumerate()
+                .map(|(i, part)| format!("{part} arg{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            selector.to_string()
+        };
         let src = format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {signature} => nil\n");
         let mut module = parse_fixture(&src);
         let analysis = analyse_full(&module, AnalysisContext::default());

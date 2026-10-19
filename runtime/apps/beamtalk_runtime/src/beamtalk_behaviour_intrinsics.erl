@@ -444,23 +444,32 @@ stdlib, a collection message the stdlib's own collection methods run through
 
 Reads the `overrides_collection_selector` key codegen bakes into each class's
 meta from the compiler's one list of those messages
-(`state_threading_selectors::overridable_collection_selectors`), so this holds
-no list of its own. A class without meta (dynamic, older build) counts as
-`false`.
+(`state_threading_selectors::overridable_collection_selectors`). A runtime
+extension method (BT-3951) is invisible to that flag, so each class on the chain
+is also asked `beamtalk_collection_selectors:extended_on/1`, whose list a Rust
+test holds equal to the compiler's. A class without meta (dynamic, older build)
+counts as `false`.
 """.
 -spec overridesCollectionSelectorFromName(atom()) -> boolean().
 overridesCollectionSelectorFromName(ClassName) ->
     walk_hierarchy(
         ClassName,
-        fun(_CN, CPid, _Acc) ->
-            Module = beamtalk_object_class:module_name_safe(CPid),
-            case is_stdlib_module_name(Module) of
+        fun(CN, CPid, _Acc) ->
+            %% A runtime extension (BT-3951) is invisible to the compile-time
+            %% flag, and may sit on a stdlib class.
+            case beamtalk_collection_selectors:extended_on(CN) of
                 true ->
-                    {cont, false};
+                    {halt, true};
                 false ->
-                    case meta_for_module(Module) of
-                        {ok, #{overrides_collection_selector := true}} -> {halt, true};
-                        _ -> {cont, false}
+                    Module = beamtalk_object_class:module_name_safe(CPid),
+                    case is_stdlib_module_name(Module) of
+                        true ->
+                            {cont, false};
+                        false ->
+                            case meta_for_module(Module) of
+                                {ok, #{overrides_collection_selector := true}} -> {halt, true};
+                                _ -> {cont, false}
+                            end
                     end
             end
         end,
