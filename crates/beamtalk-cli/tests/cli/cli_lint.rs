@@ -587,6 +587,79 @@ fn package_requirements_only_protocol_shadows_the_stdlib_one_bt_3915() {
     );
 }
 
+/// BT-3915 (Option A): a dependency's stdlib-named protocol never shadows the
+/// stdlib's for a bare `uses:` in the consumer — only the consumer's own
+/// package may — while `producer@Comparable` still reaches the dependency's.
+/// The dependency's `Comparable` is requirements-only, so resolving to it is
+/// visible as the "provides no methods" hint; the stdlib's has provisions.
+#[test]
+fn dependency_protocol_never_shadows_the_stdlib_one_bt_3915() {
+    let root = tempfile::tempdir().unwrap();
+    let dep = root.path().join("producer");
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("src/comparable.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Comparable\n\
+         \x20\x20< other -> Boolean\n",
+    )
+    .unwrap();
+
+    let consumer = root.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nproducer = { path = \"../producer\" }\n",
+    )
+    .unwrap();
+    let write_rank = |protocol: &str| {
+        std::fs::write(
+            consumer.join("src/Rank.bt"),
+            format!(
+                "// Copyright 2026 James Casey\n\
+                 // SPDX-License-Identifier: Apache-2.0\n\
+                 \n\
+                 Value subclass: Rank\n\
+                 \x20\x20uses: {protocol}\n\
+                 \x20\x20field: level :: Integer = 0\n\
+                 \n\
+                 \x20\x20< other :: Rank -> Boolean => self.level < other level\n"
+            ),
+        )
+        .unwrap();
+    };
+    let lint = || {
+        let output = cli_common::beamtalk()
+            .current_dir(&consumer)
+            .arg("lint")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+
+    write_rank("Comparable");
+    let stderr = lint();
+    assert!(
+        !stderr.contains("unknown protocol") && !stderr.contains("provides no methods"),
+        "a bare `uses: Comparable` must resolve to the stdlib's, got:\n{stderr}"
+    );
+
+    write_rank("producer@Comparable");
+    let stderr = lint();
+    assert!(
+        !stderr.contains("unknown protocol") && stderr.contains("provides no methods"),
+        "`uses: producer@Comparable` must resolve to the dependency's, got:\n{stderr}"
+    );
+}
+
 /// BT-3673: a path dependency whose own classes use a cross-file trait must
 /// compile (its multi-file compile now sees sibling-file protocols) and be
 /// consumable: `beamtalk lint` and `beamtalk build` of the consumer succeed

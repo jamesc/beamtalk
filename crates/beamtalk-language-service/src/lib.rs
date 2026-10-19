@@ -1690,12 +1690,16 @@ impl LanguageService for SimpleLanguageService {
         // `MethodInfo::origin` here, at the source that builds `MethodInfo`
         // for the LSP path, so hover needn't re-derive it.
         let (class_hierarchy_result, hierarchy_diags) =
-            crate::project_index::build_hierarchy_with_trait_origins(&module, || {
-                // First definition wins, as in analysis (BT-3915).
-                beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
-                    self.project_index.cross_file_protocol_defs_for(&file),
-                )
-            });
+            crate::project_index::build_hierarchy_with_trait_origins(
+                &module,
+                Some(self.project_index.alias_package_for_file(&file).as_str()),
+                || {
+                    // First definition wins, as in analysis (BT-3915).
+                    beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+                        self.project_index.cross_file_protocol_defs_for(&file),
+                    )
+                },
+            );
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
             // Register protocol definitions as synthetic class entries
             // so LSP features (completions, has_class) work with protocol names.

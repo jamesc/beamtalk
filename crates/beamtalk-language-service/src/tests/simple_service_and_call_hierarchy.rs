@@ -478,6 +478,117 @@ fn project_protocol_wins_over_a_dependency_namesake() {
     assert_eq!(provided, ["localOnly"], "the project's Comparable must win");
 }
 
+/// A dependency `foo` declaring its own provision-bearing `Comparable`, plus
+/// a project file `src/rank.bt` whose `Rank` `uses: {protocol}` and sends
+/// `{send}` — hovered at (6, 10).
+fn dependency_comparable_service(
+    protocol: &str,
+    send: &str,
+) -> (SimpleLanguageService, Utf8PathBuf) {
+    let mut service = SimpleLanguageService::new();
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/foo/src/comparable.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n  depOnly => 2\n".to_string(),
+    );
+    let user_file = Utf8PathBuf::from("src/rank.bt");
+    service.update_file(
+        user_file.clone(),
+        format!(
+            "Value subclass: Rank\n  uses: {protocol}\n  field: level :: Integer = 0\n\n  < other => self.level < other level\n\nRank new {send}\n"
+        ),
+    );
+    (service, user_file)
+}
+
+fn hover_docs(service: &SimpleLanguageService, file: &Utf8PathBuf) -> ecow::EcoString {
+    service
+        .hover(file, Position::new(6, 10))
+        .and_then(|h| h.documentation)
+        .unwrap_or_default()
+}
+
+/// BT-3915 (Option A): a dependency's `Comparable` never shadows the stdlib's
+/// for a bare `uses: Comparable` in the LSP, as in `beamtalk build` — the
+/// stdlib's provisions are flattened in, the dependency's are not.
+#[test]
+fn bare_stdlib_name_resolves_to_the_stdlib_over_a_dependency_namesake() {
+    let (service, user_file) =
+        dependency_comparable_service("Comparable", "between: Rank new and: Rank new");
+    let source = service
+        .get_file(&user_file)
+        .expect("indexed")
+        .source
+        .clone();
+    assert!(
+        lsp_stdlib_uses(&service, &user_file, &source)
+            .contains(&("Rank".into(), "Comparable".into()))
+    );
+    let diagnostics = service.diagnostics(&user_file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("depOnly") || d.message.contains("unknown protocol")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        hover_docs(&service, &user_file).contains("*provided by* `Comparable`"),
+        "the stdlib's between:and: must be flattened in"
+    );
+    let (service, user_file) = dependency_comparable_service("Comparable", "depOnly");
+    assert!(
+        !hover_docs(&service, &user_file).contains("*provided by*"),
+        "the dependency's depOnly must not be flattened in"
+    );
+}
+
+/// BT-3915 (Option A): the dependency's `Comparable` stays reachable in the
+/// LSP as `foo@Comparable`.
+#[test]
+fn qualified_dependency_use_resolves_to_the_dependency_namesake() {
+    let (service, user_file) = dependency_comparable_service("foo@Comparable", "depOnly");
+    let diagnostics = service.diagnostics(&user_file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown protocol")
+                || d.message.contains("no source available")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        hover_docs(&service, &user_file).contains("*provided by* `Comparable`"),
+        "the dependency's depOnly must be flattened in"
+    );
+    let source = service
+        .get_file(&user_file)
+        .expect("indexed")
+        .source
+        .clone();
+    assert!(lsp_stdlib_uses(&service, &user_file, &source).is_empty());
+}
+
+/// BT-3915 (Option A): the project's own `Comparable` still shadows both the
+/// stdlib's and a dependency's for a bare `uses: Comparable` in the LSP.
+#[test]
+fn own_project_namesake_still_shadows_with_a_dependency_namesake_present() {
+    let (mut service, user_file) = dependency_comparable_service("Comparable", "localOnly");
+    service.update_file(
+        Utf8PathBuf::from("src/comparable_local.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n  localOnly => 1\n".to_string(),
+    );
+    // Re-index the user file now that the project's protocol is known.
+    let source = service
+        .get_file(&user_file)
+        .expect("indexed")
+        .source
+        .clone();
+    service.update_file(user_file.clone(), source.clone());
+    assert!(lsp_stdlib_uses(&service, &user_file, &source).is_empty());
+    assert!(
+        hover_docs(&service, &user_file).contains("*provided by* `Comparable`"),
+        "the project's localOnly must be flattened in"
+    );
+}
+
 /// BT-3915: with the stdlib preloaded and no project `Comparable`, `uses:
 /// Comparable` gets the stdlib's provisions and the use is recorded as
 /// stdlib-resolved (so source mapping and provision diagnostics use the

@@ -449,6 +449,121 @@ fn the_stdlib_itself_never_falls_back_to_the_baked_protocols() {
     );
 }
 
+// ── Dependency shadowing of stdlib protocol names (BT-3915, Option A) ────
+
+/// A dependency `dep` declaring its own provision-bearing `Comparable`, as
+/// `beamtalk build` carries it: stamped with the dependency's package.
+fn dependency_comparable() -> HashMap<EcoString, ProtocolDefinition> {
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    first_wins_protocol_map(carried_protocols(&dep_file, Some("dep")))
+}
+
+fn rank_using(protocol: &str) -> Module {
+    parse_source(&format!(
+        "Value subclass: Rank
+  uses: {protocol}
+  field: level :: Integer = 0
+
+  < other => self.level < other level"
+    ))
+}
+
+/// A bare `uses: Comparable` never resolves to a dependency's stdlib-named
+/// protocol: it is the stdlib's, on every surface (known package or not).
+#[test]
+fn bare_stdlib_name_resolves_to_the_stdlib_over_a_dependency_namesake() {
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(
+            stdlib_uses.contains(&("Rank".into(), "Comparable".into())),
+            "{package:?}: {stdlib_uses:?}"
+        );
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "between:and:").is_some(), "{package:?}");
+        assert!(find_method(rank, "depOnly").is_none(), "{package:?}");
+        let resolved =
+            resolve_protocol_key(&external, "Comparable", package).expect("Comparable resolves");
+        assert_eq!(
+            resolved.package.as_deref(),
+            Some("stdlib"),
+            "the incremental-build hash agrees ({package:?})"
+        );
+    }
+}
+
+/// The dependency's `Comparable` stays reachable as `dep@Comparable`.
+#[test]
+fn qualified_dependency_use_resolves_to_the_dependency_namesake() {
+    let external = dependency_comparable();
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("dep@Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "depOnly").is_some(), "{package:?}");
+        assert!(find_method(rank, "between:and:").is_none(), "{package:?}");
+        let resolved = resolve_protocol_key(&external, "dep@Comparable", package)
+            .expect("dep@Comparable resolves");
+        assert_eq!(resolved.package.as_deref(), Some("dep"), "{package:?}");
+    }
+}
+
+/// The package's own `Comparable` (another file, carried unstamped) still
+/// shadows the stdlib's, and wins the bare name over the dependency's too.
+#[test]
+fn own_package_namesake_still_shadows_with_a_dependency_namesake_present() {
+    let own_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  ownOnly => #own",
+    );
+    let dep_file = parse_source(
+        "Protocol define: Comparable
+  < other -> Boolean
+  depOnly => #dep",
+    );
+    // Project before dependencies, as every carrier orders them.
+    let external = first_wins_protocol_map(
+        carried_protocols(&own_file, None)
+            .into_iter()
+            .chain(carried_protocols(&dep_file, Some("dep"))),
+    );
+    for package in [Some("my_app"), None] {
+        let mut flattened = rank_using("Comparable");
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(diagnostics.is_empty(), "{package:?}: {diagnostics:?}");
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        let rank = find_class(&flattened, "Rank");
+        assert!(find_method(rank, "ownOnly").is_some(), "{package:?}");
+        assert!(find_method(rank, "depOnly").is_none(), "{package:?}");
+        assert!(find_method(rank, "between:and:").is_none(), "{package:?}");
+    }
+}
+
+/// Compiled as the dependency itself, its own `Comparable` is the current
+/// package's and shadows the stdlib's, like any package's own.
+#[test]
+fn a_dependency_compiled_as_itself_keeps_its_own_namesake() {
+    let external = dependency_comparable();
+    let mut flattened = rank_using("Comparable");
+    let (diagnostics, _, stdlib_uses) =
+        expand_module_with_stdlib_uses(&mut flattened, &external, Some("dep"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(stdlib_uses.is_empty(), "{stdlib_uses:?}");
+    assert!(find_method(find_class(&flattened, "Rank"), "depOnly").is_some());
+}
+
 /// `docs/beamtalk-language-features.md` § Traits' `WorkerPool` example,
 /// verbatim, through the full analysis with nothing carried in.
 #[test]

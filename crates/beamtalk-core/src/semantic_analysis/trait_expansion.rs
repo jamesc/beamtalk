@@ -544,15 +544,12 @@ impl<'a> ProtocolLookup<'a> {
     /// Resolves the protocol a `uses:` line names: the current module's and
     /// the carried protocols first, then the stdlib's ([`resolve_stdlib_protocol`]).
     fn resolve(&self, use_: &ProtocolUse) -> Option<&'a ProtocolDefinition> {
-        let key = protocol_use_key(use_);
-        if qualifies_the_stdlib(&key, self.current_package) {
-            return resolve_stdlib_protocol(&key, self.current_package);
-        }
-        resolve_protocol_entry(&self.protocols, &key, self.current_package, |p| {
-            p.package.is_none()
-        })
-        .copied()
-        .or_else(|| resolve_stdlib_protocol(&key, self.current_package))
+        resolve_use_key(
+            &self.protocols,
+            &protocol_use_key(use_),
+            self.current_package,
+            |p| *p,
+        )
     }
 }
 
@@ -625,7 +622,7 @@ fn resolve_protocol_entry<'a, T>(
     protocols: &'a HashMap<EcoString, T>,
     key: &str,
     current_package: Option<&str>,
-    is_current_package: impl Fn(&T) -> bool,
+    is_current_package: impl Fn(&'a T) -> bool,
 ) -> Option<&'a T> {
     let named = protocols.get(key);
     let Some((qualifier, name)) = key.split_once('@') else {
@@ -650,13 +647,58 @@ pub fn resolve_protocol_key<'a>(
     key: &str,
     current_package: Option<&str>,
 ) -> Option<&'a ProtocolDefinition> {
+    resolve_use_key(external_protocols, key, current_package, |p| p)
+}
+
+/// The one `uses:` resolution rule every surface applies (BT-3915): the
+/// carried protocols in `protocols` (keyed as [`first_wins_protocol_map`] keys
+/// them, see [`resolve_protocol_entry`]) first, then the stdlib's
+/// ([`resolve_stdlib_protocol`]) — except that
+///
+/// - a `stdlib@Name` key resolves against the stdlib tier only
+///   ([`qualifies_the_stdlib`]), and
+/// - a bare `Name` naming a stdlib protocol never resolves to a *dependency's*
+///   same-named protocol ([`is_dependency_shadow`], Option A): only the
+///   package being compiled may shadow the stdlib's `Enumerable`. The
+///   dependency's protocol stays reachable as `dep@Enumerable`.
+///
+/// Shared by the flattener ([`ProtocolLookup`]) and the build's
+/// incremental-key hashing ([`resolve_protocol_key`]), so both follow the same
+/// protocol. `definition` reads an entry of `protocols` as its protocol.
+fn resolve_use_key<'m, 'a, T>(
+    protocols: &'m HashMap<EcoString, T>,
+    key: &str,
+    current_package: Option<&str>,
+    definition: impl Fn(&'m T) -> &'a ProtocolDefinition,
+) -> Option<&'a ProtocolDefinition> {
     if qualifies_the_stdlib(key, current_package) {
         return resolve_stdlib_protocol(key, current_package);
     }
-    resolve_protocol_entry(external_protocols, key, current_package, |p| {
-        p.package.is_none()
+    resolve_protocol_entry(protocols, key, current_package, |p| {
+        definition(p).package.is_none()
     })
+    .map(&definition)
+    .filter(|p| !is_dependency_shadow(key, p, current_package))
     .or_else(|| resolve_stdlib_protocol(key, current_package))
+}
+
+/// Whether resolving the bare `key` to `protocol` would let a dependency's
+/// protocol shadow the stdlib's same-named one (BT-3915, Option A) — `key` is
+/// unqualified, names a stdlib protocol, and `protocol` is stamped with a
+/// package other than the one being compiled. Never while compiling the
+/// stdlib itself, which has no stdlib tier to fall back to.
+fn is_dependency_shadow(
+    key: &str,
+    protocol: &ProtocolDefinition,
+    current_package: Option<&str>,
+) -> bool {
+    !key.contains('@')
+        && !stdlib_protocols::is_stdlib_package(current_package)
+        && stdlib_protocols::is_stdlib_protocol_name(key)
+        && protocol
+            .package
+            .as_deref()
+            .is_some_and(|package| Some(package) != current_package)
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s

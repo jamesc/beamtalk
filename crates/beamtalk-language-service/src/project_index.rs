@@ -38,10 +38,15 @@ use std::collections::{HashMap, HashSet};
 /// carries carried protocols from other files/packages, keyed by
 /// bare name and is supplied lazily (`external_protocols`), so the (clone-heavy)
 /// cross-file collection only runs when some class has a `uses:` line.
+/// `current_package` is the file's package as diagnostics compile it
+/// ([`ProjectIndex::alias_package_for_file`]), so a bare `uses:` resolves to
+/// the same protocol here as there — e.g. never to a dependency's
+/// stdlib-named protocol (BT-3915).
 /// Expansion diagnostics are discarded: `diagnostics()` already
 /// reports them via the full analysis pipeline.
 pub(crate) fn build_hierarchy_with_trait_origins(
     module: &beamtalk_core::ast::Module,
+    current_package: Option<&str>,
     external_protocols: impl FnOnce() -> HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
 ) -> (Result<ClassHierarchy, SemanticError>, Vec<Diagnostic>) {
     use beamtalk_core::semantic_analysis::trait_expansion;
@@ -50,8 +55,11 @@ pub(crate) fn build_hierarchy_with_trait_origins(
         return ClassHierarchy::build(module);
     }
     let mut expanded = module.clone();
-    let (_expansion_diags, origins) =
-        trait_expansion::expand_module(&mut expanded, &external_protocols());
+    let (_expansion_diags, origins) = trait_expansion::expand_module_in_package(
+        &mut expanded,
+        &external_protocols(),
+        trait_expansion::known_package(current_package),
+    );
     let (result, diags) = ClassHierarchy::build(&expanded);
     let result = result.map(|mut hierarchy| {
         trait_expansion::apply_origins(&mut hierarchy, &origins);
@@ -221,7 +229,9 @@ impl ProjectIndex {
             .collect();
         for (path, module) in parsed {
             let (file_hierarchy_result, hierarchy_diags) =
-                build_hierarchy_with_trait_origins(&module, || stdlib_protocols.clone());
+                build_hierarchy_with_trait_origins(&module, Some(STDLIB_PACKAGE_MARKER), || {
+                    stdlib_protocols.clone()
+                });
             all_diagnostics.extend(hierarchy_diags);
             let mut file_hierarchy = match file_hierarchy_result {
                 Ok(h) => h,
@@ -887,6 +897,10 @@ impl ProjectIndex {
     /// concatenates the project's protocols ahead of the dependencies'); a
     /// plain path sort would put `_build/deps/…` ahead of `src/…`. A `HashMap`
     /// walk would make a same-named protocol's resolution depend on hash order.
+    /// A dependency's protocol named like a stdlib protocol still comes first
+    /// here but never wins a bare `uses:` over the stdlib's: the shared
+    /// resolver (`trait_expansion::resolve_protocol_key`) skips it, as on every
+    /// other surface (BT-3915, Option A).
     fn files_in_precedence_order<'a, T>(
         &'a self,
         map: &'a HashMap<Utf8PathBuf, T>,
@@ -997,10 +1011,10 @@ mod tests {
             HashMap::new()
         };
         let (plain, _) = parse(lex_with_eof("Object subclass: Plain\n  foo => 1"));
-        let _ = build_hierarchy_with_trait_origins(&plain, supply);
+        let _ = build_hierarchy_with_trait_origins(&plain, None, supply);
         assert_eq!(calls.get(), 0, "no `uses:` => no cross-file collection");
         let (with_uses, _) = parse(lex_with_eof("Object subclass: Uses\n  uses: Comparable"));
-        let _ = build_hierarchy_with_trait_origins(&with_uses, supply);
+        let _ = build_hierarchy_with_trait_origins(&with_uses, None, supply);
         assert_eq!(calls.get(), 1, "`uses:` => collected exactly once");
     }
 
