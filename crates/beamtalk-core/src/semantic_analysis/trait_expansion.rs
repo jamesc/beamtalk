@@ -472,6 +472,14 @@ pub fn protocol_use_key(use_: &ProtocolUse) -> EcoString {
     }
 }
 
+/// Whether `protocol` is a trait: it provides at least one method (ADR 0127).
+/// The one rule for "provision-bearing" every carrier, the stdlib protocol
+/// table and codegen's protocol-source export apply.
+#[must_use]
+pub fn is_provision_bearing(protocol: &ProtocolDefinition) -> bool {
+    !protocol.provided_methods.is_empty()
+}
+
 /// Whether a compile path carries `protocol`'s full AST to other files' and
 /// packages' `uses:` resolution — the one rule every carrier applies.
 ///
@@ -483,8 +491,7 @@ pub fn protocol_use_key(use_: &ProtocolUse) -> EcoString {
 /// `ProtocolRegistry` still resolved the type `Comparable` to the package's.
 #[must_use]
 pub fn is_carried_protocol(protocol: &ProtocolDefinition) -> bool {
-    !protocol.provided_methods.is_empty()
-        || stdlib_protocols::is_stdlib_protocol_name(&protocol.name.name)
+    is_provision_bearing(protocol) || stdlib_protocols::is_stdlib_protocol_name(&protocol.name.name)
 }
 
 /// The protocols of `module` a compile path carries ([`is_carried_protocol`]:
@@ -882,7 +889,7 @@ fn expand_class(
             continue;
         };
 
-        if protocol.provided_methods.is_empty() {
+        if !is_provision_bearing(protocol) {
             // ADR 0127 §1, §Status 6: a hint, not a warning, so a protocol
             // gaining or losing its last provision never flips a
             // `--warnings-as-errors` build.
@@ -1498,7 +1505,7 @@ fn check_protocol_provisions(
     protocol_registry: &ProtocolRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if protocol.provided_methods.is_empty() {
+    if !is_provision_bearing(protocol) {
         return;
     }
 

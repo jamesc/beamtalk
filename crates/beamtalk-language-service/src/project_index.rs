@@ -224,7 +224,7 @@ impl ProjectIndex {
         let stdlib_protocols: HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition> = parsed
             .iter()
             .flat_map(|(_, module)| module.protocols.iter())
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing(p))
             .map(|p| (p.name.name.clone(), p.clone()))
             .collect();
         for (path, module) in parsed {
@@ -295,7 +295,9 @@ impl ProjectIndex {
             let protocol_defs: Vec<_> = module
                 .protocols
                 .iter()
-                .filter(|p| !p.provided_methods.is_empty())
+                .filter(|p| {
+                    beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing(p)
+                })
                 .cloned()
                 .collect();
             if !protocol_defs.is_empty() {

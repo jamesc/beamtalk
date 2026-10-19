@@ -1119,7 +1119,7 @@ fn collect_stdlib_protocol_infos(
         for protocol in module
             .protocols
             .into_iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing)
         {
             all_sources.insert(
                 protocol.name.name.clone(),

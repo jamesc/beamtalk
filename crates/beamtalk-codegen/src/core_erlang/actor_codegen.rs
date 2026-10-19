@@ -134,7 +134,7 @@ impl CoreErlangGenerator {
             && module
                 .protocols
                 .iter()
-                .any(|p| !p.provided_methods.is_empty());
+                .any(beamtalk_core::semantic_analysis::trait_expansion::is_provision_bearing);
         let protocol_source_export: Document<'static> = if has_protocol_source {
             Document::Str(", '__beamtalk_protocol_source'/0")
         } else {

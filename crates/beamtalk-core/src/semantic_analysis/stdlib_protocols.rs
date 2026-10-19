@@ -76,7 +76,7 @@ fn parse_protocol_files(files: Vec<(&'static str, &'static str)>) -> StdlibProto
         for mut protocol in module
             .protocols
             .into_iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(crate::semantic_analysis::trait_expansion::is_provision_bearing)
         {
             protocol.package = Some(STDLIB_PACKAGE.into());
             sources.insert(
@@ -204,7 +204,7 @@ mod tests {
             if module
                 .protocols
                 .iter()
-                .any(|p| !p.provided_methods.is_empty())
+                .any(crate::semantic_analysis::trait_expansion::is_provision_bearing)
             {
                 let name = path
                     .file_name()
