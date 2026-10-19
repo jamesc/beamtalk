@@ -211,8 +211,9 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Return the count of currently-running children.
   ///
-  /// This is the figure the `maxChildren` limit is checked against, so a
-  /// caller refused with `#max_children` can poll it to decide when to retry.
+  /// The `maxChildren` limit is checked against this figure plus any child
+  /// whose automatic restart is pending, so `count` can briefly read below
+  /// the limit while a start is still refused with `#max_children`.
   ///
   /// BT-1997 / ADR 0080 Phase 1: `countChildren/1` returns a Result-shaped
   /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
