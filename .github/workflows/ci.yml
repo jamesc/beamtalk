@@ -480,6 +480,77 @@ jobs:
           echo "core-diff found generated Core Erlang differences and this PR carries the 'core-diff:enforce' label — failing."
           exit 1
 
+  # ─── core-diff snapshot-only vs full equivalence (BT-3934) ────────────
+  # `core-diff`'s snapshot-only mode (BT-3887) is only sound if it leaves
+  # exactly the same `.core` files as a full run. This job snapshots the PR
+  # head in both modes and fails on any difference. Runs only when the
+  # command pipelines or core-diff recipes change.
+  core-diff-modes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check whether this PR touches the snapshot pipelines
+        id: filter
+        run: |
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              crates/beamtalk-cli/src/commands/build_stdlib.rs \
+              crates/beamtalk-cli/src/commands/test.rs \
+              crates/beamtalk-cli/src/commands/test_stdlib.rs \
+              crates/beamtalk-cli/src/commands/util.rs \
+              Justfile | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.filter.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        if: steps.filter.outputs.run == 'true'
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        if: steps.filter.outputs.run == 'true'
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Erlang/rebar3 artifacts
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Rust dependencies
+        if: steps.filter.outputs.run == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Compare snapshot-only and full .core output
+        if: steps.filter.outputs.run == 'true'
+        run: just core-diff-modes
+
   # ─── OTP support-window matrix (ADR 0125 §3.1, BT-3572) ────────────────
   # otp-support.toml is the single declared source of the OTP support
   # window; this job is the only place ci.yml turns it into GitHub Actions
