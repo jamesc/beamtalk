@@ -238,12 +238,29 @@ fn a_send_of_another_arity_reports_no_write_in_any_position() {
 }
 
 #[test]
-fn a_parenthesized_block_of_another_arity_is_still_a_block_value() {
-    // ADR 0131 §6: only a bare `[...]` literal is inlined or applied as one;
-    // a parenthesized block is a block value whatever its arity, compiled as
-    // a closure, so the ADR 0133 escaping-block check keeps reporting it.
-    for &(kind, header) in KINDS {
-        let src = format!("{header}    t := 0\n    ([t := t + 1]) value: 1\n    t\n");
-        assert_eq!(write_errors(&src).len(), 1, "{kind}: {src}");
+fn a_parenthesized_block_of_another_arity_is_applied_like_a_bare_one() {
+    // BT-3942: a parenthesized literal sent a `value`-family selector of
+    // another arity is the same literal: applied to a stand-in fun, raising
+    // `arity_mismatch`, with no write reported and no body compiled.
+    for &(selector, args) in SELECTORS {
+        if !is_block_value_selector(selector) {
+            continue;
+        }
+        for arity in (0..=PARAMS.len()).filter(|&arity| args != Some(arity)) {
+            let bare = send(selector, args, arity);
+            let (block, rest) = bare.split_once("] ").expect("block then selector");
+            let paren = format!("({block}]) {rest}");
+            assert_eq!(analyser_view(&paren), Lowering::Applied, "{paren}");
+            for &(kind, header) in KINDS {
+                let src = format!("{header}    t := 0\n    {paren}\n    t\n");
+                assert!(write_errors(&src).is_empty(), "{kind}: {src}");
+                let code = codegen(&src);
+                assert_eq!(
+                    lowering(&code),
+                    Lowering::Applied,
+                    "{kind}: {paren}\n{code}"
+                );
+            }
+        }
     }
 }
