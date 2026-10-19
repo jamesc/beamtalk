@@ -630,33 +630,6 @@ const fn deny(
     }
 }
 
-/// The `detect:`/`detect:ifNone:` kinds (search block, handler).
-const DETECT_KINDS: &[ConstructKind] = &[DetectIfNoneSearch, DetectIfNone];
-
-/// A [`DENY_SET`] row for a construct that writes only a local of its own
-/// innermost enclosing block (`crosses: false`, BT-3776), nested in a block
-/// whose outermost role is `container` and innermost role `inner` (`None`
-/// matches any), `deep` as in [`deny`].
-const fn deny_block_local(
-    container: Container,
-    inner: Option<Container>,
-    deep: Option<bool>,
-    contexts: &'static [MethodContext],
-    kinds: &'static [ConstructKind],
-) -> Denied {
-    Denied {
-        kinds,
-        container: Some(container),
-        inner,
-        crosses: Some(false),
-        last: None,
-        deep,
-        stateful: None,
-        direct: None,
-        contexts,
-    }
-}
-
 /// ADR 0131 Phase 0 (BT-3753): the statement positions that do *not* thread
 /// outer-local writes today. A construct in statement position is accepted
 /// unless a row here lists it; every other position is accepted only if
@@ -688,18 +661,18 @@ const DENY_SET: &[Denied] = &[
     deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
     deny(None, None, None, None, None, None, &[ValueType], &[Enumeration, IfNil, AndOr]),
     deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
     deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
     deny(Some(Arm), Some(true), Some(false), None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), Some(true), Some(true), None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[CountedLoop, Do, ListOp, Satisfy, Exception]),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
+    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, Satisfy, Enumeration, BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(true), &[Actor], &[BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
@@ -725,13 +698,13 @@ const DENY_SET: &[Denied] = &[
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
-    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
+    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Do, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[DetectIfNoneSearch, DetectIfNone, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
+    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[BlockValue]),
     deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
@@ -744,52 +717,6 @@ const DENY_SET: &[Denied] = &[
     // A self-send or field write in the outermost block (`stateful`).
     deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, CountedLoop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
-    // BT-3776: an actor `detect:`/`detect:ifNone:` whose search block or
-    // handler writes a local of its own enclosing block loses it in a
-    // protected body (erlc), in a handler or `ensure:` block, and directly in
-    // a loop body (the fold answers `{Value, State}` with the local packed into
-    // the state the body discards, so the block reads it unchanged). In an arm,
-    // a `do:`/`collect:` body or an evaluated block it answers right, an arm in
-    // a `whileTrue:` body too (`armLoop`). The innermost block a protected body
-    // or a handler is rejected under every outer role: only the arm one is
-    // measured (`protArm`, erlc), the others share its lowering. PIN-BUG
-    // BT-3878: lowering the actor detect folds as producers in those frames
-    // deletes these rows.
-    deny_block_local(ProtectedBody, None, None, &[Actor], DETECT_KINDS),
-    deny_block_local(Handler, None, None, &[Actor], DETECT_KINDS),
-    // (Directly in a `whileTrue:` body is the `LoopBody`/`LoopBody` row below:
-    // at depth one the innermost block is the outermost, so that row covers it.)
-    // A counted-loop body as the outermost block, around every innermost
-    // role. A `do:`/`collect:` body or an evaluated block in it answers right
-    // (`iterTimes`, `collTimes`, `valTimes`, over-rejected, see the pin test's
-    // `KNOWN_OVER_REJECTED`), but `DoBody`/`ListOpBody` also name the keyed,
-    // enumeration, fold, select and satisfy blocks, which are unmeasured
-    // there, so the row stays whole until BT-3878.
-    deny_block_local(CountedLoopBody, None, None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(Handler), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(ProtectedBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(Handler), None, &[Actor], DETECT_KINDS),
-    // A loop as the innermost block (BT-3776 review): measured wrong under an
-    // arm, a `do:` body and another loop (`loopArm`, `timesArm`, `loopIter`,
-    // `timesIter`, `loopLoop`, `timesLoop`, every one of the 36 cells); the
-    // list-op and evaluated-block outer roles are inferred.
-    deny_block_local(Arm, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(Arm, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(DoBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(ListOpBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(LoopBody, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(LoopBody), None, &[Actor], DETECT_KINDS),
-    deny_block_local(EvaluatedBlock, Some(CountedLoopBody), None, &[Actor], DETECT_KINDS),
 ];
 
 /// A statement shape (a construct kind at a [`Position::Statement`] or

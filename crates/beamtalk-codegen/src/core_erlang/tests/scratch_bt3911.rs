@@ -4,56 +4,43 @@ fn show(src: &str, name: &str) {
     let code = codegen(src);
     let start = code.find(name).unwrap_or(0);
     let tail = &code[start..];
-    let end = tail.find("'register_class'/0 = ").unwrap_or(tail.len());
+    let end = tail.find("'superclass'/0 = ").unwrap_or(tail.len());
     println!("{}", &tail[..end]);
-    // erlc with warnings
+    std::fs::write("/private/tmp/claude-501/-Users-james-source-beamtalk/ac3631a5-5cf5-4bac-bf55-bd15a5779328/scratchpad/last.core", &code).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("test.core");
     std::fs::write(&f, &code).unwrap();
     let out = std::process::Command::new("erlc")
         .arg("+from_core")
-        .arg("+warnings_as_errors")
         .arg("-o")
         .arg(dir.path())
         .arg(&f)
         .output()
         .unwrap();
-    println!(
-        "ERLC {} {}",
-        out.status,
-        String::from_utf8_lossy(&out.stdout)
-    );
+    println!("ERLC {}", out.status);
     println!("{}", String::from_utf8_lossy(&out.stderr));
 }
 
 #[test]
-fn scratch_do_body() {
+fn scratch_cascade_iter() {
     show(
-        "Actor subclass: Repro\n  state: n = 0\n  f: m :: Integer =>\n    i := 0\n    [#(1) do: [:e | e > 0 ifTrue: [x := e. x]]. i < m] whileTrue: [i := i + 1]\n    i\n",
-        "'f:'/2 = ",
+        "Object subclass: Repro\n  classState: n = 0\n  class f: c =>\n    t := 0\n    #(1, 2) do: [:z | #(0) size; includes: (#(1, 2) do: [:e | t := t + e]); yourself]\n    t\n",
+        "'class_f:'/2 = ",
     );
 }
 
 #[test]
-fn scratch_closure() {
+fn scratch_prot_dinh_outer() {
     show(
-        "Actor subclass: Repro\n  state: n = 0\n  f: m :: Integer =>\n    i := 0\n    [[:z | z > 0 ifTrue: [x := z. x]] value: 1. i < m] whileTrue: [i := i + 1]\n    i\n",
-        "'f:'/2 = ",
+        "Actor subclass: Repro\n  state: n = 0\n  f: c =>\n    t := 0\n    [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]. 7] on: Error do: [:e | 0]\n    t\n",
+        "let T = 0",
     );
 }
 
 #[test]
-fn scratch_bound_before() {
+fn scratch_prot_dins_local() {
     show(
-        "Actor subclass: Repro\n  state: n = 0\n  f: m :: Integer =>\n    i := 0\n    [x := 0. m > 0 ifTrue: [x := 1]. i < (m + x) - 1] whileTrue: [i := i + 1]\n    i\n",
-        "'f:'/2 = ",
-    );
-}
-
-#[test]
-fn scratch_closure_in_body() {
-    show(
-        "Actor subclass: Repro\n  state: n = 0\n  f: m :: Integer =>\n    i := 0\n    [i < m] whileTrue: [[:z | z > 0 ifTrue: [x := z. x]] value: 1. i := i + 1]\n    i\n",
-        "'f:'/2 = ",
+        "Actor subclass: Repro\n  state: n = 0\n  f: c =>\n    t := 0\n    [u := 0. #(1, 2) detect: [:e | u := u + 1. e > 5] ifNone: [nil]. t := u. 7] on: Error do: [:e | 0]\n    t\n",
+        "let T = 0",
     );
 }

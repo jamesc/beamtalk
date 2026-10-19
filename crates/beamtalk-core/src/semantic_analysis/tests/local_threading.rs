@@ -978,30 +978,26 @@ fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
-    // BT-3841: also an assignment in an arm of a class or value-type method (the
-    // fold is measured right there; the actor method keeps its rejection).
+    // BT-3841: also an assignment in an arm; ADR 0133 Phase 3 (BT-3911): in an
+    // actor method too, where the fold was measured wrong until its frames
+    // lowered a `detect:ifNone:` like any other fold.
     let arm = "true ifTrue: [r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]]\nt";
-    for src in [in_class(arm), in_value(arm)] {
+    for src in [in_class(arm), in_value(arm), in_actor(arm)] {
         let diags = adr0131_diagnostics(&src);
         assert!(diags.is_empty(), "{src}: {diags:?}");
     }
 }
 
 #[test]
-fn detect_if_none_handler_write_in_a_counted_loop_body_is_rejected_in_an_actor() {
+fn detect_if_none_handler_write_in_a_counted_loop_body_is_a_producer_in_every_context() {
     // BT-3822 review: a handler that writes an outer local inside a
     // direct-params `to:do:` must never be a silently dropped write or a leaked
     // tuple. BT-3841 lowers it for a class or value-type method (the loop body
-    // is a producer frame there); the actor method still answers wrong and
-    // stays rejected by Phase 0.
+    // is a producer frame there); ADR 0133 Phase 3 (BT-3911, closing BT-3861)
+    // lowers it in an actor method too.
     let body = "t := 0\nn := 0\n1 to: 3 do: [:i |\n  n := n + 1\n  \
                 #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]\n]\n#[t, n]";
-    let diags = adr0131_diagnostics(&in_actor(body));
-    assert!(
-        !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
-        "{diags:?}"
-    );
-    for src in [in_class(body), in_value(body)] {
+    for src in [in_class(body), in_value(body), in_actor(body)] {
         let diags = adr0131_diagnostics(&src);
         assert!(diags.is_empty(), "{src}: {diags:?}");
     }
@@ -1613,83 +1609,42 @@ fn enumerations_are_producers_where_the_frame_lowers_them() {
 
 /// BT-3776: a construct that writes only a local of its own enclosing block
 /// (`crosses: false`) is judged by the measurement like every other cell. It
-/// answers right, and is accepted, everywhere except an actor `detect:` /
-/// `detect:ifNone:` in a protected body, a handler or a loop body, which the
-/// `deny_block_local` rows reject (there it read the local unchanged or
-/// failed erlc).
+/// answers right, and is accepted, everywhere: an actor `detect:` /
+/// `detect:ifNone:` in a protected body, a handler or a loop body read the
+/// local unchanged or failed erlc until ADR 0133 Phase 3 (BT-3911, closing
+/// BT-3878) lowered it as a producer in those frames (the `deny_block_local`
+/// rows are gone).
 #[test]
-fn deny_set_block_local_writes_are_judged_by_the_measurement() {
+fn block_local_writes_are_accepted_in_every_frame() {
     let collect =
         "4 > 3 ifTrue: [\n  u := 0\n  #(1, 2) collect: [:i | u := u + 1. i]\n  t := t + u\n]\nt";
     for src in [in_class(collect), in_value(collect), in_actor(collect)] {
         assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
     }
     // A local bound inside the search block itself is not a write of the
-    // construct: the rows below do not reach it.
+    // construct.
     let own = "i := 0\n[i < 2] whileTrue: [i := i + 1. #(1, 2) detect: [:e | v := e * 2. v > 5] ifNone: [nil]]\nt";
     assert!(adr0131_diagnostics(&in_actor(own)).is_empty(), "{own}");
     let detect = "#(1, 2) detect: [:e | u := u + 1. e > 5] ifNone: [nil]";
-    for (body, rejected_in_actor) in [
-        (
-            format!("4 > 3 ifTrue: [u := 0. {detect}. t := u]\nt"),
-            false,
-        ),
-        (
-            format!("#(1, 2) do: [:z | u := 0. {detect}. t := u]\nt"),
-            false,
-        ),
-        (
-            format!("[u := 0. {detect}. t := u] on: Error do: [:e | 0]\nt"),
-            true,
-        ),
-        (
-            format!("[Error signal: \"x\"] on: Error do: [:e | u := 0. {detect}. t := u]\nt"),
-            true,
-        ),
-        (
-            format!("2 timesRepeat: [u := 0. {detect}. t := u]\nt"),
-            true,
-        ),
+    for body in [
+        format!("4 > 3 ifTrue: [u := 0. {detect}. t := u]\nt"),
+        format!("#(1, 2) do: [:z | u := 0. {detect}. t := u]\nt"),
+        format!("[u := 0. {detect}. t := u] on: Error do: [:e | 0]\nt"),
+        format!("[Error signal: \"x\"] on: Error do: [:e | u := 0. {detect}. t := u]\nt"),
+        format!("2 timesRepeat: [u := 0. {detect}. t := u]\nt"),
         // A loop as the innermost block, under an arm or a `do:` body.
-        (
-            format!("4 > 3 ifTrue: [2 timesRepeat: [u := 0. {detect}. t := u]]\nt"),
-            true,
+        format!("4 > 3 ifTrue: [2 timesRepeat: [u := 0. {detect}. t := u]]\nt"),
+        format!(
+            "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]]\nt"
         ),
-        (
-            format!(
-                "#(1, 2) do: [:z | i := 0. [i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]]\nt"
-            ),
-            true,
-        ),
-        // A `do:` body inside a counted-loop body answers right (`iterTimes`)
-        // but stays rejected with every inner role there (over-rejected until
-        // BT-3878).
-        (
-            format!("2 timesRepeat: [#(1, 2) do: [:z | u := 0. {detect}. t := u]]\nt"),
-            true,
-        ),
-        // ... but an arm inside a `whileTrue:` body answers right (`armLoop`).
-        (
-            format!(
-                "i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"
-            ),
-            false,
-        ),
-        (
-            format!("i := 0\n[i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]\nt"),
-            true,
-        ),
+        format!("2 timesRepeat: [#(1, 2) do: [:z | u := 0. {detect}. t := u]]\nt"),
+        format!("i := 0\n[i < 2] whileTrue: [i := i + 1. 4 > 3 ifTrue: [u := 0. {detect}. t := u]]\nt"),
+        format!("i := 0\n[i < 2] whileTrue: [i := i + 1. u := 0. {detect}. t := u]\nt"),
     ] {
-        for src in [in_class(&body), in_value(&body)] {
-            assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+        for src in [in_class(&body), in_value(&body), in_actor(&body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
         }
-        let diags = adr0131_diagnostics(&in_actor(&body));
-        let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
-        assert_eq!(
-            p0.len(),
-            usize::from(rejected_in_actor),
-            "{body}: {diags:?}"
-        );
     }
 }
 
@@ -1783,72 +1738,12 @@ fn adr0131_statement_probe_pins() {
 
 /// Cells that answer right but that Phase 0 still rejects, because the facts a
 /// statement position carries cannot tell them from a sibling cell that
-/// answers wrong: a `eachWithIndex:` in an actor `whileTrue:`/`to:do:` body
-/// that also touches state (the state touch inside the construct's own block,
-/// `cvar` and `selfsend`, is right and the one before it is not), the
-/// `Enumeration`/`KeyedDo`/`detect:ifNone:`/`value` statements of an actor
-/// arm-in-protected-body-in-`do:` role (`armProtIter`) and an `anySatisfy:` in
-/// a value-type arm-in-`do:`-in-`do:` role (`armIterIter`), and the three-deep
-/// `anySatisfy:`/enumeration cells generally: no `RIGHT_STATEMENTS` row exists
-/// past depth two, because a row keyed on the outermost and innermost roles
-/// would also accept every unmeasured middle role. PIN-BUG BT-3841:
-/// the producer work for those families deletes the entries.
-const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
-    ("actor", "armProtIter", "outer", "dinH"),
-    ("actor", "armProtIter", "outer", "dinS"),
-    ("actor", "armIter", "outer", "det"),
-    ("actor", "coll", "outer", "det"),
-    ("actor", "iter", "outer", "det"),
-    ("actor", "iterArm", "outer", "det"),
-    ("actor", "iterIter", "outer", "det"),
-    ("actor", "armProtIter", "outer", "det"),
-    ("actor", "armIterIter", "outer", "det"),
-    // BT-3776 re-measurement: the `detect:ifNone:` (search and handler)
-    // cells of the same `do:`/`collect:` roles answer right since the
-    // checked-in table was last blessed, like the plain `detect:` ones above.
-    ("actor", "armIter", "outer", "dinH"),
-    ("actor", "armIter", "outer", "dinS"),
-    ("actor", "coll", "outer", "dinH"),
-    ("actor", "coll", "outer", "dinS"),
-    ("actor", "iter", "outer", "dinH"),
-    ("actor", "iter", "outer", "dinS"),
-    ("actor", "iterArm", "outer", "dinH"),
-    ("actor", "iterArm", "outer", "dinS"),
-    ("actor", "iterIter", "outer", "dinH"),
-    ("actor", "iterIter", "outer", "dinS"),
-    ("actor", "armIterIter", "outer", "dinH"),
-    ("actor", "armIterIter", "outer", "dinS"),
-    // BT-3776: the block-local (`local`) detect cells of the same three-deep
-    // roles answer right too, and the depth gate rejects them the same way.
-    ("actor", "armProtIter", "local", "det"),
-    ("actor", "armProtIter", "local", "dinH"),
-    ("actor", "armProtIter", "local", "dinS"),
-    ("actor", "armIterIter", "local", "det"),
-    ("actor", "armIterIter", "local", "dinH"),
-    ("actor", "armIterIter", "local", "dinS"),
-    // BT-3878: a `do:`/`collect:` body or an evaluated block in a counted-loop
-    // body answers right, but the counted-loop `deny_block_local` row rejects
-    // every inner role (the keyed, fold, select and satisfy blocks that share
-    // `DoBody`/`ListOpBody` are unmeasured there).
-    ("actor", "iterTimes", "local", "det"),
-    ("actor", "iterTimes", "local", "dinH"),
-    ("actor", "iterTimes", "local", "dinS"),
-    ("actor", "iterTimes", "dlocal", "det"),
-    ("actor", "iterTimes", "dlocal", "dinH"),
-    ("actor", "iterTimes", "dlocal", "dinS"),
-    ("actor", "collTimes", "local", "det"),
-    ("actor", "collTimes", "local", "dinH"),
-    ("actor", "collTimes", "local", "dinS"),
-    ("actor", "collTimes", "dlocal", "det"),
-    ("actor", "collTimes", "dlocal", "dinH"),
-    ("actor", "collTimes", "dlocal", "dinS"),
-    ("actor", "valTimes", "local", "det"),
-    ("actor", "valTimes", "local", "dinH"),
-    ("actor", "valTimes", "local", "dinS"),
-    ("actor", "valTimes", "dlocal", "det"),
-    ("actor", "valTimes", "dlocal", "dinH"),
-    ("actor", "valTimes", "dlocal", "dinS"),
-];
+/// answers wrong. Empty since ADR 0133 Phase 3 (BT-3911): an actor
+/// `detect:`/`detect:ifNone:` is a loop-body producer like any other fold, so
+/// the last cells of this list (the `detect:` family's block-local rows) answer
+/// right and are accepted. A shape that answers right but cannot be told from
+/// one that does not goes back here with a `PIN-BUG` and an open issue.
+const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
 
 /// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
 /// `adr0131_statement_measured.tsv` records, for every class, value-type and
@@ -2131,12 +2026,6 @@ fn unmeasured_three_deep_chains_stay_rejected() {
                 "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
             ),
         ),
-        (
-            "actor",
-            in_actor(
-                "t := 0\n#(1, 2) do: [:z | [t < 9] whileTrue: [true ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]]]\nt",
-            ),
-        ),
     ] {
         let diags = adr0131_diagnostics(&src);
         assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
@@ -2273,10 +2162,9 @@ fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
 }
 
 /// ADR 0131 Phase 2b (BT-3793): what the loop-body producer accept does not
-/// cover stays a Phase 0 error: an arm or closure around the construct, a
-/// `detect:ifNone:` (its search-block write is dropped by the frames around
-/// it), and, in an actor, a value-bearing site and a nested `do:` (not a
-/// producer).
+/// cover stays a Phase 0 error: a closure around the construct and, in an
+/// actor, a value-bearing site (`detect:ifNone:` was on this list until ADR
+/// 0133 Phase 3, BT-3911).
 #[test]
 fn loop_body_producer_accept_stops_where_codegen_does() {
     for (body, expect_error) in [
@@ -2293,12 +2181,12 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
             "s := 0\n1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]\ns",
             [true, true, true],
         ),
-        // A search-block write inside a `do:` body answers right in a class and
-        // a value-type method and wrong in an actor method (BT-3841's
-        // measurement: `iter`/`outer`/`dinS` in `adr0131_statement_measured.tsv`).
+        // A search-block write inside a `do:` body answers right in every
+        // context (`iter`/`outer`/`dinS` in `adr0131_statement_measured.tsv`;
+        // the actor row was wrong until ADR 0133 Phase 3, BT-3911).
         (
             "t := 0\n#(1, 2) do: [:i | #(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [0]]\nt",
-            [false, false, true],
+            [false, false, false],
         ),
         // ADR 0131 Phase 2c (BT-3796): a nested `do:` is a producer in every
         // context.

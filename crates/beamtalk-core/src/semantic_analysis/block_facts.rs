@@ -2629,28 +2629,19 @@ pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> boo
 /// `with_body_producer_sites` and by the agreement test, so the diagnostic, the
 /// lowering and the test's expectation cannot disagree:
 ///
-/// - `detect:`/`detect:ifNone:` are loop-body producers in class and value-type
-///   methods (BT-3841: the fold stops at the first match, BT-3805) but not in
-///   an actor method, where the frames around them still drop or miscompile
-///   the write (measured, BT-3793); there they keep their statement-position
-///   rows.
 /// - [`is_actor_fold_value_site`].
+///
+/// `detect:`/`detect:ifNone:` are loop-body producers in every method kind
+/// (BT-3841: the fold stops at the first match, BT-3805). In an actor method
+/// they were excluded here (BT-3793) while the frames around them dropped or
+/// miscompiled the write; ADR 0133 Phase 3 (BT-3911, closing BT-3878 and
+/// BT-3861) lowers them like any other fold.
 ///
 /// A conditional, an `on:do:`/`ensure:` or a `Dictionary` lookup is a producer
 /// in a loop or fold body (ADR 0131 Phase 3b/3c, BT-3817/BT-3822/BT-3839)
 /// wherever the frame has a site for it.
 #[must_use]
 pub fn is_loop_body_producer_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
-    // BT-3841: in an actor method a `detect:`/`detect:ifNone:` in a frame
-    // is measured wrong or fails to compile (the actor fold frames do not lower
-    // it); a class or value-type method lowers it.
-    if ctx.in_actor {
-        if let Expression::MessageSend { selector, .. } = site.unwrap_parens() {
-            if matches!(selector.name().as_str(), "detect:" | "detect:ifNone:") {
-                return false;
-            }
-        }
-    }
     // ADR 0131 Phase 3 (BT-3738) / Phase 3c (BT-3822): a conditional is a
     // producer at a method-root site, in an arm of a conditional that is one
     // (`ctx.arm`) and in a loop or fold body (the frame lowers its

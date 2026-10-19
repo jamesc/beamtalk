@@ -59,3 +59,41 @@ Actor subclass: Bt3911ArmFramesActor
     i := 0
     [i < self.k and: [x := i. x < 5]] whileTrue: [i := i + 1]
     i
+
+  // BT-3878 / BT-3861: `detect:ifNone:` whose handler writes an outer local,
+  // in a protected body, a handler and a loop body of an actor.
+  detectHandlerInProtectedBody =>
+    t := 0
+    [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]. 7] on: Error do: [:e | 0]
+    t
+
+  detectHandlerInHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]. 0]
+    t
+
+  detectHandlerInLoopBody =>
+    t := 0
+    2 timesRepeat: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]
+    t
+
+  detectHandlerInDoLoopArm =>
+    t := 0
+    #(1, 2) do: [:z | [t < 9] whileTrue: [t < 20 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]]]
+    t
+
+  // The search block writes a local of its own enclosing block.
+  detectLocalInProtectedBody =>
+    t := 0
+    [u := 0. #(1, 2) detect: [:e | u := u + 1. e > 5] ifNone: [nil]. t := u. 7] on: Error do: [:e | 0]
+    t
+
+  detectLocalInHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | u := 0. #(1, 2) detect: [:x | u := u + 1. x > 5] ifNone: [nil]. t := u. 0]
+    t
+
+  detectPlainInProtectedBody =>
+    t := 0
+    [#(1, 2) detect: [:e | t := t + 1. e > 0]. 7] on: Error do: [:e | 0]
+    t

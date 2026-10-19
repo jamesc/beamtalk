@@ -85,3 +85,26 @@ TestCase subclass: Bt3911ArmFramesTest
 
   testActorConditionFieldRead =>
     self assert: Bt3911ArmFramesActor spawn condAndFieldRead equals: 3
+
+  // BT-3878 / BT-3861: an actor `detect:ifNone:` / `detect:` in a protected
+  // body, a handler and a loop body.
+  testActorDetectHandlerInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInProtectedBody equals: 1
+
+  testActorDetectHandlerInHandler =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInHandler equals: 1
+
+  testActorDetectHandlerInLoopBody =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInLoopBody equals: 2
+
+  testActorDetectHandlerInDoLoopArm =>
+    self assert: Bt3911ArmFramesActor spawn detectHandlerInDoLoopArm equals: 9
+
+  testActorDetectLocalInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectLocalInProtectedBody equals: 2
+
+  testActorDetectLocalInHandler =>
+    self assert: Bt3911ArmFramesActor spawn detectLocalInHandler equals: 2
+
+  testActorDetectPlainInProtectedBody =>
+    self assert: Bt3911ArmFramesActor spawn detectPlainInProtectedBody equals: 1
