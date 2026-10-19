@@ -97,22 +97,24 @@ fn check_erl() -> CheckResult {
 
     let window = beamtalk_cli::otp_support::window();
     match get_otp_version() {
-        Some(version_str) => match parse_otp_major(&version_str) {
-            Some(major) if major < window.min_major => CheckResult::Fail(format!(
-                "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need \
+        Some(version_str) => {
+            match beamtalk_cli::otp_support::major_from_version_str(&version_str) {
+                Some(major) if major < window.min_major => CheckResult::Fail(format!(
+                    "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need \
                  {}",
-                window.display_range()
-            )),
-            Some(major) if major > window.max_major => CheckResult::Warn(format!(
-                "Erlang/OTP {version_str} ({erl_path}) — version {major} is newer than the \
+                    window.display_range()
+                )),
+                Some(major) if major > window.max_major => CheckResult::Warn(format!(
+                    "Erlang/OTP {version_str} ({erl_path}) — version {major} is newer than the \
                  tested window ({}) and is untested",
-                window.display_range()
-            )),
-            Some(_) => CheckResult::Pass(format!("Erlang/OTP {version_str} ({erl_path})")),
-            None => CheckResult::Fail(format!(
-                "Erlang/OTP found ({erl_path}) but could not parse version: {version_str}"
-            )),
-        },
+                    window.display_range()
+                )),
+                Some(_) => CheckResult::Pass(format!("Erlang/OTP {version_str} ({erl_path})")),
+                None => CheckResult::Fail(format!(
+                    "Erlang/OTP found ({erl_path}) but could not parse version: {version_str}"
+                )),
+            }
+        }
         None => CheckResult::Fail(format!(
             "erl found ({erl_path}) but could not determine OTP version"
         )),
@@ -275,11 +277,6 @@ fn get_otp_version() -> Option<String> {
     }
 }
 
-/// Parse the major version number from an OTP release string like "27" or "27.2".
-fn parse_otp_major(version: &str) -> Option<u32> {
-    version.split('.').next()?.parse().ok()
-}
-
 /// Count `.beam` files in a directory.
 fn count_beam_files(dir: &Path) -> usize {
     std::fs::read_dir(dir)
@@ -323,36 +320,6 @@ fn print_install_instructions() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_otp_major_simple() {
-        assert_eq!(parse_otp_major("27"), Some(27));
-    }
-
-    #[test]
-    fn parse_otp_major_with_minor() {
-        assert_eq!(parse_otp_major("27.2"), Some(27));
-    }
-
-    #[test]
-    fn parse_otp_major_with_patch() {
-        assert_eq!(parse_otp_major("27.2.1"), Some(27));
-    }
-
-    #[test]
-    fn parse_otp_major_old_version() {
-        assert_eq!(parse_otp_major("26"), Some(26));
-    }
-
-    #[test]
-    fn parse_otp_major_empty() {
-        assert_eq!(parse_otp_major(""), None);
-    }
-
-    #[test]
-    fn parse_otp_major_garbage() {
-        assert_eq!(parse_otp_major("abc"), None);
-    }
 
     #[test]
     fn count_beam_files_nonexistent_dir() {
