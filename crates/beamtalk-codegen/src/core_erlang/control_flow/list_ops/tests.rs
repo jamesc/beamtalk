@@ -1393,6 +1393,27 @@ fn test_actor_non_literal_callable_uses_the_plain_list_op() {
                 body.starts_with("items inject:") || !code.contains("'lists':'foldl'"),
                 "{class} `{body}` must not fold. Got:\n{code}"
             );
+            // BT-3908: every one goes through the shared arity-normalizing
+            // wrapper (`non_literal_callable_doc`), so a Tier 2 callable is
+            // never called at the wrong arity (raw `badarity`).
+            let tier2_arity = if body.starts_with("items inject:") {
+                3
+            } else {
+                2
+            };
+            assert!(
+                code.contains("_Callable")
+                    && code.contains(&format!(
+                        ", {tier2_arity}) of <'true'> when 'true' -> fun ("
+                    )),
+                "{class} `{body}` should wrap a Tier 2 callable. Got:\n{code}"
+            );
+            if class == "Actor" {
+                assert!(
+                    code.contains("'stateful_block_dispatch'"),
+                    "{class} `{body}` should guard actor state changes. Got:\n{code}"
+                );
+            }
         }
     }
 }
@@ -1516,7 +1537,7 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
 #[test]
 fn test_value_type_collect_non_literal_callable_generates_map_wrapper() {
     // ValueType + collect: with a non-literal callable uses the plain-value wrapper
-    // (`generate_non_literal_callable_erlang_wrapper` with operation "map"), not the
+    // (`non_literal_callable_doc` with operation "map"), not the
     // ADR 0128 state fold — ValueType has no `State` map to thread.
     // Exercises the "map" arm of `generate_simple_list_op_footer`'s selector match
     // and the corresponding BIF dispatch, covering lines that the `do:` (foreach)
@@ -1552,7 +1573,7 @@ fn test_value_type_collect_non_literal_callable_generates_map_wrapper() {
 #[test]
 fn test_value_type_select_non_literal_callable_generates_filter_wrapper() {
     // ValueType + select: with a non-literal callable uses the plain-value wrapper
-    // (`generate_non_literal_callable_erlang_wrapper` with operation "filter"), not the
+    // (`non_literal_callable_doc` with operation "filter"), not the
     // ADR 0128 state fold.
     // Exercises the "filter" arm of `generate_simple_list_op_footer`'s selector match,
     // covering the third distinct operation path through these two functions.

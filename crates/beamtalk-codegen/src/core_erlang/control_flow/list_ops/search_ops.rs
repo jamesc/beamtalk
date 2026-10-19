@@ -92,7 +92,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "anySatisfy:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -138,7 +138,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "allSatisfy:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -366,7 +366,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "detect:", 1)?;
 
         Ok(docvec![
             "let ",
@@ -511,7 +511,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let pred_var = self.fresh_temp_var("temp");
-        let pred_code = self.expression_doc(predicate)?;
+        let pred_code = self.list_op_callable_doc(predicate, "detect:ifNone:", 1)?;
         let none_var = self.fresh_temp_var("temp");
         let none_code = self.expression_doc(if_none)?;
 

@@ -1,16 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3615 (ADR 0128 scope extension): `self_send_hom_pool.bt`'s shape —
-// an Actor whose user-defined HOM forwards an OPAQUE (non-literal) block
-// across a self-send straight to a stdlib collection primitive — for the
-// operators BT-3583 did not cover (`inject:into:`, `detect:`,
+// An Actor whose user-defined HOMs forward an OPAQUE (non-literal) block
+// across a self-send straight to a stdlib collection primitive, for the
+// operators beyond `do:`/`collect:`/`select:` (`inject:into:`, `detect:`,
 // `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:`) and for
-// `Array`/`Set` receivers. Before the fix every one of the six operators
-// CRASHED when the forwarded block was a Tier 2 (captured-local-mutating)
-// block — `badarity` for `inject:into:`, `function_clause` inside
-// `lists:any/all/filter`, a type error inside `beamtalk_list:detect` — and
-// a `Set` `collect:`/`select:` answered a `List`.
+// `Array`/`Set` receivers (BT-3615).
+//
+// Since ADR 0133 removed the ADR 0128 fold (BT-3908), every forwarded
+// callable goes through the one arity-normalizing wrapper
+// (`non_literal_callable_doc`). The `pure*` callers below pass blocks that
+// change no state; the `tally*` callers' field writes make
+// `detect_tier2_self_send` promote each HOM's block position to Tier 2, so
+// the pure blocks are
+// promoted too and must still answer correctly. The `tally*` blocks write
+// `self.total`, which the wrapper cannot keep, so they raise
+// `stateful_block_dispatch` (BT-3922 makes them a compile error).
 
 Actor subclass: SelfSendHomFoldPool
   state: items = #(1, 2, 3, 4)
@@ -72,7 +77,71 @@ Actor subclass: SelfSendHomFoldPool
     [(self.items count: block) > i] whileTrue: [i := i + 1]
     i
 
-// BT-3615's callers, a Tier 2 block (one that assigns a captured local, or a
-// captured local and `self.total`) through each forwarding HOM, are ADR 0133
-// escaping-block compile errors since BT-3902; actor_self_send_hom_test.bt
-// sends the HOMs pure blocks.
+  // ── callers inside the actor (BT-3908) ──────────────────────────────────
+  pureInject => self fwdInject: 0 into: [:a :x | a + x]
+
+  pureDetect => self fwdDetect: [:x | x > 2]
+
+  pureDetectIfNone => self fwdDetect: [:x | x > 20] ifNone: [7]
+
+  pureCount => self fwdCount: [:x | x > 2]
+
+  pureAnySatisfy => self fwdAnySatisfy: [:x | x > 3]
+
+  pureAllSatisfy => self fwdAllSatisfy: [:x | x > 0]
+
+  pureArrCollect => self arrCollect: [:x | x * 2]
+
+  tallyInject =>
+    self
+      fwdInject: 0
+      into: [:a :x |
+        self.total := self.total + 1
+        a + x
+      ]
+
+  tallyDetect =>
+    self
+      fwdDetect: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyDetectIfNone =>
+    self
+      fwdDetect: [:x |
+        self.total := self.total + 1
+        x > 20
+      ]
+      ifNone: [7]
+
+  tallyCount =>
+    self
+      fwdCount: [:x |
+        self.total := self.total + 1
+        x > 2
+      ]
+
+  tallyAnySatisfy =>
+    self
+      fwdAnySatisfy: [:x |
+        self.total := self.total + 1
+        x > 3
+      ]
+
+  tallyAllSatisfy =>
+    self
+      fwdAllSatisfy: [:x |
+        self.total := self.total + 1
+        x > 0
+      ]
+
+  tallyArrCollect =>
+    self
+      arrCollect: [:x |
+        self.total := self.total + 1
+        x * 2
+      ]
+
+// BT-3615's other callers, a block that assigns a captured local through each
+// forwarding HOM, are ADR 0133 escaping-block compile errors since BT-3902.

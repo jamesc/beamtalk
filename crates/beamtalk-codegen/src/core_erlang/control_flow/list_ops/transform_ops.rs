@@ -39,7 +39,7 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+        let body_code = self.list_op_callable_doc(body, "count:", 1)?;
         let filtered_var = self.fresh_temp_var("temp");
 
         Ok(docvec![
@@ -525,7 +525,7 @@ impl CoreErlangGenerator {
         } else {
             // Non-literal callable: wrap to swap args at runtime.
             let body_var = self.fresh_temp_var("temp");
-            let body_code = self.expression_doc(body)?;
+            let body_code = self.non_literal_callable_doc(body, "inject:into:", 2)?;
             docvec![
                 "let ",
                 leaf::var(body_var.clone()),

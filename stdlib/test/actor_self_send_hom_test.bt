@@ -135,6 +135,45 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool setSelect: [:x | x > 2]) class equals: Set
     self assert: (pool arrCollect: [:x | x * 2]) class equals: Array
 
+  // BT-3908: a block passed through a self-send from inside the actor, to
+  // HOMs whose block position another caller's field-writing block promoted
+  // to Tier 2. A block that changes no state answers as it did before the
+  // ADR 0128 fold was removed (these are not pins).
+  testPromotedPureBlockThroughSelfSendHom =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: pool pureInject equals: 10
+    self assert: pool pureDetect equals: 3
+    self assert: pool pureDetectIfNone equals: 7
+    self assert: pool pureCount equals: 2
+    self assert: pool pureAnySatisfy equals: true
+    self assert: pool pureAllSatisfy equals: true
+    self assert: pool pureArrCollect equals: #[2, 4, 6, 8]
+
+  // PIN-BUG (BT-3922): the same HOMs with a block that writes `self.total`.
+  // The ADR 0128 fold kept the write; since BT-3908 it raises rather than
+  // drop it (before this fix these raised raw `badarity` /
+  // `function_clause` / `type_error`). BT-3922 makes the shape a compile
+  // error.
+  testFieldWritingBlockThroughSelfSendHomRaises =>
+    pool := SelfSendHomFoldPool spawn
+    self should: [pool tallyInject] raise: #stateful_block_dispatch
+    self should: [pool tallyDetect] raise: #stateful_block_dispatch
+    self should: [pool tallyDetectIfNone] raise: #stateful_block_dispatch
+    self should: [pool tallyCount] raise: #stateful_block_dispatch
+    self should: [pool tallyAnySatisfy] raise: #stateful_block_dispatch
+    self should: [pool tallyAllSatisfy] raise: #stateful_block_dispatch
+    self should: [pool tallyArrCollect] raise: #stateful_block_dispatch
+
+  // The error names the self-send selector the block was passed to, and its
+  // hint the collection message it was forwarded to.
+  testFieldWritingBlockErrorNamesTheForwardingSelector =>
+    pool := SelfSendHomFoldPool spawn
+    hint := [pool tallyCount] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "`fwdCount:`") equals: true
+    self assert: (hint includesSubstring: "`count:`") equals: true
+    selector := [pool tallyCount] on: Error do: [:e | e selector]
+    self assert: selector equals: #fwdCount:
+
   testOpaqueDetectRaisesNotFound =>
     pool := SelfSendHomFoldPool spawn
     self should: [pool fwdDetect: [:x | x > 100]] raise: #not_found
