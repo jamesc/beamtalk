@@ -112,10 +112,18 @@ fn every_exception_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     );
 }
 
-#[test]
-fn every_exception_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// The families of [`EXCEPTION_FRAMES`], as index ranges, one test each
+/// below (`per_family_tests!`, BT-3888): the blocks of an `on:do:`/`ensure:`
+/// alone; the same in and around a loop, fold or conditional; the `Result
+/// tryDo:` block alone and in or around other frames.
+const EXCEPTION_FRAME_FAMILIES: &[std::ops::Range<usize>] = &[0..6, 6..12, 12..18];
+
+/// Both ways, for a loop, fold, conditional or exception in a statement of
+/// one family of [`EXCEPTION_FRAMES`]: the whole proof is the per-family
+/// tests below.
+fn every_exception_frame_site_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = 0;
-    for frame in EXCEPTION_FRAMES {
+    for frame in frames {
         for construct in ARM_CONSTRUCTS {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
@@ -125,9 +133,19 @@ fn every_exception_frame_site_the_core_rule_accepts_is_lowered_by_the_producer()
         }
     }
     assert!(
-        checked > 300,
-        "only {checked} exception frame sites compared"
+        checked > 100,
+        "only {checked} exception frame sites compared in {frames:?}"
     );
+}
+
+beamtalk_core::per_family_tests! {
+    list = EXCEPTION_FRAMES,
+    families = EXCEPTION_FRAME_FAMILIES,
+    check = every_exception_frame_site_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_exception_frame_site_tests_cover_every_exception_frame,
+    every_on_do_or_ensure_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 0,
+    every_nested_on_do_or_ensure_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 1,
+    every_try_do_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 2,
 }
 
 /// Exceptions that write a field of a value type: the `Self` family rides the
