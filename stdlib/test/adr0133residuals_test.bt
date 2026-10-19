@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3909 (ADR 0133 Phase 3): the actor `groupBy:` positions the
+// `RESIDUAL_DENY_SET` leaves accepted answer the grouped dictionary. The
+// rejected positions, and the other residuals made compile errors (BT-3891,
+// BT-3875), are pinned in
+// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs
+// (`residual_*`) and tests/repl-protocol/cases/adr0131_local_rebind.btscript.
+// See fixtures/adr0133residuals_actor.bt.
+
+TestCase subclass: Adr0133ResidualsTest
+
+  testAssigned => self assert: Adr0133ResidualsActor spawn assigned equals: #(3)
+
+  testReturned =>
+    self assert: (Adr0133ResidualsActor spawn returned at: false) equals: #(1)
+
+  testLastStatement =>
+    self assert: (Adr0133ResidualsActor spawn lastStatement at: true) equals: #(3)
+
+  testStored => self assert: Adr0133ResidualsActor spawn stored equals: #(3)
+
+  testAssignedInDo =>
+    self assert: Adr0133ResidualsActor spawn assignedInDo equals: #(3)
+
+  testAssignedInArm =>
+    self assert: (Adr0133ResidualsActor spawn assignedInArm: true) equals: #(3)
+
+  testAssignedInOnDo =>
+    self assert: Adr0133ResidualsActor spawn assignedInOnDo equals: #(3)
+
+  testAssignedInEnsure =>
+    self assert: Adr0133ResidualsActor spawn assignedInEnsure equals: #(3)
+
+  testAssignedInCollect =>
+    self assert: Adr0133ResidualsActor spawn assignedInCollect equals: #(3)
+
+  testAssignedInInject =>
+    self assert: Adr0133ResidualsActor spawn assignedInInject equals: #(3)
+
+  testAssignedInIfNone =>
+    self assert: Adr0133ResidualsActor spawn assignedInIfNone equals: #(3)
+
+  testFieldWriting =>
+    self assert: Adr0133ResidualsActor spawn fieldWriting equals: #(#(3), 3)

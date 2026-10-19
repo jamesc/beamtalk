@@ -798,20 +798,72 @@ t
 // => 6
 
 // ===========================================================================
-// `match:` arms (BT-3817, BT-3823)
+// `match:` arms (BT-3817, BT-3823, BT-3909)
 // ===========================================================================
 //
 // A `match:` arm is an expression, not a block: no construct threads a write
 // in it back. Class, value-type and actor methods reject one with a structured
-// error (BT-3817); the REPL is exempt from that error, and dropped the write
+// error (BT-3817); the REPL was exempt from that error, dropped the write
 // silently until BT-3864 made an assignment used as a value (here the arm's
-// value) a compile error everywhere. BT-3875 makes `match:` arms producers.
+// value) a compile error everywhere, and since BT-3909 (ADR 0133's
+// `RESIDUAL_DENY_SET`, maintainer-approved REPL output change) draws the same
+// `match:` arm error as a method.
 
 t := 0
 // => 0
 
+// PIN-BUG BT-3911 (closes BT-3875): makes `match:` arms producers. Correct
+// answer: 9.
 r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
-// => ERROR: assignment to local `t` is used as a value in a top-level expression
+// => ERROR: a `match:` arm writes outer local `t`, but `match:` cannot return the write
 
+// PIN-BUG BT-3911: correct answer 9.
 t
 // => 0
+
+// ===========================================================================
+// ADR 0133 Phase 3 residuals (BT-3909)
+// ===========================================================================
+//
+// A `groupBy:` whose block binds a local is lowered as the threaded fold at
+// the REPL, and only a top-level statement or assignment unpacks its result
+// (BT-3897); anywhere else it is a compile error until BT-3912 lowers the fold
+// body as a frame.
+
+groups := #(1, 3) groupBy: [:x | gbKey := x > 2. gbKey]
+// => #{false => #(1), true => #(3)}
+
+groups at: true
+// => [3]
+
+// PIN-BUG BT-3912 (closes BT-3897): answered the raw carrier tuple (`Type
+// error in 'at:' on Tuple`). Correct answer: #(3).
+(#(1, 3) groupBy: [:x | gbKey2 := x > 2. gbKey2]) at: true
+// => ERROR: `groupBy:` binds a local, writes a field or sends to `self` in its block, but as the receiver of a message in a top-level expression
+
+// A local bound inside a conditional arm in a `whileTrue:` condition failed
+// `erlc` in class, value-type and actor methods (BT-3891, a compile error
+// there since BT-3909); the REPL answers right.
+i := 0
+// => 0
+
+[i < 3 and: [condX := i. condX < 5]] whileTrue: [i := i + 1]
+// => nil
+
+i
+// => 3
+
+i := 0
+// => 0
+
+[4 =:= 4 ifTrue: [u := 1]. i < 2] whileTrue: [i := i + 1]
+// => nil
+
+[nil ifNil: [u2 := 1]. i < 4] whileTrue: [i := i + 1]
+// => nil
+
+[4 =:= 4 and: [u3 := 1. true]. i < 6] whileTrue: [i := i + 1]
+// => nil
+
+i
+// => 6

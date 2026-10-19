@@ -68,6 +68,45 @@ impl BlockMutationAnalysis {
         !self.field_writes.is_empty() || self.has_self_sends || self.has_field_value_call
     }
 
+    /// Whether a loop or fold over this block is lowered with mutation
+    /// threading, in a method of kind `root` (`None`: a top-level expression,
+    /// the REPL or a script). The one per-context rule: codegen's
+    /// `needs_mutation_threading` and the ADR 0133 `groupBy:` residual check
+    /// (BT-3909, `validators/local_threading.rs`) both call it.
+    ///
+    /// - REPL: any local or field write (the bindings map carries both).
+    /// - Class method: no `State`, so field writes and self-sends never
+    ///   thread; a captured local both read and written does, through a
+    ///   fresh local map.
+    /// - Actor instance method: field writes, self-sends and other state
+    ///   effects ([`Self::has_state_effects`]) when `State` is an eligible
+    ///   family (`actor_state_eligible`, always true in an actor instance
+    ///   method, ADR 0122), or any local write.
+    /// - Value-type method: a field write, or a captured local both read and
+    ///   written.
+    #[must_use]
+    pub fn needs_mutation_threading(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+    ) -> bool {
+        let captured_local_mutation = || {
+            self.captured_reads
+                .iter()
+                .any(|v| self.local_writes.contains(v))
+        };
+        match root {
+            None => self.has_mutations(),
+            Some(RootMethodKind::Class) => captured_local_mutation(),
+            Some(RootMethodKind::Actor) => {
+                (actor_state_eligible && self.has_state_effects()) || !self.local_writes.is_empty()
+            }
+            Some(RootMethodKind::ValueType) => {
+                !self.field_writes.is_empty() || captured_local_mutation()
+            }
+        }
+    }
+
     /// Returns all variables that need threading (read AND written).
     #[cfg(test)]
     pub fn threaded_vars(&self) -> HashSet<String> {
@@ -85,6 +124,27 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
         ctx.local_bindings.insert(param.name.to_string());
     }
     analyze_statements(&block.body, &mut ctx)
+}
+
+/// ADR 0133 Phase 3 (BT-3909): whether a `groupBy:` with the literal block
+/// `block`, which writes no local bound outside it, is lowered as the threaded
+/// fold (`{GroupMap, ...}` accumulator) in a method of kind `root` (`None`:
+/// the REPL). Codegen's fold gate for such a block:
+/// [`BlockMutationAnalysis::needs_mutation_threading`] (`State` always
+/// eligible in an actor instance method) and, at the REPL, a binding written
+/// anywhere through nested constructs; the gate's other disjuncts are
+/// outer-local writes, which the Phase 0 check judges. Read by the
+/// `GroupByValue` residual check; `group_by_fold_gate_agreement` in
+/// `beamtalk-codegen` compiles a corpus of blocks and asserts codegen takes
+/// the fold exactly when this says so.
+#[must_use]
+pub fn group_by_fold_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
+    analyze_block(block).needs_mutation_threading(root, true)
+        // The REPL also threads a block that writes a binding anywhere, a
+        // nested construct's block included (codegen's
+        // `repl_blocks_write_bindings`, BT-3823): every name is a binding
+        // there.
+        || (root.is_none() && !threaded_block_writes(&[block], &|_| true).is_empty())
 }
 
 /// Analyzes a method body (top-level statements, not wrapped in a
