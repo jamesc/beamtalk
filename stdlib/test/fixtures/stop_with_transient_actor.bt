@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3967 fixture: a #transient supervised child, stopped with different
+// reasons by stdlib/test/actor_stop_with_test.bt to check which reasons the
+// supervisor treats as a crash (restart) versus a clean stop (no restart).
+
+Actor subclass: StopWithTransientActor
+  class supervisionPolicy -> #permanent | #transient | #temporary => #transient
+
+  ping => #pong

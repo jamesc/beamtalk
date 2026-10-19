@@ -1203,32 +1203,53 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "case Continue of",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "<'initialize'> when 'true' ->",
-                            nest(
-                                INDENT,
-                                // The auto-chained dispatch body. Each
-                                // class's initialize is bracketed by its own
-                                // pdict stash/restore pair to preserve
-                                // re-entrant self-send semantics.
-                                inner,
-                            ),
-                            line(),
-                            "<_> when 'true' -> {'noreply', State}",
-                        ]
-                    ),
-                    line(),
-                    "end",
+                    Self::pending_stop_wrap(docvec![
+                        "case Continue of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "<'initialize'> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    // The auto-chained dispatch body. Each
+                                    // class's initialize is bracketed by its own
+                                    // pdict stash/restore pair to preserve
+                                    // re-entrant self-send semantics.
+                                    inner,
+                                ),
+                                line(),
+                                "<_> when 'true' -> {'noreply', State}",
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]),
                 ]
             ),
             "\n",
             "\n",
         ];
         Ok(doc)
+    }
+
+    /// BT-3967: wraps a gen_server callback body so its return value passes
+    /// through `beamtalk_actor:apply_pending_stop/1`.
+    ///
+    /// `self stopWith: reason` inside a method cannot call
+    /// `gen_server:stop/3` on its own process (`calling_self`), so the
+    /// runtime records the request in the process dictionary instead; this
+    /// wrapper is where it takes effect — after the current dispatch has
+    /// returned — by turning `{reply, R, S}` / `{noreply, S}` into
+    /// `{stop, Reason, R, S}` / `{stop, Reason, S}`. Any other return value,
+    /// and every callback with no pending request, passes through unchanged.
+    fn pending_stop_wrap(body: Document<'static>) -> Document<'static> {
+        docvec![
+            "let _CallbackResult =",
+            nest(INDENT, docvec![line(), body]),
+            line(),
+            "in call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)",
+        ]
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.
@@ -1352,64 +1373,69 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "case Msg of",
-                    nest(
-                        INDENT,
-                        docvec![
-                            // Wire-tagged remote fire-and-forget cast (ADR 0126
-                            // §5.1) — decode via the shared helper, then
-                            // redispatch or drop.
-                            line(),
-                            "<{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "case call 'beamtalk_actor':'decode_wire_cast'(Msg) of",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "<{'redispatch', WireMsg2}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "call ",
-                                                    leaf::atom(module_name.clone()),
-                                                    ":'handle_cast'(WireMsg2, State)",
-                                                ]
-                                            ),
-                                            line(),
-                                            "<'noreply'> when 'true' ->",
-                                            nest(INDENT, docvec![line(), "{'noreply', State}",]),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
-                            // Fire-and-forget cast with propagated context
-                            line(),
-                            "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
-                                    Self::cast_dispatch_case(&module_name),
-                                ]
-                            ),
-                            // Fire-and-forget cast without context (backward compat)
-                            line(),
-                            "<{'cast', CastSelector, CastArgs}> when 'true' ->",
-                            nest(INDENT, Self::cast_dispatch_case(&module_name)),
-                            line(),
-                            "<_> when 'true' -> {'noreply', State}",
-                        ]
-                    ),
-                    line(),
-                    "end",
+                    Self::pending_stop_wrap(docvec![
+                        "case Msg of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                // Wire-tagged remote fire-and-forget cast (ADR 0126
+                                // §5.1) — decode via the shared helper, then
+                                // redispatch or drop.
+                                line(),
+                                "<{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "case call 'beamtalk_actor':'decode_wire_cast'(Msg) of",
+                                        nest(
+                                            INDENT,
+                                            docvec![
+                                                line(),
+                                                "<{'redispatch', WireMsg2}> when 'true' ->",
+                                                nest(
+                                                    INDENT,
+                                                    docvec![
+                                                        line(),
+                                                        "call ",
+                                                        leaf::atom(module_name.clone()),
+                                                        ":'handle_cast'(WireMsg2, State)",
+                                                    ]
+                                                ),
+                                                line(),
+                                                "<'noreply'> when 'true' ->",
+                                                nest(
+                                                    INDENT,
+                                                    docvec![line(), "{'noreply', State}",]
+                                                ),
+                                            ]
+                                        ),
+                                        line(),
+                                        "end",
+                                    ]
+                                ),
+                                // Fire-and-forget cast with propagated context
+                                line(),
+                                "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
+                                        Self::cast_dispatch_case(&module_name),
+                                    ]
+                                ),
+                                // Fire-and-forget cast without context (backward compat)
+                                line(),
+                                "<{'cast', CastSelector, CastArgs}> when 'true' ->",
+                                nest(INDENT, Self::cast_dispatch_case(&module_name)),
+                                line(),
+                                "<_> when 'true' -> {'noreply', State}",
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]),
                 ]
             ),
             "\n",
@@ -1448,64 +1474,69 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "case Msg of",
-                    nest(
-                        INDENT,
-                        docvec![
-                            // Wire-tagged remote call (ADR 0126 §5.1) — decode via
-                            // the shared helper, then redispatch or reply directly.
-                            line(),
-                            "<{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "case call 'beamtalk_actor':'decode_wire_call'(Msg) of",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "<{'redispatch', WireMsg2}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "call ",
-                                                    leaf::atom(module_name.clone()),
-                                                    ":'handle_call'(WireMsg2, From, State)",
-                                                ]
-                                            ),
-                                            line(),
-                                            "<{'reply', WireReplyVal}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![line(), "{'reply', WireReplyVal, State}",]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
-                            // 3-tuple with propagated context — restore before dispatch
-                            line(),
-                            "<{Selector, Args, PropCtx}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in",
-                                    dispatch_case.clone(),
-                                ]
-                            ),
-                            // Backward compat: 2-tuple without context
-                            line(),
-                            "<{Selector, Args}> when 'true' ->",
-                            nest(INDENT, dispatch_case),
-                        ]
-                    ),
-                    line(),
-                    "end",
+                    Self::pending_stop_wrap(docvec![
+                        "case Msg of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                // Wire-tagged remote call (ADR 0126 §5.1) — decode via
+                                // the shared helper, then redispatch or reply directly.
+                                line(),
+                                "<{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "case call 'beamtalk_actor':'decode_wire_call'(Msg) of",
+                                        nest(
+                                            INDENT,
+                                            docvec![
+                                                line(),
+                                                "<{'redispatch', WireMsg2}> when 'true' ->",
+                                                nest(
+                                                    INDENT,
+                                                    docvec![
+                                                        line(),
+                                                        "call ",
+                                                        leaf::atom(module_name.clone()),
+                                                        ":'handle_call'(WireMsg2, From, State)",
+                                                    ]
+                                                ),
+                                                line(),
+                                                "<{'reply', WireReplyVal}> when 'true' ->",
+                                                nest(
+                                                    INDENT,
+                                                    docvec![
+                                                        line(),
+                                                        "{'reply', WireReplyVal, State}",
+                                                    ]
+                                                ),
+                                            ]
+                                        ),
+                                        line(),
+                                        "end",
+                                    ]
+                                ),
+                                // 3-tuple with propagated context — restore before dispatch
+                                line(),
+                                "<{Selector, Args, PropCtx}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in",
+                                        dispatch_case.clone(),
+                                    ]
+                                ),
+                                // Backward compat: 2-tuple without context
+                                line(),
+                                "<{Selector, Args}> when 'true' ->",
+                                nest(INDENT, dispatch_case),
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]),
                 ]
             ),
             "\n",
@@ -1771,7 +1802,10 @@ impl CoreErlangGenerator {
                 "'handle_info'/2 = fun (Msg, State) ->",
                 nest(
                     INDENT,
-                    docvec![line(), Self::linked_exit_intercept_doc(dispatch_body),]
+                    docvec![
+                        line(),
+                        Self::pending_stop_wrap(Self::linked_exit_intercept_doc(dispatch_body)),
+                    ]
                 ),
                 "\n",
                 "\n",

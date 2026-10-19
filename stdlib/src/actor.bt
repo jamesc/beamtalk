@@ -689,14 +689,54 @@ Object subclass: Actor
 
   /// Gracefully stop this actor (gen_server:stop).
   ///
-  /// Idempotent: stopping an already-stopped actor succeeds silently.
-  /// Raises an error if the actor times out during shutdown.
+  /// Equivalent to `stopWith: #normal`. Idempotent: stopping an
+  /// already-stopped actor succeeds silently. Raises an error if the actor
+  /// times out during shutdown. Sent to `self` from inside one of the
+  /// actor's own methods, the stop takes effect after the current message
+  /// has been handled.
   ///
   /// ## Examples
   /// ```beamtalk
   /// counter stop   // => ok
   /// ```
   sealed stop -> Symbol => @intrinsic "actorStop"
+
+  /// Stop this actor with a chosen exit reason (`gen_server:stop/3`).
+  ///
+  /// `terminate:` receives exactly `reason`, and so do `onExit:` observers.
+  /// `stopWith: #normal` is the same as `stop`. OTP treats `#normal`,
+  /// `#shutdown` and `{shutdown, term}` tuples as clean stops: no crash
+  /// report, and a `#transient` supervised child is not restarted. Any
+  /// other reason (an error, an exception) is a crash — it is logged, a
+  /// `#transient` child is restarted, and processes linked to the actor
+  /// (such as the one that spawned it) receive the exit signal.
+  ///
+  /// From another process this waits up to 5 seconds for the actor to
+  /// terminate; stopping an already-stopped actor succeeds silently. Sent
+  /// to `self` from inside one of the actor's own methods, it takes effect
+  /// after the current message has been handled (a pending caller still
+  /// gets its reply), then the actor terminates.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker stopWith: #normal                                   // => #ok
+  /// self stopWith: (Tuple withAll: #(#shutdown, #peer_closed)) // => #ok
+  /// ```
+  sealed stopWith: reason :: Object -> Symbol => @intrinsic "actorStopWith"
+
+  /// Stop this actor with a chosen exit reason, waiting up to `timeout`
+  /// milliseconds for it to terminate (`gen_server:stop/3`).
+  ///
+  /// Same semantics as `stopWith:`; raises an error if the actor has not
+  /// terminated within `timeout`. Sent to `self`, the timeout is ignored —
+  /// the stop is deferred until the current message has been handled.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker stopWith: #shutdown timeout: 1000   // => #ok
+  /// ```
+  sealed stopWith: reason :: Object timeout: timeout :: Integer -> Symbol =>
+    @intrinsic "actorStopWithTimeout"
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///

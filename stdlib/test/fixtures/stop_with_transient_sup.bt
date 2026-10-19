@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3967 fixture: supervises a single #transient StopWithTransientActor.
+// See stdlib/test/actor_stop_with_test.bt.
+
+Supervisor subclass: StopWithTransientSup
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  class children -> List => #(StopWithTransientActor)

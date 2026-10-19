@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3967 fixture: a Server that stops itself with a structured reason via
+// `self stopWith:` (from handleInfo: and from an ordinary method), and
+// records the reason its terminate: hook receives into the shared Ets table
+// named by `tableName`. See stdlib/test/actor_stop_with_test.bt.
+
+Server subclass: StopWithServer
+  state: tableName = nil
+  state: handled = 0
+
+  handleInfo: msg =>
+    msg == #close
+      ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+      ifFalse: [self.handled := self.handled + 1]
+
+  stopSelfWith: reason =>
+    self stopWith: reason
+    #stillRunning
+
+  stopSelf =>
+    self stop
+    #stillRunning
+
+  handled => self.handled
+
+  terminate: reason =>
+    self.tableName isNil
+      ifFalse: [
+        table := Ets named: self.tableName
+        table at: #called put: true; at: #reason put: reason
+      ]
