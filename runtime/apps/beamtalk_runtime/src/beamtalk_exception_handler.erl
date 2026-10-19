@@ -691,11 +691,9 @@ its wrapped map, e.g. `Error signal:` inside a runtime-defined actor method) is
 not a raw Erlang term, so it answers `nil`, as does an exception with no
 recorded term.
 """.
--spec raw_reason(term()) -> term().
-raw_reason(Details) when is_map(Details) ->
-    raw_reason_from(Details, [reason, erlang_error, original_reason]);
-raw_reason(_) ->
-    nil.
+-spec raw_reason(map()) -> term().
+raw_reason(Details) ->
+    raw_reason_from(Details, [reason, erlang_error, original_reason]).
 
 -spec raw_reason_from(map(), [atom()]) -> term().
 raw_reason_from(_Details, []) ->
