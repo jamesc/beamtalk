@@ -34,12 +34,23 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 just test-rust           # fast tier: cargo-nextest over every test binary (minus the corpus tier) + doctests
 just test-benches-smoke  # criterion benches in test mode, one pass each (~5 min serial); nightly only, not in `ci` (BT-3886)
-just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~13 min); `ci-changed` and CI run it only when compiler crates change
+just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~10 min); `ci-changed` and CI run it only when compiler crates change
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)
 just test-parity         # Cross-surface parity tests (BT-2077, ~30s)
 just test-repl-protocol  # REPL TCP-protocol tests (slower, ~50s)
 ```
+
+The corpus tier runs under cargo-nextest, one process per test, so its wall
+time is floored by its longest test, not by its total. A corpus proof that
+enumerates a shared list (frames, shapes, constructs, contexts) is split into
+one `#[test]` per *family* of that list with `beamtalk_core::per_family_tests!`
+(`crates/beamtalk-core/src/test_helpers/corpus_families.rs`, BT-3888): each
+per-family test runs the same check over its slice, and the macro also emits a
+partition test that fails when the families skip an entry, overlap, or lack a
+test, so the split is a partition of the former loop, never a reduction of it.
+Keep each per-family test well under a minute on 4 cores (nextest prints `SLOW`
+at 60 s): split a family further rather than trimming its product.
 
 ### Code Coverage
 

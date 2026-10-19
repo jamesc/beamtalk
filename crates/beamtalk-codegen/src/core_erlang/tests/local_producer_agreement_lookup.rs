@@ -22,8 +22,8 @@
 
 use super::local_producer_agreement::{BODY_STATEMENTS, POSITIONS, body_sources, sources};
 use super::local_producer_agreement_conditional::{
-    ARM_CONSTRUCTS, ARM_FRAMES, CONDITIONAL_POSITIONS, LOOP_BODY_FRAMES,
-    check_conditional_agreement,
+    ARM_CONSTRUCTS, ARM_FRAME_FAMILIES, ARM_FRAMES, CONDITIONAL_POSITIONS,
+    LOOP_BODY_FRAME_FAMILIES, LOOP_BODY_FRAMES, check_conditional_agreement,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
@@ -179,10 +179,19 @@ fn every_lookup_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     );
 }
 
-#[test]
-fn every_lookup_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// The families of [`LOOKUP_ARM_FRAMES`], as index ranges, one test each
+/// below (`per_family_tests!`, BT-3888): an absent handler alone; one after a
+/// write or in another; one in an arm or a protected body; an arm or loop in
+/// one; the present handlers; an absent handler beside a present one.
+const LOOKUP_ARM_FRAME_FAMILIES: &[std::ops::Range<usize>] =
+    &[0..2, 2..4, 4..6, 6..8, 8..10, 10..12];
+
+/// Both ways, for a loop, fold, conditional, exception or lookup in a
+/// statement of one family of [`LOOKUP_ARM_FRAMES`]: the whole proof is the
+/// per-family tests below.
+fn every_lookup_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = 0;
-    for frame in LOOKUP_ARM_FRAMES {
+    for frame in frames {
         for construct in ARM_CONSTRUCTS.iter().chain(LOOKUP_SAMPLE) {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
@@ -191,16 +200,34 @@ fn every_lookup_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer(
             }
         }
     }
+    // Not vacuous, family by family (the whole corpus once asserted more
+    // than 300 over its 12 frames).
     assert!(
-        checked > 300,
-        "only {checked} lookup arm frame sites compared"
+        checked > 30,
+        "only {checked} lookup arm frame sites compared in {frames:?}"
     );
 }
 
-#[test]
-fn lookups_in_the_arms_of_other_conditional_producers_agree() {
+beamtalk_core::per_family_tests! {
+    list = LOOKUP_ARM_FRAMES,
+    families = LOOKUP_ARM_FRAME_FAMILIES,
+    check = every_lookup_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_lookup_arm_frame_site_tests_cover_every_lookup_arm_frame,
+    every_absent_handler_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 0,
+    every_absent_handler_after_a_write_or_in_another_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 1,
+    every_absent_handler_in_an_arm_or_protected_body_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 2,
+    every_arm_or_loop_in_an_absent_handler_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 3,
+    every_present_handler_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 4,
+    every_absent_handler_beside_a_present_one_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 5,
+}
+
+/// A lookup in a statement of one family of
+/// [`ARM_FRAMES`](super::local_producer_agreement_conditional::ARM_FRAMES)
+/// (the arms of the other conditional producers): the whole proof is the
+/// per-family tests below.
+fn lookups_in_the_arms_of_other_conditional_producers_agree(frames: &[&str]) {
     let mut checked = 0;
-    for frame in ARM_FRAMES {
+    for frame in frames {
         for construct in LOOKUP_SAMPLE {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
@@ -209,7 +236,25 @@ fn lookups_in_the_arms_of_other_conditional_producers_agree() {
             }
         }
     }
-    assert!(checked > 300, "only {checked} arm frame lookups compared");
+    // Not vacuous, family by family (the whole corpus once asserted more
+    // than 300 over its 23 frames).
+    assert!(
+        checked > 30,
+        "only {checked} arm frame lookups compared in {frames:?}"
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = ARM_FRAMES,
+    families = ARM_FRAME_FAMILIES,
+    check = lookups_in_the_arms_of_other_conditional_producers_agree,
+    partition = the_arm_frame_lookup_tests_cover_every_arm_frame,
+    lookups_in_the_if_true_arms_of_other_conditional_producers_agree => 0,
+    lookups_in_the_boolean_or_nil_arms_of_other_conditional_producers_agree => 1,
+    lookups_in_the_arms_nested_in_a_producer_of_other_conditional_producers_agree => 2,
+    lookups_in_the_arms_in_a_loop_or_holding_a_conditional_of_other_conditional_producers_agree => 3,
+    lookups_in_the_evaluated_block_arms_of_other_conditional_producers_agree => 4,
+    lookups_in_the_nested_evaluated_block_arms_of_other_conditional_producers_agree => 5,
 }
 
 #[test]
@@ -239,11 +284,11 @@ fn lookups_that_write_nothing_agree_in_every_context() {
 /// `is_loop_body_producer_site` + `conditional_producer_writes` name exactly
 /// the lookups codegen lowers as local-threading producers in the frame, and
 /// the enclosing loops and folds that thread their writes, in class,
-/// value-type and actor methods.
-#[test]
-fn every_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// value-type and actor methods. Over one family of [`LOOP_BODY_FRAMES`]: the
+/// whole proof is the per-family tests below.
+fn every_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = [0usize; 3];
-    for frame in LOOP_BODY_FRAMES {
+    for frame in frames {
         for construct in LOOKUP_SAMPLE {
             for statement in BODY_STATEMENTS {
                 for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
@@ -252,10 +297,23 @@ fn every_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer() {
             }
         }
     }
+    // Not vacuous, family by family and context by context (the whole corpus
+    // once asserted more than 150 per context over its 12 frames).
     assert!(
-        checked.iter().all(|&n| n > 150),
-        "loop-body lookup producer sites compared (class, value, actor): {checked:?}"
+        checked.iter().all(|&n| n > 30),
+        "loop-body lookup producer sites compared (class, value, actor) in {frames:?}: {checked:?}"
     );
+}
+
+beamtalk_core::per_family_tests! {
+    list = LOOP_BODY_FRAMES,
+    families = LOOP_BODY_FRAME_FAMILIES,
+    check = every_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_loop_body_lookup_tests_cover_every_loop_body_frame,
+    every_letrec_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer => 0,
+    every_fold_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer => 1,
+    every_two_level_or_closure_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer => 2,
+    every_protected_or_evaluated_block_loop_body_lookup_the_core_rule_accepts_is_lowered_by_the_producer => 3,
 }
 
 /// BT-3839: a lookup in a loop or fold body inside an arm of a conditional

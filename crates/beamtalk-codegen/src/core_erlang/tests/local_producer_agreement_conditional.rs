@@ -295,10 +295,21 @@ fn every_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     );
 }
 
-#[test]
-fn every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// The families of [`ARM_FRAMES`], as index ranges, one test each here and in
+/// `local_producer_agreement_lookup.rs` (`per_family_tests!`, BT-3888): the
+/// `ifTrue:`/`ifFalse:` arms; the boolean and nil-testing arms; an arm nested
+/// in another producer; an arm in a loop or holding a conditional; an
+/// evaluated literal block's arm alone; the same nested in or around other
+/// frames.
+pub(super) const ARM_FRAME_FAMILIES: &[std::ops::Range<usize>] =
+    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23];
+
+/// Both ways, for a loop, fold, conditional or exception in a statement of
+/// one family of [`ARM_FRAMES`]: the whole proof is the per-family tests
+/// below.
+fn every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = 0;
-    for frame in ARM_FRAMES {
+    for frame in frames {
         for construct in ARM_CONSTRUCTS {
             for statement in BODY_STATEMENTS {
                 for src in body_sources(frame, construct, statement) {
@@ -307,7 +318,25 @@ fn every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer() {
             }
         }
     }
-    assert!(checked > 300, "only {checked} arm frame sites compared");
+    // Not vacuous, family by family (the whole corpus once asserted more
+    // than 300 over its 23 frames).
+    assert!(
+        checked > 30,
+        "only {checked} arm frame sites compared in {frames:?}"
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = ARM_FRAMES,
+    families = ARM_FRAME_FAMILIES,
+    check = every_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_arm_frame_site_tests_cover_every_arm_frame,
+    every_if_true_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 0,
+    every_boolean_or_nil_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 1,
+    every_arm_frame_site_nested_in_a_producer_the_core_rule_accepts_is_lowered_by_the_producer => 2,
+    every_arm_frame_site_in_a_loop_or_holding_a_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 3,
+    every_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 4,
+    every_nested_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 5,
 }
 
 /// Actor conditionals the core rule does not name as producers (the arm writes a
@@ -446,15 +475,21 @@ const LOOP_BODY_CONDITIONALS: &[&str] = &[
     "[(s < 3) ifTrue: [t := t + 1]] value",
 ];
 
+/// The families of [`LOOP_BODY_FRAMES`], as index ranges, one test each here
+/// and in `local_producer_agreement_lookup.rs` (`per_family_tests!`,
+/// BT-3888): the letrec loops; the folds; a two-level frame or a closure in a
+/// fold; a protected body or an evaluated block in a frame.
+pub(super) const LOOP_BODY_FRAME_FAMILIES: &[std::ops::Range<usize>] = &[0..3, 3..6, 6..9, 9..12];
+
 /// Both ways, for a conditional anywhere a loop or fold body statement can
 /// hold one (the statement, an assignment's value, an operand): the core rule's
 /// `is_loop_body_producer_site` + `conditional_producer_writes` name exactly
 /// the conditionals codegen lowers as local-threading producers in the loop
-/// frame, in class, value-type and actor methods.
-#[test]
-fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer() {
+/// frame, in class, value-type and actor methods. Over one family of
+/// [`LOOP_BODY_FRAMES`]: the whole proof is the per-family tests below.
+fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer(frames: &[&str]) {
     let mut checked = [0usize; 3];
-    for frame in LOOP_BODY_FRAMES {
+    for frame in frames {
         for construct in LOOP_BODY_CONDITIONALS {
             for statement in BODY_STATEMENTS {
                 for (i, src) in body_sources(frame, construct, statement).iter().enumerate() {
@@ -463,10 +498,24 @@ fn every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer(
             }
         }
     }
+    // Not vacuous, family by family and context by context (the whole corpus
+    // once asserted more than 150 per context over its 12 frames).
     assert!(
-        checked.iter().all(|&n| n > 150),
-        "loop-body conditional producer sites compared (class, value, actor): {checked:?}"
+        checked.iter().all(|&n| n > 30),
+        "loop-body conditional producer sites compared (class, value, actor) in {frames:?}: \
+         {checked:?}"
     );
+}
+
+beamtalk_core::per_family_tests! {
+    list = LOOP_BODY_FRAMES,
+    families = LOOP_BODY_FRAME_FAMILIES,
+    check = every_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer,
+    partition = the_loop_body_conditional_tests_cover_every_loop_body_frame,
+    every_letrec_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 0,
+    every_fold_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 1,
+    every_two_level_or_closure_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 2,
+    every_protected_or_evaluated_block_loop_body_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 3,
 }
 
 /// Conditionals that are not producers: their arms write no outer local. The

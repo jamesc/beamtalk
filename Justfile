@@ -137,7 +137,7 @@ ci-changed:
       echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
     fi
 
-    # The Rust corpus tier (`test-corpus`, ~13 min on 4 cores) runs only when
+    # The Rust corpus tier (`test-corpus`, ~10 min on 4 cores) runs only when
     # scripts/ci/corpus-gate.sh says the changed paths can affect it; ci.yml's
     # Linux `check` job calls the same script, so the path list has one home.
     if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
@@ -1123,9 +1123,10 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # Two tiers. `test-rust` is the fast tier: everything except `corpus_tests`.
 # `test-corpus` is the slow tier: the ADR 0111/0131 state-threading agreement
 # and corpus proofs (`local_producer_agreement*`, `*_corpus`,
-# `class_var_agreement`, `repl_local_producer`, ...), about 90 tests that
-# enumerate frames x constructs x statements and compile every cell: roughly
-# 13 of the suite's 21 minutes on a 4-core runner. They only prove things
+# `class_var_agreement`, `repl_local_producer`, ...), about 230 tests that
+# enumerate frames x constructs x statements and compile every cell, split per
+# frame family so no test runs over a minute (BT-3888): roughly 10 of the
+# suite's 18 minutes on a 4-core runner. They only prove things
 # about the compiler crates they call in-process, so `ci-changed` and CI's
 # Linux `check` job run them only when those crates change; `just ci` always
 # runs both tiers. The set is one nextest filterset, defined once here.

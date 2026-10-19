@@ -259,11 +259,12 @@ fn both_outputs(name: &str, src: &str, compile: bool) -> [(&'static str, String)
 /// unpacked -- as an intermediate and as the last statement, with and without
 /// a producer in the construct's receiver, in the eval and the trace module.
 /// A construct that does not set `repl_loop_mutated` shows up here as a
-/// missing `_AssignTuple` (and, at a producer site, a missing carrier).
-#[test]
-fn every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked() {
+/// missing `_AssignTuple` (and, at a producer site, a missing carrier). Over
+/// one family of [`CONSTRUCTS`]: the whole proof is the per-family tests
+/// below.
+fn every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked(constructs: &[&str]) {
     let mut compared = 0;
-    for (c, template) in CONSTRUCTS.iter().enumerate() {
+    for (c, template) in constructs.iter().enumerate() {
         for (r, receiver) in RECEIVERS.iter().enumerate() {
             let value = construct(template, *receiver);
             for (k, src) in [
@@ -311,7 +312,29 @@ fn every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked() {
             }
         }
     }
-    assert!(compared >= 60, "only {compared} outputs compared");
+    // Every construct x receiver x whole-value input x entry point is compared:
+    // nothing in that loop is skipped.
+    assert_eq!(
+        compared,
+        constructs.len() * RECEIVERS.len() * 3 * 2,
+        "whole-value outputs compared in {constructs:?}"
+    );
+}
+
+/// The families of [`CONSTRUCTS`], as index ranges, one test each below
+/// (`per_family_tests!`, BT-3888): the folds; the searches, `count:` and
+/// `do:`; the letrec loops; the other state-threading constructs.
+const CONSTRUCT_FAMILIES: &[std::ops::Range<usize>] = &[0..4, 4..8, 8..11, 11..16];
+
+beamtalk_core::per_family_tests! {
+    list = CONSTRUCTS,
+    families = CONSTRUCT_FAMILIES,
+    check = every_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked,
+    partition = the_threaded_construct_tests_cover_every_construct,
+    every_threaded_fold_is_a_tuple_and_a_whole_value_one_is_unpacked => 0,
+    every_threaded_search_count_or_do_is_a_tuple_and_a_whole_value_one_is_unpacked => 1,
+    every_threaded_letrec_loop_is_a_tuple_and_a_whole_value_one_is_unpacked => 2,
+    every_other_threaded_construct_is_a_tuple_and_a_whole_value_one_is_unpacked => 3,
 }
 
 /// BT-3823: the REPL arms whose sites hold a producer, for the arm-site half of
@@ -333,20 +356,50 @@ const REPL_ARMS: &[(&str, usize)] = &[
     ("r := (Result tryDo: [{p}. 7]) unwrap", 2),
 ];
 
+/// The constructs at a REPL arm site (BT-3823): every family of
+/// [`CONSTRUCTS`] plus `Result tryDo:`.
+fn arm_site_constructs() -> Vec<&'static str> {
+    CONSTRUCTS
+        .iter()
+        .copied()
+        .chain(["Result tryDo: [t := t + 1. 5]"])
+        .collect()
+}
+
+/// The families of [`arm_site_constructs`], one construct each, one test
+/// each below (`per_family_tests!`, BT-3888): every construct is 9 arms x 3
+/// statements x 2 entry points, each an `erlc` run, so one construct is the
+/// unit nextest spreads over cores.
+const ARM_SITE_CONSTRUCT_FAMILIES: &[std::ops::Range<usize>] = &[
+    0..1,
+    1..2,
+    2..3,
+    3..4,
+    4..5,
+    5..6,
+    6..7,
+    7..8,
+    8..9,
+    9..10,
+    10..11,
+    11..12,
+    12..13,
+    13..14,
+    14..15,
+    15..16,
+    16..17,
+];
+
 /// BT-3823: every construct at a REPL arm site (the statement itself, an
 /// operand and an assignment's value) compiles to a `{Value, Bindings}`
 /// carrier the arm adopts: a family that reached the producer without setting
 /// `repl_loop_mutated` would leave no carrier and drop its write. Every family
 /// of [`CONSTRUCTS`] plus `tryDo:`, in every arm kind, in the eval and the
-/// trace module, `erlc`-checked.
-#[test]
-fn every_construct_at_a_repl_arm_site_produces_its_carrier() {
+/// trace module, `erlc`-checked. Over one family of [`arm_site_constructs`]:
+/// the whole proof is the per-family tests below.
+fn every_construct_at_a_repl_arm_site_produces_its_carrier(constructs: &[&str]) {
     let mut compared = 0;
-    let constructs = CONSTRUCTS
-        .iter()
-        .copied()
-        .chain(["Result tryDo: [t := t + 1. 5]"]);
-    for (c, value) in constructs.enumerate() {
+    for (c, value) in constructs.iter().enumerate() {
         for (a, (arm, expected)) in REPL_ARMS.iter().enumerate() {
             for (k, stmt) in [
                 value.to_string(),
@@ -371,7 +424,37 @@ fn every_construct_at_a_repl_arm_site_produces_its_carrier() {
             }
         }
     }
-    assert!(compared >= 500, "only {compared} outputs compared");
+    // Every construct x arm x statement x entry point is compared: nothing in
+    // that loop is skipped.
+    assert_eq!(
+        compared,
+        constructs.len() * REPL_ARMS.len() * 3 * 2,
+        "arm-site outputs compared in {constructs:?}"
+    );
+}
+
+beamtalk_core::per_family_tests! {
+    list = arm_site_constructs(),
+    families = ARM_SITE_CONSTRUCT_FAMILIES,
+    check = every_construct_at_a_repl_arm_site_produces_its_carrier,
+    partition = the_repl_arm_site_tests_cover_every_construct,
+    every_inject_into_at_a_repl_arm_site_produces_its_carrier => 0,
+    every_collect_at_a_repl_arm_site_produces_its_carrier => 1,
+    every_select_at_a_repl_arm_site_produces_its_carrier => 2,
+    every_reject_at_a_repl_arm_site_produces_its_carrier => 3,
+    every_detect_at_a_repl_arm_site_produces_its_carrier => 4,
+    every_detect_if_none_at_a_repl_arm_site_produces_its_carrier => 5,
+    every_count_at_a_repl_arm_site_produces_its_carrier => 6,
+    every_do_at_a_repl_arm_site_produces_its_carrier => 7,
+    every_to_do_at_a_repl_arm_site_produces_its_carrier => 8,
+    every_times_repeat_at_a_repl_arm_site_produces_its_carrier => 9,
+    every_while_true_at_a_repl_arm_site_produces_its_carrier => 10,
+    every_if_true_if_false_at_a_repl_arm_site_produces_its_carrier => 11,
+    every_block_value_at_a_repl_arm_site_produces_its_carrier => 12,
+    every_block_value_with_argument_at_a_repl_arm_site_produces_its_carrier => 13,
+    every_on_do_at_a_repl_arm_site_produces_its_carrier => 14,
+    every_ensure_at_a_repl_arm_site_produces_its_carrier => 15,
+    every_try_do_at_a_repl_arm_site_produces_its_carrier => 16,
 }
 
 /// A fold that writes no binding is a plain value: no tuple, nothing to
