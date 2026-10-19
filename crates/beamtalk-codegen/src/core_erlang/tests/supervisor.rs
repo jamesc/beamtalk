@@ -649,3 +649,107 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
         "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_dynamic_supervisor_child_class_calls_registry_whereis_with_class_name() {
+    // `childClass/0` is called by `beamtalk_supervisor:startChild/1,2` to resolve
+    // the child class at runtime.  The generated body must call
+    // `beamtalk_class_registry:whereis_class` with the *class* atom (not the
+    // module atom) — otherwise `startChild` silently starts the wrong child.
+    let module = make_dynamic_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('WorkerPool')"),
+        "childClass/0 must call beamtalk_class_registry:whereis_class with the class name atom. \
+         Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_dynamic_supervisor_child_class_body_calls_class_send_with_child_class_selector() {
+    // After resolving the class proxy, `childClass/0` must forward the
+    // `childClass` message via `beamtalk_object_class:class_send` — that is the
+    // only way to invoke a user-defined class-side method through the class
+    // gen_server.  A bare function call would bypass the gen_server and break
+    // class-variable access inside the method.
+    let module = make_dynamic_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'beamtalk_object_class':'class_send'"),
+        "childClass/0 must delegate to beamtalk_object_class:class_send. Got:\n{code}"
+    );
+    // The selector atom passed to class_send must be 'childClass'.
+    assert!(
+        code.contains("'beamtalk_object_class':'class_send'(SupCp, 'childClass', [])"),
+        "childClass/0 must forward selector 'childClass' to class_send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_dynamic_supervisor_with_user_class_method_exports_it() {
+    // A `DynamicSupervisor subclass: WorkerPool` with a user-defined class
+    // method (e.g. `class maxConcurrency => ...`) must export it — this is the
+    // same invariant as the static case (see
+    // `test_static_supervisor_with_user_class_method_exports_it`).
+    let max_concurrency_method = MethodDefinition {
+        selector: MessageSelector::Unary("maxConcurrency".into()),
+        parameters: vec![],
+        body: vec![bare(Expression::Literal(
+            Literal::Integer(10),
+            Span::new(0, 0),
+        ))],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        span: Span::new(0, 0),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+    let class = ClassDefinition {
+        name: Identifier::new("WorkerPool", Span::new(0, 0)),
+        superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: Some(SupervisorKind::Dynamic),
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![max_concurrency_method],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        uses: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        shape_version: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    };
+    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'class_maxConcurrency'/1"),
+        "Dynamic supervisor with user class method must export class_maxConcurrency/1. \
+         Got:\n{code}"
+    );
+}
