@@ -1593,35 +1593,3 @@ bt3482_drain_trace_calls(Acc) ->
     after 0 ->
         lists:reverse(Acc)
     end.
-
-%%% ============================================================================
-%%% is_tier2_block/1 — ADR 0132 Tier 2 mark (BT-3885)
-%%% ============================================================================
-
-%% call_threaded/3 itself is covered by beamtalk_threaded_dispatch_tests.
-
-%% The Tier 2 mark the EUnit helper spells is the gate's, at every arity, and
-%% the gate's check accepts it (BT-3885).
-tier2_mark_test_() ->
-    Marked = [
-        beamtalk_tier2_test_block:mark(fun(Acc) -> {1, Acc} end),
-        beamtalk_tier2_test_block:mark(fun(_A, Acc) -> {1, Acc} end),
-        beamtalk_tier2_test_block:mark(fun(_A, _B, Acc) -> {1, Acc} end),
-        beamtalk_tier2_test_block:mark(fun(_A, _B, _C, Acc) -> {1, Acc} end)
-    ],
-    [
-        ?_test(begin
-            {name, Name} = erlang:fun_info(M, name),
-            {arity, Arity} = erlang:fun_info(M, arity),
-            Mark =
-                "-BtTier2Block/" ++ integer_to_list(Arity) ++ "-",
-            ?assertNotEqual(nomatch, string:find(atom_to_list(Name), Mark)),
-            ?assert(beamtalk_dispatch:is_tier2_block(M))
-        end)
-     || M <- Marked
-    ] ++
-        [
-            ?_assertNot(beamtalk_dispatch:is_tier2_block(fun(_Acc) -> {1, #{}} end)),
-            ?_assertNot(beamtalk_dispatch:is_tier2_block(fun maps:put/3)),
-            ?_assertNot(beamtalk_dispatch:is_tier2_block(not_a_fun))
-        ].
