@@ -307,6 +307,9 @@ into three buckets that are presented differently:
 * **Bucket C — resource/env** (`resource_error`/`process_not_found`/
   `timeout_error`): `system_limit`, `noproc`, `timeout`.
 
+Every clause records the original raw term under `details.reason`, which
+`Exception>>reason` exposes to Beamtalk code (BT-3954).
+
 `Context` is the dispatch-layer breadcrumb: a map that may carry
 `selector` and `class` for the active send. It disambiguates the overloaded
 `badarg` and lets bucket-A errors render located messages
@@ -326,7 +329,7 @@ wrap_raw({badarity, {Fun, Args}}, _Context) when is_function(Fun), is_list(Args)
     Hint =
         <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
     wrap_classified(arity_mismatch, 'Block', undefined, Message, Hint, #{
-        expected_args => Expected, actual_args => Actual
+        expected_args => Expected, actual_args => Actual, reason => {badarity, {Fun, Args}}
     });
 %%% --- Bucket A: user-input errors ----------------------------------------
 wrap_raw(badarith, Context) ->
@@ -340,12 +343,16 @@ wrap_raw({badkey, Key}, Context) ->
     Core = iolist_to_binary(io_lib:format("key not found: ~tp", [Key])),
     Message = located(Sel, Cls, Core),
     Hint = <<"Use 'includesKey:' to test first, or 'at:ifAbsent:' to supply a default.">>,
-    wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{key => Key});
+    wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{
+        key => Key, reason => {badkey, Key}
+    });
 wrap_raw({badmap, Value}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"expected a Dictionary but got a non-map value">>),
     Hint = <<"This message is only understood by Dictionary values.">>,
-    wrap_classified(classify_kind({badmap, Value}), Cls, Sel, Message, Hint, #{value => Value});
+    wrap_classified(classify_kind({badmap, Value}), Cls, Sel, Message, Hint, #{
+        value => Value, reason => {badmap, Value}
+    });
 wrap_raw(badarg, Context) ->
     %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
     %% error can't tell which. With a dispatch breadcrumb we can locate it as a
@@ -645,6 +652,13 @@ dispatch('selector', [], #{error := Error}) ->
     end;
 dispatch('errorClass', [], #{error := Error}) ->
     Error#beamtalk_error.class;
+dispatch('reason', [], #{error := #beamtalk_error{details = #{reason := Reason}}}) ->
+    %% BT-3954: the raw Erlang term this exception wraps (a raw error:/exit:/
+    %% throw: reason, or the R of an FFI {error, R}). Beamtalk-raised
+    %% exceptions carry no details.reason and answer nil.
+    Reason;
+dispatch('reason', [], _) ->
+    nil;
 dispatch('printString', [], #{error := Error}) ->
     beamtalk_error:format(Error);
 dispatch('stackTrace', [], #{stacktrace := Frames}) ->
@@ -670,6 +684,7 @@ has_method('hint') -> true;
 has_method('kind') -> true;
 has_method('selector') -> true;
 has_method('errorClass') -> true;
+has_method('reason') -> true;
 has_method('printString') -> true;
 has_method('stackTrace') -> true;
 has_method('class') -> true;

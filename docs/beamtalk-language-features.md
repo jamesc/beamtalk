@@ -1178,6 +1178,19 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. Exceptions raised from Beamtalk (`Error signal:`, `self error:`) have no raw term, and `reason` returns `nil`:
+
+```beamtalk
+(Erlang string to_integer: "abc") ifError: [:e | e reason]
+// => #no_integer
+[Erlang erlang error: #econnreset] on: Exception do: [:e | e reason]
+// => #econnreset
+[#(1, "x") sum] on: TypeError do: [:e | e reason]
+// => #badarith  (classified as type_error, original term still available)
+[Error signal: "boom"] on: Error do: [:e | e reason]
+// => nil
+```
+
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
 
 ### Type Specs for Native Modules
