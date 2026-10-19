@@ -13,6 +13,12 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
   // DynamicSupervisorDefaultsTest, BT-3379).
   class serial -> Boolean => true
 
+  // Stop the shared pool even when an assertion fails mid-test, so the next
+  // test starts from an empty supervisor rather than `already_started`.
+  tearDown =>
+    pool := TestDynamicSupervisorCapped current
+    pool isNil ifFalse: [[pool stop] on: Error do: [:e | nil]]
+
   testMaxChildrenDefaultsToInfinity =>
     self assert: DynamicSupervisor maxChildren equals: #infinity
 
@@ -33,7 +39,6 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
     self assert: pool count equals: 1
     self assert: pool startChild isOk equals: true
     self assert: pool count equals: 2
-    [pool stop] on: Error do: [:e | nil]
 
   testStartChildWithArgsFailsAtLimit =>
     pool := (TestDynamicSupervisorCapped supervise) unwrap
@@ -42,7 +47,6 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
     result := pool startChild: #{#value => 3}
     self assert: result isError equals: true
     self assert: result error kind equals: #max_children
-    [pool stop] on: Error do: [:e | nil]
 
   testStartChildWithNameFailsAtLimit =>
     pool := (TestDynamicSupervisorCapped supervise) unwrap
@@ -53,9 +57,16 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
     self assert: result error kind equals: #max_children
     // The refused child was never started, so its name is not registered.
     self assert: (Counter named: #dsMaxChildrenTestC) isError equals: true
-    [pool stop] on: Error do: [:e | nil]
+
+  testSuperviseIsIdempotentWithCap =>
+    // A second `supervise` returns the running, capped instance.
+    pool := (TestDynamicSupervisorCapped supervise) unwrap
+    pool startChild unwrap
+    again := (TestDynamicSupervisorCapped supervise) unwrap
+    self assert: again count equals: 1
 
   testInvalidMaxChildrenFailsSupervise =>
     result := TestDynamicSupervisorBadCap supervise
     self assert: result isError equals: true
     self assert: result error kind equals: #supervisor_start_failed
+    self assert: TestDynamicSupervisorBadCap current equals: nil

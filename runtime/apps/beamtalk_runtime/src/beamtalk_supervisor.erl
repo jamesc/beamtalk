@@ -132,10 +132,10 @@ startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
-    case precheck_max_children(ClassName) of
+    case precheck_max_children(ClassName, Module) of
         ok ->
             start_link_supervisor(ClassName, Module);
-        {error, #beamtalk_error{message = Msg}} ->
+        {error, #beamtalk_error{hint = Msg}} ->
             ?LOG_ERROR("Supervisor start failed", #{
                 supervisor => ClassName,
                 module => Module,
@@ -240,9 +240,7 @@ dynamic_init(Module, ClassName) ->
     ChildClass = call_class_method_direct(ClassName, Module, class_childClass, ClassSelf),
     MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf),
     MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf),
-    MaxC = validate_max_children(
-        ClassName, call_class_method_direct(ClassName, Module, class_maxChildren, ClassSelf)
-    ),
+    MaxC = validate_max_children(ClassName, read_max_children(ClassName, Module)),
     %% BT-3964: OTP's `supervisor` has no `max_children` flag (that is Elixir's
     %% DynamicSupervisor), so the limit is enforced by `startChild/1,2,3` via
     %% `with_child_capacity/4`. `init/1` runs in the supervisor process, so the
@@ -1737,7 +1735,7 @@ check_max_children(ClassName, Other) ->
 -doc """
 `check_max_children/2` for `dynamic_init/2`: returns the limit or raises the
 `type_error`. `startLink/1` pre-checks the same value with
-`precheck_max_children/1` so a misconfigured limit normally surfaces as a clean
+`precheck_max_children/2` so a misconfigured limit normally surfaces as a clean
 `supervisor_start_failed` Result; this raise is the backstop for a supervisor
 started (or restarted) by other means.
 """.
@@ -1753,25 +1751,50 @@ Validate `class maxChildren` in the caller before `start_link` (BT-3964).
 
 A raise inside the supervisor's `init/1` takes down the linked caller rather
 than returning `{error, _}`, so `startLink/1` checks the value first and turns
-a bad one into `supervisor_start_failed`. Only DynamicSupervisor subclasses
-have the setting; other classes (and a class that cannot be resolved
-in-process) pass through to `init/1`.
+a bad one into `supervisor_start_failed`. It reads the value through
+`read_max_children/2`, the same resolver `dynamic_init/2` uses, so the value
+validated here is the value the supervisor enforces. Only DynamicSupervisor
+subclasses have the setting, and an already-running supervisor is skipped so
+`supervise` stays an idempotent get-or-start for the live instance.
+
+A DynamicSupervisor nested under a static `Supervisor` is started by OTP
+directly from its child spec, bypassing this check; there the
+`validate_max_children/2` raise in `dynamic_init/2` fails the parent's start
+(or counts against the parent's restart intensity on a restart).
 """.
--spec precheck_max_children(atom()) -> ok | {error, #beamtalk_error{}}.
-precheck_max_children(ClassName) ->
-    case beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
-        false ->
-            ok;
+-spec precheck_max_children(atom(), module()) -> ok | {error, #beamtalk_error{}}.
+precheck_max_children(ClassName, Module) ->
+    case
+        is_pid(whereis(Module)) orelse
+            not beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor')
+    of
         true ->
-            case class_config_value(ClassName, maxChildren) of
-                {ok, Value} ->
-                    case check_max_children(ClassName, Value) of
-                        {ok, _} -> ok;
-                        {error, _} = Err -> Err
-                    end;
-                not_found ->
-                    ok
+            ok;
+        false ->
+            case check_max_children(ClassName, read_max_children(ClassName, Module)) of
+                {ok, _} -> ok;
+                {error, _} = Err -> Err
             end
+    end.
+
+-doc """
+Read a DynamicSupervisor's `class maxChildren` in the calling process.
+
+Resolves the definition the way a class-side send would
+(`class_config_value/2`, so an ADR 0084 runtime class-method override wins),
+falling back to the compiled export via the ETS hierarchy walk when the class
+cannot be resolved that way. Shared by `precheck_max_children/2` and
+`dynamic_init/2` so the validated and the enforced value cannot diverge.
+""".
+-spec read_max_children(atom(), module()) -> term().
+read_max_children(ClassName, Module) ->
+    case class_config_value(ClassName, maxChildren) of
+        {ok, Value} ->
+            Value;
+        not_found ->
+            call_class_method_direct(
+                ClassName, Module, class_maxChildren, make_init_class_self(ClassName, Module)
+            )
     end.
 
 -doc """
@@ -1796,11 +1819,13 @@ is below its `maxChildren` limit (BT-3964); otherwise return
 `{error, #beamtalk_error{kind = max_children}}` with the limit in
 `details` (`#{max_children => Max}`) so callers can back off and retry.
 
-The live count is the same `active` figure `countChildren/1` (Beamtalk
-`count`) reports. The check runs in the caller, not inside the supervisor, so
-it is exact when one process starts children (e.g. a single acceptor), but
-concurrent starters racing past the check can briefly exceed the limit by up
-to the number of racers.
+The count is every dynamic child the supervisor tracks — what
+`countChildren/1` (Beamtalk `count`) reports plus any child whose restart is
+pending retry. `supervisor:count_children/1` is O(1) for `simple_one_for_one`.
+The check runs in the caller, not inside the supervisor, so it is exact when
+one process starts children (e.g. a single acceptor), but concurrent starters
+racing past the check can briefly exceed the limit by up to the number of
+racers. Supervisor-driven restarts are never refused.
 
 Rejections log at debug: hitting the cap is expected back-pressure under load,
 and logging every refused start would flood the log exactly when the system
@@ -1816,8 +1841,14 @@ with_child_capacity(SupClass, Selector, SupPid, StartFun) ->
             StartFun();
         Max ->
             Counts = supervisor:count_children(SupPid),
-            Active = proplists:get_value(active, Counts, 0),
-            case Active >= Max of
+            %% `workers` + `supervisors` is every dynamic child, including one
+            %% whose supervisor-driven restart is pending retry (not yet
+            %% `active`): counting it keeps a retry that later succeeds from
+            %% pushing the pool past Max.
+            Total =
+                proplists:get_value(workers, Counts, 0) +
+                    proplists:get_value(supervisors, Counts, 0),
+            case Total >= Max of
                 false ->
                     StartFun();
                 true ->

@@ -3559,7 +3559,7 @@ pool stop
 WorkerPool current                  // => nil
 ```
 
-**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once `count` reaches the limit, `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. The value must be a non-negative Integer or `#infinity` (anything else makes `supervise` fail) and is read once when the supervisor starts.
+**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once the pool holds that many children (`count`, plus any child whose automatic restart is pending), `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. Automatic restarts of existing children are never refused. The value must be a non-negative Integer or `#infinity` — anything else makes `supervise` return `Result error:` with kind `#supervisor_start_failed` (or, for a pool nested under a static `Supervisor`, fails the parent's start) — and is read each time the supervisor (re)starts.
 
 ```beamtalk
 DynamicSupervisor(Worker) subclass: ConnectionPool
