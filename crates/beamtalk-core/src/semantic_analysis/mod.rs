@@ -213,7 +213,7 @@ pub struct AnalysisResult {
     /// this field is plumbed through here rather than recomputed downstream.
     pub type_map: TypeMap,
 
-    /// Every provision-bearing protocol carried in from outside this module
+    /// Every carried protocol carried in from outside this module
     /// (ADR 0127 §10a, BT-3591) — same-package other files plus dependency
     /// packages — that this analysis's Phase -1 flattening resolved a
     /// cross-file/cross-package `uses:` line against. A driver handing this
@@ -359,7 +359,7 @@ pub struct AnalysisContext<'a> {
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
     /// fixtures.
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// Full ASTs of carried protocols from outside this module —
     /// another file in the same package, or a dependency package (ADR 0127
     /// §10a; BT-3591). Unlike `pre_loaded_protocols` (name/signature metadata
     /// only, for conformance/`extending:` resolution), this carries the
@@ -461,7 +461,7 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
-    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// Full ASTs of carried protocols from outside this module —
     /// see the `pre_loaded_protocol_defs` field's own doc.
     #[must_use]
     pub fn with_pre_loaded_protocol_defs(
@@ -472,7 +472,7 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
-    /// Source identity of the provision-bearing protocols carried in
+    /// Source identity of the carried protocols carried in
     /// `pre_loaded_protocol_defs` — see the `protocol_sources` field's doc.
     #[must_use]
     pub fn with_protocol_sources(mut self, protocol_sources: ProtocolSourceMap) -> Self {
@@ -656,7 +656,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // not see this module yet") for the full boundary and BT-3590, which
     // owns wiring the flattened module through to codegen.
     // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
-    // provision-bearing protocol carried in from outside this module — used
+    // carried protocol carried in from outside this module — used
     // both by `expand_module` right below and by `check_after_hierarchy`
     // later (Phase 0.55), which needs the same protocol definitions to check
     // a cross-file/cross-package `uses:` line's requirements and

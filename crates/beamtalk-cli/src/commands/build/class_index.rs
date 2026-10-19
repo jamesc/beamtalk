@@ -46,7 +46,8 @@ pub(crate) struct ClassIndexResult {
     /// project-wide (and every dependency's) is included unconditionally.
     pub(crate) all_protocol_infos:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from same-package cross-file
+    /// Full ASTs of carried protocols (`trait_expansion::is_carried_protocol`)
+    /// from same-package cross-file
     /// declarations and dependency packages (ADR 0127 §10a; BT-3591) — the
     /// trait-flattening counterpart to `all_protocol_infos`. Feeds
     /// `ClassHierarchyContext::pre_loaded_protocol_defs` so a cross-file or
@@ -54,7 +55,7 @@ pub(crate) struct ClassIndexResult {
     /// protocol".
     pub(crate) all_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Source identity (file path + text, declaring package) of each
-    /// provision-bearing protocol in `all_protocol_defs`, project and
+    /// carried protocol in `all_protocol_defs`, project and
     /// dependency alike (ADR 0127 §3; BT-3625, BT-3663) — so a flattened
     /// dependency method maps its lines to the dependency's own file.
     pub(crate) all_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
@@ -406,7 +407,7 @@ pub(crate) fn flatten_trait_user_class_infos(
     )
 }
 
-/// Collects `cached_asts`' trait users and provision-bearing protocols (in
+/// Collects `cached_asts`' trait users and carried protocols (in
 /// sorted-path order) for [`flatten_trait_user_class_infos`] (BT-3673).
 /// `dependency` names the dependency the files belong to, whose protocols are
 /// stamped with it (BT-3684); `None` for the package being compiled.
@@ -428,7 +429,7 @@ pub(crate) fn package_trait_users(
 
 /// Flattens cross-file trait provisions (BT-3673) into the `ClassInfo`s
 /// [`build_class_module_index`] returned for a whole package, using the
-/// provision-bearing protocols of that package's own `cached_asts` followed
+/// carried protocols of that package's own `cached_asts` followed
 /// by `extra_protocol_defs` (e.g. its dependencies', first definition wins).
 ///
 /// For callers that index every file of a package in one non-incremental
@@ -825,7 +826,7 @@ pub(crate) fn collect_project_protocol_infos(
     collect_project_protocol_and_alias_infos(source_files, "").protocol_infos
 }
 
-/// Extracts full ASTs of every *provision-bearing* protocol declared in any
+/// Extracts full ASTs of every carried protocol declared in any
 /// project source file (ADR 0127 §10a; BT-3591) — the trait-flattening
 /// counterpart to [`collect_project_protocol_infos`]. Standalone wrapper for
 /// tests; the production path calls
@@ -876,7 +877,7 @@ fn collect_project_protocol_and_alias_infos(
             ),
         );
 
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — a protocol with no provisions has nothing for
         // `trait_expansion::expand_module` to flatten, and `ProtocolInfo`
         // above already carries everything conformance/`extending:`
@@ -924,7 +925,7 @@ struct ProjectProtocolScan {
     protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    /// Source file of each provision-bearing protocol in `protocol_defs`.
+    /// Source file of each carried protocol in `protocol_defs`.
     protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
 }
 

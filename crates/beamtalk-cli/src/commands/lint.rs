@@ -770,7 +770,7 @@ fn parse_and_extract_class_infos(
                 &module,
             ),
         );
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — the trait-flattening counterpart to `all_protocol_infos`
         // immediately above; see `collect_diagnostics`'s
         // `pre_loaded_protocol_defs` parameter.
@@ -1403,7 +1403,7 @@ mod tests {
         );
     }
 
-    /// BT-3665: lint carries each provision-bearing protocol's source path so
+    /// BT-3665: lint carries each carried protocol's source path so
     /// a provision diagnostic can be published in the protocol's file once.
     #[test]
     fn lint_extraction_records_protocol_source_identity() {

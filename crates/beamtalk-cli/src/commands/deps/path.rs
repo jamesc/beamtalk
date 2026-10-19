@@ -48,13 +48,14 @@ pub struct ResolvedDependency {
     /// modifier at the AST level, so every declared protocol is exported —
     /// unlike `alias_infos`, there is no seeding-boundary filter to apply.
     pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from this dependency's
+    /// Full ASTs of carried protocols
+    /// (`trait_expansion::is_carried_protocol`) from this dependency's
     /// source files (ADR 0127 §10a; BT-3591) — the trait-flattening
     /// counterpart to `protocol_infos` above. Lets a consumer's cross-package
     /// `uses: <this dep>@Name` flatten the protocol's provided methods,
     /// rather than reporting "no source available". Empty when this
     /// dependency's source is unavailable (compiled-only, not fetched) or
-    /// defines no provision-bearing protocol.
+    /// defines no carried protocol.
     pub protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Source identity of each protocol in `protocol_defs` — the dependency
     /// checkout file it was parsed from and this dependency's package name
@@ -685,7 +686,7 @@ impl DepProtocolAliasMetadata {
     }
 }
 
-/// The provision-bearing protocol ASTs of `prior_deps`, in order — what a
+/// The carried protocol ASTs of `prior_deps`, in order — what a
 /// dependency compiled after them may `uses:` (BT-3678).
 fn prior_protocol_defs(
     prior_deps: &[ResolvedDependency],
@@ -735,7 +736,7 @@ fn extract_dep_protocol_alias_metadata(
                 module,
             ),
         );
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
         // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(

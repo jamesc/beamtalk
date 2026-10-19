@@ -111,7 +111,7 @@ pub type OriginMap = HashMap<(EcoString, EcoString), EcoString>;
 /// Expand every `uses:` line in `module`'s classes in place (ADR 0127 §3
 /// steps 1–4, 6).
 ///
-/// `external_protocols` carries every provision-bearing protocol's full AST
+/// `external_protocols` carries every carried protocol's full AST
 /// from outside this module — another file in the same package, or a
 /// dependency package (ADR 0127 §10a; BT-3591) — keyed by bare protocol
 /// name. Pass an empty map for a caller with no cross-file/cross-package
@@ -276,7 +276,7 @@ pub struct TraitUserModule<'a> {
 /// unflattened infos into ones carrying cross-file trait provisions, so a
 /// typed call to a provided method never reports "does not understand" on
 /// one surface while another accepts it. `protocol_defs` are the
-/// provision-bearing protocol ASTs in precedence order (first wins, see
+/// carried protocol ASTs in precedence order (first wins, see
 /// [`first_wins_protocol_map`]).
 ///
 /// Entries are matched by class name and `package` (the stamp
@@ -336,7 +336,7 @@ struct CollectedModule {
 
 /// Collects, while a caller walks a package's source files once, what
 /// [`flatten_trait_user_class_infos`] needs: the modules with `uses:` lines
-/// and every provision-bearing protocol AST. Used by the lint surfaces, whose
+/// and every carried protocol AST ([`is_carried_protocol`]). Used by the lint surfaces, whose
 /// Pass 1 loops consume the parsed modules.
 ///
 /// `add` must be called for *every* module, in the order its classes were
@@ -363,7 +363,7 @@ impl TraitUserCollector {
         }
     }
 
-    /// Records `module`'s declared classes and provision-bearing protocols
+    /// Records `module`'s declared classes and carried protocols ([`is_carried_protocol`])
     /// and, if any class has a `uses:` line, the module itself.
     pub fn add(&mut self, module: &Module) {
         self.modules.push(CollectedModule {
@@ -378,7 +378,7 @@ impl TraitUserCollector {
             .extend(carried_protocols(module, self.package.as_deref()));
     }
 
-    /// The provision-bearing protocol ASTs collected so far, in `add` order.
+    /// The carried protocol ASTs ([`is_carried_protocol`]) collected so far, in `add` order.
     #[must_use]
     pub fn protocol_defs(&self) -> &[ProtocolDefinition] {
         &self.protocol_defs

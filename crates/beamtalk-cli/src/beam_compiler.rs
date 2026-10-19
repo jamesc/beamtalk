@@ -664,7 +664,7 @@ pub struct ClassHierarchyContext {
     /// recognise protocol names defined outside the current module.
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    /// Full ASTs of provision-bearing protocols from other source files in
+    /// Full ASTs of carried protocols from other source files in
     /// the compilation unit, or from a resolved dependency (ADR 0127 §10a;
     /// BT-3591) — the trait-flattening counterpart to `pre_loaded_protocols`
     /// above. `pre_loaded_protocols` carries name/signature metadata only,

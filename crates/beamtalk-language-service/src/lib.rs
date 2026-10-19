@@ -1745,7 +1745,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index
                 .update_file_protocols(file.clone(), protocol_infos);
 
-            // Track this file's provision-bearing protocols' full ASTs
+            // Track this file's carried protocols' full ASTs
             // (BT-3591) so a cross-file/cross-package `uses:` flattens
             // during LSP diagnostics the same way `beamtalk build` already
             // does, and record which protocols this file's own classes
@@ -1846,7 +1846,7 @@ impl LanguageService for SimpleLanguageService {
                 // "unknown protocol" — parity with the CLI's `build`/`lint`
                 // wiring, mirrors `cross_file_classes` above.
                 let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
-                // Cross-file/cross-package provision-bearing protocol ASTs
+                // Cross-file/cross-package carried protocol ASTs
                 // (BT-3591), so a cross-file `uses:` flattens during LSP
                 // diagnostics instead of reporting "unknown protocol" —
                 // parity with the CLI's `build`/`lint` wiring, mirrors

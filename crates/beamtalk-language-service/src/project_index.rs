@@ -35,7 +35,7 @@ use std::collections::{HashMap, HashSet};
 /// methods are present, then stamps `MethodInfo::origin` — the same sequence
 /// `analyse_full` runs, so hover and the other hierarchy-backed LSP queries
 /// see the same provenance as diagnostics (BT-3655). `external_protocols`
-/// carries provision-bearing protocols from other files/packages, keyed by
+/// carries carried protocols from other files/packages, keyed by
 /// bare name and is supplied lazily (`external_protocols`), so the (clone-heavy)
 /// cross-file collection only runs when some class has a `uses:` line.
 /// Expansion diagnostics are discarded: `diagnostics()` already
@@ -129,7 +129,8 @@ pub struct ProjectIndex {
     /// every declared protocol is exported project-wide with no
     /// collision/visibility bookkeeping needed here.
     file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
-    /// Per-file full ASTs of *provision-bearing* protocols declared in that
+    /// Per-file full ASTs of carried protocols
+    /// (`trait_expansion::is_carried_protocol`) declared in that
     /// file — the trait-flattening counterpart to `file_protocols` (ADR 0127
     /// §10a; BT-3591). `ProtocolInfo` above carries name/signature metadata
     /// only, enough for `extending:`/conformance resolution; flattening a
@@ -424,7 +425,7 @@ impl ProjectIndex {
         }
     }
 
-    /// Add or update a file's *provision-bearing* protocol ASTs (ADR 0127
+    /// Add or update a file's carried protocol ASTs (ADR 0127
     /// §10a; BT-3591) — the trait-flattening counterpart to
     /// [`Self::update_file_protocols`]. Call alongside it whenever a file is
     /// (re)indexed. An empty `protocol_defs` clears the file's prior entry.
@@ -880,10 +881,12 @@ impl ProjectIndex {
 
     /// The per-file entries of `map` other than `file`'s own, in the one
     /// precedence order every "first definition wins" consumer relies on
-    /// (BT-3915): project and dependency files sorted by path, then — when
-    /// `include_stdlib` — the preloaded stdlib files, sorted by path. A
-    /// `HashMap` walk would make a same-named protocol's resolution depend on
-    /// hash order.
+    /// (BT-3915): project files, then dependency files, then — when
+    /// `include_stdlib` — the preloaded stdlib files, each sorted by path.
+    /// Project before dependencies is `beamtalk build`'s order (its Pass 1
+    /// concatenates the project's protocols ahead of the dependencies'); a
+    /// plain path sort would put `_build/deps/…` ahead of `src/…`. A `HashMap`
+    /// walk would make a same-named protocol's resolution depend on hash order.
     fn files_in_precedence_order<'a, T>(
         &'a self,
         map: &'a HashMap<Utf8PathBuf, T>,
@@ -895,14 +898,21 @@ impl ProjectIndex {
             .filter(|(path, _)| *path != file)
             .filter(|(path, _)| include_stdlib || !self.is_stdlib_file(path))
             .collect();
-        entries.sort_by(|(a, _), (b, _)| {
-            (self.is_stdlib_file(a), a.as_str()).cmp(&(self.is_stdlib_file(b), b.as_str()))
-        });
+        // Project (0), then dependencies (1), then stdlib (2).
+        let tier = |path: &Utf8PathBuf| {
+            if self.is_stdlib_file(path) {
+                2
+            } else {
+                u8::from(dependency_package_for_path(path).is_some())
+            }
+        };
+        entries.sort_by(|(a, _), (b, _)| (tier(a), a.as_str()).cmp(&(tier(b), b.as_str())));
         entries.into_iter().map(|(_, value)| value)
     }
 
-    /// Returns cross-file *provision-bearing* protocol ASTs for diagnostic
-    /// computation (ADR 0127 §10a; BT-3591) — the trait-flattening
+    /// Returns the cross-file protocol ASTs a compile path carries
+    /// ([`is_carried_protocol`](beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol))
+    /// for diagnostic computation (ADR 0127 §10a; BT-3591) — the trait-flattening
     /// counterpart to [`Self::cross_file_protocol_infos_for`]. Feeds
     /// `ProjectDiagnosticContext::pre_loaded_protocol_defs` so a
     /// cross-file/cross-package `uses:` flattens in the LSP the same way

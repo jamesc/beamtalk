@@ -443,6 +443,41 @@ fn preloaded_stdlib_comparable_never_beats_the_projects_own() {
     assert!(!hover.contains("*provided by*"), "{hover}");
 }
 
+/// BT-3915: a project's own `Comparable` wins over a dependency's for a bare
+/// `uses: Comparable` in the LSP, as in `beamtalk build` (whose Pass 1 puts
+/// the project's protocols ahead of the dependencies') — even though
+/// `_build/deps/…` sorts before `src/…` by path.
+#[test]
+fn project_protocol_wins_over_a_dependency_namesake() {
+    use beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map;
+    let mut service = SimpleLanguageService::new();
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/foo/src/comparable.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n  depOnly => 2\n".to_string(),
+    );
+    service.update_file(
+        Utf8PathBuf::from("src/comparable_local.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n  localOnly => 1\n".to_string(),
+    );
+    let user_file = Utf8PathBuf::from("src/rank.bt");
+    service.update_file(
+        user_file.clone(),
+        "Value subclass: Rank\n  uses: Comparable\n\n  < other => true\n".to_string(),
+    );
+
+    let carried = service
+        .project_index()
+        .cross_file_protocol_defs_for(&user_file);
+    assert_eq!(carried.len(), 2, "{carried:?}");
+    let resolved = &first_wins_protocol_map(carried)["Comparable"];
+    let provided: Vec<_> = resolved
+        .provided_methods
+        .iter()
+        .map(|m| m.selector.name())
+        .collect();
+    assert_eq!(provided, ["localOnly"], "the project's Comparable must win");
+}
+
 /// BT-3915: with the stdlib preloaded and no project `Comparable`, `uses:
 /// Comparable` gets the stdlib's provisions and the use is recorded as
 /// stdlib-resolved (so source mapping and provision diagnostics use the
