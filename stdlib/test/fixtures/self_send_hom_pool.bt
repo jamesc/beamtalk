@@ -39,13 +39,22 @@ Actor subclass: SelfSendHomPool
     self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
-// `inject:into:` written as `self do: [:each | acc := ...]` (and `size` on
-// top of it) is an ADR 0133 escaping-block compile error since BT-3908: an
-// actor self-send of `do:` is dispatched to this class's own `do:`, so the
-// block escapes (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
+  // `inject:into:` written as `self do: [:each | acc := ...]` (and `size` on
+  // top of it) is an ADR 0133 escaping-block compile error since BT-3908: an
+  // actor self-send of `do:` is dispatched to this class's own `do:`, so the
+  // block escapes (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
 
-// A block that mutates ONLY `self.field`, passed through a self-send to
-// `do:`, is an ADR 0133 compile error since BT-3922 (it raised
-// `stateful_block_dispatch` before). That shape was also the only way to make
-// `do:`'s parameter a promoted Tier 2 position, which BT-3936's case B pin
-// (`recordAll`) needed, so that pin went with it.
+  // A block that mutates ONLY `self.field`, passed through a self-send to
+  // `do:`, is an ADR 0133 compile error since BT-3922 (it raised
+  // `stateful_block_dispatch` before). That shape was also the only way to make
+  // `do:`'s parameter a promoted Tier 2 position, so `recordAll` below, which
+  // BT-3936's case B pinned as a raise, is now the same plain-closure case A as
+  // `SelfSendHomPlainPool`.
+
+  // A block that assigns nothing but sends `record:`, which changes a field.
+  record: each => self.total := self.total + each
+
+  recordAll =>
+    self.total := 0
+    self do: [:each | self record: each]
+    self.total
