@@ -248,6 +248,12 @@ Affected components: codegen, semantic analysis (lint), stdlib tests, docs. No p
 - **Operators:** after upgrading, a `Server` or cast-driven actor that used to log `warning`s repeatedly will now show as restarts in its supervisor. That is the signal the warnings were hiding.
 - No deprecation period: the behaviour ships with the implementation issue, with a changelog entry marked **breaking**.
 
+## Implementation Tracking
+
+**Epic:** BT-3953 (under BT-3957, Catalina stdlib work)
+**Issues:** BT-3958 (codegen re-raise), BT-3959 (`handleinfo-no-catch-all` lint), BT-3960 (docs + REPL e2e), BT-3961 (package cast audit)
+**Status:** Planned
+
 ## References
 - Related issues: BT-3953 (implementation epic), BT-3954 (`Exception>>reason`, found in the same investigation), BT-1457 (`handleInfo:` codegen), BT-3596 (`trap_exit` on `terminate:`), BT-3943 (`match:` raises `#pattern_mismatch`)
 - Related ADRs: ADR 0065 (amended), ADR 0043 (sync-by-default messaging), ADR 0054 (cast protocol), ADR 0059 (supervision tree syntax)
