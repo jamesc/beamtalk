@@ -1,6 +1,5 @@
 <!-- btfixture: fixtures/ch15typed_point.bt -->
 <!-- btfixture: fixtures/ch15typed_counter.bt -->
-<!-- btfixture: fixtures/ch15typed_classes.bt -->
 
 ## Type Annotations
 

@@ -759,10 +759,54 @@ fn check_setup_body_returns_self(
         return;
     }
     let last_expr = last_stmt.expression.unwrap_parens();
-    if is_self_producing(last_expr) {
+    if is_self_producing(last_expr) || is_local_holding_updated_self(body, last_expr) {
         return;
     }
     diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
+}
+
+/// Returns `true` if `last_expr` is a bare local identifier (e.g. `updated`)
+/// whose *only* assignment anywhere in `body` is a top-level statement of the
+/// form `name := <self-producing expression>` — so the local provably holds
+/// the fully updated self. Any other assignment to the same name (reassigned
+/// to a non-self value, or assigned inside a nested block) makes the value
+/// unprovable, so this answers `false` and the lint still fires.
+fn is_local_holding_updated_self(
+    body: &[crate::ast::ExpressionStatement],
+    last_expr: &Expression,
+) -> bool {
+    let Expression::Identifier(id) = last_expr else {
+        return false;
+    };
+    let name = id.name.as_str();
+    if name == "self" {
+        return false;
+    }
+    let assigns_name = |e: &Expression| {
+        matches!(
+            e,
+            Expression::Assignment { target, .. }
+                if matches!(target.as_ref(), Expression::Identifier(t) if t.name.as_str() == name)
+        )
+    };
+    let mut total = 0usize;
+    for stmt in body {
+        walk_expression(&stmt.expression, &mut |e| {
+            if assigns_name(e) {
+                total += 1;
+            }
+        });
+    }
+    if total != 1 {
+        return false;
+    }
+    body.iter().any(|stmt| {
+        matches!(
+            stmt.expression.unwrap_parens(),
+            Expression::Assignment { value, .. }
+                if assigns_name(stmt.expression.unwrap_parens()) && is_self_producing(value)
+        )
+    })
 }
 
 /// Builds the diagnostic for a `setUp` whose trailing statement
@@ -779,8 +823,8 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
     .with_hint(
         "End `setUp` with a bare `self` — or make the last statement a \
          `self.field := value` assignment, a `self with<Field>: value` \
-         send, or a `with<Field>:` cascade — so the updated fields carry \
-         forward",
+         send, or a `with<Field>:` cascade — or a local bound once to such a \
+         send — so the updated fields carry forward",
     )
     .with_category(DiagnosticCategory::Lint)
 }
@@ -1956,6 +2000,43 @@ mod tests {
             1,
             "Expected 1 warning in standalone setUp method, got: {diagnostics:?}"
         );
+    }
+
+    /// BT-3931: a trailing local bound (once) to a `with<Field>:` send holds
+    /// the updated self, so nothing is dropped.
+    #[test]
+    fn setup_trailing_local_holding_updated_self_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    updated := self withDashboard: 1.\n    updated dashboard.\n    updated";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for aliased updated self, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-3931: a local reassigned to a non-self value still warns.
+    #[test]
+    fn setup_trailing_local_reassigned_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    updated := self withDashboard: 1.\n    updated := 5.\n    updated";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+    }
+
+    /// BT-3931: a trailing local bound to a non-self value still warns.
+    #[test]
+    fn setup_trailing_local_non_self_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ThingTest\n  field: dashboard = nil\n  setUp =>\n    self.dashboard := 1.\n    other := 5.\n    other";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
     }
 
     /// The diagnostic has the `Lint` category and a hint pointing at the fix.

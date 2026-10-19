@@ -2,12 +2,6 @@
 <!-- btfixture: fixtures/counter_app.bt -->
 <!-- btfixture: fixtures/persistent_worker.bt -->
 <!-- btfixture: fixtures/worker_pool.bt -->
-<!-- btfixture: fixtures/ch17static_supervisor.bt -->
-<!-- btfixture: fixtures/ch17supervision_specs.bt -->
-<!-- btfixture: fixtures/ch17restart_policy.bt -->
-<!-- btfixture: fixtures/ch17strategies.bt -->
-<!-- btfixture: fixtures/ch17dynamic_supervisor.bt -->
-<!-- btfixture: fixtures/ch17lifecycle.bt -->
 
 ## OTP Supervisors
 

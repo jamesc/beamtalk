@@ -1,5 +1,3 @@
-<!-- btfixture: fixtures/ch18file_io.bt -->
-
 ## File I/O
 
 Beamtalk's `File` class provides reading, writing, directory operations, and

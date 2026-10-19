@@ -1,5 +1,4 @@
 <!-- btfixture: fixtures/point.bt -->
-<!-- btfixture: fixtures/ch24reflection.bt -->
 
 ## Reflection & Metaprogramming
 

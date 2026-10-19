@@ -1,8 +1,3 @@
-<!-- btfixture: fixtures/ch16erlang_calls.bt -->
-<!-- btfixture: fixtures/ch16type_mapping.bt -->
-<!-- btfixture: fixtures/ch16practical_patterns.bt -->
-<!-- btfixture: fixtures/ch16error_handling.bt -->
-
 ## BEAM Interop
 
 Beamtalk is a first-class BEAM citizen. Beamtalk actors are standard OTP
@@ -105,9 +100,9 @@ TestCase subclass: Ch16TypeMapping
     result := Erlang erlang is_atom: true
     self assert: result
 
-  testArraysAreLists =>
-    // Beamtalk Arrays become Erlang lists:
-    result := Erlang erlang is_list: #[1, 2, 3]
+  testListsAreLists =>
+    // Beamtalk Lists become Erlang lists:
+    result := Erlang erlang is_list: #(1, 2, 3)
     self assert: result
 
   testDictsAreMaps =>
@@ -161,7 +156,7 @@ TestCase subclass: Ch16PracticalPatterns
     self assert: hash class equals: Binary    // raw bytes, not valid UTF-8 → Binary
 
   testListsFlattening =>
-    nested := #[#[1, 2], #[3, 4], #[5]]
+    nested := #(#(1, 2), #(3, 4), #(5))
     flat := Erlang lists flatten: nested
     self assert: flat equals: #(1, 2, 3, 4, 5)
 
@@ -217,7 +212,7 @@ a reason to avoid it — but clarity is. Prefer Beamtalk APIs where they exist.
 Call Erlang:
 
 ```
-Erlang lists reverse: #[3, 2, 1]
+Erlang lists reverse: #(3, 2, 1)
 Erlang maps merge: d1 with: d2
 proxy := Erlang moduleName   -- cached proxy
 ```
