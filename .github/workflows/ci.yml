@@ -676,6 +676,17 @@ jobs:
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
 
+      # BT-3937: test/sys.config writes warning-level logger output (e.g. the
+      # ERTS `bad_dist_ext` warning behind a killed dist connection on OTP 27)
+      # to beamtalk_test_warnings.log, below the console's error floor.
+      - name: Upload runtime test warning log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: runtime-test-warnings-otp${{ matrix.otp }}
+          path: runtime/**/beamtalk_test_warnings.log
+          if-no-files-found: warn
+
   test-dialyzer:
     needs: otp-matrix
     strategy:
