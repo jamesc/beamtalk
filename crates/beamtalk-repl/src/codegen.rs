@@ -360,11 +360,12 @@ impl<'a> ReplAssembler<'a> {
 
     /// BT-3910 (ADR 0131 §1): marks the value-position local assignments of the
     /// input `expressions` as producers, by the one rule
-    /// (`value_position_assignment_spans_of_input`).
+    /// (`value_position_assignment_spans`).
     fn set_value_assign_sites(&mut self, expressions: &[Expression]) {
         self.generator.set_value_assign_sites(
-            beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans_of_input(
+            beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans(
                 expressions,
+                None,
             ),
         );
     }

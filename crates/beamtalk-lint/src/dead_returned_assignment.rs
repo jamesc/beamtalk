@@ -23,6 +23,10 @@
 //!     [^count := count + 1] ensure: [self log: count]
 //! ```
 //!
+//! The lint has no false positives by construction: when the cleanup is not a
+//! block literal (`[...] ensure: cleanupBlock`) it cannot be read, so the lint
+//! assumes it may read `t` and stays silent.
+//!
 //! It is a warning, never a compile error.
 
 use crate::LintPass;
@@ -39,7 +43,9 @@ pub(crate) struct DeadReturnedAssignmentPass;
 /// mentions the locals `read`.
 struct Cleanup {
     protected: Span,
-    read: HashSet<String>,
+    /// The names the cleanup block literal mentions; `None` when the cleanup is
+    /// not a literal (it may read anything).
+    read: Option<HashSet<String>>,
 }
 
 impl LintPass for DeadReturnedAssignmentPass {
@@ -65,7 +71,7 @@ impl LintPass for DeadReturnedAssignmentPass {
                 let observed = cleanups.iter().any(|c| {
                     c.protected.start() <= span.start()
                         && span.end() <= c.protected.end()
-                        && c.read.contains(&name)
+                        && c.read.as_ref().is_none_or(|read| read.contains(&name))
                 });
                 if !observed {
                     diagnostics.push(
@@ -101,10 +107,14 @@ fn ensure_cleanup(expr: &Expression) -> Option<Cleanup> {
     if parts.len() != 1 || parts[0].keyword != "ensure:" {
         return None;
     }
-    let (Expression::Block(protected), Some(Expression::Block(cleanup))) =
-        (receiver.as_ref(), arguments.first())
-    else {
+    let Expression::Block(protected) = receiver.as_ref() else {
         return None;
+    };
+    let Some(Expression::Block(cleanup)) = arguments.first() else {
+        return Some(Cleanup {
+            protected: protected.span,
+            read: None,
+        });
     };
     let mut read = HashSet::new();
     for stmt in &cleanup.body {
@@ -116,7 +126,7 @@ fn ensure_cleanup(expr: &Expression) -> Option<Cleanup> {
     }
     Some(Cleanup {
         protected: protected.span,
-        read,
+        read: Some(read),
     })
 }
 
@@ -175,6 +185,12 @@ mod tests {
     fn an_ensure_cleanup_that_reads_another_local_does_not() {
         let diags = lint(&in_method("[^t := t + 1] ensure: [Transcript show: \"x\"]"));
         assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn a_cleanup_that_is_not_a_block_literal_keeps_the_write_live() {
+        let diags = lint(&in_method("[^t := t + 1] ensure: cleanup"));
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]

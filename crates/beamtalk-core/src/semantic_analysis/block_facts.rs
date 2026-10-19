@@ -3593,65 +3593,25 @@ pub fn value_position_local_assignments(
     finder.found
 }
 
-/// BT-3910 (ADR 0131 §1): the spans of every value-position local assignment
-/// ([`value_position_local_assignments`]) in the method bodies and top-level
-/// expressions of `module`, each body judged by the kind of method it is
-/// ([`RootMethodKind`]). `is_actor` says whether a class (by name) is an actor,
-/// so its instance methods are actor methods. Codegen's producer gates read
-/// this set: one rule decides which assignments are producers, so a gate
-/// cannot disagree with the lowering.
+/// BT-3910 (ADR 0131 §1): the spans of the value-position local assignments
+/// ([`value_position_local_assignments`]) of one body: a method body of kind
+/// `root`, or a top-level expression list (`None`). Codegen installs the set per
+/// method body (`with_local_producer_sites`), never module-wide: a `Span` carries
+/// no file id, and a `uses:` provision's body keeps the spans of the protocol's
+/// file, so only spans of one body are guaranteed distinct from each other.
+/// Codegen's producer gates read this set: one rule decides which assignments
+/// are producers, so a gate cannot disagree with the lowering.
 #[must_use]
-pub fn value_position_assignment_spans(
-    module: &crate::ast::Module,
-    is_actor: &dyn Fn(&str) -> bool,
+pub fn value_position_assignment_spans<'a>(
+    body: impl IntoIterator<Item = &'a Expression>,
+    root: Option<RootMethodKind>,
 ) -> HashSet<Span> {
-    let instance_kind = |class_name: &str| {
-        if is_actor(class_name) {
-            RootMethodKind::Actor
-        } else {
-            RootMethodKind::ValueType
-        }
-    };
-    let mut out = HashSet::new();
-    let mut add = |body: &[ExpressionStatement], kind: Option<RootMethodKind>| {
-        out.extend(
-            value_position_local_assignments(body, kind)
-                .into_iter()
-                .map(|found| found.span),
-        );
-    };
-    for class in &module.classes {
-        let kind = instance_kind(class.name.name.as_str());
-        for method in &class.methods {
-            add(&method.body, Some(kind));
-        }
-        for method in &class.class_methods {
-            add(&method.body, Some(RootMethodKind::Class));
-        }
-    }
-    for standalone in &module.method_definitions {
-        let kind = if standalone.is_class_method {
-            RootMethodKind::Class
-        } else {
-            instance_kind(standalone.class_name.name.as_str())
-        };
-        add(&standalone.method.body, Some(kind));
-    }
-    add(&module.expressions, None);
-    out
-}
-
-/// [`value_position_assignment_spans`] for a top-level expression list (a REPL
-/// input): the value-position local assignments of `expressions`, judged as
-/// the statements of a module-level body.
-#[must_use]
-pub fn value_position_assignment_spans_of_input(expressions: &[Expression]) -> HashSet<Span> {
-    let body: Vec<ExpressionStatement> = expressions
-        .iter()
+    let statements: Vec<ExpressionStatement> = body
+        .into_iter()
         .cloned()
         .map(ExpressionStatement::bare)
         .collect();
-    value_position_local_assignments(&body, None)
+    value_position_local_assignments(&statements, root)
         .into_iter()
         .map(|found| found.span)
         .collect()

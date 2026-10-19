@@ -247,11 +247,14 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
-    /// BT-3910 (ADR 0131 §1): the spans of the module's value-position local
-    /// assignments (`beamtalk_core`'s `value_position_assignment_spans`), the
-    /// producers `threaded_expression` lowers as a `LocalRebind` of the
-    /// enclosing frame. Module-wide (spans are unique) and set once by the
-    /// driver; empty when nothing sets it.
+    /// BT-3910 (ADR 0131 §1): the spans of the value-position local
+    /// assignments of the body being lowered (`beamtalk_core`'s
+    /// `value_position_assignment_spans`), the producers `threaded_expression`
+    /// lowers as a `LocalRebind` of the enclosing frame. Per body, not per
+    /// module: a `Span` has no file id, and a `uses:` provision keeps the spans
+    /// of the protocol's file, so spans of two bodies may coincide. Installed by
+    /// `with_local_producer_sites` at a method body (restored after), and set
+    /// once for a REPL input; empty elsewhere.
     pub(in crate::core_erlang) value_assign_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
     /// BT-3827: the body-block span of the one fold a value-type consumer is

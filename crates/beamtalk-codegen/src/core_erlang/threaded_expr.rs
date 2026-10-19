@@ -74,6 +74,7 @@ use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
+use beamtalk_core::semantic_analysis::block_facts::RootMethodKind;
 use beamtalk_core::source_analysis::Span;
 
 /// ADR 0131 Phase 2 (BT-3748 review): test-only fault injection into the
@@ -664,9 +665,33 @@ impl CoreErlangGenerator {
             })
             .map(Expression::span)
             .collect();
+        // BT-3910: this body's value-position local assignments (see
+        // `value_assign_sites`). A REPL input sets its own once.
+        let value_sites = if self.is_repl_mode() {
+            None
+        } else {
+            let kind = if self.in_class_method() {
+                RootMethodKind::Class
+            } else if self.context == super::CodeGenContext::ValueType {
+                RootMethodKind::ValueType
+            } else {
+                RootMethodKind::Actor
+            };
+            Some(
+                beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans(
+                    body.iter().copied(),
+                    Some(kind),
+                ),
+            )
+        };
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
+        let saved_value_sites = value_sites
+            .map(|value_sites| std::mem::replace(&mut self.value_assign_sites, value_sites));
         let result = f(self);
         self.local_producer_sites = saved;
+        if let Some(saved_value_sites) = saved_value_sites {
+            self.value_assign_sites = saved_value_sites;
+        }
         result
     }
 
@@ -1507,7 +1532,7 @@ impl CoreErlangGenerator {
     /// BT-3910 (ADR 0131 §1): whether `expr` (paren-unwrapped) is a local
     /// assignment in value position, a producer
     /// ([`Self::lower_local_assignment_producer`]). One rule, decided once per
-    /// module by `beamtalk_core`'s `value_position_assignment_spans`: a
+    /// body by `beamtalk_core`'s `value_position_assignment_spans`: a
     /// statement-position assignment is never in the set.
     pub(super) fn is_local_assignment_producer(&self, expr: &Expression) -> bool {
         #[cfg(test)]
