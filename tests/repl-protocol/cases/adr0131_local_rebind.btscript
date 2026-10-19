@@ -742,6 +742,22 @@ pinArg := 100
 t
 // => 0
 
+// BT-3884: the analyser reads the same arity rule, so such a send in a value
+// position (an operand, a literal element) is no block evaluation either: it
+// raises the arity error instead of the Phase 0 error about a write that
+// never happens.
+y := ([t := t + 1] value: 1) printString
+// => ERROR: Wrong number of arguments: block expects 0 but was called with 1
+
+y := ([:k | t := t + k] value) printString
+// => ERROR: Wrong number of arguments: block expects 1 but was called with 0
+
+#[[t := t + 1] value: 1]
+// => ERROR: Wrong number of arguments: block expects 0 but was called with 1
+
+t
+// => 0
+
 // A block `value:` whose argument is a writing fold is not lowered: the fold is
 // an operand of a construct, not a site, so it keeps the Phase 0 error in an
 // arm (as in class, value-type and actor methods) rather than dropping the
