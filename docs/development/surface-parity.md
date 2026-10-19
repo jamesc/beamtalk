@@ -898,11 +898,16 @@ flattening implementation):
   `include_str!` table of the files declaring provision-bearing protocols,
   parsed once by `semantic_analysis::stdlib_protocols`. Which `(class,
   protocol)` uses resolved to the stdlib is recorded per class
-  (`trait_expansion::stdlib_resolved_uses`, `AnalysisResult::stdlib_protocol_uses`,
+  (`trait_expansion::expand_module_with_stdlib_uses`, `AnalysisResult::stdlib_protocol_uses`,
   `ProvisionOrigin::package`), so codegen (`flattened_method_source`) and
   provision-diagnostic rendering (`provision_report_target`) map only those
   provisions through the stdlib file — never a user's same-named carried
-  protocol. The fallback is off while compiling the stdlib itself
+  protocol. Every carrier applies one rule, `trait_expansion::is_carried_protocol`:
+  provision-bearing protocols plus any named like a stdlib trait, so a
+  package's own *requirements-only* `Comparable` in another file is carried
+  and shadows the stdlib's (resolving to it, with a "provides no methods"
+  hint) instead of silently falling through to the stdlib's provisions.
+  The fallback is off while compiling the stdlib itself
   (`current_package == "stdlib"` / `stdlib_mode`), which carries its own
   protocols live.
 - `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or

@@ -102,6 +102,14 @@ pub(crate) fn stdlib_protocol_map() -> &'static HashMap<EcoString, ProtocolDefin
     &stdlib_protocols().map
 }
 
+/// Whether `name` (bare) names one of the stdlib's provision-bearing
+/// protocols — a name a package's own protocol must be carried under to
+/// shadow it ([`is_carried_protocol`](crate::semantic_analysis::trait_expansion::is_carried_protocol)).
+#[must_use]
+pub fn is_stdlib_protocol_name(name: &str) -> bool {
+    stdlib_protocols().sources.contains_key(name)
+}
+
 /// The source file of stdlib protocol `name`, if it is one.
 #[must_use]
 pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {
@@ -111,7 +119,7 @@ pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {
 /// Stamps [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package) as the stdlib on every provision
 /// diagnostic raised in a class whose `uses:` of that protocol resolved to the
 /// stdlib's own (`uses`, from
-/// [`trait_expansion::stdlib_resolved_uses`](crate::semantic_analysis::trait_expansion::stdlib_resolved_uses)),
+/// [`trait_expansion::expand_module_with_stdlib_uses`](crate::semantic_analysis::trait_expansion::expand_module_with_stdlib_uses)),
 /// so a reporter renders it against the stdlib file and never against a
 /// same-named protocol of the user's.
 #[allow(clippy::implicit_hasher)] // concrete HashSet, as `AnalysisResult::stdlib_protocol_uses` holds it
@@ -179,6 +187,14 @@ mod tests {
         let mut expected = Vec::new();
         for entry in std::fs::read_dir(&stdlib_src).expect("stdlib/src") {
             let path = entry.expect("dir entry").path();
+            // `build_stdlib.rs`'s `provision_bearing_protocol_file_names`
+            // keys the generated table by file name, which is only unique
+            // while `stdlib/src` is flat.
+            assert!(
+                !path.is_dir(),
+                "stdlib/src must stay flat, found directory {}",
+                path.display()
+            );
             if path.extension().and_then(|e| e.to_str()) != Some("bt") {
                 continue;
             }

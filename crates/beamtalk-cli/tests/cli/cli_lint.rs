@@ -532,6 +532,61 @@ fn lint_resolves_cross_file_trait_provided_method_bt_3673() {
     );
 }
 
+/// BT-3915: a package's own requirements-only `Comparable`, declared in another
+/// file, shadows the stdlib's for `uses: Comparable` — it resolves to the
+/// package's protocol (a "provides no methods" hint, no "unknown protocol")
+/// and gains none of the stdlib's provisions, so `between:and:` is a DNU.
+#[test]
+fn package_requirements_only_protocol_shadows_the_stdlib_one_bt_3915() {
+    let project = cli_common::fixture_project();
+    let src = project.path().join("src");
+    std::fs::write(
+        src.join("comparable.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Comparable\n\
+         \x20\x20< other -> Boolean\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Rank.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: Rank\n\
+         \x20\x20uses: Comparable\n\
+         \x20\x20field: level :: Integer = 0\n\
+         \n\
+         \x20\x20< other :: Rank -> Boolean => self.level < other level\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Caller.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Caller\n\
+         \x20\x20inside: r :: Rank => r between: r and: r\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unknown protocol"),
+        "the package's own Comparable must resolve, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("does not understand 'between:and:'"),
+        "Rank must not gain the stdlib Comparable's provisions, got:\n{stderr}"
+    );
+}
+
 /// BT-3673: a path dependency whose own classes use a cross-file trait must
 /// compile (its multi-file compile now sees sibling-file protocols) and be
 /// consumable: `beamtalk lint` and `beamtalk build` of the consumer succeed

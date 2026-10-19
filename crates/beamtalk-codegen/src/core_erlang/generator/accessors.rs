@@ -470,28 +470,19 @@ impl CoreErlangGenerator {
         self.class_context_mut().stdlib_mode = value;
     }
 
-    /// Sets the protocol sources flattened provisions map through (ADR 0127
-    /// §3, "Source locations") and which of `module`'s `uses:` lines resolved
-    /// to the stdlib's own protocols (BT-3915) — taken from `analysis` when
-    /// the driver handed one off, else re-derived the way the self-sufficient
-    /// path flattens (nothing carried). The stdlib's own build has no stdlib
-    /// fallback, so call this after [`Self::set_stdlib_mode`].
-    pub(in crate::core_erlang) fn set_protocol_sources(
+    /// Records which `(class, protocol)` `uses:` lines resolved to the
+    /// stdlib's own protocols (BT-3915) — those classes' provisions map
+    /// through the stdlib file in [`Self::flattened_method_source`]. Taken
+    /// from the handed-off analysis or the self-sufficient flattening; the
+    /// stdlib's own build has no stdlib fallback, so it records nothing
+    /// (call after [`Self::set_stdlib_mode`]).
+    pub(in crate::core_erlang) fn set_stdlib_protocol_uses(
         &mut self,
-        protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
-        module: &beamtalk_core::ast::Module,
-        analysis: Option<&beamtalk_core::semantic_analysis::AnalysisResult>,
+        uses: beamtalk_core::semantic_analysis::trait_expansion::StdlibUses,
     ) {
-        self.protocol_sources = protocol_sources;
-        self.stdlib_protocol_uses = match analysis {
-            _ if self.stdlib_mode() => std::collections::HashSet::new(),
-            Some(analysis) => analysis.stdlib_protocol_uses.clone(),
-            None => beamtalk_core::semantic_analysis::trait_expansion::stdlib_resolved_uses(
-                module,
-                &std::collections::HashMap::new(),
-                None,
-            ),
-        };
+        if !self.stdlib_mode() {
+            self.stdlib_protocol_uses = uses;
+        }
     }
 
     /// Returns a mutable reference to the class context, creating it if absent.

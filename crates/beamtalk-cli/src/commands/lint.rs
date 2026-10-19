@@ -777,7 +777,7 @@ fn parse_and_extract_class_infos(
         for protocol in module
             .protocols
             .iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
             // Source identity (ADR 0127 §3), first definition wins — the
             // file the provisions' spans are offsets into, so a diagnostic

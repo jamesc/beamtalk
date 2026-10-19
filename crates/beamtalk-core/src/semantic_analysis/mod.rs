@@ -228,10 +228,10 @@ pub struct AnalysisResult {
 
     /// `(class, protocol)` for every `uses:` line of the module that resolved
     /// to the stdlib's own protocol (BT-3915) —
-    /// [`trait_expansion::stdlib_resolved_uses`]. Codegen maps those
+    /// [`trait_expansion::expand_module_with_stdlib_uses`]. Codegen maps those
     /// classes' provisions through the stdlib file; analysis stamps their
     /// provision diagnostics' [`ProvisionOrigin::package`](crate::source_analysis::ProvisionOrigin::package).
-    pub stdlib_protocol_uses: HashSet<(EcoString, EcoString)>,
+    pub stdlib_protocol_uses: trait_expansion::StdlibUses,
 }
 
 impl AnalysisResult {
@@ -696,17 +696,17 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
     // language service's placeholder package is not one.
     let trait_package = trait_expansion::known_package(current_package);
-    result.stdlib_protocol_uses =
-        trait_expansion::stdlib_resolved_uses(module, &external_protocols, trait_package);
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins) = trait_expansion::expand_module_in_package(
-            &mut owned,
-            &external_protocols,
-            trait_package,
-        );
+        let (expansion_diags, origins, stdlib_uses) =
+            trait_expansion::expand_module_with_stdlib_uses(
+                &mut owned,
+                &external_protocols,
+                trait_package,
+            );
+        result.stdlib_protocol_uses = stdlib_uses;
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;

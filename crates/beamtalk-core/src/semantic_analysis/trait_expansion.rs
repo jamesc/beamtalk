@@ -162,11 +162,35 @@ pub fn expand_module_in_package(
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
     current_package: Option<&str>,
 ) -> (Vec<Diagnostic>, OriginMap) {
+    let (diagnostics, origins, _stdlib_uses) =
+        expand_module_with_stdlib_uses(module, external_protocols, current_package);
+    (diagnostics, origins)
+}
+
+/// `(class, protocol)` pairs whose `uses:` resolved to one of the stdlib's own
+/// protocols (BT-3915) — see [`expand_module_with_stdlib_uses`].
+pub type StdlibUses = HashSet<(EcoString, EcoString)>;
+
+/// [`expand_module_in_package`], also answering which `(class, protocol)`
+/// `uses:` lines resolved to one of the stdlib's own protocols (BT-3915) —
+/// from the same lookup the flattening used, so the two cannot disagree.
+///
+/// `MethodInfo::origin` names a provision's protocol by bare name only, so a
+/// stdlib `Comparable` and a user's carried `Comparable` look alike there;
+/// this set is what tells codegen's source mapping and provision-diagnostic
+/// rendering that a given class's provisions come from the stdlib file.
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn expand_module_with_stdlib_uses(
+    module: &mut Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Vec<Diagnostic>, OriginMap, StdlibUses) {
     let mut diagnostics = Vec::new();
     let mut origins = OriginMap::new();
+    let mut stdlib_uses = StdlibUses::new();
 
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
-        return (diagnostics, origins);
+        return (diagnostics, origins, stdlib_uses);
     }
 
     // Look up protocols once, before mutating any class — a protocol's
@@ -179,10 +203,17 @@ pub fn expand_module_in_package(
         if class.uses.is_empty() {
             continue;
         }
+        for use_ in &class.uses {
+            if let Some(protocol) = protocols.resolve(use_) {
+                if stdlib_protocols::is_stdlib_package(protocol.package.as_deref()) {
+                    stdlib_uses.insert((class.name.name.clone(), protocol.name.name.clone()));
+                }
+            }
+        }
         expand_class(class, &protocols, &mut diagnostics, &mut origins);
     }
 
-    (diagnostics, origins)
+    (diagnostics, origins, stdlib_uses)
 }
 
 /// Extracts `ClassInfo` for every class of `module` with its `uses:` lines
@@ -418,8 +449,23 @@ pub fn protocol_use_key(use_: &ProtocolUse) -> EcoString {
     }
 }
 
-/// The provision-bearing protocols of `module` (those with at least one
-/// provided method — the only ones flattening needs the AST of), stamped as
+/// Whether a compile path carries `protocol`'s full AST to other files' and
+/// packages' `uses:` resolution — the one rule every carrier applies.
+///
+/// Every provision-bearing protocol, plus any protocol named like one of the
+/// stdlib's traits (BT-3915). The stdlib's protocols are the resolver's last
+/// tier, so a package's own `Comparable` shadows the stdlib's only if it is
+/// carried — including a requirements-only one, which would otherwise not be,
+/// and a `uses: Comparable` would silently gain the stdlib's provisions while
+/// `ProtocolRegistry` still resolved the type `Comparable` to the package's.
+#[must_use]
+pub fn is_carried_protocol(protocol: &ProtocolDefinition) -> bool {
+    !protocol.provided_methods.is_empty()
+        || stdlib_protocols::is_stdlib_protocol_name(&protocol.name.name)
+}
+
+/// The protocols of `module` a compile path carries ([`is_carried_protocol`]:
+/// the provision-bearing ones, plus any named like a stdlib trait), stamped as
 /// declared in `package` when it is not the package being compiled
 /// ([`ProtocolDefinition::package`]).
 #[must_use]
@@ -430,7 +476,7 @@ pub fn provision_bearing_protocols(
     module
         .protocols
         .iter()
-        .filter(|p| !p.provided_methods.is_empty())
+        .filter(|p| is_carried_protocol(p))
         .map(|p| {
             let mut def = p.clone();
             def.package = package.map(EcoString::from);
@@ -513,37 +559,21 @@ impl<'a> ProtocolLookup<'a> {
     }
 }
 
-/// `(class, protocol name)` for every `uses:` line of `module` that resolves to
-/// one of the stdlib's own protocols (BT-3915) rather than to a protocol of
-/// the module or one carried in `external_protocols`, under the same rule
-/// [`expand_module_in_package`] flattens with.
-///
-/// `MethodInfo::origin` names a provision's protocol by bare name only, so a
-/// stdlib `Comparable` and a user's carried `Comparable` look alike there;
-/// this set is what tells codegen's source mapping and provision-diagnostic
-/// rendering that a given class's provisions come from the stdlib file.
+/// The [`StdlibUses`] of `module` without keeping its flattened form — a
+/// clone flattened by [`expand_module_with_stdlib_uses`]. Test-only.
+#[cfg(test)]
 #[must_use]
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
-pub fn stdlib_resolved_uses(
+pub(crate) fn stdlib_resolved_uses(
     module: &Module,
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
     current_package: Option<&str>,
-) -> HashSet<(EcoString, EcoString)> {
-    let mut uses = HashSet::new();
+) -> StdlibUses {
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
-        return uses;
+        return StdlibUses::new();
     }
-    let protocols = ProtocolLookup::new(&module.protocols, external_protocols, current_package);
-    for class in &module.classes {
-        for use_ in &class.uses {
-            if let Some(protocol) = protocols.resolve(use_) {
-                if stdlib_protocols::is_stdlib_package(protocol.package.as_deref()) {
-                    uses.insert((class.name.name.clone(), protocol.name.name.clone()));
-                }
-            }
-        }
-    }
-    uses
+    let mut flattened = module.clone();
+    expand_module_with_stdlib_uses(&mut flattened, external_protocols, current_package).2
 }
 
 /// Whether `key` is a `stdlib@Name` qualified use outside the stdlib's own

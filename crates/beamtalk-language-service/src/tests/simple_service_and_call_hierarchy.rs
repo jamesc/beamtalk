@@ -333,6 +333,45 @@ fn hover_on_cross_file_trait_provided_method_shows_provenance() {
     );
 }
 
+/// BT-3915: a project's own requirements-only `Comparable` in another file
+/// shadows the stdlib's for `uses: Comparable` in the LSP as in `beamtalk
+/// build` — it resolves to the project's protocol ("provides no methods"
+/// hint, no "unknown protocol") and no stdlib provision is flattened in.
+#[test]
+fn project_requirements_only_protocol_shadows_the_stdlib_one() {
+    let mut service = SimpleLanguageService::new();
+    let proto_file = Utf8PathBuf::from("comparable.bt");
+    let user_file = Utf8PathBuf::from("rank.bt");
+    service.update_file(
+        proto_file,
+        "Protocol define: Comparable\n  < other -> Boolean\n".to_string(),
+    );
+    let source = "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  < other => self.level < other level\n\nRank new between: Rank new and: Rank new\n";
+    service.update_file(user_file.clone(), source.to_string());
+
+    let diagnostics = service.diagnostics(&user_file);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown protocol")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("provides no methods")),
+        "expected the project's requirements-only Comparable: {diagnostics:?}"
+    );
+    let provided = service
+        .hover(&user_file, Position::new(6, 10))
+        .and_then(|h| h.documentation)
+        .unwrap_or_default();
+    assert!(
+        !provided.contains("*provided by*"),
+        "no stdlib provision may be flattened in: {provided}"
+    );
+}
+
 /// BT-3915: a `uses:` of the stdlib's own `Enumerable` — declared in no file
 /// the service knows — resolves in the LSP as in `beamtalk build`: no
 /// "unknown protocol", and hover shows the stdlib provision's provenance.

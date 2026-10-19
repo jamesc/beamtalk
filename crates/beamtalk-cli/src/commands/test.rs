@@ -369,7 +369,7 @@ fn build_fixture_class_indexes(
         for protocol in module
             .protocols
             .iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
             protocol_defs.sources.insert(
                 protocol.name.name.clone(),

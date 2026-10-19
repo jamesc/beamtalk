@@ -1756,7 +1756,9 @@ impl LanguageService for SimpleLanguageService {
             let protocol_defs: Vec<_> = module
                 .protocols
                 .iter()
-                .filter(|p| !p.provided_methods.is_empty())
+                .filter(|p| {
+                    beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p)
+                })
                 .cloned()
                 .collect();
             self.project_index

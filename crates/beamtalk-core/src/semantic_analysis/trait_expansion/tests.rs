@@ -386,6 +386,50 @@ Value subclass: Rank
     assert!(stdlib_resolved_uses(&local, &HashMap::new(), Some("my_app")).is_empty());
 }
 
+/// A package's own requirements-only `Comparable` in *another* file is carried
+/// (`is_carried_protocol`) and shadows the stdlib's: `uses: Comparable`
+/// resolves to it (the "provides no methods" hint), never to the stdlib's
+/// provisions.
+#[test]
+fn carried_requirements_only_namesake_shadows_the_stdlib_protocol() {
+    let other_file = parse_source("Protocol define: Comparable\n  < other -> Boolean");
+    let carried = provision_bearing_protocols(&other_file, None);
+    assert_eq!(
+        carried.len(),
+        1,
+        "a stdlib-named protocol is always carried"
+    );
+    assert!(
+        provision_bearing_protocols(
+            &parse_source("Protocol define: Sized\n  size -> Integer"),
+            None
+        )
+        .is_empty(),
+        "other requirements-only protocols are still not carried"
+    );
+    let external = first_wins_protocol_map(carried);
+    let module = parse_source(
+        "Value subclass: Rank
+  uses: Comparable
+  field: level :: Integer = 0
+
+  < other => self.level < other level",
+    );
+    for package in [Some("my_app"), None] {
+        let mut flattened = module.clone();
+        let (diagnostics, _, stdlib_uses) =
+            expand_module_with_stdlib_uses(&mut flattened, &external, package);
+        assert!(stdlib_uses.is_empty(), "{package:?}: {stdlib_uses:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("provides no methods")),
+            "{package:?}: {diagnostics:?}"
+        );
+        assert!(find_method(find_class(&flattened, "Rank"), "between:and:").is_none());
+    }
+}
+
 #[test]
 fn the_stdlib_itself_never_falls_back_to_the_baked_protocols() {
     let mut module = parse_source(

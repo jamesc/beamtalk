@@ -884,7 +884,7 @@ fn collect_project_protocol_and_alias_infos(
         for protocol in module
             .protocols
             .iter()
-            .filter(|p| !p.provided_methods.is_empty())
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
         {
             // Source identity for flattened-method line mapping (ADR 0127
             // §3; BT-3625): the file the provisions' spans are offsets into.

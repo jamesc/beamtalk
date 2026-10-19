@@ -126,6 +126,40 @@ fn compile_flattens_a_stdlib_protocol_without_protocol_sources() {
     );
 }
 
+/// BT-3915: the workspace's own requirements-only `Comparable`, carried on
+/// the wire, shadows the stdlib's for a bare `uses: Comparable` — none of the
+/// stdlib's provisions are flattened in.
+#[test]
+fn compile_carried_requirements_only_protocol_shadows_the_stdlib_one() {
+    let user_comparable = "Protocol define: Comparable\n\
+         \x20 < other :: Self -> Boolean";
+    let request = Map::from([
+        (atom("command"), atom("compile")),
+        (
+            atom("source"),
+            binary(VERSION_SOURCE.replace("Ranked", "Comparable").as_str()),
+        ),
+        (atom("module_name"), binary("bt@version")),
+        (
+            atom("protocol_sources"),
+            Term::from(Map::from([(binary("Comparable"), binary(user_comparable))])),
+        ),
+    ]);
+
+    let response = handle_compile(&request);
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "{response:?}"
+    );
+    let core_erlang =
+        response_field_str(&response, "core_erlang").expect("compile response has core_erlang");
+    assert!(
+        !core_erlang.contains("between:and:"),
+        "the carried Comparable must shadow the stdlib's provisions: {core_erlang}"
+    );
+}
+
 /// BT-3915: on the REPL/workspace path (no package identity), a
 /// `uses: stdlib@Comparable` resolves to the stdlib's protocol even when the
 /// workspace carries its own `Comparable` on the wire — as `beamtalk build`
