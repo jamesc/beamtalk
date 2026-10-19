@@ -676,10 +676,6 @@ fn test_dynamic_supervisor_child_class_body_calls_class_send_with_child_class_se
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
-    assert!(
-        code.contains("call 'beamtalk_object_class':'class_send'"),
-        "childClass/0 must delegate to beamtalk_object_class:class_send. Got:\n{code}"
-    );
     // The selector atom passed to class_send must be 'childClass'.
     assert!(
         code.contains("'beamtalk_object_class':'class_send'(SupCp, 'childClass', [])"),
@@ -747,9 +743,18 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
     };
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
+    // Pin the export in the module header specifically, not just anywhere in the
+    // output (the function definition also contains `'class_maxConcurrency'/1`).
+    let header_exports = code
+        .split_once("module 'bt@workerpool' [")
+        .expect("generated code must contain a module header")
+        .1
+        .split_once(']')
+        .expect("module header export list must be closed")
+        .0;
     assert!(
-        code.contains("'class_maxConcurrency'/1"),
-        "Dynamic supervisor with user class method must export class_maxConcurrency/1. \
-         Got:\n{code}"
+        header_exports.contains("'class_maxConcurrency'/1"),
+        "Dynamic supervisor with user class method must export class_maxConcurrency/1 \
+         in the module header. Got header exports:\n{header_exports}"
     );
 }
