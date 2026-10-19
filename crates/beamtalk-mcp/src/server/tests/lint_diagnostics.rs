@@ -896,7 +896,14 @@ fn run_lint_structured_qualified_dependency_provision_diagnostic_lands_in_depend
         .collect();
     assert_eq!(provision.len(), 1, "{result:?}");
     assert!(
-        provision[0].file.contains("deps/http") && provision[0].line == Some(4),
+        // Compare path components, not a `/`-joined string: on Windows the
+        // file is a verbatim `\\?\C:\...\deps\http\src\tagged.bt` path.
+        std::path::Path::new(&provision[0].file).ends_with(
+            std::path::Path::new("deps")
+                .join("http")
+                .join("src")
+                .join("tagged.bt")
+        ) && provision[0].line == Some(4),
         "reported against http's file and line: {:?}",
         provision[0]
     );
