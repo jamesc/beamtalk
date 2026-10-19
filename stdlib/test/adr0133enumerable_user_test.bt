@@ -12,14 +12,16 @@
 // (`beamtalk_collection:to_list_for_threading/2`): the stdlib's own method is
 // the fold over `do:`, so the write threads (`Ets`, the stdlib collections);
 // a method from outside the stdlib (the class's own override, or a provision
-// of a package-local trait) would be bypassed by the fold, so the send raises
+// of a package-local trait; a provision of a stdlib trait such as `Enumerable`
+// counts as the stdlib's, by origin, not by the module it is flattened into)
+// would be bypassed by the fold, so the send raises
 // `stateful_block_dispatch`, and a receiver that does not respond to the
 // selector raises `does_not_understand`, as the pure path does. Never a
 // dropped write and never a silent wrong answer. (A block laundered through
 // Erlang FFI is outside this decision, BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
-// object_own_any,actor_own_any,stdlib,user}.bt. `Ets` is the stdlib's own
+// object_own_any,actor_own_any,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
 // `uses: Enumerable(V)` class; `Adr0133EnumerableStdlib` is a user class that
 // `uses:` the same stdlib `Enumerable` (BT-3915), whose provisions forward to
 // `elements` rather than walking with `self do:`.
@@ -141,6 +143,32 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser detectPure: self stdlibBag) equals: 2
     self assert: (Adr0133EnumerableUser detectNonePure: self stdlibBag) equals: #none
     self assert: (Adr0133EnumerableUser anySatisfyPure: self stdlibBag)
+
+  // BT-3916: `uses:` flattens the stdlib's provisions into this class's own
+  // module, so the guard classifies by the method's origin (the stdlib
+  // protocol), not its module: the same writing blocks fold for an actor ...
+  testStdlibEnumerableActorWrite =>
+    a := Adr0133EnumerableStdlibActor spawnWith: #{#items => #(1, 2, 3)}
+    [
+      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
+      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]
+      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]
+      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]
+      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]
+      self assert: (Adr0133EnumerableUser detectNoneWrite: a) equals: #[#none, 3]
+      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
+    ] ensure: [a stop]
+
+  // ... and the class's own method wins over the stdlib provision, so it is
+  // refused while the provisions it left alone still fold.
+  testStdlibEnumerableOwnAnySatisfy =>
+    c := Adr0133EnumerableStdlibOwnAny new: #{#items => #(1, 2, 3)}
+    self deny: (Adr0133EnumerableUser anySatisfyPure: c)
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: c
+    ] raise: #stateful_block_dispatch
+    self assert: (Adr0133EnumerableUser injectWrite: c) equals: #[6, 3]
+    self assert: (Adr0133EnumerableUser collectWrite: c) equals: #[#(10, 20, 30), 3]
 
   // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---
   testEtsWrite =>

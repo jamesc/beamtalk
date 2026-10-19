@@ -389,7 +389,39 @@ impl CoreErlangGenerator {
         self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
         if let Some(class) = module.classes.first() {
             self.own_direct_class_methods = self.own_direct_class_methods_for(&class.name.name);
+            self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
         }
+    }
+
+    /// The class's instance-side methods that are provisions of a stdlib
+    /// protocol, sorted (BT-3916). Provenance is `MethodInfo::origin` (the
+    /// protocol a flattened method came from) joined with
+    /// `stdlib_protocol_uses` (which `(class, protocol)` `uses:` lines
+    /// resolved to the stdlib's own protocol), the same pair
+    /// [`Self::flattened_method_source`] uses, so a package-local trait that
+    /// shares a stdlib protocol's name is not mistaken for it.
+    fn own_stdlib_trait_methods_for(
+        &self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        class: &beamtalk_core::ast::ClassDefinition,
+    ) -> Vec<String> {
+        let Some(info) = hierarchy.get_class(class.name.name.as_str()) else {
+            return Vec::new();
+        };
+        let mut own: Vec<String> = info
+            .methods
+            .iter()
+            .filter(|m| {
+                m.origin.as_ref().is_some_and(|origin| {
+                    self.stdlib_protocol_uses
+                        .contains(&(class.name.name.clone(), origin.clone()))
+                })
+            })
+            .map(|m| m.selector.to_string())
+            .collect();
+        own.sort();
+        own.dedup();
+        own
     }
 
     /// A class's direct-call-eligible class methods as sorted

@@ -376,8 +376,9 @@ Who answers `Selector` for instances of the class named ClassName (BT-3916).
 
 Walks the hierarchy exactly as `classCanUnderstandFromName/2` does and answers
 `stdlib` when the first class on the chain that defines the selector is a
-stdlib module, `user` when it is any other module or a registered extension
-method, and `none` when nothing on the chain defines it. The receiver guard of
+stdlib module, `user` when it is any other module (unless the method is a provision of a
+stdlib protocol the class `uses:`, recorded in its meta) or a registered
+extension method, and `none` when nothing on the chain defines it. The receiver guard of
 an inlined list-op fold (`beamtalk_collection:to_list_for_threading/2`) reads
 this to tell "the stdlib's own `inject:into:`, which is the fold over `do:`"
 from a class's own method the fold would otherwise bypass.
@@ -394,7 +395,10 @@ selectorProviderFromName(ClassName, Selector) ->
                     case beamtalk_object_class:has_method_local(CPid, Selector) of
                         true ->
                             Module = beamtalk_object_class:module_name_safe(CPid),
-                            case is_stdlib_module_name(Module) of
+                            case
+                                is_stdlib_module_name(Module) orelse
+                                    is_stdlib_trait_provision(Module, Selector)
+                            of
                                 true -> {halt, stdlib};
                                 false -> {halt, user}
                             end;
@@ -405,6 +409,20 @@ selectorProviderFromName(ClassName, Selector) ->
         end,
         none
     ).
+
+%% A provision of a stdlib protocol (`uses: Enumerable`) is flattened into the
+%% using class's own module (ADR 0127), so the module is a package's, but the
+%% method is the stdlib's. Codegen records those selectors in the class meta
+%% (`stdlib_trait_methods`, BT-3916); a class without the key (older build,
+%% dynamic class) has none.
+-spec is_stdlib_trait_provision(atom(), atom()) -> boolean().
+is_stdlib_trait_provision(Module, Selector) ->
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            lists:member(Selector, maps:get(stdlib_trait_methods, Meta, []));
+        not_available ->
+            false
+    end.
 
 -doc """
 Return all field names including inherited, in slot order.

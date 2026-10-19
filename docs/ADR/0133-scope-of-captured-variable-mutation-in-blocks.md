@@ -460,17 +460,25 @@ code.
   > (`beamtalk_collection:to_list_for_threading(Recv, Selector)`, in place of
   > `to_list/1`; `do:` is the fold's own source and is never guarded). For a
   > writing block sent with a compiler-known collection message other than
-  > `do:`: when the receiver's class resolves the selector to a stdlib
-  > method (`Ets`, the stdlib collections), the write threads as before;
-  > when it resolves to a method from outside the stdlib (the class's own
-  > override, or a provision of a package-local trait) the send raises
-  > `stateful_block_dispatch`; when the receiver does not respond to the
-  > selector at all it raises `does_not_understand`, as the pure send does.
-  > The cost is accepted: a trait-provided `inject:into:` on a user class
-  > refuses a writing block rather than answering, even when it is a
-  > faithful fold over `do:`; a class that wants the write to thread
-  > supplies `do:` alone, or computes the value without assigning from the
-  > block. `testOwnAnySatisfyWritePin` flipped to
+  > `do:`: the selector is classified by the **origin of the method**, not
+  > the module it lives in (`uses:` flattens a provision into the using
+  > class's own module, ADR 0127). A stdlib class's method, or a provision
+  > of a **stdlib** trait such as `Enumerable` (BT-3915), is the fold over
+  > `do:`, so the write threads (`Ets`, the stdlib collections, a user class
+  > that `uses: Enumerable`). The class's own method body, or a provision of
+  > a package-local trait, would be bypassed by the fold, so the send
+  > raises `stateful_block_dispatch`; an extension method counts as the
+  > class's own. A receiver that does not respond to the selector at all
+  > raises `does_not_understand`, as the pure send does. Codegen records
+  > each class's stdlib-trait provisions in `__beamtalk_meta/0`
+  > (`stdlib_trait_methods`, from `MethodInfo::origin` joined with the
+  > `(class, protocol)` pairs that resolved to the stdlib, the same pair
+  > source mapping uses), and the runtime guard reads it. The cost is
+  > accepted: a package-local trait's `inject:into:` refuses a writing
+  > block rather than answering, even when it is a faithful fold over
+  > `do:`; a class that wants the write to thread `uses:` the stdlib
+  > `Enumerable`, or computes the value without assigning from the block.
+  > `testOwnAnySatisfyWritePin` flipped to
   > `testOwnAnySatisfyWriteRaises`.
 
 ### Neutral

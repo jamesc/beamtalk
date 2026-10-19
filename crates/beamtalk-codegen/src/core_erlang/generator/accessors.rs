@@ -30,6 +30,7 @@ impl CoreErlangGenerator {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
             direct_class_methods: &self.own_direct_class_methods,
+            stdlib_trait_methods: &self.own_stdlib_trait_methods,
         }
     }
 

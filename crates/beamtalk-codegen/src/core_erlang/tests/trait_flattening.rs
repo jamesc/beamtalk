@@ -504,3 +504,74 @@ fn self_sufficient_codegen_infers_return_type_and_origin_for_flattened_provision
         "expected an inferred return type for `answer`, got:\n{code}"
     );
 }
+
+/// BT-3916: a class that `uses:` a stdlib protocol records, in
+/// `__beamtalk_meta/0`, which of its methods are that protocol's provisions
+/// (`stdlib_trait_methods`), so the runtime's list-op receiver guard classifies
+/// them by origin: `uses:` flattens them into the class's own module. A method
+/// the class defines itself is not listed, even when the protocol provides one
+/// of the same name.
+#[test]
+fn stdlib_protocol_provisions_are_recorded_in_the_class_meta() {
+    const BAG: &str = concat!(
+        "Value subclass: Bag\n",
+        "  uses: Enumerable(Integer)\n",
+        "  field: items :: List(Integer) = #()\n",
+        "  elements -> List(Integer) => self.items\n",
+        "  isEmpty -> Boolean => true\n",
+    );
+    let mut module = parse_fixture(BAG);
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    lower_analysed_module_for_codegen(&mut module, &analysis);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bag")
+            .with_source(BAG)
+            .with_source_path_opt(Some("bag.bt"))
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    let entry = code
+        .split("'stdlib_trait_methods' => ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("expected a stdlib_trait_methods meta key, got:\n{code}"));
+    let list = &entry[..entry.find(']').expect("an atom list")];
+    for provided in ["'inject:into:'", "'collect:'", "'select:'", "'do:'"] {
+        assert!(list.contains(provided), "{provided} missing from {list}");
+    }
+    for own in ["'elements'", "'isEmpty'"] {
+        assert!(
+            !list.contains(own),
+            "the class's own {own} must not be listed: {list}"
+        );
+    }
+}
+
+/// BT-3916: a *package-local* protocol that shares a stdlib protocol's name is
+/// not the stdlib's, and a class with no `uses:` has nothing to record: the key
+/// is omitted in both.
+#[test]
+fn package_local_protocol_provisions_are_not_recorded_as_stdlib() {
+    const USER_COMPARABLE: &str = concat!(
+        "Protocol define: Comparable\n",
+        "  < other -> Boolean\n",
+        "  describe -> String => \"user comparable\"\n",
+    );
+    const RANK: &str = concat!(
+        "Value subclass: Rank\n",
+        "  uses: Comparable\n",
+        "  < other => true\n",
+    );
+    let code = generate_cross_file(RANK, USER_COMPARABLE, "unused.bt", false);
+    assert!(code.contains("describe"), "{code}");
+    assert!(
+        !code.contains("stdlib_trait_methods"),
+        "a carried package-local protocol's provisions are not the stdlib's, got:\n{code}"
+    );
+    let plain = generate_module(
+        &parse_fixture("Value subclass: Plain\n  size -> Integer => 0\n"),
+        CodegenOptions::new("plain"),
+    )
+    .expect("codegen should succeed");
+    assert!(!plain.contains("stdlib_trait_methods"), "{plain}");
+}
