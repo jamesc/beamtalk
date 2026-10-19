@@ -96,3 +96,12 @@ TestCase subclass: NilComparisonTest
   /// Sorting a collection of symbols with a comparison block keeps working.
   testSortSymbolsWithBlock =>
     self assert: (#(#c, #a, #b) sort: [:a :b | a < b]) equals: #(#a, #b, #c)
+
+  /// BT-3928: the argument is not checked at run time. A primitive receiver
+  /// compared with an argument of a different kind falls back to Erlang term
+  /// order instead of raising (number < atom < ...). The compiler warns when
+  /// it can see the mismatch statically; these pins make any change to the
+  /// runtime fallback deliberate.
+  testMismatchedArgumentFallsBackToTermOrder =>
+    self assert: (self lt: 5 with: nil)
+    self deny: (self lt: #a with: 5)

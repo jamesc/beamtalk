@@ -41,6 +41,20 @@ mod generics;
 mod literals;
 mod send;
 
+/// The class whose method table answers for a `Known` type name.
+///
+/// A symbol singleton (`#foo`) is a subtype of `Symbol` and has no method
+/// table of its own, so its selectors resolve through `Symbol`; every other
+/// name resolves through itself. Callers keep the original name for
+/// user-facing messages and `Self`-typed returns.
+pub(super) fn method_resolution_class(name: &str) -> &str {
+    if name.starts_with('#') {
+        "Symbol"
+    } else {
+        name
+    }
+}
+
 /// How [`type_resolver::resolve_declared_type`] treats constructs that
 /// only make sense in a particular resolution setting.
 ///
