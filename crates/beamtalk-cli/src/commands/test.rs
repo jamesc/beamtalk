@@ -194,6 +194,7 @@ fn compile_fixtures_directory(
     output_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<Vec<String>> {
@@ -242,8 +243,10 @@ fn compile_fixtures_directory(
         module_names.push(module_name);
     }
 
-    // Batch compile all fixture cores in a single BEAM process startup
-    if !core_files.is_empty() {
+    // Batch compile all fixture cores in a single BEAM process startup.
+    // Skipped in snapshot-only mode (BT-3887): the `.beam` only ever
+    // serves the code path at test execution, which never happens there.
+    if !core_files.is_empty() && !snapshot_only {
         let compiler = BeamCompiler::new(output_dir.to_owned());
         compiler
             .compile_batch(&core_files)
@@ -259,6 +262,7 @@ fn compile_fixture(
     output_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<String> {
@@ -275,10 +279,13 @@ fn compile_fixture(
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
-    let compiler = BeamCompiler::new(output_dir.to_owned());
-    compiler
-        .compile_batch(&[core_file])
-        .wrap_err_with(|| format!("Failed to compile fixture BEAM for '{fixture_path}'"))?;
+    // Snapshot-only mode (BT-3887) wants the `.core` above and nothing more.
+    if !snapshot_only {
+        let compiler = BeamCompiler::new(output_dir.to_owned());
+        compiler
+            .compile_batch(&[core_file])
+            .wrap_err_with(|| format!("Failed to compile fixture BEAM for '{fixture_path}'"))?;
+    }
 
     Ok(module_name)
 }
@@ -671,6 +678,7 @@ fn discover_and_compile_doc_tests(
     build_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<Vec<CompiledDocTestResult>> {
@@ -692,6 +700,7 @@ fn discover_and_compile_doc_tests(
         build_dir,
         hierarchy,
         warnings_as_errors,
+        snapshot_only,
         current_package,
         native_type_registry,
     )
@@ -742,8 +751,9 @@ fn discover_and_compile_doc_tests(
             }
         }
 
-        // Batch compile Core Erlang files to BEAM
-        if !core_files.is_empty() {
+        // Batch compile Core Erlang files to BEAM — not in snapshot-only
+        // mode (BT-3887), which stops at the `.core` files written above.
+        if !core_files.is_empty() && !snapshot_only {
             let compiler = BeamCompiler::new(build_dir.to_owned());
             compiler.compile_batch(&core_files).wrap_err_with(|| {
                 format!(
@@ -859,6 +869,10 @@ struct TestPipeline {
     test_files: Vec<Utf8PathBuf>,
     /// Temporary build directory for compiled artifacts.
     build_dir: Utf8PathBuf,
+    /// BT-3887: stop once every `.core` is written, before any batch
+    /// `.beam` compile or test execution (`BEAMTALK_CORE_SNAPSHOT_ONLY=1`;
+    /// see `util::CoreOutputDir::snapshot_only`).
+    snapshot_only: bool,
     /// Whether to treat warnings as errors.
     warnings_as_errors: bool,
     /// Discovered packages: `(canonical_root, manifest)`.
@@ -983,12 +997,30 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize, quiet: bool)
     // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
     // unless the corpus `.core` diff harness asks to keep them — see
     // `util::core_output_dir`'s doc.
-    let (build_dir, _core_output_dir_guard) = util::core_output_dir()?;
+    let (build_dir, core_output_dir_guard) = util::core_output_dir()?;
 
-    let mut pipeline =
-        initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors, jobs)?;
+    let mut pipeline = initialize_pipeline(
+        test_path,
+        test_files,
+        build_dir,
+        core_output_dir_guard.snapshot_only(),
+        warnings_as_errors,
+        jobs,
+    )?;
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
+
+    // BT-3887: every `.core` (fixtures, test classes, doc tests) is on disk
+    // now; the corpus `.core` diff harness's snapshot-only mode stops here
+    // rather than building packages and running the suite.
+    if pipeline.snapshot_only {
+        println!(
+            "Snapshotted {} test file(s) to .core only (BEAMTALK_CORE_SNAPSHOT_ONLY=1); \
+             skipped package build and test execution",
+            pipeline.test_files.len()
+        );
+        return Ok(());
+    }
 
     // Cheap pre-scan: check if any package might have native test files
     // so we can skip build_packages entirely when there are no tests at all.
@@ -1279,6 +1311,7 @@ fn initialize_pipeline(
     test_path: Utf8PathBuf,
     test_files: Vec<Utf8PathBuf>,
     build_dir: Utf8PathBuf,
+    snapshot_only: bool,
     warnings_as_errors: bool,
     jobs: usize,
 ) -> Result<TestPipeline> {
@@ -1318,6 +1351,7 @@ fn initialize_pipeline(
         test_path,
         test_files,
         build_dir,
+        snapshot_only,
         native_type_registry,
         warnings_as_errors,
         discovered_packages,
@@ -1421,6 +1455,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         &pipeline.build_dir,
         &fixture_hierarchy,
         pipeline.warnings_as_errors,
+        pipeline.snapshot_only,
         fixtures_package.as_deref(),
         pipeline.native_type_registry.as_ref(),
     )?;
@@ -1469,7 +1504,9 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
 
     // Batch compile all test file cores in a single BEAM process startup.
     // This replaces the previous per-file compile_batch calls (one BEAM startup per file).
-    if !pending_test_cores.is_empty() {
+    // Skipped in snapshot-only mode (BT-3887): no `.beam` is ever read from
+    // it, and `run_tests` returns right after this function anyway.
+    if !pending_test_cores.is_empty() && !pipeline.snapshot_only {
         let compiler = BeamCompiler::new(pipeline.build_dir.clone());
         compiler
             .compile_batch(&pending_test_cores)
@@ -1579,6 +1616,7 @@ fn compile_single_test_file(
         &pipeline.build_dir,
         &file_hierarchy,
         pipeline.warnings_as_errors,
+        pipeline.snapshot_only,
         test_file_package.as_deref(),
         pipeline.native_type_registry.as_ref(),
     )?;
@@ -1663,6 +1701,7 @@ fn resolve_load_directives(
             &pipeline.build_dir,
             hierarchy,
             pipeline.warnings_as_errors,
+            pipeline.snapshot_only,
             fixture_package.as_deref(),
             pipeline.native_type_registry.as_ref(),
         )?;

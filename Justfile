@@ -1434,15 +1434,34 @@ verify-threaded-ir: test-stdlib test-bunit
 #
 # OUT_DIR may be relative (resolved against the repo root) or absolute.
 #
+# MODE (BT-3887) is `snapshot-only` (default) or `full`. This harness only
+# ever reads the `.core` files, so `snapshot-only` sets
+# `BEAMTALK_CORE_SNAPSHOT_ONLY=1` (read by the same `core_output_dir`
+# resolver) and each of the three commands returns as soon as its last
+# `.core` is written — no `.beam`, no `.app`/generated-source output, no
+# test execution (those are `test-beam`'s job). `full` runs the commands to
+# completion exactly as before and exists to re-verify the invariant the
+# early returns rely on: both modes must leave an identical set of `.core`
+# files. Check it by snapshotting the same checkout once in each mode and
+# `diff -r`-ing the two output directories.
+#
 # Linux only, like `test-beam` above: `build-erlang`/`test`/`test-stdlib`
 # need the Erlang/OTP toolchain this recipe's dependency chain builds, and
 # the normalisation step below uses GNU `sed -i`'s syntax (BSD/macOS sed's
 # `-i` takes a mandatory backup-suffix argument, so `-i -E` means something
 # different there — this would silently misbehave rather than fail loudly).
 [linux]
-core-diff-snapshot OUT_DIR: build-rust build-erlang
+core-diff-snapshot OUT_DIR MODE="snapshot-only": build-rust build-erlang
     #!/usr/bin/env bash
     set -euo pipefail
+    case "{{MODE}}" in
+        snapshot-only) export BEAMTALK_CORE_SNAPSHOT_ONLY=1 ;;
+        full) ;;
+        *)
+            echo "❌ MODE must be 'snapshot-only' (default) or 'full', got '{{MODE}}'" >&2
+            exit 1
+            ;;
+    esac
     mkdir -p "{{OUT_DIR}}"
     OUT="$(cd "{{OUT_DIR}}" && pwd)"
     REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -1457,11 +1476,14 @@ core-diff-snapshot OUT_DIR: build-rust build-erlang
     rm -rf "${OUT:?}"/*
     mkdir -p "$OUT/src" "$OUT/test" "$OUT/bootstrap-test"
 
-    echo "📦 Snapshotting stdlib/src/*.bt ..."
+    echo "📦 Snapshotting stdlib/src/*.bt ({{MODE}}) ..."
     # A stale ebin/ would make build-stdlib's incremental check moot for
     # nothing (it's already bypassed above) but also mixes this run's
-    # .beam files with a previous one's — start clean.
-    rm -rf runtime/apps/beamtalk_stdlib/ebin
+    # .beam files with a previous one's — start clean. Snapshot-only mode
+    # writes no .beam and leaves ebin/ untouched, so only `full` needs this.
+    if [[ "{{MODE}}" == full ]]; then
+        rm -rf runtime/apps/beamtalk_stdlib/ebin
+    fi
     BEAMTALK_CORE_SNAPSHOT_DIR="$OUT/src" \
         cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
 
@@ -1486,31 +1508,21 @@ core-diff-snapshot OUT_DIR: build-rust build-erlang
     count=$(find "$OUT" -name '*.core' | wc -l | tr -d ' ')
     echo "✅ Snapshot written to $OUT ($count .core files)"
 
-# BT-3509: diffs a fresh corpus `.core` snapshot of the current checkout
-# against the same snapshot taken from BASE_REF (default `origin/main`),
-# built in its own git worktree so the comparison never mutates either
-# checkout. Non-zero exit on any difference. See
-# docs/development/testing-strategy.md § Corpus `.core` diff harness.
-#
-# BASE_REF must itself carry this recipe (`core-diff-snapshot`) — true for
-# any commit once this harness has landed on `main`, which is why BT-3509
-# is Phase 0 and blocks every other issue in its epic. Comparing a branch
-# against a pre-BT-3509 `main` doesn't work for that one bootstrapping PR;
-# every use after it does.
+# BT-3887: the base side of `core-diff`, on its own so CI can run it only
+# on a cache miss. Checks BASE_REF out into a throwaway git worktree and
+# runs *that checkout's* `core-diff-snapshot` into OUT_DIR, so the result
+# is a pure function of BASE_REF (its sources, compiler and recipe) and
+# never of the current checkout — which is what makes it safe to cache by
+# SHA. OUT_DIR may be relative (resolved against the repo root) or absolute.
 #
 # Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
 [linux]
-core-diff BASE_REF="origin/main":
+core-diff-base-snapshot BASE_REF OUT_DIR:
     #!/usr/bin/env bash
     set -euo pipefail
-    ROOT="$(pwd)"
-    OUT_DIR="$ROOT/target/core-diff"
-    HEAD_DIR="$OUT_DIR/head"
-    BASE_DIR="$OUT_DIR/base"
-    BASE_WORKTREE="$OUT_DIR/_base-worktree"
-
-    echo "🔎 Snapshotting current checkout (HEAD) ..."
-    just core-diff-snapshot "$HEAD_DIR"
+    mkdir -p "{{OUT_DIR}}"
+    OUT="$(cd "{{OUT_DIR}}" && pwd)"
+    BASE_WORKTREE="$(pwd)/target/core-diff/_base-worktree"
 
     echo "🔎 Snapshotting {{BASE_REF}} ..."
     # A prior run killed before its own `trap` fired (Ctrl-C, OOM) leaves
@@ -1523,7 +1535,60 @@ core-diff BASE_REF="origin/main":
     rm -rf "$BASE_WORKTREE"
     git worktree add --detach --quiet "$BASE_WORKTREE" "{{BASE_REF}}"
     trap 'git worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true' EXIT
-    (cd "$BASE_WORKTREE" && just core-diff-snapshot "$BASE_DIR")
+    # $OUT is absolute, so it lands outside the worktree; the base's own
+    # `core-diff-snapshot` default MODE applies (full for commits that
+    # predate BT-3887, snapshot-only after — identical `.core` either way).
+    (cd "$BASE_WORKTREE" && just core-diff-snapshot "$OUT")
+
+# BT-3509: diffs a fresh corpus `.core` snapshot of the current checkout
+# against the same snapshot taken from BASE_REF (default `origin/main`),
+# built in its own git worktree so the comparison never mutates either
+# checkout. Non-zero exit on any difference. See
+# docs/development/testing-strategy.md § Corpus `.core` diff harness.
+#
+# BASE_REF must itself carry this recipe (`core-diff-snapshot`) — true for
+# any commit once this harness has landed on `main`, which is why BT-3509
+# is Phase 0 and blocks every other issue in its epic. Comparing a branch
+# against a pre-BT-3509 `main` doesn't work for that one bootstrapping PR;
+# every use after it does.
+#
+# BASE_SNAPSHOT (BT-3887), when given, is a directory already holding
+# BASE_REF's snapshot (as written by `core-diff-base-snapshot`): the base
+# worktree build is skipped and that directory is diffed against HEAD as
+# is. CI passes `target/core-diff/base` here after restoring it from an
+# `actions/cache` entry keyed on the PR's base SHA (see the `core-diff` job
+# in .github/workflows/ci.yml) — the base snapshot is a pure function of
+# that SHA, so one build per base commit is enough. It is opt-in rather
+# than "reuse whatever is lying around" so a local `just core-diff` can
+# never silently compare against a stale base from an earlier run.
+#
+# Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
+[linux]
+core-diff BASE_REF="origin/main" BASE_SNAPSHOT="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="$(pwd)"
+    OUT_DIR="$ROOT/target/core-diff"
+    HEAD_DIR="$OUT_DIR/head"
+    BASE_DIR="$OUT_DIR/base"
+
+    echo "🔎 Snapshotting current checkout (HEAD) ..."
+    just core-diff-snapshot "$HEAD_DIR"
+
+    if [[ -n "{{BASE_SNAPSHOT}}" ]]; then
+        if ! BASE_DIR="$(cd "{{BASE_SNAPSHOT}}" 2>/dev/null && pwd)"; then
+            echo "❌ core-diff: BASE_SNAPSHOT '{{BASE_SNAPSHOT}}' is not a directory" >&2
+            exit 1
+        fi
+        count=$(find "$BASE_DIR" -name '*.core' | wc -l | tr -d ' ')
+        if [[ "$count" -eq 0 ]]; then
+            echo "❌ core-diff: BASE_SNAPSHOT '$BASE_DIR' holds no .core files — not a snapshot" >&2
+            exit 1
+        fi
+        echo "♻️  Reusing {{BASE_REF}} snapshot at $BASE_DIR ($count .core files); skipping its worktree build"
+    else
+        just core-diff-base-snapshot "{{BASE_REF}}" "$BASE_DIR"
+    fi
 
     echo "🔬 Diffing {{BASE_REF}} (base) against HEAD ..."
     if diff -ru "$BASE_DIR" "$HEAD_DIR"; then

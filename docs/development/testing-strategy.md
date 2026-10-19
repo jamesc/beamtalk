@@ -592,8 +592,9 @@ graph; this catches a *well-formed* graph that renders to different text,
 which is the failure mode ADR 0122's migration series (BT-3508) exists to
 guard against.
 
-**Location:** `Justfile` (`core-diff-snapshot`, `core-diff` recipes),
-`crates/beamtalk-cli/src/commands/util.rs` (`core_output_dir`).
+**Location:** `Justfile` (`core-diff-snapshot`, `core-diff-base-snapshot`,
+`core-diff` recipes), `crates/beamtalk-cli/src/commands/util.rs`
+(`core_output_dir`, `CoreOutputDir::snapshot_only`).
 
 **Corpus:** `stdlib/src/*.bt` (via `build-stdlib`), `stdlib/test/*.bt` +
 `stdlib/test/fixtures/*.bt` (via the `test` command), and
@@ -609,6 +610,36 @@ just core-diff-snapshot target/core-diff/head
 # worktree so neither checkout is disturbed. Non-zero exit on any diff:
 just core-diff
 just core-diff some-other-branch-or-tag
+
+# Build only the base side of that comparison (what CI caches, below):
+just core-diff-base-snapshot origin/main target/core-diff/base
+
+# Diff HEAD against a base snapshot you already have, skipping the base
+# worktree build. Opt-in by design: `core-diff` never reuses a base
+# snapshot it wasn't explicitly handed, so a stale one from an earlier
+# run can't be compared against by accident.
+just core-diff origin/main target/core-diff/base
+```
+
+**Snapshot-only mode (BT-3887):** the harness only ever reads `.core`, so
+`core-diff-snapshot`'s default `MODE=snapshot-only` sets
+`BEAMTALK_CORE_SNAPSHOT_ONLY=1` and each of `build-stdlib`, `test-stdlib`
+and `test` returns as soon as its last `.core` is written — no `.beam`
+compile, no `.app`/`builtins.rs`/`.hrl` generation, and none of the
+bootstrap-test or BUnit test bodies run (those are `test-beam`'s job).
+`core_output_dir` reads the flag alongside the directory (and rejects it
+without one) and exposes it as `CoreOutputDir::snapshot_only`, which each
+command checks at exactly one point: after its last `.core` write, before
+its first `.beam`/test-execution step. That placement is the invariant the
+mode depends on — a snapshot-only run must leave the *same* set of `.core`
+files a full run does. `MODE=full` runs the three commands to completion as
+before so the invariant can be re-verified whenever a command's pipeline
+changes:
+
+```bash
+just core-diff-snapshot target/core-diff/a snapshot-only
+just core-diff-snapshot target/core-diff/b full
+diff -r target/core-diff/a target/core-diff/b   # must print nothing
 ```
 
 **How it stays deterministic:** `build-stdlib`/`test`/`test-stdlib` normally
@@ -640,6 +671,25 @@ but not for a branch diffed against a pre-BT-3509 `main`.
 `core-diff` job) on PRs touching `crates/beamtalk-codegen/`, reporting any
 diff to the job summary without failing the build. Add the
 `core-diff:enforce` label to a PR to make a real diff fail that job instead.
+
+The job diffs against the PR's base SHA (`github.event.pull_request.base.sha`)
+rather than a freshly fetched `origin/main`, because the base side is
+cached (BT-3887): `core-diff-base-snapshot` builds it from a worktree of
+that commit alone, so it's a pure function of the SHA. Cache entries saved
+from a PR branch are visible only to that branch (and the job only runs on
+pull requests), so in practice the base is built once per PR per base SHA:
+every later push to the same PR reuses it, while a second PR on the same
+base builds its own. The `actions/cache` key is
+`core-diff-base-<os>-<base sha>-<hash of Justfile + .tool-versions>` — the
+Justfile hash covers the `core-diff*` recipes that drive and normalise the
+snapshot, `.tool-versions` the OTP that compiles it — and there are no
+`restore-keys`, since a near-miss is the wrong base, not a usable one. On a
+hit, `target/core-diff/base` is restored and handed to `just core-diff
+<sha> target/core-diff/base`, skipping the base worktree build entirely; on
+a miss, the job runs `core-diff-base-snapshot` first and saves the result
+(only after that build succeeds, but regardless of whether the diff then
+finds differences). The job summary says which happened. `just core-diff`
+with no cache is unchanged: it builds the base side itself.
 
 ---
 

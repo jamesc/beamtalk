@@ -361,10 +361,6 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Fetch origin/main
-        if: steps.filter.outputs.run == 'true'
-        run: git fetch origin main:refs/remotes/origin/main
-
       - name: Install Rust toolchain
         if: steps.filter.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -402,16 +398,73 @@ jobs:
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
-      - name: Run corpus .core diff against origin/main
+      # BT-3887: the base-side snapshot is a pure function of the PR's base
+      # SHA (`just core-diff-base-snapshot` builds it from a worktree of that
+      # commit alone), so it's cached by that SHA. Cache entries saved from a
+      # PR branch are visible only to that branch (and this job never runs
+      # on `main`), so in practice that is one build per PR per base SHA:
+      # every later push to the same PR hits, a second PR on the same base
+      # does not. The key
+      # also carries this checkout's Justfile (its `core-diff-base-snapshot`
+      # recipe drives the build; the base's own recipes do the snapshotting
+      # and normalising, and those are pinned by the SHA already) and
+      # `.tool-versions` (the OTP this job installs, which compiles the base
+      # too), so a driver-recipe or toolchain change can never reuse a stale
+      # snapshot. No `restore-keys`: a near-miss is the wrong base, not a
+      # usable one. `actions/cache/restore` + `save` rather than the combined
+      # action so the save happens only after a *successful* miss build, and
+      # happens even when the diff step below then reports differences.
+      - name: Restore cached base-side .core snapshot
+        if: steps.filter.outputs.run == 'true'
+        id: base-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: target/core-diff/base
+          key: core-diff-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}-${{ hashFiles('Justfile', '.tool-versions') }}
+
+      # Informational like the rest of this job: a base build failure must
+      # not go red on its own (`continue-on-error`), and it leaves no partial
+      # directory behind, so the diff step below fails loudly on "no base
+      # snapshot" instead of diffing against half of one.
+      - name: Snapshot the PR base (cache miss)
+        if: steps.filter.outputs.run == 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        id: base-snapshot
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          just core-diff-base-snapshot "$BASE_SHA" target/core-diff/base \
+            || { rm -rf target/core-diff/base; exit 1; }
+
+      - name: Save base-side .core snapshot to cache
+        if: >-
+          steps.filter.outputs.run == 'true' &&
+          steps.base-cache.outputs.cache-hit != 'true' &&
+          steps.base-snapshot.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: target/core-diff/base
+          key: ${{ steps.base-cache.outputs.cache-primary-key }}
+
+      - name: Run corpus .core diff against the PR base
         if: steps.filter.outputs.run == 'true'
         id: core-diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_CACHE_HIT: ${{ steps.base-cache.outputs.cache-hit }}
         run: |
           set +e
-          just core-diff origin/main > core-diff.log 2>&1
+          just core-diff "$BASE_SHA" target/core-diff/base > core-diff.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           set -e
+          if [ "$BASE_CACHE_HIT" = "true" ]; then
+            base_source="restored from cache"
+          else
+            base_source="built in this run (cache miss)"
+          fi
           {
             echo '## Corpus `.core` diff (BT-3509)'
+            echo "Base snapshot \`${BASE_SHA}\`: ${base_source}."
             echo '```'
             tail -c 60000 core-diff.log
             echo '```'
