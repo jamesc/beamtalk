@@ -26,8 +26,9 @@
 //!
 //! Not part of it: counters whose identity must outlive a body
 //! (`branch_frame_counter`: frame ids are unique across a module), and the
-//! scope-bound facts (`var_context`, the version counters) that already have
-//! their own save/restore discipline.
+//! variable scopes (`var_context`), which have their own push/pop discipline.
+//! The `State`/`Self` version counters and the non-local-return token are
+//! part of it.
 
 use super::CoreErlangGenerator;
 use crate::core_erlang::control_flow::LoopMode;
@@ -52,6 +53,11 @@ pub(in crate::core_erlang) struct BodyState {
     rebind_frames: HashMap<FrameId, RebindFrame>,
     block_depth: usize,
     class_var_capture: Option<String>,
+    /// The enclosing body's non-local-return token variable
+    /// (`value_type_context.current_nlr_token`): a nested body mints and
+    /// clears its own, and the enclosing body's `^` in a later block must
+    /// still throw to its own catch.
+    nlr_token: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -75,6 +81,11 @@ impl CoreErlangGenerator {
             rebind_frames: std::mem::take(&mut self.rebind_frames),
             block_depth: std::mem::take(&mut self.block_depth),
             class_var_capture: self.class_var_capture.take(),
+            nlr_token: {
+                let token = self.current_nlr_token().cloned();
+                self.set_current_nlr_token(None);
+                token
+            },
         }
     }
 
@@ -94,6 +105,7 @@ impl CoreErlangGenerator {
             rebind_frames,
             block_depth,
             class_var_capture,
+            nlr_token,
         } = state;
         self.set_state_version(state_version);
         self.set_self_version(self_version);
@@ -107,6 +119,7 @@ impl CoreErlangGenerator {
         self.rebind_frames = rebind_frames;
         self.block_depth = block_depth;
         self.class_var_capture = class_var_capture;
+        self.set_current_nlr_token(nlr_token);
     }
 
     /// Enters a nested body: the enclosing body's [`BodyState`] is parked in
@@ -180,6 +193,7 @@ mod tests {
             .insert(FrameId::new(7), RebindFrame::implicit_root());
         generator.block_depth = 2;
         generator.class_var_capture = Some("CVCap".to_string());
+        generator.set_current_nlr_token(Some("NlrTok".to_string()));
     }
 
     #[test]
@@ -199,6 +213,7 @@ mod tests {
             assert!(scope.rebind_frames.is_empty());
             assert_eq!(scope.block_depth, 0);
             assert!(scope.class_var_capture.is_none());
+            assert!(scope.current_nlr_token().is_none());
         }
         assert_eq!(generator.state_version(), 4);
         assert_eq!(generator.self_version(), 5);
@@ -211,6 +226,10 @@ mod tests {
         assert!(generator.rebind_frames.contains_key(&FrameId::new(7)));
         assert_eq!(generator.block_depth, 2);
         assert_eq!(generator.class_var_capture.as_deref(), Some("CVCap"));
+        assert_eq!(
+            generator.current_nlr_token().map(String::as_str),
+            Some("NlrTok")
+        );
     }
 
     #[test]

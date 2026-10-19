@@ -110,3 +110,14 @@ Object subclass: Bt3911ArmFramesClass
       i < (m + x) - 1
     ] whileTrue: [i := i + 1]
     i
+
+  // A `ClassBuilder` `classMethods:` fun is a body of its own: the enclosing
+  // method's non-local-return token survives it, so the `^` in a block
+  // lexically after the cascade still reaches the method's catch.
+  class firstOver: limit in: xs =>
+    Object classBuilder name: #Bt3911BuiltBeforeNlr;
+      superclass: Object;
+      classMethods: #{#answer => [:cls | 7]};
+      register
+    xs do: [:e | e > limit ifTrue: [^e]]
+    0

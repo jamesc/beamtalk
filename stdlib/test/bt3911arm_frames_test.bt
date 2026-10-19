@@ -114,3 +114,7 @@ TestCase subclass: Bt3911ArmFramesTest
   testActorClassBuilderFunInLoopBody =>
     self assert: Bt3911ArmFramesActor spawn builderInLoopBody equals: 2
     self assert: Bt3911BuiltInLoop answer equals: 41
+
+  testClassBuilderFunKeepsTheEnclosingNonLocalReturn =>
+    self assert: (Bt3911ArmFramesClass firstOver: 2 in: #(1, 2, 3, 4)) equals: 3
+    self assert: (Bt3911ArmFramesClass firstOver: 9 in: #(1, 2)) equals: 0

@@ -13,6 +13,7 @@
 //! - [`body_state`] — [`BodyState`](body_state::BodyState), the per-body
 //!   generator state a method frame (or any nested body) owns, and the
 //!   [`BodyScope`](body_state::BodyScope) that parks the enclosing body's
+//!   state while a nested body is lowered
 //! - [`branch_guard`] — [`BranchContextGuard`](branch_guard::BranchContextGuard)
 //!   and the `with_branch_context`/`enter_branch_context` pair
 //! - [`accessors`] — small field getters/setters and context-default wrappers
